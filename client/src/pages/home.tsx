@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ArrowRight, Shield, Cpu, MapPin, RefreshCw, CheckCheck, Clock, Zap } from "lucide-react";
@@ -11,6 +11,10 @@ import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
 import GradientButton from "@/components/ui/gradient-button";
 import { pricingTiers } from "@shared/schema";
+import type { SlabShowcaseItem } from "@/components/SlabShowcase";
+
+// Code-split: Three.js + showcase only load when the hero has certs to show.
+const SlabShowcase = lazy(() => import("@/components/SlabShowcase"));
 
 const TIER_ICONS: Record<string, { shortName: string; blurb: string; icon: React.ReactNode }> = {
   standard: {
@@ -239,14 +243,48 @@ export default function HomeV2() {
   const uniqueSets = stats?.unique_sets ?? 71;
   const recentCerts = stats?.recent_certs ?? [];
 
+  // ── 3D slab showcase data (real graded certs) ─────────────────────────────
+  const [showcaseItems, setShowcaseItems] = useState<SlabShowcaseItem[]>([]);
+  const [showcaseLoaded, setShowcaseLoaded] = useState(false);
+  useEffect(() => {
+    fetch("/api/public/slab-showcase")
+      .then((r) => r.json())
+      .then((d) => {
+        setShowcaseItems(d.items || []);
+        setShowcaseLoaded(true);
+      })
+      .catch(() => setShowcaseLoaded(true)); // fail silently — hero copy still renders
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col relative vault-page">
       <AmbientLayer />
       <HeaderV2 />
 
-      {/* ── SECTION A: HERO ──────────────────────────────────────────── */}
-      <section className="relative vault-hero-section">
-        <div className="mx-auto max-w-3xl px-6 pt-10 pb-20 md:pt-16 md:pb-32 text-center">
+      {/* ── SECTION A: HERO — 3D slab showcase behind the copy ─────────── */}
+      <section
+        className="relative w-full overflow-hidden vault-hero-section"
+        style={{ height: "min(90vh, 720px)", minHeight: "500px" }}
+      >
+        {/* 3D showcase — fills the section, real graded slabs */}
+        {showcaseLoaded && showcaseItems.length > 0 && (
+          <div className="absolute inset-0">
+            <Suspense fallback={null}>
+              <SlabShowcase items={showcaseItems} />
+            </Suspense>
+          </div>
+        )}
+
+        {/* Fallback background if no certs yet */}
+        {showcaseLoaded && showcaseItems.length === 0 && (
+          <div className="absolute inset-0 bg-gradient-to-br from-[#0c0c0a] via-[#0d0f0a] to-[#0a0c10]" />
+        )}
+
+        {/* Dark gradient overlay — keeps the copy readable over the 3D scene */}
+        <div className="absolute inset-0 bg-gradient-to-r from-[#0c0c0a]/90 via-[#0c0c0a]/50 to-transparent pointer-events-none" />
+
+        {/* Hero copy — unchanged text, repositioned left above the scene */}
+        <div className="relative z-10 h-full flex flex-col justify-center px-6 md:px-16 max-w-xl pointer-events-none [&_a]:pointer-events-auto">
           <p
             className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
             style={{ color: "#D4AF37" }}
@@ -262,12 +300,12 @@ export default function HomeV2() {
             graded collectibles.
           </h1>
           <p
-            className="font-body text-lg md:text-xl leading-relaxed max-w-xl mx-auto mb-8"
+            className="font-body text-lg md:text-xl leading-relaxed max-w-xl mb-8"
             style={{ color: "var(--v2-ink-soft)" }}
           >
             AI-powered precision grading with NFC-linked certification. Every grade logged, every slab traceable.
           </p>
-          <div className="flex flex-wrap items-center justify-center gap-4 mb-5">
+          <div className="flex flex-wrap items-center gap-4 mb-5">
             <Link href="/submit" className="no-underline">
               <GradientButton height="44px" className="gradient-btn-filled">
                 Submit a card <ArrowRight size={14} />
@@ -286,6 +324,14 @@ export default function HomeV2() {
             From &pound;19 &middot; 40 day turnaround &middot; UK return shipping insured
           </p>
         </div>
+
+        {/* Grade count badge — bottom left */}
+        {showcaseItems.length > 0 && (
+          <div className="absolute bottom-6 left-6 z-10 flex items-center gap-2 bg-white/5 backdrop-blur-sm border border-white/10 rounded-full px-4 py-2 text-xs text-white/60">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] animate-pulse" />
+            {showcaseItems.length} certified card{showcaseItems.length !== 1 ? "s" : ""} graded
+          </div>
+        )}
       </section>
 
       {/* ── SECTION B: STATS + PROMISES ──────────────────────────────── */}
@@ -451,9 +497,9 @@ export default function HomeV2() {
                   </thead>
                   <tbody>
                     {[
-                      { qty: "10+", off: "5% off",   vq: "£18.05", st: "£23.75", ex: "£42.75" },
+                      { qty: "10+", off: "5% off", vq: "£18.05", st: "£23.75", ex: "£42.75" },
                       { qty: "25+", off: "7.5% off", vq: "£17.58", st: "£23.13", ex: "£41.63" },
-                      { qty: "50+", off: "10% off",  vq: "£17.10", st: "£22.50", ex: "£40.50" },
+                      { qty: "50+", off: "10% off", vq: "£17.10", st: "£22.50", ex: "£40.50" },
                     ].map((row) => (
                       <tr key={row.qty} className="border-b border-[#222] last:border-b-0">
                         <td className="py-3 px-4">
@@ -469,8 +515,8 @@ export default function HomeV2() {
                 </table>
               </div>
               <p className="font-body text-xs md:text-sm text-center mt-3" style={{ color: "var(--v2-ink-mute)" }}>
-                Vault Club and bulk discounts are mutually exclusive — the higher discount applies.
-                Pristine 10P upgrade is excluded from bulk pricing.
+                Vault Club and bulk discounts are mutually exclusive — the higher discount applies. Pristine 10P upgrade
+                is excluded from bulk pricing.
               </p>
             </div>
           </div>

@@ -2071,6 +2071,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Slab showcase — homepage 3D hero data ─────────────────────────────────
+  // Public, no auth. Top graded certs with real label PNGs (generated +
+  // cached in R2 by server/slab-showcase.ts). Never 500s a page load.
+  const showcaseRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many requests. Limit: 30 per minute per IP." },
+  });
+  app.get("/api/public/slab-showcase", showcaseRateLimit, async (_req, res) => {
+    try {
+      const { getSlabShowcaseItems } = await import("./slab-showcase");
+      const items = await getSlabShowcaseItems(8);
+      res.setHeader("Cache-Control", "public, max-age=300");
+      res.json({ items, generatedAt: new Date().toISOString() });
+    } catch (err: any) {
+      console.error("[slab-showcase] endpoint error:", err?.message || err);
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.json({ items: [], generatedAt: new Date().toISOString() });
+    }
+  });
+
   app.get("/api/cert/:id/population", lookupRateLimit, async (req, res) => {
     try {
       const certId = String(req.params.id);
@@ -10286,6 +10309,15 @@ Defects (admin-confirmed): ${defectLines}`;
         } catch (logErr) {
           console.warn("[approve] ai_grade_corrections insert failed:", logErr);
         }
+      }
+
+      // Newly published cert should appear in the homepage showcase without
+      // waiting out the 5-min memory cache.
+      try {
+        const { clearSlabShowcaseCache } = await import("./slab-showcase");
+        clearSlabShowcaseCache();
+      } catch {
+        /* non-fatal */
       }
 
       const updated = await storage.getCertificate(id);
