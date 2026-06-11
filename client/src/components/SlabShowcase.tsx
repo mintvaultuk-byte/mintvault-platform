@@ -65,8 +65,8 @@ const CARD_POSITIONS: CardPosition[] = [
   {
     x: 57,
     y: 50,
-    rotY: -16,
-    rotX: 4,
+    rotY: 0, // centre hero card faces the viewer straight-on
+    rotX: 0,
     scale: 1.0,
     blur: 0,
     zIndex: 8,
@@ -336,10 +336,12 @@ export default function SlabShowcase({ items, className }: Props) {
               <div
                 className="card-face"
                 style={{
+                  // No preserve-3d here — a 3D context on the face forces the
+                  // image onto its own compositing layer, which softens it.
+                  // The thickness edges are decorative and survive flattening.
                   width: "100%",
                   height: "100%",
                   position: "relative",
-                  transformStyle: "preserve-3d",
                   borderRadius: "8px",
                   boxShadow: `0 ${Math.round(22 * pos.scale)}px ${Math.round(55 * pos.scale)}px rgba(0,0,0,0.85), 0 ${Math.round(6 * pos.scale)}px ${Math.round(18 * pos.scale)}px rgba(0,0,0,0.5), 0 0 0 1.5px ${colour}70${isSelected ? `, 0 0 ${Math.round(34 * pos.scale)}px ${colour}66` : ""}`,
                 }}
@@ -399,6 +401,8 @@ export default function SlabShowcase({ items, className }: Props) {
                     borderRadius: "7px",
                     display: "block",
                     userSelect: "none",
+                    imageRendering: "high-quality" as const,
+                    WebkitBackfaceVisibility: "hidden" as const,
                   }}
                   onLoad={() => setLoadedCount((c) => c + 1)}
                   onError={(e) => {
