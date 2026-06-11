@@ -263,12 +263,13 @@ export default function HomeV2() {
 
       {/* ── SECTION A: HERO — 3D slab showcase behind the copy ─────────── */}
       <section
-        className="relative w-full overflow-hidden vault-hero-section"
-        style={{ height: "min(90vh, 720px)", minHeight: "500px" }}
+        className="relative w-full overflow-hidden vault-hero-section md:h-[min(90vh,720px)]"
+        style={{ minHeight: "500px" }}
       >
-        {/* 3D showcase — fills the section, real graded slabs */}
+        {/* 3D showcase — desktop only; on mobile the cards spread over the
+            copy, so the hero is copy + dark background below md */}
         {showcaseLoaded && showcaseItems.length > 0 && (
-          <div className="absolute inset-0">
+          <div className="hidden md:block absolute inset-0">
             <Suspense fallback={null}>
               <SlabShowcase items={showcaseItems} />
             </Suspense>
@@ -282,17 +283,20 @@ export default function HomeV2() {
 
         {/* Dark gradient overlay — keeps the copy readable over the 3D scene.
             Explicit stops: fully transparent by 52% so the card zone (centre
-            card sits at x:57%) has no overlay dimming it. */}
+            card sits at x:57%) has no overlay dimming it. z-[5]: between the
+            cards (no z-index) and the copy (z-20). Desktop only — no cards
+            to fade on mobile. */}
         <div
-          className="absolute inset-0 pointer-events-none"
+          className="hidden md:block absolute inset-0 z-[5] pointer-events-none"
           style={{
             background:
               "linear-gradient(to right, rgba(10,10,8,0.95) 0%, rgba(10,10,8,0.6) 28%, rgba(10,10,8,0.1) 42%, transparent 52%)",
           }}
         />
 
-        {/* Hero copy — unchanged text, repositioned left above the scene */}
-        <div className="relative z-10 h-full flex flex-col justify-center px-6 md:px-16 max-w-xl pointer-events-none [&_a]:pointer-events-auto">
+        {/* Hero copy — unchanged text. Mobile: normal flow, full width.
+            Desktop: absolute left, vertically centred, above cards (z-20). */}
+        <div className="relative md:absolute md:left-0 md:top-1/2 md:-translate-y-1/2 z-20 w-full md:max-w-[520px] px-6 md:px-16 py-16 md:py-0 pointer-events-none [&_a]:pointer-events-auto">
           <p
             className="font-mono-v2 text-sm md:text-base font-semibold uppercase tracking-[0.25em] no-text-shadow mb-6"
             style={{ color: "#D4AF37" }}
@@ -333,9 +337,9 @@ export default function HomeV2() {
           </p>
         </div>
 
-        {/* Grade count badge — bottom left */}
+        {/* Grade count badge — bottom left, desktop only (refers to the cards) */}
         {showcaseItems.length > 0 && (
-          <div className="absolute bottom-6 left-6 z-10 flex items-center gap-2 bg-white/5 backdrop-blur-sm border border-white/10 rounded-full px-4 py-2 text-xs text-white/60">
+          <div className="hidden md:flex absolute bottom-6 left-6 z-10 items-center gap-2 bg-white/5 backdrop-blur-sm border border-white/10 rounded-full px-4 py-2 text-xs text-white/60">
             <span className="w-1.5 h-1.5 rounded-full bg-[#D4AF37] animate-pulse" />
             {showcaseItems.length} certified card{showcaseItems.length !== 1 ? "s" : ""} graded
           </div>
