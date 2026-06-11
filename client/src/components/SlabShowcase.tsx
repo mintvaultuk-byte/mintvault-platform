@@ -60,7 +60,8 @@ interface CardPosition {
 }
 
 // Arc layout — index 0 is the centre hero card; far cards are smaller,
-// blurrier (depth of field), move less with parallax, and bob out of phase.
+// move less with parallax, and bob out of phase. Depth reads from scale +
+// position alone — no blur (all cards render sharp).
 const CARD_POSITIONS: CardPosition[] = [
   {
     x: 57,
@@ -81,7 +82,7 @@ const CARD_POSITIONS: CardPosition[] = [
     rotY: 22,
     rotX: -3,
     scale: 0.86,
-    blur: 0.3,
+    blur: 0,
     zIndex: 6,
     depth: 0.72,
     floatSpeed: 4.4,
@@ -94,7 +95,7 @@ const CARD_POSITIONS: CardPosition[] = [
     rotY: 28,
     rotX: 6,
     scale: 0.8,
-    blur: 0.5,
+    blur: 0,
     zIndex: 5,
     depth: 0.65,
     floatSpeed: 3.6,
@@ -107,7 +108,7 @@ const CARD_POSITIONS: CardPosition[] = [
     rotY: -24,
     rotX: -4,
     scale: 0.76,
-    blur: 0.4,
+    blur: 0,
     zIndex: 4,
     depth: 0.6,
     floatSpeed: 5.0,
@@ -120,7 +121,7 @@ const CARD_POSITIONS: CardPosition[] = [
     rotY: -30,
     rotX: 7,
     scale: 0.68,
-    blur: 1.0,
+    blur: 0,
     zIndex: 3,
     depth: 0.5,
     floatSpeed: 4.2,
@@ -133,7 +134,7 @@ const CARD_POSITIONS: CardPosition[] = [
     rotY: 35,
     rotX: -5,
     scale: 0.62,
-    blur: 1.2,
+    blur: 0,
     zIndex: 2,
     depth: 0.45,
     floatSpeed: 4.8,
@@ -146,7 +147,7 @@ const CARD_POSITIONS: CardPosition[] = [
     rotY: -8,
     rotX: 10,
     scale: 0.58,
-    blur: 1.4,
+    blur: 0,
     zIndex: 1,
     depth: 0.4,
     floatSpeed: 3.4,
@@ -159,7 +160,7 @@ const CARD_POSITIONS: CardPosition[] = [
     rotY: -38,
     rotX: 5,
     scale: 0.55,
-    blur: 1.6,
+    blur: 0,
     zIndex: 1,
     depth: 0.38,
     floatSpeed: 5.2,
@@ -295,11 +296,9 @@ export default function SlabShowcase({ items, className }: Props) {
                 transform: `translate(-50%, -50%) rotateY(${pos.rotY}deg) rotateX(${pos.rotX}deg)`,
                 transformStyle: "preserve-3d",
                 zIndex: pos.zIndex,
-                // undefined removes the property entirely — even blur(0)/"none"
-                // can promote the card to a compositing layer and soften it
-                filter: pos.blur > 0 ? `blur(${pos.blur}px)` : undefined,
+                // No filter on cards — depth reads from scale/position alone;
+                // any filter (even blur(0)) promotes a softening compositing layer
                 cursor: "pointer",
-                transition: "filter 0.4s ease",
                 // no will-change: the RAF loop drives transforms directly, and
                 // forced layer promotion can render the card at lower resolution
               }}
