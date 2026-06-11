@@ -1,16 +1,17 @@
 /**
- * SlabShowcase — Three.js homepage hero rendering real MintVault graded
- * slabs. Front face composes the actual generated label (top strip) above
- * the real card scan, exactly like a physical slab; back face composes the
- * back label; sides are frosted acrylic. Clicking a slab opens a cert
- * overlay linking to the public certificate page.
+ * SlabShowcase — CSS 3D floating card showcase for the homepage hero.
  *
- * Three.js is dynamically imported inside useEffect so it stays code-split
- * and never blocks page parse. Falls back to a CSS 3D stack on mobile or
- * when WebGL is unavailable.
+ * Pure CSS 3D + a single requestAnimationFrame loop: no Three.js, no WebGL.
+ * Each card is the REAL scan (via the same-origin /api/public/slab-image
+ * proxy) floating in an arc with depth-of-field blur, mouse parallax,
+ * hover tilt, and a cursor-tracking specular shine. Clicking a card opens
+ * a cert overlay with the MVGS score and a View Certificate CTA.
+ *
+ * The white mat border on the scans (V850 scanner output) is INTENTIONAL —
+ * against the dark vault background it reads as a physical card mount.
+ * Never mask or crop it.
  */
 import { useEffect, useRef, useState } from "react";
-import type * as ThreeNS from "three";
 
 export interface SlabShowcaseItem {
   certNumber: string;
@@ -27,442 +28,741 @@ export interface SlabShowcaseItem {
   frontScanUrl: string | null;
 }
 
-interface SlabShowcaseProps {
+interface Props {
   items: SlabShowcaseItem[];
   className?: string;
 }
 
-// Arc layout — filled from the centre out (index 0 = centre slab).
-const POSITIONS = [
-  { x: 0.0, y: 0.0, z: 0.0, rotY: 0.0, rotX: 0.0 },
-  { x: -2.2, y: -0.3, z: -0.8, rotY: 0.18, rotX: 0.04 },
-  { x: 2.2, y: -0.3, z: -0.8, rotY: -0.18, rotX: 0.04 },
-  { x: -4.2, y: -0.6, z: -1.8, rotY: 0.32, rotX: 0.06 },
-  { x: 4.2, y: -0.6, z: -1.8, rotY: -0.32, rotX: 0.06 },
-  { x: -1.1, y: 1.9, z: -1.2, rotY: 0.12, rotX: -0.05 },
-  { x: 1.1, y: 1.9, z: -1.2, rotY: -0.12, rotX: -0.05 },
-  { x: 0.0, y: -2.2, z: -2.0, rotY: 0.0, rotX: 0.08 },
+function gradeColor(grade: number): string {
+  if (grade >= 10) return "#D4AF37"; // Gold — Gem Mint / Black Label
+  if (grade >= 9.5) return "#c8a020"; // Deep gold — Mint+
+  if (grade >= 9) return "#22c55e"; // Green — Mint
+  if (grade >= 8) return "#16a34a"; // Dark green — NM-Mint+/NM-Mint
+  if (grade >= 7) return "#3b82f6"; // Blue — NM+/Near Mint
+  if (grade >= 6) return "#f59e0b"; // Amber — EX-Mint+/EX-Mint
+  if (grade >= 5) return "#ea580c"; // Orange — Excellent+/Excellent
+  if (grade >= 4) return "#ef4444"; // Red — VG-EX+/VG-EX
+  return "#991b1b"; // Dark red — below 4
+}
+
+interface CardPosition {
+  x: number;
+  y: number;
+  rotY: number;
+  rotX: number;
+  scale: number;
+  blur: number;
+  zIndex: number;
+  depth: number;
+  floatSpeed: number;
+  floatAmp: number;
+  floatOffset: number;
+}
+
+// Arc layout — index 0 is the centre hero card; far cards are smaller,
+// blurrier (depth of field), move less with parallax, and bob out of phase.
+const CARD_POSITIONS: CardPosition[] = [
+  {
+    x: 57,
+    y: 50,
+    rotY: -16,
+    rotX: 4,
+    scale: 1.0,
+    blur: 0,
+    zIndex: 8,
+    depth: 1.0,
+    floatSpeed: 3.8,
+    floatAmp: 11,
+    floatOffset: 0,
+  },
+  {
+    x: 41,
+    y: 38,
+    rotY: 22,
+    rotX: -3,
+    scale: 0.86,
+    blur: 0.3,
+    zIndex: 6,
+    depth: 0.72,
+    floatSpeed: 4.4,
+    floatAmp: 8,
+    floatOffset: 1.2,
+  },
+  {
+    x: 43,
+    y: 68,
+    rotY: 28,
+    rotX: 6,
+    scale: 0.8,
+    blur: 0.5,
+    zIndex: 5,
+    depth: 0.65,
+    floatSpeed: 3.6,
+    floatAmp: 9,
+    floatOffset: 2.4,
+  },
+  {
+    x: 71,
+    y: 26,
+    rotY: -24,
+    rotX: -4,
+    scale: 0.76,
+    blur: 0.4,
+    zIndex: 4,
+    depth: 0.6,
+    floatSpeed: 5.0,
+    floatAmp: 7,
+    floatOffset: 0.8,
+  },
+  {
+    x: 74,
+    y: 68,
+    rotY: -30,
+    rotX: 7,
+    scale: 0.68,
+    blur: 1.0,
+    zIndex: 3,
+    depth: 0.5,
+    floatSpeed: 4.2,
+    floatAmp: 6,
+    floatOffset: 1.8,
+  },
+  {
+    x: 32,
+    y: 22,
+    rotY: 35,
+    rotX: -5,
+    scale: 0.62,
+    blur: 1.2,
+    zIndex: 2,
+    depth: 0.45,
+    floatSpeed: 4.8,
+    floatAmp: 7,
+    floatOffset: 3.0,
+  },
+  {
+    x: 55,
+    y: 78,
+    rotY: -8,
+    rotX: 10,
+    scale: 0.58,
+    blur: 1.4,
+    zIndex: 1,
+    depth: 0.4,
+    floatSpeed: 3.4,
+    floatAmp: 5,
+    floatOffset: 2.0,
+  },
+  {
+    x: 83,
+    y: 45,
+    rotY: -38,
+    rotX: 5,
+    scale: 0.55,
+    blur: 1.6,
+    zIndex: 1,
+    depth: 0.38,
+    floatSpeed: 5.2,
+    floatAmp: 5,
+    floatOffset: 0.4,
+  },
 ];
 
-function gradeColor(grade: number): string {
-  if (grade >= 10) return "#D4AF37";
-  if (grade >= 9) return "#c8a020";
-  if (grade >= 8) return "#22c55e";
-  if (grade >= 7) return "#3b82f6";
-  if (grade >= 6) return "#f59e0b";
-  if (grade >= 5) return "#ea580c";
-  if (grade >= 4) return "#ef4444";
-  return "#991b1b";
-}
+// Centre card base size — 63×88mm card aspect.
+const BASE_W = 168;
+const BASE_H = 235;
 
-function canWebGL(): boolean {
-  try {
-    const c = document.createElement("canvas");
-    return !!(c.getContext("webgl2") || c.getContext("webgl"));
-  } catch {
-    return false;
-  }
-}
-
-/** Load an image for canvas composition. Resolves null on failure. */
-function loadImageEl(url: string | null): Promise<HTMLImageElement | null> {
-  if (!url) return Promise.resolve(null);
-  return new Promise((resolve) => {
-    const img = new Image();
-    // No crossOrigin needed — images come from the same-origin
-    // /api/public/slab-image proxy, so the canvas stays untainted.
-    img.onload = () => resolve(img);
-    img.onerror = () => {
-      console.warn("[SlabShowcase] image load failed:", url);
-      resolve(null);
-    };
-    img.src = url;
-  });
-}
-
-/**
- * Compose a slab face: label strip at the top (its natural landscape
- * aspect), card scan (front face) or branded dark body (back face) below.
- * 512×716 matches the 63×88mm slab face aspect.
- */
-function composeFaceCanvas(label: HTMLImageElement | null, scan: HTMLImageElement | null): HTMLCanvasElement {
-  const canvas = document.createElement("canvas");
-  canvas.width = 512;
-  canvas.height = 716;
-  const ctx = canvas.getContext("2d")!;
-
-  ctx.fillStyle = "#0c0c0a";
-  ctx.fillRect(0, 0, 512, 716);
-
-  let labelBottom = 0;
-  if (label) {
-    // Label keeps its own aspect, full width.
-    const h = Math.round((label.height / label.width) * 512);
-    ctx.drawImage(label, 0, 0, 512, h);
-    labelBottom = h;
-  }
-
-  if (scan) {
-    // Fit the scan inside the remaining area, centred, with a small inset.
-    const areaY = labelBottom + 8;
-    const areaH = 716 - areaY - 8;
-    const areaW = 512 - 16;
-    const s = Math.min(areaW / scan.width, areaH / scan.height);
-    const w = scan.width * s;
-    const h = scan.height * s;
-    ctx.drawImage(scan, (512 - w) / 2, areaY + (areaH - h) / 2, w, h);
-  } else if (label) {
-    // Back face / no scan: branded dark body under the label.
-    ctx.fillStyle = "#D4AF37";
-    ctx.textAlign = "center";
-    ctx.font = "bold 28px sans-serif";
-    ctx.fillText("MINTVAULT", 256, (716 + labelBottom) / 2);
-    ctx.font = "16px sans-serif";
-    ctx.fillText("CERTIFIED", 256, (716 + labelBottom) / 2 + 32);
-  } else {
-    // No label at all — full branded fallback.
-    ctx.fillStyle = "#D4AF37";
-    ctx.textAlign = "center";
-    ctx.font = "bold 28px sans-serif";
-    ctx.fillText("MINTVAULT", 256, 358);
-    ctx.font = "16px sans-serif";
-    ctx.fillText("CERTIFIED", 256, 390);
-  }
-
-  return canvas;
-}
-
-export default function SlabShowcase({ items, className }: SlabShowcaseProps) {
+export default function SlabShowcase({ items, className }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [selectedItem, setSelectedItem] = useState<SlabShowcaseItem | null>(null);
-  const [ready, setReady] = useState(false);
-  const [useFallback, setUseFallback] = useState(false);
-  const selectedIndexRef = useRef<number>(-1);
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const rafRef = useRef<number>(0);
+  const [selected, setSelected] = useState<SlabShowcaseItem | null>(null);
+  const [loadedCount, setLoadedCount] = useState(0);
 
+  // Per-card animation state — lives in refs so the RAF loop never re-renders.
+  const floatOffsetY = useRef<number[]>([]);
+  const parallaxOffset = useRef<{ x: number; y: number }[]>([]);
+  const targetParallax = useRef<{ x: number; y: number }[]>([]);
+  const isHoveringRef = useRef<boolean[]>([]);
+
+  // (Re)size animation state when the item list changes.
   useEffect(() => {
-    selectedIndexRef.current = selectedItem ? items.findIndex((i) => i.certNumber === selectedItem.certNumber) : -1;
-  }, [selectedItem, items]);
+    floatOffsetY.current = items.map(() => 0);
+    parallaxOffset.current = items.map(() => ({ x: 0, y: 0 }));
+    targetParallax.current = items.map(() => ({ x: 0, y: 0 }));
+    isHoveringRef.current = items.map(() => false);
+  }, [items]);
 
+  // Combined base + parallax + float transform. Called by the RAF loop;
+  // skipped while a card is hovered (hover tilt owns the transform then).
+  function applyTransform(el: HTMLDivElement, i: number) {
+    const pos = CARD_POSITIONS[i];
+    if (!pos) return;
+    const target = targetParallax.current[i] ?? { x: 0, y: 0 };
+    const current = parallaxOffset.current[i] ?? { x: 0, y: 0 };
+    // Lerp parallax toward target (smoothing)
+    current.x += (target.x - current.x) * 0.06;
+    current.y += (target.y - current.y) * 0.06;
+    parallaxOffset.current[i] = current;
+    if (isHoveringRef.current[i]) return; // hover handler drives the transform
+    const fy = floatOffsetY.current[i] || 0;
+    el.style.transform = `translate(calc(-50% + ${current.x.toFixed(2)}px), calc(-50% + ${(current.y + fy).toFixed(2)}px)) rotateY(${pos.rotY}deg) rotateX(${pos.rotX}deg)`;
+  }
+
+  // Float loop — sine bob per card with individual speed + phase offset.
+  // CSS @keyframes can't stagger phases without N generated blocks.
   useEffect(() => {
-    if (!items.length) return;
-    if (window.innerWidth < 768 || !canWebGL()) {
-      setUseFallback(true);
-      setReady(true);
-      return;
-    }
-
-    let disposed = false;
-    let animationFrameId = 0;
-    let cleanupFns: Array<() => void> = [];
-
-    (async () => {
-      const THREE = await import("three");
-      const { RoomEnvironment } = await import("three/examples/jsm/environments/RoomEnvironment.js");
-      const container = containerRef.current;
-      const canvas = canvasRef.current;
-      if (!container || !canvas || disposed) return;
-
-      // ── Compose face textures from real label + scan images ──
-      const faces = await Promise.all(
-        items.map(async (item) => {
-          const [labelImg, scanImg, backImg] = await Promise.all([
-            loadImageEl(item.frontLabelUrl),
-            loadImageEl(item.frontScanUrl),
-            loadImageEl(item.backLabelUrl),
-          ]);
-          const frontTex = new THREE.CanvasTexture(composeFaceCanvas(labelImg, scanImg));
-          const backTex = new THREE.CanvasTexture(composeFaceCanvas(backImg, null));
-          for (const tex of [frontTex, backTex]) {
-            tex.colorSpace = THREE.SRGBColorSpace;
-            tex.generateMipmaps = true;
-            tex.minFilter = THREE.LinearMipmapLinearFilter;
-            tex.magFilter = THREE.LinearFilter;
-          }
-          return { frontTex, backTex };
-        })
-      );
-      if (disposed) return;
-
-      // ── Renderer / scene / camera ──
-      const renderer = new THREE.WebGLRenderer({
-        canvas,
-        antialias: true,
-        alpha: true,
-        powerPreference: "high-performance",
+    const loop = () => {
+      const t = performance.now() / 1000;
+      cardRefs.current.forEach((el, i) => {
+        if (!el) return;
+        const pos = CARD_POSITIONS[i];
+        if (!pos) return;
+        const bob = Math.sin(t * ((2 * Math.PI) / pos.floatSpeed) + pos.floatOffset) * pos.floatAmp;
+        floatOffsetY.current[i] = bob;
+        applyTransform(el, i);
       });
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.setSize(container.clientWidth, container.clientHeight);
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.2;
-      renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-      const scene = new THREE.Scene();
-      const camera = new THREE.PerspectiveCamera(42, container.clientWidth / container.clientHeight, 0.1, 50);
-      camera.position.set(0, 0, 9);
-
-      const pmremGenerator = new THREE.PMREMGenerator(renderer);
-      scene.environment = pmremGenerator.fromScene(new RoomEnvironment(), 0.04).texture;
-      pmremGenerator.dispose();
-
-      // ── Lights ──
-      scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-      const keyLight = new THREE.PointLight(0xd4af37, 3.5, 20);
-      keyLight.position.set(4, 5, 6);
-      scene.add(keyLight);
-      const fillLight = new THREE.PointLight(0x99bbdd, 1.5, 20);
-      fillLight.position.set(-5, 2, 4);
-      scene.add(fillLight);
-      const rimLight = new THREE.PointLight(0xffffff, 2.0, 20);
-      rimLight.position.set(0, 0, -6);
-      scene.add(rimLight);
-      const floorLight = new THREE.PointLight(0xd4af37, 0.8, 15);
-      floorLight.position.set(0, -5, 3);
-      scene.add(floorLight);
-
-      // ── Slabs ──
-      const slabGeo = new THREE.BoxGeometry(1.89, 2.64, 0.18);
-      const acrylicMaterial = new THREE.MeshPhysicalMaterial({
-        color: new THREE.Color(0xc8dde8),
-        roughness: 0.05,
-        metalness: 0.0,
-        transmission: 0.82,
-        thickness: 0.5,
-        transparent: true,
-        opacity: 0.92,
-        envMapIntensity: 1.5,
-        ior: 1.49,
-      });
-
-      const slabGroup = new THREE.Group();
-      scene.add(slabGroup);
-      const slabMeshes: ThreeNS.Mesh[] = [];
-
-      items.slice(0, POSITIONS.length).forEach((item, index) => {
-        const pos = POSITIONS[index];
-        const materials = [
-          acrylicMaterial,
-          acrylicMaterial,
-          acrylicMaterial,
-          acrylicMaterial,
-          new THREE.MeshStandardMaterial({ map: faces[index].frontTex, roughness: 0.15, metalness: 0.0 }),
-          new THREE.MeshStandardMaterial({ map: faces[index].backTex, roughness: 0.15, metalness: 0.0 }),
-        ];
-        const mesh = new THREE.Mesh(slabGeo, materials);
-        mesh.position.set(pos.x, pos.y, pos.z);
-        mesh.rotation.y = pos.rotY;
-        mesh.rotation.x = pos.rotX;
-        mesh.userData.baseRotY = pos.rotY;
-        mesh.userData.baseZ = pos.z;
-        mesh.userData.autoRotSpeed = 0.004 + index * 0.0008;
-        mesh.userData.certNumber = item.certNumber;
-        mesh.userData.itemIndex = index;
-        slabGroup.add(mesh);
-        slabMeshes.push(mesh);
-      });
-
-      // ── Interaction ──
-      const raycaster = new THREE.Raycaster();
-      const mouse2D = new THREE.Vector2();
-      const mouseRef = { x: 0, y: 0 };
-      const targetGroupRot = { x: 0, y: 0 };
-      const currentGroupRot = { x: 0, y: 0 };
-
-      const toNdc = (event: MouseEvent) => {
-        const rect = canvas.getBoundingClientRect();
-        mouse2D.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        mouse2D.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-      };
-
-      const onClick = (event: MouseEvent) => {
-        toNdc(event);
-        raycaster.setFromCamera(mouse2D, camera);
-        const hits = raycaster.intersectObjects(slabMeshes);
-        if (hits.length > 0) {
-          const idx = hits[0].object.userData.itemIndex as number;
-          setSelectedItem(items[idx]);
-        } else {
-          setSelectedItem(null);
-        }
-      };
-
-      const onMouseMove = (event: MouseEvent) => {
-        const rect = canvas.getBoundingClientRect();
-        mouseRef.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-        mouseRef.y = ((event.clientY - rect.top) / rect.height) * 2 - 1;
-        toNdc(event);
-        raycaster.setFromCamera(mouse2D, camera);
-        canvas.style.cursor = raycaster.intersectObjects(slabMeshes).length > 0 ? "pointer" : "default";
-      };
-
-      canvas.addEventListener("click", onClick);
-      canvas.addEventListener("mousemove", onMouseMove);
-      cleanupFns.push(() => {
-        canvas.removeEventListener("click", onClick);
-        canvas.removeEventListener("mousemove", onMouseMove);
-      });
-
-      // ── Visibility pause ──
-      const isVisibleRef = { current: true };
-      const io = new IntersectionObserver(
-        (entries) => {
-          isVisibleRef.current = entries[0].isIntersecting;
-        },
-        { threshold: 0.1 }
-      );
-      io.observe(container);
-      cleanupFns.push(() => io.disconnect());
-
-      // ── Resize ──
-      const onResize = () => {
-        const w = container.clientWidth;
-        const h = container.clientHeight;
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
-        renderer.setSize(w, h);
-      };
-      window.addEventListener("resize", onResize);
-      cleanupFns.push(() => window.removeEventListener("resize", onResize));
-
-      // ── Animation loop ──
-      const clock = new THREE.Clock();
-      const animate = () => {
-        animationFrameId = requestAnimationFrame(animate);
-        if (!isVisibleRef.current) return;
-        clock.getDelta(); // keeps elapsedTime ticking
-
-        slabMeshes.forEach((mesh, i) => {
-          const isSelected = selectedIndexRef.current === mesh.userData.itemIndex;
-          if (!isSelected) {
-            mesh.rotation.y = mesh.userData.baseRotY + clock.elapsedTime * mesh.userData.autoRotSpeed;
-          }
-          // Float bob
-          mesh.position.y = POSITIONS[i].y + Math.sin(clock.elapsedTime * 0.6 + i * 1.1) * 0.06;
-          // Selected slab eases forward; others ease back to base depth
-          const targetZ = mesh.userData.baseZ + (isSelected ? 0.3 : 0);
-          mesh.position.z += (targetZ - mesh.position.z) * 0.08;
-        });
-
-        targetGroupRot.x = mouseRef.y * -0.08;
-        targetGroupRot.y = mouseRef.x * 0.12;
-        currentGroupRot.x += (targetGroupRot.x - currentGroupRot.x) * 0.05;
-        currentGroupRot.y += (targetGroupRot.y - currentGroupRot.y) * 0.05;
-        slabGroup.rotation.x = currentGroupRot.x;
-        slabGroup.rotation.y = currentGroupRot.y;
-
-        renderer.render(scene, camera);
-      };
-      animate();
-      setReady(true);
-
-      cleanupFns.push(() => {
-        cancelAnimationFrame(animationFrameId);
-        slabMeshes.forEach((mesh) => {
-          mesh.geometry.dispose();
-          if (Array.isArray(mesh.material)) {
-            mesh.material.forEach((m) => {
-              const mat = m as ThreeNS.MeshStandardMaterial;
-              if (mat.map) mat.map.dispose();
-              mat.dispose();
-            });
-          }
-        });
-        scene.environment?.dispose();
-        scene.clear();
-        renderer.dispose();
-      });
-    })();
-
-    return () => {
-      disposed = true;
-      cleanupFns.forEach((fn) => fn());
-      cleanupFns = [];
+      rafRef.current = requestAnimationFrame(loop);
     };
-    // items identity is stable per fetch — re-init only when the list changes
+    rafRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [items]);
+
+  // Container-level mouse parallax + per-card specular shine tracking.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const onMouseMove = (e: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      const nx = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
+      const ny = ((e.clientY - rect.top) / rect.height - 0.5) * 2;
+
+      CARD_POSITIONS.forEach((pos, i) => {
+        if (!items[i]) return;
+        targetParallax.current[i] = { x: nx * 55 * pos.depth, y: ny * 28 * pos.depth };
+      });
+
+      cardRefs.current.forEach((el) => {
+        if (!el) return;
+        const shine = el.querySelector(".card-shine") as HTMLElement | null;
+        if (!shine) return;
+        const cardRect = el.getBoundingClientRect();
+        const sx = (((e.clientX - cardRect.left) / cardRect.width) * 100).toFixed(1) + "%";
+        const sy = (((e.clientY - cardRect.top) / cardRect.height) * 100).toFixed(1) + "%";
+        shine.style.setProperty("--sx", sx);
+        shine.style.setProperty("--sy", sy);
+      });
+    };
+
+    container.addEventListener("mousemove", onMouseMove, { passive: true });
+    return () => container.removeEventListener("mousemove", onMouseMove);
   }, [items]);
 
   if (!items.length) return null;
 
+  const visible = items.slice(0, CARD_POSITIONS.length);
+
   return (
-    <div ref={containerRef} className={`relative w-full h-full ${className ?? ""}`}>
-      {/* Loading state until first frame / fallback decided */}
-      {!ready && (
-        <div className="absolute inset-0 bg-gradient-to-b from-[#0c0c0a] to-[#1a1408] animate-pulse flex items-center justify-center">
-          <div className="w-8 h-8 rounded-full border-2 border-[#D4AF37] border-t-transparent animate-spin" />
-        </div>
-      )}
+    <div
+      ref={containerRef}
+      className={className}
+      style={{
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        perspective: "900px",
+        perspectiveOrigin: "50% 50%",
+        overflow: "hidden",
+      }}
+    >
+      <style>{`@keyframes mv-showcase-spin { to { transform: rotate(360deg) } }`}</style>
 
-      {/* WebGL canvas */}
-      {!useFallback && <canvas ref={canvasRef} className="w-full h-full block" />}
+      {/* Stage */}
+      <div style={{ position: "absolute", inset: 0, transformStyle: "preserve-3d" }}>
+        {visible.map((item, index) => {
+          const pos = CARD_POSITIONS[index];
+          const cardW = Math.round(BASE_W * pos.scale);
+          const cardH = Math.round(BASE_H * pos.scale);
+          const colour = gradeColor(item.grade);
+          const isSelected = selected?.certNumber === item.certNumber;
 
-      {/* CSS 3D fallback (mobile / no WebGL) */}
-      {useFallback && (
-        <div className="relative w-full h-full flex items-center justify-center" style={{ perspective: "1000px" }}>
-          {items.slice(0, 5).map((item, i) => (
+          return (
             <div
               key={item.certNumber}
-              className="absolute w-28 h-40 rounded-lg shadow-2xl cursor-pointer transition-transform hover:scale-105 bg-[#0c0c0a] border border-white/10 overflow-hidden"
+              ref={(el) => (cardRefs.current[index] = el)}
+              className="card-wrap"
               style={{
-                transform: `rotateY(${(i - 2) * 12}deg) translateX(${(i - 2) * 48}px) translateZ(${-Math.abs(i - 2) * 30}px)`,
-                zIndex: 5 - Math.abs(i - 2),
+                position: "absolute",
+                left: pos.x + "%",
+                top: pos.y + "%",
+                width: cardW + "px",
+                height: cardH + "px",
+                transform: `translate(-50%, -50%) rotateY(${pos.rotY}deg) rotateX(${pos.rotX}deg)`,
+                transformStyle: "preserve-3d",
+                zIndex: pos.zIndex,
+                filter: pos.blur > 0 ? `blur(${pos.blur}px)` : "none",
+                cursor: "pointer",
+                transition: "filter 0.4s ease",
+                willChange: "transform",
               }}
-              onClick={() => setSelectedItem(item)}
+              onClick={() => setSelected(item)}
+              onMouseMove={(e) => {
+                const el = cardRefs.current[index];
+                if (!el) return;
+                isHoveringRef.current[index] = true;
+                const rect = el.getBoundingClientRect();
+                const cx = (e.clientX - rect.left) / rect.width - 0.5;
+                const cy = (e.clientY - rect.top) / rect.height - 0.5;
+                const extraRY = cx * 18;
+                const extraRX = -cy * 12;
+                const p = parallaxOffset.current[index] ?? { x: 0, y: 0 };
+                const fy = floatOffsetY.current[index] || 0;
+                el.style.transform = `translate(calc(-50% + ${p.x.toFixed(2)}px), calc(-50% + ${(p.y + fy).toFixed(2)}px)) rotateY(${pos.rotY + extraRY}deg) rotateX(${pos.rotX + extraRX}deg) scale(1.04)`;
+                const badge = el.querySelector("[data-badge]") as HTMLElement | null;
+                if (badge) badge.style.transform = "scale(1.12) translateZ(6px)";
+              }}
+              onMouseLeave={() => {
+                isHoveringRef.current[index] = false;
+                const badge = cardRefs.current[index]?.querySelector("[data-badge]") as HTMLElement | null;
+                if (badge) badge.style.transform = "";
+                // applyTransform restores the base rotation on the next RAF tick
+              }}
             >
-              <img src={item.frontLabelUrl} alt="" className="w-full object-cover" />
-              {item.frontScanUrl && (
-                <img src={item.frontScanUrl} alt={item.cardName} className="w-full object-contain" />
-              )}
+              {/* Ambient colour glow underneath the card */}
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: "-18px",
+                  left: "-10%",
+                  right: "-10%",
+                  height: "36px",
+                  background: `radial-gradient(ellipse, ${colour}50 0%, transparent 70%)`,
+                  filter: "blur(10px)",
+                  pointerEvents: "none",
+                }}
+              />
+
+              {/* Card face */}
+              <div
+                className="card-face"
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  position: "relative",
+                  transformStyle: "preserve-3d",
+                  borderRadius: "8px",
+                  boxShadow: `0 ${Math.round(22 * pos.scale)}px ${Math.round(55 * pos.scale)}px rgba(0,0,0,0.85), 0 ${Math.round(6 * pos.scale)}px ${Math.round(18 * pos.scale)}px rgba(0,0,0,0.5), 0 0 0 1.5px ${colour}70${isSelected ? `, 0 0 ${Math.round(34 * pos.scale)}px ${colour}66` : ""}`,
+                }}
+              >
+                {/* Card thickness — right edge */}
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "1px",
+                    right: "-5px",
+                    width: "5px",
+                    height: "calc(100% - 2px)",
+                    background: "linear-gradient(90deg, #d8d8d4, #b0b0aa)",
+                    transform: "rotateY(90deg)",
+                    transformOrigin: "left center",
+                    borderRadius: "0 3px 3px 0",
+                  }}
+                />
+
+                {/* Card thickness — bottom edge */}
+                <div
+                  style={{
+                    position: "absolute",
+                    bottom: "-4px",
+                    left: "4%",
+                    right: "4%",
+                    height: "4px",
+                    background: "linear-gradient(180deg, #b8b8b2, #909088)",
+                    transform: "rotateX(-90deg)",
+                    transformOrigin: "top center",
+                    borderRadius: "0 0 2px 2px",
+                  }}
+                />
+
+                {/* Gold frame ring */}
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: "-2.5px",
+                    borderRadius: "10.5px",
+                    border: `1.5px solid ${colour}90`,
+                    boxShadow: `0 0 ${Math.round(16 * pos.scale)}px ${colour}35`,
+                    pointerEvents: "none",
+                    zIndex: 5,
+                  }}
+                />
+
+                {/* Real card scan — white mat border is intentional (card mount) */}
+                <img
+                  src={item.frontScanUrl || item.frontLabelUrl}
+                  alt={item.cardName}
+                  draggable={false}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    borderRadius: "7px",
+                    display: "block",
+                    userSelect: "none",
+                  }}
+                  onLoad={() => setLoadedCount((c) => c + 1)}
+                  onError={(e) => {
+                    // Fallback to label if scan fails; count as loaded if both fail
+                    if (
+                      item.frontLabelUrl &&
+                      e.currentTarget.src !== new URL(item.frontLabelUrl, window.location.origin).href
+                    ) {
+                      e.currentTarget.src = item.frontLabelUrl;
+                    } else {
+                      console.warn("[SlabShowcase] image load failed:", item.certNumber);
+                      setLoadedCount((c) => c + 1);
+                    }
+                  }}
+                />
+
+                {/* Specular shine — follows the cursor via --sx/--sy */}
+                <div
+                  className="card-shine"
+                  data-card-index={index}
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    borderRadius: "7px",
+                    background:
+                      "radial-gradient(circle at var(--sx,50%) var(--sy,50%), rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.06) 35%, transparent 65%)",
+                    pointerEvents: "none",
+                    zIndex: 6,
+                    mixBlendMode: "screen" as const,
+                  }}
+                />
+
+                {/* Grade badge sticker — bottom right */}
+                <div
+                  data-badge
+                  style={{
+                    position: "absolute",
+                    bottom: Math.round(-13 * pos.scale) + "px",
+                    right: Math.round(-13 * pos.scale) + "px",
+                    width: Math.round(50 * pos.scale) + "px",
+                    height: Math.round(50 * pos.scale) + "px",
+                    borderRadius: "50%",
+                    background: `linear-gradient(135deg, ${colour}, ${colour}bb)`,
+                    border: "2px solid rgba(255,255,255,0.22)",
+                    boxShadow: `0 ${Math.round(4 * pos.scale)}px ${Math.round(16 * pos.scale)}px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.28)`,
+                    display: "flex",
+                    flexDirection: "column" as const,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    zIndex: 7,
+                    transition: "transform 0.3s ease",
+                    color: item.grade >= 9.5 ? "#0a0a08" : "#fff",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: (item.grade % 1 !== 0 ? Math.round(13 * pos.scale) : Math.round(16 * pos.scale)) + "px",
+                      fontWeight: 800,
+                      lineHeight: 1,
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {item.grade}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: Math.round(6 * pos.scale) + "px",
+                      textTransform: "uppercase" as const,
+                      letterSpacing: "0.04em",
+                      marginTop: "1px",
+                      opacity: 0.85,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {item.gradeLabel}
+                  </span>
+                </div>
+
+                {/* MintVault cert chip — top left */}
+                <div
+                  style={{
+                    position: "absolute",
+                    top: Math.round(-9 * pos.scale) + "px",
+                    left: Math.round(9 * pos.scale) + "px",
+                    background: "rgba(10,10,8,0.94)",
+                    border: "1px solid rgba(212,175,55,0.45)",
+                    borderRadius: "4px",
+                    padding: `${Math.round(2.5 * pos.scale)}px ${Math.round(7 * pos.scale)}px`,
+                    fontSize: Math.round(7.5 * pos.scale) + "px",
+                    color: "#D4AF37",
+                    letterSpacing: "0.1em",
+                    textTransform: "uppercase" as const,
+                    fontWeight: 700,
+                    zIndex: 7,
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.6)",
+                    whiteSpace: "nowrap" as const,
+                  }}
+                >
+                  MintVault
+                </div>
+              </div>
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
+
+      {/* Loading spinner — fades out once every card image has resolved */}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "transparent",
+          opacity: loadedCount >= visible.length ? 0 : 1,
+          transition: "opacity 0.6s ease",
+          pointerEvents: "none",
+          zIndex: 10,
+        }}
+      >
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            border: "2px solid rgba(212,175,55,0.3)",
+            borderTopColor: "#D4AF37",
+            animation: "mv-showcase-spin 0.8s linear infinite",
+          }}
+        />
+      </div>
 
       {/* Cert overlay */}
-      {selectedItem && (
-        <div className="absolute bottom-0 left-0 right-0 z-20 bg-[#0c0c0a]/95 backdrop-blur-md border-t border-[#D4AF37]/30 rounded-t-2xl p-6 transform transition-transform duration-300 translate-y-0">
+      <div
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setSelected(null);
+        }}
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 100,
+          display: "flex",
+          alignItems: "flex-end",
+          justifyContent: "center",
+          background: selected ? "rgba(0,0,0,0.6)" : "transparent",
+          backdropFilter: selected ? "blur(4px)" : "none",
+          transition: "background 0.35s ease, backdrop-filter 0.35s ease",
+          pointerEvents: selected ? "all" : "none",
+        }}
+      >
+        <div
+          style={{
+            width: "100%",
+            maxWidth: "700px",
+            background: "#111110",
+            border: "1px solid rgba(212,175,55,0.22)",
+            borderBottom: "none",
+            borderRadius: "22px 22px 0 0",
+            padding: "28px 32px 32px",
+            transform: selected ? "translateY(0)" : "translateY(100%)",
+            transition: "transform 0.4s cubic-bezier(0.32,0.72,0,1)",
+            boxShadow: "0 -20px 60px rgba(0,0,0,0.5)",
+            position: "relative",
+          }}
+        >
+          {/* Close */}
           <button
-            onClick={() => setSelectedItem(null)}
+            onClick={() => setSelected(null)}
             aria-label="Close"
-            className="absolute top-4 right-4 text-white/50 hover:text-white text-2xl leading-none"
+            style={{
+              position: "absolute",
+              top: 16,
+              right: 18,
+              width: 32,
+              height: 32,
+              background: "rgba(255,255,255,0.07)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: "50%",
+              color: "rgba(255,255,255,0.5)",
+              fontSize: 17,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
           >
             ×
           </button>
 
-          <div className="flex items-center gap-4">
+          {/* Header: grade badge + identity */}
+          <div style={{ display: "flex", gap: 18, marginBottom: 22, alignItems: "flex-start" }}>
             <div
-              className="shrink-0 w-16 h-16 rounded-xl flex flex-col items-center justify-center border-2"
               style={{
-                borderColor: gradeColor(selectedItem.grade),
-                background: gradeColor(selectedItem.grade) + "22",
+                width: 68,
+                height: 68,
+                borderRadius: "50%",
+                border: `2px solid ${gradeColor(selected?.grade ?? 0)}55`,
+                background: `${gradeColor(selected?.grade ?? 0)}12`,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
               }}
             >
-              <span className="text-xl font-bold tabular-nums" style={{ color: gradeColor(selectedItem.grade) }}>
-                {selectedItem.grade}
+              <span
+                style={{
+                  fontSize: 25,
+                  fontWeight: 800,
+                  color: gradeColor(selected?.grade ?? 0),
+                  lineHeight: 1,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {selected?.grade}
               </span>
-              <span className="text-[9px] uppercase tracking-widest text-white/60">{selectedItem.gradeLabel}</span>
+              <span
+                style={{
+                  fontSize: 8.5,
+                  color: "rgba(255,255,255,0.45)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                  marginTop: 3,
+                }}
+              >
+                {selected?.gradeLabel}
+              </span>
             </div>
 
-            <div className="flex-1 min-w-0">
-              <p className="text-white font-medium truncate text-lg">{selectedItem.cardName}</p>
-              {selectedItem.setName && <p className="text-white/50 text-sm truncate">{selectedItem.setName}</p>}
-              <p className="text-white/30 text-xs mt-1 font-mono">{selectedItem.certNumber}</p>
+            <div>
+              <div style={{ fontSize: 21, fontWeight: 700, color: "#fff", marginBottom: 4 }}>{selected?.cardName}</div>
+              {selected?.setName && (
+                <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginBottom: 8 }}>{selected.setName}</div>
+              )}
+              <div
+                style={{
+                  fontFamily: "monospace",
+                  fontSize: 11,
+                  color: "rgba(255,255,255,0.22)",
+                  letterSpacing: "0.05em",
+                }}
+              >
+                {selected?.certNumber} · MINTVAULT CERTIFIED
+              </div>
+            </div>
+          </div>
+
+          {/* MVGS score bar */}
+          {selected?.gradeStrengthScore != null && (
+            <div
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: 10,
+                padding: "14px 16px",
+                marginBottom: 16,
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 9,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.12em",
+                  color: "rgba(255,255,255,0.28)",
+                  marginBottom: 10,
+                  fontWeight: 600,
+                }}
+              >
+                MVGS Score
+              </div>
+              <div
+                style={{
+                  height: 5,
+                  background: "rgba(255,255,255,0.06)",
+                  borderRadius: 3,
+                  overflow: "hidden",
+                  marginBottom: 8,
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${selected.gradeStrengthScore}%`,
+                    background: "linear-gradient(90deg, #D4AF37, #f0d070)",
+                    borderRadius: 3,
+                    transition: "width 0.6s cubic-bezier(0.4,0,0.2,1)",
+                  }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 20 }}>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+                  <b style={{ color: "rgba(255,255,255,0.7)" }}>{selected.gradeStrengthScore}</b>/100
+                </span>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+                  Graded by <b style={{ color: "rgba(255,255,255,0.7)" }}>MintVault UK</b>
+                </span>
+                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+                  Standard <b style={{ color: "rgba(255,255,255,0.7)" }}>MVGS v2</b>
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Footer: QR placeholder + tagline + CTA */}
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div
+              style={{
+                width: 48,
+                height: 48,
+                border: "1px solid rgba(255,255,255,0.1)",
+                borderRadius: 6,
+                background: "rgba(255,255,255,0.03)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 7,
+                color: "rgba(255,255,255,0.18)",
+                letterSpacing: "0.05em",
+                flexShrink: 0,
+              }}
+            >
+              QR
+            </div>
+
+            <div style={{ flex: 1, fontSize: 11, color: "rgba(255,255,255,0.2)", lineHeight: 1.5 }}>
+              Verifiable grading report, NFC-linked
+              <br />
+              ownership logbook &amp; certificate.
             </div>
 
             <a
-              href={`/cert/${selectedItem.certNumber}`}
+              href={`/cert/${selected?.certNumber}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="shrink-0 px-5 py-2.5 rounded-lg bg-[#D4AF37] text-[#0c0c0a] font-semibold text-sm hover:bg-[#c8a020] transition-colors"
+              style={{
+                background: "#D4AF37",
+                color: "#0a0a08",
+                padding: "12px 22px",
+                borderRadius: 8,
+                fontSize: 14,
+                fontWeight: 700,
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+                display: "inline-block",
+              }}
             >
               View Certificate →
             </a>
           </div>
-
-          <p className="text-white/25 text-xs mt-3 text-center">
-            Certificate includes verifiable grading report & ownership logbook
-          </p>
         </div>
-      )}
+      </div>
     </div>
   );
 }
