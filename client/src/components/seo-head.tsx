@@ -11,6 +11,9 @@ interface SeoHeadProps {
   ogTitle?: string;
   ogDescription?: string;
   ogImage?: string;
+  /** Override the default 1200×630 OG image dimensions (e.g. 1080 square share images). */
+  ogImageWidth?: string;
+  ogImageHeight?: string;
   ogType?: string;
   noindex?: boolean;
   schema?: Record<string, unknown> | Record<string, unknown>[];
@@ -23,6 +26,8 @@ export default function SeoHead({
   ogTitle,
   ogDescription,
   ogImage,
+  ogImageWidth,
+  ogImageHeight,
   ogType = "website",
   noindex = false,
   schema,
@@ -58,7 +63,7 @@ export default function SeoHead({
     const resolvedTitle = ogTitle || title;
     const resolvedDesc = ogDescription || description;
     const resolvedImage = ogImage || DEFAULT_OG_IMAGE;
-    const resolvedCanonical = canonical || (SITE_URL + window.location.pathname);
+    const resolvedCanonical = canonical || SITE_URL + window.location.pathname;
 
     setMeta("description", description);
 
@@ -68,8 +73,8 @@ export default function SeoHead({
     setMeta("og:title", resolvedTitle, "property");
     setMeta("og:description", resolvedDesc, "property");
     setMeta("og:image", resolvedImage, "property");
-    setMeta("og:image:width", "1200", "property");
-    setMeta("og:image:height", "630", "property");
+    setMeta("og:image:width", ogImageWidth || "1200", "property");
+    setMeta("og:image:height", ogImageHeight || "630", "property");
     setMeta("og:image:alt", resolvedTitle, "property");
     setMeta("og:locale", "en_GB", "property");
 
@@ -104,7 +109,19 @@ export default function SeoHead({
       const el = document.getElementById(schemaId);
       if (el) el.remove();
     };
-  }, [title, description, canonical, ogTitle, ogDescription, ogImage, ogType, noindex, schema]);
+  }, [
+    title,
+    description,
+    canonical,
+    ogTitle,
+    ogDescription,
+    ogImage,
+    ogImageWidth,
+    ogImageHeight,
+    ogType,
+    noindex,
+    schema,
+  ]);
 
   return null;
 }
