@@ -1,13 +1,14 @@
 /**
- * ShareStudio — 20-variant share-image picker for the cert page.
+ * ShareStudio — share-image picker for the cert page.
  *
- * Replaces the basic ShareButton. Carousel of AI background variants
- * (arrows + dots), live preview from /api/public/share/:cert/:variant/feed,
- * adjacent-variant preload, and a Download & Share CTA that uses the native
- * share sheet on mobile / download + caption-copy on desktop.
+ * 56 AI background variants across 5 categories (Vault, Cosmic, Pokémon,
+ * Weather, Nature). Category tab strip → thumbnail grid within the category
+ * → large 1:1 preview from /api/public/share/:cert/:variant/feed. Download &
+ * Share uses the native share sheet on mobile / download + caption-copy on
+ * desktop.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Download, Copy, Loader2 } from "lucide-react";
+import { Download, Copy, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface ShareStudioProps {
@@ -31,11 +32,13 @@ const FALLBACK_VARIANT: VariantMeta = {
   preview: "/api/public/share-bg/vault-gold",
 };
 
-export default function ShareStudio({ certNumber, cardName, grade, tier }: ShareStudioProps) {
+export default function ShareStudio({ certNumber, cardName, grade }: ShareStudioProps) {
   const { toast } = useToast();
   const [variants, setVariants] = useState<VariantMeta[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
   const [variantsError, setVariantsError] = useState(false);
-  const [index, setIndex] = useState(0);
+  const [selectedCategory, setSelectedCategory] = useState("Vault");
+  const [selectedId, setSelectedId] = useState("vault-gold");
   const [caption, setCaption] = useState("");
   const [previewLoading, setPreviewLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
@@ -46,14 +49,24 @@ export default function ShareStudio({ certNumber, cardName, grade, tier }: Share
     fetch("/api/public/share-variants")
       .then((r) => r.json())
       .then((d) => {
-        if (Array.isArray(d.variants) && d.variants.length > 0) setVariants(d.variants);
-        else {
+        if (Array.isArray(d.variants) && d.variants.length > 0) {
+          setVariants(d.variants);
+          const cats: string[] =
+            Array.isArray(d.categories) && d.categories.length
+              ? d.categories
+              : [...new Set(d.variants.map((v: VariantMeta) => v.category))];
+          setCategories(cats);
+          setSelectedCategory(cats[0] ?? "Vault");
+          setSelectedId(d.variants[0].id);
+        } else {
           setVariants([FALLBACK_VARIANT]);
+          setCategories(["Vault"]);
           setVariantsError(true);
         }
       })
       .catch(() => {
         setVariants([FALLBACK_VARIANT]);
+        setCategories(["Vault"]);
         setVariantsError(true);
       });
 
@@ -67,24 +80,25 @@ export default function ShareStudio({ certNumber, cardName, grade, tier }: Share
       .catch(() => {});
   }, [certNumber]);
 
-  const current = variants[index] ?? FALLBACK_VARIANT;
-  // ?v=<variantId> gives each variant a unique URL so switching never serves
-  // another variant's 24h-cached image.
+  const inCategory = useMemo(
+    () => variants.filter((v) => v.category === selectedCategory),
+    [variants, selectedCategory]
+  );
+  const current = variants.find((v) => v.id === selectedId) ?? FALLBACK_VARIANT;
+
   const feedUrl = (variantId: string) =>
     `/api/public/share/${certNumber}/${variantId}/feed?v=${encodeURIComponent(variantId)}`;
 
-  // Preload adjacent variant previews
-  const adjacent = useMemo(() => {
-    if (variants.length < 2) return [];
-    const prev = variants[(index - 1 + variants.length) % variants.length];
-    const next = variants[(index + 1) % variants.length];
-    return [prev, next].filter(Boolean);
-  }, [variants, index]);
-
-  const go = (delta: number) => {
-    if (variants.length === 0) return;
+  const selectVariant = (id: string) => {
+    if (id === selectedId) return;
     setPreviewLoading(true);
-    setIndex((i) => (i + delta + variants.length) % variants.length);
+    setSelectedId(id);
+  };
+
+  const selectCategory = (cat: string) => {
+    setSelectedCategory(cat);
+    const first = variants.find((v) => v.category === cat);
+    if (first) selectVariant(first.id);
   };
 
   const handleDownload = async () => {
@@ -97,14 +111,12 @@ export default function ShareStudio({ certNumber, cardName, grade, tier }: Share
       const file = new File([blob], `mintvault-${certNumber}.jpg`, { type: "image/jpeg" });
       const text = captionRef.current;
 
-      // Mobile: native share sheet (image + caption)
       const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
       if (nav.canShare?.({ files: [file] })) {
         await nav.share({ files: [file], title: `${cardName} — MintVault Grade ${grade}`, text });
         return;
       }
 
-      // Desktop: download + copy caption
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -143,93 +155,72 @@ export default function ShareStudio({ certNumber, cardName, grade, tier }: Share
     }
   };
 
-  // Dots — max 5 visible, windowed around the current index
-  const dotWindow = useMemo(() => {
-    const max = 5;
-    if (variants.length <= max) return variants.map((_, i) => i);
-    let start = Math.max(0, index - 2);
-    if (start + max > variants.length) start = variants.length - max;
-    return Array.from({ length: max }, (_, i) => start + i);
-  }, [variants, index]);
-
   return (
     <div className="w-full">
       <h3 className="text-[#1A1A1A] text-sm font-bold uppercase tracking-wider mb-3">Share Your Certificate</h3>
 
-      {/* Carousel */}
-      <div className="relative">
-        <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-[#0A0A0A] border border-[#E8E4DC]">
-          {/* Loading skeleton */}
-          {previewLoading && (
-            <div className="absolute inset-0 bg-gradient-to-br from-[#111] to-[#1a1408] animate-pulse" />
-          )}
-          <img
-            key={current.id}
-            src={feedUrl(current.id)}
-            alt={`${cardName} — ${current.name}`}
-            className="w-full h-full object-cover transition-opacity duration-300"
-            style={{ opacity: previewLoading ? 0 : 1 }}
-            onLoad={() => setPreviewLoading(false)}
-            onError={() => setPreviewLoading(false)}
-          />
-          {/* Variant name pill — clear feedback when cycling styles */}
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/75 backdrop-blur-sm text-white text-xs font-medium px-3 py-1.5 rounded-full pointer-events-none z-10 whitespace-nowrap">
-            {current.name}
-          </div>
-          {/* Hidden adjacent preloads */}
-          {adjacent.map((v) => (
-            <img key={`pre-${v.id}`} src={feedUrl(v.id)} alt="" className="hidden" aria-hidden />
-          ))}
-        </div>
-
-        {variants.length > 1 && (
-          <>
+      {/* Category tabs */}
+      {categories.length > 1 && (
+        <div className="flex gap-1 overflow-x-auto pb-2 -mx-1 px-1 mb-3">
+          {categories.map((cat) => (
             <button
+              key={cat}
               type="button"
-              onClick={() => go(-1)}
-              aria-label="Previous style"
-              className="absolute left-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center transition-colors"
+              onClick={() => selectCategory(cat)}
+              className={`shrink-0 px-3 py-1.5 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${
+                selectedCategory === cat
+                  ? "border-[#D4AF37] text-[#1A1A1A]"
+                  : "border-transparent text-[#999] hover:text-[#555]"
+              }`}
             >
-              <ChevronLeft className="w-5 h-5" />
+              {cat}
             </button>
-            <button
-              type="button"
-              onClick={() => go(1)}
-              aria-label="Next style"
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center transition-colors"
-            >
-              <ChevronRight className="w-5 h-5" />
-            </button>
-          </>
-        )}
-      </div>
-
-      {/* Variant name shown in the pill overlay on the image — no duplicate here */}
-
-      {/* Dots */}
-      {variants.length > 1 && (
-        <div className="flex items-center justify-center gap-2 mt-2">
-          {dotWindow.map((i) => (
-            <button
-              key={i}
-              type="button"
-              aria-label={`Style ${i + 1}`}
-              onClick={() => {
-                setPreviewLoading(true);
-                setIndex(i);
-              }}
-              className={`h-2 rounded-full transition-all ${i === index ? "w-5 bg-[#D4AF37]" : "w-2 bg-[#D4AF37]/30"}`}
-            />
           ))}
         </div>
       )}
 
+      {/* Large preview */}
+      <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-[#0A0A0A] border border-[#E8E4DC] mb-3">
+        {previewLoading && (
+          <div className="absolute inset-0 bg-gradient-to-br from-[#111] to-[#1a1408] animate-pulse" />
+        )}
+        <img
+          key={current.id}
+          src={feedUrl(current.id)}
+          alt={`${cardName} — ${current.name}`}
+          className="w-full h-full object-cover transition-opacity duration-300"
+          style={{ opacity: previewLoading ? 0 : 1 }}
+          onLoad={() => setPreviewLoading(false)}
+          onError={() => setPreviewLoading(false)}
+        />
+        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/75 backdrop-blur-sm text-white text-xs font-medium px-3 py-1.5 rounded-full pointer-events-none z-10 whitespace-nowrap">
+          {current.name}
+        </div>
+      </div>
+
+      {/* Thumbnail grid (within category) */}
+      <div className="grid grid-cols-4 gap-2 mb-4">
+        {inCategory.map((v) => (
+          <button
+            key={v.id}
+            type="button"
+            onClick={() => selectVariant(v.id)}
+            aria-label={v.name}
+            className={`aspect-square rounded-lg overflow-hidden bg-[#0A0A0A] transition-all ${
+              v.id === selectedId ? "ring-2 ring-[#D4AF37]" : "ring-1 ring-[#E8E4DC] hover:ring-[#D4AF37]/50"
+            }`}
+          >
+            <img src={v.preview} alt={v.name} className="w-full h-full object-cover" loading="lazy" />
+          </button>
+        ))}
+      </div>
+
       {variantsError && (
-        <p className="text-center text-[#999] text-xs mt-2">Showing the default style — more styles couldn't load.</p>
+        <p className="text-center text-[#999] text-xs mb-3">Showing the default style — more styles couldn't load.</p>
       )}
 
       {/* CTAs */}
-      <div className="mt-4 space-y-2">
+      <div className="space-y-2">
         <button
           type="button"
           onClick={handleDownload}
