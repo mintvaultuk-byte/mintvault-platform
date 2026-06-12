@@ -2151,6 +2151,83 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Instagram share images + caption ───────────────────────────────────────
+  // Public. Feed (1080×1080) and story (1080×1920) renders of a cert, cached
+  // permanently in R2 (invalidated on re-grade in the approve endpoint).
+  // Same active+graded gate as the slab-image proxy. No PII.
+
+  /** Shared loader for the share endpoints — cert + scan key + render data. */
+  async function loadShareCert(rawCertNumber: string): Promise<{
+    cert: import("./share-image").ShareCertData;
+    scanKey: string | null;
+    cardGame: string | null;
+  } | null> {
+    const certNumber = normalizeCertId(String(rawCertNumber));
+    if (!/^MV\d+$/.test(certNumber)) return null;
+    const row = (await storage.getCertificateByCertId(certNumber)) as any;
+    if (!row || row.status !== "active" || row.gradeOverall == null) return null;
+    const grade = parseFloat(String(row.gradeOverall));
+    if (!Number.isFinite(grade)) return null;
+    const { mvgsTierName } = await import("@shared/mvgs-scoring");
+    return {
+      cert: {
+        certNumber,
+        grade,
+        gradeLabel: mvgsTierName(grade),
+        gradeStrengthScore: row.gradeStrengthScore != null ? Number(row.gradeStrengthScore) : null,
+        cardName: String(row.cardName || "Graded Card"),
+        setName: row.setName ? String(row.setName) : null,
+      },
+      scanKey: row.gradingFrontDisplay || row.gradingFrontCropped || row.frontImagePath || null,
+      cardGame: row.cardGame ? String(row.cardGame).toLowerCase() : null,
+    };
+  }
+
+  const shareImageHandler = (format: "feed" | "story") => async (req: any, res: any) => {
+    try {
+      const loaded = await loadShareCert(req.params.certNumber);
+      if (!loaded) return res.status(404).json({ error: "Certificate not found" });
+      if (!loaded.scanKey) return res.status(404).json({ error: "Certificate has no image" });
+
+      const { getOrCreateShareImage } = await import("./share-image");
+      const image = await getOrCreateShareImage(loaded.cert, loaded.scanKey, format);
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("Content-Length", String(image.length));
+      res.end(image);
+    } catch (err: any) {
+      console.error(`[share-image] ${format} failed for ${req.params.certNumber}: ${err?.message || err}`);
+      res.status(500).json({ error: "Share image generation failed" });
+    }
+  };
+
+  app.get("/api/public/share/:certNumber/feed", lookupRateLimit, shareImageHandler("feed"));
+  app.get("/api/public/share/:certNumber/story", lookupRateLimit, shareImageHandler("story"));
+
+  app.get("/api/public/share/:certNumber/caption", async (req, res) => {
+    try {
+      const loaded = await loadShareCert(String(req.params.certNumber));
+      if (!loaded) return res.status(404).json({ error: "Certificate not found" });
+      const { cert, cardGame } = loaded;
+
+      const caption =
+        `Just got my ${cert.cardName} graded! 🏆\n\n` +
+        `Grade: ${cert.grade} ${cert.gradeLabel}\n` +
+        `Certified by @mintvaultuk 🔐\n\n` +
+        `Verify at mintvaultuk.com/cert/${cert.certNumber}`;
+
+      let gameTag = "#PokemonTCG";
+      if (cardGame === "mtg") gameTag = "#MagicTheGathering";
+      else if (cardGame === "yugioh") gameTag = "#YuGiOh";
+      const hashtags = `#MintVault #GradedCards #CardGrading ${gameTag} #TCG #TradingCards #CardCollector #Pokemon`;
+
+      res.json({ caption, hashtags });
+    } catch (err: any) {
+      console.error("[share-caption] error:", err?.message || err);
+      res.status(500).json({ error: "Caption generation failed" });
+    }
+  });
+
   app.get("/api/cert/:id/population", lookupRateLimit, async (req, res) => {
     try {
       const certId = String(req.params.id);
@@ -10407,6 +10484,18 @@ Defects (admin-confirmed): ${defectLines}`;
       try {
         const { clearSlabShowcaseCache } = await import("./slab-showcase");
         clearSlabShowcaseCache();
+      } catch {
+        /* non-fatal */
+      }
+
+      // Invalidate share image cache on (re-)grade — next share request
+      // regenerates with the new grade. Best-effort, never blocks approve.
+      try {
+        const shareCertNumber = normalizeCertId(cert.certId);
+        await Promise.all([
+          deleteFromR2(`public/share/${shareCertNumber}/feed.jpg`).catch(() => {}),
+          deleteFromR2(`public/share/${shareCertNumber}/story.jpg`).catch(() => {}),
+        ]);
       } catch {
         /* non-fatal */
       }

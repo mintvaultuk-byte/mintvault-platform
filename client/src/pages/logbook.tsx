@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import SeoHead from "@/components/seo-head";
+import ShareButton from "@/components/ShareButton";
 
 interface LogbookData {
   certId: string;
@@ -544,6 +545,11 @@ export default function LogbookPage() {
         title={`${titleCase(card.name)} — Grade ${safe(grades.overall)} | MintVault Logbook`}
         description={`Official MintVault Ownership Logbook for ${titleCase(card.name)} (${safe(card.set)}). Grade: ${safe(grades.overall)} ${grades.gradeLabel}. Certificate ${data.certId}.`}
         canonical={`/vault/${data.certId}`}
+        ogTitle={`${titleCase(card.name)} — Grade ${safe(grades.overall)} ${grades.gradeLabel} | MintVault`}
+        ogDescription="Certified by MintVault UK. Verify this certificate at mintvaultuk.com."
+        ogImage={`https://mintvaultuk.com/api/public/share/${data.certId}/feed`}
+        ogImageWidth="1080"
+        ogImageHeight="1080"
       />
 
       <div className="min-h-screen bg-white text-[#1A1A1A]">
@@ -971,6 +977,14 @@ export default function LogbookPage() {
                   </>
                 )}
               </Section>
+
+              {/* Share — Instagram feed/story image + caption (numeric grades only;
+                  the share render needs a numeric grade for the badge) */}
+              {!grades.isNonNumeric && (
+                <Section title="Share">
+                  <ShareButton certNumber={data.certId} cardName={titleCase(card.name)} />
+                </Section>
+              )}
 
               {/* Provenance */}
               <Section title="Provenance">
