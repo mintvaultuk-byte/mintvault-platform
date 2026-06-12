@@ -32,6 +32,7 @@ const AdminPage = lazy(() => import("@/pages/admin"));
 const AdminInstagramPage = lazy(() => import("@/pages/admin-instagram"));
 const AdminWeeklyReelPage = lazy(() => import("@/pages/admin-weekly-reel"));
 const AdminMvgsCalibrationPage = lazy(() => import("@/pages/admin-mvgs-calibration"));
+const AdminPromotionsPage = lazy(() => import("@/pages/admin-promotions"));
 const ReelsPage = lazy(() => import("@/pages/reels"));
 const ShareReelPage = lazy(() => import("@/pages/share-reel"));
 const StandardPage = lazy(() => import("@/pages/standard"));
@@ -211,6 +212,7 @@ function Router() {
           <Route path="/admin/instagram" component={AdminInstagramPage} />
           <Route path="/admin/weekly-reel" component={AdminWeeklyReelPage} />
           <Route path="/admin/mvgs-calibration" component={AdminMvgsCalibrationPage} />
+          <Route path="/admin/promotions" component={AdminPromotionsPage} />
           <Route path="/reels" component={ReelsPage} />
           <Route path="/share/reel/:date/:certNumber" component={ShareReelPage} />
           <Route path="/standard" component={StandardPage} />

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { ArrowRight, Check, CheckCheck, Shield, Clock, Zap } from "lucide-react";
 import NumberFlow from "@number-flow/react";
@@ -55,8 +55,31 @@ const revealVariants = {
   hidden: { filter: "blur(10px)", y: -20, opacity: 0 },
 };
 
+// ── Active promotion (admin-set) ─────────────────────────────────────────
+// Tier discount keys from /api/public/active-promotion, mapped to the
+// grading tier ids used by pricingTiers.
+interface ActivePromo {
+  bannerText: string;
+  tiers: { vault_queue: number; standard: number; express: number; black_label: number };
+  expiresAt: string | null;
+}
+const PROMO_KEY_FOR_TIER: Record<string, keyof ActivePromo["tiers"]> = {
+  standard: "vault_queue",
+  priority: "standard",
+  express: "express",
+  gold: "black_label",
+};
+
 export default function PricingV2() {
   const pricingRef = useRef<HTMLDivElement>(null);
+
+  const [promo, setPromo] = useState<ActivePromo | null>(null);
+  useEffect(() => {
+    fetch("/api/public/active-promotion")
+      .then((r) => r.json())
+      .then((d) => setPromo(d.promo || null))
+      .catch(() => setPromo(null)); // promo failure never breaks pricing
+  }, []);
 
   const faqRefs = useRef<(HTMLDivElement | null)[]>([]);
   useEffect(() => {
@@ -129,6 +152,20 @@ export default function PricingV2() {
       <section className="frost-panel-dark" style={{ position: "relative", overflow: "hidden" }}>
         <DarkSectionGlow />
         <div className="mx-auto max-w-7xl px-6 py-24 md:py-32" style={{ position: "relative", zIndex: 1 }}>
+          {/* Active promotion banner — admin-set text only, no hardcoded claims */}
+          {promo && (
+            <div
+              className="mb-8 rounded-lg px-5 py-3 text-center"
+              style={{
+                background: "linear-gradient(135deg, #D4AF37 0%, #B8960C 100%)",
+                color: "#1A1400",
+              }}
+              data-testid="promo-banner"
+            >
+              <span className="font-bold text-sm md:text-base tracking-wide">{promo.bannerText}</span>
+            </div>
+          )}
+
           <SectionEyebrow numeral="I" label="Grading Tiers" className="mb-4" />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-16 mb-14">
             <h2
@@ -166,6 +203,10 @@ export default function PricingV2() {
                 };
                 const price = tier.pricePerCard / 100;
                 const days = tier.turnaroundDays ?? 0;
+                // Active promo discount for this tier (0 = none)
+                const promoPct = promo ? (promo.tiers[PROMO_KEY_FOR_TIER[tier.id]] ?? 0) : 0;
+                const discountedPrice =
+                  promoPct > 0 ? Math.round(tier.pricePerCard * (1 - promoPct / 100)) / 100 : null;
 
                 return (
                   <TimelineContent
@@ -196,13 +237,27 @@ export default function PricingV2() {
                           <h3 className="xl:text-3xl md:text-2xl text-3xl font-semibold text-white">{d.shortName}</h3>
                         </div>
                         <p className="xl:text-sm md:text-xs text-sm text-[#888] mb-4">{d.blurb}</p>
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-4xl font-semibold text-white">
-                            £
-                            <NumberFlow value={price} className="text-4xl font-semibold" />
-                          </span>
-                          <span className="text-[#888] ml-1">/ card</span>
-                        </div>
+                        {discountedPrice != null ? (
+                          <div className="flex items-baseline gap-2 flex-wrap" data-testid={`promo-price-${tier.id}`}>
+                            <span className="text-xl font-medium text-[#666] line-through">£{price}</span>
+                            <span className="text-4xl font-semibold" style={{ color: "#D4AF37" }}>
+                              £
+                              <NumberFlow value={discountedPrice} className="text-4xl font-semibold" />
+                            </span>
+                            <span className="text-[#888]">/ card</span>
+                            <span className="text-[10px] font-bold uppercase tracking-wider bg-[#D4AF37] text-[#1A1400] rounded-full px-2 py-0.5">
+                              {promoPct}% off
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-4xl font-semibold text-white">
+                              £
+                              <NumberFlow value={price} className="text-4xl font-semibold" />
+                            </span>
+                            <span className="text-[#888] ml-1">/ card</span>
+                          </div>
+                        )}
                         <p className="text-xs text-[#666] mt-1">{days} working day turnaround</p>
                       </CardHeader>
 
@@ -266,9 +321,9 @@ export default function PricingV2() {
                 </thead>
                 <tbody>
                   {[
-                    { qty: "10+", off: "5% off",   vq: "£18.05", st: "£23.75", ex: "£42.75" },
+                    { qty: "10+", off: "5% off", vq: "£18.05", st: "£23.75", ex: "£42.75" },
                     { qty: "25+", off: "7.5% off", vq: "£17.58", st: "£23.13", ex: "£41.63" },
-                    { qty: "50+", off: "10% off",  vq: "£17.10", st: "£22.50", ex: "£40.50" },
+                    { qty: "50+", off: "10% off", vq: "£17.10", st: "£22.50", ex: "£40.50" },
                   ].map((row) => (
                     <tr key={row.qty} className="border-b border-[#222] last:border-b-0">
                       <td className="py-3 px-4">
@@ -284,8 +339,8 @@ export default function PricingV2() {
               </table>
             </div>
             <p className="font-body text-xs md:text-sm text-center mt-3" style={{ color: "var(--v2-ink-mute)" }}>
-              Vault Club and bulk discounts are mutually exclusive — the higher discount applies.
-              Pristine 10P upgrade is excluded from bulk pricing.
+              Vault Club and bulk discounts are mutually exclusive — the higher discount applies. Pristine 10P upgrade
+              is excluded from bulk pricing.
             </p>
           </div>
 

@@ -751,6 +751,44 @@ export const auditLog = pgTable("audit_log", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ── Promotions engine ───────────────────────────────────────────────────────
+// One active promotion at a time (enforced in server/services/promotionService).
+// Per-tier discount percents map to grading tier_ids:
+//   vault_queue → "standard", standard → "priority",
+//   express → "express", black_label → "gold".
+// Stripe coupon IDs are created on activation; deactivation keeps them
+// (duration "once" — already-issued usage is fine).
+export const promotions = pgTable("promotions", {
+  id: serial("id").primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  bannerText: varchar("banner_text", { length: 200 }).notNull(),
+  vaultQueuePct: integer("vault_queue_pct").notNull().default(0),
+  standardPct: integer("standard_pct").notNull().default(0),
+  expressPct: integer("express_pct").notNull().default(0),
+  blackLabelPct: integer("black_label_pct").notNull().default(0),
+  vaultQueueCouponId: varchar("vault_queue_coupon_id", { length: 100 }),
+  standardCouponId: varchar("standard_coupon_id", { length: 100 }),
+  expressCouponId: varchar("express_coupon_id", { length: 100 }),
+  blackLabelCouponId: varchar("black_label_coupon_id", { length: 100 }),
+  active: boolean("active").notNull().default(false),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type PromotionRecord = typeof promotions.$inferSelect;
+
+export interface PromotionInput {
+  name: string;
+  banner_text: string;
+  vault_queue_pct: number; // 0-100
+  standard_pct: number;
+  express_pct: number;
+  black_label_pct: number;
+  expires_at?: string | null; // ISO string or null
+  active: boolean;
+}
+
 // ── MVGS compliance interest (public form capture) ────────────────────────
 // Backs POST /api/mvgs/interest. Append-only; no auth, no public read.
 export const mvgsInterest = pgTable("mvgs_interest", {

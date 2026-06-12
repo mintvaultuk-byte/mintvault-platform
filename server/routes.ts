@@ -2228,6 +2228,99 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Promotions engine ───────────────────────────────────────────────────
+  // Admin CRUD + public active-promo endpoint. One active promotion at a
+  // time (enforced in server/services/promotionService.ts). Stripe coupons
+  // are created on activation; checkout applies the percentages server-side
+  // in /api/create-payment-intent (PaymentIntent flow — coupons can't attach).
+
+  app.get("/api/admin/promotions", requireAdmin, async (_req, res) => {
+    try {
+      const { listPromotions } = await import("./services/promotionService");
+      res.json({ promotions: await listPromotions(20) });
+    } catch (err: any) {
+      console.error("[promotions] list error:", err?.message || err);
+      res.status(500).json({ error: "Failed to list promotions" });
+    }
+  });
+
+  app.get("/api/admin/promotions/active", requireAdmin, async (_req, res) => {
+    try {
+      const { getActivePromotion } = await import("./services/promotionService");
+      res.json({ promotion: await getActivePromotion() });
+    } catch (err: any) {
+      console.error("[promotions] active error:", err?.message || err);
+      res.status(500).json({ error: "Failed to load active promotion" });
+    }
+  });
+
+  app.post("/api/admin/promotions", requireAdmin, async (req, res) => {
+    try {
+      const { savePromotion } = await import("./services/promotionService");
+      const result = await savePromotion(req.body, req.session.adminEmail || "admin");
+      if (result.error) return res.status(400).json({ error: result.error });
+      res.json({ promotion: result.promo });
+    } catch (err: any) {
+      console.error("[promotions] create error:", err?.message || err);
+      res.status(500).json({ error: "Failed to create promotion" });
+    }
+  });
+
+  app.put("/api/admin/promotions/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid promotion id" });
+      const { savePromotion } = await import("./services/promotionService");
+      const result = await savePromotion(req.body, req.session.adminEmail || "admin", id);
+      if (result.error) return res.status(400).json({ error: result.error });
+      res.json({ promotion: result.promo });
+    } catch (err: any) {
+      console.error("[promotions] update error:", err?.message || err);
+      res.status(500).json({ error: "Failed to update promotion" });
+    }
+  });
+
+  app.delete("/api/admin/promotions/:id/deactivate", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid promotion id" });
+      const { deactivatePromotion } = await import("./services/promotionService");
+      const result = await deactivatePromotion(id, req.session.adminEmail || "admin");
+      if (!result.ok) return res.status(404).json({ error: result.error });
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[promotions] deactivate error:", err?.message || err);
+      res.status(500).json({ error: "Failed to deactivate promotion" });
+    }
+  });
+
+  // Public: active promo for the pricing page banner + strikethrough prices.
+  // Exposes ONLY display data — never coupon IDs.
+  app.get("/api/public/active-promotion", async (_req, res) => {
+    try {
+      const { getActivePromotion } = await import("./services/promotionService");
+      const promo = await getActivePromotion();
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.json({
+        promo: promo
+          ? {
+              bannerText: promo.bannerText,
+              tiers: {
+                vault_queue: promo.vaultQueuePct,
+                standard: promo.standardPct,
+                express: promo.expressPct,
+                black_label: promo.blackLabelPct,
+              },
+              expiresAt: promo.expiresAt?.toISOString() ?? null,
+            }
+          : null,
+      });
+    } catch (err: any) {
+      console.error("[promotions] public error:", err?.message || err);
+      res.json({ promo: null });
+    }
+  });
+
   app.get("/api/cert/:id/population", lookupRateLimit, async (req, res) => {
     try {
       const certId = String(req.params.id);
@@ -2528,13 +2621,44 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       }
 
+      // ── Active promotion discount ──────────────────────────────────────
+      // The promo's per-tier percent competes with Vault Club / bulk via
+      // max() — discounts NEVER stack. Applies to the per-card grading fee
+      // only (same base as VC/bulk). Tier ids: standard=Vault Queue,
+      // priority=Standard, express=Express, gold=Black Label.
+      let promoPercent = 0;
+      let activePromoId: number | null = null;
+      try {
+        const { getActivePromotion } = await import("./services/promotionService");
+        const promo = await getActivePromotion();
+        if (promo) {
+          const promoTierPct: Record<string, number> = {
+            standard: promo.vaultQueuePct,
+            priority: promo.standardPct,
+            express: promo.expressPct,
+            gold: promo.blackLabelPct,
+          };
+          promoPercent = promoTierPct[tier] ?? 0;
+          if (promoPercent > 0) activePromoId = promo.id;
+        }
+      } catch (promoErr: any) {
+        // Promo lookup failure must never block checkout — charge full price
+        console.error("[promotions] checkout lookup failed:", promoErr?.message || promoErr);
+      }
+
       const bulkPercent = totals.discountPercent;
-      const effectiveDiscountPercent = Math.max(vcPercent, bulkPercent);
+      const effectiveDiscountPercent = Math.max(vcPercent, bulkPercent, promoPercent);
       const effectiveDiscountAmount = Math.round(
         (tierData.pricePerCard * authoritativeQuantity * effectiveDiscountPercent) / 100
       );
       const discountType: string | null =
-        vcPercent >= bulkPercent && vcPercent > 0 ? "vault_club_silver" : bulkPercent > 0 ? "bulk" : null;
+        promoPercent > 0 && promoPercent >= vcPercent && promoPercent >= bulkPercent
+          ? "promotion"
+          : vcPercent >= bulkPercent && vcPercent > 0
+            ? "vault_club_silver"
+            : bulkPercent > 0
+              ? "bulk"
+              : null;
       const discountedSubtotal = tierData.pricePerCard * authoritativeQuantity - effectiveDiscountAmount;
 
       // ── Credit application (Vault Club Silver/Gold) ────────────────────────
@@ -2652,7 +2776,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           await db.insert(auditLog).values({
             entityType: "submission",
             entityId: String(submission.id),
-            action: discountType === "vault_club_silver" ? "vault_club_discount_applied" : "bulk_discount_applied",
+            action:
+              discountType === "promotion"
+                ? "promotion_discount_applied"
+                : discountType === "vault_club_silver"
+                  ? "vault_club_discount_applied"
+                  : "bulk_discount_applied",
             adminUser: null,
             details: {
               user_id: (req.session as any)?.userId ?? null,
@@ -2664,6 +2793,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               card_count: authoritativeQuantity,
               vc_alternative_percent: vcPercent,
               bulk_alternative_percent: bulkPercent,
+              promo_alternative_percent: promoPercent,
+              promo_id: activePromoId,
             },
           });
         } catch {}
@@ -2685,6 +2816,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           discountType: discountType || "none",
           vcAlternativePercent: String(vcPercent),
           bulkAlternativePercent: String(bulkPercent),
+          ...(activePromoId != null
+            ? { mintvaultPromoId: String(activePromoId), promoDiscountPercent: String(promoPercent) }
+            : {}),
           declaredValue: String(totalDeclaredValue),
           declaredValuePerCard: String(declaredValuePerCard),
           shippingInsurance: totals.shippingLabel,
