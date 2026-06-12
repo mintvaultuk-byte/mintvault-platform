@@ -615,7 +615,18 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer, variant: Vari
   drawCard(ctx, cardImg, cert.grade, CARD_X, CARD_Y, CARD_W, CARD_H);
 
   // Layer 5 — badge (centre offset -16 from card corner, radius 56)
-  drawBadge(ctx, cert.grade, tierLabel(cert.grade), CARD_X + CARD_W - 16 - 56, CARD_Y + CARD_H - 16 - 56, 112);
+  // Badge sits OUTSIDE the card — centre is right of and below the card
+  // corner, reads as a physical grading sticker attached to the outside.
+  const BADGE_DIAM = 112;
+  const BADGE_R = BADGE_DIAM / 2;
+  drawBadge(
+    ctx,
+    cert.grade,
+    tierLabel(cert.grade),
+    CARD_X + CARD_W + BADGE_R - 10, // right of card
+    CARD_Y + CARD_H - BADGE_R - 10, // near card bottom
+    BADGE_DIAM
+  );
 
   // Layer 6 — header
   drawHeader(ctx, 52, 50);
@@ -671,7 +682,18 @@ async function renderStory(cert: ShareCertData, scanBuffer: Buffer, variant: Var
     CARD_H = 600;
   drawCard(ctx, cardImg, cert.grade, CARD_X, CARD_Y, CARD_W, CARD_H);
 
-  drawBadge(ctx, cert.grade, tierLabel(cert.grade), CARD_X + CARD_W - 16 - 56, CARD_Y + CARD_H - 16 - 56, 112);
+  // Badge sits OUTSIDE the card — centre is right of and below the card
+  // corner, reads as a physical grading sticker attached to the outside.
+  const BADGE_DIAM = 112;
+  const BADGE_R = BADGE_DIAM / 2;
+  drawBadge(
+    ctx,
+    cert.grade,
+    tierLabel(cert.grade),
+    CARD_X + CARD_W + BADGE_R - 10, // right of card
+    CARD_Y + CARD_H - BADGE_R - 10, // near card bottom
+    BADGE_DIAM
+  );
 
   drawHeader(ctx, 52, 50);
 

@@ -164,10 +164,15 @@ export default function ShareStudio({ certNumber, cardName, grade, tier }: Share
             key={current.id}
             src={feedUrl(current.id)}
             alt={`${cardName} — ${current.name}`}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover transition-opacity duration-300"
+            style={{ opacity: previewLoading ? 0 : 1 }}
             onLoad={() => setPreviewLoading(false)}
             onError={() => setPreviewLoading(false)}
           />
+          {/* Variant name pill — clear feedback when cycling styles */}
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/75 backdrop-blur-sm text-white text-xs font-medium px-3 py-1.5 rounded-full pointer-events-none z-10 whitespace-nowrap">
+            {current.name}
+          </div>
           {/* Hidden adjacent preloads */}
           {adjacent.map((v) => (
             <img key={`pre-${v.id}`} src={feedUrl(v.id)} alt="" className="hidden" aria-hidden />
