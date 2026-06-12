@@ -144,13 +144,13 @@ function drawBadge(
   numberPx: number,
   labelPx: number
 ) {
-  // Outer glow
-  const badgeGlow = ctx.createRadialGradient(cx, cy, radius * 0.5, cx, cy, radius * 1.8);
-  badgeGlow.addColorStop(0, `rgba(${gradeRgb(cert.grade)}, 0.55)`);
+  // Outer glow — tight halo, not a second background (was 1.8r @ 0.55)
+  const badgeGlow = ctx.createRadialGradient(cx, cy, radius * 0.4, cx, cy, radius * 1.25);
+  badgeGlow.addColorStop(0, `rgba(${gradeRgb(cert.grade)}, 0.35)`);
   badgeGlow.addColorStop(1, `rgba(${gradeRgb(cert.grade)}, 0)`);
   ctx.fillStyle = badgeGlow;
   ctx.beginPath();
-  ctx.arc(cx, cy, radius * 1.8, 0, Math.PI * 2);
+  ctx.arc(cx, cy, radius * 1.25, 0, Math.PI * 2);
   ctx.fill();
 
   // Badge fill gradient
@@ -222,11 +222,11 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer): Promise<Buff
   ctx.fillStyle = "#0a0a08";
   ctx.fillRect(0, 0, W, H);
 
-  // Large colour glow — auto-matched to card art
-  const glow = ctx.createRadialGradient(W / 2, H * 0.41, 0, W / 2, H * 0.41, W * 0.64);
-  glow.addColorStop(0, `rgba(${glowRgb}, 0.40)`);
-  glow.addColorStop(0.35, `rgba(${glowRgb}, 0.16)`);
-  glow.addColorStop(0.7, `rgba(${glowRgb}, 0.05)`);
+  // Large colour glow — auto-matched to card art, centred behind the card
+  const glow = ctx.createRadialGradient(W / 2, H * 0.48, 0, W / 2, H * 0.48, W * 0.64);
+  glow.addColorStop(0, `rgba(${glowRgb}, 0.72)`);
+  glow.addColorStop(0.35, `rgba(${glowRgb}, 0.35)`);
+  glow.addColorStop(0.7, `rgba(${glowRgb}, 0.10)`);
   glow.addColorStop(1, `rgba(${glowRgb}, 0)`);
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, W, H);
@@ -343,10 +343,10 @@ async function renderStory(cert: ShareCertData, scanBuffer: Buffer): Promise<Buf
   ctx.fillStyle = "#0a0a08";
   ctx.fillRect(0, 0, SW, SH);
 
-  const glow = ctx.createRadialGradient(SW / 2, SH * 0.42, 0, SW / 2, SH * 0.42, SW * 0.8);
-  glow.addColorStop(0, `rgba(${glowRgb}, 0.40)`);
-  glow.addColorStop(0.35, `rgba(${glowRgb}, 0.16)`);
-  glow.addColorStop(0.7, `rgba(${glowRgb}, 0.05)`);
+  const glow = ctx.createRadialGradient(SW / 2, SH * 0.48, 0, SW / 2, SH * 0.48, SW * 0.8);
+  glow.addColorStop(0, `rgba(${glowRgb}, 0.72)`);
+  glow.addColorStop(0.35, `rgba(${glowRgb}, 0.35)`);
+  glow.addColorStop(0.7, `rgba(${glowRgb}, 0.10)`);
   glow.addColorStop(1, `rgba(${glowRgb}, 0)`);
   ctx.fillStyle = glow;
   ctx.fillRect(0, 0, SW, SH);
