@@ -563,206 +563,307 @@ export default function SlabShowcase({ items, className }: Props) {
             <div
               style={{
                 width: "100%",
-                maxWidth: "700px",
+                maxWidth: 720,
                 background: "#111110",
-                border: "1px solid rgba(212,175,55,0.22)",
+                border: "1px solid rgba(212,175,55,0.15)",
                 borderBottom: "none",
-                borderRadius: "22px 22px 0 0",
-                padding: "28px 32px 32px",
+                borderRadius: "20px 20px 0 0",
+                overflow: "hidden",
+                position: "relative",
                 transform: selected ? "translateY(0)" : "translateY(100%)",
                 transition: "transform 0.4s cubic-bezier(0.32,0.72,0,1)",
                 boxShadow: "0 -4px 24px rgba(0,0,0,0.4)",
-                position: "relative",
               }}
             >
-              {/* Close */}
-              <button
-                onClick={() => setSelected(null)}
-                aria-label="Close"
+              {/* Gold accent bar — top edge */}
+              <div
                 style={{
-                  position: "absolute",
-                  top: 16,
-                  right: 18,
-                  width: 32,
-                  height: 32,
-                  background: "rgba(255,255,255,0.07)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  borderRadius: "50%",
-                  color: "rgba(255,255,255,0.5)",
-                  fontSize: 17,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
+                  height: 2,
+                  background: "linear-gradient(90deg, transparent, #D4AF37, #f0d070, #D4AF37, transparent)",
                 }}
-              >
-                ×
-              </button>
+              />
 
-              {/* Header: grade badge + identity */}
-              <div style={{ display: "flex", gap: 18, marginBottom: 22, alignItems: "flex-start" }}>
-                <div
+              {/* Content area */}
+              <div style={{ padding: "24px 24px 28px", position: "relative" }}>
+                {/* Close */}
+                <button
+                  onClick={() => setSelected(null)}
+                  aria-label="Close"
                   style={{
-                    width: 68,
-                    height: 68,
+                    position: "absolute",
+                    top: 16,
+                    right: 16,
+                    width: 32,
+                    height: 32,
+                    background: "rgba(255,255,255,0.07)",
+                    border: "1px solid rgba(255,255,255,0.1)",
                     borderRadius: "50%",
-                    border: `2px solid ${gradeColor(selected?.grade ?? 0)}55`,
-                    background: `${gradeColor(selected?.grade ?? 0)}12`,
+                    color: "rgba(255,255,255,0.5)",
+                    fontSize: 17,
+                    cursor: "pointer",
                     display: "flex",
-                    flexDirection: "column",
                     alignItems: "center",
                     justifyContent: "center",
-                    flexShrink: 0,
                   }}
                 >
-                  <span
-                    style={{
-                      fontSize: 25,
-                      fontWeight: 800,
-                      color: gradeColor(selected?.grade ?? 0),
-                      lineHeight: 1,
-                      fontVariantNumeric: "tabular-nums",
-                    }}
-                  >
-                    {selected?.grade}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 8.5,
-                      color: "rgba(255,255,255,0.45)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                      marginTop: 3,
-                    }}
-                  >
-                    {selected?.gradeLabel}
-                  </span>
-                </div>
+                  ×
+                </button>
 
-                <div>
-                  <div style={{ fontSize: 21, fontWeight: 700, color: "#fff", marginBottom: 4 }}>
-                    {selected?.cardName}
-                  </div>
-                  {selected?.setName && (
-                    <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginBottom: 8 }}>
-                      {selected.setName}
-                    </div>
-                  )}
+                {/* TOP ROW: card thumbnail + grade + identity */}
+                <div style={{ display: "flex", gap: 18, marginBottom: 20, alignItems: "flex-start" }}>
+                  {/* Card thumbnail — shows the actual card scan */}
                   <div
                     style={{
-                      fontFamily: "monospace",
-                      fontSize: 11,
-                      color: "rgba(255,255,255,0.22)",
-                      letterSpacing: "0.05em",
-                    }}
-                  >
-                    {selected?.certNumber} · MINTVAULT CERTIFIED
-                  </div>
-                </div>
-              </div>
-
-              {/* MVGS score bar */}
-              {selected?.gradeStrengthScore != null && (
-                <div
-                  style={{
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px solid rgba(255,255,255,0.06)",
-                    borderRadius: 10,
-                    padding: "14px 16px",
-                    marginBottom: 16,
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 9,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.12em",
-                      color: "rgba(255,255,255,0.28)",
-                      marginBottom: 10,
-                      fontWeight: 600,
-                    }}
-                  >
-                    MVGS Score
-                  </div>
-                  <div
-                    style={{
-                      height: 5,
-                      background: "rgba(255,255,255,0.06)",
-                      borderRadius: 3,
+                      width: 80,
+                      flexShrink: 0,
+                      aspectRatio: "63/88",
+                      borderRadius: 6,
                       overflow: "hidden",
-                      marginBottom: 8,
+                      border: `1.5px solid ${gradeColor(selected?.grade ?? 0)}80`,
+                      boxShadow: "0 4px 20px rgba(0,0,0,0.6)",
+                      background: "#0a0a08",
+                    }}
+                  >
+                    {selected && (
+                      <img
+                        src={`/api/public/slab-image/${selected.certNumber}/scan`}
+                        alt={selected?.cardName}
+                        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                      />
+                    )}
+                  </div>
+
+                  {/* Grade + identity */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {/* Grade badge + grade label side by side */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+                      <div
+                        style={{
+                          width: 56,
+                          height: 56,
+                          borderRadius: "50%",
+                          flexShrink: 0,
+                          background: `linear-gradient(135deg, ${gradeColor(selected?.grade ?? 0)}, ${gradeColor(selected?.grade ?? 0)}bb)`,
+                          border: "2px solid rgba(255,255,255,0.2)",
+                          boxShadow: `0 4px 20px ${gradeColor(selected?.grade ?? 0)}40, inset 0 1px 0 rgba(255,255,255,0.25)`,
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <span
+                          style={{
+                            fontSize: 22,
+                            fontWeight: 800,
+                            lineHeight: 1,
+                            color: (selected?.grade ?? 0) >= 9.5 ? "#0a0a08" : "#fff",
+                            fontVariantNumeric: "tabular-nums",
+                          }}
+                        >
+                          {selected?.grade}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: 6.5,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.05em",
+                            color: (selected?.grade ?? 0) >= 9.5 ? "#0a0a08" : "#fff",
+                            opacity: 0.75,
+                            marginTop: 1,
+                          }}
+                        >
+                          {selected?.gradeLabel}
+                        </span>
+                      </div>
+                      <div>
+                        <div
+                          style={{
+                            fontSize: 10,
+                            textTransform: "uppercase",
+                            letterSpacing: "0.1em",
+                            color: "rgba(255,255,255,0.3)",
+                            marginBottom: 2,
+                          }}
+                        >
+                          Overall Grade
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 22,
+                            fontWeight: 700,
+                            color: gradeColor(selected?.grade ?? 0),
+                            lineHeight: 1,
+                            letterSpacing: "-0.01em",
+                          }}
+                        >
+                          {selected?.gradeLabel?.toUpperCase()}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: 17, fontWeight: 700, color: "#fff", marginBottom: 3 }}>
+                      {selected?.cardName}
+                    </div>
+                    {selected?.setName && (
+                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>
+                        {selected.setName}
+                      </div>
+                    )}
+                    <div
+                      style={{
+                        fontFamily: "monospace",
+                        fontSize: 10,
+                        color: "rgba(255,255,255,0.2)",
+                        letterSpacing: "0.05em",
+                      }}
+                    >
+                      {selected?.certNumber} · MINTVAULT CERTIFIED
+                    </div>
+                  </div>
+                </div>
+
+                {/* MVGS Score bar */}
+                {selected?.gradeStrengthScore != null && (
+                  <div
+                    style={{
+                      background: "rgba(255,255,255,0.03)",
+                      border: "1px solid rgba(255,255,255,0.06)",
+                      borderRadius: 10,
+                      padding: "12px 14px",
+                      marginBottom: 14,
                     }}
                   >
                     <div
                       style={{
-                        height: "100%",
-                        width: `${selected.gradeStrengthScore}%`,
-                        background: "linear-gradient(90deg, #D4AF37, #f0d070)",
-                        borderRadius: 3,
-                        transition: "width 0.6s cubic-bezier(0.4,0,0.2,1)",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: 8,
                       }}
-                    />
+                    >
+                      <span
+                        style={{
+                          fontSize: 9,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.12em",
+                          color: "rgba(255,255,255,0.25)",
+                          fontWeight: 600,
+                        }}
+                      >
+                        MVGS Score
+                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.6)" }}>
+                        <b style={{ color: "#D4AF37", fontSize: 16 }}>{selected.gradeStrengthScore}</b>/100
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        height: 4,
+                        background: "rgba(255,255,255,0.06)",
+                        borderRadius: 2,
+                        overflow: "hidden",
+                        marginBottom: 10,
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: "100%",
+                          borderRadius: 2,
+                          width: `${selected.gradeStrengthScore}%`,
+                          background: "linear-gradient(90deg,#D4AF37,#f0d070)",
+                          transition: "width 0.6s cubic-bezier(0.4,0,0.2,1)",
+                        }}
+                      />
+                    </div>
+                    <div style={{ display: "flex", gap: 16 }}>
+                      <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
+                        Graded by <b style={{ color: "rgba(255,255,255,0.5)" }}>MintVault UK</b>
+                      </span>
+                      <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
+                        Standard <b style={{ color: "rgba(255,255,255,0.5)" }}>MVGS v2</b>
+                      </span>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: 20 }}>
-                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
-                      <b style={{ color: "rgba(255,255,255,0.7)" }}>{selected.gradeStrengthScore}</b>/100
-                    </span>
-                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
-                      Graded by <b style={{ color: "rgba(255,255,255,0.7)" }}>MintVault UK</b>
-                    </span>
-                    <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
-                      Standard <b style={{ color: "rgba(255,255,255,0.7)" }}>MVGS v2</b>
-                    </span>
-                  </div>
-                </div>
-              )}
+                )}
 
-              {/* Footer: QR placeholder + tagline + CTA */}
-              <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                {/* BUTTONS */}
+                <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+                  <a
+                    href={`/cert/${selected?.certNumber}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      flex: 1,
+                      background: "#D4AF37",
+                      color: "#0a0a08",
+                      padding: "13px 20px",
+                      borderRadius: 10,
+                      fontSize: 14,
+                      fontWeight: 700,
+                      textDecoration: "none",
+                      textAlign: "center",
+                      display: "block",
+                    }}
+                  >
+                    View Certificate →
+                  </a>
+                  {/* Share button placeholder — will be wired when share-image
+                      feature merges. For now: copies cert URL to clipboard */}
+                  <button
+                    onClick={() => {
+                      if (selected) {
+                        navigator.clipboard
+                          .writeText(`https://mintvaultuk.com/cert/${selected.certNumber}`)
+                          .catch(() => {});
+                      }
+                    }}
+                    style={{
+                      background: "rgba(255,255,255,0.05)",
+                      color: "rgba(255,255,255,0.6)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      padding: "13px 18px",
+                      borderRadius: 10,
+                      fontSize: 13,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8M16 6l-4-4-4 4M12 2v13" />
+                    </svg>
+                    Share
+                  </button>
+                </div>
+
+                {/* VERIFIED FOOTER */}
                 <div
                   style={{
-                    width: 48,
-                    height: 48,
-                    border: "1px solid rgba(255,255,255,0.1)",
-                    borderRadius: 6,
-                    background: "rgba(255,255,255,0.03)",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 7,
-                    color: "rgba(255,255,255,0.18)",
-                    letterSpacing: "0.05em",
-                    flexShrink: 0,
+                    gap: 8,
+                    paddingTop: 12,
+                    borderTop: "1px solid rgba(255,255,255,0.05)",
                   }}
                 >
-                  QR
+                  <div
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      flexShrink: 0,
+                      background: "#22c55e",
+                      boxShadow: "0 0 6px rgba(34,197,94,0.6)",
+                    }}
+                  />
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.22)", lineHeight: 1.4 }}>
+                    Verified certificate — includes NFC-linked logbook &amp; ownership record.{" "}
+                    <span style={{ color: "rgba(212,175,55,0.5)" }}>mintvaultuk.com/cert/{selected?.certNumber}</span>
+                  </div>
                 </div>
-
-                <div style={{ flex: 1, fontSize: 11, color: "rgba(255,255,255,0.2)", lineHeight: 1.5 }}>
-                  Verifiable grading report, NFC-linked
-                  <br />
-                  ownership logbook &amp; certificate.
-                </div>
-
-                <a
-                  href={`/cert/${selected?.certNumber}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    background: "#D4AF37",
-                    color: "#0a0a08",
-                    padding: "12px 22px",
-                    borderRadius: 8,
-                    fontSize: 14,
-                    fontWeight: 700,
-                    textDecoration: "none",
-                    whiteSpace: "nowrap",
-                    flexShrink: 0,
-                    display: "inline-block",
-                  }}
-                >
-                  View Certificate →
-                </a>
               </div>
             </div>
           </div>,
