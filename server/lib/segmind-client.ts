@@ -86,7 +86,11 @@ async function postJson(url: string, body: object, apiKey: string): Promise<{ st
     body: JSON.stringify(body),
   });
   let parsed: any;
-  try { parsed = await res.json(); } catch { parsed = null; }
+  try {
+    parsed = await res.json();
+  } catch {
+    parsed = null;
+  }
   return { status: res.status, body: parsed };
 }
 
@@ -96,7 +100,11 @@ async function getJson(url: string, apiKey: string): Promise<{ status: number; b
     headers: { "x-api-key": apiKey },
   });
   let parsed: any;
-  try { parsed = await res.json(); } catch { parsed = null; }
+  try {
+    parsed = await res.json();
+  } catch {
+    parsed = null;
+  }
   return { status: res.status, body: parsed };
 }
 
@@ -126,10 +134,53 @@ async function pollUntilDone(pollUrl: string, apiKey: string, deadlineMs: number
   }
 }
 
+export interface TextToImageOptions {
+  /** Segmind model slug — defaults to flux-schnell (fast, 4-step). */
+  model?: string;
+  width?: number;
+  height?: number;
+  steps?: number;
+  seed?: number;
+}
+
+/**
+ * Text-to-image via Segmind (default model flux-schnell). Unlike
+ * imageToVideo, image endpoints return the binary image directly on the
+ * POST, so this resolves to a Buffer. Throws on missing key or non-2xx —
+ * callers decide whether to fall back.
+ */
+export async function textToImage(prompt: string, options: TextToImageOptions = {}): Promise<Buffer> {
+  const apiKey = requireKey();
+  const model = options.model || "flux-schnell";
+  const res = await fetch(`${SEGMIND_BASE_URL}/${model}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-api-key": apiKey },
+    body: JSON.stringify({
+      prompt,
+      steps: options.steps ?? 4,
+      width: options.width ?? 1080,
+      height: options.height ?? 1080,
+      ...(options.seed != null ? { seed: options.seed } : {}),
+      samples: 1,
+      base64: false,
+    }),
+  });
+  if (res.status < 200 || res.status >= 300) {
+    let detail = "";
+    try {
+      detail = (await res.text()).slice(0, 200);
+    } catch {
+      /* ignore */
+    }
+    throw new Error(`Segmind textToImage ${res.status}: ${detail}`);
+  }
+  return Buffer.from(await res.arrayBuffer());
+}
+
 export async function imageToVideo(
   imageUrl: string,
   prompt: string,
-  options: ImageToVideoOptions = {},
+  options: ImageToVideoOptions = {}
 ): Promise<string> {
   const apiKey = requireKey();
   const model = options.model || DEFAULT_MODEL_SLUG;
@@ -140,11 +191,7 @@ export async function imageToVideo(
   // source URL, `prompt` for the text guidance, `duration` for clip
   // length. Exact accepted fields vary by model; if the API returns a
   // 4xx flagging unknown fields, this is the place to tweak.
-  const { status, body } = await postJson(
-    url,
-    { image: imageUrl, prompt, duration },
-    apiKey,
-  );
+  const { status, body } = await postJson(url, { image: imageUrl, prompt, duration }, apiKey);
   if (status < 200 || status >= 300) {
     const reason = body?.error ?? body?.message ?? `HTTP ${status}`;
     throw new Error(`Segmind POST failed: ${reason}`);
@@ -166,8 +213,7 @@ export async function imageToVideo(
   //   GET /v1/requests/{request_id}
   // but we honour an explicit poll_url if the API provides one (future-
   // proofs against breaking changes to the endpoint shape).
-  const pollUrl = body?.poll_url
-    ?? (body?.request_id ? `${SEGMIND_BASE_URL}/requests/${body.request_id}` : null);
+  const pollUrl = body?.poll_url ?? (body?.request_id ? `${SEGMIND_BASE_URL}/requests/${body.request_id}` : null);
   if (!pollUrl) {
     throw new Error(`Segmind response has no output, poll_url, or request_id: ${JSON.stringify(body)}`);
   }

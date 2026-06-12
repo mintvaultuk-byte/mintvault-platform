@@ -98,6 +98,8 @@ const VerifyEmailPage = lazy(() => import("@/pages/verify-email"));
 const AccountSettingsPage = lazy(() => import("@/pages/account-settings"));
 const ShowroomPage = lazy(() => import("@/pages/showroom"));
 const ShowroomsListPage = lazy(() => import("@/pages/showrooms"));
+const CommunityPage = lazy(() => import("@/pages/community"));
+const AdminCommunityPage = lazy(() => import("@/pages/admin/community"));
 
 function GoldBurstEffect() {
   useEffect(() => {
@@ -211,6 +213,8 @@ function Router() {
           <Route path="/admin/instagram" component={AdminInstagramPage} />
           <Route path="/admin/weekly-reel" component={AdminWeeklyReelPage} />
           <Route path="/admin/mvgs-calibration" component={AdminMvgsCalibrationPage} />
+          <Route path="/admin/community" component={AdminCommunityPage} />
+          <Route path="/community" component={CommunityPage} />
           <Route path="/reels" component={ReelsPage} />
           <Route path="/share/reel/:date/:certNumber" component={ShareReelPage} />
           <Route path="/standard" component={StandardPage} />

@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import SeoHead from "@/components/seo-head";
-import ShareButton from "@/components/ShareButton";
+import ShareStudio from "@/components/ShareStudio";
 
 interface LogbookData {
   certId: string;
@@ -982,7 +982,14 @@ export default function LogbookPage() {
                   the share render needs a numeric grade for the badge) */}
               {!grades.isNonNumeric && (
                 <Section title="Share">
-                  <ShareButton certNumber={data.certId} cardName={titleCase(card.name)} />
+                  <ShareStudio
+                    certNumber={data.certId}
+                    cardName={titleCase(card.name)}
+                    grade={
+                      typeof grades.overall === "number" ? grades.overall : parseFloat(String(grades.overall)) || 0
+                    }
+                    tier={grades.gradeLabel}
+                  />
                 </Section>
               )}
 

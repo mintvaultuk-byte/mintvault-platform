@@ -1,23 +1,55 @@
 /**
- * Instagram share-image generator — feed (1080×1080) and story (1080×1920).
+ * Instagram share-image generator — Share Studio edition.
  *
- * Dramatic glow layout: a cinematic AI backdrop (Segmind FLUX schnell, cached
- * per grade tier in R2; canvas-gradient fallback when Segmind is unavailable)
- * sits behind the card, with the card frame + badge auto-tinted from the grade
- * tier's colour (glowFromGrade) and MintVault branding + the verify URL
- * anchoring the frame. node-canvas for drawing, sharp for scan decode and final
- * JPEG encode — same toolchain as the label pipeline (server/labels.ts).
+ * 20 cinematic AI background variants (Segmind FLUX schnell, cached per
+ * variant in R2 — shared across ALL certs; canvas-gradient fallback when
+ * Segmind is unavailable) composited under the card with an 11-layer
+ * premium frame (grade badge, MintVault header, card identity, cert/URL,
+ * gold hairline, corner registration marks).
  *
- * Images are cached permanently in R2 (public/share/{cert}/{format}.jpg);
- * the approve endpoint deletes the keys on re-grade so the next request
- * regenerates with the new grade.
+ * Fonts (Bebas Neue, Barlow Condensed, Space Mono) are registered at module
+ * load from public/brand — the same convention server/labels.ts uses, and the
+ * only path that ships in the Docker image (COPY public).
  *
+ * Backgrounds: public/share-bg/{variant}.jpg (1080² shared).
  * No PII: cert number, grade, card identity only.
  */
+import path from "path";
 import sharp from "sharp";
+import pLimit from "p-limit";
 import { uploadToR2, headR2 } from "./r2";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getR2Client } from "./r2";
+import { textToImage } from "./lib/segmind-client";
+
+// ── Font registration (node-canvas) ─────────────────────────────────────────
+// Registered once at module load. public/brand ships via the Dockerfile's
+// `COPY public` (server/fonts/ would not be copied). Failures are non-fatal —
+// canvas falls back to a system sans if a face is missing.
+const BRAND_DIR = path.join(process.cwd(), "public", "brand");
+let fontsRegistered = false;
+async function ensureFonts() {
+  if (fontsRegistered) return;
+  fontsRegistered = true;
+  try {
+    const { registerFont } = await import("canvas");
+    const reg = (file: string, family: string, weight?: string) => {
+      try {
+        registerFont(path.join(BRAND_DIR, file), weight ? { family, weight } : { family });
+      } catch (e: any) {
+        console.warn(`[share-image] font register failed for ${file}: ${e?.message || e}`);
+      }
+    };
+    reg("BebasNeue-Regular.ttf", "Bebas Neue");
+    reg("BarlowCondensed-Regular.ttf", "Barlow Condensed", "400");
+    reg("BarlowCondensed-Bold.ttf", "Barlow Condensed", "700");
+    reg("BarlowCondensed-Black.ttf", "Barlow Condensed", "900");
+    reg("SpaceMono-Regular.ttf", "Space Mono", "400");
+    reg("SpaceMono-Bold.ttf", "Space Mono", "700");
+  } catch (e: any) {
+    console.warn(`[share-image] canvas font registration unavailable: ${e?.message || e}`);
+  }
+}
 
 export interface ShareCertData {
   certNumber: string;
@@ -26,39 +58,236 @@ export interface ShareCertData {
   gradeStrengthScore: number | null;
   cardName: string;
   setName: string | null;
+  setNumber?: string | null;
 }
 
 export type ShareFormat = "feed" | "story";
 
-// Same mapping as the client gradeColor (SlabShowcase.tsx).
-function gradeHex(grade: number): string {
-  if (grade >= 10) return "#D4AF37";
-  if (grade >= 9.5) return "#c8a020";
-  if (grade >= 9) return "#22c55e";
-  if (grade >= 8) return "#16a34a";
-  if (grade >= 7) return "#3b82f6";
-  if (grade >= 6) return "#f59e0b";
-  if (grade >= 5) return "#ea580c";
-  if (grade >= 4) return "#ef4444";
-  return "#991b1b";
+// ── Background variants ──────────────────────────────────────────────────────
+// `accent` drives the keyless gradient fallback so variants stay visually
+// distinct even when Segmind is unavailable.
+export const SHARE_VARIANTS = [
+  // VAULT
+  {
+    id: "vault-gold",
+    category: "Vault",
+    name: "Vault · Gold",
+    accent: "#D4AF37",
+    prompt:
+      "dark luxury vault interior, dramatic warm golden light rays, treasure room, deep shadows, gold atmospheric glow, cinematic, 8k, hyperrealistic, no text, no people, no cards",
+  },
+  {
+    id: "vault-emerald",
+    category: "Vault",
+    name: "Vault · Emerald",
+    accent: "#10b981",
+    prompt:
+      "dark vault interior, deep emerald green atmospheric lighting, dramatic shadows, premium dark aesthetic, green luminescence, cinematic 8k, no text, no people, no cards",
+  },
+  {
+    id: "vault-steel",
+    category: "Vault",
+    name: "Vault · Steel",
+    accent: "#64748b",
+    prompt:
+      "cool steel blue vault interior, secure storage facility, dramatic cold lighting, dark blue atmosphere, cinematic, premium industrial, 8k, no text, no people, no cards",
+  },
+  {
+    id: "vault-crimson",
+    category: "Vault",
+    name: "Vault · Crimson",
+    accent: "#dc2626",
+    prompt:
+      "dark vault interior, deep crimson red dramatic lighting, shadows, dark red atmosphere, cinematic luxury, 8k, no text, no people, no cards",
+  },
+  // COSMIC
+  {
+    id: "cosmic-gold",
+    category: "Cosmic",
+    name: "Cosmic · Gold",
+    accent: "#f0c020",
+    prompt:
+      "deep space gold starfield, warm gold and amber nebula, cosmic dust, dramatic space photography, dark background, no text, no people, no cards, 8k cinematic",
+  },
+  {
+    id: "cosmic-green",
+    category: "Cosmic",
+    name: "Cosmic · Green",
+    accent: "#22c55e",
+    prompt:
+      "deep space emerald nebula, green cosmic gas clouds, dark background, dramatic space photography, bioluminescent green glow, 8k cinematic, no text, no people, no cards",
+  },
+  {
+    id: "cosmic-blue",
+    category: "Cosmic",
+    name: "Cosmic · Blue",
+    accent: "#3b82f6",
+    prompt:
+      "deep space blue galaxy, cool blue star clusters, cosmic, dark background, dramatic space photography, 8k cinematic, no text, no people, no cards",
+  },
+  {
+    id: "cosmic-purple",
+    category: "Cosmic",
+    name: "Cosmic · Purple",
+    accent: "#a855f7",
+    prompt:
+      "deep space purple void, aurora-like purple and violet light, dark cosmic background, nebula, 8k cinematic, no text, no people, no cards",
+  },
+  // STUDIO
+  {
+    id: "studio-warm",
+    category: "Studio",
+    name: "Studio · Warm",
+    accent: "#e8a838",
+    prompt:
+      "dark photography studio, single warm spotlight from above, bokeh background, dramatic chiaroscuro lighting, luxury product photography setup, 8k, no text, no people, no cards",
+  },
+  {
+    id: "studio-cool",
+    category: "Studio",
+    name: "Studio · Cool",
+    accent: "#38bdf8",
+    prompt:
+      "dark photography studio, cool blue backlight, atmospheric haze, cinematic lighting, luxury product photography, 8k, no text, no people, no cards",
+  },
+  {
+    id: "studio-neon",
+    category: "Studio",
+    name: "Studio · Neon",
+    accent: "#84cc16",
+    prompt:
+      "dark studio, neon light leaks, green and gold neon glow, atmospheric dark background, cinematic, 8k, no text, no people, no cards",
+  },
+  {
+    id: "studio-smoke",
+    category: "Studio",
+    name: "Studio · Smoke",
+    accent: "#9ca3af",
+    prompt:
+      "dark studio, dramatic smoke and atmospheric haze, single key light, cinematic dramatic lighting, luxury aesthetic, 8k, no text, no people, no cards",
+  },
+  // ABSTRACT
+  {
+    id: "abstract-marble",
+    category: "Abstract",
+    name: "Abstract · Marble",
+    accent: "#cbb26a",
+    prompt:
+      "dark black marble texture with gold veining, luxury surface, macro photography, premium material, cinematic lighting, 8k, no text, no people, no cards",
+  },
+  {
+    id: "abstract-carbon",
+    category: "Abstract",
+    name: "Abstract · Carbon",
+    accent: "#475569",
+    prompt:
+      "dark carbon fibre texture, premium tech material, macro photography, dark industrial luxury, cinematic, 8k, no text, no people, no cards",
+  },
+  {
+    id: "abstract-metal",
+    category: "Abstract",
+    name: "Abstract · Metal",
+    accent: "#94a3b8",
+    prompt:
+      "brushed dark metal surface, industrial luxury, dramatic lighting, premium material macro photography, 8k, no text, no people, no cards",
+  },
+  {
+    id: "abstract-obsidian",
+    category: "Abstract",
+    name: "Abstract · Obsidian",
+    accent: "#6d28d9",
+    prompt:
+      "volcanic black obsidian glass texture, dark luxury mineral, macro photography, premium natural material, 8k, no text, no people, no cards",
+  },
+  // NATURE
+  {
+    id: "nature-forest",
+    category: "Nature",
+    name: "Nature · Forest",
+    accent: "#16a34a",
+    prompt:
+      "dark ancient forest canopy, shafts of light through trees, atmospheric fog, cinematic nature photography, dark moody, 8k, no text, no people, no cards",
+  },
+  {
+    id: "nature-ocean",
+    category: "Nature",
+    name: "Nature · Ocean",
+    accent: "#06b6d4",
+    prompt:
+      "deep ocean bioluminescent glow, dark underwater, blue and green light, cinematic underwater photography, 8k, no text, no people, no cards",
+  },
+  {
+    id: "nature-dusk",
+    category: "Nature",
+    name: "Nature · Dusk",
+    accent: "#f97316",
+    prompt:
+      "dark desert dusk, deep orange horizon glow, dramatic sky, cinematic landscape, moody atmosphere, 8k, no text, no people, no cards",
+  },
+  {
+    id: "nature-arctic",
+    category: "Nature",
+    name: "Nature · Arctic",
+    accent: "#5eead4",
+    prompt:
+      "dark arctic night, aurora borealis, green and blue northern lights, dramatic sky, cinematic, 8k, no text, no people, no cards",
+  },
+] as const;
+
+export type VariantId = (typeof SHARE_VARIANTS)[number]["id"];
+export const DEFAULT_VARIANT: VariantId = "vault-gold";
+const VARIANT_IDS = new Set<string>(SHARE_VARIANTS.map((v) => v.id));
+export function isValidVariant(id: string): id is VariantId {
+  return VARIANT_IDS.has(id);
 }
 
-/** "r,g,b" string of the grade colour — for rgba() gradient stops. */
-function gradeRgb(grade: number): string {
-  const hex = gradeHex(grade).replace("#", "");
-  const r = parseInt(hex.slice(0, 2), 16);
-  const g = parseInt(hex.slice(2, 4), 16);
-  const b = parseInt(hex.slice(4, 6), 16);
-  return `${r},${g},${b}`;
+// ── Grade colour + tier ──────────────────────────────────────────────────────
+const GRADE_COLOURS: Record<string, string> = {
+  "10": "#D4AF37",
+  "9.5": "#c8a020",
+  "9": "#22c55e",
+  "8": "#16a34a",
+  "7": "#3b82f6",
+  "6": "#f59e0b",
+  "5": "#ea580c",
+  "4": "#ef4444",
+};
+
+function gradeColour(grade: number): string {
+  const key = grade % 1 === 0.5 ? grade.toFixed(1) : String(Math.round(grade));
+  return GRADE_COLOURS[key] ?? "#9ca3af";
 }
 
-/** Darkened (×0.65) grade colour — bottom stop of the badge fill gradient. */
-function gradeDarkHex(grade: number): string {
-  const hex = gradeHex(grade).replace("#", "");
-  const r = Math.round(parseInt(hex.slice(0, 2), 16) * 0.65);
-  const g = Math.round(parseInt(hex.slice(2, 4), 16) * 0.65);
-  const b = Math.round(parseInt(hex.slice(4, 6), 16) * 0.65);
-  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+function tierLabel(grade: number): string {
+  if (grade === 10) return "PRISTINE";
+  if (grade >= 9) return "MINT";
+  if (grade >= 7) return "NEAR MINT";
+  if (grade >= 5) return "GOOD";
+  if (grade >= 3) return "POOR";
+  return "AUTHENTIC";
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const h = hex.replace("#", "");
+  return { r: parseInt(h.slice(0, 2), 16), g: parseInt(h.slice(2, 4), 16), b: parseInt(h.slice(4, 6), 16) };
+}
+function clamp255(n: number): number {
+  return Math.max(0, Math.min(255, Math.round(n)));
+}
+function toHex({ r, g, b }: { r: number; g: number; b: number }): string {
+  return `#${clamp255(r).toString(16).padStart(2, "0")}${clamp255(g).toString(16).padStart(2, "0")}${clamp255(b).toString(16).padStart(2, "0")}`;
+}
+function lighten(hex: string, pct: number): string {
+  const { r, g, b } = hexToRgb(hex);
+  return toHex({ r: r + (255 - r) * pct, g: g + (255 - g) * pct, b: b + (255 - b) * pct });
+}
+function darken(hex: string, pct: number): string {
+  const { r, g, b } = hexToRgb(hex);
+  return toHex({ r: r * (1 - pct), g: g * (1 - pct), b: b * (1 - pct) });
+}
+function rgba(hex: string, a: number): string {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${a})`;
 }
 
 /** Manual rounded-rect path — node-canvas roundRect support varies by build. */
@@ -72,23 +301,6 @@ function roundRectPath(ctx: any, x: number, y: number, w: number, h: number, r: 
   ctx.closePath();
 }
 
-/**
- * Glow colour by grade tier — same palette as the grade badge / client
- * gradeColor. Replaces the old card-art colour extraction: grade-based is
- * guaranteed vivid on every card and always coheres with the badge.
- */
-function glowFromGrade(grade: number): string {
-  if (grade >= 10) return "212,175,55"; // gold
-  if (grade >= 9.5) return "200,160,32"; // deep gold
-  if (grade >= 9) return "34,197,94"; // green
-  if (grade >= 8) return "22,163,74"; // dark green
-  if (grade >= 7) return "59,130,246"; // blue
-  if (grade >= 6) return "245,158,11"; // amber
-  if (grade >= 5) return "234,88,12"; // orange
-  if (grade >= 4) return "239,68,68"; // red
-  return "153,27,27"; // dark red
-}
-
 async function fetchR2Buffer(key: string): Promise<Buffer> {
   const result = await getR2Client().send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME!, Key: key }));
   if (!result.Body) throw new Error(`Empty R2 body for ${key}`);
@@ -97,485 +309,412 @@ async function fetchR2Buffer(key: string): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-/** Gold gradient hairline along the bottom edge — shared by both formats. */
-function drawGoldBottomLine(ctx: any, w: number, h: number) {
-  const goldLine = ctx.createLinearGradient(0, 0, w, 0);
-  goldLine.addColorStop(0, "transparent");
-  goldLine.addColorStop(0.25, "#D4AF37");
-  goldLine.addColorStop(0.75, "#f0d070");
-  goldLine.addColorStop(1, "transparent");
-  ctx.strokeStyle = goldLine;
-  ctx.lineWidth = 2.5;
-  ctx.beginPath();
-  ctx.moveTo(0, h - 2);
-  ctx.lineTo(w, h - 2);
+// ── Background generation (Segmind FLUX schnell, R2-cached per variant) ──────
+
+/** Per-variant near-black gradient — keyless / Segmind-down fallback. Kept
+ *  visually distinct per variant (accent colour) and NOT cached, so it
+ *  auto-upgrades to the AI background once the key/key-cache lands. */
+async function variantFallback(variant: VariantId): Promise<Buffer> {
+  const { createCanvas } = await import("canvas");
+  const W = 1080;
+  const canvas = createCanvas(W, W);
+  const ctx = canvas.getContext("2d");
+  const accent = SHARE_VARIANTS.find((v) => v.id === variant)?.accent ?? "#D4AF37";
+  ctx.fillStyle = "#050504";
+  ctx.fillRect(0, 0, W, W);
+  const g = ctx.createRadialGradient(W / 2, W * 0.42, 0, W / 2, W * 0.42, W * 0.62);
+  g.addColorStop(0, rgba(accent, 0.32));
+  g.addColorStop(0.5, rgba(accent, 0.1));
+  g.addColorStop(1, rgba(accent, 0));
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, W);
+  return sharp(canvas.toBuffer("image/png")).jpeg({ quality: 85 }).toBuffer();
+}
+
+/**
+ * 1080² background for a variant — R2 cache hit, else Segmind FLUX schnell
+ * resized to exactly 1080² and cached at q0.85. Any failure (no key, non-2xx,
+ * decode) falls back to the variant gradient so a share image always returns.
+ */
+async function generateBackground(variant: VariantId): Promise<Buffer> {
+  const r2Key = `public/share-bg/${variant}.jpg`;
+
+  const cached = await headR2(r2Key).catch(() => null);
+  if (cached) return fetchR2Buffer(r2Key);
+
+  if (!process.env.SEGMIND_API_KEY) {
+    console.warn(`[share-bg] SEGMIND_API_KEY unset — gradient fallback for ${variant}`);
+    return variantFallback(variant);
+  }
+
+  const v = SHARE_VARIANTS.find((x) => x.id === variant)!;
+  try {
+    const raw = await textToImage(v.prompt, { width: 1080, height: 1080, steps: 4 });
+    const jpeg = await sharp(raw)
+      .resize(1080, 1080, { fit: "cover", position: "centre" })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+    await uploadToR2(r2Key, jpeg, "image/jpeg");
+    console.log(`[share-bg] generated ${variant} (${(jpeg.length / 1024).toFixed(0)}KB → ${r2Key})`);
+    return jpeg;
+  } catch (err: any) {
+    console.error(`[share-bg] generation failed for ${variant}: ${err?.message || err} — gradient fallback`);
+    return variantFallback(variant);
+  }
+}
+
+/** Public accessor for a variant background (R2-cached or freshly generated). */
+export async function getShareBackground(variant: VariantId): Promise<Buffer> {
+  return generateBackground(variant);
+}
+
+/** Pre-warm all 20 backgrounds. p-limit concurrency 3 (NOT Promise.all). */
+export async function preGenerateAllBackgrounds(): Promise<{ generated: number; cached: number }> {
+  const limit = pLimit(3);
+  let generated = 0;
+  let cached = 0;
+  await Promise.all(
+    SHARE_VARIANTS.map((v) =>
+      limit(async () => {
+        const r2Key = `public/share-bg/${v.id}.jpg`;
+        const exists = await headR2(r2Key).catch(() => null);
+        if (exists) {
+          cached++;
+          return;
+        }
+        await generateBackground(v.id);
+        generated++;
+      })
+    )
+  );
+  return { generated, cached };
+}
+
+// ── Shared layer helpers ─────────────────────────────────────────────────────
+
+/** Layer 1+2 — AI background (cover-fill) + dark overlay. */
+async function drawBackground(ctx: any, loadImage: any, variant: VariantId, W: number, H: number) {
+  const bgBuf = await generateBackground(variant);
+  const bgImg = await loadImage(await sharp(bgBuf).resize(W, H, { fit: "cover", position: "centre" }).png().toBuffer());
+  ctx.drawImage(bgImg, 0, 0, W, H);
+  ctx.fillStyle = "rgba(0,0,0,0.30)";
+  ctx.fillRect(0, 0, W, H);
+}
+
+/** Card scan + edge glow + border rings (Layers 3 & 4). */
+function drawCard(ctx: any, cardImg: any, grade: number, x: number, y: number, w: number, h: number) {
+  const colour = gradeColour(grade);
+
+  // Layer 4 — edge glow (two passes), projected via shadow on an alpha-0 stroke
+  for (const [blur, alpha] of [
+    [55, 0.18],
+    [110, 0.09],
+  ] as const) {
+    ctx.save();
+    ctx.shadowColor = rgba(colour, alpha);
+    ctx.shadowBlur = blur;
+    ctx.strokeStyle = rgba(colour, alpha);
+    ctx.lineWidth = 2;
+    roundRectPath(ctx, x, y, w, h, 14);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Layer 3 — card scan, scaled to fill, clipped to rounded rect (white mat kept)
+  ctx.save();
+  roundRectPath(ctx, x, y, w, h, 14);
+  ctx.clip();
+  const scale = Math.max(w / cardImg.width, h / cardImg.height);
+  const dw = cardImg.width * scale;
+  const dh = cardImg.height * scale;
+  ctx.drawImage(cardImg, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  ctx.restore();
+
+  // Border rings — drawn after the card
+  ctx.strokeStyle = "rgba(212,175,55,0.55)";
+  ctx.lineWidth = 2;
+  roundRectPath(ctx, x, y, w, h, 14);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(0,0,0,0.72)";
+  ctx.lineWidth = 1;
+  roundRectPath(ctx, x - 9, y - 9, w + 18, h + 18, 18);
   ctx.stroke();
 }
 
-// ── AI background generation (Segmind FLUX schnell) ─────────────────────────
+/** Grade badge (Layer 5). */
+function drawBadge(ctx: any, grade: number, gradeLabelStr: string, cx: number, cy: number, diameter: number) {
+  const r = diameter / 2;
+  const colour = gradeColour(grade);
 
-const BG_PROMPTS: Record<string, string> = {
-  "10": "dark luxury vault interior, dramatic warm golden light, deep shadows, molten gold ambient glow, premium treasure vault, cinematic 8k, hyperrealistic, dark moody atmosphere, rich textures, no text, no people",
-  "9": "dark vault interior, deep emerald green atmospheric lighting, dramatic shadows, premium dark aesthetic, cinematic quality, moody green luminescence, treasure room, no text, no people, 8k",
-  "8": "dark luxury interior, forest green dramatic lighting, shadows, premium vault, cinematic moody, deep greens and blacks, no text, no people",
-  "7": "dark vault room, cool blue steel lighting, dramatic shadows, cinematic, dark blue atmosphere, premium aesthetic, moody, no text, no people",
-  "6": "dark interior, warm amber lighting, dramatic shadows, cinematic, dark amber atmosphere, premium, moody, no text, no people",
-  "5": "dark vault, orange toned dramatic lighting, shadows, cinematic, deep orange atmosphere, no text, no people",
-  "4": "dark interior, deep red dramatic lighting, shadows, cinematic, dark crimson atmosphere, no text, no people",
-};
+  // Shadow + glow
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.72)";
+  ctx.shadowBlur = 40;
+  ctx.shadowOffsetY = 10;
+  ctx.fillStyle = colour;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 
-function bgDims(format: ShareFormat): { w: number; h: number } {
-  return format === "story" ? { w: 1080, h: 1920 } : { w: 1080, h: 1080 };
+  // Radial fill — highlight at 32%/28%
+  const grad = ctx.createRadialGradient(cx - r * 0.18, cy - r * 0.22, r * 0.1, cx, cy, r);
+  grad.addColorStop(0, lighten(colour, 0.3));
+  grad.addColorStop(0.55, colour);
+  grad.addColorStop(1, darken(colour, 0.2));
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Rings
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = rgba(colour, 0.28);
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r + 9, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Grade number — Bebas Neue
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `60px "Bebas Neue"`;
+  ctx.fillText(String(grade), cx, cy - 6);
+
+  // Tier label — Barlow Condensed 700, tracked
+  ctx.fillStyle = "rgba(255,255,255,0.90)";
+  ctx.font = `700 14px "Barlow Condensed"`;
+  drawTracked(ctx, gradeLabelStr, cx, cy + 28, 4, "center");
 }
 
-/**
- * Canvas fallback background — radial grade-colour glow on near-black.
- * Used when Segmind is unavailable (no key, error, timeout) so share
- * images always generate. Mirrors the pre-AI near-black aesthetic.
- */
-async function generateGradientFallback(grade: number, format: ShareFormat): Promise<Buffer> {
-  const { createCanvas } = await import("canvas");
-  const { w, h } = bgDims(format);
-  const canvas = createCanvas(w, h);
-  const ctx = canvas.getContext("2d");
-  const glowRgb = glowFromGrade(grade);
-
-  ctx.fillStyle = "#050504";
-  ctx.fillRect(0, 0, w, h);
-
-  const glow = ctx.createRadialGradient(w / 2, h * 0.45, 0, w / 2, h * 0.45, Math.max(w, h) * 0.6);
-  glow.addColorStop(0, `rgba(${glowRgb}, 0.30)`);
-  glow.addColorStop(0.5, `rgba(${glowRgb}, 0.10)`);
-  glow.addColorStop(1, `rgba(${glowRgb}, 0)`);
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, w, h);
-
-  return sharp(canvas.toBuffer("image/png")).jpeg({ quality: 88 }).toBuffer();
+/** Draw letter-spaced text (node-canvas has no letterSpacing). */
+function drawTracked(
+  ctx: any,
+  text: string,
+  x: number,
+  y: number,
+  spacing: number,
+  align: "left" | "center" | "right"
+) {
+  const chars = [...text];
+  const widths = chars.map((c) => ctx.measureText(c).width);
+  const total = widths.reduce((s, w) => s + w, 0) + spacing * Math.max(0, chars.length - 1);
+  let cursor = align === "center" ? x - total / 2 : align === "right" ? x - total : x;
+  const prevAlign = ctx.textAlign;
+  ctx.textAlign = "left";
+  chars.forEach((c, i) => {
+    ctx.fillText(c, cursor, y);
+    cursor += widths[i] + spacing;
+  });
+  ctx.textAlign = prevAlign;
+  return total;
 }
 
-/**
- * Per-grade-tier cinematic background. Cached in R2 by grade tier + format
- * (public/share-bg/{floor(grade)}-{format}.jpg) so all certs at the same
- * grade reuse one generation — ~7 generations total, not one per cert.
- *
- * Generation uses Segmind's flux-schnell text-to-image (4 steps). Any
- * failure — missing key, non-2xx, decode error — falls back to the canvas
- * gradient so a share image always returns. The bg is resized to the exact
- * format dims before caching (FLUX may not honour arbitrary sizes exactly).
- */
-async function generateShareBackground(grade: number, format: ShareFormat): Promise<Buffer> {
-  const tier = Math.min(Math.max(Math.floor(grade), 4), 10);
-  const { w, h } = bgDims(format);
-  const key = `public/share-bg/${tier}-${format}.jpg`;
-
-  // 1. R2 cache hit?
-  const cached = await headR2(key).catch(() => null);
-  if (cached) {
-    return fetchR2Buffer(key);
-  }
-
-  const apiKey = process.env.SEGMIND_API_KEY;
-  if (!apiKey) {
-    // No key → don't burn a doomed round-trip; gradient fallback (uncached,
-    // so it auto-upgrades to the AI bg once the secret is set).
-    console.warn(`[share-bg] SEGMIND_API_KEY unset — gradient fallback for grade ${tier} ${format}`);
-    return generateGradientFallback(grade, format);
-  }
-
-  const prompt = BG_PROMPTS[String(tier)] ?? BG_PROMPTS["7"];
-  try {
-    const response = await fetch("https://api.segmind.com/v1/flux-schnell", {
-      method: "POST",
-      headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt,
-        steps: 4,
-        seed: Math.floor(Math.random() * 1_000_000),
-        sampler_name: "euler",
-        scheduler: "simple",
-        samples: 1,
-        width: w,
-        height: h,
-        denoise: 1,
-        base64: false,
-      }),
-    });
-
-    if (!response.ok) {
-      console.error(`[share-bg] Segmind error: ${response.status} — gradient fallback`);
-      return generateGradientFallback(grade, format);
-    }
-
-    // Segmind returns binary image data directly. Normalise to exact dims +
-    // JPEG (FLUX may round the requested size to a supported multiple).
-    const imageBuffer = Buffer.from(await response.arrayBuffer());
-    const jpegBuffer = await sharp(imageBuffer)
-      .resize(w, h, { fit: "cover", position: "centre" })
-      .jpeg({ quality: 88 })
-      .toBuffer();
-
-    await uploadToR2(key, jpegBuffer, "image/jpeg");
-    console.log(
-      `[share-bg] generated ${format} bg for grade ${tier} (${(jpegBuffer.length / 1024).toFixed(0)}KB → ${key})`
-    );
-    return jpegBuffer;
-  } catch (err: any) {
-    console.error(
-      `[share-bg] generation failed for grade ${tier} ${format}: ${err?.message || err} — gradient fallback`
-    );
-    return generateGradientFallback(grade, format);
-  }
+function measureTracked(ctx: any, text: string, spacing: number): number {
+  const chars = [...text];
+  return chars.reduce((s, c) => s + ctx.measureText(c).width, 0) + spacing * Math.max(0, chars.length - 1);
 }
 
-// ── Format A: 1080×1080 feed ───────────────────────────────────────────────
+/** MintVault header (Layer 6). */
+function drawHeader(ctx: any, x: number, baselineY: number) {
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#D4AF37";
+  ctx.font = `900 38px "Barlow Condensed"`;
+  const logoW = drawTracked(ctx, "MINTVAULT", x, baselineY, 5, "left");
+  const dividerX = x + logoW + 15;
+  ctx.strokeStyle = "rgba(212,175,55,0.30)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(dividerX, baselineY - 20);
+  ctx.lineTo(dividerX, baselineY + 6);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(212,175,55,0.42)";
+  ctx.font = `400 13px "Barlow Condensed"`;
+  drawTracked(ctx, "CERTIFIED GRADING", dividerX + 15, baselineY - 2, 5, "left");
+}
 
-async function renderFeed(cert: ShareCertData, scanBuffer: Buffer): Promise<Buffer> {
+/** Truncate text to a max pixel width, appending an ellipsis. */
+function truncateToWidth(ctx: any, text: string, maxWidth: number): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let t = text;
+  while (t.length > 1 && ctx.measureText(t + "…").width > maxWidth) t = t.slice(0, -1);
+  return t + "…";
+}
+
+/** Cert + URL block, bottom-right (Layer 9). */
+function drawCertUrl(ctx: any, certNumber: string, W: number, certY: number, urlY: number) {
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "rgba(212,175,55,0.62)";
+  ctx.font = `700 14px "Space Mono"`;
+  const certW = measureTracked(ctx, certNumber, 2);
+  drawTracked(ctx, certNumber, W - 52 - certW, certY, 2, "left");
+  ctx.fillStyle = "rgba(212,175,55,0.28)";
+  ctx.font = `400 11px "Space Mono"`;
+  const urlW = measureTracked(ctx, "mintvaultuk.com", 1);
+  drawTracked(ctx, "mintvaultuk.com", W - 52 - urlW, urlY, 1, "left");
+}
+
+/** Gold hairline (Layer 10). */
+function drawHairline(ctx: any, W: number, y: number) {
+  const g = ctx.createLinearGradient(0, 0, W, 0);
+  g.addColorStop(0, "rgba(212,175,55,0)");
+  g.addColorStop(0.06, "rgba(212,175,55,0.48)");
+  g.addColorStop(0.28, "#D4AF37");
+  g.addColorStop(0.72, "#D4AF37");
+  g.addColorStop(0.94, "rgba(212,175,55,0.48)");
+  g.addColorStop(1, "rgba(212,175,55,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, y, W, 3);
+}
+
+/** Four corner registration brackets (Layer 11). */
+function drawCornerMarks(ctx: any, W: number, H: number) {
+  const s = 26;
+  const m = 22;
+  ctx.strokeStyle = "rgba(212,175,55,0.20)";
+  ctx.lineWidth = 2;
+  const bracket = (x: number, y: number, hDir: 1 | -1, vDir: 1 | -1) => {
+    ctx.beginPath();
+    ctx.moveTo(x + (hDir === 1 ? 0 : s), y);
+    ctx.lineTo(x + (hDir === 1 ? s : 0), y); // horizontal arm
+    ctx.moveTo(x + (hDir === 1 ? 0 : s), y);
+    ctx.lineTo(x + (hDir === 1 ? 0 : s), y + vDir * s); // vertical arm
+    ctx.stroke();
+  };
+  bracket(m, m, 1, 1); // TL: right + down
+  bracket(W - m - s, m, -1, 1); // TR: left + down
+  bracket(m, H - m, 1, -1); // BL: right + up
+  bracket(W - m - s, H - m, -1, -1); // BR: left + up
+}
+
+// ── Format A: 1080×1080 feed ─────────────────────────────────────────────────
+
+async function renderFeed(cert: ShareCertData, scanBuffer: Buffer, variant: VariantId): Promise<Buffer> {
+  await ensureFonts();
   const { createCanvas, loadImage } = await import("canvas");
   const W = 1080;
   const H = 1080;
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext("2d");
 
-  const glowRgb = glowFromGrade(cert.grade);
-  const glowHex = gradeHex(cert.grade);
+  // Layers 1 + 2
+  await drawBackground(ctx, loadImage, variant, W, H);
 
-  // ── 1. BACKGROUND — AI-generated cinematic backdrop (per grade tier) ──
-  const bgBuffer = await generateShareBackground(cert.grade, "feed");
-  const bgImg = await loadImage(await sharp(bgBuffer).png().toBuffer());
-  ctx.drawImage(bgImg, 0, 0, W, H);
-
-  // Dark overlay so the card + text stay readable over the backdrop
-  const bgOverlay = ctx.createLinearGradient(0, 0, 0, H);
-  bgOverlay.addColorStop(0, "rgba(0,0,0,0.35)");
-  bgOverlay.addColorStop(0.5, "rgba(0,0,0,0.20)");
-  bgOverlay.addColorStop(1, "rgba(0,0,0,0.55)");
-  ctx.fillStyle = bgOverlay;
-  ctx.fillRect(0, 0, W, H);
-
-  // ── 2. CARD IMAGE — fills almost the full frame ──
+  // Layers 3 + 4 — card
   const cardImg = await loadImage(await sharp(scanBuffer).png().toBuffer());
-  const CARD_Y = 50; // header margin
-  const CARD_W = W - 52; // 26px side margins
-  const CARD_H = H - 118; // 50 top + 68 footer
-  const scale = Math.min(CARD_W / cardImg.width, CARD_H / cardImg.height);
-  const drawnW = Math.round(cardImg.width * scale);
-  const drawnH = Math.round(cardImg.height * scale);
-  const drawX = Math.round((W - drawnW) / 2);
-  const drawY = Math.round(CARD_Y + (CARD_H - drawnH) / 2);
+  const CARD_X = 325,
+    CARD_Y = 80,
+    CARD_W = 430,
+    CARD_H = 600;
+  drawCard(ctx, cardImg, cert.grade, CARD_X, CARD_Y, CARD_W, CARD_H);
 
-  // ── 3. CARD EDGE GLOW — layered shadowBlur passes behind the card ──
-  for (const blur of [80, 40, 16]) {
-    ctx.save();
-    ctx.shadowColor = glowHex;
-    ctx.shadowBlur = blur;
-    ctx.fillStyle = glowHex;
-    roundRectPath(ctx, drawX, drawY, drawnW, drawnH, 10);
-    ctx.fill();
-    ctx.restore();
-  }
+  // Layer 5 — badge (centre offset -16 from card corner, radius 56)
+  drawBadge(ctx, cert.grade, tierLabel(cert.grade), CARD_X + CARD_W - 16 - 56, CARD_Y + CARD_H - 16 - 56, 112);
 
-  // ── 4. CARD IMAGE (clipped to rounded rect) ──
+  // Layer 6 — header
+  drawHeader(ctx, 52, 50);
+
+  // Layer 7 — card name (Bebas Neue 80px)
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
   ctx.save();
-  roundRectPath(ctx, drawX, drawY, drawnW, drawnH, 10);
-  ctx.clip();
-  ctx.drawImage(cardImg, drawX, drawY, drawnW, drawnH);
-  ctx.restore();
-
-  // Card border (thin, grade coloured)
-  ctx.strokeStyle = `rgba(${glowRgb}, 0.85)`;
-  ctx.lineWidth = 2.5;
-  roundRectPath(ctx, drawX, drawY, drawnW, drawnH, 10);
-  ctx.stroke();
-
-  // ── 5. GRADE BADGE — overlaps the card's bottom-right corner ──
-  const BADGE_R = 80;
-  const BADGE_CX = drawX + drawnW - 18;
-  const BADGE_CY = drawY + drawnH - 18;
-
-  ctx.save();
-  ctx.shadowColor = glowHex;
+  ctx.shadowColor = "rgba(0,0,0,0.95)";
   ctx.shadowBlur = 30;
-  ctx.fillStyle = gradeHex(cert.grade);
-  ctx.beginPath();
-  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.shadowOffsetY = 4;
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `80px "Bebas Neue"`;
+  drawTracked(ctx, truncateToWidth(ctx, cert.cardName.toUpperCase(), 900), 52, 726, 3, "left");
   ctx.restore();
 
-  const bFill = ctx.createLinearGradient(
-    BADGE_CX - BADGE_R,
-    BADGE_CY - BADGE_R,
-    BADGE_CX + BADGE_R,
-    BADGE_CY + BADGE_R
-  );
-  bFill.addColorStop(0, gradeHex(cert.grade));
-  bFill.addColorStop(1, gradeDarkHex(cert.grade));
-  ctx.fillStyle = bFill;
-  ctx.beginPath();
-  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = "rgba(255,255,255,0.28)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.strokeStyle = "rgba(255,255,255,0.1)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R - 7, 0, Math.PI * 2);
-  ctx.stroke();
-
-  const badgeTxt = cert.grade >= 9.5 ? "#0a0a08" : "#ffffff";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = badgeTxt;
-  ctx.font = `900 ${cert.grade % 1 !== 0 ? 60 : 70}px sans-serif`;
-  ctx.fillText(String(cert.grade), BADGE_CX, BADGE_CY - 12);
-  ctx.font = "600 20px sans-serif";
-  ctx.fillStyle = cert.grade >= 9.5 ? "rgba(10,10,8,0.78)" : "rgba(255,255,255,0.85)";
-  ctx.fillText(cert.gradeLabel.toUpperCase(), BADGE_CX, BADGE_CY + 34);
-
-  // ── 6. HEADER STRIP ──
-  const hdrGrad = ctx.createLinearGradient(0, 0, 0, 52);
-  hdrGrad.addColorStop(0, "rgba(0,0,0,0.85)");
-  hdrGrad.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = hdrGrad;
-  ctx.fillRect(0, 0, W, 52);
-
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = "#D4AF37";
-  ctx.font = "bold 22px sans-serif";
-  ctx.fillText("MINTVAULT", 28, 28);
-  const mvW = ctx.measureText("MINTVAULT").width;
-  ctx.fillStyle = "rgba(255,255,255,0.4)";
-  ctx.font = "400 15px sans-serif";
-  ctx.fillText("CERTIFIED GRADING", 28 + mvW + 14, 28);
-
-  // ── 7. FOOTER STRIP ──
-  const ftrGrad = ctx.createLinearGradient(0, H - 70, 0, H);
-  ftrGrad.addColorStop(0, "rgba(0,0,0,0)");
-  ftrGrad.addColorStop(1, "rgba(0,0,0,0.92)");
-  ctx.fillStyle = ftrGrad;
-  ctx.fillRect(0, H - 70, W, 70);
-
-  // Card name — left aligned, ellipsis-truncated
-  ctx.textAlign = "left";
-  ctx.textBaseline = "bottom";
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 38px sans-serif";
-  let nameText = cert.cardName.toUpperCase();
-  while (ctx.measureText(nameText).width > 680 && nameText.length > 4) nameText = nameText.slice(0, -1);
-  if (nameText !== cert.cardName.toUpperCase()) nameText += "…";
-  ctx.fillText(nameText, 28, H - 30);
-
+  // Layer 8 — set line
   if (cert.setName) {
-    ctx.fillStyle = "rgba(255,255,255,0.55)";
-    ctx.font = "400 22px sans-serif";
-    ctx.fillText(cert.setName, 30, H - 8);
+    const setText = cert.setNumber ? `${cert.setName} · ${cert.setNumber}` : cert.setName;
+    ctx.fillStyle = "rgba(255,255,255,0.30)";
+    ctx.font = `400 20px "Barlow Condensed"`;
+    drawTracked(ctx, truncateToWidth(ctx, setText, 800), 52, 820, 4, "left");
   }
 
-  // Cert number + URL — right aligned
-  ctx.textAlign = "right";
-  ctx.fillStyle = `rgba(${glowRgb}, 0.8)`;
-  ctx.font = "500 16px monospace";
-  ctx.fillText(cert.certNumber, W - 28, H - 30);
-  ctx.fillStyle = "rgba(255,255,255,0.22)";
-  ctx.font = "400 13px sans-serif";
-  ctx.fillText("mintvaultuk.com/cert/" + cert.certNumber, W - 28, H - 10);
+  // Layer 9 — cert + url
+  drawCertUrl(ctx, cert.certNumber, W, 1018, 1038);
 
-  // ── 8. GOLD BOTTOM LINE ──
-  drawGoldBottomLine(ctx, W, H);
+  // Layer 10 — gold hairline
+  drawHairline(ctx, W, 1077);
 
-  return sharp(canvas.toBuffer("image/png")).jpeg({ quality: 88, progressive: true, mozjpeg: true }).toBuffer();
+  // Layer 11 — corner marks
+  drawCornerMarks(ctx, W, H);
+
+  return sharp(canvas.toBuffer("image/png")).jpeg({ quality: 92, progressive: true, mozjpeg: true }).toBuffer();
 }
 
-// ── Format B: 1080×1920 story ──────────────────────────────────────────────
+// ── Format B: 1080×1920 story ────────────────────────────────────────────────
 
-async function renderStory(cert: ShareCertData, scanBuffer: Buffer): Promise<Buffer> {
+async function renderStory(cert: ShareCertData, scanBuffer: Buffer, variant: VariantId): Promise<Buffer> {
+  await ensureFonts();
   const { createCanvas, loadImage } = await import("canvas");
-  const SW = 1080;
-  const SH = 1920;
-  const canvas = createCanvas(SW, SH);
+  const W = 1080;
+  const H = 1920;
+  const canvas = createCanvas(W, H);
   const ctx = canvas.getContext("2d");
 
-  const glowRgb = glowFromGrade(cert.grade);
-  const glowHex = gradeHex(cert.grade);
+  await drawBackground(ctx, loadImage, variant, W, H);
 
-  // ── BACKGROUND — AI-generated cinematic backdrop (per grade tier) ──
-  const bgBuffer = await generateShareBackground(cert.grade, "story");
-  const bgImg = await loadImage(await sharp(bgBuffer).png().toBuffer());
-  ctx.drawImage(bgImg, 0, 0, SW, SH);
-
-  const bgOverlay = ctx.createLinearGradient(0, 0, 0, SH);
-  bgOverlay.addColorStop(0, "rgba(0,0,0,0.35)");
-  bgOverlay.addColorStop(0.5, "rgba(0,0,0,0.20)");
-  bgOverlay.addColorStop(1, "rgba(0,0,0,0.55)");
-  ctx.fillStyle = bgOverlay;
-  ctx.fillRect(0, 0, SW, SH);
-
-  // ── "JUST CERTIFIED" header with flanking gold lines ──
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = "#D4AF37";
-  ctx.font = "bold 52px sans-serif";
-  ctx.fillText("JUST CERTIFIED", SW / 2, 110);
-  ctx.strokeStyle = "rgba(212,175,55,0.45)";
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(60, 110);
-  ctx.lineTo(330, 110);
-  ctx.moveTo(750, 110);
-  ctx.lineTo(1020, 110);
-  ctx.stroke();
-
-  // ── CARD IMAGE — fills the top ~78% of the frame ──
   const cardImg = await loadImage(await sharp(scanBuffer).png().toBuffer());
-  const CARD_Y = 148;
-  const CARD_W = 1020;
-  const CARD_H = 1380;
-  const scale = Math.min(CARD_W / cardImg.width, CARD_H / cardImg.height);
-  const drawnW = Math.round(cardImg.width * scale);
-  const drawnH = Math.round(cardImg.height * scale);
-  const drawX = Math.round((SW - drawnW) / 2);
-  const drawY = Math.round(CARD_Y + (CARD_H - drawnH) / 2);
+  const CARD_X = 325,
+    CARD_Y = 280,
+    CARD_W = 430,
+    CARD_H = 600;
+  drawCard(ctx, cardImg, cert.grade, CARD_X, CARD_Y, CARD_W, CARD_H);
 
-  // Card edge glow — same three-pass bloom as the feed
-  for (const blur of [80, 40, 16]) {
-    ctx.save();
-    ctx.shadowColor = glowHex;
-    ctx.shadowBlur = blur;
-    ctx.fillStyle = glowHex;
-    roundRectPath(ctx, drawX, drawY, drawnW, drawnH, 10);
-    ctx.fill();
-    ctx.restore();
-  }
+  drawBadge(ctx, cert.grade, tierLabel(cert.grade), CARD_X + CARD_W - 16 - 56, CARD_Y + CARD_H - 16 - 56, 112);
 
-  ctx.save();
-  roundRectPath(ctx, drawX, drawY, drawnW, drawnH, 10);
-  ctx.clip();
-  ctx.drawImage(cardImg, drawX, drawY, drawnW, drawnH);
-  ctx.restore();
+  drawHeader(ctx, 52, 50);
 
-  ctx.strokeStyle = `rgba(${glowRgb}, 0.85)`;
-  ctx.lineWidth = 2.5;
-  roundRectPath(ctx, drawX, drawY, drawnW, drawnH, 10);
-  ctx.stroke();
-
-  // ── GRADE BADGE — larger, overlaps the card corner ──
-  const BADGE_R = 96;
-  const BADGE_CX = drawX + drawnW - 22;
-  const BADGE_CY = drawY + drawnH - 22;
-
-  ctx.save();
-  ctx.shadowColor = glowHex;
-  ctx.shadowBlur = 30;
-  ctx.fillStyle = gradeHex(cert.grade);
-  ctx.beginPath();
-  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-
-  const bFill = ctx.createLinearGradient(
-    BADGE_CX - BADGE_R,
-    BADGE_CY - BADGE_R,
-    BADGE_CX + BADGE_R,
-    BADGE_CY + BADGE_R
-  );
-  bFill.addColorStop(0, gradeHex(cert.grade));
-  bFill.addColorStop(1, gradeDarkHex(cert.grade));
-  ctx.fillStyle = bFill;
-  ctx.beginPath();
-  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.strokeStyle = "rgba(255,255,255,0.28)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.strokeStyle = "rgba(255,255,255,0.1)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R - 7, 0, Math.PI * 2);
-  ctx.stroke();
-
-  const badgeTxt = cert.grade >= 9.5 ? "#0a0a08" : "#ffffff";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = badgeTxt;
-  ctx.font = `900 ${cert.grade % 1 !== 0 ? 68 : 82}px sans-serif`;
-  ctx.fillText(String(cert.grade), BADGE_CX, BADGE_CY - 14);
-  ctx.font = "600 22px sans-serif";
-  ctx.fillStyle = cert.grade >= 9.5 ? "rgba(10,10,8,0.78)" : "rgba(255,255,255,0.85)";
-  ctx.fillText(cert.gradeLabel.toUpperCase(), BADGE_CX, BADGE_CY + 40);
-
-  // ── CARD NAME + SET — centred below the card ──
-  ctx.textAlign = "center";
+  ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.95)";
+  ctx.shadowBlur = 30;
+  ctx.shadowOffsetY = 4;
   ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 52px sans-serif";
-  ctx.fillText(cert.cardName.toUpperCase(), SW / 2, drawY + drawnH + 72, 980);
+  ctx.font = `80px "Bebas Neue"`;
+  drawTracked(ctx, truncateToWidth(ctx, cert.cardName.toUpperCase(), 900), 52, 1040, 3, "left");
+  ctx.restore();
+
   if (cert.setName) {
-    ctx.fillStyle = "rgba(255,255,255,0.55)";
-    ctx.font = "400 30px sans-serif";
-    ctx.fillText(cert.setName, SW / 2, drawY + drawnH + 130, 980);
+    const setText = cert.setNumber ? `${cert.setName} · ${cert.setNumber}` : cert.setName;
+    ctx.fillStyle = "rgba(255,255,255,0.30)";
+    ctx.font = `400 20px "Barlow Condensed"`;
+    drawTracked(ctx, truncateToWidth(ctx, setText, 800), 52, 1134, 4, "left");
   }
 
-  // ── MVGS SCORE BAR — centred (only if score not null) ──
-  if (cert.gradeStrengthScore != null) {
-    const score = Math.max(0, Math.min(100, cert.gradeStrengthScore));
-    const BAR_Y = drawY + drawnH + 160;
-    ctx.fillStyle = "rgba(255,255,255,0.07)";
-    roundRectPath(ctx, (SW - 600) / 2, BAR_Y, 600, 5, 3);
-    ctx.fill();
-    ctx.fillStyle = gradeHex(cert.grade);
-    roundRectPath(ctx, (SW - 600) / 2, BAR_Y, 600 * (score / 100), 5, 3);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.35)";
-    ctx.font = "400 17px sans-serif";
-    ctx.fillText(`MVGS SCORE  ${cert.gradeStrengthScore}/100`, SW / 2, BAR_Y + 22 + 5);
-  }
+  drawCertUrl(ctx, cert.certNumber, W, 1840, 1860);
+  drawHairline(ctx, W, 1917);
+  drawCornerMarks(ctx, W, H);
 
-  // ── FOOTER ──
-  ctx.textAlign = "center";
-  ctx.font = "500 26px sans-serif";
-  ctx.fillStyle = "rgba(255,255,255,0.5)";
-  ctx.fillText("Graded by MINTVAULT UK", SW / 2, 1850);
-  ctx.font = "400 20px sans-serif";
-  ctx.fillStyle = "rgba(212,175,55,0.5)";
-  ctx.fillText("mintvaultuk.com", SW / 2, 1884);
-
-  // ── GOLD BOTTOM LINE ──
-  drawGoldBottomLine(ctx, SW, SH);
-
-  return sharp(canvas.toBuffer("image/png")).jpeg({ quality: 88, progressive: true, mozjpeg: true }).toBuffer();
+  return sharp(canvas.toBuffer("image/png")).jpeg({ quality: 92, progressive: true, mozjpeg: true }).toBuffer();
 }
 
-// ── Public API: cached generate ─────────────────────────────────────────────
+// ── Public API ───────────────────────────────────────────────────────────────
 
 /**
- * Returns the share image for a cert/format — from R2 when cached, freshly
- * rendered (and uploaded) otherwise. scanKey is the R2 key of the front scan.
+ * Render a share image for a cert/format/variant. Composites are NOT R2-cached
+ * per (cert × variant × format) — the expensive part (the background) is cached
+ * per variant; compositing is fast canvas work, and skipping the composite cache
+ * keeps fallback backgrounds from freezing into the cert's image. The HTTP layer
+ * sets Cache-Control for browser/CDN caching.
  */
 export async function getOrCreateShareImage(
   cert: ShareCertData,
   scanKey: string,
-  format: ShareFormat
+  format: ShareFormat,
+  variant: VariantId = DEFAULT_VARIANT
 ): Promise<Buffer> {
-  const r2Key = `public/share/${cert.certNumber}/${format}.jpg`;
-
-  const cached = await headR2(r2Key).catch(() => null);
-  if (cached) return fetchR2Buffer(r2Key);
-
   const scanBuffer = await fetchR2Buffer(scanKey);
-  const image = format === "feed" ? await renderFeed(cert, scanBuffer) : await renderStory(cert, scanBuffer);
-
-  await uploadToR2(r2Key, image, "image/jpeg");
-  console.log(
-    `[share-image] generated ${format} for ${cert.certNumber} (${(image.length / 1024).toFixed(0)}KB → ${r2Key})`
-  );
-  return image;
+  return format === "feed" ? renderFeed(cert, scanBuffer, variant) : renderStory(cert, scanBuffer, variant);
 }

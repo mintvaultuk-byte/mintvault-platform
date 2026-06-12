@@ -751,6 +751,34 @@ export const auditLog = pgTable("audit_log", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// ── Community wall posts ──────────────────────────────────────────────────
+// Backs /community (public gallery) + /admin/community (moderation). Manual
+// admin adds auto-approve; status="rejected" serves as soft-delete. Image
+// lives in R2 (community/{id}.jpg). Audit-logged on every status change.
+export const communityPosts = pgTable(
+  "community_posts",
+  {
+    id: serial("id").primaryKey(),
+    certNumber: text("cert_number").references(() => certificates.certId),
+    instagramHandle: text("instagram_handle"),
+    instagramPostUrl: text("instagram_post_url"),
+    imageR2Key: text("image_r2_key").notNull(),
+    cardName: text("card_name"),
+    grade: numeric("grade", { precision: 4, scale: 1 }),
+    status: text("status").notNull().default("pending"),
+    featured: boolean("featured").notNull().default(false),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    approvedBy: text("approved_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    statusIdx: index("idx_community_posts_status").on(t.status),
+    certIdx: index("idx_community_posts_cert").on(t.certNumber),
+  })
+);
+
+export type CommunityPostRecord = typeof communityPosts.$inferSelect;
+
 // ── MVGS compliance interest (public form capture) ────────────────────────
 // Backs POST /api/mvgs/interest. Append-only; no auth, no public read.
 export const mvgsInterest = pgTable("mvgs_interest", {
