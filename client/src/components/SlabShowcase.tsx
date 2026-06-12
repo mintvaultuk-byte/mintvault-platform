@@ -180,6 +180,50 @@ export default function SlabShowcase({ items, className }: Props) {
   const rafRef = useRef<number>(0);
   const [selected, setSelected] = useState<SlabShowcaseItem | null>(null);
   const [loadedCount, setLoadedCount] = useState(0);
+  const [sharing, setSharing] = useState(false);
+
+  // Share the selected cert as the server-rendered IG story image
+  // (/api/public/share/:cert/story — 1080×1920, R2-cached, active-certs-only).
+  // Mobile: native share sheet with the image file (drops straight into
+  // Instagram/stories). Desktop or no Web Share: download the JPEG.
+  // Any failure: fall back to copying the cert link (the old stub behaviour).
+  async function shareCert() {
+    if (!selected || sharing) return;
+    const certNumber = selected.certNumber;
+    setSharing(true);
+    try {
+      const res = await fetch(`/api/public/share/${certNumber}/story`);
+      if (!res.ok) throw new Error(`share image ${res.status}`);
+      const blob = await res.blob();
+      const file = new File([blob], `MintVault-${certNumber}.jpg`, { type: "image/jpeg" });
+      if (typeof navigator.share === "function" && navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: `${selected.cardName} — MintVault ${selected.grade}`,
+            text: `Verified at mintvaultuk.com/cert/${certNumber}`,
+          });
+          return;
+        } catch (err) {
+          // User dismissed the sheet — not an error, and don't surprise them
+          // with a download they didn't ask for.
+          if ((err as DOMException)?.name === "AbortError") return;
+          // Real share failure → fall through to download.
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `MintVault-${certNumber}.jpg`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch {
+      // Generation/network failed — keep the previous behaviour: copy the link.
+      navigator.clipboard.writeText(`https://mintvaultuk.com/cert/${certNumber}`).catch(() => {});
+    } finally {
+      setSharing(false);
+    }
+  }
   // Hidden entirely below 768px — on mobile the cards spread over the hero copy.
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" && window.innerWidth < 768);
   useEffect(() => {
@@ -806,16 +850,13 @@ export default function SlabShowcase({ items, className }: Props) {
                   >
                     View Certificate →
                   </a>
-                  {/* Share button placeholder — will be wired when share-image
-                      feature merges. For now: copies cert URL to clipboard */}
+                  {/* Share — server-rendered IG story image via shareCert():
+                      mobile share sheet → desktop download → copy-link fallback */}
                   <button
                     onClick={() => {
-                      if (selected) {
-                        navigator.clipboard
-                          .writeText(`https://mintvaultuk.com/cert/${selected.certNumber}`)
-                          .catch(() => {});
-                      }
+                      void shareCert();
                     }}
+                    disabled={sharing}
                     style={{
                       background: "rgba(255,255,255,0.05)",
                       color: "#fff",
@@ -823,7 +864,8 @@ export default function SlabShowcase({ items, className }: Props) {
                       padding: "13px 18px",
                       borderRadius: 10,
                       fontSize: 13,
-                      cursor: "pointer",
+                      cursor: sharing ? "wait" : "pointer",
+                      opacity: sharing ? 0.6 : 1,
                       whiteSpace: "nowrap",
                       display: "flex",
                       alignItems: "center",
@@ -833,7 +875,7 @@ export default function SlabShowcase({ items, className }: Props) {
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8M16 6l-4-4-4 4M12 2v13" />
                     </svg>
-                    Share
+                    {sharing ? "Preparing…" : "Share"}
                   </button>
                 </div>
 

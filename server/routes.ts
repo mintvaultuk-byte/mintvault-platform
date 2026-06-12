@@ -2177,20 +2177,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         gradeStrengthScore: row.gradeStrengthScore != null ? Number(row.gradeStrengthScore) : null,
         cardName: String(row.cardName || "Graded Card"),
         setName: row.setName ? String(row.setName) : null,
+        setNumber: row.cardNumber ? String(row.cardNumber) : null,
       },
       scanKey: row.gradingFrontDisplay || row.gradingFrontCropped || row.frontImagePath || null,
       cardGame: row.cardGame ? String(row.cardGame).toLowerCase() : null,
     };
   }
 
+  // Variant-aware share image handler. `variant` undefined → default (vault-gold).
   const shareImageHandler = (format: "feed" | "story") => async (req: any, res: any) => {
     try {
+      const { isValidVariant, DEFAULT_VARIANT } = await import("./share-image");
+      const rawVariant = req.params.variant as string | undefined;
+      if (rawVariant && !isValidVariant(rawVariant)) {
+        return res.status(400).json({ error: `Unknown share variant "${rawVariant}"` });
+      }
+      const variant = (rawVariant ?? DEFAULT_VARIANT) as any;
+
       const loaded = await loadShareCert(req.params.certNumber);
       if (!loaded) return res.status(404).json({ error: "Certificate not found" });
       if (!loaded.scanKey) return res.status(404).json({ error: "Certificate has no image" });
 
       const { getOrCreateShareImage } = await import("./share-image");
-      const image = await getOrCreateShareImage(loaded.cert, loaded.scanKey, format);
+      const image = await getOrCreateShareImage(loaded.cert, loaded.scanKey, format, variant);
       res.setHeader("Content-Type", "image/jpeg");
       res.setHeader("Cache-Control", "public, max-age=86400");
       res.setHeader("Content-Length", String(image.length));
@@ -2201,8 +2210,49 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   };
 
+  // No-variant (backwards compat) → default variant. These are 2-segment
+  // paths; the 3-segment variant routes below can't shadow them (Express
+  // distinguishes by segment count).
   app.get("/api/public/share/:certNumber/feed", lookupRateLimit, shareImageHandler("feed"));
   app.get("/api/public/share/:certNumber/story", lookupRateLimit, shareImageHandler("story"));
+
+  // Variant routes — the handler validates :variant against SHARE_VARIANTS and
+  // returns 400 for unknown ids. (Inline-regex route params, e.g.
+  // ":variant(a|b)", are unsupported by this path-to-regexp version and crash
+  // route registration — so validation lives in the handler instead.)
+  app.get("/api/public/share/:certNumber/:variant/feed", lookupRateLimit, shareImageHandler("feed"));
+  app.get("/api/public/share/:certNumber/:variant/story", lookupRateLimit, shareImageHandler("story"));
+
+  // Variant catalogue
+  app.get("/api/public/share-variants", async (_req, res) => {
+    const { SHARE_VARIANTS: variants } = await import("./share-image");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.json({
+      variants: variants.map((v) => ({
+        id: v.id,
+        name: v.name,
+        category: v.category,
+        preview: `/api/public/share-bg/${v.id}`,
+      })),
+    });
+  });
+
+  // Raw background image for a variant (shared across all certs)
+  app.get("/api/public/share-bg/:variant", lookupRateLimit, async (req, res) => {
+    try {
+      const { isValidVariant, getShareBackground } = await import("./share-image");
+      const variant = String(req.params.variant);
+      if (!isValidVariant(variant)) return res.status(400).json({ error: `Unknown share variant "${variant}"` });
+      const buf = await getShareBackground(variant);
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "public, max-age=604800"); // 7 days
+      res.setHeader("Content-Length", String(buf.length));
+      res.end(buf);
+    } catch (err: any) {
+      console.error(`[share-bg] failed for ${req.params.variant}: ${err?.message || err}`);
+      res.status(500).json({ error: "Background generation failed" });
+    }
+  });
 
   app.get("/api/public/share/:certNumber/caption", async (req, res) => {
     try {
@@ -2225,6 +2275,89 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err: any) {
       console.error("[share-caption] error:", err?.message || err);
       res.status(500).json({ error: "Caption generation failed" });
+    }
+  });
+
+  // ── Community wall ──────────────────────────────────────────────────────────
+
+  app.get("/api/public/community", async (req, res) => {
+    try {
+      const page = Math.max(1, parseInt(String(req.query.page ?? "1"), 10) || 1);
+      const limit = Math.max(1, Math.min(50, parseInt(String(req.query.limit ?? "20"), 10) || 20));
+      const { listApprovedPosts } = await import("./community");
+      const { posts, total } = await listApprovedPosts(page, limit);
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.json({ posts, total });
+    } catch (err: any) {
+      console.error("[community] list error:", err?.message || err);
+      res.json({ posts: [], total: 0 });
+    }
+  });
+
+  app.get("/api/admin/community", requireAdmin, async (req, res) => {
+    try {
+      const filter = String(req.query.filter ?? "all");
+      const { listPostsAdmin } = await import("./community");
+      res.json({ posts: await listPostsAdmin(filter) });
+    } catch (err: any) {
+      console.error("[community] admin list error:", err?.message || err);
+      res.status(500).json({ error: "Failed to list posts" });
+    }
+  });
+
+  app.post("/api/admin/community", requireAdmin, upload.single("imageFile"), async (req, res) => {
+    try {
+      if (!req.file) return res.status(400).json({ error: "imageFile is required" });
+      const gradeRaw = req.body.grade != null && req.body.grade !== "" ? parseFloat(String(req.body.grade)) : null;
+      const { createPostManual } = await import("./community");
+      const post = await createPostManual(
+        {
+          instagramHandle: req.body.instagramHandle?.trim() || null,
+          certNumber: req.body.certNumber ? normalizeCertId(String(req.body.certNumber)) : null,
+          cardName: req.body.cardName?.trim() || null,
+          grade: gradeRaw != null && Number.isFinite(gradeRaw) ? gradeRaw : null,
+          instagramPostUrl: req.body.instagramPostUrl?.trim() || null,
+        },
+        req.file.buffer,
+        req.file.mimetype || "image/jpeg",
+        req.session.adminEmail || "admin"
+      );
+      res.json({ post });
+    } catch (err: any) {
+      console.error("[community] create error:", err?.message || err);
+      res.status(500).json({ error: "Failed to create post" });
+    }
+  });
+
+  app.patch("/api/admin/community/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid post id" });
+      const patch: { status?: "approved" | "rejected"; featured?: boolean } = {};
+      if (req.body.status === "approved" || req.body.status === "rejected") patch.status = req.body.status;
+      if (typeof req.body.featured === "boolean") patch.featured = req.body.featured;
+      if (patch.status === undefined && patch.featured === undefined) {
+        return res.status(400).json({ error: "Nothing to update (status or featured required)" });
+      }
+      const { updatePostStatus } = await import("./community");
+      const result = await updatePostStatus(id, patch, req.session.adminEmail || "admin");
+      if (!result.ok) return res.status(404).json({ error: result.error });
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[community] patch error:", err?.message || err);
+      res.status(500).json({ error: "Failed to update post" });
+    }
+  });
+
+  // Pre-warm all 20 share backgrounds (p-limit concurrency 3 inside).
+  app.post("/api/admin/share/prewarm", requireAdmin, async (_req, res) => {
+    try {
+      const { preGenerateAllBackgrounds } = await import("./share-image");
+      const result = await preGenerateAllBackgrounds();
+      res.json(result);
+    } catch (err: any) {
+      console.error("[share-prewarm] error:", err?.message || err);
+      res.status(500).json({ error: "Prewarm failed" });
     }
   });
 
