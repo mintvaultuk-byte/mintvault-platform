@@ -106,24 +106,18 @@ export default function ShareStudio({ certNumber, cardName, grade }: ShareStudio
       const res = await fetch(feedUrl(current.id));
       if (!res.ok) throw new Error(`Image ${res.status}`);
       const blob = await res.blob();
-      const file = new File([blob], `mintvault-${certNumber}.jpg`, { type: "image/jpeg" });
+      const filename = `mintvault-${certNumber}.jpg`;
       const text = captionRef.current;
 
-      // Only use the native share sheet when the browser can actually share
-      // THIS file. Desktop Chrome exposes navigator.share but rejects files —
-      // gating on canShare({ files }) makes it fall through to the download.
-      const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
-      if (typeof nav.share === "function" && nav.canShare && nav.canShare({ files: [file] })) {
-        await nav.share({ files: [file], title: `${cardName} — MintVault Grade ${grade}`, text });
-        return;
-      }
-
+      // Always download the file first — it lands in Downloads regardless of
+      // whether the native share sheet is available or gets cancelled.
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `mintvault-${certNumber}.jpg`;
+      a.download = filename;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 10000);
+
       if (text) {
         try {
           await navigator.clipboard.writeText(text);
@@ -134,7 +128,23 @@ export default function ShareStudio({ certNumber, cardName, grade }: ShareStudio
       } else {
         toast({ title: "Image downloaded" });
       }
-    } catch (err) {
+
+      // Then attempt the native share sheet ON TOP, only where the browser can
+      // actually share this file (mobile). Failures here — incl. the user
+      // dismissing the sheet (AbortError) and desktop Chrome silently rejecting
+      // file share — are non-fatal: the download already happened.
+      const file = new File([blob], filename, { type: "image/jpeg" });
+      const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
+      if (typeof nav.share === "function" && nav.canShare && nav.canShare({ files: [file] })) {
+        try {
+          await nav.share({ files: [file], title: `${cardName} — MintVault Grade ${grade}`, text });
+        } catch {
+          /* user cancelled or browser rejected — file is already downloaded */
+        }
+      }
+    } catch (err: unknown) {
+      // AbortError = share sheet cancelled, not a generation failure → silent.
+      if (err instanceof Error && err.name === "AbortError") return;
       console.warn("[ShareStudio] download failed:", err);
       toast({ title: "Couldn't generate that image", description: "Please try again.", variant: "destructive" });
     } finally {
