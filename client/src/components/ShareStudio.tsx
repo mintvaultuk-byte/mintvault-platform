@@ -68,7 +68,10 @@ export default function ShareStudio({ certNumber, cardName, grade, tier }: Share
   }, [certNumber]);
 
   const current = variants[index] ?? FALLBACK_VARIANT;
-  const feedUrl = (variantId: string) => `/api/public/share/${certNumber}/${variantId}/feed`;
+  // ?v=<variantId> gives each variant a unique URL so switching never serves
+  // another variant's 24h-cached image.
+  const feedUrl = (variantId: string) =>
+    `/api/public/share/${certNumber}/${variantId}/feed?v=${encodeURIComponent(variantId)}`;
 
   // Preload adjacent variant previews
   const adjacent = useMemo(() => {
