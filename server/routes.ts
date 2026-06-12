@@ -7,7 +7,6 @@ import type {
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
-import { SHARE_VARIANTS } from "./share-image";
 import { registerPublicRoutes } from "./routes/public";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerSubmissionRoutes } from "./routes/submissions";
@@ -2211,29 +2210,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   };
 
-  // Variant ID alternation — constrains the :variant param so the variant
-  // routes can never shadow the no-variant /:certNumber/feed route. Built from
-  // the canonical SHARE_VARIANTS list. An invalid variant falls through to the
-  // unconstrained validation route below → 400.
-  const VARIANT_ROUTE_IDS = SHARE_VARIANTS.map((v) => v.id).join("|");
-
-  // No-variant (backwards compat) → default variant
+  // No-variant (backwards compat) → default variant. These are 2-segment
+  // paths; the 3-segment variant routes below can't shadow them (Express
+  // distinguishes by segment count).
   app.get("/api/public/share/:certNumber/feed", lookupRateLimit, shareImageHandler("feed"));
   app.get("/api/public/share/:certNumber/story", lookupRateLimit, shareImageHandler("story"));
 
-  // Variant routes — regex-constrained fast path
-  app.get(
-    `/api/public/share/:certNumber/:variant(${VARIANT_ROUTE_IDS})/feed`,
-    lookupRateLimit,
-    shareImageHandler("feed")
-  );
-  app.get(
-    `/api/public/share/:certNumber/:variant(${VARIANT_ROUTE_IDS})/story`,
-    lookupRateLimit,
-    shareImageHandler("story")
-  );
-
-  // Unconstrained fallback — unknown variants reach here and return 400
+  // Variant routes — the handler validates :variant against SHARE_VARIANTS and
+  // returns 400 for unknown ids. (Inline-regex route params, e.g.
+  // ":variant(a|b)", are unsupported by this path-to-regexp version and crash
+  // route registration — so validation lives in the handler instead.)
   app.get("/api/public/share/:certNumber/:variant/feed", lookupRateLimit, shareImageHandler("feed"));
   app.get("/api/public/share/:certNumber/:variant/story", lookupRateLimit, shareImageHandler("story"));
 
