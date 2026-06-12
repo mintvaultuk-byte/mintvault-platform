@@ -1,7 +1,7 @@
 /**
  * ShareStudio — share-image picker for the cert page.
  *
- * 56 AI background variants across 5 categories (Vault, Cosmic, Pokémon,
+ * 56 AI background variants across 5 categories (Vault, Cosmic, Elements,
  * Weather, Nature). Category tab strip → thumbnail grid within the category
  * → large 1:1 preview from /api/public/share/:cert/:variant/feed. Download &
  * Share uses the native share sheet on mobile / download + caption-copy on
