@@ -1,12 +1,12 @@
 /**
  * Instagram share-image generator — feed (1080×1080) and story (1080×1920).
  *
- * Dramatic glow layout: the background glow + card frame are auto-tinted from
- * the grade tier's colour (glowFromGrade), the grade badge uses
- * the grade-tier colour with a radial glow, and MintVault branding + the
- * verify URL anchor the frame. node-canvas for drawing, sharp for the colour
- * sampling, scan decode and final JPEG encode — same toolchain as the label
- * pipeline (server/labels.ts).
+ * Dramatic glow layout: a cinematic AI backdrop (Segmind FLUX schnell, cached
+ * per grade tier in R2; canvas-gradient fallback when Segmind is unavailable)
+ * sits behind the card, with the card frame + badge auto-tinted from the grade
+ * tier's colour (glowFromGrade) and MintVault branding + the verify URL
+ * anchoring the frame. node-canvas for drawing, sharp for scan decode and final
+ * JPEG encode — same toolchain as the label pipeline (server/labels.ts).
  *
  * Images are cached permanently in R2 (public/share/{cert}/{format}.jpg);
  * the approve endpoint deletes the keys on re-grade so the next request
@@ -112,6 +112,121 @@ function drawGoldBottomLine(ctx: any, w: number, h: number) {
   ctx.stroke();
 }
 
+// ── AI background generation (Segmind FLUX schnell) ─────────────────────────
+
+const BG_PROMPTS: Record<string, string> = {
+  "10": "dark luxury vault interior, dramatic warm golden light, deep shadows, molten gold ambient glow, premium treasure vault, cinematic 8k, hyperrealistic, dark moody atmosphere, rich textures, no text, no people",
+  "9": "dark vault interior, deep emerald green atmospheric lighting, dramatic shadows, premium dark aesthetic, cinematic quality, moody green luminescence, treasure room, no text, no people, 8k",
+  "8": "dark luxury interior, forest green dramatic lighting, shadows, premium vault, cinematic moody, deep greens and blacks, no text, no people",
+  "7": "dark vault room, cool blue steel lighting, dramatic shadows, cinematic, dark blue atmosphere, premium aesthetic, moody, no text, no people",
+  "6": "dark interior, warm amber lighting, dramatic shadows, cinematic, dark amber atmosphere, premium, moody, no text, no people",
+  "5": "dark vault, orange toned dramatic lighting, shadows, cinematic, deep orange atmosphere, no text, no people",
+  "4": "dark interior, deep red dramatic lighting, shadows, cinematic, dark crimson atmosphere, no text, no people",
+};
+
+function bgDims(format: ShareFormat): { w: number; h: number } {
+  return format === "story" ? { w: 1080, h: 1920 } : { w: 1080, h: 1080 };
+}
+
+/**
+ * Canvas fallback background — radial grade-colour glow on near-black.
+ * Used when Segmind is unavailable (no key, error, timeout) so share
+ * images always generate. Mirrors the pre-AI near-black aesthetic.
+ */
+async function generateGradientFallback(grade: number, format: ShareFormat): Promise<Buffer> {
+  const { createCanvas } = await import("canvas");
+  const { w, h } = bgDims(format);
+  const canvas = createCanvas(w, h);
+  const ctx = canvas.getContext("2d");
+  const glowRgb = glowFromGrade(grade);
+
+  ctx.fillStyle = "#050504";
+  ctx.fillRect(0, 0, w, h);
+
+  const glow = ctx.createRadialGradient(w / 2, h * 0.45, 0, w / 2, h * 0.45, Math.max(w, h) * 0.6);
+  glow.addColorStop(0, `rgba(${glowRgb}, 0.30)`);
+  glow.addColorStop(0.5, `rgba(${glowRgb}, 0.10)`);
+  glow.addColorStop(1, `rgba(${glowRgb}, 0)`);
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, w, h);
+
+  return sharp(canvas.toBuffer("image/png")).jpeg({ quality: 88 }).toBuffer();
+}
+
+/**
+ * Per-grade-tier cinematic background. Cached in R2 by grade tier + format
+ * (public/share-bg/{floor(grade)}-{format}.jpg) so all certs at the same
+ * grade reuse one generation — ~7 generations total, not one per cert.
+ *
+ * Generation uses Segmind's flux-schnell text-to-image (4 steps). Any
+ * failure — missing key, non-2xx, decode error — falls back to the canvas
+ * gradient so a share image always returns. The bg is resized to the exact
+ * format dims before caching (FLUX may not honour arbitrary sizes exactly).
+ */
+async function generateShareBackground(grade: number, format: ShareFormat): Promise<Buffer> {
+  const tier = Math.min(Math.max(Math.floor(grade), 4), 10);
+  const { w, h } = bgDims(format);
+  const key = `public/share-bg/${tier}-${format}.jpg`;
+
+  // 1. R2 cache hit?
+  const cached = await headR2(key).catch(() => null);
+  if (cached) {
+    return fetchR2Buffer(key);
+  }
+
+  const apiKey = process.env.SEGMIND_API_KEY;
+  if (!apiKey) {
+    // No key → don't burn a doomed round-trip; gradient fallback (uncached,
+    // so it auto-upgrades to the AI bg once the secret is set).
+    console.warn(`[share-bg] SEGMIND_API_KEY unset — gradient fallback for grade ${tier} ${format}`);
+    return generateGradientFallback(grade, format);
+  }
+
+  const prompt = BG_PROMPTS[String(tier)] ?? BG_PROMPTS["7"];
+  try {
+    const response = await fetch("https://api.segmind.com/v1/flux-schnell", {
+      method: "POST",
+      headers: { "x-api-key": apiKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        steps: 4,
+        seed: Math.floor(Math.random() * 1_000_000),
+        sampler_name: "euler",
+        scheduler: "simple",
+        samples: 1,
+        width: w,
+        height: h,
+        denoise: 1,
+        base64: false,
+      }),
+    });
+
+    if (!response.ok) {
+      console.error(`[share-bg] Segmind error: ${response.status} — gradient fallback`);
+      return generateGradientFallback(grade, format);
+    }
+
+    // Segmind returns binary image data directly. Normalise to exact dims +
+    // JPEG (FLUX may round the requested size to a supported multiple).
+    const imageBuffer = Buffer.from(await response.arrayBuffer());
+    const jpegBuffer = await sharp(imageBuffer)
+      .resize(w, h, { fit: "cover", position: "centre" })
+      .jpeg({ quality: 88 })
+      .toBuffer();
+
+    await uploadToR2(key, jpegBuffer, "image/jpeg");
+    console.log(
+      `[share-bg] generated ${format} bg for grade ${tier} (${(jpegBuffer.length / 1024).toFixed(0)}KB → ${key})`
+    );
+    return jpegBuffer;
+  } catch (err: any) {
+    console.error(
+      `[share-bg] generation failed for grade ${tier} ${format}: ${err?.message || err} — gradient fallback`
+    );
+    return generateGradientFallback(grade, format);
+  }
+}
+
 // ── Format A: 1080×1080 feed ───────────────────────────────────────────────
 
 async function renderFeed(cert: ShareCertData, scanBuffer: Buffer): Promise<Buffer> {
@@ -124,8 +239,17 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer): Promise<Buff
   const glowRgb = glowFromGrade(cert.grade);
   const glowHex = gradeHex(cert.grade);
 
-  // ── 1. BACKGROUND — near black ──
-  ctx.fillStyle = "#050504";
+  // ── 1. BACKGROUND — AI-generated cinematic backdrop (per grade tier) ──
+  const bgBuffer = await generateShareBackground(cert.grade, "feed");
+  const bgImg = await loadImage(await sharp(bgBuffer).png().toBuffer());
+  ctx.drawImage(bgImg, 0, 0, W, H);
+
+  // Dark overlay so the card + text stay readable over the backdrop
+  const bgOverlay = ctx.createLinearGradient(0, 0, 0, H);
+  bgOverlay.addColorStop(0, "rgba(0,0,0,0.35)");
+  bgOverlay.addColorStop(0.5, "rgba(0,0,0,0.20)");
+  bgOverlay.addColorStop(1, "rgba(0,0,0,0.55)");
+  ctx.fillStyle = bgOverlay;
   ctx.fillRect(0, 0, W, H);
 
   // ── 2. CARD IMAGE — fills almost the full frame ──
@@ -279,8 +403,16 @@ async function renderStory(cert: ShareCertData, scanBuffer: Buffer): Promise<Buf
   const glowRgb = glowFromGrade(cert.grade);
   const glowHex = gradeHex(cert.grade);
 
-  // ── BACKGROUND — near black ──
-  ctx.fillStyle = "#050504";
+  // ── BACKGROUND — AI-generated cinematic backdrop (per grade tier) ──
+  const bgBuffer = await generateShareBackground(cert.grade, "story");
+  const bgImg = await loadImage(await sharp(bgBuffer).png().toBuffer());
+  ctx.drawImage(bgImg, 0, 0, SW, SH);
+
+  const bgOverlay = ctx.createLinearGradient(0, 0, 0, SH);
+  bgOverlay.addColorStop(0, "rgba(0,0,0,0.35)");
+  bgOverlay.addColorStop(0.5, "rgba(0,0,0,0.20)");
+  bgOverlay.addColorStop(1, "rgba(0,0,0,0.55)");
+  ctx.fillStyle = bgOverlay;
   ctx.fillRect(0, 0, SW, SH);
 
   // ── "JUST CERTIFIED" header with flanking gold lines ──
