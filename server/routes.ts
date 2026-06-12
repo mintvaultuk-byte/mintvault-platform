@@ -2225,7 +2225,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Variant catalogue
   app.get("/api/public/share-variants", async (_req, res) => {
-    const { SHARE_VARIANTS: variants } = await import("./share-image");
+    const { SHARE_VARIANTS: variants, VARIANT_CATEGORIES } = await import("./share-image");
     res.setHeader("Cache-Control", "public, max-age=3600");
     res.json({
       variants: variants.map((v) => ({
@@ -2234,6 +2234,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         category: v.category,
         preview: `/api/public/share-bg/${v.id}`,
       })),
+      categories: VARIANT_CATEGORIES,
     });
   });
 

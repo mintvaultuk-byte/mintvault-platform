@@ -66,176 +66,360 @@ export type ShareFormat = "feed" | "story";
 // ── Background variants ──────────────────────────────────────────────────────
 // `accent` drives the keyless gradient fallback so variants stay visually
 // distinct even when Segmind is unavailable.
+
+// ── Background variants (Nano Banana Pro, 56) ──────────────────────────────
 export const SHARE_VARIANTS = [
-  // VAULT
+  // VAULT (10)
   {
     id: "vault-gold",
     category: "Vault",
     name: "Vault · Gold",
-    accent: "#D4AF37",
-    prompt:
-      "dark luxury vault interior, dramatic warm golden light rays, treasure room, deep shadows, gold atmospheric glow, cinematic, 8k, hyperrealistic, no text, no people, no cards",
+    prompt: "warm golden atmospheric light rays in darkness, deep amber and gold colour field",
   },
   {
     id: "vault-emerald",
     category: "Vault",
     name: "Vault · Emerald",
-    accent: "#10b981",
-    prompt:
-      "dark vault interior, deep emerald green atmospheric lighting, dramatic shadows, premium dark aesthetic, green luminescence, cinematic 8k, no text, no people, no cards",
+    prompt: "deep emerald green atmospheric glow, dark space, rich green light diffusion",
   },
   {
     id: "vault-steel",
     category: "Vault",
     name: "Vault · Steel",
-    accent: "#64748b",
-    prompt:
-      "cool steel blue vault interior, secure storage facility, dramatic cold lighting, dark blue atmosphere, cinematic, premium industrial, 8k, no text, no people, no cards",
+    prompt: "cool steel blue light atmosphere, dark cold colour field, industrial blue tones",
   },
   {
     id: "vault-crimson",
     category: "Vault",
     name: "Vault · Crimson",
-    accent: "#dc2626",
-    prompt:
-      "dark vault interior, deep crimson red dramatic lighting, shadows, dark red atmosphere, cinematic luxury, 8k, no text, no people, no cards",
+    prompt: "deep crimson red atmospheric light, dark dramatic red colour field",
   },
-  // COSMIC
   {
-    id: "cosmic-gold",
+    id: "vault-midnight",
+    category: "Vault",
+    name: "Vault · Midnight",
+    prompt: "dark midnight blue atmosphere, deep navy colour field, subtle light diffusion",
+  },
+  {
+    id: "vault-obsidian",
+    category: "Vault",
+    name: "Vault · Obsidian",
+    prompt: "near-black dark atmosphere with subtle purple tones, dark luxury colour field",
+  },
+  {
+    id: "vault-copper",
+    category: "Vault",
+    name: "Vault · Copper",
+    prompt: "warm copper and bronze atmospheric tones, dark amber light field",
+  },
+  {
+    id: "vault-platinum",
+    category: "Vault",
+    name: "Vault · Platinum",
+    prompt: "cool silver platinum light atmosphere, pale metallic colour diffusion on dark background",
+  },
+  {
+    id: "vault-onyx",
+    category: "Vault",
+    name: "Vault · Onyx",
+    prompt: "pure deep black atmospheric field, very subtle dark texture, luxury darkness",
+  },
+  {
+    id: "vault-rose",
+    category: "Vault",
+    name: "Vault · Rose",
+    prompt: "deep rose gold atmospheric light, warm pink-gold colour field in darkness",
+  },
+
+  // COSMIC (10)
+  {
+    id: "cosmic-nebula",
     category: "Cosmic",
-    name: "Cosmic · Gold",
-    accent: "#f0c020",
-    prompt:
-      "deep space gold starfield, warm gold and amber nebula, cosmic dust, dramatic space photography, dark background, no text, no people, no cards, 8k cinematic",
+    name: "Cosmic · Nebula",
+    prompt: "deep space nebula colour field, purple and blue atmospheric gas clouds",
   },
   {
-    id: "cosmic-green",
+    id: "cosmic-aurora",
     category: "Cosmic",
-    name: "Cosmic · Green",
-    accent: "#22c55e",
-    prompt:
-      "deep space emerald nebula, green cosmic gas clouds, dark background, dramatic space photography, bioluminescent green glow, 8k cinematic, no text, no people, no cards",
+    name: "Cosmic · Aurora",
+    prompt: "aurora borealis colour field, green and teal light waves in darkness",
   },
   {
-    id: "cosmic-blue",
+    id: "cosmic-supernova",
     category: "Cosmic",
-    name: "Cosmic · Blue",
-    accent: "#3b82f6",
-    prompt:
-      "deep space blue galaxy, cool blue star clusters, cosmic, dark background, dramatic space photography, 8k cinematic, no text, no people, no cards",
+    name: "Cosmic · Supernova",
+    prompt: "gold and orange cosmic explosion colour field, warm energy atmosphere",
   },
   {
-    id: "cosmic-purple",
+    id: "cosmic-void",
     category: "Cosmic",
-    name: "Cosmic · Purple",
-    accent: "#a855f7",
-    prompt:
-      "deep space purple void, aurora-like purple and violet light, dark cosmic background, nebula, 8k cinematic, no text, no people, no cards",
-  },
-  // STUDIO
-  {
-    id: "studio-warm",
-    category: "Studio",
-    name: "Studio · Warm",
-    accent: "#e8a838",
-    prompt:
-      "dark photography studio, single warm spotlight from above, bokeh background, dramatic chiaroscuro lighting, luxury product photography setup, 8k, no text, no people, no cards",
+    name: "Cosmic · Void",
+    prompt: "deep space void, dark blue-black colour field with subtle star atmosphere",
   },
   {
-    id: "studio-cool",
-    category: "Studio",
-    name: "Studio · Cool",
-    accent: "#38bdf8",
-    prompt:
-      "dark photography studio, cool blue backlight, atmospheric haze, cinematic lighting, luxury product photography, 8k, no text, no people, no cards",
+    id: "cosmic-pulsar",
+    category: "Cosmic",
+    name: "Cosmic · Pulsar",
+    prompt: "electric blue cosmic energy field, pulsing blue atmosphere",
   },
   {
-    id: "studio-neon",
-    category: "Studio",
-    name: "Studio · Neon",
-    accent: "#84cc16",
-    prompt:
-      "dark studio, neon light leaks, green and gold neon glow, atmospheric dark background, cinematic, 8k, no text, no people, no cards",
+    id: "cosmic-galaxy",
+    category: "Cosmic",
+    name: "Cosmic · Galaxy",
+    prompt: "spiral colour field of blues and purples, galactic atmosphere",
   },
   {
-    id: "studio-smoke",
-    category: "Studio",
-    name: "Studio · Smoke",
-    accent: "#9ca3af",
-    prompt:
-      "dark studio, dramatic smoke and atmospheric haze, single key light, cinematic dramatic lighting, luxury aesthetic, 8k, no text, no people, no cards",
-  },
-  // ABSTRACT
-  {
-    id: "abstract-marble",
-    category: "Abstract",
-    name: "Abstract · Marble",
-    accent: "#cbb26a",
-    prompt:
-      "dark black marble texture with gold veining, luxury surface, macro photography, premium material, cinematic lighting, 8k, no text, no people, no cards",
+    id: "cosmic-stardust",
+    category: "Cosmic",
+    name: "Cosmic · Stardust",
+    prompt: "golden stardust colour field, warm sparkle atmosphere in darkness",
   },
   {
-    id: "abstract-carbon",
-    category: "Abstract",
-    name: "Abstract · Carbon",
-    accent: "#475569",
-    prompt:
-      "dark carbon fibre texture, premium tech material, macro photography, dark industrial luxury, cinematic, 8k, no text, no people, no cards",
+    id: "cosmic-magnetar",
+    category: "Cosmic",
+    name: "Cosmic · Magnetar",
+    prompt: "intense blue-white energy atmosphere, magnetic field colour diffusion",
   },
   {
-    id: "abstract-metal",
-    category: "Abstract",
-    name: "Abstract · Metal",
-    accent: "#94a3b8",
-    prompt:
-      "brushed dark metal surface, industrial luxury, dramatic lighting, premium material macro photography, 8k, no text, no people, no cards",
+    id: "cosmic-infrared",
+    category: "Cosmic",
+    name: "Cosmic · Infrared",
+    prompt: "deep red infrared cosmic atmosphere, warm dark red colour field",
   },
   {
-    id: "abstract-obsidian",
-    category: "Abstract",
-    name: "Abstract · Obsidian",
-    accent: "#6d28d9",
-    prompt:
-      "volcanic black obsidian glass texture, dark luxury mineral, macro photography, premium natural material, 8k, no text, no people, no cards",
+    id: "cosmic-plasma",
+    category: "Cosmic",
+    name: "Cosmic · Plasma",
+    prompt: "electric green plasma energy field, vibrant green atmosphere in darkness",
   },
-  // NATURE
+
+  // POKÉMON TYPES (18)
+  {
+    id: "poke-fire",
+    category: "Pokémon",
+    name: "Pokémon · Fire",
+    prompt: "intense orange and red fire energy colour field, warm flame atmosphere",
+  },
+  {
+    id: "poke-water",
+    category: "Pokémon",
+    name: "Pokémon · Water",
+    prompt: "deep ocean blue colour field, cool aqua light diffusion atmosphere",
+  },
+  {
+    id: "poke-grass",
+    category: "Pokémon",
+    name: "Pokémon · Grass",
+    prompt: "rich forest green colour field, natural green light atmosphere",
+  },
+  {
+    id: "poke-electric",
+    category: "Pokémon",
+    name: "Pokémon · Electric",
+    prompt: "bright yellow electric energy colour field, lightning atmosphere",
+  },
+  {
+    id: "poke-psychic",
+    category: "Pokémon",
+    name: "Pokémon · Psychic",
+    prompt: "deep pink and purple psychic energy colour field, mystical atmosphere",
+  },
+  {
+    id: "poke-ice",
+    category: "Pokémon",
+    name: "Pokémon · Ice",
+    prompt: "pale blue and white ice energy colour field, cold crystal light atmosphere",
+  },
+  {
+    id: "poke-dragon",
+    category: "Pokémon",
+    name: "Pokémon · Dragon",
+    prompt: "deep purple and blue dragon energy colour field, powerful dark atmosphere",
+  },
+  {
+    id: "poke-dark",
+    category: "Pokémon",
+    name: "Pokémon · Dark",
+    prompt: "near-black dark energy colour field, shadowy purple atmosphere",
+  },
+  {
+    id: "poke-steel",
+    category: "Pokémon",
+    name: "Pokémon · Steel",
+    prompt: "metallic silver colour field, cool steel light diffusion",
+  },
+  {
+    id: "poke-fairy",
+    category: "Pokémon",
+    name: "Pokémon · Fairy",
+    prompt: "soft pink and white fairy energy colour field, delicate light atmosphere",
+  },
+  {
+    id: "poke-fighting",
+    category: "Pokémon",
+    name: "Pokémon · Fighting",
+    prompt: "deep red and orange fighting energy colour field, intense warm atmosphere",
+  },
+  {
+    id: "poke-poison",
+    category: "Pokémon",
+    name: "Pokémon · Poison",
+    prompt: "deep purple toxic colour field, dark violet atmosphere",
+  },
+  {
+    id: "poke-ground",
+    category: "Pokémon",
+    name: "Pokémon · Ground",
+    prompt: "warm earth tones colour field, ochre and brown atmosphere",
+  },
+  {
+    id: "poke-flying",
+    category: "Pokémon",
+    name: "Pokémon · Flying",
+    prompt: "light blue sky colour field, airy pale blue atmosphere",
+  },
+  {
+    id: "poke-rock",
+    category: "Pokémon",
+    name: "Pokémon · Rock",
+    prompt: "dark grey stone colour field, deep granite atmosphere",
+  },
+  {
+    id: "poke-ghost",
+    category: "Pokémon",
+    name: "Pokémon · Ghost",
+    prompt: "dark teal ghost energy colour field, ethereal misty atmosphere",
+  },
+  {
+    id: "poke-bug",
+    category: "Pokémon",
+    name: "Pokémon · Bug",
+    prompt: "deep green and yellow bug energy colour field, natural vivid atmosphere",
+  },
+  {
+    id: "poke-normal",
+    category: "Pokémon",
+    name: "Pokémon · Normal",
+    prompt: "warm cream and beige colour field, soft neutral light atmosphere",
+  },
+
+  // WEATHER (10)
+  {
+    id: "weather-storm",
+    category: "Weather",
+    name: "Weather · Storm",
+    prompt: "dramatic dark storm atmosphere, deep grey energy colour field",
+  },
+  {
+    id: "weather-lightning",
+    category: "Weather",
+    name: "Weather · Lightning",
+    prompt: "electric white and blue lightning energy atmosphere",
+  },
+  {
+    id: "weather-fog",
+    category: "Weather",
+    name: "Weather · Fog",
+    prompt: "soft grey fog colour field, misty light diffusion atmosphere",
+  },
+  {
+    id: "weather-aurora",
+    category: "Weather",
+    name: "Weather · Aurora",
+    prompt: "green and pink aurora colour field, northern lights atmosphere",
+  },
+  {
+    id: "weather-sunset",
+    category: "Weather",
+    name: "Weather · Sunset",
+    prompt: "deep orange and red sunset colour field atmosphere",
+  },
+  {
+    id: "weather-midnight",
+    category: "Weather",
+    name: "Weather · Midnight",
+    prompt: "deep blue midnight sky atmosphere, dark navy colour field",
+  },
+  {
+    id: "weather-rain",
+    category: "Weather",
+    name: "Weather · Rain",
+    prompt: "dark blue-grey rain atmosphere, cool wet colour field",
+  },
+  {
+    id: "weather-snow",
+    category: "Weather",
+    name: "Weather · Snow",
+    prompt: "pale white and blue snow atmosphere, cold light colour field",
+  },
+  {
+    id: "weather-heat",
+    category: "Weather",
+    name: "Weather · Heat",
+    prompt: "shimmering gold heat haze atmosphere, warm distortion colour field",
+  },
+  {
+    id: "weather-wind",
+    category: "Weather",
+    name: "Weather · Wind",
+    prompt: "soft moving blue and white wind energy colour field",
+  },
+
+  // NATURE (8)
+  {
+    id: "nature-deep-ocean",
+    category: "Nature",
+    name: "Nature · Deep Ocean",
+    prompt: "deep ocean blue-black atmosphere, bioluminescent teal glow colour field",
+  },
   {
     id: "nature-forest",
     category: "Nature",
     name: "Nature · Forest",
-    accent: "#16a34a",
-    prompt:
-      "dark ancient forest canopy, shafts of light through trees, atmospheric fog, cinematic nature photography, dark moody, 8k, no text, no people, no cards",
+    prompt: "deep rich forest green colour field, dark natural atmosphere",
   },
   {
-    id: "nature-ocean",
+    id: "nature-volcano",
     category: "Nature",
-    name: "Nature · Ocean",
-    accent: "#06b6d4",
-    prompt:
-      "deep ocean bioluminescent glow, dark underwater, blue and green light, cinematic underwater photography, 8k, no text, no people, no cards",
-  },
-  {
-    id: "nature-dusk",
-    category: "Nature",
-    name: "Nature · Dusk",
-    accent: "#f97316",
-    prompt:
-      "dark desert dusk, deep orange horizon glow, dramatic sky, cinematic landscape, moody atmosphere, 8k, no text, no people, no cards",
+    name: "Nature · Volcano",
+    prompt: "deep red and black volcanic atmosphere, magma glow colour field",
   },
   {
     id: "nature-arctic",
     category: "Nature",
     name: "Nature · Arctic",
-    accent: "#5eead4",
-    prompt:
-      "dark arctic night, aurora borealis, green and blue northern lights, dramatic sky, cinematic, 8k, no text, no people, no cards",
+    prompt: "pale blue and white arctic atmosphere, ice light colour field",
+  },
+  {
+    id: "nature-desert",
+    category: "Nature",
+    name: "Nature · Desert",
+    prompt: "warm ochre and gold desert atmosphere, heat colour field",
+  },
+  {
+    id: "nature-jungle",
+    category: "Nature",
+    name: "Nature · Jungle",
+    prompt: "vibrant deep green and teal jungle atmosphere, lush colour field",
+  },
+  {
+    id: "nature-cave",
+    category: "Nature",
+    name: "Nature · Cave",
+    prompt: "dark stone grey atmosphere, deep cave colour field",
+  },
+  {
+    id: "nature-sky",
+    category: "Nature",
+    name: "Nature · Sky",
+    prompt: "bright blue sky colour field, open atmosphere",
   },
 ] as const;
 
 export type VariantId = (typeof SHARE_VARIANTS)[number]["id"];
+export type VariantCategory = (typeof SHARE_VARIANTS)[number]["category"];
 export const DEFAULT_VARIANT: VariantId = "vault-gold";
+export const VARIANT_CATEGORIES = ["Vault", "Cosmic", "Pokémon", "Weather", "Nature"] as const;
 const VARIANT_IDS = new Set<string>(SHARE_VARIANTS.map((v) => v.id));
 export function isValidVariant(id: string): id is VariantId {
   return VARIANT_IDS.has(id);
@@ -319,7 +503,10 @@ async function variantFallback(variant: VariantId): Promise<Buffer> {
   const W = 1080;
   const canvas = createCanvas(W, W);
   const ctx = canvas.getContext("2d");
-  const accent = SHARE_VARIANTS.find((v) => v.id === variant)?.accent ?? "#D4AF37";
+  // New variants carry no accent field; gradient fallback is gold (only the
+  // failed-generation variant, weather-midnight, ever reaches this path).
+  void variant;
+  const accent = "#D4AF37";
   ctx.fillStyle = "#050504";
   ctx.fillRect(0, 0, W, W);
   const g = ctx.createRadialGradient(W / 2, W * 0.42, 0, W / 2, W * 0.42, W * 0.62);
