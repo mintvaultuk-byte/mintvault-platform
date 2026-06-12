@@ -97,63 +97,6 @@ async function fetchR2Buffer(key: string): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-/** Grade badge — radial outer glow, gradient disc, border, inset highlight,
- *  grade number + tier label. Shared by both formats (sizes differ). */
-function drawBadge(
-  ctx: any,
-  cert: ShareCertData,
-  cx: number,
-  cy: number,
-  radius: number,
-  numberPx: number,
-  labelPx: number
-) {
-  // Outer glow — tight halo, not a second background (was 1.8r @ 0.55)
-  const badgeGlow = ctx.createRadialGradient(cx, cy, radius * 0.4, cx, cy, radius * 1.25);
-  badgeGlow.addColorStop(0, `rgba(${gradeRgb(cert.grade)}, 0.35)`);
-  badgeGlow.addColorStop(1, `rgba(${gradeRgb(cert.grade)}, 0)`);
-  ctx.fillStyle = badgeGlow;
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius * 1.25, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Badge fill gradient
-  const badgeFill = ctx.createLinearGradient(cx - radius, cy - radius, cx + radius, cy + radius);
-  badgeFill.addColorStop(0, gradeHex(cert.grade));
-  badgeFill.addColorStop(1, gradeDarkHex(cert.grade));
-  ctx.fillStyle = badgeFill;
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Border
-  ctx.strokeStyle = "rgba(255,255,255,0.28)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Inset highlight
-  ctx.strokeStyle = "rgba(255,255,255,0.12)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.arc(cx, cy, radius - 6, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Grade number (dark text on the gold tiers)
-  const badgeTxt = cert.grade >= 9.5 ? "#0a0a08" : "#ffffff";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = badgeTxt;
-  ctx.font = `900 ${numberPx}px sans-serif`;
-  ctx.fillText(String(cert.grade), cx, cy - 12);
-
-  // Grade tier label
-  ctx.font = `600 ${labelPx}px sans-serif`;
-  ctx.fillStyle = cert.grade >= 9.5 ? "rgba(10,10,8,0.75)" : "rgba(255,255,255,0.82)";
-  ctx.fillText(cert.gradeLabel.toUpperCase(), cx, cy + 34, radius * 1.7);
-}
-
 /** Gold gradient hairline along the bottom edge — shared by both formats. */
 function drawGoldBottomLine(ctx: any, w: number, h: number) {
   const goldLine = ctx.createLinearGradient(0, 0, w, 0);
@@ -178,112 +121,147 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer): Promise<Buff
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext("2d");
 
-  // Grade-tier colour — drives the background glow + card frame
   const glowRgb = glowFromGrade(cert.grade);
+  const glowHex = gradeHex(cert.grade);
 
-  // ── BACKGROUND ──
-  ctx.fillStyle = "#0a0a08";
+  // ── 1. BACKGROUND — near black ──
+  ctx.fillStyle = "#050504";
   ctx.fillRect(0, 0, W, H);
 
-  // Large colour glow — auto-matched to card art, centred behind the card
-  const glow = ctx.createRadialGradient(W / 2, H * 0.48, 0, W / 2, H * 0.48, W * 0.64);
-  glow.addColorStop(0, `rgba(${glowRgb}, 0.72)`);
-  glow.addColorStop(0.35, `rgba(${glowRgb}, 0.35)`);
-  glow.addColorStop(0.7, `rgba(${glowRgb}, 0.10)`);
-  glow.addColorStop(1, `rgba(${glowRgb}, 0)`);
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, W, H);
-
-  // Floor darkening
-  const floor = ctx.createLinearGradient(0, H * 0.68, 0, H);
-  floor.addColorStop(0, "rgba(0,0,0,0)");
-  floor.addColorStop(1, "rgba(0,0,0,0.6)");
-  ctx.fillStyle = floor;
-  ctx.fillRect(0, 0, W, H);
-
-  // ── CARD IMAGE ── fit into 580×812, centred horizontally, top at y=58
+  // ── 2. CARD IMAGE — fills almost the full frame ──
   const cardImg = await loadImage(await sharp(scanBuffer).png().toBuffer());
-  const CARD_MAX_W = 580,
-    CARD_MAX_H = 812;
-  const scale = Math.min(CARD_MAX_W / cardImg.width, CARD_MAX_H / cardImg.height);
+  const CARD_Y = 50; // header margin
+  const CARD_W = W - 52; // 26px side margins
+  const CARD_H = H - 118; // 50 top + 68 footer
+  const scale = Math.min(CARD_W / cardImg.width, CARD_H / cardImg.height);
   const drawnW = Math.round(cardImg.width * scale);
   const drawnH = Math.round(cardImg.height * scale);
-  const cardX = Math.round((W - drawnW) / 2);
-  const cardY = 58;
-  ctx.drawImage(cardImg, cardX, cardY, drawnW, drawnH);
+  const drawX = Math.round((W - drawnW) / 2);
+  const drawY = Math.round(CARD_Y + (CARD_H - drawnH) / 2);
 
-  // Coloured frame around card (uses card's own colour)
-  ctx.strokeStyle = `rgba(${glowRgb}, 0.65)`;
-  ctx.lineWidth = 3;
-  roundRectPath(ctx, cardX - 5, cardY - 5, drawnW + 10, drawnH + 10, 10);
+  // ── 3. CARD EDGE GLOW — layered shadowBlur passes behind the card ──
+  for (const blur of [80, 40, 16]) {
+    ctx.save();
+    ctx.shadowColor = glowHex;
+    ctx.shadowBlur = blur;
+    ctx.fillStyle = glowHex;
+    roundRectPath(ctx, drawX, drawY, drawnW, drawnH, 10);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // ── 4. CARD IMAGE (clipped to rounded rect) ──
+  ctx.save();
+  roundRectPath(ctx, drawX, drawY, drawnW, drawnH, 10);
+  ctx.clip();
+  ctx.drawImage(cardImg, drawX, drawY, drawnW, drawnH);
+  ctx.restore();
+
+  // Card border (thin, grade coloured)
+  ctx.strokeStyle = `rgba(${glowRgb}, 0.85)`;
+  ctx.lineWidth = 2.5;
+  roundRectPath(ctx, drawX, drawY, drawnW, drawnH, 10);
   ctx.stroke();
 
-  // ── GRADE BADGE ──
-  drawBadge(ctx, cert, cardX + drawnW - 24, cardY + drawnH - 24, 82, cert.grade % 1 !== 0 ? 62 : 72, 19);
+  // ── 5. GRADE BADGE — overlaps the card's bottom-right corner ──
+  const BADGE_R = 80;
+  const BADGE_CX = drawX + drawnW - 18;
+  const BADGE_CY = drawY + drawnH - 18;
 
-  // ── CARD NAME + SET ──
-  const TEXT_Y = cardY + drawnH + 50;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "alphabetic";
+  ctx.save();
+  ctx.shadowColor = glowHex;
+  ctx.shadowBlur = 30;
+  ctx.fillStyle = gradeHex(cert.grade);
+  ctx.beginPath();
+  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 
-  // Card name — large bold white, truncated with ellipsis past 820px
-  ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 52px sans-serif";
-  let nameText = cert.cardName.toUpperCase();
-  while (ctx.measureText(nameText).width > 820 && nameText.length > 4) nameText = nameText.slice(0, -1);
-  if (nameText !== cert.cardName.toUpperCase()) nameText += "…";
-  ctx.fillText(nameText, 54, TEXT_Y);
+  const bFill = ctx.createLinearGradient(
+    BADGE_CX - BADGE_R,
+    BADGE_CY - BADGE_R,
+    BADGE_CX + BADGE_R,
+    BADGE_CY + BADGE_R
+  );
+  bFill.addColorStop(0, gradeHex(cert.grade));
+  bFill.addColorStop(1, gradeDarkHex(cert.grade));
+  ctx.fillStyle = bFill;
+  ctx.beginPath();
+  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R, 0, Math.PI * 2);
+  ctx.fill();
 
-  // Set name
-  if (cert.setName) {
-    ctx.fillStyle = "rgba(255,255,255,0.65)";
-    ctx.font = "400 28px sans-serif";
-    ctx.fillText(cert.setName, 56, TEXT_Y + 46);
-  }
+  ctx.strokeStyle = "rgba(255,255,255,0.28)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R, 0, Math.PI * 2);
+  ctx.stroke();
 
-  // ── MVGS SCORE BAR (only if score not null) ──
-  if (cert.gradeStrengthScore != null) {
-    const score = Math.max(0, Math.min(100, cert.gradeStrengthScore));
-    const BAR_Y = TEXT_Y + (cert.setName ? 82 : 54);
-    ctx.fillStyle = "rgba(255,255,255,0.07)";
-    roundRectPath(ctx, 54, BAR_Y, 480, 5, 3);
-    ctx.fill();
-    ctx.fillStyle = gradeHex(cert.grade);
-    roundRectPath(ctx, 54, BAR_Y, 480 * (score / 100), 5, 3);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.35)";
-    ctx.font = "400 17px sans-serif";
-    ctx.fillText(`MVGS SCORE  ${cert.gradeStrengthScore}/100`, 54, BAR_Y + 26);
-  }
+  ctx.strokeStyle = "rgba(255,255,255,0.1)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R - 7, 0, Math.PI * 2);
+  ctx.stroke();
 
-  // ── MINTVAULT HEADER ──
-  const hdrGrad = ctx.createLinearGradient(0, 0, 0, 72);
-  hdrGrad.addColorStop(0, "rgba(0,0,0,0.72)");
+  const badgeTxt = cert.grade >= 9.5 ? "#0a0a08" : "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = badgeTxt;
+  ctx.font = `900 ${cert.grade % 1 !== 0 ? 60 : 70}px sans-serif`;
+  ctx.fillText(String(cert.grade), BADGE_CX, BADGE_CY - 12);
+  ctx.font = "600 20px sans-serif";
+  ctx.fillStyle = cert.grade >= 9.5 ? "rgba(10,10,8,0.78)" : "rgba(255,255,255,0.85)";
+  ctx.fillText(cert.gradeLabel.toUpperCase(), BADGE_CX, BADGE_CY + 34);
+
+  // ── 6. HEADER STRIP ──
+  const hdrGrad = ctx.createLinearGradient(0, 0, 0, 52);
+  hdrGrad.addColorStop(0, "rgba(0,0,0,0.85)");
   hdrGrad.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = hdrGrad;
-  ctx.fillRect(0, 0, W, 72);
+  ctx.fillRect(0, 0, W, 52);
 
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#D4AF37";
-  ctx.font = "bold 26px sans-serif";
-  ctx.fillText("MINTVAULT", 54, 38);
-  const mvWidth = ctx.measureText("MINTVAULT").width;
-  ctx.fillStyle = "rgba(255,255,255,0.38)";
-  ctx.font = "400 17px sans-serif";
-  ctx.fillText("CERTIFIED GRADING", 54 + mvWidth + 16, 38);
+  ctx.font = "bold 22px sans-serif";
+  ctx.fillText("MINTVAULT", 28, 28);
+  const mvW = ctx.measureText("MINTVAULT").width;
+  ctx.fillStyle = "rgba(255,255,255,0.4)";
+  ctx.font = "400 15px sans-serif";
+  ctx.fillText("CERTIFIED GRADING", 28 + mvW + 14, 28);
 
-  // ── CERT + URL (bottom right) ──
-  ctx.textAlign = "right";
+  // ── 7. FOOTER STRIP ──
+  const ftrGrad = ctx.createLinearGradient(0, H - 70, 0, H);
+  ftrGrad.addColorStop(0, "rgba(0,0,0,0)");
+  ftrGrad.addColorStop(1, "rgba(0,0,0,0.92)");
+  ctx.fillStyle = ftrGrad;
+  ctx.fillRect(0, H - 70, W, 70);
+
+  // Card name — left aligned, ellipsis-truncated
+  ctx.textAlign = "left";
   ctx.textBaseline = "bottom";
-  ctx.fillStyle = `rgba(${glowRgb}, 0.75)`;
-  ctx.font = "500 17px monospace";
-  ctx.fillText(cert.certNumber, W - 50, H - 28);
-  ctx.fillStyle = "rgba(255,255,255,0.22)";
-  ctx.font = "400 14px sans-serif";
-  ctx.fillText("mintvaultuk.com/cert/" + cert.certNumber, W - 50, H - 50);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 38px sans-serif";
+  let nameText = cert.cardName.toUpperCase();
+  while (ctx.measureText(nameText).width > 680 && nameText.length > 4) nameText = nameText.slice(0, -1);
+  if (nameText !== cert.cardName.toUpperCase()) nameText += "…";
+  ctx.fillText(nameText, 28, H - 30);
 
-  // ── GOLD BOTTOM LINE ──
+  if (cert.setName) {
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.font = "400 22px sans-serif";
+    ctx.fillText(cert.setName, 30, H - 8);
+  }
+
+  // Cert number + URL — right aligned
+  ctx.textAlign = "right";
+  ctx.fillStyle = `rgba(${glowRgb}, 0.8)`;
+  ctx.font = "500 16px monospace";
+  ctx.fillText(cert.certNumber, W - 28, H - 30);
+  ctx.fillStyle = "rgba(255,255,255,0.22)";
+  ctx.font = "400 13px sans-serif";
+  ctx.fillText("mintvaultuk.com/cert/" + cert.certNumber, W - 28, H - 10);
+
+  // ── 8. GOLD BOTTOM LINE ──
   drawGoldBottomLine(ctx, W, H);
 
   return sharp(canvas.toBuffer("image/png")).jpeg({ quality: 88, progressive: true, mozjpeg: true }).toBuffer();
@@ -298,97 +276,145 @@ async function renderStory(cert: ShareCertData, scanBuffer: Buffer): Promise<Buf
   const canvas = createCanvas(SW, SH);
   const ctx = canvas.getContext("2d");
 
-  // Grade-tier colour — same as the feed
   const glowRgb = glowFromGrade(cert.grade);
+  const glowHex = gradeHex(cert.grade);
 
-  // ── BACKGROUND ── same technique as the feed, taller glow
-  ctx.fillStyle = "#0a0a08";
-  ctx.fillRect(0, 0, SW, SH);
-
-  const glow = ctx.createRadialGradient(SW / 2, SH * 0.48, 0, SW / 2, SH * 0.48, SW * 0.8);
-  glow.addColorStop(0, `rgba(${glowRgb}, 0.72)`);
-  glow.addColorStop(0.35, `rgba(${glowRgb}, 0.35)`);
-  glow.addColorStop(0.7, `rgba(${glowRgb}, 0.10)`);
-  glow.addColorStop(1, `rgba(${glowRgb}, 0)`);
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 0, SW, SH);
-
-  const floor = ctx.createLinearGradient(0, SH * 0.68, 0, SH);
-  floor.addColorStop(0, "rgba(0,0,0,0)");
-  floor.addColorStop(1, "rgba(0,0,0,0.6)");
-  ctx.fillStyle = floor;
+  // ── BACKGROUND — near black ──
+  ctx.fillStyle = "#050504";
   ctx.fillRect(0, 0, SW, SH);
 
   // ── "JUST CERTIFIED" header with flanking gold lines ──
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillStyle = "#D4AF37";
-  ctx.font = "bold 60px sans-serif";
-  ctx.fillText("JUST CERTIFIED", SW / 2, 195);
-  ctx.strokeStyle = "rgba(212,175,55,0.4)";
+  ctx.font = "bold 52px sans-serif";
+  ctx.fillText("JUST CERTIFIED", SW / 2, 110);
+  ctx.strokeStyle = "rgba(212,175,55,0.45)";
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(60, 195);
-  ctx.lineTo(360, 195);
-  ctx.moveTo(720, 195);
-  ctx.lineTo(1020, 195);
+  ctx.moveTo(60, 110);
+  ctx.lineTo(330, 110);
+  ctx.moveTo(750, 110);
+  ctx.lineTo(1020, 110);
   ctx.stroke();
 
-  // ── CARD IMAGE ── fit into 820×1148, centred, top at y=255
+  // ── CARD IMAGE — fills the top ~78% of the frame ──
   const cardImg = await loadImage(await sharp(scanBuffer).png().toBuffer());
-  const CARD_MAX_W = 820,
-    CARD_MAX_H = 1148;
-  const scale = Math.min(CARD_MAX_W / cardImg.width, CARD_MAX_H / cardImg.height);
+  const CARD_Y = 148;
+  const CARD_W = 1020;
+  const CARD_H = 1380;
+  const scale = Math.min(CARD_W / cardImg.width, CARD_H / cardImg.height);
   const drawnW = Math.round(cardImg.width * scale);
   const drawnH = Math.round(cardImg.height * scale);
-  const cardX = Math.round((SW - drawnW) / 2);
-  const cardY = 255;
-  ctx.drawImage(cardImg, cardX, cardY, drawnW, drawnH);
+  const drawX = Math.round((SW - drawnW) / 2);
+  const drawY = Math.round(CARD_Y + (CARD_H - drawnH) / 2);
 
-  ctx.strokeStyle = `rgba(${glowRgb}, 0.65)`;
-  ctx.lineWidth = 3;
-  roundRectPath(ctx, cardX - 5, cardY - 5, drawnW + 10, drawnH + 10, 10);
+  // Card edge glow — same three-pass bloom as the feed
+  for (const blur of [80, 40, 16]) {
+    ctx.save();
+    ctx.shadowColor = glowHex;
+    ctx.shadowBlur = blur;
+    ctx.fillStyle = glowHex;
+    roundRectPath(ctx, drawX, drawY, drawnW, drawnH, 10);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.save();
+  roundRectPath(ctx, drawX, drawY, drawnW, drawnH, 10);
+  ctx.clip();
+  ctx.drawImage(cardImg, drawX, drawY, drawnW, drawnH);
+  ctx.restore();
+
+  ctx.strokeStyle = `rgba(${glowRgb}, 0.85)`;
+  ctx.lineWidth = 2.5;
+  roundRectPath(ctx, drawX, drawY, drawnW, drawnH, 10);
   ctx.stroke();
 
-  // ── GRADE BADGE — larger ──
-  drawBadge(ctx, cert, cardX + drawnW - 28, cardY + drawnH - 28, 96, cert.grade % 1 !== 0 ? 70 : 84, 22);
+  // ── GRADE BADGE — larger, overlaps the card corner ──
+  const BADGE_R = 96;
+  const BADGE_CX = drawX + drawnW - 22;
+  const BADGE_CY = drawY + drawnH - 22;
 
-  // ── CARD NAME + SET — centred ──
+  ctx.save();
+  ctx.shadowColor = glowHex;
+  ctx.shadowBlur = 30;
+  ctx.fillStyle = gradeHex(cert.grade);
+  ctx.beginPath();
+  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  const bFill = ctx.createLinearGradient(
+    BADGE_CX - BADGE_R,
+    BADGE_CY - BADGE_R,
+    BADGE_CX + BADGE_R,
+    BADGE_CY + BADGE_R
+  );
+  bFill.addColorStop(0, gradeHex(cert.grade));
+  bFill.addColorStop(1, gradeDarkHex(cert.grade));
+  ctx.fillStyle = bFill;
+  ctx.beginPath();
+  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.28)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.strokeStyle = "rgba(255,255,255,0.1)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.arc(BADGE_CX, BADGE_CY, BADGE_R - 7, 0, Math.PI * 2);
+  ctx.stroke();
+
+  const badgeTxt = cert.grade >= 9.5 ? "#0a0a08" : "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = badgeTxt;
+  ctx.font = `900 ${cert.grade % 1 !== 0 ? 68 : 82}px sans-serif`;
+  ctx.fillText(String(cert.grade), BADGE_CX, BADGE_CY - 14);
+  ctx.font = "600 22px sans-serif";
+  ctx.fillStyle = cert.grade >= 9.5 ? "rgba(10,10,8,0.78)" : "rgba(255,255,255,0.85)";
+  ctx.fillText(cert.gradeLabel.toUpperCase(), BADGE_CX, BADGE_CY + 40);
+
+  // ── CARD NAME + SET — centred below the card ──
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
   ctx.fillStyle = "#ffffff";
-  ctx.font = "bold 60px sans-serif";
-  ctx.fillText(cert.cardName.toUpperCase(), SW / 2, cardY + drawnH + 90, 920);
+  ctx.font = "bold 52px sans-serif";
+  ctx.fillText(cert.cardName.toUpperCase(), SW / 2, drawY + drawnH + 72, 980);
   if (cert.setName) {
-    ctx.fillStyle = "rgba(255,255,255,0.65)";
-    ctx.font = "400 32px sans-serif";
-    ctx.fillText(cert.setName, SW / 2, cardY + drawnH + 158, 920);
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    ctx.font = "400 30px sans-serif";
+    ctx.fillText(cert.setName, SW / 2, drawY + drawnH + 130, 980);
   }
 
   // ── MVGS SCORE BAR — centred (only if score not null) ──
   if (cert.gradeStrengthScore != null) {
     const score = Math.max(0, Math.min(100, cert.gradeStrengthScore));
-    const BAR_Y = cardY + drawnH + 200;
+    const BAR_Y = drawY + drawnH + 160;
     ctx.fillStyle = "rgba(255,255,255,0.07)";
-    roundRectPath(ctx, 240, BAR_Y, 600, 5, 3);
+    roundRectPath(ctx, (SW - 600) / 2, BAR_Y, 600, 5, 3);
     ctx.fill();
     ctx.fillStyle = gradeHex(cert.grade);
-    roundRectPath(ctx, 240, BAR_Y, 600 * (score / 100), 5, 3);
+    roundRectPath(ctx, (SW - 600) / 2, BAR_Y, 600 * (score / 100), 5, 3);
     ctx.fill();
     ctx.fillStyle = "rgba(255,255,255,0.35)";
     ctx.font = "400 17px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(`MVGS SCORE  ${cert.gradeStrengthScore}/100`, SW / 2, BAR_Y + 30);
+    ctx.fillText(`MVGS SCORE  ${cert.gradeStrengthScore}/100`, SW / 2, BAR_Y + 22 + 5);
   }
 
   // ── FOOTER ──
   ctx.textAlign = "center";
-  ctx.font = "500 28px sans-serif";
+  ctx.font = "500 26px sans-serif";
   ctx.fillStyle = "rgba(255,255,255,0.5)";
-  ctx.fillText("Graded by MINTVAULT UK", SW / 2, 1840);
-  ctx.font = "400 22px sans-serif";
+  ctx.fillText("Graded by MINTVAULT UK", SW / 2, 1850);
+  ctx.font = "400 20px sans-serif";
   ctx.fillStyle = "rgba(212,175,55,0.5)";
-  ctx.fillText("mintvaultuk.com", SW / 2, 1878);
+  ctx.fillText("mintvaultuk.com", SW / 2, 1884);
 
   // ── GOLD BOTTOM LINE ──
   drawGoldBottomLine(ctx, SW, SH);
