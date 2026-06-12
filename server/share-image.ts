@@ -608,30 +608,30 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer, variant: Vari
 
   // Layers 3 + 4 — card
   const cardImg = await loadImage(await sharp(scanBuffer).png().toBuffer());
-  const CARD_X = 325,
-    CARD_Y = 80,
-    CARD_W = 430,
-    CARD_H = 600;
+  const CARD_X = 240,
+    CARD_Y = 72,
+    CARD_W = 600,
+    CARD_H = 840;
   drawCard(ctx, cardImg, cert.grade, CARD_X, CARD_Y, CARD_W, CARD_H);
 
-  // Layer 5 — badge (centre offset -16 from card corner, radius 56)
-  // Badge sits OUTSIDE the card — centre is right of and below the card
-  // corner, reads as a physical grading sticker attached to the outside.
-  const BADGE_DIAM = 112;
-  const BADGE_R = BADGE_DIAM / 2;
+  // Layer 5 — badge fully OUTSIDE the card's bottom-right corner.
+  // Centre X = CARD_X+CARD_W+R+18 = 912; left edge 858 > card right 840 (clear);
+  // right edge 966 < 1080 (safe).
+  const BADGE_DIAM = 108;
+  const BADGE_R2 = BADGE_DIAM / 2;
   drawBadge(
     ctx,
     cert.grade,
     tierLabel(cert.grade),
-    CARD_X + CARD_W + BADGE_R - 10, // right of card
-    CARD_Y + CARD_H - BADGE_R - 10, // near card bottom
+    CARD_X + CARD_W + BADGE_R2 + 18,
+    CARD_Y + CARD_H - BADGE_R2 - 18,
     BADGE_DIAM
   );
 
   // Layer 6 — header
   drawHeader(ctx, 52, 50);
 
-  // Layer 7 — card name (Bebas Neue 80px)
+  // Layer 7 — card name (Bebas Neue 80px). Y tracks the taller card.
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   ctx.save();
@@ -640,7 +640,7 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer, variant: Vari
   ctx.shadowOffsetY = 4;
   ctx.fillStyle = "#ffffff";
   ctx.font = `80px "Bebas Neue"`;
-  drawTracked(ctx, truncateToWidth(ctx, cert.cardName.toUpperCase(), 900), 52, 726, 3, "left");
+  drawTracked(ctx, truncateToWidth(ctx, cert.cardName.toUpperCase(), 900), 52, 964, 3, "left");
   ctx.restore();
 
   // Layer 8 — set line
@@ -648,11 +648,11 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer, variant: Vari
     const setText = cert.setNumber ? `${cert.setName} · ${cert.setNumber}` : cert.setName;
     ctx.fillStyle = "rgba(255,255,255,0.30)";
     ctx.font = `400 20px "Barlow Condensed"`;
-    drawTracked(ctx, truncateToWidth(ctx, setText, 800), 52, 820, 4, "left");
+    drawTracked(ctx, truncateToWidth(ctx, setText, 800), 52, 992, 4, "left");
   }
 
   // Layer 9 — cert + url
-  drawCertUrl(ctx, cert.certNumber, W, 1018, 1038);
+  drawCertUrl(ctx, cert.certNumber, W, 1025, 1045);
 
   // Layer 10 — gold hairline
   drawHairline(ctx, W, 1077);
@@ -682,16 +682,15 @@ async function renderStory(cert: ShareCertData, scanBuffer: Buffer, variant: Var
     CARD_H = 600;
   drawCard(ctx, cardImg, cert.grade, CARD_X, CARD_Y, CARD_W, CARD_H);
 
-  // Badge sits OUTSIDE the card — centre is right of and below the card
-  // corner, reads as a physical grading sticker attached to the outside.
-  const BADGE_DIAM = 112;
-  const BADGE_R = BADGE_DIAM / 2;
+  // Badge fully OUTSIDE the card's bottom-right corner (story card values).
+  const BADGE_DIAM = 108;
+  const BADGE_R2 = BADGE_DIAM / 2;
   drawBadge(
     ctx,
     cert.grade,
     tierLabel(cert.grade),
-    CARD_X + CARD_W + BADGE_R - 10, // right of card
-    CARD_Y + CARD_H - BADGE_R - 10, // near card bottom
+    CARD_X + CARD_W + BADGE_R2 + 18,
+    CARD_Y + CARD_H - BADGE_R2 - 18,
     BADGE_DIAM
   );
 
