@@ -179,20 +179,25 @@ export default function ShareStudio({ certNumber, cardName, grade }: ShareStudio
         </div>
       )}
 
-      {/* Large preview */}
+      {/* Large preview — image is always visible; the skeleton overlays on top
+          and fades out on load so a 2s+ feed generation never looks like a
+          broken black box. */}
       <div className="relative w-full aspect-square rounded-xl overflow-hidden bg-[#0A0A0A] border border-[#E8E4DC] mb-3">
-        {previewLoading && (
-          <div className="absolute inset-0 bg-gradient-to-br from-[#111] to-[#1a1408] animate-pulse" />
-        )}
         <img
           key={current.id}
           src={feedUrl(current.id)}
           alt={`${cardName} — ${current.name}`}
-          className="w-full h-full object-cover transition-opacity duration-300"
-          style={{ opacity: previewLoading ? 0 : 1 }}
+          className="w-full h-full object-cover"
           onLoad={() => setPreviewLoading(false)}
           onError={() => setPreviewLoading(false)}
         />
+        <div
+          className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#1a1408] via-[#111] to-[#0A0A0A] animate-pulse transition-opacity duration-300 pointer-events-none"
+          style={{ opacity: previewLoading ? 1 : 0 }}
+          aria-hidden
+        >
+          <Loader2 className="w-7 h-7 text-[#D4AF37]/60 animate-spin" />
+        </div>
         <div className="absolute bottom-3 left-1/2 -translate-x-1/2 bg-black/75 backdrop-blur-sm text-white text-xs font-medium px-3 py-1.5 rounded-full pointer-events-none z-10 whitespace-nowrap">
           {current.name}
         </div>
