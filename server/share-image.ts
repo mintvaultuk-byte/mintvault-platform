@@ -72,10 +72,50 @@ function roundRectPath(ctx: any, x: number, y: number, w: number, h: number, r: 
   ctx.closePath();
 }
 
+function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
+  r /= 255;
+  g /= 255;
+  b /= 255;
+  const max = Math.max(r, g, b),
+    min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return { h: 0, s: 0, l };
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return { h, s, l };
+}
+
+function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return { r: v, g: v, b: v };
+  }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const hue2rgb = (p: number, q: number, t: number) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  return {
+    r: Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+    g: Math.round(hue2rgb(p, q, h) * 255),
+    b: Math.round(hue2rgb(p, q, h - 1 / 3) * 255),
+  };
+}
+
 /**
  * Dominant colour of the card ART — saturation-weighted average of the
- * centre crop (22%–78% both axes, skipping the card border/mat), ignoring
- * near-greys and extreme lights/darks. Falls back to brand gold when the
+ * centre crop (28%–72% both axes, cutting well inside the card border/mat),
+ * ignoring near-greys and extreme lights/darks, then saturation-boosted so
+ * even pale cards produce a vivid glow. Falls back to brand gold when the
  * art is effectively monochrome.
  */
 async function extractDominantColor(cardBuffer: Buffer): Promise<{ r: number; g: number; b: number }> {
@@ -87,10 +127,10 @@ async function extractDominantColor(cardBuffer: Buffer): Promise<{ r: number; g:
 
   const w = info.width,
     h = info.height;
-  const xStart = Math.floor(w * 0.22);
-  const xEnd = Math.floor(w * 0.78);
-  const yStart = Math.floor(h * 0.22);
-  const yEnd = Math.floor(h * 0.78);
+  const xStart = Math.floor(w * 0.28);
+  const xEnd = Math.floor(w * 0.72);
+  const yStart = Math.floor(h * 0.28);
+  const yEnd = Math.floor(h * 0.72);
 
   let sumR = 0,
     sumG = 0,
@@ -118,11 +158,11 @@ async function extractDominantColor(cardBuffer: Buffer): Promise<{ r: number; g:
   }
 
   if (totalWeight === 0) return { r: 212, g: 175, b: 55 };
-  return {
-    r: Math.round(sumR / totalWeight),
-    g: Math.round(sumG / totalWeight),
-    b: Math.round(sumB / totalWeight),
-  };
+
+  // Boost saturation so even pale cards produce a vivid glow. Clamp
+  // lightness 0.35–0.60 so the glow is neither murky nor washed out.
+  const hsl = rgbToHsl(Math.round(sumR / totalWeight), Math.round(sumG / totalWeight), Math.round(sumB / totalWeight));
+  return hslToRgb(hsl.h, Math.max(hsl.s, 0.65), Math.min(Math.max(hsl.l, 0.35), 0.6));
 }
 
 async function fetchR2Buffer(key: string): Promise<Buffer> {
