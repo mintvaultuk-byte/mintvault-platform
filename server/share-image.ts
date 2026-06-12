@@ -2,7 +2,7 @@
  * Instagram share-image generator — feed (1080×1080) and story (1080×1920).
  *
  * Dramatic glow layout: the background glow + card frame are auto-tinted from
- * the card art's dominant colour (extractDominantColor), the grade badge uses
+ * the grade tier's colour (glowFromGrade), the grade badge uses
  * the grade-tier colour with a radial glow, and MintVault branding + the
  * verify URL anchor the frame. node-canvas for drawing, sharp for the colour
  * sampling, scan decode and final JPEG encode — same toolchain as the label
@@ -72,97 +72,21 @@ function roundRectPath(ctx: any, x: number, y: number, w: number, h: number, r: 
   ctx.closePath();
 }
 
-function rgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
-  r /= 255;
-  g /= 255;
-  b /= 255;
-  const max = Math.max(r, g, b),
-    min = Math.min(r, g, b);
-  const l = (max + min) / 2;
-  if (max === min) return { h: 0, s: 0, l };
-  const d = max - min;
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-  let h = 0;
-  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-  else if (max === g) h = ((b - r) / d + 2) / 6;
-  else h = ((r - g) / d + 4) / 6;
-  return { h, s, l };
-}
-
-function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
-  if (s === 0) {
-    const v = Math.round(l * 255);
-    return { r: v, g: v, b: v };
-  }
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  const hue2rgb = (p: number, q: number, t: number) => {
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-  return {
-    r: Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
-    g: Math.round(hue2rgb(p, q, h) * 255),
-    b: Math.round(hue2rgb(p, q, h - 1 / 3) * 255),
-  };
-}
-
 /**
- * Dominant colour of the card ART — saturation-weighted average of the
- * centre crop (28%–72% both axes, cutting well inside the card border/mat),
- * ignoring near-greys and extreme lights/darks, then saturation-boosted so
- * even pale cards produce a vivid glow. Falls back to brand gold when the
- * art is effectively monochrome.
+ * Glow colour by grade tier — same palette as the grade badge / client
+ * gradeColor. Replaces the old card-art colour extraction: grade-based is
+ * guaranteed vivid on every card and always coheres with the badge.
  */
-async function extractDominantColor(cardBuffer: Buffer): Promise<{ r: number; g: number; b: number }> {
-  const { data, info } = await sharp(cardBuffer)
-    .resize(60, 84, { fit: "fill" })
-    .removeAlpha()
-    .raw()
-    .toBuffer({ resolveWithObject: true });
-
-  const w = info.width,
-    h = info.height;
-  const xStart = Math.floor(w * 0.28);
-  const xEnd = Math.floor(w * 0.72);
-  const yStart = Math.floor(h * 0.28);
-  const yEnd = Math.floor(h * 0.72);
-
-  let sumR = 0,
-    sumG = 0,
-    sumB = 0,
-    totalWeight = 0;
-
-  for (let y = yStart; y < yEnd; y++) {
-    for (let x = xStart; x < xEnd; x++) {
-      const i = (y * w + x) * 3;
-      const r = data[i],
-        g = data[i + 1],
-        b = data[i + 2];
-      const max = Math.max(r, g, b),
-        min = Math.min(r, g, b);
-      const lightness = (max + min) / 2;
-      const sat = max === min ? 0 : (max - min) / (255 - Math.abs(2 * lightness - 255));
-      if (sat > 0.22 && lightness > 35 && lightness < 215) {
-        const w2 = sat * sat;
-        sumR += r * w2;
-        sumG += g * w2;
-        sumB += b * w2;
-        totalWeight += w2;
-      }
-    }
-  }
-
-  if (totalWeight === 0) return { r: 212, g: 175, b: 55 };
-
-  // Boost saturation so even pale cards produce a vivid glow. Clamp
-  // lightness 0.35–0.60 so the glow is neither murky nor washed out.
-  const hsl = rgbToHsl(Math.round(sumR / totalWeight), Math.round(sumG / totalWeight), Math.round(sumB / totalWeight));
-  return hslToRgb(hsl.h, Math.max(hsl.s, 0.65), Math.min(Math.max(hsl.l, 0.35), 0.6));
+function glowFromGrade(grade: number): string {
+  if (grade >= 10) return "212,175,55"; // gold
+  if (grade >= 9.5) return "200,160,32"; // deep gold
+  if (grade >= 9) return "34,197,94"; // green
+  if (grade >= 8) return "22,163,74"; // dark green
+  if (grade >= 7) return "59,130,246"; // blue
+  if (grade >= 6) return "245,158,11"; // amber
+  if (grade >= 5) return "234,88,12"; // orange
+  if (grade >= 4) return "239,68,68"; // red
+  return "153,27,27"; // dark red
 }
 
 async function fetchR2Buffer(key: string): Promise<Buffer> {
@@ -254,9 +178,8 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer): Promise<Buff
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext("2d");
 
-  // Extract card colour — drives the background glow + card frame
-  const { r: dr, g: dg, b: db } = await extractDominantColor(scanBuffer);
-  const glowRgb = `${dr},${dg},${db}`;
+  // Grade-tier colour — drives the background glow + card frame
+  const glowRgb = glowFromGrade(cert.grade);
 
   // ── BACKGROUND ──
   ctx.fillStyle = "#0a0a08";
@@ -375,9 +298,8 @@ async function renderStory(cert: ShareCertData, scanBuffer: Buffer): Promise<Buf
   const canvas = createCanvas(SW, SH);
   const ctx = canvas.getContext("2d");
 
-  // Extract card colour — same sampling as the feed
-  const { r: dr, g: dg, b: db } = await extractDominantColor(scanBuffer);
-  const glowRgb = `${dr},${dg},${db}`;
+  // Grade-tier colour — same as the feed
+  const glowRgb = glowFromGrade(cert.grade);
 
   // ── BACKGROUND ── same technique as the feed, taller glow
   ctx.fillStyle = "#0a0a08";
