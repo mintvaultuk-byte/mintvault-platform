@@ -201,8 +201,7 @@ export default function ShareStudio({ certNumber, cardName, grade, tier }: Share
         )}
       </div>
 
-      {/* Variant name */}
-      <p className="text-center text-[#555] text-sm font-medium mt-3">{current.name}</p>
+      {/* Variant name shown in the pill overlay on the image — no duplicate here */}
 
       {/* Dots */}
       {variants.length > 1 && (

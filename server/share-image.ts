@@ -614,24 +614,19 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer, variant: Vari
     CARD_H = 840;
   drawCard(ctx, cardImg, cert.grade, CARD_X, CARD_Y, CARD_W, CARD_H);
 
-  // Layer 5 — badge fully OUTSIDE the card's bottom-right corner.
-  // Centre X = CARD_X+CARD_W+R+18 = 912; left edge 858 > card right 840 (clear);
-  // right edge 966 < 1080 (safe).
-  const BADGE_DIAM = 108;
+  // Layer 5 — badge sits in the footer strip, below the card, left side.
+  // Clean separation from the card art; the card name + set sit beside it.
+  const BADGE_DIAM = 100;
   const BADGE_R2 = BADGE_DIAM / 2;
-  drawBadge(
-    ctx,
-    cert.grade,
-    tierLabel(cert.grade),
-    CARD_X + CARD_W + BADGE_R2 + 18,
-    CARD_Y + CARD_H - BADGE_R2 - 18,
-    BADGE_DIAM
-  );
+  const BADGE_CX = CARD_X + BADGE_R2;
+  const BADGE_CY = CARD_Y + CARD_H + BADGE_R2 + 16;
+  drawBadge(ctx, cert.grade, tierLabel(cert.grade), BADGE_CX, BADGE_CY, BADGE_DIAM);
 
   // Layer 6 — header
   drawHeader(ctx, 52, 50);
 
-  // Layer 7 — card name (Bebas Neue 80px). Y tracks the taller card.
+  // Layer 7 — card name (Bebas Neue 80px), beside the badge.
+  const FOOTER_TEXT_X = BADGE_CX + BADGE_R2 + 20;
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   ctx.save();
@@ -640,7 +635,7 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer, variant: Vari
   ctx.shadowOffsetY = 4;
   ctx.fillStyle = "#ffffff";
   ctx.font = `80px "Bebas Neue"`;
-  drawTracked(ctx, truncateToWidth(ctx, cert.cardName.toUpperCase(), 900), 52, 964, 3, "left");
+  drawTracked(ctx, truncateToWidth(ctx, cert.cardName.toUpperCase(), 900), FOOTER_TEXT_X, 964, 3, "left");
   ctx.restore();
 
   // Layer 8 — set line
@@ -648,7 +643,7 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer, variant: Vari
     const setText = cert.setNumber ? `${cert.setName} · ${cert.setNumber}` : cert.setName;
     ctx.fillStyle = "rgba(255,255,255,0.30)";
     ctx.font = `400 20px "Barlow Condensed"`;
-    drawTracked(ctx, truncateToWidth(ctx, setText, 800), 52, 992, 4, "left");
+    drawTracked(ctx, truncateToWidth(ctx, setText, 800), FOOTER_TEXT_X, 992, 4, "left");
   }
 
   // Layer 9 — cert + url
@@ -682,20 +677,16 @@ async function renderStory(cert: ShareCertData, scanBuffer: Buffer, variant: Var
     CARD_H = 600;
   drawCard(ctx, cardImg, cert.grade, CARD_X, CARD_Y, CARD_W, CARD_H);
 
-  // Badge fully OUTSIDE the card's bottom-right corner (story card values).
-  const BADGE_DIAM = 108;
+  // Badge below the card, left side; card name + set beside it (story values).
+  const BADGE_DIAM = 100;
   const BADGE_R2 = BADGE_DIAM / 2;
-  drawBadge(
-    ctx,
-    cert.grade,
-    tierLabel(cert.grade),
-    CARD_X + CARD_W + BADGE_R2 + 18,
-    CARD_Y + CARD_H - BADGE_R2 - 18,
-    BADGE_DIAM
-  );
+  const BADGE_CX = CARD_X + BADGE_R2;
+  const BADGE_CY = CARD_Y + CARD_H + BADGE_R2 + 16;
+  drawBadge(ctx, cert.grade, tierLabel(cert.grade), BADGE_CX, BADGE_CY, BADGE_DIAM);
 
   drawHeader(ctx, 52, 50);
 
+  const FOOTER_TEXT_X = BADGE_CX + BADGE_R2 + 20;
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
   ctx.save();
@@ -704,14 +695,14 @@ async function renderStory(cert: ShareCertData, scanBuffer: Buffer, variant: Var
   ctx.shadowOffsetY = 4;
   ctx.fillStyle = "#ffffff";
   ctx.font = `80px "Bebas Neue"`;
-  drawTracked(ctx, truncateToWidth(ctx, cert.cardName.toUpperCase(), 900), 52, 1040, 3, "left");
+  drawTracked(ctx, truncateToWidth(ctx, cert.cardName.toUpperCase(), 900), FOOTER_TEXT_X, BADGE_CY - 14, 3, "left");
   ctx.restore();
 
   if (cert.setName) {
     const setText = cert.setNumber ? `${cert.setName} · ${cert.setNumber}` : cert.setName;
     ctx.fillStyle = "rgba(255,255,255,0.30)";
     ctx.font = `400 20px "Barlow Condensed"`;
-    drawTracked(ctx, truncateToWidth(ctx, setText, 800), 52, 1134, 4, "left");
+    drawTracked(ctx, truncateToWidth(ctx, setText, 800), FOOTER_TEXT_X, BADGE_CY + 14, 4, "left");
   }
 
   drawCertUrl(ctx, cert.certNumber, W, 1840, 1860);
