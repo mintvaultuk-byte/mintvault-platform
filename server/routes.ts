@@ -2226,7 +2226,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Variant catalogue
   app.get("/api/public/share-variants", async (_req, res) => {
     const { SHARE_VARIANTS: variants, VARIANT_CATEGORIES } = await import("./share-image");
-    res.setHeader("Cache-Control", "public, max-age=3600");
+    // Short cache: the catalogue changes between deploys, and a long TTL leaves
+    // browsers building thumbnails from removed variant ids (→ 400s) after a
+    // variant set change.
+    res.setHeader("Cache-Control", "public, max-age=60");
     res.json({
       variants: variants.map((v) => ({
         id: v.id,
