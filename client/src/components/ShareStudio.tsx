@@ -109,8 +109,11 @@ export default function ShareStudio({ certNumber, cardName, grade }: ShareStudio
       const file = new File([blob], `mintvault-${certNumber}.jpg`, { type: "image/jpeg" });
       const text = captionRef.current;
 
+      // Only use the native share sheet when the browser can actually share
+      // THIS file. Desktop Chrome exposes navigator.share but rejects files —
+      // gating on canShare({ files }) makes it fall through to the download.
       const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
-      if (nav.canShare?.({ files: [file] })) {
+      if (typeof nav.share === "function" && nav.canShare && nav.canShare({ files: [file] })) {
         await nav.share({ files: [file], title: `${cardName} — MintVault Grade ${grade}`, text });
         return;
       }
