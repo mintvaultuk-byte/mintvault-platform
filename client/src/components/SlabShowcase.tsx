@@ -598,7 +598,7 @@ export default function SlabShowcase({ items, className }: Props) {
                     background: "rgba(255,255,255,0.07)",
                     border: "1px solid rgba(255,255,255,0.1)",
                     borderRadius: "50%",
-                    color: "rgba(255,255,255,0.5)",
+                    color: "#fff",
                     fontSize: 17,
                     cursor: "pointer",
                     display: "flex",
@@ -682,7 +682,7 @@ export default function SlabShowcase({ items, className }: Props) {
                             fontSize: 10,
                             textTransform: "uppercase",
                             letterSpacing: "0.1em",
-                            color: "rgba(255,255,255,0.3)",
+                            color: "#fff",
                             marginBottom: 2,
                           }}
                         >
@@ -706,15 +706,13 @@ export default function SlabShowcase({ items, className }: Props) {
                       {selected?.cardName}
                     </div>
                     {selected?.setName && (
-                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", marginBottom: 6 }}>
-                        {selected.setName}
-                      </div>
+                      <div style={{ fontSize: 13, color: "#fff", marginBottom: 6 }}>{selected.setName}</div>
                     )}
                     <div
                       style={{
                         fontFamily: "monospace",
                         fontSize: 10,
-                        color: "rgba(255,255,255,0.2)",
+                        color: "#fff",
                         letterSpacing: "0.05em",
                       }}
                     >
@@ -753,7 +751,7 @@ export default function SlabShowcase({ items, className }: Props) {
                       >
                         MVGS Score
                       </span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.6)" }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
                         <b style={{ color: "#D4AF37", fontSize: 16 }}>{selected.gradeStrengthScore}</b>/100
                       </span>
                     </div>
@@ -778,10 +776,10 @@ export default function SlabShowcase({ items, className }: Props) {
                     </div>
                     <div style={{ display: "flex", gap: 16 }}>
                       <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
-                        Graded by <b style={{ color: "rgba(255,255,255,0.5)" }}>MintVault UK</b>
+                        Graded by <b style={{ color: "#fff" }}>MintVault UK</b>
                       </span>
                       <span style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>
-                        Standard <b style={{ color: "rgba(255,255,255,0.5)" }}>MVGS v2</b>
+                        Standard <b style={{ color: "#fff" }}>MVGS v2</b>
                       </span>
                     </div>
                   </div>
@@ -820,7 +818,7 @@ export default function SlabShowcase({ items, className }: Props) {
                     }}
                     style={{
                       background: "rgba(255,255,255,0.05)",
-                      color: "rgba(255,255,255,0.6)",
+                      color: "#fff",
                       border: "1px solid rgba(255,255,255,0.1)",
                       padding: "13px 18px",
                       borderRadius: 10,
@@ -859,9 +857,9 @@ export default function SlabShowcase({ items, className }: Props) {
                       boxShadow: "0 0 6px rgba(34,197,94,0.6)",
                     }}
                   />
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.22)", lineHeight: 1.4 }}>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.75)", lineHeight: 1.4 }}>
                     Verified certificate — includes NFC-linked logbook &amp; ownership record.{" "}
-                    <span style={{ color: "rgba(212,175,55,0.5)" }}>mintvaultuk.com/cert/{selected?.certNumber}</span>
+                    <span style={{ color: "#D4AF37" }}>mintvaultuk.com/cert/{selected?.certNumber}</span>
                   </div>
                 </div>
               </div>
