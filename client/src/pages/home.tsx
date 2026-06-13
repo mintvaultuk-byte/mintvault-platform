@@ -42,15 +42,6 @@ interface HomepageStats {
   unique_sets: number;
   avg_grade: number;
   claimed_count: number;
-  recent_certs: {
-    id: number;
-    card_name: string;
-    set_name: string;
-    grade: string;
-    grade_type: string;
-    cert_number: string;
-    front_image_path: string | null;
-  }[];
 }
 
 // ── Animated counter — REMOVED 2026-04-27 ──────────────────────────────────

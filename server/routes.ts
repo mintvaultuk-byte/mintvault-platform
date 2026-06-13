@@ -1333,22 +1333,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           COUNT(*) FILTER (WHERE ownership_status = 'claimed') AS claimed_count
         FROM certificates
       `);
-      // Hero slab stack shows grade RANGE, not just the 3 most recent.
-      // For each distinct numeric grade, pick the most recent cert; then take
-      // the top 3 grades (highest first). Falls back to <3 rows if DB has
-      // fewer distinct grades — caller degrades gracefully.
-      const recentResult = await db.execute(sql`
-        SELECT DISTINCT ON (grade::numeric)
-               id, card_name, set_name, grade, grade_type,
-               REGEXP_REPLACE(REGEXP_REPLACE(id::text, '^0+', ''), '^', 'MV') AS cert_number,
-               front_image_path
-        FROM certificates
-        WHERE deleted_at IS NULL AND grade IS NOT NULL
-          AND grade_type = 'numeric'
-          AND card_name IS NOT NULL AND card_name != '' AND card_name != '(untitled)'
-        ORDER BY grade::numeric DESC, issued_at DESC
-        LIMIT 3
-      `);
+      // recent_certs removed (2026-06-13): it derived cert_number from the DB
+      // row id, surfacing fabricated numbers (MV584/593/595). The homepage now
+      // sources live registry rows from /api/public/recent-graded instead.
       const stats = statsResult.rows[0] as any;
       const data = {
         total_graded: parseInt(stats.total_graded || "0"),
@@ -1356,15 +1343,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         unique_sets: parseInt(stats.unique_sets || "0"),
         avg_grade: parseFloat(stats.avg_grade || "0"),
         claimed_count: parseInt(stats.claimed_count || "0"),
-        recent_certs: (recentResult.rows as any[]).map((r) => ({
-          id: r.id,
-          card_name: r.card_name,
-          set_name: r.set_name,
-          grade: r.grade,
-          grade_type: r.grade_type,
-          cert_number: r.cert_number,
-          front_image_path: r.front_image_path,
-        })),
       };
       homepageStatsCache = { data, ts: Date.now() };
       res.json(data);
