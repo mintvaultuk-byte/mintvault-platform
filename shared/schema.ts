@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { mvgsTierName } from "./mvgs-scoring";
 
 /**
  * pgvector column type — drizzle-orm doesn't ship a first-class pgvector
@@ -1135,9 +1136,14 @@ export function gradeLabel(grade: number): string {
 export function gradeLabelFull(gradeType: string, gradeOverall: string): string {
   if (gradeType === "NO") return "AUTHENTIC";
   if (gradeType === "AA") return "AUTHENTIC ALTERED";
-  const g = Math.round(parseFloat(gradeOverall));
-  if (g >= 10) return "GEM MINT";
-  return gradeLabel(g);
+  // Tier NAME from the exact grade via the canonical MVGS tier table — no
+  // rounding, so half grades read their TRUE tier (8.5 → "NM-MINT+", 9.5 →
+  // "MINT+") and agree with the displayed number. Same source the cert page,
+  // slab, PDF and logbook use. (The numeric VALUE is rendered separately by
+  // callers; this returns the name only.)
+  const g = parseFloat(gradeOverall);
+  if (!Number.isFinite(g)) return "";
+  return mvgsTierName(g).toUpperCase();
 }
 
 // ── Tier capacity gating ────────────────────────────────────────────────────
