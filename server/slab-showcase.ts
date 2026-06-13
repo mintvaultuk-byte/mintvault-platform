@@ -74,6 +74,50 @@ async function ensureLabelInR2(dbId: number, certNumber: string, side: "front" |
   }
 }
 
+export interface RecentGradedItem {
+  cert_number: string;
+  card_name: string;
+  grade: number;
+  grade_label: string;
+  scan_url: string;
+}
+
+/**
+ * Most-recently-graded active certs that have a front scan, newest first
+ * (grade_approved_at DESC). Lighter than getSlabShowcaseItems — no label
+ * generation; scan_url is the same-origin /api/public/slab-image proxy (which
+ * serves any active graded cert's front scan from R2). No PII.
+ */
+export async function getRecentGradedItems(limit = 8): Promise<RecentGradedItem[]> {
+  const safe = Math.max(1, Math.min(20, limit));
+  const rows = (
+    await db.execute(sql`
+      SELECT certificate_number, grade, card_name
+      FROM certificates
+      WHERE deleted_at IS NULL
+        AND status = 'active'
+        AND grade IS NOT NULL
+        AND COALESCE(grading_front_display, grading_front_cropped, front_image_path) IS NOT NULL
+      ORDER BY grade_approved_at DESC NULLS LAST, issued_at DESC
+      LIMIT ${safe}
+    `)
+  ).rows as any[];
+
+  return rows
+    .map((row) => {
+      const certNumber = normaliseCertNumber(String(row.certificate_number));
+      const grade = parseFloat(String(row.grade));
+      return {
+        cert_number: certNumber,
+        card_name: String(row.card_name || "Graded Card"),
+        grade,
+        grade_label: mvgsTierName(grade),
+        scan_url: `/api/public/slab-image/${certNumber}/scan`,
+      };
+    })
+    .filter((r) => Number.isFinite(r.grade));
+}
+
 export async function getSlabShowcaseItems(limit = 8): Promise<SlabShowcaseItem[]> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.items;
 

@@ -2094,6 +2094,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Most recently graded certs (newest first) — homepage hero source.
+  app.get("/api/public/recent-graded", showcaseRateLimit, async (req, res) => {
+    try {
+      const limit = Math.max(1, Math.min(20, parseInt(String(req.query.limit ?? "8"), 10) || 8));
+      const { getRecentGradedItems } = await import("./slab-showcase");
+      const items = await getRecentGradedItems(limit);
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.json({ items });
+    } catch (err: any) {
+      console.error("[recent-graded] endpoint error:", err?.message || err);
+      res.setHeader("Cache-Control", "public, max-age=30");
+      res.json({ items: [] });
+    }
+  });
+
   // ── Slab showcase image proxy ──────────────────────────────────────────────
   // The browser canvas can't consume R2 signed URLs cross-origin (no CORS
   // headers on the bucket), so the showcase loads images through this

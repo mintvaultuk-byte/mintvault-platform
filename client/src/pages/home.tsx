@@ -243,14 +243,33 @@ export default function HomeV2() {
   const uniqueSets = stats?.unique_sets ?? 71;
   const recentCerts = stats?.recent_certs ?? [];
 
-  // ── 3D slab showcase data (real graded certs) ─────────────────────────────
+  // ── 3D slab showcase data (most recently graded certs) ────────────────────
   const [showcaseItems, setShowcaseItems] = useState<SlabShowcaseItem[]>([]);
   const [showcaseLoaded, setShowcaseLoaded] = useState(false);
   useEffect(() => {
-    fetch("/api/public/slab-showcase")
+    fetch("/api/public/recent-graded?limit=8")
       .then((r) => r.json())
       .then((d) => {
-        setShowcaseItems(d.items || []);
+        // Map the lean recent-graded shape into the SlabShowcase item shape.
+        // The showcase renders frontScanUrl + grade badge; label urls are only
+        // a fallback and never trigger since every item has a scan.
+        const items: SlabShowcaseItem[] = (d.items || []).map(
+          (it: { cert_number: string; card_name: string; grade: number; grade_label: string; scan_url: string }) => ({
+            certNumber: it.cert_number,
+            dbId: 0,
+            grade: it.grade,
+            gradeLabel: it.grade_label,
+            gradeStrengthScore: null,
+            cardName: it.card_name,
+            setName: null,
+            cardGame: null,
+            labelType: "Standard",
+            frontLabelUrl: it.scan_url,
+            backLabelUrl: null,
+            frontScanUrl: it.scan_url,
+          })
+        );
+        setShowcaseItems(items);
         setShowcaseLoaded(true);
       })
       .catch(() => setShowcaseLoaded(true)); // fail silently — hero copy still renders
