@@ -1095,6 +1095,16 @@ export const NON_NUMERIC_GRADES = [
   { value: "AA", label: "AUTHENTIC ALTERED", description: "Authentic Altered" },
 ] as const;
 
+// The complete set of valid MVGS overall grades — whole grades 1–10 plus the
+// half grades (1.5, 2.5, … 9.5). Single source of truth for grade validation
+// on both client and server; derived from NUMERIC_GRADES so it can never drift.
+export const NUMERIC_GRADE_VALUES: readonly number[] = NUMERIC_GRADES.map((g) => g.value);
+
+/** True if `grade` is one of the permitted MVGS numeric grades (incl. half grades). */
+export function isValidNumericGrade(grade: number): boolean {
+  return Number.isFinite(grade) && NUMERIC_GRADE_VALUES.includes(grade);
+}
+
 export function isNonNumericGrade(gradeType: string): boolean {
   return gradeType === "NO" || gradeType === "AA";
 }

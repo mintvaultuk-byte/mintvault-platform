@@ -24,6 +24,7 @@ import {
   gradeLabel,
   gradeLabelFull,
   isNonNumericGrade,
+  isValidNumericGrade,
   SUBMISSION_STATUS_TRANSITIONS,
   SUBMISSION_STATUS_LABELS,
   serviceTierToPricingTier,
@@ -5786,8 +5787,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
         if (!isNonNum && req.body.gradeOverall) {
           const g = Number(req.body.gradeOverall);
-          if (!Number.isInteger(g) || g < 1 || g > 10) {
-            return res.status(400).json({ error: "Grade must be an integer from 1 to 10" });
+          if (!isValidNumericGrade(g)) {
+            return res.status(400).json({ error: "Grade must be a valid MVGS grade (1–10, including half grades)" });
           }
         }
 
@@ -5936,8 +5937,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
         if (!isNonNumUpdate && req.body.gradeOverall) {
           const g = Number(req.body.gradeOverall);
-          if (!Number.isInteger(g) || g < 1 || g > 10) {
-            return res.status(400).json({ error: "Grade must be an integer from 1 to 10" });
+          if (!isValidNumericGrade(g)) {
+            return res.status(400).json({ error: "Grade must be a valid MVGS grade (1–10, including half grades)" });
           }
         }
 

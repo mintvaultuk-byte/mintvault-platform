@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
-import { NUMERIC_GRADES, NON_NUMERIC_GRADES, isNonNumericGrade } from "@shared/schema";
+import { NUMERIC_GRADES, NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
 import {
   Save,
   Upload,
@@ -708,8 +708,8 @@ export default function CertificateForm({
     // Grade is optional on initial save — can be set later via the workstation
     if (!isNonNum && form.gradeOverall) {
       const grade = parseFloat(form.gradeOverall);
-      if (isNaN(grade) || grade < 1 || grade > 10) {
-        setError("Overall grade must be between 1 and 10");
+      if (!isValidNumericGrade(grade)) {
+        setError("Overall grade must be a valid MVGS grade (1–10, including half grades)");
         return;
       }
     }
