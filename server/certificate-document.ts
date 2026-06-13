@@ -3,7 +3,7 @@ import PDFDocument from "pdfkit";
 import path from "path";
 import type { CertificateRecord } from "@shared/schema";
 import { isNonNumericGrade, gradeLabelFull } from "@shared/schema";
-import { mvgsGradeLabel, mvgsTierName } from "@shared/mvgs-scoring";
+import { mvgsTierName } from "@shared/mvgs-scoring";
 import { APP_BASE_URL } from "./app-url";
 
 // ── Page geometry ────────────────────────────────────────────────────────────
@@ -268,13 +268,11 @@ export async function generateCertificateDocument(cert: CertificateRecord, owner
         : cert.gradeOverall != null
           ? cert.labelType === "black"
             ? "PRISTINE 10P"
-            : typeof cert.gradeStrengthScore === "number" && cert.gradeStrengthScore >= 1
-              ? mvgsGradeLabel(cert.gradeStrengthScore).toUpperCase()
-              : // Legacy certs (no MVGS score): MVGS tier table, not rounding
-                // gradeLabelFull, so the name agrees with the half-grade number.
-                `${mvgsTierName(parseFloat(String(cert.gradeOverall)))} ${parseFloat(
-                  String(cert.gradeOverall)
-                )}`.toUpperCase()
+            : // Tier NAME from the grade itself via mvgsTierName (the gold box
+              // beside this already prints the number) — never from the strength
+              // score, whose band can disagree with a half grade. So the name
+              // always agrees with the number: 8.5 → "NM-MINT+".
+              mvgsTierName(parseFloat(String(cert.gradeOverall))).toUpperCase()
           : "";
 
       if (isNonNumeric) {

@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
+import { mvgsTierName } from "@shared/mvgs-scoring";
 import {
   Plus,
   Edit,
@@ -1375,7 +1376,9 @@ function CertRow({
   const gradeType = (cert as any).gradeType || "numeric";
   const isNonNum = isNonNumericGrade(gradeType);
   const grade = isNonNum ? 0 : parseFloat(cert.gradeOverall || "0");
-  const label = gradeLabelFull(gradeType, cert.gradeOverall || "0");
+  // Tier NAME from the MVGS table for numeric grades so half grades read true
+  // (8.5 → "NM-MINT+") instead of gradeLabelFull's rounded whole-grade name.
+  const label = isNonNum ? gradeLabelFull(gradeType, cert.gradeOverall || "0") : mvgsTierName(grade).toUpperCase();
 
   // Embedding freshness — embeddedAt is null until the hourly job picks
   // it up; stale when a cert mutation (image swap, grade edit, etc.) has
