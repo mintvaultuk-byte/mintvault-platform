@@ -62,6 +62,29 @@ interface Props {
   }>;
   onWhiteningLinesChange?: (next: NonNullable<Props["whiteningLines"]>) => void;
   onCreaseLinesChange?: (next: NonNullable<Props["creaseLines"]>) => void;
+  /** Background crop-upload owner (lives in the panel so the upload + retry
+   *  survive this tool closing, and so the panel's Approve gate can block on
+   *  it). Called with the /recrop body; resolves the fresh display URL on
+   *  success (for the seamless <img> swap) or undefined on final failure.
+   *  When provided alongside onDefectAdded, Compute transitions to the defects
+   *  phase INSTANTLY against a local crop preview while this runs in the
+   *  background. Absent → the legacy synchronous (await /recrop) path. */
+  onStartCropUpload?: (payload: RecropPayload) => Promise<string | undefined>;
+  /** Panel-owned crop-sync status, surfaced as a chip in the defects banner. */
+  cropSyncStatus?: "idle" | "pending" | "synced" | "failed";
+  /** Re-runs the last failed crop upload; resolves the display URL on success. */
+  onRetryCrop?: () => Promise<string | undefined>;
+}
+
+/** Body of POST /api/admin/certificates/:id/recrop. */
+export interface RecropPayload {
+  side: "front" | "back";
+  left_pct: number;
+  top_pct: number;
+  width_pct: number;
+  height_pct: number;
+  rotation_deg: number;
+  quad: ReturnType<typeof outerEdgesToBboxQuad>;
 }
 
 // Points are captured clockwise, one SIDE at a time. Index → short label.
@@ -216,6 +239,9 @@ export default function ManualCardTool({
   creaseLines = [],
   onWhiteningLinesChange,
   onCreaseLinesChange,
+  onStartCropUpload,
+  cropSyncStatus = "idle",
+  onRetryCrop,
 }: Props) {
   const [mode, setMode] = useState<CardToolMode>("full");
   const [outerPts, setOuterPts] = useState<Point[]>([]);
@@ -245,6 +271,22 @@ export default function ManualCardTool({
   // image, returned by /recrop's response. Becomes the <img src> for the
   // defects phase so the operator marks pins on the new crop (not the raw).
   const [croppedDisplayUrl, setCroppedDisplayUrl] = useState<string | null>(null);
+  // Optimistic local crop preview shown the instant Compute fires, while the
+  // real crop uploads to R2 in the background. Geometry mirrors the server's
+  // rotate(deskew)+rectangular-extract exactly (in natural pixels) so defect
+  // pins — which are frame-relative percentages — land identically once the
+  // R2 image swaps in. Cleared back to null once croppedDisplayUrl arrives.
+  const [localPreview, setLocalPreview] = useState<null | {
+    rawW: number;
+    rawH: number;
+    d: number; // deskew degrees (server rotates the raw by this first)
+    RW: number; // rotated-expanded raw width  (natural px)
+    RH: number; // rotated-expanded raw height (natural px)
+    cl: number; // crop left in rotated-expanded space (natural px)
+    ct: number; // crop top
+    cw: number; // crop width
+    ch: number; // crop height
+  }>(null);
   // Defect-marking batch state (mirrors image-viewer.tsx's pendingBatch +
   // pickerOpen + pickerAnchor + pickerTier shape so behaviour stays identical
   // across both call sites). Each click in the defects phase drops a pin
@@ -770,29 +812,21 @@ export default function ManualCardTool({
         imgDims.h
       );
 
-      // 1) Crop + deskew via the existing recrop endpoint (crops the RAW
-      //    original, rotating first — no double-rotation).
-      const cropRes = await fetch(`/api/admin/certificates/${certId}/recrop`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          side,
-          left_pct: crop.left_pct,
-          top_pct: crop.top_pct,
-          width_pct: crop.width_pct,
-          height_pct: crop.height_pct,
-          rotation_deg: deskewDeg,
-          quad: outerQuad,
-        }),
-      });
-      const cropJson = await cropRes.json();
-      if (!cropRes.ok) throw new Error(cropJson.error || "Recrop failed");
+      const cropPayload: RecropPayload = {
+        side,
+        left_pct: crop.left_pct,
+        top_pct: crop.top_pct,
+        width_pct: crop.width_pct,
+        height_pct: crop.height_pct,
+        rotation_deg: deskewDeg,
+        quad: outerQuad,
+      };
 
-      // 2) Centering via the existing manual-centering endpoint (full mode
-      //    only). Rects are normalized to the post-crop frame; ratios/subgrade
-      //    flow through the canonical chart (shared/centering.ts).
-      if (mode === "full" && centering) {
+      // Fire centering — cheap (pure math + tiny JSONB writes), no R2/sharp.
+      // In the optimistic path it runs in parallel and wires its result when it
+      // lands; in the legacy path it's awaited inline (below).
+      const sendCentering = async () => {
+        if (!(mode === "full" && centering)) return;
         const cenRes = await fetch(`/api/admin/certificates/${certId}/manual-centering`, {
           method: "POST",
           credentials: "include",
@@ -809,32 +843,77 @@ export default function ManualCardTool({
           topBottom: centering.tb,
           subgrade: centering.subgrade,
         });
-      }
+      };
 
       const deskewNote = Math.abs(deskewDeg) > 0.1 ? `, deskew ${deskewDeg.toFixed(1)}°` : "";
-      toast({
-        title:
-          mode === "full" && centering
-            ? `${side}: cropped + centered ${centering.lr} / ${centering.tb} → grade ${centering.subgrade}${deskewNote}`
-            : `${side}: cropped${deskewNote}`,
-      });
+      const doneToast = () =>
+        toast({
+          title:
+            mode === "full" && centering
+              ? `${side}: cropped + centered ${centering.lr} / ${centering.tb} → grade ${centering.subgrade}${deskewNote}`
+              : `${side}: cropped${deskewNote}`,
+        });
 
-      // Phase transition — if a defect-add handler is wired AND /recrop gave
-      // us the freshly-cropped display URL, stay open and switch to the
-      // defects phase against the new image. Centering is already durably
-      // saved (above), so cancelling out of defects loses nothing. If either
-      // is missing we fall back to the pre-merge behaviour: close on Compute.
-      if (onDefectAdded && typeof cropJson.displayUrl === "string" && cropJson.displayUrl.length > 0) {
-        setCroppedDisplayUrl(cropJson.displayUrl);
-        // Reset placement-phase derived state. The 8-dot capture state
-        // (outerPts/innerPts) is intentionally KEPT so a subsequent close
-        // + reopen still shows it — but `placing` derives from activeArr
-        // and is now irrelevant in the defects phase.
+      // ── OPTIMISTIC PATH ────────────────────────────────────────────────
+      // Defects phase exists (onDefectAdded) AND the panel owns the upload
+      // (onStartCropUpload): transition to defect-marking INSTANTLY against a
+      // local crop preview, and let /recrop upload to R2 in the background.
+      if (onDefectAdded && onStartCropUpload) {
+        // Geometry of the server crop in NATURAL pixels (rotate-expand then
+        // rectangular extract — the same operation /recrop performs). Used to
+        // render the CSS preview; pins are %-of-frame so they're invariant to
+        // which image fills the frame.
+        const rawW = imgDims.w;
+        const rawH = imgDims.h;
+        const rad = (deskewDeg * Math.PI) / 180;
+        const RW = Math.abs(rawW * Math.cos(rad)) + Math.abs(rawH * Math.sin(rad));
+        const RH = Math.abs(rawW * Math.sin(rad)) + Math.abs(rawH * Math.cos(rad));
+        const cl = (RW * crop.left_pct) / 100;
+        const ct = (RH * crop.top_pct) / 100;
+        const cw = (RW * crop.width_pct) / 100;
+        const ch = (RH * crop.height_pct) / 100;
+
+        setLocalPreview({ rawW, rawH, d: deskewDeg, RW, RH, cl, ct, cw, ch });
+        setCroppedDisplayUrl(null);
+        // Drive the fit/zoom math off the crop's aspect so the frame size (and
+        // therefore pin percentages) match the R2 crop that swaps in later.
+        setImgDims({ w: Math.max(1, Math.round(cw)), h: Math.max(1, Math.round(ch)) });
         setHover(null);
         setDrag(null);
-        // Seed the in-tool defect mirror from existing pins on this side
-        // (passed by the parent). Pins committed in this session are
-        // appended via the local onLocalDefectCommit path below.
+        setCommittedDefects((existingDefects ?? []).filter((d) => d.image_side === side));
+        setPhase("defects");
+
+        // Background: centering (parallel, non-blocking) + crop upload (panel-
+        // owned, retried, gates approval). On upload success, swap the <img>
+        // from the local preview to the R2 display URL — seamless, identical
+        // framing. On failure the panel surfaces it and blocks approval.
+        sendCentering().catch((e) =>
+          toast({ title: "Centering save failed", description: e.message, variant: "destructive" })
+        );
+        onStartCropUpload(cropPayload).then((url) => {
+          if (url) setCroppedDisplayUrl(url);
+        });
+        doneToast();
+        return;
+      }
+
+      // ── LEGACY SYNCHRONOUS PATH (no defects phase / no upload owner) ─────
+      const cropRes = await fetch(`/api/admin/certificates/${certId}/recrop`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cropPayload),
+      });
+      const cropJson = await cropRes.json();
+      if (!cropRes.ok) throw new Error(cropJson.error || "Recrop failed");
+
+      await sendCentering();
+      doneToast();
+
+      if (onDefectAdded && typeof cropJson.displayUrl === "string" && cropJson.displayUrl.length > 0) {
+        setCroppedDisplayUrl(cropJson.displayUrl);
+        setHover(null);
+        setDrag(null);
         setCommittedDefects((existingDefects ?? []).filter((d) => d.image_side === side));
         setPhase("defects");
       } else {
@@ -1062,6 +1141,38 @@ export default function ManualCardTool({
               </span>
             )}
             <p className="text-[var(--admin-ink)] text-sm sm:text-lg font-extrabold leading-tight">{bannerText}</p>
+            {phase === "defects" && cropSyncStatus !== "idle" && (
+              <span className="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wide">
+                {cropSyncStatus === "pending" && (
+                  <span className="flex items-center gap-1 text-[var(--admin-gold)]">
+                    <Loader2 size={12} className="animate-spin" /> Crop syncing…
+                  </span>
+                )}
+                {cropSyncStatus === "synced" && (
+                  <span className="flex items-center gap-1 text-[var(--admin-green)]">
+                    <Check size={12} /> Crop saved
+                  </span>
+                )}
+                {cropSyncStatus === "failed" && (
+                  <span className="flex items-center gap-1.5 text-[var(--admin-red)]">
+                    Crop upload failed
+                    {onRetryCrop && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onRetryCrop().then((url) => {
+                            if (url) setCroppedDisplayUrl(url);
+                          });
+                        }}
+                        className="underline hover:no-underline"
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </span>
+                )}
+              </span>
+            )}
           </div>
           {phase === "capture" ? (
             <p className="text-[var(--admin-ink-faint)] text-[11px] sm:text-xs mt-0.5 font-mono">
@@ -1143,24 +1254,73 @@ export default function ManualCardTool({
               onMouseUp={onContainerMouseUp}
               onTouchStart={onContainerTouchStart}
             >
-              <img
-                // In defects phase, swap to the freshly-cropped display image
-                // returned by /recrop. The cache-buster on the signed URL
-                // ensures the browser doesn't keep pre-recrop bytes (server
-                // appends `?v={Date.now()}` in the recrop response). imgDims
-                // re-measures via onLoad so coordinate capture stays accurate
-                // against the new image's natural pixels.
-                src={phase === "defects" && croppedDisplayUrl ? croppedDisplayUrl : rawImageUrl}
-                alt={`${side} ${phase === "defects" ? "cropped" : "raw"}`}
-                className="block cursor-crosshair"
-                style={
-                  renderW != null && renderH != null
-                    ? { width: renderW, height: renderH }
-                    : { maxWidth: fitBox?.w ?? "100vw", maxHeight: fitBox?.h ?? "80vh", width: "auto" }
-                }
-                draggable={false}
-                onLoad={(e) => setImgDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-              />
+              {phase === "defects" && localPreview && !croppedDisplayUrl ? (
+                // ── Optimistic local crop preview ──────────────────────────
+                // A CSS-only reconstruction of the server crop (rotate-expand
+                // the already-loaded raw <img>, then clip to the crop rect in
+                // an overflow:hidden frame). Display-only — no canvas, so no
+                // CORS taint. The frame is sized exactly like the R2 crop will
+                // be (renderW × renderH, driven by the crop aspect we fed into
+                // imgDims), so when croppedDisplayUrl arrives and this swaps to
+                // the <img> below, nothing shifts — and defect pins, being
+                // %-of-frame, stay pinned to the same spot.
+                <div
+                  className="block cursor-crosshair"
+                  style={{
+                    width: renderW ?? localPreview.cw,
+                    height: renderH ?? localPreview.ch,
+                    position: "relative",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "absolute",
+                      width: localPreview.RW,
+                      height: localPreview.RH,
+                      transformOrigin: "0 0",
+                      // scale natural-crop px → on-screen px, then shift the
+                      // crop rect's top-left to the frame origin.
+                      transform: `scale(${(renderW ?? localPreview.cw) / localPreview.cw}) translate(${-localPreview.cl}px, ${-localPreview.ct}px)`,
+                    }}
+                  >
+                    <img
+                      src={rawImageUrl}
+                      alt={`${side} cropped preview`}
+                      draggable={false}
+                      style={{
+                        position: "absolute",
+                        // Centre the raw image inside the rotated-expanded box,
+                        // then rotate by the same deskew /recrop applies — this
+                        // reproduces sharp's rotate-with-expand exactly.
+                        left: (localPreview.RW - localPreview.rawW) / 2,
+                        top: (localPreview.RH - localPreview.rawH) / 2,
+                        width: localPreview.rawW,
+                        height: localPreview.rawH,
+                        transform: `rotate(${localPreview.d}deg)`,
+                        transformOrigin: "center center",
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <img
+                  // In defects phase, swap to the freshly-cropped display image
+                  // returned by /recrop. imgDims re-measures via onLoad so
+                  // coordinate capture stays accurate against the new image's
+                  // natural pixels (same aspect as the preview → no pin shift).
+                  src={phase === "defects" && croppedDisplayUrl ? croppedDisplayUrl : rawImageUrl}
+                  alt={`${side} ${phase === "defects" ? "cropped" : "raw"}`}
+                  className="block cursor-crosshair"
+                  style={
+                    renderW != null && renderH != null
+                      ? { width: renderW, height: renderH }
+                      : { maxWidth: fitBox?.w ?? "100vw", maxHeight: fitBox?.h ?? "80vh", width: "auto" }
+                  }
+                  draggable={false}
+                  onLoad={(e) => setImgDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+                />
+              )}
 
               {/* Non-interactive overlay: crop box, quads, crosshair. preserve-
                 AspectRatio="none" is safe here — pointer-events:none, never
