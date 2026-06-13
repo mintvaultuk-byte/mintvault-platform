@@ -79,6 +79,7 @@ export interface RecentGradedItem {
   card_name: string;
   grade: number;
   grade_label: string;
+  set_name: string | null;
   scan_url: string;
 }
 
@@ -92,7 +93,7 @@ export async function getRecentGradedItems(limit = 8): Promise<RecentGradedItem[
   const safe = Math.max(1, Math.min(20, limit));
   const rows = (
     await db.execute(sql`
-      SELECT certificate_number, grade, card_name
+      SELECT certificate_number, grade, card_name, set_name
       FROM certificates
       WHERE deleted_at IS NULL
         AND status = 'active'
@@ -112,6 +113,7 @@ export async function getRecentGradedItems(limit = 8): Promise<RecentGradedItem[
         card_name: String(row.card_name || "Graded Card"),
         grade,
         grade_label: mvgsTierName(grade),
+        set_name: row.set_name ? String(row.set_name) : null,
         scan_url: `/api/public/slab-image/${certNumber}/scan`,
       };
     })

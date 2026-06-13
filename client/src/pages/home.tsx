@@ -241,7 +241,6 @@ export default function HomeV2() {
   // totalGraded + avgGrade removed with the stats trio (2026-04-27).
   // uniqueSets stays — still consumed below in the AI-grade copy line.
   const uniqueSets = stats?.unique_sets ?? 71;
-  const recentCerts = stats?.recent_certs ?? [];
 
   // ── 3D slab showcase data (most recently graded certs) ────────────────────
   const [showcaseItems, setShowcaseItems] = useState<SlabShowcaseItem[]>([]);
@@ -273,6 +272,19 @@ export default function HomeV2() {
         setShowcaseLoaded(true);
       })
       .catch(() => setShowcaseLoaded(true)); // fail silently — hero copy still renders
+  }, []);
+
+  // ── Population Registry data (REAL recently-graded certs only) ─────────────
+  // Sourced from /api/public/recent-graded (same endpoint as the hero), NOT
+  // from homepage-stats — that was serving fabricated cert numbers.
+  const [registryCerts, setRegistryCerts] = useState<
+    { cert_number: string; card_name: string; grade: number; set_name: string | null }[]
+  >([]);
+  useEffect(() => {
+    fetch("/api/public/recent-graded?limit=3")
+      .then((r) => r.json())
+      .then((d) => setRegistryCerts(Array.isArray(d.items) ? d.items : []))
+      .catch(() => {}); // fail silently — section hides itself when empty
   }, []);
 
   return (
@@ -769,7 +781,7 @@ export default function HomeV2() {
             </div>
 
             {/* Ticker strip */}
-            {recentCerts.length > 0 && (
+            {registryCerts.length > 0 && (
               <div
                 className="overflow-hidden mb-10 rounded-lg py-3 px-4"
                 style={{ backgroundColor: "var(--v2-paper-raised)", border: "1px solid var(--v2-line)" }}
@@ -778,7 +790,7 @@ export default function HomeV2() {
                   className="flex items-center gap-6 animate-marquee whitespace-nowrap font-mono-v2 text-[10px]"
                   style={{ color: "var(--v2-ink-mute)" }}
                 >
-                  {[...recentCerts, ...recentCerts].map((cert, i) => (
+                  {[...registryCerts, ...registryCerts].map((cert, i) => (
                     <span key={i} className="flex items-center gap-2">
                       <span style={{ color: "var(--v2-gold)" }}>{cert.cert_number}</span>
                       <span>&middot;</span>
@@ -794,7 +806,7 @@ export default function HomeV2() {
             )}
 
             {/* Mini table */}
-            {recentCerts.length > 0 && (
+            {registryCerts.length > 0 && (
               <div className="rounded-xl overflow-x-auto" style={{ border: "1px solid var(--v2-line)" }}>
                 <table className="w-full text-left">
                   <thead>
@@ -826,11 +838,11 @@ export default function HomeV2() {
                     </tr>
                   </thead>
                   <tbody>
-                    {recentCerts.map((cert, i) => (
+                    {registryCerts.map((cert, i) => (
                       <tr
-                        key={cert.id}
+                        key={cert.cert_number}
                         style={{
-                          borderBottom: i < recentCerts.length - 1 ? "1px solid var(--v2-line-soft)" : undefined,
+                          borderBottom: i < registryCerts.length - 1 ? "1px solid var(--v2-line-soft)" : undefined,
                           backgroundColor: "var(--v2-paper-raised)",
                         }}
                       >
