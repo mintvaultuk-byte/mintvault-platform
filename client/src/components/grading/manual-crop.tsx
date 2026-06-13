@@ -9,6 +9,20 @@ interface Props {
   rawImageUrl: string;
   onDone: () => void;
   onCancel: () => void;
+  /** Panel-owned background crop upload (same per-side cropSync lifecycle the
+   *  8-dot card tool uses). When provided, Apply fires this in the background
+   *  and closes INSTANTLY instead of awaiting /recrop — the panel tracks the
+   *  upload per side, retries on failure, and blocks approval until it lands.
+   *  Absent → the legacy synchronous (await /recrop) path. */
+  onStartCropUpload?: (payload: {
+    side: "front" | "back";
+    left_pct: number;
+    top_pct: number;
+    width_pct: number;
+    height_pct: number;
+    rotation_deg: number;
+    quad: { tl: Point; tr: Point; br: Point; bl: Point };
+  }) => Promise<string | undefined>;
 }
 
 const CORNER_KEYS: (keyof CropQuad)[] = ["tl", "tr", "br", "bl"];
@@ -46,7 +60,7 @@ function pointInQuad(px: number, py: number, q: CropQuad): boolean {
 
 const CORNER_LABELS: Record<keyof CropQuad, string> = { tl: "TL", tr: "TR", br: "BR", bl: "BL" };
 
-export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel }: Props) {
+export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel, onStartCropUpload }: Props) {
   const [quad, setQuad] = useState<CropQuad>({ ...DEFAULT_QUAD });
   const [rotation, setRotation] = useState(0);
   // Natural pixel dimensions of the raw image, captured on load. Needed so the
@@ -200,27 +214,44 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   }, [quad, rotation]);
 
   async function handleApply() {
+    // Compute bounding box + rotation from quad for the backend
+    const bounds = quadBounds(quad);
+    const autoRotation = rotation || quadRotation(quad, imgDims.w, imgDims.h);
+    // Only apply quad-derived rotation if slider is at zero AND quad is visibly skewed
+    const effectiveRotation = Math.abs(rotation) > 0.1 ? rotation : Math.abs(autoRotation) > 0.3 ? autoRotation : 0;
+
+    const payload = {
+      side,
+      left_pct: bounds.left_pct,
+      top_pct: bounds.top_pct,
+      width_pct: bounds.width_pct,
+      height_pct: bounds.height_pct,
+      rotation_deg: effectiveRotation,
+      quad: { tl: quad.tl, tr: quad.tr, br: quad.br, bl: quad.bl },
+    };
+
+    // \u2500\u2500 OPTIMISTIC PATH \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    // Panel owns the upload: fire it in the background and close INSTANTLY. The
+    // panel's per-side cropSync tracks/retries it and blocks approval until it
+    // lands; the viewer refreshes to the new crop when the upload completes.
+    if (onStartCropUpload) {
+      onStartCropUpload(payload); // non-awaited \u2014 runs in the background
+      toast({
+        title: `${side} crop applied \u2014 saving in the background`,
+        description: "You can keep working; approval waits until the crop is saved.",
+      });
+      onDone();
+      return;
+    }
+
+    // \u2500\u2500 LEGACY SYNCHRONOUS PATH (no panel upload owner) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     setSaving(true);
     try {
-      // Compute bounding box + rotation from quad for the backend
-      const bounds = quadBounds(quad);
-      const autoRotation = rotation || quadRotation(quad, imgDims.w, imgDims.h);
-      // Only apply quad-derived rotation if slider is at zero AND quad is visibly skewed
-      const effectiveRotation = Math.abs(rotation) > 0.1 ? rotation : Math.abs(autoRotation) > 0.3 ? autoRotation : 0;
-
       const r = await fetch(`/api/admin/certificates/${certId}/recrop`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          side,
-          left_pct: bounds.left_pct,
-          top_pct: bounds.top_pct,
-          width_pct: bounds.width_pct,
-          height_pct: bounds.height_pct,
-          rotation_deg: effectiveRotation,
-          quad: { tl: quad.tl, tr: quad.tr, br: quad.br, bl: quad.bl },
-        }),
+        body: JSON.stringify(payload),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Recrop failed");

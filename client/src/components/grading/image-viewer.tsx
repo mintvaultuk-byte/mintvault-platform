@@ -76,6 +76,23 @@ interface Props {
   centeringBack?: CenteringOverlayData | null;
   certId?: number;
   onImageDeleted?: () => void;
+  /** Panel-owned background crop upload, threaded to the ManualCrop (perspective
+   *  crop) tool so it uses the same per-side cropSync lifecycle + approval gate
+   *  as the 8-dot card tool instead of blocking on /recrop. */
+  onStartCropUpload?: (payload: {
+    side: "front" | "back";
+    left_pct: number;
+    top_pct: number;
+    width_pct: number;
+    height_pct: number;
+    rotation_deg: number;
+    quad: {
+      tl: { x: number; y: number };
+      tr: { x: number; y: number };
+      br: { x: number; y: number };
+      bl: { x: number; y: number };
+    };
+  }) => Promise<string | undefined>;
   onSideChange?: (side: string) => void;
   onZoomChange?: (zoom: number) => void;
   onModeChange?: (mode: { fullscreen: boolean; markMode: boolean }) => void;
@@ -217,6 +234,7 @@ export default function ImageViewer({
   centeringBack,
   certId,
   onImageDeleted,
+  onStartCropUpload,
   onSideChange,
   onZoomChange,
   onModeChange,
@@ -1614,6 +1632,7 @@ export default function ImageViewer({
               onImageDeleted?.();
             }}
             onCancel={() => setManualCropSide(null)}
+            onStartCropUpload={onStartCropUpload}
           />
         </Suspense>
       )}

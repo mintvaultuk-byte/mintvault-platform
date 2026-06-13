@@ -1715,6 +1715,10 @@ export default function GradingPanel({
                 onImageDeleted={() =>
                   queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })
                 }
+                // Perspective crop tool plugs into the SAME per-side crop-sync
+                // lifecycle as the 8-dot card tool (background upload, retries,
+                // catch-all approval gate). front/back tracked independently.
+                onStartCropUpload={(payload) => runRecrop(payload.side, payload)}
                 onSideChange={setViewerSide}
                 onZoomChange={setViewerZoom}
                 onModeChange={setViewerMode}
