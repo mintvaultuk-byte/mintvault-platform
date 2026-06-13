@@ -389,7 +389,10 @@ export function generatePrintBatchCutSVG(itemCount: number): string {
 
 export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Buffer> {
   const { createCanvas, loadImage } = await import("canvas");
-  const layout = buildLayout(items.length);
+  // Cricut PNG carries ONLY the slab labels (front) + NFC backs — the claim
+  // insert stays on the PDF/SVG paths and is filtered out here. (PDF/SVG
+  // generators are untouched and still composite all three cell kinds.)
+  const layout = buildLayout(items.length).filter((c) => c.kind === "label" || c.kind === "back");
   const { fronts, backs, inserts } = await renderItemBuffers(items);
 
   const widthPx = mmPx(PAGE_W_MM);
