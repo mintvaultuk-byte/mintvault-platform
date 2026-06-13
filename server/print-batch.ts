@@ -65,7 +65,7 @@ const mm = (v: number) => v * MM_TO_PT;
 // DPI to the raw pixel count. So the canvas must be sized at 144 DPI for the
 // print to land at its true mm dimensions on the Cricut mat. At 144 DPI:
 // 165.9mm → 941px, 234.7mm → 1331px (16.59×23.47cm — Print Then Cut max area).
-const DPI = 144;
+const DPI = 300;
 const MM_TO_PX = DPI / 25.4;
 const mmPx = (v: number) => Math.round(v * MM_TO_PX);
 
@@ -165,7 +165,7 @@ const PDF_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF_CONTENT_W_MM) / 2; // 31.13
 // so the Cricut sheet stays untouched even if a caller passes 5.
 export const MAX_CERTS_PER_BATCH = 5;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v5";
+export const SHEET_LAYOUT_VERSION = "v6";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
