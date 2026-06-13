@@ -364,14 +364,28 @@ export default function GradingPanel({
   // PUT is in flight; "saved" after a successful save (cleared after a few seconds);
   // "error" if the save failed. Idle = nothing to indicate.
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
-  // Background card-tool crop upload status. Owned here (not in ManualCardTool)
-  // so the upload + retry survive the tool closing, and so the Approve gate can
-  // block on it. "pending"/"failed" HARD-BLOCK approval — a backgrounded crop
-  // that hasn't persisted to R2 + the DB image path must never finalise a cert.
-  const [cropSyncStatus, setCropSyncStatus] = useState<"idle" | "pending" | "synced" | "failed">("idle");
-  const cropRetryRef = useRef<{ side: "front" | "back"; payload: any } | null>(null);
-  const cropSyncedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cropSyncBlocking = cropSyncStatus === "pending" || cropSyncStatus === "failed";
+  // Background card-tool crop upload status — PER SIDE. Owned here (not in
+  // ManualCardTool) so the upload + retry survive the tool closing, and so the
+  // Approve gate can block on it. "pending"/"failed" HARD-BLOCK approval — a
+  // backgrounded crop that hasn't persisted to R2 + the DB image path must
+  // never finalise a cert. Front and back are tracked independently so an
+  // in-flight back upload can't clobber a still-pending front one (and v.v.).
+  type CropSideSync = { status: "idle" | "pending" | "synced" | "failed"; payload: any | null };
+  const [cropSync, setCropSync] = useState<{ front: CropSideSync; back: CropSideSync }>({
+    front: { status: "idle", payload: null },
+    back: { status: "idle", payload: null },
+  });
+  // One auto-clear timer per side so a front "synced→idle" never cancels back's.
+  const cropSyncedTimerRef = useRef<{
+    front: ReturnType<typeof setTimeout> | null;
+    back: ReturnType<typeof setTimeout> | null;
+  }>({
+    front: null,
+    back: null,
+  });
+  const cropFailedSides = (["front", "back"] as const).filter((s) => cropSync[s].status === "failed");
+  const cropPendingSides = (["front", "back"] as const).filter((s) => cropSync[s].status === "pending");
+  const cropSyncBlocking = cropFailedSides.length > 0 || cropPendingSides.length > 0;
   const [gradeApprovedAt, setGradeApprovedAt] = useState<string | null>(null);
   const [gradeApprovedBy, setGradeApprovedBy] = useState<string | null>(null);
   const [approved, setApproved] = useState(false);
@@ -465,11 +479,9 @@ export default function GradingPanel({
           toast({ title: "Confirm deionization first", description: "Tick 'Deionization complete' before approving." });
           return;
         }
-        if (cropSyncStatus === "pending" || cropSyncStatus === "failed") {
-          toast({
-            title: cropSyncStatus === "failed" ? "Crop upload failed" : "Crop still syncing",
-            description: "Wait for the card crop to finish saving (or retry it) before approving.",
-          });
+        const cropBlock = cropGateBlockToast();
+        if (cropBlock) {
+          toast(cropBlock);
           return;
         }
         setShowConfirm(true);
@@ -1330,12 +1342,13 @@ export default function GradingPanel({
   // final failure it flips the gate to "failed" (blocking approval) and toasts
   // — never a silent failure. Survives the tool closing because it lives here.
   async function runRecrop(side: "front" | "back", payload: any): Promise<string | undefined> {
-    cropRetryRef.current = { side, payload };
-    if (cropSyncedTimerRef.current) {
-      clearTimeout(cropSyncedTimerRef.current);
-      cropSyncedTimerRef.current = null;
+    // Functional updates only — front and back upload loops run concurrently
+    // and must never read/write a stale snapshot of the other side's slot.
+    if (cropSyncedTimerRef.current[side]) {
+      clearTimeout(cropSyncedTimerRef.current[side]!);
+      cropSyncedTimerRef.current[side] = null;
     }
-    setCropSyncStatus("pending");
+    setCropSync((prev) => ({ ...prev, [side]: { status: "pending", payload } }));
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -1347,10 +1360,13 @@ export default function GradingPanel({
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
-        // Persisted to R2 + DB image path. Clear the gate and refresh images.
-        cropRetryRef.current = null;
-        setCropSyncStatus("synced");
-        cropSyncedTimerRef.current = setTimeout(() => setCropSyncStatus("idle"), 2500);
+        // Persisted to R2 + DB image path. Clear THIS side's gate + refresh images.
+        setCropSync((prev) => ({ ...prev, [side]: { status: "synced", payload: null } }));
+        cropSyncedTimerRef.current[side] = setTimeout(() => {
+          setCropSync((prev) =>
+            prev[side].status === "synced" ? { ...prev, [side]: { status: "idle", payload: null } } : prev
+          );
+        }, 2500);
         queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
         return typeof json.displayUrl === "string" ? json.displayUrl : undefined;
       } catch (e: any) {
@@ -1358,7 +1374,8 @@ export default function GradingPanel({
           await new Promise((r) => setTimeout(r, 600 * attempt));
           continue;
         }
-        setCropSyncStatus("failed");
+        // Keep this side's payload so Retry re-sends the CORRECT side's body.
+        setCropSync((prev) => ({ ...prev, [side]: { status: "failed", payload } }));
         toast({
           title: "Crop upload failed — retry",
           description: `${side} crop didn't save to storage. Approval is blocked until it succeeds.`,
@@ -1370,21 +1387,36 @@ export default function GradingPanel({
     return undefined;
   }
 
-  function retryCrop(): Promise<string | undefined> {
-    const last = cropRetryRef.current;
-    if (!last) return Promise.resolve(undefined);
-    return runRecrop(last.side, last.payload);
+  function retryCrop(side: "front" | "back"): Promise<string | undefined> {
+    const slot = cropSync[side];
+    if (!slot.payload) return Promise.resolve(undefined);
+    return runRecrop(side, slot.payload);
+  }
+
+  // Catch-all approval gate message — names which side(s) are failed/pending.
+  // Returns null when nothing blocks. Used by every approve entry point.
+  function cropGateBlockToast(): { title: string; description: string } | null {
+    if (cropFailedSides.length > 0) {
+      return {
+        title: `Crop upload failed — ${cropFailedSides.join(" + ")}`,
+        description: `Retry the ${cropFailedSides.join(" and ")} crop upload before approving.`,
+      };
+    }
+    if (cropPendingSides.length > 0) {
+      return {
+        title: `Crop still syncing — ${cropPendingSides.join(" + ")}`,
+        description: `Wait for the ${cropPendingSides.join(" and ")} crop to finish saving before approving.`,
+      };
+    }
+    return null;
   }
 
   async function approveGrade() {
     // HARD GATE: a backgrounded crop that's still uploading or has failed must
     // never finalise a cert (defects would point at an unpersisted/old image).
-    if (cropSyncStatus === "pending" || cropSyncStatus === "failed") {
-      toast({
-        title: cropSyncStatus === "failed" ? "Crop upload failed" : "Crop still syncing",
-        description: "Wait for the card crop to finish saving (or retry it) before approving.",
-        variant: "destructive",
-      });
+    const block = cropGateBlockToast();
+    if (block) {
+      toast({ ...block, variant: "destructive" });
       return;
     }
     setApproving(true);
@@ -1522,11 +1554,9 @@ export default function GradingPanel({
               });
               return;
             }
-            if (cropSyncStatus === "pending" || cropSyncStatus === "failed") {
-              toast({
-                title: cropSyncStatus === "failed" ? "Crop upload failed" : "Crop still syncing",
-                description: "Wait for the card crop to finish saving (or retry it) before approving.",
-              });
+            const cropBlock = cropGateBlockToast();
+            if (cropBlock) {
+              toast(cropBlock);
               return;
             }
             setShowConfirm(true);
@@ -2579,28 +2609,30 @@ export default function GradingPanel({
                     <span className="text-[var(--admin-red)]">Save failed — retrying on next change</span>
                   )}
                 </span>
-                {cropSyncStatus !== "idle" && (
-                  <span className="flex items-center gap-1.5">
-                    {cropSyncStatus === "pending" && (
-                      <span className="flex items-center gap-1 text-[var(--admin-gold)]">
-                        <Loader2 size={10} className="animate-spin" /> Crop syncing…
-                      </span>
-                    )}
-                    {cropSyncStatus === "synced" && (
-                      <span className="flex items-center gap-1 text-[var(--admin-green)]">
-                        <CheckCircle2 size={10} /> Crop saved
-                      </span>
-                    )}
-                    {cropSyncStatus === "failed" && (
-                      <span className="flex items-center gap-1.5 text-[var(--admin-red)]">
-                        Crop upload failed
-                        <button type="button" onClick={() => retryCrop()} className="underline hover:no-underline">
-                          Retry
-                        </button>
-                      </span>
-                    )}
-                  </span>
-                )}
+                {(["front", "back"] as const)
+                  .filter((s) => cropSync[s].status !== "idle")
+                  .map((s) => (
+                    <span key={s} className="flex items-center gap-1.5">
+                      {cropSync[s].status === "pending" && (
+                        <span className="flex items-center gap-1 text-[var(--admin-gold)]">
+                          <Loader2 size={10} className="animate-spin" /> {s} crop syncing…
+                        </span>
+                      )}
+                      {cropSync[s].status === "synced" && (
+                        <span className="flex items-center gap-1 text-[var(--admin-green)]">
+                          <CheckCircle2 size={10} /> {s} crop saved
+                        </span>
+                      )}
+                      {cropSync[s].status === "failed" && (
+                        <span className="flex items-center gap-1.5 text-[var(--admin-red)]">
+                          {s} crop upload failed
+                          <button type="button" onClick={() => retryCrop(s)} className="underline hover:no-underline">
+                            Retry
+                          </button>
+                        </span>
+                      )}
+                    </span>
+                  ))}
                 {gradeApprovedAt && <span className="text-[var(--admin-green)]">✓ Live</span>}
               </div>
               {!approved ? (
@@ -2618,10 +2650,10 @@ export default function GradingPanel({
                       ? "Set all four subgrades first"
                       : !deionizationComplete
                         ? "Tick 'Deionization complete' before approving"
-                        : cropSyncStatus === "pending"
-                          ? "Card crop is still saving to storage — wait for it to finish"
-                          : cropSyncStatus === "failed"
-                            ? "Card crop failed to save — retry it before approving"
+                        : cropFailedSides.length > 0
+                          ? `${cropFailedSides.join(" + ")} crop failed to save — retry before approving`
+                          : cropPendingSides.length > 0
+                            ? `${cropPendingSides.join(" + ")} crop still saving to storage — wait for it to finish`
                             : "Approve and publish — cert goes live and PDF becomes available at the public URL"
                   }
                   data-testid="btn-approve-publish"
@@ -2632,10 +2664,10 @@ export default function GradingPanel({
                     ? "Set subgrades first"
                     : !deionizationComplete
                       ? "Confirm deionization first"
-                      : cropSyncStatus === "pending"
-                        ? "Crop syncing…"
-                        : cropSyncStatus === "failed"
-                          ? "Crop failed — retry"
+                      : cropFailedSides.length > 0
+                        ? "Crop failed — retry"
+                        : cropPendingSides.length > 0
+                          ? "Crop syncing…"
                           : "Approve & Publish"}
                 </button>
               ) : (
@@ -2746,11 +2778,29 @@ export default function GradingPanel({
           }}
           onCancel={() => setManualCardToolSide(null)}
           // Background crop upload owned by the panel so it survives this tool
-          // closing and gates the Approve button. The captured `side` is bound
-          // here so the panel tracks which side's crop is in flight.
+          // closing and gates the Approve button. Tracked PER SIDE so a back
+          // upload can't clobber a still-pending front one.
           onStartCropUpload={(payload) => runRecrop(payload.side, payload)}
-          cropSyncStatus={cropSyncStatus}
-          onRetryCrop={retryCrop}
+          cropSyncStatus={cropSync[manualCardToolSide].status}
+          onRetryCrop={() => retryCrop(manualCardToolSide)}
+          // Skip centering when this side ALREADY has a crop image: open straight
+          // to defect-marking on the existing crop. GATE ON CROP PRESENCE, not
+          // centering-done — a legacy side can have centering ratios but no crop
+          // image, where opening defects on the raw would misalign pins.
+          initialPhase={
+            (
+              manualCardToolSide === "front"
+                ? urls.front_display || urls.front_cropped
+                : urls.back_display || urls.back_cropped
+            )
+              ? "defects"
+              : "capture"
+          }
+          existingCroppedUrl={
+            (manualCardToolSide === "front"
+              ? urls.front_display || urls.front_cropped
+              : urls.back_display || urls.back_cropped) || undefined
+          }
         />
       )}
 

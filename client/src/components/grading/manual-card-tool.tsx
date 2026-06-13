@@ -70,10 +70,18 @@ interface Props {
    *  phase INSTANTLY against a local crop preview while this runs in the
    *  background. Absent → the legacy synchronous (await /recrop) path. */
   onStartCropUpload?: (payload: RecropPayload) => Promise<string | undefined>;
-  /** Panel-owned crop-sync status, surfaced as a chip in the defects banner. */
+  /** Panel-owned crop-sync status for THIS side, surfaced as a chip in the
+   *  defects banner. */
   cropSyncStatus?: "idle" | "pending" | "synced" | "failed";
-  /** Re-runs the last failed crop upload; resolves the display URL on success. */
+  /** Re-runs THIS side's failed crop upload; resolves the display URL on success. */
   onRetryCrop?: () => Promise<string | undefined>;
+  /** Phase to open in. "defects" jumps straight to defect-marking on an
+   *  existing crop (centering already saved + crop image present), skipping the
+   *  8-dot capture. Defaults to "capture". */
+  initialPhase?: "capture" | "defects";
+  /** When opening directly in "defects", the already-cropped display image URL
+   *  to load as the defects-phase <img> (no /recrop re-run needed). */
+  existingCroppedUrl?: string;
 }
 
 /** Body of POST /api/admin/certificates/:id/recrop. */
@@ -242,6 +250,8 @@ export default function ManualCardTool({
   onStartCropUpload,
   cropSyncStatus = "idle",
   onRetryCrop,
+  initialPhase = "capture",
+  existingCroppedUrl,
 }: Props) {
   const [mode, setMode] = useState<CardToolMode>("full");
   const [outerPts, setOuterPts] = useState<Point[]>([]);
@@ -266,11 +276,16 @@ export default function ManualCardTool({
   // — the crop and centering are already durably saved by handleCompute.
   // No `onDefectAdded` prop → phase stays "capture" forever and the tool
   // closes on Compute as it did pre-merge.
-  const [phase, setPhase] = useState<"capture" | "defects">("capture");
+  // Opens in `initialPhase`: "defects" when the panel knows this side already
+  // has a crop (skip the 8-dot capture entirely), else "capture".
+  const [phase, setPhase] = useState<"capture" | "defects">(initialPhase);
   // After Compute: the cache-busted signed URL of the freshly-cropped display
   // image, returned by /recrop's response. Becomes the <img src> for the
   // defects phase so the operator marks pins on the new crop (not the raw).
-  const [croppedDisplayUrl, setCroppedDisplayUrl] = useState<string | null>(null);
+  // When opening directly in defects, seeded from the existing crop URL.
+  const [croppedDisplayUrl, setCroppedDisplayUrl] = useState<string | null>(
+    initialPhase === "defects" && existingCroppedUrl ? existingCroppedUrl : null
+  );
   // Optimistic local crop preview shown the instant Compute fires, while the
   // real crop uploads to R2 in the background. Geometry mirrors the server's
   // rotate(deskew)+rectangular-extract exactly (in natural pixels) so defect
@@ -316,7 +331,12 @@ export default function ManualCardTool({
   // updated defects don't flow back into the overlay (the panel is hidden
   // beneath this fixed-inset overlay), so without it the operator would not
   // see pins they just committed. Seeded from props.existingDefects.
-  const [committedDefects, setCommittedDefects] = useState<Defect[]>([]);
+  // Seeded immediately when opening directly in defects so prior pins for this
+  // side are visible without a Compute (handleCompute seeds it on the normal
+  // capture→defects path).
+  const [committedDefects, setCommittedDefects] = useState<Defect[]>(
+    initialPhase === "defects" ? (existingDefects ?? []).filter((d) => d.image_side === side) : []
+  );
   const lastDefectClickAtRef = useRef<number>(0);
   // Cursor position in % while hovering the image in placement mode; drives the
   // live targeting reticle. Null when not hovering / not placing.
@@ -1195,15 +1215,34 @@ export default function ManualCardTool({
             <Undo2 size={13} /> Undo
           </button>
         ) : (
-          <button
-            type="button"
-            onClick={() => setDefectBatch([])}
-            disabled={defectBatch.length === 0}
-            title="Clear pending pins (Esc)"
-            className="flex-shrink-0 flex items-center gap-1 border border-[var(--admin-line)] text-[var(--admin-ink-dim)] text-[11px] sm:text-xs px-2.5 py-1.5 rounded-lg hover:bg-[var(--admin-panel3)] hover:text-[var(--admin-ink)] disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Undo2 size={13} /> Clear pins
-          </button>
+          <div className="flex-shrink-0 flex items-center gap-2">
+            {/* Escape hatch — re-place the 8 dots and re-Compute centering/crop
+                for this side. Available throughout the defects phase (e.g. when
+                opened straight to defects on an existing crop). */}
+            <button
+              type="button"
+              onClick={() => {
+                setPhase("capture");
+                setLocalPreview(null);
+                setDefectBatch([]);
+                setHover(null);
+                setDrag(null);
+              }}
+              title="Re-do centering — place the 8 dots and Compute again"
+              className="flex items-center gap-1 border border-[var(--admin-line)] text-[var(--admin-ink-dim)] text-[11px] sm:text-xs px-2.5 py-1.5 rounded-lg hover:bg-[var(--admin-panel3)] hover:text-[var(--admin-ink)]"
+            >
+              <Crop size={13} /> Redo centering
+            </button>
+            <button
+              type="button"
+              onClick={() => setDefectBatch([])}
+              disabled={defectBatch.length === 0}
+              title="Clear pending pins (Esc)"
+              className="flex items-center gap-1 border border-[var(--admin-line)] text-[var(--admin-ink-dim)] text-[11px] sm:text-xs px-2.5 py-1.5 rounded-lg hover:bg-[var(--admin-panel3)] hover:text-[var(--admin-ink)] disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Undo2 size={13} /> Clear pins
+            </button>
+          </div>
         )}
       </div>
 
