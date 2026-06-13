@@ -165,7 +165,7 @@ const PDF_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF_CONTENT_W_MM) / 2; // 31.13
 // so the Cricut sheet stays untouched even if a caller passes 5.
 export const MAX_CERTS_PER_BATCH = 5;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v4";
+export const SHEET_LAYOUT_VERSION = "v5";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
