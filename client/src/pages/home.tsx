@@ -336,7 +336,7 @@ export default function HomeV2() {
           >
             AI-powered precision grading with NFC-linked certification. Every grade logged, every slab traceable.
           </p>
-          <div className="flex flex-wrap items-center gap-4 mb-5">
+          <div className="flex flex-wrap items-center gap-4 mb-8 md:mb-10">
             <Link href="/submit" className="no-underline">
               <GradientButton height="44px" className="gradient-btn-filled">
                 Submit a card <ArrowRight size={14} />
@@ -349,7 +349,7 @@ export default function HomeV2() {
             </Link>
           </div>
           <p
-            className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider"
+            className="font-mono-v2 text-xs md:text-sm uppercase tracking-wider mt-2"
             style={{ color: "var(--v2-ink-mute)" }}
           >
             From &pound;19 &middot; 40 day turnaround &middot; UK return shipping insured
