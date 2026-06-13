@@ -2087,6 +2087,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Grade distribution for the public Population Registry chart.
+  app.get("/api/public/grade-distribution", showcaseRateLimit, async (_req, res) => {
+    try {
+      const { getGradeDistribution } = await import("./slab-showcase");
+      const data = await getGradeDistribution();
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.json(data);
+    } catch (err: any) {
+      console.error("[grade-distribution] endpoint error:", err?.message || err);
+      res.setHeader("Cache-Control", "public, max-age=30");
+      res.json({ distribution: [], total: 0 });
+    }
+  });
+
   // ── Slab showcase image proxy ──────────────────────────────────────────────
   // The browser canvas can't consume R2 signed URLs cross-origin (no CORS
   // headers on the bucket), so the showcase loads images through this

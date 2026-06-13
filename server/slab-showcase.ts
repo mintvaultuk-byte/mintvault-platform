@@ -120,6 +120,49 @@ export async function getRecentGradedItems(limit = 8): Promise<RecentGradedItem[
     .filter((r) => Number.isFinite(r.grade));
 }
 
+export interface GradeDistribution {
+  distribution: { grade: number; count: number }[];
+  total: number;
+}
+
+/**
+ * Grade distribution for the public Population Registry chart. Counts active,
+ * non-voided, numerically-graded certs grouped by grade. Whole grades 1–10 are
+ * always present (count 0 if none) so the axis stays complete; half grades
+ * (e.g. 7.5/8.5/9.5) appear ONLY when real certs exist at them. No fabrication.
+ */
+export async function getGradeDistribution(): Promise<GradeDistribution> {
+  const rows = (
+    await db.execute(sql`
+      SELECT grade::numeric AS g, COUNT(*)::int AS count
+      FROM certificates
+      WHERE deleted_at IS NULL
+        AND status = 'active'
+        AND grade IS NOT NULL
+        AND grade_type = 'numeric'
+      GROUP BY grade::numeric
+    `)
+  ).rows as any[];
+
+  const counts = new Map<number, number>();
+  for (const row of rows) {
+    const grade = parseFloat(String(row.g));
+    const count = Number(row.count) || 0;
+    if (Number.isFinite(grade) && grade >= 1 && grade <= 10) {
+      counts.set(grade, (counts.get(grade) ?? 0) + count);
+    }
+  }
+
+  const grades = new Set<number>();
+  for (let g = 1; g <= 10; g++) grades.add(g); // whole grades always present
+  for (const g of counts.keys()) if (!Number.isInteger(g)) grades.add(g); // real half grades only
+
+  const distribution = [...grades].sort((a, b) => a - b).map((grade) => ({ grade, count: counts.get(grade) ?? 0 }));
+
+  const total = distribution.reduce((sum, d) => sum + d.count, 0);
+  return { distribution, total };
+}
+
 export async function getSlabShowcaseItems(limit = 8): Promise<SlabShowcaseItem[]> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.items;
 

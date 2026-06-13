@@ -10,6 +10,7 @@ import FooterV2 from "@/components/v2/footer-v2";
 import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
 import GradientButton from "@/components/ui/gradient-button";
+import GradeDistributionChart from "@/components/v2/grade-distribution-chart";
 import { pricingTiers } from "@shared/schema";
 import type { SlabShowcaseItem } from "@/components/SlabShowcase";
 
@@ -770,6 +771,9 @@ export default function HomeV2() {
                 Collectors deserve to see the market they trade in.
               </p>
             </div>
+
+            {/* Grade distribution chart — real live data; hides itself when empty */}
+            <GradeDistributionChart />
 
             {/* Ticker strip */}
             {registryCerts.length > 0 && (
