@@ -93,6 +93,32 @@ const INSERT_H_MM = 54;
 const ROW_H_MM = INSERT_H_MM;
 const ROW_PITCH_MM = ROW_H_MM + GAP_MM;
 
+// ── Cricut PNG 5-up layout (slab labels + NFC backs only, NO claim insert) ───
+// The Cricut PNG drops the claim insert, so each row only needs the slab pair
+// (front + 4mm gap + back = 44mm) — not the insert-driven 54mm row. That frees
+// enough vertical room to fit 5 certs in PNG_PAGE_H_MM (234.7mm), where the old
+// 58mm pitch capped the sheet at 4. Vertical sum: 2 (top) + 5×44 + 4×2.5 = 232mm,
+// leaving 2.7mm bottom spare for Cricut's registration marks. The SVG + PDF
+// paths use their own builders and are unaffected.
+const CRICUT_PNG_ROW_COUNT = 5;
+const CRICUT_PNG_SLAB_PAIR_H_MM = LABEL_H_MM + GAP_MM + LABEL_H_MM; // 44
+const CRICUT_PNG_INTER_ROW_GAP_MM = 2.5;
+const CRICUT_PNG_ROW_PITCH_MM = CRICUT_PNG_SLAB_PAIR_H_MM + CRICUT_PNG_INTER_ROW_GAP_MM; // 46.5
+
+// Static assertion — the 5-up Cricut PNG column MUST fit within PNG_PAGE_H_MM.
+// Throws at import time if a constant edit breaks the fit (mirrors the PDF guard).
+{
+  const vSum =
+    MARGIN_MM +
+    CRICUT_PNG_ROW_COUNT * CRICUT_PNG_SLAB_PAIR_H_MM +
+    (CRICUT_PNG_ROW_COUNT - 1) * CRICUT_PNG_INTER_ROW_GAP_MM;
+  if (vSum > PNG_PAGE_H_MM) {
+    throw new Error(
+      `print-batch.ts: Cricut PNG ${CRICUT_PNG_ROW_COUNT}-up layout sums to ${vSum}mm, exceeds ${PNG_PAGE_H_MM}mm`
+    );
+  }
+}
+
 // ── Layout (mm) — Guillotine PDF (A4, 5 rows, spread for cutting) ────────────
 // Replaces the Cricut-tight 2mm margin + 4mm gap layout with a full-A4 page
 // that puts a clear guillotine lane between every label. Top/bottom margins
@@ -200,6 +226,39 @@ function buildLayout(itemCount: number): CellSpec[] {
       yMm: rowTopY,
       wMm: INSERT_W_MM,
       hMm: INSERT_H_MM,
+    });
+  }
+  return cells;
+}
+
+// Cricut PNG layout — 5-up, slab labels (front) + NFC backs ONLY, no claim
+// insert. Deliberately NOT buildLayout(): that builder is shared with the 4-up
+// SVG cut path, which must stay untouched. This own builder caps at 5 and uses
+// the reduced CRICUT_PNG_ROW_PITCH_MM (46.5mm) so 5 slab pairs fit the Cricut
+// canvas height. Left-column label + back structure is identical to buildLayout;
+// only the insert column and the row cap/pitch differ.
+function buildCricutPNGLayout(itemCount: number): CellSpec[] {
+  const n = Math.max(1, Math.min(CRICUT_PNG_ROW_COUNT, itemCount | 0));
+  const cells: CellSpec[] = [];
+  for (let i = 0; i < n; i++) {
+    const rowTopY = MARGIN_MM + i * CRICUT_PNG_ROW_PITCH_MM;
+    // Front label — left column, top-aligned.
+    cells.push({
+      kind: "label",
+      itemIndex: i,
+      xMm: MARGIN_MM,
+      yMm: rowTopY,
+      wMm: LABEL_W_MM,
+      hMm: LABEL_H_MM,
+    });
+    // Back label (NFC chip + QR) — left column, stacked below the front.
+    cells.push({
+      kind: "back",
+      itemIndex: i,
+      xMm: MARGIN_MM,
+      yMm: rowTopY + LABEL_H_MM + GAP_MM,
+      wMm: LABEL_W_MM,
+      hMm: LABEL_H_MM,
     });
   }
   return cells;
@@ -389,10 +448,9 @@ export function generatePrintBatchCutSVG(itemCount: number): string {
 
 export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Buffer> {
   const { createCanvas, loadImage } = await import("canvas");
-  // Cricut PNG carries ONLY the slab labels (front) + NFC backs — the claim
-  // insert stays on the PDF/SVG paths and is filtered out here. (PDF/SVG
-  // generators are untouched and still composite all three cell kinds.)
-  const layout = buildLayout(items.length).filter((c) => c.kind === "label" || c.kind === "back");
+  // Cricut PNG uses its OWN 5-up layout (slab labels + NFC backs, no insert).
+  // Not buildLayout() — that's shared with the 4-up SVG and must stay untouched.
+  const layout = buildCricutPNGLayout(items.length);
   const { fronts, backs, inserts } = await renderItemBuffers(items);
 
   const widthPx = mmPx(PAGE_W_MM);
