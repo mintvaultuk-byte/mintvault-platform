@@ -10,6 +10,7 @@ import FooterV2 from "@/components/v2/footer-v2";
 import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
 import GradientButton from "@/components/ui/gradient-button";
+import CardPopulationChart from "@/components/v2/card-population-chart";
 import { pricingTiers } from "@shared/schema";
 import type { SlabShowcaseItem } from "@/components/SlabShowcase";
 
@@ -277,6 +278,34 @@ export default function HomeV2() {
       .then((d) => setRegistryCerts(Array.isArray(d.items) ? d.items : []))
       .catch(() => {}); // fail silently — section hides itself when empty
   }, []);
+
+  // ── Search-gated per-card population lookup ────────────────────────────────
+  // Nothing aggregate shows by default; data appears only after an explicit
+  // search for a specific card via /api/public/population.
+  type PopResult = {
+    card: string;
+    set: string | null;
+    distribution: { grade: number; count: number }[];
+    total: number;
+  };
+  const [searchCard, setSearchCard] = useState("");
+  const [searchSet, setSearchSet] = useState("");
+  const [popSearching, setPopSearching] = useState(false);
+  const [popResult, setPopResult] = useState<PopResult | null>(null);
+
+  const runPopulationSearch = (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const card = searchCard.trim();
+    if (!card || popSearching) return;
+    setPopSearching(true);
+    const params = new URLSearchParams({ card });
+    if (searchSet.trim()) params.set("set", searchSet.trim());
+    fetch(`/api/public/population?${params.toString()}`)
+      .then((r) => r.json())
+      .then((d: PopResult) => setPopResult(d))
+      .catch(() => setPopResult({ card, set: searchSet.trim() || null, distribution: [], total: 0 }))
+      .finally(() => setPopSearching(false));
+  };
 
   return (
     <div className="min-h-screen flex flex-col relative vault-page">
@@ -770,6 +799,69 @@ export default function HomeV2() {
                 Collectors deserve to see the market they trade in.
               </p>
             </div>
+
+            {/* Search-gated card population lookup — no aggregate data until a
+                collector searches for a specific card. */}
+            <form onSubmit={runPopulationSearch} className="flex flex-col sm:flex-row gap-3 mb-6">
+              <input
+                type="text"
+                value={searchCard}
+                onChange={(e) => setSearchCard(e.target.value)}
+                placeholder="Card name"
+                aria-label="Card name"
+                className="flex-1 rounded-lg px-4 py-2.5 font-body text-sm outline-none focus:border-[#D4AF37] transition-colors"
+                style={{
+                  backgroundColor: "var(--v2-paper-raised)",
+                  border: "1px solid var(--v2-line)",
+                  color: "var(--v2-ink)",
+                }}
+              />
+              <input
+                type="text"
+                value={searchSet}
+                onChange={(e) => setSearchSet(e.target.value)}
+                placeholder="Set (optional)"
+                aria-label="Set"
+                className="flex-1 rounded-lg px-4 py-2.5 font-body text-sm outline-none focus:border-[#D4AF37] transition-colors"
+                style={{
+                  backgroundColor: "var(--v2-paper-raised)",
+                  border: "1px solid var(--v2-line)",
+                  color: "var(--v2-ink)",
+                }}
+              />
+              <GradientButton
+                as="button"
+                type="submit"
+                className="gradient-btn-filled"
+                disabled={popSearching || !searchCard.trim()}
+              >
+                {popSearching ? "Searching…" : "Search population"}
+              </GradientButton>
+            </form>
+
+            {/* Per-card result — only after a search has run */}
+            {popResult &&
+              (popResult.total > 0 ? (
+                <div className="mb-10">
+                  <CardPopulationChart
+                    cardName={popResult.card}
+                    setName={popResult.set}
+                    distribution={popResult.distribution}
+                    total={popResult.total}
+                  />
+                </div>
+              ) : (
+                <div
+                  className="mb-10 rounded-xl px-6 py-8 text-center font-body text-sm"
+                  style={{
+                    backgroundColor: "var(--v2-paper-raised)",
+                    border: "1px solid var(--v2-line)",
+                    color: "var(--v2-ink-soft)",
+                  }}
+                >
+                  No certs graded for this card yet.
+                </div>
+              ))}
 
             {/* Ticker strip */}
             {registryCerts.length > 0 && (

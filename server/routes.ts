@@ -2101,6 +2101,27 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Per-card population lookup (search-gated). Returns grade distribution +
+  // total for ONE card (+ optional set) only — never a global aggregate.
+  app.get("/api/public/population", showcaseRateLimit, async (req, res) => {
+    try {
+      const card = String(req.query.card ?? "").slice(0, 120);
+      const set = String(req.query.set ?? "").slice(0, 120);
+      if (!card.trim()) {
+        res.json({ card: "", set: set.trim() || null, distribution: [], total: 0 });
+        return;
+      }
+      const { getCardPopulation } = await import("./slab-showcase");
+      const data = await getCardPopulation(card, set);
+      res.setHeader("Cache-Control", "public, max-age=60");
+      res.json(data);
+    } catch (err: any) {
+      console.error("[population] endpoint error:", err?.message || err);
+      res.setHeader("Cache-Control", "public, max-age=30");
+      res.json({ card: "", set: null, distribution: [], total: 0 });
+    }
+  });
+
   // ── Slab showcase image proxy ──────────────────────────────────────────────
   // The browser canvas can't consume R2 signed URLs cross-origin (no CORS
   // headers on the bucket), so the showcase loads images through this

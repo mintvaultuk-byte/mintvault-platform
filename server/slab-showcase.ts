@@ -163,6 +163,61 @@ export async function getGradeDistribution(): Promise<GradeDistribution> {
   return { distribution, total };
 }
 
+export interface CardPopulation {
+  card: string;
+  set: string | null;
+  distribution: { grade: number; count: number }[];
+  total: number;
+}
+
+/** Build a 1–10 axis (zeros kept) plus any real half grades, ascending. */
+function buildDistribution(counts: Map<number, number>): { grade: number; count: number }[] {
+  const grades = new Set<number>();
+  for (let g = 1; g <= 10; g++) grades.add(g); // whole grades always present
+  for (const g of counts.keys()) if (!Number.isInteger(g)) grades.add(g); // real half grades only
+  return [...grades].sort((a, b) => a - b).map((grade) => ({ grade, count: counts.get(grade) ?? 0 }));
+}
+
+/**
+ * Grade distribution for ONE specific card (+ optional set). Counts active,
+ * non-voided, numerically-graded certs whose card_name matches (case-insensitive,
+ * trimmed); when set is given, set_name must match too. Real data only — returns
+ * total 0 / empty axis when nothing matches. Never reveals a global aggregate.
+ */
+export async function getCardPopulation(card: string, set?: string): Promise<CardPopulation> {
+  const cardTrim = (card || "").trim();
+  const setTrim = (set || "").trim();
+  if (!cardTrim) return { card: cardTrim, set: setTrim || null, distribution: [], total: 0 };
+
+  const rows = (
+    await db.execute(sql`
+      SELECT grade::numeric AS g, COUNT(*)::int AS count
+      FROM certificates
+      WHERE deleted_at IS NULL
+        AND status = 'active'
+        AND grade IS NOT NULL
+        AND grade_type = 'numeric'
+        AND LOWER(TRIM(card_name)) = LOWER(${cardTrim})
+        ${setTrim ? sql`AND LOWER(TRIM(set_name)) = LOWER(${setTrim})` : sql``}
+      GROUP BY grade::numeric
+    `)
+  ).rows as any[];
+
+  const counts = new Map<number, number>();
+  for (const row of rows) {
+    const grade = parseFloat(String(row.g));
+    const count = Number(row.count) || 0;
+    if (Number.isFinite(grade) && grade >= 1 && grade <= 10) {
+      counts.set(grade, (counts.get(grade) ?? 0) + count);
+    }
+  }
+
+  const total = [...counts.values()].reduce((s, c) => s + c, 0);
+  // Empty axis when nothing matched — caller shows the "no certs" message.
+  const distribution = total > 0 ? buildDistribution(counts) : [];
+  return { card: cardTrim, set: setTrim || null, distribution, total };
+}
+
 export async function getSlabShowcaseItems(limit = 8): Promise<SlabShowcaseItem[]> {
   if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.items;
 
