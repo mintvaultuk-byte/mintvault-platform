@@ -75,10 +75,10 @@ const mmPx = (v: number) => Math.round(v * MM_TO_PX);
 // still emitted for downstream tooling and must be byte-identical for ≤4-cert
 // inputs. PDF moves to FULL A4 (210×297mm) because it's no longer cut on the
 // Cricut, so the 165.9mm safe-area constraint no longer applies to this path.
-const PAGE_W_MM = 165.9;
+const PAGE_W_MM = 164.5;
 const PDF_PAGE_W_MM = 210; // full A4 — guillotine PDF only
 const PDF_PAGE_H_MM = 297;
-const PNG_PAGE_H_MM = 234.7;
+const PNG_PAGE_H_MM = 233.0;
 
 // ── Layout (mm) — PNG + SVG (Cricut) ─────────────────────────────────────────
 // MARGIN_MM dropped from 10 → 2 because Cricut's 165.9mm width minus row
@@ -173,7 +173,7 @@ const PDF_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF_CONTENT_W_MM) / 2; // 31.13
 // so the Cricut sheet stays untouched even if a caller passes 5.
 export const MAX_CERTS_PER_BATCH = 5;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v10";
+export const SHEET_LAYOUT_VERSION = "v11";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
