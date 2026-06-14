@@ -835,7 +835,7 @@ async function drawFront(
   // would override the requested weight.
   const TXT_FAMILY = "Arial, Helvetica, sans-serif";
   const TXT_WEIGHT = "600"; // was "700" — lighter title per print pass
-  const TARGET_SIZE = 34; // was 40 — ~15% reduction
+  const TARGET_SIZE = 48; // was 34 — raised so short-name lines grow to fill the 116px text zone
   const MIN_SIZE = 20; // was 24 — ~15% reduction
   const MIN_GAP_FACTOR = 0.1;
 
