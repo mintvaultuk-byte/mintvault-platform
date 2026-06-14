@@ -69,6 +69,12 @@ const DPI = 350;
 const MM_TO_PX = DPI / 25.4;
 const mmPx = (v: number) => Math.round(v * MM_TO_PX);
 
+// High-quality print PNG DPI — separate from the Cricut-sizing DPI above. Used
+// only by generatePrintBatchPrintPNG (165.9mm → 2613px, 234.7mm → 3697px).
+const PRINT_DPI = 400;
+const PRINT_MM_TO_PX = PRINT_DPI / 25.4;
+const printMmPx = (v: number) => Math.round(v * PRINT_MM_TO_PX);
+
 // ── Page dimensions ──────────────────────────────────────────────────────────
 // PNG + SVG (Cricut Explore 4 Print Then Cut max area, 165.9×234.7mm) keep
 // their existing dimensions — guillotine-only now, but the Cricut output is
@@ -177,7 +183,7 @@ const PDF_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF_CONTENT_W_MM) / 2; // 31.13
 // so the Cricut sheet stays untouched even if a caller passes 5.
 export const MAX_CERTS_PER_BATCH = 5;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v13";
+export const SHEET_LAYOUT_VERSION = "v14";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
@@ -531,6 +537,37 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
   return sharp(rawBuffer).withMetadata({ density: DPI }).toBuffer();
 }
 
+// High-quality PRINT PNG — same layout/cells as generatePrintBatchPNG but
+// rendered at PRINT_DPI (400) for crisp home/photo printing, NOT for Cricut
+// sizing. Canvas: 165.9mm → 2613px, 234.7mm → 3697px. pHYs density = 400 DPI.
+export async function generatePrintBatchPrintPNG(items: PrintBatchItem[]): Promise<Buffer> {
+  const { createCanvas, loadImage } = await import("canvas");
+  const layout = buildCricutPNGLayout(items.length);
+  const { fronts, backs, inserts } = await renderItemBuffers(items);
+
+  const widthPx = printMmPx(PAGE_W_MM);
+  const heightPx = printMmPx(PNG_PAGE_H_MM);
+
+  const canvas = createCanvas(widthPx, heightPx);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, widthPx, heightPx);
+
+  for (const cell of layout) {
+    const buf =
+      cell.kind === "label"
+        ? fronts[cell.itemIndex]
+        : cell.kind === "back"
+          ? backs[cell.itemIndex]
+          : inserts[cell.itemIndex];
+    const img = await loadImage(buf);
+    ctx.drawImage(img, printMmPx(cell.xMm), printMmPx(cell.yMm), printMmPx(cell.wMm), printMmPx(cell.hMm));
+  }
+
+  const rawBuffer = canvas.toBuffer("image/png");
+  return sharp(rawBuffer).withMetadata({ density: PRINT_DPI }).toBuffer();
+}
+
 // ── Deterministic batch ID for idempotency ───────────────────────────────────
 //
 // Hash sorted certIds + admin user + UTC day. Two clicks within the same
@@ -565,14 +602,24 @@ export async function generatePrintBatchPNG(items: PrintBatchItem[]): Promise<Bu
 // stale older-layout PDF for the same batchId. Same dance the PNG history did
 // inline historically (-v2 / -v3 / -v6) — now centralised so the version
 // flows from one constant to every read+write site.
-export function r2KeyForPrintBatch(batchId: string, ext: "pdf" | "png"): string {
+export function r2KeyForPrintBatch(batchId: string, ext: "pdf" | "png" | "print-png"): string {
+  // "print-png" → the 400-DPI print variant at a distinct -print.png suffix;
+  // "pdf"/"png" keep their existing {batchId}-{VERSION}.{ext} form.
+  if (ext === "print-png") return `print-batches/${batchId}-${SHEET_LAYOUT_VERSION}-print.png`;
   return `print-batches/${batchId}-${SHEET_LAYOUT_VERSION}.${ext}`;
 }
 
-export async function uploadPrintBatchArtifacts(batchId: string, pdfBuf: Buffer, pngBuf: Buffer): Promise<void> {
+export async function uploadPrintBatchArtifacts(
+  batchId: string,
+  pdfBuf: Buffer,
+  pngBuf: Buffer,
+  printPngBuf?: Buffer
+): Promise<void> {
   await Promise.all([
     uploadToR2(r2KeyForPrintBatch(batchId, "pdf"), pdfBuf, "application/pdf"),
     uploadToR2(r2KeyForPrintBatch(batchId, "png"), pngBuf, "image/png"),
+    // 400-DPI print variant — only when the caller supplies it (main handler).
+    ...(printPngBuf ? [uploadToR2(r2KeyForPrintBatch(batchId, "print-png"), printPngBuf, "image/png")] : []),
   ]);
 }
 

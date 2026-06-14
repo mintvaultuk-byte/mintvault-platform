@@ -6201,6 +6201,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         generatePrintBatchPDF,
         generatePrintBatchCutSVG,
         generatePrintBatchPNG,
+        generatePrintBatchPrintPNG,
         generateCricutSVG,
         deriveBatchId,
         uploadPrintBatchArtifacts,
@@ -6286,6 +6287,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           return res.json({
             pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
             pngUrl: `/api/admin/print-batch/${batchId}/png`,
+            printPngUrl: `/api/admin/print-batch/${batchId}/print-png`,
             cricutSvgUrl: `/api/admin/print-batch/${batchId}/cricut-cut.svg`,
             svg: Buffer.from(svgStr, "utf8").toString("base64"),
             batchId,
@@ -6299,16 +6301,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         console.log(`[print-batch] duplicate batchId ${batchId} but R2 artefact missing — regenerating`);
       }
 
-      const [pdfBuf, svgStr, pngBuf] = await Promise.all([
+      const [pdfBuf, svgStr, pngBuf, printPngBuf] = await Promise.all([
         generatePrintBatchPDF(items),
         Promise.resolve(generatePrintBatchCutSVG(items.length)),
         generatePrintBatchPNG(items),
+        generatePrintBatchPrintPNG(items),
       ]);
 
-      // Persist PDF + PNG to R2 so the client can retrieve them via stable
-      // server URLs instead of expiring blob URLs. SVG stays inline as base64.
+      // Persist PDF + PNG (+ 400-DPI print PNG) to R2 so the client can retrieve
+      // them via stable server URLs instead of expiring blob URLs. SVG inline.
       try {
-        await uploadPrintBatchArtifacts(batchId, pdfBuf, pngBuf);
+        await uploadPrintBatchArtifacts(batchId, pdfBuf, pngBuf, printPngBuf);
       } catch (uploadErr: any) {
         console.error("[print-batch] R2 upload failed:", uploadErr.message);
         return res.status(500).json({ error: "Failed to store print batch artefacts" });
@@ -6387,6 +6390,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({
         pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
         pngUrl: `/api/admin/print-batch/${batchId}/png`,
+        printPngUrl: `/api/admin/print-batch/${batchId}/print-png`,
         cricutSvgUrl: `/api/admin/print-batch/${batchId}/cricut-cut.svg`,
         svg: Buffer.from(svgStr, "utf8").toString("base64"),
         batchId,
@@ -6645,6 +6649,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err: any) {
       console.error("[print-batch/png] error:", err.message);
       res.status(500).json({ error: "Failed to fetch print batch PNG" });
+    }
+  });
+
+  // 400-DPI print PNG — same R2-stream pattern as /png, distinct -print.png key.
+  app.get("/api/admin/print-batch/:batchId/print-png", requireAdmin, async (req, res) => {
+    try {
+      const batchId = String(req.params.batchId);
+      const { r2KeyForPrintBatch } = await import("./print-batch");
+      const key = r2KeyForPrintBatch(batchId, "print-png");
+      const head = await headR2(key);
+      if (!head) return res.status(404).json({ error: "Print batch print PNG not found" });
+      const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+      const { getR2Client } = await import("./r2");
+      const client = getR2Client();
+      const result = await client.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key }));
+      if (!result.Body) return res.status(404).json({ error: "Print batch print PNG not found" });
+      const chunks: Buffer[] = [];
+      for await (const chunk of result.Body as AsyncIterable<Uint8Array>) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const filename = `MintVault-Batch-${batchId}-print.png`;
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(Buffer.concat(chunks));
+    } catch (err: any) {
+      console.error("[print-batch/print-png] error:", err.message);
+      res.status(500).json({ error: "Failed to fetch print batch print PNG" });
     }
   });
 
