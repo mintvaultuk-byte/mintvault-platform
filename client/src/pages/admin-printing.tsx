@@ -618,6 +618,32 @@ function LatestSheetSection({
                 )}
               </Button>
             )}
+            {latestBatchId && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={downloadingPng}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDownloadPng(
+                    `/api/admin/print-batch/${latestBatchId}/cricut-cut.svg`,
+                    `mintvault-batch-${latestBatchId}-cut.svg`
+                  );
+                }}
+                className="h-7 text-[10px] px-2 border-[var(--admin-gold)]/60 text-[var(--admin-gold-hi)] hover:bg-[var(--admin-gold)]/10"
+                data-testid="btn-download-latest-cut-svg"
+              >
+                {downloadingPng ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin mr-1" /> SVG…
+                  </>
+                ) : (
+                  <>
+                    <FileDown className="h-3 w-3 mr-1" /> Cut SVG
+                  </>
+                )}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"

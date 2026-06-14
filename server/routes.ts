@@ -6201,8 +6201,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         generatePrintBatchPDF,
         generatePrintBatchCutSVG,
         generatePrintBatchPNG,
+        generateCricutSVG,
         deriveBatchId,
         uploadPrintBatchArtifacts,
+        uploadCricutSvg,
         r2KeyForPrintBatch,
       } = await import("./print-batch");
       if (certIds.length > MAX_CERTS_PER_BATCH) {
@@ -6274,10 +6276,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const head = await headR2(pdfKey).catch(() => null);
         if (head) {
           const svgStr = generatePrintBatchCutSVG(items.length);
+          // Cricut cut SVG is a cheap static string — (re)upload it so its
+          // download endpoint resolves even on the idempotent fast-path (the
+          // object may predate this feature for an older same-version batch).
+          await uploadCricutSvg(batchId, generateCricutSVG(items)).catch((e: any) =>
+            console.warn("[print-batch] cricut SVG upload (fast-path) failed:", e?.message || e)
+          );
           console.log(`[print-batch] idempotent fast-path for batch ${batchId} — skipped generation`);
           return res.json({
             pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
             pngUrl: `/api/admin/print-batch/${batchId}/png`,
+            cricutSvgUrl: `/api/admin/print-batch/${batchId}/cricut-cut.svg`,
             svg: Buffer.from(svgStr, "utf8").toString("base64"),
             batchId,
             certIds: ids,
@@ -6304,6 +6313,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         console.error("[print-batch] R2 upload failed:", uploadErr.message);
         return res.status(500).json({ error: "Failed to store print batch artefacts" });
       }
+
+      // Cricut cut-guide SVG (matches the PNG layout). Non-fatal if it fails —
+      // the PDF/PNG are the critical artefacts; the cut SVG is a convenience.
+      await uploadCricutSvg(batchId, generateCricutSVG(items)).catch((e: any) =>
+        console.warn("[print-batch] cricut SVG upload failed:", e?.message || e)
+      );
 
       if (!isRecentDuplicate) {
         // Audit row — one per batch generated.
@@ -6372,6 +6387,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({
         pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
         pngUrl: `/api/admin/print-batch/${batchId}/png`,
+        cricutSvgUrl: `/api/admin/print-batch/${batchId}/cricut-cut.svg`,
         svg: Buffer.from(svgStr, "utf8").toString("base64"),
         batchId,
         certIds: ids,
@@ -6629,6 +6645,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err: any) {
       console.error("[print-batch/png] error:", err.message);
       res.status(500).json({ error: "Failed to fetch print batch PNG" });
+    }
+  });
+
+  // Cricut cut-guide SVG (matches the PNG layout) — same R2-stream pattern as /png.
+  app.get("/api/admin/print-batch/:batchId/cricut-cut.svg", requireAdmin, async (req, res) => {
+    try {
+      const batchId = String(req.params.batchId);
+      const { r2KeyForCricutSvg } = await import("./print-batch");
+      const key = r2KeyForCricutSvg(batchId);
+      const head = await headR2(key);
+      if (!head) return res.status(404).json({ error: "Print batch cut SVG not found" });
+      const { GetObjectCommand } = await import("@aws-sdk/client-s3");
+      const { getR2Client } = await import("./r2");
+      const client = getR2Client();
+      const result = await client.send(new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key }));
+      if (!result.Body) return res.status(404).json({ error: "Print batch cut SVG not found" });
+      const chunks: Buffer[] = [];
+      for await (const chunk of result.Body as AsyncIterable<Uint8Array>) {
+        chunks.push(Buffer.from(chunk));
+      }
+      const filename = `MintVault-Batch-${batchId}-cut.svg`;
+      res.setHeader("Content-Type", "image/svg+xml");
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.send(Buffer.concat(chunks));
+    } catch (err: any) {
+      console.error("[print-batch/cricut-cut.svg] error:", err.message);
+      res.status(500).json({ error: "Failed to fetch print batch cut SVG" });
     }
   });
 

@@ -287,6 +287,33 @@ function buildCricutPNGLayout(itemCount: number): CellSpec[] {
   return cells;
 }
 
+// Cricut cut guide that matches the Cricut PNG EXACTLY — same canvas
+// (PAGE_W_MM × PNG_PAGE_H_MM) and the same cells from buildCricutPNGLayout, so
+// when imported into Design Space on a Cut layer over the printed PNG, every
+// label + insert gets a cut path pixel-aligned to its printed artwork. One
+// <rect> per cell at the cell's exact mm coords. Hairline black stroke —
+// Design Space uses the path geometry, not the stroke appearance. NO bleed
+// inset (unlike generatePrintBatchCutSVG): the cut sits on the cell edge so it
+// lines up with the PNG, not inside a printed border.
+export function generateCricutSVG(items: PrintBatchItem[]): string {
+  const layout = buildCricutPNGLayout(items.length);
+  const rect = (c: CellSpec) =>
+    `    <rect x="${c.xMm.toFixed(4)}" y="${c.yMm.toFixed(4)}" ` +
+    `width="${c.wMm.toFixed(4)}" height="${c.hMm.toFixed(4)}" ` +
+    `fill="none" stroke="#000000" stroke-width="0.1"/>`;
+  return [
+    `<?xml version="1.0" encoding="UTF-8"?>`,
+    `<!-- MintVault Cricut Cut Guide (${SHEET_LAYOUT_VERSION}) — ${layout.length} cut paths, aligned to the Cricut PNG -->`,
+    `<svg xmlns="http://www.w3.org/2000/svg"`,
+    `     width="${PAGE_W_MM}mm" height="${PNG_PAGE_H_MM}mm"`,
+    `     viewBox="0 0 ${PAGE_W_MM} ${PNG_PAGE_H_MM}">`,
+    `  <g id="cut">`,
+    ...layout.map(rect),
+    `  </g>`,
+    `</svg>`,
+  ].join("\n");
+}
+
 // Guillotine PDF layout — 5 rows on full A4, slab pair + insert per row.
 // Mirrors buildLayout's `kind` semantics so drawLabelCropMarks works without
 // modification. Coordinates are computed from the PDF_* constants above so
@@ -547,6 +574,16 @@ export async function uploadPrintBatchArtifacts(batchId: string, pdfBuf: Buffer,
     uploadToR2(r2KeyForPrintBatch(batchId, "pdf"), pdfBuf, "application/pdf"),
     uploadToR2(r2KeyForPrintBatch(batchId, "png"), pngBuf, "image/png"),
   ]);
+}
+
+// Cricut cut-guide SVG R2 key — separate key/suffix from the pdf/png artefacts,
+// version-folded so a layout bump writes a fresh object (same as the others).
+export function r2KeyForCricutSvg(batchId: string): string {
+  return `print-batches/${batchId}-${SHEET_LAYOUT_VERSION}-cricut-cut.svg`;
+}
+
+export async function uploadCricutSvg(batchId: string, svg: string): Promise<void> {
+  await uploadToR2(r2KeyForCricutSvg(batchId), Buffer.from(svg, "utf8"), "image/svg+xml");
 }
 
 export function deriveBatchId(certIds: string[], adminUser: string): string {
