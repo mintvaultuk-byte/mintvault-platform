@@ -828,7 +828,14 @@ async function drawFront(
   // target. Longer-named carts shrink the whole 3-line block proportionally
   // so within a single label every line still matches.
   const textZoneT = MV_HDR_BOT + MV_BELOW_GAP;
-  const textZoneH = contentB - textZoneT;
+  // Text block fills DOWN to the inner bottom border (I_BOTTOM), not contentB
+  // (= stripY), so the 3 lines distribute across the full height and the last
+  // line (rarity) lands level with the cert ID. Safe to occupy the strip zone:
+  // the strip has no background fill and its left side is empty (only the
+  // right-anchored cert ID renders there, different column). contentB / stripY
+  // / panelH are untouched, so the grade panel + cert ID are unaffected.
+  const textBlockB = I_BOTTOM; // 242
+  const textZoneH = textBlockB - textZoneT;
 
   // Title family drops "Arial Black" so weight 600 (semibold) actually renders
   // as semibold via Arial — "Arial Black" is a single-weight (900) face and
