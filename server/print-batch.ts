@@ -142,6 +142,14 @@ const PDF_HORIZ_GAP_MM = 8; // spec floor for vertical-cut clearance
 const PDF_SLAB_PAIR_H_MM = LABEL_H_MM + GAP_MM + LABEL_H_MM; // 44
 const PDF_INSERT_W_MM = 69.74; // 44 × (85.6 / 54), aspect preserved
 const PDF_INSERT_H_MM = 44;
+
+// Cricut PNG claim-insert column — reuses the PDF's reduced insert size so the
+// insert is the SAME height as the slab pair (44mm). Row height/pitch and the
+// 5-up vertical fit are therefore unchanged. Declared here (not beside the
+// CRICUT_PNG block above) because it references PDF_INSERT_*, defined just above.
+const CRICUT_INSERT_W_MM = PDF_INSERT_W_MM; // 69.74mm
+const CRICUT_INSERT_H_MM = PDF_INSERT_H_MM; // 44mm
+const CRICUT_HORIZ_GAP_MM = GAP_MM; // 4mm
 const PDF_ROW_H_MM = Math.max(PDF_SLAB_PAIR_H_MM, PDF_INSERT_H_MM); // 44
 const PDF_CONTENT_W_MM = LABEL_W_MM + PDF_HORIZ_GAP_MM + PDF_INSERT_W_MM; // 147.74
 const PDF_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF_CONTENT_W_MM) / 2; // 31.13
@@ -165,7 +173,7 @@ const PDF_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF_CONTENT_W_MM) / 2; // 31.13
 // so the Cricut sheet stays untouched even if a caller passes 5.
 export const MAX_CERTS_PER_BATCH = 5;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v8";
+export const SHEET_LAYOUT_VERSION = "v9";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
@@ -259,6 +267,17 @@ function buildCricutPNGLayout(itemCount: number): CellSpec[] {
       yMm: rowTopY + LABEL_H_MM + GAP_MM,
       wMm: LABEL_W_MM,
       hMm: LABEL_H_MM,
+    });
+    // Claim insert — right column, top-aligned. Reduced size (69.74×44mm) so it
+    // matches the slab-pair height; horizontal fit: 2 + 70 + 4 + 69.74 = 145.74mm
+    // ≤ 165.9mm canvas width.
+    cells.push({
+      kind: "insert",
+      itemIndex: i,
+      xMm: MARGIN_MM + LABEL_W_MM + CRICUT_HORIZ_GAP_MM,
+      yMm: rowTopY,
+      wMm: CRICUT_INSERT_W_MM,
+      hMm: CRICUT_INSERT_H_MM,
     });
   }
   return cells;
