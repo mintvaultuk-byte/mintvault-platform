@@ -78,7 +78,7 @@ const mmPx = (v: number) => Math.round(v * MM_TO_PX);
 const PAGE_W_MM = 165.9;
 const PDF_PAGE_W_MM = 210; // full A4 — guillotine PDF only
 const PDF_PAGE_H_MM = 297;
-const PNG_PAGE_H_MM = 230.0;
+const PNG_PAGE_H_MM = 234.7;
 
 // ── Layout (mm) — PNG + SVG (Cricut) ─────────────────────────────────────────
 // MARGIN_MM dropped from 10 → 2 because Cricut's 165.9mm width minus row
@@ -100,10 +100,14 @@ const ROW_PITCH_MM = ROW_H_MM + GAP_MM;
 // 58mm pitch capped the sheet at 4. Vertical sum: 2 (top) + 5×44 + 4×2.5 = 232mm,
 // leaving 2.7mm bottom spare for Cricut's registration marks. The SVG + PDF
 // paths use their own builders and are unaffected.
-const CRICUT_PNG_ROW_COUNT = 5;
-const CRICUT_PNG_SLAB_PAIR_H_MM = LABEL_H_MM + GAP_MM + LABEL_H_MM; // 44
-const CRICUT_PNG_INTER_ROW_GAP_MM = 1.0;
-const CRICUT_PNG_ROW_PITCH_MM = CRICUT_PNG_SLAB_PAIR_H_MM + CRICUT_PNG_INTER_ROW_GAP_MM; // 46.5
+// Cricut-specific slab-label size — taller (21mm) than the global LABEL_H_MM
+// (20mm, shared with the PDF + slab rendering, which must NOT change). 4-up now.
+const CRICUT_LABEL_W_MM = 70;
+const CRICUT_LABEL_H_MM = 21;
+const CRICUT_PNG_ROW_COUNT = 4;
+const CRICUT_PNG_SLAB_PAIR_H_MM = CRICUT_LABEL_H_MM + GAP_MM + CRICUT_LABEL_H_MM; // 46
+const CRICUT_PNG_INTER_ROW_GAP_MM = 8; // more spacing with only 4 rows
+const CRICUT_PNG_ROW_PITCH_MM = CRICUT_PNG_SLAB_PAIR_H_MM + CRICUT_PNG_INTER_ROW_GAP_MM; // 54
 
 // Static assertion — the 5-up Cricut PNG column MUST fit within PNG_PAGE_H_MM.
 // Throws at import time if a constant edit breaks the fit (mirrors the PDF guard).
@@ -173,7 +177,7 @@ const PDF_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF_CONTENT_W_MM) / 2; // 31.13
 // so the Cricut sheet stays untouched even if a caller passes 5.
 export const MAX_CERTS_PER_BATCH = 5;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v12";
+export const SHEET_LAYOUT_VERSION = "v13";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
@@ -250,23 +254,23 @@ function buildCricutPNGLayout(itemCount: number): CellSpec[] {
   const cells: CellSpec[] = [];
   for (let i = 0; i < n; i++) {
     const rowTopY = MARGIN_MM + i * CRICUT_PNG_ROW_PITCH_MM;
-    // Front label — left column, top-aligned.
+    // Front label — left column, top-aligned. Cricut-specific 70×21mm size.
     cells.push({
       kind: "label",
       itemIndex: i,
       xMm: MARGIN_MM,
       yMm: rowTopY,
-      wMm: LABEL_W_MM,
-      hMm: LABEL_H_MM,
+      wMm: CRICUT_LABEL_W_MM,
+      hMm: CRICUT_LABEL_H_MM,
     });
     // Back label (NFC chip + QR) — left column, stacked below the front.
     cells.push({
       kind: "back",
       itemIndex: i,
       xMm: MARGIN_MM,
-      yMm: rowTopY + LABEL_H_MM + GAP_MM,
-      wMm: LABEL_W_MM,
-      hMm: LABEL_H_MM,
+      yMm: rowTopY + CRICUT_LABEL_H_MM + GAP_MM,
+      wMm: CRICUT_LABEL_W_MM,
+      hMm: CRICUT_LABEL_H_MM,
     });
     // Claim insert — right column, top-aligned. Reduced size (69.74×44mm) so it
     // matches the slab-pair height; horizontal fit: 2 + 70 + 4 + 69.74 = 145.74mm
