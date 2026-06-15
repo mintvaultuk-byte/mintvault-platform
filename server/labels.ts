@@ -441,7 +441,9 @@ export async function generateLabelPNG(cert: CertificateRecord, side: "front" | 
   // Label is unaffected (black on white).
   const labelFg = isBlack ? GOLD_LIGHT : "#000000";
 
-  const SCALE = 2;
+  const SCALE = 2.4; // 300 base × 2.4 = 720 DPI effective. Uniform ctx.scale —
+  // PX_W/PX_H and all derived layout constants stay identical; only the physical
+  // pixel count grows. Both createCanvas and ctx.scale use this same constant.
   const canvas = createCanvas(PX_W * SCALE, PX_H * SCALE);
   const ctx = canvas.getContext("2d");
   ctx.scale(SCALE, SCALE);

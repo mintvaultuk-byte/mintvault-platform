@@ -3,7 +3,7 @@ import PDFDocument from "pdfkit";
 import path from "path";
 import { APP_BASE_URL } from "./app-url";
 
-const DPI = 300;
+const DPI = 360;
 const MM = DPI / 25.4;
 
 const CARD_W_MM = 85.6;
