@@ -56,7 +56,7 @@ async function generateQR(url: string, size: number): Promise<Buffer> {
 // Draw a solid gold border frame on the canvas (matches certificate style).
 // v6: inner vertical side bars removed; only outer border + corner ornaments.
 function drawBorderFrame(ctx: any, w: number, h: number) {
-  const bw = 8; // outer bar width (px)
+  const bw = 16; // outer bar width (px) — doubled from 8 for a heavier gold frame
 
   // Outer gold bars
   ctx.fillStyle = GOLD;

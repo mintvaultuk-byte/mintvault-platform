@@ -197,7 +197,7 @@ const MAX_CERTS_PER_PDF9 = PDF9_COLS * PDF9_ROWS; // 9
 // so the Cricut sheet stays untouched even if a caller passes 5.
 export const MAX_CERTS_PER_BATCH = 9;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v19";
+export const SHEET_LAYOUT_VERSION = "v20";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
