@@ -182,16 +182,16 @@ const PDF_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF_CONTENT_W_MM) / 2; // 31.13
 // Each unit is one 70mm-wide vertical column: front 21mm / back 21mm / insert
 // 44mm = 86mm tall. NO page margins — units start at x=0,70,140 and y=0,86,172.
 // Used height = 3×86 = 258mm, leaving the bottom 39mm of the A4 page empty.
-const PDF9_LABEL_W_MM = 70;
-const PDF9_SIDE_MARGIN_MM = 0; // (210 - 3*70)/2 = 0, columns span the full width
+const PDF9_LABEL_W_MM = 69;
+const PDF9_SIDE_MARGIN_MM = 1.5; // (210 - 3*70)/2 = 0, columns span the full width
 const PDF9_TOP_OFFSET_MM = 20; // push grid down, clears top clip + uses bottom space
-const PDF9_FRONT_H_MM = 22;
-const PDF9_BACK_H_MM = 22;
+const PDF9_FRONT_H_MM = 21;
+const PDF9_BACK_H_MM = 21;
 const PDF9_INSERT_H_MM = 44;
 const PDF9_UNIT_H_MM = PDF9_FRONT_H_MM + PDF9_BACK_H_MM + PDF9_INSERT_H_MM; // 88
 const PDF9_COLS = 3;
 const PDF9_ROWS = 3;
-const PDF9_INSERT_W_MM = 70; // matches label width — they stack in the same column
+const PDF9_INSERT_W_MM = 69; // matches label width — they stack in the same column
 const MAX_CERTS_PER_PDF9 = PDF9_COLS * PDF9_ROWS; // 9
 
 // Static assertion — the offset grid MUST fit within the A4 page height.
@@ -208,7 +208,7 @@ const MAX_CERTS_PER_PDF9 = PDF9_COLS * PDF9_ROWS; // 9
 // so the Cricut sheet stays untouched even if a caller passes 5.
 export const MAX_CERTS_PER_BATCH = 9;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v24";
+export const SHEET_LAYOUT_VERSION = "v25";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
