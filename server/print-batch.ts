@@ -110,7 +110,7 @@ const ROW_PITCH_MM = ROW_H_MM + GAP_MM;
 // (20mm, shared with the PDF + slab rendering, which must NOT change). 4-up now.
 const CRICUT_LABEL_W_MM = 70;
 const CRICUT_LABEL_H_MM = 21;
-const CRICUT_PNG_ROW_COUNT = 4;
+const CRICUT_PNG_ROW_COUNT = 5;
 const CRICUT_PNG_SLAB_PAIR_H_MM = CRICUT_LABEL_H_MM + GAP_MM + CRICUT_LABEL_H_MM; // 46
 const CRICUT_PNG_INTER_ROW_GAP_MM = 8; // more spacing with only 4 rows
 const CRICUT_PNG_ROW_PITCH_MM = CRICUT_PNG_SLAB_PAIR_H_MM + CRICUT_PNG_INTER_ROW_GAP_MM; // 54
@@ -183,7 +183,7 @@ const PDF_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF_CONTENT_W_MM) / 2; // 31.13
 // so the Cricut sheet stays untouched even if a caller passes 5.
 export const MAX_CERTS_PER_BATCH = 5;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v15";
+export const SHEET_LAYOUT_VERSION = "v16";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
