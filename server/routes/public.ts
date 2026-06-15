@@ -2,6 +2,7 @@ import type { Express } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { BUILD_STAMP, serviceTierToPricingTier } from "@shared/schema";
+import { getActivePromotion } from "../services/promotionService";
 import { storage } from "../storage";
 import { getStripePublishableKey } from "../stripeClient";
 import { getR2SignedUrl } from "../r2";
@@ -369,6 +370,57 @@ export function registerPublicRoutes(app: Express): void {
     } catch (error: any) {
       console.error("Error fetching service tiers:", error.message);
       res.status(500).json({ error: "Failed to fetch service tiers" });
+    }
+  });
+
+  // ── Active promotion (public, for the pricing page banner + struck prices) ──
+  // Exposes ONLY the banner text and, per grading tier, the percent off + the
+  // server-computed discounted price (in pence). Coupon ids are NEVER exposed.
+  // The discounted price is computed with the SAME formula the grading checkout
+  // uses (price − round(price × pct / 100)) so the page matches the charge.
+  // NOTE: this is the source-of-truth display value; the actual Stripe charge is
+  // still authoritative if rounding ever diverges. A missing/broken promo simply
+  // returns { promo: null } — it never errors the page.
+  app.get("/api/promotions/active", async (_req, res) => {
+    try {
+      const promo = await getActivePromotion();
+      if (!promo || promo.active !== true) {
+        return res.json({ promo: null });
+      }
+
+      // Build per-tier discounted prices off the live grading tier prices.
+      const tiers = await storage.getServiceTiers("grading");
+      const priceByTier = new Map<string, number>();
+      for (const st of tiers.map(serviceTierToPricingTier) as any[]) {
+        if (typeof st.pricePerCard === "number") priceByTier.set(st.id, st.pricePerCard);
+      }
+
+      const tierPctCols: Record<string, number> = {
+        standard: promo.standard_pct,
+        priority: promo.priority_pct,
+        express: promo.express_pct,
+      };
+
+      const tiersOut: Record<string, { pct: number; originalPrice: number; discountedPrice: number }> = {};
+      for (const [tierId, pctRaw] of Object.entries(tierPctCols)) {
+        const pct = Math.max(0, Math.min(100, Number(pctRaw) || 0));
+        const original = priceByTier.get(tierId);
+        if (pct > 0 && typeof original === "number" && original > 0) {
+          const discountedPrice = original - Math.round((original * pct) / 100);
+          tiersOut[tierId] = { pct, originalPrice: original, discountedPrice };
+        }
+      }
+
+      res.json({
+        promo: {
+          bannerText: promo.banner_text,
+          tiers: tiersOut,
+        },
+      });
+    } catch (error: any) {
+      // Never let a promo failure break the pricing page — fall back to no promo.
+      console.error("[promotions] public active error:", error?.message || error);
+      res.json({ promo: null });
     }
   });
 

@@ -5,6 +5,7 @@ import { calculateOrderTotals, getVaultClubDiscountPercent, serviceTierToPricing
 import { storage } from "../storage";
 import { getUncachableStripeClient } from "../stripeClient";
 import { sendSubmissionConfirmation, sendSubmissionConfirmationV2 } from "../email";
+import { getActivePromotion } from "../services/promotionService";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -272,13 +273,84 @@ export function registerSubmissionRoutes(app: Express): void {
       }
 
       const bulkPercent = totals.discountPercent;
-      const effectiveDiscountPercent = Math.max(vcPercent, bulkPercent);
-      const effectiveDiscountAmount = Math.round(
-        (tierData.pricePerCard * authoritativeQuantity * effectiveDiscountPercent) / 100
-      );
-      const discountType: string | null =
-        vcPercent >= bulkPercent && vcPercent > 0 ? "vault_club_silver" : bulkPercent > 0 ? "bulk" : null;
-      const discountedSubtotal = tierData.pricePerCard * authoritativeQuantity - effectiveDiscountAmount;
+      const subtotalPence = tierData.pricePerCard * authoritativeQuantity;
+
+      // ── Active promotion (limited-time) ────────────────────────────────────
+      // Resolved SERVER-SIDE from the active promo row — a client-supplied
+      // percentage or coupon id is NEVER trusted. The grading checkout is a
+      // PaymentIntent (no Stripe coupon), so the promo is applied the SAME way
+      // vault-club/bulk are: by reducing the charged amount. The minted Stripe
+      // coupon is not used here. A missing/broken promo falls back to 0% — it
+      // must NEVER block checkout, hence the try/catch.
+      let promoPercent = 0;
+      let promoId: number | null = null;
+      let promoStackingMode: "best_of" | "stack_on_top" = "best_of";
+      try {
+        // Promo applies to GRADING checkouts only (it's advertised on the
+        // grading pricing page). Reholder/crossover/authentication never get it,
+        // even if they reuse the standard/priority/express tier ids.
+        const promo = serviceType === "grading" ? await getActivePromotion() : null;
+        if (promo && promo.active === true) {
+          // Map the checkout tier id → the promo's tier column. The promo tier
+          // key space is exactly standard/priority/express (prompt 1); any other
+          // tier id gets no promo.
+          const promoPctByTier: Record<string, number> = {
+            standard: promo.standard_pct,
+            priority: promo.priority_pct,
+            express: promo.express_pct,
+          };
+          const pct = promoPctByTier[tier];
+          if (typeof pct === "number" && pct > 0) {
+            promoPercent = Math.max(0, Math.min(100, Math.trunc(pct)));
+            promoId = promo.id;
+            promoStackingMode = promo.stacking_mode === "stack_on_top" ? "stack_on_top" : "best_of";
+          }
+        }
+      } catch (err: any) {
+        console.error("[promo] checkout resolve failed — charging full price:", err?.message || err);
+      }
+
+      // Discount amounts for each method, on the same subtotal base.
+      const vcAmt = Math.round((subtotalPence * vcPercent) / 100);
+      const bulkAmt = Math.round((subtotalPence * bulkPercent) / 100);
+      const promoAmt = Math.round((subtotalPence * promoPercent) / 100);
+
+      let effectiveDiscountAmount: number;
+      let effectiveDiscountPercent: number;
+      let discountType: string | null;
+
+      if (promoPercent > 0 && promoStackingMode === "stack_on_top") {
+        // Better-of(vault-club, bulk) FIRST, then promo compounded on the
+        // reduced subtotal. Floored so the price can never go below £0.
+        const baseAmt = Math.max(vcAmt, bulkAmt);
+        const afterBase = subtotalPence - baseAmt;
+        const promoOnTop = Math.round((afterBase * promoPercent) / 100);
+        effectiveDiscountAmount = Math.min(subtotalPence, baseAmt + promoOnTop);
+        effectiveDiscountPercent = subtotalPence > 0 ? Math.round((effectiveDiscountAmount / subtotalPence) * 100) : 0;
+        const baseLabel =
+          vcPercent >= bulkPercent && vcPercent > 0 ? "vault_club_silver" : bulkPercent > 0 ? "bulk" : null;
+        discountType = baseLabel ? `${baseLabel}+promo` : "promo";
+      } else {
+        // best_of (default + the locked vault-club/bulk rule): the single
+        // LOWEST final price across {vault-club, bulk, promo}. Same subtotal
+        // base → largest discount amount wins.
+        effectiveDiscountAmount = Math.max(vcAmt, bulkAmt, promoAmt);
+        if (promoPercent > 0 && promoAmt >= vcAmt && promoAmt >= bulkAmt) {
+          discountType = "promo";
+          effectiveDiscountPercent = promoPercent;
+        } else if (vcPercent >= bulkPercent && vcPercent > 0) {
+          discountType = "vault_club_silver";
+          effectiveDiscountPercent = vcPercent;
+        } else if (bulkPercent > 0) {
+          discountType = "bulk";
+          effectiveDiscountPercent = bulkPercent;
+        } else {
+          discountType = null;
+          effectiveDiscountPercent = 0;
+        }
+      }
+      const promoApplied = discountType !== null && discountType.includes("promo");
+      const discountedSubtotal = subtotalPence - effectiveDiscountAmount;
 
       // ── Credit application (Vault Club Silver/Gold) ────────────────────────
       let creditApplied = false;
@@ -384,13 +456,17 @@ export function registerSubmissionRoutes(app: Express): void {
         } catch {}
       }
 
-      // Audit log for applied discount (vault_club_silver or bulk).
+      // Audit log for applied discount (vault_club_silver, bulk, and/or promo).
       if (discountType !== null) {
         try {
           await db.insert(auditLog).values({
             entityType: "submission",
             entityId: String(submission.id),
-            action: discountType === "vault_club_silver" ? "vault_club_discount_applied" : "bulk_discount_applied",
+            action: promoApplied
+              ? "promo_discount_applied"
+              : discountType === "vault_club_silver"
+                ? "vault_club_discount_applied"
+                : "bulk_discount_applied",
             adminUser: null,
             details: {
               user_id: (req.session as any)?.userId ?? null,
@@ -402,6 +478,9 @@ export function registerSubmissionRoutes(app: Express): void {
               card_count: authoritativeQuantity,
               vc_alternative_percent: vcPercent,
               bulk_alternative_percent: bulkPercent,
+              promo_id: promoId,
+              promo_percent: promoPercent,
+              promo_stacking_mode: promoId !== null ? promoStackingMode : null,
             },
           });
         } catch {}
@@ -423,6 +502,9 @@ export function registerSubmissionRoutes(app: Express): void {
           discountType: discountType || "none",
           vcAlternativePercent: String(vcPercent),
           bulkAlternativePercent: String(bulkPercent),
+          promoId: promoId !== null ? String(promoId) : "",
+          promoPercent: String(promoPercent),
+          promoStackingMode: promoId !== null ? promoStackingMode : "",
           declaredValue: String(totalDeclaredValue),
           declaredValuePerCard: String(declaredValuePerCard),
           shippingInsurance: totals.shippingLabel,

@@ -47,6 +47,15 @@ function parseInput(body: any, id?: number): { error: string } | { input: Promot
     pcts[key] = v;
   }
 
+  // Stacking mode is optional; default to the safe non-stacking rule.
+  let stacking_mode: "best_of" | "stack_on_top" = "best_of";
+  if (body.stacking_mode !== undefined && body.stacking_mode !== null && body.stacking_mode !== "") {
+    if (body.stacking_mode !== "best_of" && body.stacking_mode !== "stack_on_top") {
+      return { error: "stacking_mode must be 'best_of' or 'stack_on_top'" };
+    }
+    stacking_mode = body.stacking_mode;
+  }
+
   let expires_at: string | null = null;
   if (body.expires_at !== undefined && body.expires_at !== null && String(body.expires_at).trim() !== "") {
     const d = new Date(body.expires_at);
@@ -64,6 +73,7 @@ function parseInput(body: any, id?: number): { error: string } | { input: Promot
       standard_pct: pcts.standard_pct,
       priority_pct: pcts.priority_pct,
       express_pct: pcts.express_pct,
+      stacking_mode,
       expires_at,
       active: body.active,
     },

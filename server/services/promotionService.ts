@@ -29,6 +29,11 @@ const PROMO_TIERS = [
 
 export type TierKey = (typeof PROMO_TIERS)[number]["key"];
 
+/** How the promo combines with vault-club / bulk discounts at the grading
+ *  checkout. Per-promo setting; defaults to best_of (the locked non-stacking
+ *  rule). See server/routes/submissions.ts for the resolver. */
+export type StackingMode = "best_of" | "stack_on_top";
+
 export interface PromotionInput {
   id?: number; // present when editing (PUT)
   name: string;
@@ -36,6 +41,7 @@ export interface PromotionInput {
   standard_pct: number;
   priority_pct: number;
   express_pct: number;
+  stacking_mode: StackingMode;
   expires_at?: string | null;
   active: boolean;
 }
@@ -50,6 +56,7 @@ export interface Promotion {
   standard_coupon_id: string | null;
   priority_coupon_id: string | null;
   express_coupon_id: string | null;
+  stacking_mode: StackingMode;
   active: boolean;
   expires_at: string | null;
   created_at: string;
@@ -62,9 +69,16 @@ function log(msg: string, extra?: Record<string, unknown>) {
   console.log(`[promotions] ${msg}${extra ? " " + JSON.stringify(extra) : ""}`);
 }
 
-/** The single active promotion, or null. */
+/** The single active promotion, or null. Expiry is enforced at READ time: a
+ *  promo whose expires_at has passed is treated as not active everywhere this
+ *  helper is consumed (live grading checkout, public pricing banner, admin
+ *  "active" read), so an admin-set expiry actually stops the discount without
+ *  needing a sweeper. (active stays true in the row until a manual deactivate,
+ *  which keeps the singleton index honest — see deactivatePromotion.) */
 export async function getActivePromotion(): Promise<Promotion | null> {
-  const res = await db.execute(sql`SELECT * FROM promotions WHERE active = true LIMIT 1`);
+  const res = await db.execute(
+    sql`SELECT * FROM promotions WHERE active = true AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1`
+  );
   return (res.rows[0] as unknown as Promotion) ?? null;
 }
 
@@ -199,6 +213,7 @@ async function upsertRow(
         standard_coupon_id = ${couponIds.standard},
         priority_coupon_id = ${couponIds.priority},
         express_coupon_id = ${couponIds.express},
+        stacking_mode = ${data.stacking_mode},
         active = ${active},
         expires_at = ${expiresAt},
         updated_at = NOW()
@@ -212,10 +227,10 @@ async function upsertRow(
   const res = await tx.execute(sql`
     INSERT INTO promotions
       (name, banner_text, standard_pct, priority_pct, express_pct,
-       standard_coupon_id, priority_coupon_id, express_coupon_id, active, expires_at, updated_at)
+       standard_coupon_id, priority_coupon_id, express_coupon_id, stacking_mode, active, expires_at, updated_at)
     VALUES
       (${data.name}, ${data.banner_text}, ${data.standard_pct}, ${data.priority_pct}, ${data.express_pct},
-       ${couponIds.standard}, ${couponIds.priority}, ${couponIds.express}, ${active}, ${expiresAt}, NOW())
+       ${couponIds.standard}, ${couponIds.priority}, ${couponIds.express}, ${data.stacking_mode}, ${active}, ${expiresAt}, NOW())
     RETURNING *
   `);
   return res.rows[0] as unknown as Promotion;

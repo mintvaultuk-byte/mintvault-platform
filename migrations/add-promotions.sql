@@ -25,3 +25,13 @@ CREATE TABLE IF NOT EXISTS promotions (
 -- active = true permits exactly one row with active = true at any time.
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_promotion
   ON promotions ((active)) WHERE active = true;
+
+-- Per-promo discount stacking behaviour at the grading checkout (prompt 2).
+--   best_of      = charge the single LOWEST final price across
+--                  {vault-club, bulk, promo}. Default; matches the locked
+--                  non-stacking rule.
+--   stack_on_top = apply promo AFTER the better-of(vault-club, bulk),
+--                  compounding. Floored at £0.
+ALTER TABLE promotions
+  ADD COLUMN IF NOT EXISTS stacking_mode VARCHAR(20) NOT NULL DEFAULT 'best_of'
+  CHECK (stacking_mode IN ('best_of', 'stack_on_top'));
