@@ -16,6 +16,7 @@ import { registerTransferRoutes } from "./routes/transfers";
 import { registerPreGradeRoutes } from "./routes/pre-grade";
 import { registerStolenRoutes } from "./routes/stolen";
 import { registerEmbeddingRoutes } from "./routes/embedding";
+import { registerPromotionRoutes } from "./routes/admin/promotions";
 import {
   BUILD_STAMP,
   pricingTiers,
@@ -1299,6 +1300,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerTransferRoutes(app);
   registerPreGradeRoutes(app);
   registerStolenRoutes(app);
+  registerPromotionRoutes(app);
   registerEmbeddingRoutes(app);
 
   // ── Health check — no auth, no DB, no shared state. First registered so

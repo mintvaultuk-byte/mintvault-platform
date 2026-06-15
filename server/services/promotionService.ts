@@ -1,0 +1,222 @@
+/**
+ * promotionService.ts — promotions engine data layer + Stripe coupon orchestration.
+ *
+ * One active promotion at a time (DB-enforced by the partial unique index
+ * `one_active_promotion` on promotions(active) WHERE active = true).
+ *
+ * Tier keys mirror the code's real grading checkout tier ids
+ * (shared/schema.ts pricingTiers): standard (= "Vault Queue"),
+ * priority (= "Standard"), express. "Black Label" is a post-grading label
+ * type, not a checkout tier, so it has no promo column. The Stripe coupon's
+ * metadata.tier carries the code key so prompt 2's checkout can match it.
+ *
+ * All activation work runs in ONE DB transaction. If any Stripe coupon create
+ * throws, the transaction rolls back so no promo row is ever persisted with
+ * partial/null coupon ids — and the ids of any coupons created before the
+ * failure are logged so they can be reconciled (Stripe has no transaction).
+ */
+import { db } from "../db";
+import { sql } from "drizzle-orm";
+import { auditLog } from "@shared/schema";
+import { getUncachableStripeClient } from "../stripeClient";
+
+// Ordered tier map — column keys mirror the real pricingTiers ids.
+const PROMO_TIERS = [
+  { key: "standard", label: "Vault Queue", pctCol: "standard_pct", couponCol: "standard_coupon_id" },
+  { key: "priority", label: "Standard", pctCol: "priority_pct", couponCol: "priority_coupon_id" },
+  { key: "express", label: "Express", pctCol: "express_pct", couponCol: "express_coupon_id" },
+] as const;
+
+export type TierKey = (typeof PROMO_TIERS)[number]["key"];
+
+export interface PromotionInput {
+  id?: number; // present when editing (PUT)
+  name: string;
+  banner_text: string;
+  standard_pct: number;
+  priority_pct: number;
+  express_pct: number;
+  expires_at?: string | null;
+  active: boolean;
+}
+
+export interface Promotion {
+  id: number;
+  name: string;
+  banner_text: string;
+  standard_pct: number;
+  priority_pct: number;
+  express_pct: number;
+  standard_coupon_id: string | null;
+  priority_coupon_id: string | null;
+  express_coupon_id: string | null;
+  active: boolean;
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+type CouponIds = Record<TierKey, string | null>;
+
+function log(msg: string, extra?: Record<string, unknown>) {
+  console.log(`[promotions] ${msg}${extra ? " " + JSON.stringify(extra) : ""}`);
+}
+
+/** The single active promotion, or null. */
+export async function getActivePromotion(): Promise<Promotion | null> {
+  const res = await db.execute(sql`SELECT * FROM promotions WHERE active = true LIMIT 1`);
+  return (res.rows[0] as unknown as Promotion) ?? null;
+}
+
+/** All promotions, newest first (admin list). */
+export async function listPromotions(): Promise<Promotion[]> {
+  const res = await db.execute(sql`SELECT * FROM promotions ORDER BY created_at DESC LIMIT 20`);
+  return res.rows as unknown as Promotion[];
+}
+
+/**
+ * Create (POST) or edit (PUT, when data.id is set) a promotion. When
+ * data.active === true, Stripe coupons are minted for each tier with pct > 0
+ * and the previous active promo (if any) is deactivated — all atomically.
+ */
+export async function savePromotion(data: PromotionInput, adminUser: string): Promise<Promotion> {
+  const expiresAt = data.expires_at && data.expires_at.trim().length > 0 ? data.expires_at : null;
+
+  if (!data.active) {
+    // Inactive: plain insert/update, no Stripe, no coupons.
+    const couponIds: CouponIds = { standard: null, priority: null, express: null };
+    return await db.transaction(async (tx) => {
+      const row = await upsertRow(tx, data, couponIds, false, expiresAt);
+      log("saved inactive promo", { id: row.id, name: data.name });
+      return row;
+    });
+  }
+
+  // Active path — coupons + singleton swap, one transaction.
+  log("activation start", {
+    name: data.name,
+    tiers: { standard: data.standard_pct, priority: data.priority_pct, express: data.express_pct },
+  });
+
+  const createdCoupons: Array<{ tier: TierKey; id: string }> = [];
+  try {
+    return await db.transaction(async (tx) => {
+      // a. Lock the current active promo (if any).
+      const cur = await tx.execute(sql`SELECT id FROM promotions WHERE active = true LIMIT 1 FOR UPDATE`);
+      const oldId: number | null = (cur.rows[0] as { id: number } | undefined)?.id ?? null;
+
+      // b. Mint a Stripe coupon for every tier with pct > 0.
+      const stripe = await getUncachableStripeClient();
+      const couponIds: CouponIds = { standard: null, priority: null, express: null };
+      for (const t of PROMO_TIERS) {
+        const pct = data[t.pctCol as keyof PromotionInput] as number;
+        if (pct > 0) {
+          const coupon = await stripe.coupons.create({
+            percent_off: pct,
+            duration: "once",
+            name: `${data.name} - ${t.label}`,
+            metadata: { mintvault_promo: "1", tier: t.key },
+          });
+          couponIds[t.key] = coupon.id;
+          createdCoupons.push({ tier: t.key, id: coupon.id });
+          log("coupon created", { tier: t.key, coupon_id: coupon.id, percent_off: pct });
+        }
+      }
+
+      // d. Deactivate the old active promo BEFORE activating the new one, so the
+      //    singleton index never sees two active rows mid-transaction.
+      if (oldId !== null && oldId !== data.id) {
+        await tx.execute(sql`UPDATE promotions SET active = false, updated_at = NOW() WHERE id = ${oldId}`);
+      }
+
+      // c. Insert (or update) the promo row WITH the coupon ids, active = true.
+      const row = await upsertRow(tx, data, couponIds, true, expiresAt);
+
+      // e. Audit (inside the txn for atomicity).
+      await tx.insert(auditLog).values({
+        entityType: "promotion",
+        entityId: String(row.id),
+        action: "PROMO_ACTIVATED",
+        adminUser,
+        details: {
+          name: data.name,
+          banner_text: data.banner_text,
+          tiers: { standard: data.standard_pct, priority: data.priority_pct, express: data.express_pct },
+          coupon_ids: couponIds,
+          deactivated_promo_id: oldId,
+          expires_at: expiresAt,
+        },
+      });
+
+      log("activation success", { id: row.id, deactivated_promo_id: oldId });
+      return row;
+    });
+  } catch (err: any) {
+    // Stripe has no transaction — surface any coupons minted before the failure
+    // so they can be reconciled/voided manually. Never swallow the error.
+    if (createdCoupons.length > 0) {
+      console.error(
+        "[promotions] ACTIVATION FAILED after creating Stripe coupons — these are now orphaned, reconcile in Stripe:",
+        JSON.stringify(createdCoupons)
+      );
+    }
+    console.error("[promotions] activation error:", err?.message || err);
+    throw new Error(`Promotion activation failed: ${err?.message || err}`);
+  }
+}
+
+/** Deactivate a promotion. Stripe coupons are intentionally kept. */
+export async function deactivatePromotion(id: number, adminUser: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`UPDATE promotions SET active = false, updated_at = NOW() WHERE id = ${id}`);
+    await tx.insert(auditLog).values({
+      entityType: "promotion",
+      entityId: String(id),
+      action: "PROMO_DEACTIVATED",
+      adminUser,
+      details: {},
+    });
+  });
+  log("deactivated", { id });
+}
+
+/** INSERT (no id) or UPDATE (id present) the promo row, returning the saved row. */
+async function upsertRow(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  data: PromotionInput,
+  couponIds: CouponIds,
+  active: boolean,
+  expiresAt: string | null
+): Promise<Promotion> {
+  if (data.id) {
+    const res = await tx.execute(sql`
+      UPDATE promotions SET
+        name = ${data.name},
+        banner_text = ${data.banner_text},
+        standard_pct = ${data.standard_pct},
+        priority_pct = ${data.priority_pct},
+        express_pct = ${data.express_pct},
+        standard_coupon_id = ${couponIds.standard},
+        priority_coupon_id = ${couponIds.priority},
+        express_coupon_id = ${couponIds.express},
+        active = ${active},
+        expires_at = ${expiresAt},
+        updated_at = NOW()
+      WHERE id = ${data.id}
+      RETURNING *
+    `);
+    const row = res.rows[0] as unknown as Promotion | undefined;
+    if (!row) throw new Error(`Promotion ${data.id} not found`);
+    return row;
+  }
+  const res = await tx.execute(sql`
+    INSERT INTO promotions
+      (name, banner_text, standard_pct, priority_pct, express_pct,
+       standard_coupon_id, priority_coupon_id, express_coupon_id, active, expires_at, updated_at)
+    VALUES
+      (${data.name}, ${data.banner_text}, ${data.standard_pct}, ${data.priority_pct}, ${data.express_pct},
+       ${couponIds.standard}, ${couponIds.priority}, ${couponIds.express}, ${active}, ${expiresAt}, NOW())
+    RETURNING *
+  `);
+  return res.rows[0] as unknown as Promotion;
+}
