@@ -127,7 +127,7 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
     ctx.drawImage(logo, dx, pad, dw, dh);
     logoBottom = pad + dh;
   } else {
-    ctx.font = '900 38px "Arial Black", Arial, sans-serif';
+    ctx.font = '900 76px "Arial Black", Arial, sans-serif';
     ctx.fillStyle = GOLD;
     ctx.textAlign = "center";
     ctx.fillText("MINTVAULT UK", PX_W / 2, pad + 6);
@@ -140,7 +140,7 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
   // Subtitle is 14px tall → subtitle BOTTOM at logoBottom + 26.
   // 20px gap → header divider at logoBottom + 26 + 20 = logoBottom + 46.
   const subtitleY = logoBottom + 12;
-  ctx.font = '900 24px "Arial Black", Arial, sans-serif';
+  ctx.font = '900 48px "Arial Black", Arial, sans-serif';
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.fillText("PROFESSIONAL TRADING CARD GRADING", PX_W / 2, subtitleY);
@@ -162,32 +162,32 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
   let y = headerDivY + 22;
 
   // "CLAIM YOUR CARD" (28px) — dark text for inkjet print legibility on white
-  ctx.font = "bold 32px Arial, Helvetica, sans-serif";
+  ctx.font = "bold 64px Arial, Helvetica, sans-serif";
   ctx.fillStyle = DARK;
   ctx.textAlign = "left";
   ctx.fillText("CLAIM YOUR CERTIFICATE", contentLeft, y);
   y += 28 + 20; // 20px gap before next section
 
   // "Certificate No." label (28px Arial Black, pure black)
-  ctx.font = '900 28px "Arial Black", Arial, sans-serif';
+  ctx.font = '900 56px "Arial Black", Arial, sans-serif';
   ctx.fillStyle = "#000000";
   ctx.fillText("Certificate No.", contentLeft, y);
   y += 28 + 10; // 10px gap between label and its value
 
   // Certificate value — restored from PR #90: 28pt bold gold.
-  ctx.font = "bold 48px 'Courier New', Courier, monospace";
+  ctx.font = "bold 96px 'Courier New', Courier, monospace";
   ctx.fillStyle = GOLD;
   ctx.fillText(normalCertId, contentLeft, y);
   y += 44 + 14;
 
   // "Claim Code" label (28px Arial Black, pure black)
-  ctx.font = '900 28px "Arial Black", Arial, sans-serif';
+  ctx.font = '900 56px "Arial Black", Arial, sans-serif';
   ctx.fillStyle = "#000000";
   ctx.fillText("Claim Code", contentLeft, y);
   y += 28 + 10;
 
   // Claim code value — restored from PR #90: 14pt Courier gold.
-  ctx.font = "bold 36px 'Courier New', Courier, monospace";
+  ctx.font = "bold 72px 'Courier New', Courier, monospace";
   ctx.fillStyle = GOLD;
   ctx.fillText(formattedCode, contentLeft, y);
   y += 48 + 14;
@@ -200,7 +200,7 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
   y += 1 + 14;
 
   // Steps (bold 28px Arial, pure black)
-  ctx.font = "bold 20px Arial, Helvetica, sans-serif";
+  ctx.font = "bold 40px Arial, Helvetica, sans-serif";
   ctx.fillStyle = "#000000";
   const steps = [
     "1. Visit mintvaultuk.com/claim",
@@ -213,7 +213,7 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
   }
 
   // ── QR code — right column, vertically centred between header divider & footer ─
-  const qrSize = 220;
+  const qrSize = 275;
   const qrBuf = await generateQR(claimUrl, qrSize * SCALE);
   const qrImg = await loadImage(qrBuf);
 
@@ -234,7 +234,7 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
   ctx.drawImage(qrImg, qrX + qrPad, qrY + qrPad, qrSize, qrSize);
 
   // "Scan to claim" caption (bold 22px Arial, pure black)
-  ctx.font = "bold 22px Arial, Helvetica, sans-serif";
+  ctx.font = "bold 44px Arial, Helvetica, sans-serif";
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.fillText("Scan to claim", qrX + qrBoxSize / 2, qrY + qrBoxSize + 16);
@@ -257,7 +257,7 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
   ctx.fillRect(pad, footerLineY, PX_W - pad * 2, 1);
   ctx.globalAlpha = 1;
 
-  ctx.font = '900 24px "Arial Black", Arial, sans-serif';
+  ctx.font = '900 48px "Arial Black", Arial, sans-serif';
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.fillText("mintvaultuk.com", PX_W / 2, footerTextTop);
