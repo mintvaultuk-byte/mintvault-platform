@@ -192,7 +192,7 @@ const PDF9_UNIT_H_MM = PDF9_FRONT_H_MM + PDF9_BACK_H_MM + PDF9_INSERT_H_MM; // 8
 const PDF9_COLS = 3;
 const PDF9_ROWS = 3;
 const PDF9_INSERT_W_MM = 69; // matches label width — they stack in the same column
-const MAX_CERTS_PER_PDF9 = PDF9_COLS * PDF9_ROWS; // 9
+const MAX_CERTS_PER_PDF9 = 8; // portrait layout = 2 cols × 4 rows
 
 // Static assertion — the offset grid MUST fit within the A4 page height.
 // Throws at import time if a constant edit pushes it past 297mm.
@@ -203,12 +203,27 @@ const MAX_CERTS_PER_PDF9 = PDF9_COLS * PDF9_ROWS; // 9
   }
 }
 
+// ── Portrait-rotation PDF (each set rotated 90° CW, runs tall) ────────────────
+// Each unit is the front/back/insert stacked HORIZONTALLY (after rotation):
+// 21 + 21 + 44 = 86mm wide × 70mm tall (the label long dimension). 2 cols × 4
+// rows = 8 sets, centred on A4.
+const PDF9P_UNIT_W_MM = 86; // 21 (front) + 21 (back) + 44 (insert)
+const PDF9P_UNIT_H_MM = 70; // label long dimension, rotated
+const PDF9P_COLS = 2;
+const PDF9P_ROWS = 4;
+const PDF9P_SETS = PDF9P_COLS * PDF9P_ROWS; // 8
+const PDF9P_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF9P_COLS * PDF9P_UNIT_W_MM) / 2; // 19
+const PDF9P_TOP_MARGIN_MM = (PDF_PAGE_H_MM - PDF9P_ROWS * PDF9P_UNIT_H_MM) / 2; // 8.5
+const PDF9P_FRONT_W_MM = 21;
+const PDF9P_BACK_W_MM = 21;
+const PDF9P_INSERT_W_MM_P = 44; // suffix _P to avoid clash with existing PDF9_INSERT_W_MM
+
 // Public cap — the route validator + UI use this. Bumped 4 → 5 for the new
 // PDF row count. The Cricut PNG/SVG path keeps its own internal cap (4) below
 // so the Cricut sheet stays untouched even if a caller passes 5.
-export const MAX_CERTS_PER_BATCH = 9;
+export const MAX_CERTS_PER_BATCH = 8;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v25";
+export const SHEET_LAYOUT_VERSION = "v26";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
@@ -422,6 +437,45 @@ function buildPdf9Layout(itemCount: number): CellSpec[] {
   return cells;
 }
 
+// Portrait-rotation layout — 2 cols × 4 rows of units; each unit's front/back/
+// insert sit side-by-side (they're drawn rotated 90° CW so they run tall). Cell
+// coords are the UPRIGHT page rectangles each rotated image occupies (w×h).
+function buildPortraitLayout(itemCount: number): CellSpec[] {
+  const n = Math.max(1, Math.min(PDF9P_SETS, itemCount | 0));
+  const cells: CellSpec[] = [];
+  for (let i = 0; i < n; i++) {
+    const col = i % PDF9P_COLS;
+    const row = Math.floor(i / PDF9P_COLS);
+    const unitLeft = PDF9P_LEFT_MARGIN_MM + col * PDF9P_UNIT_W_MM;
+    const unitTop = PDF9P_TOP_MARGIN_MM + row * PDF9P_UNIT_H_MM;
+    cells.push({
+      kind: "label",
+      itemIndex: i,
+      xMm: unitLeft,
+      yMm: unitTop,
+      wMm: PDF9P_FRONT_W_MM,
+      hMm: PDF9P_UNIT_H_MM,
+    });
+    cells.push({
+      kind: "back",
+      itemIndex: i,
+      xMm: unitLeft + PDF9P_FRONT_W_MM,
+      yMm: unitTop,
+      wMm: PDF9P_BACK_W_MM,
+      hMm: PDF9P_UNIT_H_MM,
+    });
+    cells.push({
+      kind: "insert",
+      itemIndex: i,
+      xMm: unitLeft + PDF9P_FRONT_W_MM + PDF9P_BACK_W_MM,
+      yMm: unitTop,
+      wMm: PDF9P_INSERT_W_MM_P,
+      hMm: PDF9P_UNIT_H_MM,
+    });
+  }
+  return cells;
+}
+
 // Render the per-item PNGs in parallel. Used by the PDF, PNG and print-PNG
 // paths. `cap` defaults to MAX_CERTS_PER_BATCH (5) so the Cricut PNG/print-PNG
 // callers (which pass no cap) render exactly 5 — unchanged. The 9-up PDF passes
@@ -520,11 +574,58 @@ function drawGuillotineLines(doc: InstanceType<typeof PDFDocument>): void {
   doc.restore();
 }
 
-// ── PDF generator (full A4, guillotine sheet) ────────────────────────────────
+// Draw `buf` rotated 90° clockwise at page position (xMm, yMm), appearing as
+// wMm wide × hMm tall. The source image's natural orientation is landscape
+// (hMm × wMm); the rotate makes it run tall in the column.
+function drawImageRotated90CW(
+  doc: InstanceType<typeof PDFDocument>,
+  buf: Buffer,
+  xMm: number,
+  yMm: number,
+  wMm: number,
+  hMm: number
+): void {
+  doc.save();
+  doc.translate(mm(xMm + wMm), mm(yMm));
+  doc.rotate(90);
+  doc.image(buf, 0, 0, { width: mm(hMm), height: mm(wMm) });
+  doc.restore();
+}
+
+// Guillotine cut lines for the portrait layout. Verticals split the front/back/
+// insert within each unit + the unit edges (x = 19,40,61,105,126,147,191),
+// running the height of the grid; horizontals split the 4 rows full-page-width.
+function drawPortraitGuillotineLines(doc: InstanceType<typeof PDFDocument>): void {
+  const gridTop = PDF9P_TOP_MARGIN_MM; // 8.5
+  const gridBot = PDF9P_TOP_MARGIN_MM + PDF9P_ROWS * PDF9P_UNIT_H_MM; // 288.5
+  doc.save();
+  doc.lineWidth(GUILLOTINE_STROKE_PT).strokeColor(GUILLOTINE_HEX);
+  // Vertical splits — for each column: unit left, front|back, back|insert, unit
+  // right. The shared edge between adjacent columns dedupes naturally.
+  const xs = new Set<number>();
+  for (let c = 0; c < PDF9P_COLS; c++) {
+    const left = PDF9P_LEFT_MARGIN_MM + c * PDF9P_UNIT_W_MM;
+    xs.add(left);
+    xs.add(left + PDF9P_FRONT_W_MM);
+    xs.add(left + PDF9P_FRONT_W_MM + PDF9P_BACK_W_MM);
+    xs.add(left + PDF9P_UNIT_W_MM);
+  }
+  for (const x of xs) {
+    doc.moveTo(mm(x), mm(gridTop)).lineTo(mm(x), mm(gridBot)).stroke();
+  }
+  // Horizontal row splits — full page width, at each row bottom (r = 1..ROWS).
+  for (let r = 1; r <= PDF9P_ROWS; r++) {
+    const y = PDF9P_TOP_MARGIN_MM + r * PDF9P_UNIT_H_MM;
+    doc.moveTo(mm(0), mm(y)).lineTo(mm(PDF_PAGE_W_MM), mm(y)).stroke();
+  }
+  doc.restore();
+}
+
+// ── PDF generator (full A4, portrait-rotation sheet) ─────────────────────────
 
 export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Buffer> {
-  const layout = buildPdf9Layout(items.length);
-  const { fronts, backs, inserts } = await renderItemBuffers(items, MAX_CERTS_PER_PDF9);
+  const layout = buildPortraitLayout(items.length);
+  const { fronts, backs, inserts } = await renderItemBuffers(items, PDF9P_SETS);
 
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({
@@ -550,14 +651,10 @@ export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Bu
             : cell.kind === "back"
               ? backs[cell.itemIndex]
               : inserts[cell.itemIndex];
-        doc.image(buf, mm(cell.xMm), mm(cell.yMm), {
-          width: mm(cell.wMm),
-          height: mm(cell.hMm),
-        });
+        // Each set is rotated 90° CW so the labels/insert run tall down the page.
+        drawImageRotated90CW(doc, buf, cell.xMm, cell.yMm, cell.wMm, cell.hMm);
       }
-      // Full-length guillotine cut lines at every boundary (drawn after the
-      // artwork so they sit on top), replacing the per-label corner ticks.
-      drawGuillotineLines(doc);
+      drawPortraitGuillotineLines(doc);
       doc.end();
     } catch (err) {
       reject(err);

@@ -37,8 +37,8 @@ import AdminCertBrowser from "./admin-cert-browser";
 // claim insert stacked per cell. PRINT_BATCH_MAX is defined inside
 // SheetPrintingPanel (kept close to its only consumer); we expose the same
 // number here for "select first N" UI.
-// Mirrors server/print-batch.ts MAX_CERTS_PER_BATCH (currently 9).
-const MAX_CERTS_PER_BATCH = 9;
+// Mirrors server/print-batch.ts MAX_CERTS_PER_BATCH (currently 8).
+const MAX_CERTS_PER_BATCH = 8;
 
 type CertForPrinting = CertificateRecord & { lastPrintedAt: string | null };
 type FilterMode = "all" | "unprinted" | "printed";
