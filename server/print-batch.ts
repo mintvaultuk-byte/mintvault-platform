@@ -473,7 +473,11 @@ export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Bu
 // sheet — 4 fronts + 4 inserts.
 
 export function generatePrintBatchCutSVG(itemCount: number): string {
-  const layout = buildLayout(itemCount);
+  // Use the SAME layout as the Cricut PNG (buildCricutPNGLayout) so the cut
+  // paths line up exactly with the printed labels. Slab labels only (front +
+  // back) — the claim insert is a paper insert, not cut on the Cricut. Canvas
+  // is the Cricut sheet (PAGE_W_MM × PNG_PAGE_H_MM), NOT the A4 PDF height.
+  const layout = buildCricutPNGLayout(itemCount).filter((c) => c.kind === "label" || c.kind === "back");
   const insetRect = (cell: CellSpec) =>
     `    <rect x="${(cell.xMm + CUT_INSET_MM).toFixed(4)}" y="${(cell.yMm + CUT_INSET_MM).toFixed(4)}" ` +
     `width="${(cell.wMm - 2 * CUT_INSET_MM).toFixed(4)}" height="${(cell.hMm - 2 * CUT_INSET_MM).toFixed(4)}" ` +
@@ -482,10 +486,10 @@ export function generatePrintBatchCutSVG(itemCount: number): string {
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<!-- MintVault Print Batch Cut Guide (${SHEET_LAYOUT_VERSION}) — ${layout.length} cut paths -->`,
-    `<!-- A4 ${PAGE_W_MM}×${PDF_PAGE_H_MM}mm | ${CUT_INSET_MM}mm bleed inset per side | stroke ${CUT_STROKE_HEX} -->`,
+    `<!-- Cricut ${PAGE_W_MM}×${PNG_PAGE_H_MM}mm | ${CUT_INSET_MM}mm bleed inset per side | stroke ${CUT_STROKE_HEX} -->`,
     `<svg xmlns="http://www.w3.org/2000/svg"`,
-    `     width="${PAGE_W_MM}mm" height="${PDF_PAGE_H_MM}mm"`,
-    `     viewBox="0 0 ${PAGE_W_MM} ${PDF_PAGE_H_MM}">`,
+    `     width="${PAGE_W_MM}mm" height="${PNG_PAGE_H_MM}mm"`,
+    `     viewBox="0 0 ${PAGE_W_MM} ${PNG_PAGE_H_MM}">`,
     `  <g id="cut">`,
     ...layout.map(insetRect),
     `  </g>`,
