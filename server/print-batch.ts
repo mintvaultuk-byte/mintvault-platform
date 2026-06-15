@@ -208,12 +208,12 @@ const MAX_CERTS_PER_PDF9 = 8; // portrait layout = 2 cols × 4 rows
 // 21 + 21 + 44 = 86mm wide × 70mm tall (the label long dimension). 2 cols × 4
 // rows = 8 sets, centred on A4.
 const PDF9P_UNIT_W_MM = 86; // 21 (front) + 21 (back) + 44 (insert)
-const PDF9P_UNIT_H_MM = 70; // label long dimension, rotated
+const PDF9P_UNIT_H_MM = 69.5; // label long dimension, rotated
 const PDF9P_COLS = 2;
 const PDF9P_ROWS = 4;
 const PDF9P_SETS = PDF9P_COLS * PDF9P_ROWS; // 8
 const PDF9P_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF9P_COLS * PDF9P_UNIT_W_MM) / 2; // 19
-const PDF9P_TOP_MARGIN_MM = (PDF_PAGE_H_MM - PDF9P_ROWS * PDF9P_UNIT_H_MM) / 2; // 8.5
+const PDF9P_TOP_MARGIN_MM = (PDF_PAGE_H_MM - PDF9P_ROWS * PDF9P_UNIT_H_MM) / 2; // 9.5 (auto: (297 - 4×69.5)/2)
 const PDF9P_FRONT_W_MM = 21;
 const PDF9P_BACK_W_MM = 21;
 const PDF9P_INSERT_W_MM_P = 44; // suffix _P to avoid clash with existing PDF9_INSERT_W_MM
@@ -223,7 +223,7 @@ const PDF9P_INSERT_W_MM_P = 44; // suffix _P to avoid clash with existing PDF9_I
 // so the Cricut sheet stays untouched even if a caller passes 5.
 export const MAX_CERTS_PER_BATCH = 8;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v27";
+export const SHEET_LAYOUT_VERSION = "v28";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
@@ -596,8 +596,8 @@ function drawImageRotated90CW(
 // insert within each unit + the unit edges (x = 19,40,61,105,126,147,191),
 // running the height of the grid; horizontals split the 4 rows full-page-width.
 function drawPortraitGuillotineLines(doc: InstanceType<typeof PDFDocument>): void {
-  const gridTop = PDF9P_TOP_MARGIN_MM; // 8.5
-  const gridBot = PDF9P_TOP_MARGIN_MM + PDF9P_ROWS * PDF9P_UNIT_H_MM; // 288.5
+  const gridTop = PDF9P_TOP_MARGIN_MM; // 9.5
+  const gridBot = PDF9P_TOP_MARGIN_MM + PDF9P_ROWS * PDF9P_UNIT_H_MM; // 287.5
   doc.save();
   doc.lineWidth(GUILLOTINE_STROKE_PT).strokeColor(GUILLOTINE_HEX);
   // Vertical splits — for each column: unit left, front|back, back|insert, unit
