@@ -207,15 +207,15 @@ const MAX_CERTS_PER_PDF9 = 8; // portrait layout = 2 cols × 4 rows
 // Each unit is the front/back/insert stacked HORIZONTALLY (after rotation):
 // 21 + 21 + 44 = 86mm wide × 70mm tall (the label long dimension). 2 cols × 4
 // rows = 8 sets, centred on A4.
-const PDF9P_UNIT_W_MM = 87.4; // 21.5 (front) + 21.5 (back) + 44 (insert)
-const PDF9P_UNIT_H_MM = 69.7; // label long dimension, rotated
+const PDF9P_UNIT_W_MM = 87.6; // 21.5 (front) + 21.5 (back) + 44 (insert)
+const PDF9P_UNIT_H_MM = 69.8; // label long dimension, rotated
 const PDF9P_COLS = 2;
 const PDF9P_ROWS = 4;
 const PDF9P_SETS = PDF9P_COLS * PDF9P_ROWS; // 8
 const PDF9P_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF9P_COLS * PDF9P_UNIT_W_MM) / 2; // 18
 const PDF9P_TOP_MARGIN_MM = (PDF_PAGE_H_MM - PDF9P_ROWS * PDF9P_UNIT_H_MM) / 2; // 9.5 (auto: (297 - 4×69.5)/2)
-const PDF9P_FRONT_W_MM = 21.7;
-const PDF9P_BACK_W_MM = 21.7;
+const PDF9P_FRONT_W_MM = 21.8;
+const PDF9P_BACK_W_MM = 21.8;
 const PDF9P_INSERT_W_MM_P = 44; // suffix _P to avoid clash with existing PDF9_INSERT_W_MM
 
 // Public cap — the route validator + UI use this. Bumped 4 → 5 for the new
@@ -223,7 +223,7 @@ const PDF9P_INSERT_W_MM_P = 44; // suffix _P to avoid clash with existing PDF9_I
 // so the Cricut sheet stays untouched even if a caller passes 5.
 export const MAX_CERTS_PER_BATCH = 8;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v30";
+export const SHEET_LAYOUT_VERSION = "v31";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
