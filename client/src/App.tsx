@@ -210,6 +210,7 @@ function Router() {
           <Route path="/pricing-v2" component={PricingV2Mockup} />
           <Route path="/pricing-demo" component={PricingDemo} />
           <Route path="/admin" component={AdminPage} />
+          <Route path="/admin/promotions" component={AdminPage} />
           <Route path="/admin/instagram" component={AdminInstagramPage} />
           <Route path="/admin/weekly-reel" component={AdminWeeklyReelPage} />
           <Route path="/admin/mvgs-calibration" component={AdminMvgsCalibrationPage} />

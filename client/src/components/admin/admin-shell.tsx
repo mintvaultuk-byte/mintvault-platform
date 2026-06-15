@@ -20,6 +20,7 @@ import {
   Search,
   LogOut,
   Check,
+  Tag,
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
 
@@ -30,6 +31,7 @@ export type AdminTab =
   | "submissions"
   | "intake"
   | "pricing"
+  | "promotions"
   | "capacity"
   | "printing"
   | "grading"
@@ -70,6 +72,7 @@ const NAV: NavSection[] = [
       { key: "submissions", label: "Submissions", icon: Package },
       { key: "intake", label: "Intake", icon: ScanLine },
       { key: "pricing", label: "Pricing", icon: DollarSign },
+      { key: "promotions", label: "Promotions", icon: Tag },
       { key: "capacity", label: "Capacity", icon: Database },
       { key: "printing", label: "Printing", icon: Printer },
     ],

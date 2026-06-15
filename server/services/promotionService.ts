@@ -115,7 +115,35 @@ export async function savePromotion(data: PromotionInput, adminUser: string): Pr
   const createdCoupons: Array<{ tier: TierKey; id: string }> = [];
   try {
     return await db.transaction(async (tx) => {
-      // a. Lock the current active promo (if any).
+      // 0. Auto-expire any stale active row whose expiry has already passed,
+      //    BEFORE the singleton swap below. The partial unique index allows only
+      //    one active=true row; if that row is expired-but-still-active it would
+      //    otherwise make this activation fail the index. Clearing it here (with a
+      //    distinct PROMO_AUTO_EXPIRED audit, separate from a normal swap) means
+      //    activating a new promo always succeeds over a dead row. Excludes the
+      //    row being edited (data.id) so re-activating it isn't self-expired.
+      const excludeId = data.id ?? -1; // serial ids are positive → -1 excludes nothing on insert
+      const expiredRows = await tx.execute(sql`
+        UPDATE promotions
+        SET active = false, updated_at = NOW()
+        WHERE active = true
+          AND expires_at IS NOT NULL
+          AND expires_at <= NOW()
+          AND id <> ${excludeId}
+        RETURNING id, expires_at
+      `);
+      for (const r of expiredRows.rows as Array<{ id: number; expires_at: string }>) {
+        await tx.insert(auditLog).values({
+          entityType: "promotion",
+          entityId: String(r.id),
+          action: "PROMO_AUTO_EXPIRED",
+          adminUser,
+          details: { expires_at: r.expires_at, reason: "expired_on_activate" },
+        });
+        log("auto-expired stale active promo", { id: r.id, expires_at: r.expires_at });
+      }
+
+      // a. Lock the current (unexpired) active promo (if any).
       const cur = await tx.execute(sql`SELECT id FROM promotions WHERE active = true LIMIT 1 FOR UPDATE`);
       const oldId: number | null = (cur.rows[0] as { id: number } | undefined)?.id ?? null;
 

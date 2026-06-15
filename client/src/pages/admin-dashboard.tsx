@@ -81,6 +81,7 @@ const GRADING_STATUS_VARIANT: Record<GradingStatus, AdminBadgeVariant> = {
 };
 import AdminSubmissions, { AdminIntake } from "@/pages/admin-submissions";
 import AdminPricing from "@/pages/admin-pricing";
+import AdminPromotions from "@/pages/admin-promotions";
 import AdminPrinting from "@/pages/admin-printing";
 import AdminLearningPage from "@/pages/admin-learning";
 import AdminCaptureHealthPage from "@/pages/admin-capture-health";
@@ -110,6 +111,8 @@ import GradingQueue from "@/components/grading/grading-queue";
 
 interface Props {
   onLogout: () => void;
+  /** Tab to open on first render (e.g. when deep-linked via /admin/promotions). */
+  initialTab?: AdminTab;
 }
 
 interface DashboardStats {
@@ -122,8 +125,8 @@ interface DashboardStats {
   recentCerts: CertificateRecord[];
 }
 
-export default function AdminDashboard({ onLogout }: Props) {
-  const [activeTab, setActiveTab] = useState<AdminTab>("dashboard");
+export default function AdminDashboard({ onLogout, initialTab }: Props) {
+  const [activeTab, setActiveTab] = useState<AdminTab>(initialTab ?? "dashboard");
   const [filterPreset, setFilterPreset] = useState<CertsFilter>({});
   const [showForm, setShowForm] = useState(false);
   const [editingCert, setEditingCert] = useState<CertificateRecord | null>(null);
@@ -315,6 +318,7 @@ export default function AdminDashboard({ onLogout }: Props) {
       {activeTab === "submissions" && <AdminSubmissions />}
       {activeTab === "intake" && <AdminIntake />}
       {activeTab === "pricing" && <AdminPricing />}
+      {activeTab === "promotions" && <AdminPromotions />}
       {activeTab === "capacity" && <AdminCapacity />}
       {activeTab === "printing" && <AdminPrinting />}
       {activeTab === "learning" && <AdminLearningPage />}

@@ -4,7 +4,9 @@ import AdminDashboard from "./admin-dashboard";
 
 export default function AdminPage() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
-  const [, navigate] = useLocation();
+  const [location, navigate] = useLocation();
+  // Deep-link: /admin/promotions opens the dashboard on the Promotions tab.
+  const initialTab = location === "/admin/promotions" ? ("promotions" as const) : undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -35,14 +37,16 @@ export default function AdminPage() {
     }
 
     checkAuth();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     if (authenticated === false) {
-      navigate("/admin/login?next=/admin", { replace: true });
+      navigate(`/admin/login?next=${encodeURIComponent(location || "/admin")}`, { replace: true });
     }
-  }, [authenticated, navigate]);
+  }, [authenticated, navigate, location]);
 
   if (authenticated !== true) {
     return (
@@ -54,5 +58,5 @@ export default function AdminPage() {
     );
   }
 
-  return <AdminDashboard onLogout={() => navigate("/cert")} />;
+  return <AdminDashboard onLogout={() => navigate("/cert")} initialTab={initialTab} />;
 }
