@@ -178,12 +178,26 @@ const PDF_LEFT_MARGIN_MM = (PDF_PAGE_W_MM - PDF_CONTENT_W_MM) / 2; // 31.13
   }
 }
 
+// ── 9-up edge-to-edge guillotine PDF (3 cols × 3 rows, stacked units) ────────
+// Each unit is one 70mm-wide vertical column: front 21mm / back 21mm / insert
+// 44mm = 86mm tall. NO page margins — units start at x=0,70,140 and y=0,86,172.
+// Used height = 3×86 = 258mm, leaving the bottom 39mm of the A4 page empty.
+const PDF9_LABEL_W_MM = 70;
+const PDF9_FRONT_H_MM = 21;
+const PDF9_BACK_H_MM = 21;
+const PDF9_INSERT_H_MM = 44;
+const PDF9_UNIT_H_MM = PDF9_FRONT_H_MM + PDF9_BACK_H_MM + PDF9_INSERT_H_MM; // 86
+const PDF9_COLS = 3;
+const PDF9_ROWS = 3;
+const PDF9_INSERT_W_MM = 70;
+const MAX_CERTS_PER_PDF9 = PDF9_COLS * PDF9_ROWS; // 9
+
 // Public cap — the route validator + UI use this. Bumped 4 → 5 for the new
 // PDF row count. The Cricut PNG/SVG path keeps its own internal cap (4) below
 // so the Cricut sheet stays untouched even if a caller passes 5.
-export const MAX_CERTS_PER_BATCH = 5;
+export const MAX_CERTS_PER_BATCH = 9;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v18";
+export const SHEET_LAYOUT_VERSION = "v19";
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.
@@ -359,13 +373,58 @@ function buildPdfLayout(itemCount: number): CellSpec[] {
   return cells;
 }
 
-// Render the per-item PNGs in parallel. Used by both the PDF and PNG paths.
-async function renderItemBuffers(items: PrintBatchItem[]): Promise<{
+// 9-up edge-to-edge layout — 3 cols × 3 rows of stacked units (front/back/insert),
+// no margins. Caps at 9 (MAX_CERTS_PER_PDF9). cellX = col×70, unitTopY = row×86.
+function buildPdf9Layout(itemCount: number): CellSpec[] {
+  const n = Math.max(1, Math.min(MAX_CERTS_PER_PDF9, itemCount | 0));
+  const cells: CellSpec[] = [];
+  for (let i = 0; i < n; i++) {
+    const col = i % PDF9_COLS;
+    const row = Math.floor(i / PDF9_COLS);
+    const cellX = col * PDF9_LABEL_W_MM;
+    const unitTopY = row * PDF9_UNIT_H_MM;
+    cells.push({
+      kind: "label",
+      itemIndex: i,
+      xMm: cellX,
+      yMm: unitTopY,
+      wMm: PDF9_LABEL_W_MM,
+      hMm: PDF9_FRONT_H_MM,
+    });
+    cells.push({
+      kind: "back",
+      itemIndex: i,
+      xMm: cellX,
+      yMm: unitTopY + PDF9_FRONT_H_MM,
+      wMm: PDF9_LABEL_W_MM,
+      hMm: PDF9_BACK_H_MM,
+    });
+    cells.push({
+      kind: "insert",
+      itemIndex: i,
+      xMm: cellX,
+      yMm: unitTopY + PDF9_FRONT_H_MM + PDF9_BACK_H_MM,
+      wMm: PDF9_INSERT_W_MM,
+      hMm: PDF9_INSERT_H_MM,
+    });
+  }
+  return cells;
+}
+
+// Render the per-item PNGs in parallel. Used by the PDF, PNG and print-PNG
+// paths. `cap` defaults to MAX_CERTS_PER_BATCH (5) so the Cricut PNG/print-PNG
+// callers (which pass no cap) render exactly 5 — unchanged. The 9-up PDF passes
+// MAX_CERTS_PER_PDF9 (9). The Cricut PNG layout still caps its own cells at 5,
+// so even if more buffers exist it indexes the same 0–4.
+async function renderItemBuffers(
+  items: PrintBatchItem[],
+  cap: number = MAX_CERTS_PER_BATCH
+): Promise<{
   fronts: Buffer[];
   backs: Buffer[];
   inserts: Buffer[];
 }> {
-  const slice = items.slice(0, MAX_CERTS_PER_BATCH);
+  const slice = items.slice(0, cap);
   const [fronts, backs, inserts] = await Promise.all([
     Promise.all(slice.map((it) => generateLabelPNG(it.cert, "front"))),
     Promise.all(slice.map((it) => generateLabelPNG(it.cert, "back"))),
@@ -417,11 +476,41 @@ function drawLabelCropMarks(doc: InstanceType<typeof PDFDocument>, cell: CellSpe
   doc.restore();
 }
 
+// Full-length guillotine cut lines for the 9-up edge-to-edge PDF. Unlike the
+// per-label corner ticks, these are continuous straight lines spanning the
+// whole used area at every cut boundary, so the operator can guillotine the
+// whole sheet in straight passes. Vertical lines at the column splits (x=70,140)
+// run y=0→258; horizontal lines at every front|back, back|insert and unit
+// boundary run x=0→210 (y = 21,42,86,107,128,172,193,214,258).
+const GUILLOTINE_STROKE_PT = 0.2;
+const GUILLOTINE_HEX = "#000000";
+
+function drawGuillotineLines(doc: InstanceType<typeof PDFDocument>): void {
+  const usedH = PDF9_ROWS * PDF9_UNIT_H_MM; // 258
+  doc.save();
+  doc.lineWidth(GUILLOTINE_STROKE_PT).strokeColor(GUILLOTINE_HEX);
+  // Vertical column splits — full used height.
+  for (let c = 1; c < PDF9_COLS; c++) {
+    const x = c * PDF9_LABEL_W_MM; // 70, 140
+    doc.moveTo(mm(x), mm(0)).lineTo(mm(x), mm(usedH)).stroke();
+  }
+  // Horizontal splits — full page width, three per unit row (front|back,
+  // back|insert, unit bottom).
+  for (let r = 0; r < PDF9_ROWS; r++) {
+    const top = r * PDF9_UNIT_H_MM;
+    const ys = [top + PDF9_FRONT_H_MM, top + PDF9_FRONT_H_MM + PDF9_BACK_H_MM, top + PDF9_UNIT_H_MM];
+    for (const y of ys) {
+      doc.moveTo(mm(0), mm(y)).lineTo(mm(PDF_PAGE_W_MM), mm(y)).stroke();
+    }
+  }
+  doc.restore();
+}
+
 // ── PDF generator (full A4, guillotine sheet) ────────────────────────────────
 
 export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Buffer> {
-  const layout = buildPdfLayout(items.length);
-  const { fronts, backs, inserts } = await renderItemBuffers(items);
+  const layout = buildPdf9Layout(items.length);
+  const { fronts, backs, inserts } = await renderItemBuffers(items, MAX_CERTS_PER_PDF9);
 
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({
@@ -452,13 +541,9 @@ export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Bu
           height: mm(cell.hMm),
         });
       }
-      // Guillotine trim guides — 70×20mm slab labels only (front + back).
-      // Drawn after the artwork so the ticks sit on top of the white margins.
-      for (const cell of layout) {
-        if (cell.kind === "label" || cell.kind === "back") {
-          drawLabelCropMarks(doc, cell);
-        }
-      }
+      // Full-length guillotine cut lines at every boundary (drawn after the
+      // artwork so they sit on top), replacing the per-label corner ticks.
+      drawGuillotineLines(doc);
       doc.end();
     } catch (err) {
       reject(err);

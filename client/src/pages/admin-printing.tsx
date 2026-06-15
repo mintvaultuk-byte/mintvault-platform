@@ -33,11 +33,12 @@ import {
 } from "lucide-react";
 import AdminCertBrowser from "./admin-cert-browser";
 
-// Guillotine PDF — 5 certs per sheet, full A4, slab pair + claim insert per row.
-// PRINT_BATCH_MAX is defined inside SheetPrintingPanel (kept close to its
-// only consumer); we expose the same number here for "select first N" UI.
-// Mirrors server/print-batch.ts MAX_CERTS_PER_BATCH (currently 5).
-const MAX_CERTS_PER_BATCH = 5;
+// Guillotine PDF — 9 certs per sheet, 3 columns x 3 rows, front + back label +
+// claim insert stacked per cell. PRINT_BATCH_MAX is defined inside
+// SheetPrintingPanel (kept close to its only consumer); we expose the same
+// number here for "select first N" UI.
+// Mirrors server/print-batch.ts MAX_CERTS_PER_BATCH (currently 9).
+const MAX_CERTS_PER_BATCH = 9;
 
 type CertForPrinting = CertificateRecord & { lastPrintedAt: string | null };
 type FilterMode = "all" | "unprinted" | "printed";
@@ -1209,7 +1210,7 @@ function SheetPrintingPanel() {
             <LayoutGrid className="h-5 w-5" /> Label Sheet Printing
           </h2>
           <p className="text-xs text-[var(--admin-ink-faint)] mt-0.5">
-            A4 · {MAX_CERTS_PER_BATCH} certs per sheet · 70 × 20 mm slab label + claim insert · guillotine-cut
+            A4 · {MAX_CERTS_PER_BATCH} certs per sheet · 70 × 21 mm slab labels + claim insert · guillotine-cut
           </p>
         </div>
         <Button
