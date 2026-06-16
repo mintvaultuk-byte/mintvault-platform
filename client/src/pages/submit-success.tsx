@@ -116,7 +116,7 @@ export default function SubmitSuccessPage() {
         </p>
         <a
           href={`/api/submissions/${subId}/shipping-label?token=${psToken}`}
-          className="inline-flex items-center gap-2 border border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37] px-5 py-2.5 rounded font-medium tracking-wide text-sm transition-all hover:bg-[#D4AF37]/20"
+          className="inline-flex items-center gap-2 bg-[#D4AF37] text-[#1A1400] px-5 py-2.5 rounded font-semibold tracking-wide text-sm transition-all hover:bg-[#B8960C]"
           data-testid="button-download-shipping-label"
         >
           <Download size={16} /> Download Shipping Label (PDF)
@@ -169,7 +169,7 @@ export default function SubmitSuccessPage() {
         </Link>
         <Link href="/" className="flex-1">
           <button
-            className="w-full border border-[#D4AF37]/30 text-[#D4AF37]/60 py-2.5 rounded font-medium transition-all hover:border-[#D4AF37]/50 hover:text-[#D4AF37]"
+            className="w-full bg-[#D4AF37] text-[#1A1400] py-2.5 rounded font-semibold transition-all hover:bg-[#B8960C]"
             data-testid="button-back-home"
           >
             Back to Home
