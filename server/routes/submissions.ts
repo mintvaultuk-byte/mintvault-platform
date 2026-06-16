@@ -6,6 +6,7 @@ import { storage } from "../storage";
 import { getUncachableStripeClient } from "../stripeClient";
 import { sendSubmissionConfirmation, sendSubmissionConfirmationV2 } from "../email";
 import { getActivePromotion } from "../services/promotionService";
+import { resolveGradingDiscount } from "../services/gradingDiscount";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -310,47 +311,11 @@ export function registerSubmissionRoutes(app: Express): void {
         console.error("[promo] checkout resolve failed — charging full price:", err?.message || err);
       }
 
-      // Discount amounts for each method, on the same subtotal base.
-      const vcAmt = Math.round((subtotalPence * vcPercent) / 100);
-      const bulkAmt = Math.round((subtotalPence * bulkPercent) / 100);
-      const promoAmt = Math.round((subtotalPence * promoPercent) / 100);
-
-      let effectiveDiscountAmount: number;
-      let effectiveDiscountPercent: number;
-      let discountType: string | null;
-
-      if (promoPercent > 0 && promoStackingMode === "stack_on_top") {
-        // Better-of(vault-club, bulk) FIRST, then promo compounded on the
-        // reduced subtotal. Floored so the price can never go below £0.
-        const baseAmt = Math.max(vcAmt, bulkAmt);
-        const afterBase = subtotalPence - baseAmt;
-        const promoOnTop = Math.round((afterBase * promoPercent) / 100);
-        effectiveDiscountAmount = Math.min(subtotalPence, baseAmt + promoOnTop);
-        effectiveDiscountPercent = subtotalPence > 0 ? Math.round((effectiveDiscountAmount / subtotalPence) * 100) : 0;
-        const baseLabel =
-          vcPercent >= bulkPercent && vcPercent > 0 ? "vault_club_silver" : bulkPercent > 0 ? "bulk" : null;
-        discountType = baseLabel ? `${baseLabel}+promo` : "promo";
-      } else {
-        // best_of (default + the locked vault-club/bulk rule): the single
-        // LOWEST final price across {vault-club, bulk, promo}. Same subtotal
-        // base → largest discount amount wins.
-        effectiveDiscountAmount = Math.max(vcAmt, bulkAmt, promoAmt);
-        if (promoPercent > 0 && promoAmt >= vcAmt && promoAmt >= bulkAmt) {
-          discountType = "promo";
-          effectiveDiscountPercent = promoPercent;
-        } else if (vcPercent >= bulkPercent && vcPercent > 0) {
-          discountType = "vault_club_silver";
-          effectiveDiscountPercent = vcPercent;
-        } else if (bulkPercent > 0) {
-          discountType = "bulk";
-          effectiveDiscountPercent = bulkPercent;
-        } else {
-          discountType = null;
-          effectiveDiscountPercent = 0;
-        }
-      }
-      const promoApplied = discountType !== null && discountType.includes("promo");
-      const discountedSubtotal = subtotalPence - effectiveDiscountAmount;
+      // Resolve the charged discount (vault-club vs bulk vs promo) in ONE place —
+      // server/services/gradingDiscount.ts — so the route and tests share the
+      // exact same logic. Behaviour is identical to the prior inline code.
+      const { effectiveDiscountAmount, effectiveDiscountPercent, discountType, discountedSubtotal, promoApplied } =
+        resolveGradingDiscount({ subtotalPence, vcPercent, bulkPercent, promoPercent, promoStackingMode });
 
       // ── Credit application (Vault Club Silver/Gold) ────────────────────────
       let creditApplied = false;
