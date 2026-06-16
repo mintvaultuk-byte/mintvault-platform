@@ -21,6 +21,13 @@ import {
   deletePromotion,
   type PromotionInput,
 } from "../../services/promotionService";
+import {
+  listPromoCodes,
+  createPromoCode,
+  deletePromoCode,
+  normalizeCode,
+  type PromoCodeInput,
+} from "../../services/promoCodeService";
 
 function adminUserOf(req: Request): string {
   return req.session?.adminEmail || "admin";
@@ -150,4 +157,76 @@ export function registerPromotionRoutes(app: Express): void {
       res.status(500).json({ error: err?.message || "Failed to delete promotion" });
     }
   });
+
+  // ── Promo codes (private, customer-entered; multiple at once) ──
+  app.get("/api/admin/promo-codes", requireAdmin, async (_req, res) => {
+    try {
+      res.json({ codes: await listPromoCodes() });
+    } catch (err: any) {
+      console.error("[promo-codes] list error:", err?.message || err);
+      res.status(500).json({ error: "Failed to list promo codes" });
+    }
+  });
+
+  app.post("/api/admin/promo-codes", requireAdmin, async (req, res) => {
+    const parsed = parseCodeInput(req.body);
+    if ("error" in parsed) return res.status(400).json({ error: parsed.error });
+    try {
+      const code = await createPromoCode(parsed.input, adminUserOf(req));
+      res.json({ code });
+    } catch (err: any) {
+      // Unique-violation when the code already exists (active) → friendly 409.
+      if (err?.code === "23505" || /duplicate key|unique/i.test(err?.message || "")) {
+        return res.status(409).json({ error: "That code already exists" });
+      }
+      console.error("[promo-codes] create error:", err?.message || err);
+      res.status(500).json({ error: err?.message || "Failed to create promo code" });
+    }
+  });
+
+  app.delete("/api/admin/promo-codes/:id", requireAdmin, async (req, res) => {
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid promo code id" });
+    try {
+      await deletePromoCode(id, adminUserOf(req));
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[promo-codes] delete error:", err?.message || err);
+      res.status(500).json({ error: err?.message || "Failed to delete promo code" });
+    }
+  });
+}
+
+/** Validate + coerce a promo-code create body. Server is the source of truth. */
+function parseCodeInput(body: any): { error: string } | { input: PromoCodeInput } {
+  if (!body || typeof body !== "object") return { error: "Body must be an object" };
+
+  const code = normalizeCode(body.code);
+  if (!code) return { error: "code is required" };
+  if (code.length > 64) return { error: "code must be ≤ 64 chars" };
+  if (!/^[A-Z0-9._-]+$/.test(code)) return { error: "code may only contain letters, numbers, . _ -" };
+
+  const percent = body.percent;
+  if (typeof percent !== "number" || !Number.isInteger(percent) || percent < 1 || percent > 100) {
+    return { error: "percent must be an integer between 1 and 100" };
+  }
+
+  let max_uses: number | null = null;
+  if (body.max_uses !== undefined && body.max_uses !== null && String(body.max_uses).trim() !== "") {
+    const m = Number(body.max_uses);
+    if (!Number.isInteger(m) || m < 1) return { error: "max_uses must be an integer ≥ 1 (or empty for unlimited)" };
+    max_uses = m;
+  }
+
+  let expires_at: string | null = null;
+  if (body.expires_at !== undefined && body.expires_at !== null && String(body.expires_at).trim() !== "") {
+    const d = new Date(body.expires_at);
+    if (Number.isNaN(d.getTime())) return { error: "expires_at is not a valid date" };
+    expires_at = d.toISOString();
+  }
+
+  const label = typeof body.label === "string" ? body.label.trim().slice(0, 200) : null;
+  if (typeof body.active !== "boolean") return { error: "active must be a boolean" };
+
+  return { input: { code, label, percent, max_uses, expires_at, active: body.active } };
 }

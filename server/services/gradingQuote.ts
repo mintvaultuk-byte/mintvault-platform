@@ -20,6 +20,7 @@ import { sql } from "drizzle-orm";
 import { calculateOrderTotals, getVaultClubDiscountPercent } from "@shared/schema";
 import { getActivePromotion } from "./promotionService";
 import { resolveGradingDiscount, type GradingStackingMode } from "./gradingDiscount";
+import { validatePromoCode } from "./promoCodeService";
 
 /** Count unused, unexpired credits of a given type (read-only). */
 export async function countCreditsRemaining(userId: string, creditType: string = "member"): Promise<number> {
@@ -44,6 +45,8 @@ export interface GradingQuoteInput {
   applyCredit?: boolean;
   /** requestedCreditType from the client ("reholder" → reholder, else standard_grade). */
   creditType?: string;
+  /** Optional customer-typed promo code — validated server-side; never trust a client %. */
+  promoCode?: string;
 }
 
 export interface GradingQuoteResult {
@@ -72,10 +75,24 @@ export interface GradingQuoteResult {
   insuranceSurchargeLabel: string;
   /** The chargeable total in pence — exactly the PaymentIntent amount. */
   total: number;
+  // ── Promo code (when one was supplied) ──
+  /** A code was entered and passed validation (active, not expired, under cap). */
+  promoCodeValid: boolean;
+  /** Rejection reason when a code was entered but invalid (for wizard feedback). */
+  promoCodeReason: string | null;
+  /** The code actually discounted this order (won best_of). Drives redemption. */
+  promoCodeApplied: boolean;
+  /** The validated code's id — stored in PI metadata only when applied. */
+  promoCodeId: number | null;
+  /** Normalized code string (when valid). */
+  promoCode: string | null;
+  /** The code's % (when valid). */
+  promoCodePercent: number;
 }
 
 export async function computeGradingQuote(input: GradingQuoteInput): Promise<GradingQuoteResult> {
-  const { serviceType, tier, pricePerCard, quantity, declaredValue, userId, applyCredit, creditType } = input;
+  const { serviceType, tier, pricePerCard, quantity, declaredValue, userId, applyCredit, creditType, promoCode } =
+    input;
 
   const totals = calculateOrderTotals(pricePerCard, quantity, declaredValue);
   const subtotalPence = pricePerCard * quantity;
@@ -122,8 +139,34 @@ export async function computeGradingQuote(input: GradingQuoteInput): Promise<Gra
     console.error("[promo] quote/checkout resolve failed — charging full price:", err?.message || err);
   }
 
+  // Promo CODE — validated SERVER-SIDE (never trust a client %). Grading only.
+  // It's fed to the resolver as a best_of arm; it only "applies" (discounts the
+  // order) if it beats vault-club/bulk/auto-promo (discountType === "promo_code").
+  let codePercent = 0;
+  let promoCodeValid = false;
+  let promoCodeReason: string | null = null;
+  let promoCodeId: number | null = null;
+  let promoCodeStr: string | null = null;
+  if (typeof promoCode === "string" && promoCode.trim() !== "") {
+    if (serviceType !== "grading") {
+      promoCodeReason = "not_found";
+    } else {
+      const v = await validatePromoCode(promoCode);
+      if (v.valid) {
+        codePercent = v.percent;
+        promoCodeValid = true;
+        promoCodeId = v.id;
+        promoCodeStr = v.code;
+      } else {
+        promoCodeReason = v.reason;
+      }
+    }
+  }
+
   const { effectiveDiscountAmount, effectiveDiscountPercent, discountType, discountedSubtotal, promoApplied } =
-    resolveGradingDiscount({ subtotalPence, vcPercent, bulkPercent, promoPercent, promoStackingMode });
+    resolveGradingDiscount({ subtotalPence, vcPercent, bulkPercent, promoPercent, promoStackingMode, codePercent });
+
+  const promoCodeApplied = discountType === "promo_code";
 
   // Credit application (Vault Club Silver/Gold). Read-only count here.
   let creditApplied = false;
@@ -166,5 +209,11 @@ export async function computeGradingQuote(input: GradingQuoteInput): Promise<Gra
     shippingLabel: totals.shippingLabel,
     insuranceSurchargeLabel: totals.insuranceSurchargeLabel,
     total,
+    promoCodeValid,
+    promoCodeReason,
+    promoCodeApplied,
+    promoCodeId,
+    promoCode: promoCodeStr,
+    promoCodePercent: codePercent,
   };
 }

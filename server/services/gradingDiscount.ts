@@ -29,6 +29,8 @@ export interface GradingDiscountInput {
   promoPercent: number;
   /** The active promo's stacking mode (irrelevant when promoPercent is 0). */
   promoStackingMode: GradingStackingMode;
+  /** Validated promo-CODE % (0 if none). A pure best_of alternative — NEVER stacks. */
+  codePercent?: number;
 }
 
 export interface GradingDiscountResult {
@@ -45,7 +47,7 @@ export interface GradingDiscountResult {
 }
 
 export function resolveGradingDiscount(input: GradingDiscountInput): GradingDiscountResult {
-  const { subtotalPence, vcPercent, bulkPercent, promoPercent, promoStackingMode } = input;
+  const { subtotalPence, vcPercent, bulkPercent, promoPercent, promoStackingMode, codePercent } = input;
 
   // Discount amounts for each method, on the same subtotal base.
   const vcAmt = Math.round((subtotalPence * vcPercent) / 100);
@@ -83,6 +85,20 @@ export function resolveGradingDiscount(input: GradingDiscountInput): GradingDisc
     } else {
       discountType = null;
       effectiveDiscountPercent = 0;
+    }
+  }
+
+  // Promo CODE — a pure best_of alternative that NEVER stacks. It competes against
+  // the resolved effective discount above (vault-club / bulk / auto-promo, including
+  // stack_on_top); the single biggest wins. Strictly-greater, so a tie with an
+  // existing arm keeps that arm (a 10% code + 10% vault-club = 10%, never 20%).
+  const codePct = Math.max(0, Math.min(100, codePercent ?? 0));
+  if (codePct > 0) {
+    const codeAmt = Math.round((subtotalPence * codePct) / 100);
+    if (codeAmt > effectiveDiscountAmount) {
+      effectiveDiscountAmount = codeAmt;
+      effectiveDiscountPercent = codePct;
+      discountType = "promo_code";
     }
   }
 

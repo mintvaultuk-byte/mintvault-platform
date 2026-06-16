@@ -108,7 +108,32 @@ export async function migratePromotionsSchema(): Promise<void> {
   await db.execute(sql`
     ALTER TABLE promotions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ
   `);
-  console.log("[promotions-migrate] promotions table + index + stacking_mode + deleted_at ensured");
+
+  // ── Promo codes (customer-entered discount codes; private, multiple at once) ──
+  // Distinct from the singleton auto-promo. A code's % is a best_of arm (never
+  // stacks). code is stored UPPERCASE+trimmed; the unique index is partial on
+  // deleted_at IS NULL so a soft-deleted code's string can be reused.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS promo_codes (
+      id SERIAL PRIMARY KEY,
+      code VARCHAR(64) NOT NULL,
+      label VARCHAR(200),
+      percent INTEGER NOT NULL CHECK (percent BETWEEN 1 AND 100),
+      max_uses INTEGER CHECK (max_uses IS NULL OR max_uses >= 1),
+      uses_count INTEGER NOT NULL DEFAULT 0,
+      expires_at TIMESTAMPTZ,
+      active BOOLEAN NOT NULL DEFAULT true,
+      deleted_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS promo_codes_code_unique
+      ON promo_codes (code) WHERE deleted_at IS NULL
+  `);
+
+  console.log("[promotions-migrate] promotions table + index + stacking_mode + deleted_at + promo_codes ensured");
 }
 
 /** The single active promotion, or null. Expiry is enforced at READ time: a

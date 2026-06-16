@@ -90,6 +90,7 @@ interface WizardState {
   authReason: string;
   authConcerns: string;
   revealWrap: boolean;
+  promoCode: string;
 }
 
 const WIZARD_STATE_VERSION = "mv-wizard-v4";
@@ -833,6 +834,10 @@ type GradingQuote = {
   insuranceSurchargeLabel: string;
   total: number;
   promoApplied: boolean;
+  promoCodeValid: boolean;
+  promoCodeReason: string | null;
+  promoCodeApplied: boolean;
+  promoCodePercent: number;
 };
 
 /**
@@ -844,14 +849,16 @@ type GradingQuote = {
  */
 function useGradingQuote(tier: PricingTier | undefined, state: WizardState) {
   const tierId = tier?.id ?? state.tier;
+  const code = (state.promoCode || "").trim();
   return useQuery<GradingQuote>({
-    queryKey: ["/api/grading/quote", state.type, tierId, state.quantity, state.declaredValue],
+    queryKey: ["/api/grading/quote", state.type, tierId, state.quantity, state.declaredValue, code.toUpperCase()],
     queryFn: async () => {
       const res = await apiRequest("POST", "/api/grading/quote", {
         type: state.type,
         tier: tierId,
         quantity: state.quantity,
         declaredValue: state.declaredValue,
+        promoCode: code || undefined,
       });
       return res.json();
     },
@@ -894,6 +901,7 @@ function Step3Review({
   void vcPercent;
   void vcTier;
   const { data: quote } = useGradingQuote(tier, state);
+  const [codeInput, setCodeInput] = useState(state.promoCode || "");
 
   return (
     <div>
@@ -996,6 +1004,67 @@ function Step3Review({
               </p>
             </div>
           )}
+
+          {/* Promo code — one per order, never stacks (server resolves best_of). */}
+          <div className="border-t border-[#D4AF37]/20 pt-3 mt-3">
+            <label className="text-[#D4AF37]/80 text-xs uppercase tracking-wider block mb-1.5">Promo code</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={codeInput}
+                onChange={(e) => setCodeInput(e.target.value.toUpperCase())}
+                placeholder="e.g. FRIEND15"
+                className="flex-1 bg-transparent border border-[#D4AF37]/30 rounded px-3 py-2 text-[#1A1A1A] text-sm uppercase focus:outline-none focus:border-[#D4AF37]"
+                data-testid="input-promo-code"
+              />
+              {state.promoCode ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCodeInput("");
+                    setState({ ...state, promoCode: "" });
+                  }}
+                  className="text-sm px-3 py-2 rounded border border-[#D4AF37]/30 text-[#888888] hover:text-[#1A1A1A]"
+                  data-testid="button-remove-code"
+                >
+                  Remove
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setState({ ...state, promoCode: codeInput.trim().toUpperCase() })}
+                  disabled={!codeInput.trim()}
+                  className="text-sm px-4 py-2 rounded bg-[#D4AF37] text-[#1A1A1A] font-semibold disabled:opacity-40"
+                  data-testid="button-apply-code"
+                >
+                  Apply
+                </button>
+              )}
+            </div>
+            {state.promoCode && quote && (
+              <p className="text-xs mt-1.5" data-testid="text-promo-code-feedback">
+                {quote.promoCodeApplied ? (
+                  <span className="text-[#2E7D32]">
+                    ✓ Code “{state.promoCode}” applied — {quote.promoCodePercent}% off
+                  </span>
+                ) : quote.promoCodeValid ? (
+                  <span className="text-[#B8860B]">
+                    Code “{state.promoCode}” is valid, but a bigger discount already applies.
+                  </span>
+                ) : (
+                  <span className="text-[#C0392B]">
+                    {quote.promoCodeReason === "expired"
+                      ? "That code has expired."
+                      : quote.promoCodeReason === "over_limit"
+                        ? "That code has reached its usage limit."
+                        : quote.promoCodeReason === "inactive"
+                          ? "That code is no longer active."
+                          : "That code isn’t valid."}
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
 
           <div className="border-t border-[#D4AF37]/20 pt-3 mt-3 space-y-2">
             <SummaryRow
@@ -1302,6 +1371,7 @@ function Step5Payment({
         tier: state.tier,
         quantity: state.quantity,
         declaredValue: state.declaredValue,
+        promoCode: state.promoCode || undefined,
         notes: state.notes,
         submissionName: state.submissionName,
         email: state.email,
@@ -1717,6 +1787,7 @@ function SubmitWizardInner() {
     authReason: "",
     authConcerns: "",
     revealWrap: false,
+    promoCode: "",
   };
 
   const [state, setState] = useState<WizardState>(() => {

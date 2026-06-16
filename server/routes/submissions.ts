@@ -6,6 +6,7 @@ import { storage } from "../storage";
 import { getUncachableStripeClient } from "../stripeClient";
 import { sendSubmissionConfirmation, sendSubmissionConfirmationV2 } from "../email";
 import { computeGradingQuote } from "../services/gradingQuote";
+import { redeemPromoCode } from "../services/promoCodeService";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
@@ -82,7 +83,7 @@ export function registerSubmissionRoutes(app: Express): void {
   // promo server-side; never trusts a client-supplied percentage. No DB writes.
   app.post("/api/grading/quote", async (req, res) => {
     try {
-      const { type, tier, quantity, declaredValue, applyCredit, creditType } = req.body ?? {};
+      const { type, tier, quantity, declaredValue, applyCredit, creditType, promoCode } = req.body ?? {};
       const serviceType = typeof type === "string" && type ? type : "grading";
       if (!tier || typeof tier !== "string") {
         return res.status(400).json({ error: "tier is required" });
@@ -109,6 +110,7 @@ export function registerSubmissionRoutes(app: Express): void {
         userId: (req.session as any)?.userId ?? null,
         applyCredit: !!applyCredit,
         creditType,
+        promoCode: typeof promoCode === "string" ? promoCode : undefined,
       });
       res.json(quote);
     } catch (err: any) {
@@ -144,6 +146,7 @@ export function registerSubmissionRoutes(app: Express): void {
         marketingFeatureConsent,
         applyCredit,
         creditType: requestedCreditType,
+        promoCode,
       } = req.body;
 
       const VALID_SERVICE_TYPES = ["grading", "reholder", "crossover", "authentication"];
@@ -297,6 +300,7 @@ export function registerSubmissionRoutes(app: Express): void {
         userId: (req.session as any)?.userId ?? null,
         applyCredit: !!applyCredit,
         creditType: requestedCreditType,
+        promoCode: typeof promoCode === "string" ? promoCode : undefined,
       });
       const {
         vcTier,
@@ -319,6 +323,10 @@ export function registerSubmissionRoutes(app: Express): void {
         insuranceSurchargePerCard,
         shippingLabel,
         total,
+        promoCodeApplied,
+        promoCodeId,
+        promoCode: appliedPromoCode,
+        promoCodePercent,
       } = quote;
 
       const declaredValuePerCard =
@@ -458,6 +466,15 @@ export function registerSubmissionRoutes(app: Express): void {
           promoId: promoId !== null ? String(promoId) : "",
           promoPercent: String(promoPercent),
           promoStackingMode: promoId !== null ? promoStackingMode : "",
+          // Promo code — recorded only when it actually discounted the order (won
+          // best_of). Redeemed (usage incremented) on the success path.
+          ...(promoCodeApplied && promoCodeId !== null
+            ? {
+                promoCodeId: String(promoCodeId),
+                promoCode: appliedPromoCode || "",
+                promoCodePercent: String(promoCodePercent),
+              }
+            : {}),
           declaredValue: String(totalDeclaredValue),
           declaredValuePerCard: String(declaredValuePerCard),
           shippingInsurance: shippingLabel,
@@ -599,6 +616,22 @@ export function registerSubmissionRoutes(app: Express): void {
                 console.error("[checkout] credit consume error:", e.message)
               );
             }
+          }
+        }
+
+        // Redeem the promo code (atomic increment + audit, cap-guarded) if one
+        // discounted this order. Same first-transition guard as credit above, so it
+        // counts exactly once. Never fails the payment — the charge already reflects
+        // the discount.
+        if (piMeta.promoCodeId) {
+          const codeId = Number(piMeta.promoCodeId);
+          if (Number.isInteger(codeId) && codeId > 0) {
+            await redeemPromoCode(
+              codeId,
+              piMeta.promoCode || null,
+              piMeta.promoCodePercent ? Number(piMeta.promoCodePercent) : null,
+              Number(submission.id)
+            ).catch((e: any) => console.error("[checkout] promo code redeem error:", e.message));
           }
         }
 

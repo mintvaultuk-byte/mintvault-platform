@@ -625,6 +625,250 @@ export default function AdminPromotions() {
           </div>
         )}
       </div>
+
+      <PromoCodesSection />
+    </div>
+  );
+}
+
+type PromoCode = {
+  id: number;
+  code: string;
+  label: string | null;
+  percent: number;
+  max_uses: number | null;
+  uses_count: number;
+  expires_at: string | null;
+  active: boolean;
+  created_at: string;
+};
+
+type CodeForm = { code: string; percent: string; max_uses: string; expires_at: string; active: boolean };
+const EMPTY_CODE_FORM: CodeForm = { code: "", percent: "10", max_uses: "", expires_at: "", active: true };
+
+/**
+ * Promo codes — private, customer-entered discount codes (multiple at once),
+ * distinct from the singleton auto-promo above. Same admin styling + tokens.
+ */
+function PromoCodesSection() {
+  const [form, setForm] = useState<CodeForm>(EMPTY_CODE_FORM);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+
+  const { data, isLoading } = useQuery<{ codes: PromoCode[] }>({ queryKey: ["/api/admin/promo-codes"] });
+  const codes = data?.codes ?? [];
+
+  function refetch() {
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/promo-codes"] });
+  }
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      // Client guard is UX only — the server validator is the source of truth.
+      const body = {
+        code: form.code.trim().toUpperCase(),
+        percent: Math.max(1, Math.min(100, Math.trunc(Number(form.percent) || 0))),
+        max_uses: form.max_uses.trim() === "" ? null : Math.max(1, Math.trunc(Number(form.max_uses) || 0)),
+        expires_at: form.expires_at ? new Date(form.expires_at).toISOString() : null,
+        active: form.active,
+      };
+      await apiRequest("POST", "/api/admin/promo-codes", body);
+    },
+    onSuccess: () => {
+      refetch();
+      setForm(EMPTY_CODE_FORM);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/admin/promo-codes/${id}`);
+    },
+    onSuccess: () => {
+      refetch();
+      setConfirmDelete(null);
+    },
+  });
+
+  const createError = createMutation.isError ? (createMutation.error as Error)?.message : null;
+
+  return (
+    <div className="mt-10 border-t border-[var(--admin-line-soft)] pt-8">
+      <div className="mb-4">
+        <h2 className="text-lg font-bold text-[var(--admin-gold-hi)] tracking-widest">PROMO CODES</h2>
+        <p className="text-[var(--admin-ink-faint)] text-sm">
+          Private codes customers type at checkout. Multiple can exist; a code never stacks — the single biggest
+          discount (code vs Vault Club / bulk / auto-promo) wins.
+        </p>
+      </div>
+
+      {/* Create */}
+      <div className="border rounded-lg p-4 border-[var(--admin-line)] space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label className="block">
+            <span className={labelClass}>Code</span>
+            <input
+              type="text"
+              value={form.code}
+              onChange={(e) => setForm((f) => ({ ...f, code: e.target.value.toUpperCase() }))}
+              className={inputClass}
+              placeholder="FRIEND15"
+              data-testid="input-code"
+            />
+          </label>
+          <label className="block">
+            <span className={labelClass}>% off (1–100)</span>
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={form.percent}
+              onChange={(e) => setForm((f) => ({ ...f, percent: e.target.value }))}
+              className={inputClass}
+              style={{ fontFamily: "var(--admin-mono)" }}
+              data-testid="input-code-percent"
+            />
+          </label>
+          <label className="block">
+            <span className={labelClass}>Max uses (blank = unlimited)</span>
+            <input
+              type="number"
+              min={1}
+              value={form.max_uses}
+              onChange={(e) => setForm((f) => ({ ...f, max_uses: e.target.value }))}
+              className={inputClass}
+              style={{ fontFamily: "var(--admin-mono)" }}
+              placeholder="unlimited"
+              data-testid="input-code-maxuses"
+            />
+          </label>
+          <label className="block">
+            <span className={labelClass}>Expiry (optional)</span>
+            <input
+              type="datetime-local"
+              value={form.expires_at}
+              onChange={(e) => setForm((f) => ({ ...f, expires_at: e.target.value }))}
+              className={inputClass}
+              style={{ fontFamily: "var(--admin-mono)" }}
+              data-testid="input-code-expiry"
+            />
+          </label>
+        </div>
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => setForm((f) => ({ ...f, active: !f.active }))}
+            className={`flex items-center gap-1.5 text-sm ${form.active ? "text-[var(--admin-green)]" : "text-[var(--admin-ink-faint)]"}`}
+            data-testid="button-code-active"
+          >
+            {form.active ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
+            {form.active ? "Active" : "Inactive"}
+          </button>
+          <button
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending || !form.code.trim()}
+            className="border border-[var(--admin-gold)] bg-[color-mix(in_srgb,var(--admin-gold)_12%,transparent)] text-[var(--admin-gold-hi)] px-4 py-2 rounded font-medium text-sm transition-all hover:bg-[color-mix(in_srgb,var(--admin-gold)_22%,transparent)] disabled:opacity-50 inline-flex items-center gap-1.5"
+            data-testid="button-create-code"
+          >
+            <Save size={14} /> {createMutation.isPending ? "Creating…" : "Create code"}
+          </button>
+        </div>
+        {createError && (
+          <p className="text-sm" style={{ color: "var(--admin-red)" }} data-testid="text-code-error">
+            {createError}
+          </p>
+        )}
+      </div>
+
+      {/* List */}
+      <div className="mt-5">
+        {isLoading ? (
+          <div className="animate-pulse h-10 bg-[var(--admin-line-soft)] rounded" />
+        ) : codes.length === 0 ? (
+          <div className="text-center py-6 border border-[var(--admin-line-soft)] rounded-lg">
+            <p className="text-[var(--admin-ink-dim)] text-sm">No promo codes yet.</p>
+          </div>
+        ) : (
+          <div className="border border-[var(--admin-line-soft)] rounded-lg overflow-x-auto">
+            <table className="w-full text-sm" style={{ fontFamily: "var(--admin-mono)" }}>
+              <thead>
+                <tr className="text-[var(--admin-ink-faint)] text-xs uppercase tracking-wider border-b border-[var(--admin-line-soft)]">
+                  <th className="text-left py-2 px-3 font-medium">Code</th>
+                  <th className="text-left py-2 px-3 font-medium">% off</th>
+                  <th className="text-left py-2 px-3 font-medium">Uses</th>
+                  <th className="text-left py-2 px-3 font-medium">Status</th>
+                  <th className="text-left py-2 px-3 font-medium">Expiry</th>
+                  <th className="text-right py-2 px-3 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {codes.map((c) => {
+                  const expired = isExpired(c);
+                  const overCap = c.max_uses !== null && c.uses_count >= c.max_uses;
+                  const status = !c.active ? "inactive" : expired ? "expired" : overCap ? "used up" : "active";
+                  const statusColor =
+                    status === "active"
+                      ? "var(--admin-green)"
+                      : status === "expired" || overCap
+                        ? "var(--admin-red)"
+                        : "var(--admin-ink-faint)";
+                  return (
+                    <tr
+                      key={c.id}
+                      className="border-b border-[var(--admin-line-soft)] last:border-0"
+                      data-testid={`row-code-${c.id}`}
+                    >
+                      <td className="py-2 px-3 text-[var(--admin-ink)] font-bold">{c.code}</td>
+                      <td className="py-2 px-3 text-[var(--admin-ink-dim)]">{c.percent}%</td>
+                      <td className="py-2 px-3 text-[var(--admin-ink-dim)]">
+                        {c.uses_count}/{c.max_uses ?? "∞"}
+                      </td>
+                      <td className="py-2 px-3" style={{ color: statusColor }}>
+                        {status}
+                      </td>
+                      <td
+                        className="py-2 px-3 text-[var(--admin-ink-dim)]"
+                        style={{ color: expired ? "var(--admin-red)" : undefined }}
+                      >
+                        {fmtExpiry(c.expires_at)}
+                      </td>
+                      <td className="py-2 px-3 text-right whitespace-nowrap">
+                        {confirmDelete === c.id ? (
+                          <span className="inline-flex items-center gap-3">
+                            <button
+                              onClick={() => deleteMutation.mutate(c.id)}
+                              disabled={deleteMutation.isPending}
+                              className="inline-flex items-center gap-1 disabled:opacity-50"
+                              style={{ color: "var(--admin-red)" }}
+                              data-testid={`button-confirm-delete-code-${c.id}`}
+                            >
+                              <Trash2 size={13} /> {deleteMutation.isPending ? "Deleting…" : "Confirm delete"}
+                            </button>
+                            <button
+                              onClick={() => setConfirmDelete(null)}
+                              className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)]"
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmDelete(c.id)}
+                            className="inline-flex items-center gap-1 hover:opacity-80"
+                            style={{ color: "var(--admin-red)" }}
+                            data-testid={`button-delete-code-${c.id}`}
+                          >
+                            <Trash2 size={13} /> Delete
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
