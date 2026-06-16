@@ -103,7 +103,12 @@ export async function migratePromotionsSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS stacking_mode VARCHAR(20) NOT NULL DEFAULT 'best_of'
       CHECK (stacking_mode IN ('best_of', 'stack_on_top'))
   `);
-  console.log("[promotions-migrate] promotions table + one_active_promotion index + stacking_mode ensured");
+  // Soft-delete marker. A deleted promo is set active=false too, so it never
+  // conflicts with the active=true partial unique index. All reads filter it out.
+  await db.execute(sql`
+    ALTER TABLE promotions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ
+  `);
+  console.log("[promotions-migrate] promotions table + index + stacking_mode + deleted_at ensured");
 }
 
 /** The single active promotion, or null. Expiry is enforced at READ time: a
@@ -114,14 +119,16 @@ export async function migratePromotionsSchema(): Promise<void> {
  *  which keeps the singleton index honest — see deactivatePromotion.) */
 export async function getActivePromotion(): Promise<Promotion | null> {
   const res = await db.execute(
-    sql`SELECT * FROM promotions WHERE active = true AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1`
+    sql`SELECT * FROM promotions WHERE active = true AND deleted_at IS NULL AND (expires_at IS NULL OR expires_at > NOW()) LIMIT 1`
   );
   return (res.rows[0] as unknown as Promotion) ?? null;
 }
 
-/** All promotions, newest first (admin list). */
+/** All non-deleted promotions, newest first (admin list). */
 export async function listPromotions(): Promise<Promotion[]> {
-  const res = await db.execute(sql`SELECT * FROM promotions ORDER BY created_at DESC LIMIT 20`);
+  const res = await db.execute(
+    sql`SELECT * FROM promotions WHERE deleted_at IS NULL ORDER BY created_at DESC LIMIT 20`
+  );
   return res.rows as unknown as Promotion[];
 }
 
@@ -257,6 +264,34 @@ export async function deactivatePromotion(id: number, adminUser: string): Promis
     });
   });
   log("deactivated", { id });
+}
+
+/**
+ * SOFT-delete a promotion: set deleted_at = NOW() AND active = false in one
+ * statement (so deleting the live promo also stops it running), and audit it.
+ * Never a hard DELETE — the row persists with deleted_at and is filtered out of
+ * every read (getActivePromotion / listPromotions). Stripe coupons are kept.
+ */
+export async function deletePromotion(id: number, adminUser: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const cur = await tx.execute(
+      sql`SELECT name, active FROM promotions WHERE id = ${id} AND deleted_at IS NULL LIMIT 1 FOR UPDATE`
+    );
+    const row = cur.rows[0] as { name: string; active: boolean } | undefined;
+    if (!row) throw new Error(`Promotion ${id} not found`);
+
+    await tx.execute(
+      sql`UPDATE promotions SET deleted_at = NOW(), active = false, updated_at = NOW() WHERE id = ${id}`
+    );
+    await tx.insert(auditLog).values({
+      entityType: "promotion",
+      entityId: String(id),
+      action: "PROMO_DELETED",
+      adminUser,
+      details: { name: row.name, was_active: row.active },
+    });
+  });
+  log("deleted (soft)", { id });
 }
 
 /** INSERT (no id) or UPDATE (id present) the promo row, returning the saved row. */

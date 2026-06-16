@@ -18,6 +18,7 @@ import {
   getActivePromotion,
   savePromotion,
   deactivatePromotion,
+  deletePromotion,
   type PromotionInput,
 } from "../../services/promotionService";
 
@@ -134,6 +135,19 @@ export function registerPromotionRoutes(app: Express): void {
     } catch (err: any) {
       console.error("[promotions] deactivate error:", err?.message || err);
       res.status(500).json({ error: "Failed to deactivate promotion" });
+    }
+  });
+
+  // Soft-delete (deleted_at + active=false + audit) — never a hard delete.
+  app.delete("/api/admin/promotions/:id", requireAdmin, async (req, res) => {
+    const id = parseInt(String(req.params.id), 10);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "Invalid promotion id" });
+    try {
+      await deletePromotion(id, adminUserOf(req));
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error("[promotions] delete error:", err?.message || err);
+      res.status(500).json({ error: err?.message || "Failed to delete promotion" });
     }
   });
 }

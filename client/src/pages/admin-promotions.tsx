@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Save, Tag, ToggleLeft, ToggleRight, Pencil, AlertTriangle } from "lucide-react";
+import { Save, Tag, ToggleLeft, ToggleRight, Pencil, AlertTriangle, Trash2 } from "lucide-react";
 
 /**
  * Admin → Promotions. Create / activate / edit / deactivate the single active
@@ -97,6 +97,7 @@ export default function AdminPromotions() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [confirmDeactivate, setConfirmDeactivate] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
 
   const { data: listData, isLoading } = useQuery<{ promotions: Promotion[] }>({
     queryKey: ["/api/admin/promotions"],
@@ -144,6 +145,18 @@ export default function AdminPromotions() {
     onSuccess: () => {
       invalidateAll();
       setConfirmDeactivate(null);
+    },
+  });
+
+  // Soft-delete (server sets deleted_at + active=false + audit). Removing the
+  // active promo also stops it running. Requires a confirm step.
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      await apiRequest("DELETE", `/api/admin/promotions/${id}`);
+    },
+    onSuccess: () => {
+      invalidateAll();
+      setConfirmDelete(null);
     },
   });
 
@@ -226,7 +239,7 @@ export default function AdminPromotions() {
                 </span>
               </p>
             </div>
-            <div className="shrink-0">
+            <div className="shrink-0 flex flex-col gap-2 items-end">
               {confirmDeactivate === activeRow.id ? (
                 <div className="flex flex-col gap-1.5">
                   <button
@@ -250,11 +263,50 @@ export default function AdminPromotions() {
                 </div>
               ) : (
                 <button
-                  onClick={() => setConfirmDeactivate(activeRow.id)}
+                  onClick={() => {
+                    setConfirmDelete(null);
+                    setConfirmDeactivate(activeRow.id);
+                  }}
                   className="text-sm px-3 py-1.5 rounded border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)] hover:border-[color-mix(in_srgb,var(--admin-gold)_40%,transparent)] transition-colors"
                   data-testid="button-deactivate"
                 >
                   Deactivate
+                </button>
+              )}
+
+              {confirmDelete === activeRow.id ? (
+                <div className="flex flex-col gap-1.5 items-end">
+                  <button
+                    onClick={() => deleteMutation.mutate(activeRow.id)}
+                    disabled={deleteMutation.isPending}
+                    className="text-sm px-3 py-1.5 rounded border font-medium disabled:opacity-50 inline-flex items-center gap-1.5"
+                    style={{
+                      color: "var(--admin-red)",
+                      borderColor: "color-mix(in srgb, var(--admin-red) 60%, transparent)",
+                    }}
+                    data-testid="button-confirm-delete"
+                  >
+                    <Trash2 size={13} />
+                    {deleteMutation.isPending ? "Deleting…" : "Confirm delete — kills live promo"}
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelete(null)}
+                    className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)] text-xs"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => {
+                    setConfirmDeactivate(null);
+                    setConfirmDelete(activeRow.id);
+                  }}
+                  className="text-xs px-3 py-1.5 rounded border border-[var(--admin-line)] inline-flex items-center gap-1 hover:border-[color-mix(in_srgb,var(--admin-red)_50%,transparent)] transition-colors"
+                  style={{ color: "var(--admin-red)" }}
+                  data-testid="button-delete"
+                >
+                  <Trash2 size={12} /> Delete
                 </button>
               )}
             </div>
@@ -486,7 +538,7 @@ export default function AdminPromotions() {
                   <th className="text-left py-2 px-3 font-medium">Status</th>
                   <th className="text-left py-2 px-3 font-medium">Expiry</th>
                   <th className="text-left py-2 px-3 font-medium">Created</th>
-                  <th className="text-right py-2 px-3 font-medium">Edit</th>
+                  <th className="text-right py-2 px-3 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -523,14 +575,47 @@ export default function AdminPromotions() {
                       <td className="py-2 px-3 text-[var(--admin-ink-faint)]">
                         {new Date(p.created_at).toLocaleDateString("en-GB", { dateStyle: "medium" } as any)}
                       </td>
-                      <td className="py-2 px-3 text-right">
-                        <button
-                          onClick={() => startEdit(p)}
-                          className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-gold-hi)] inline-flex items-center gap-1"
-                          data-testid={`button-edit-promo-${p.id}`}
-                        >
-                          <Pencil size={13} /> Edit
-                        </button>
+                      <td className="py-2 px-3 text-right whitespace-nowrap">
+                        {confirmDelete === p.id ? (
+                          <span className="inline-flex items-center gap-3">
+                            <button
+                              onClick={() => deleteMutation.mutate(p.id)}
+                              disabled={deleteMutation.isPending}
+                              className="inline-flex items-center gap-1 disabled:opacity-50"
+                              style={{ color: "var(--admin-red)" }}
+                              data-testid={`button-confirm-delete-${p.id}`}
+                            >
+                              <Trash2 size={13} /> {deleteMutation.isPending ? "Deleting…" : "Confirm delete"}
+                            </button>
+                            <button
+                              onClick={() => setConfirmDelete(null)}
+                              className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-ink)]"
+                            >
+                              Cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-3">
+                            <button
+                              onClick={() => startEdit(p)}
+                              className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-gold-hi)] inline-flex items-center gap-1"
+                              data-testid={`button-edit-promo-${p.id}`}
+                            >
+                              <Pencil size={13} /> Edit
+                            </button>
+                            <button
+                              onClick={() => {
+                                setConfirmDeactivate(null);
+                                setConfirmDelete(p.id);
+                              }}
+                              className="inline-flex items-center gap-1 hover:opacity-80"
+                              style={{ color: "var(--admin-red)" }}
+                              data-testid={`button-delete-promo-${p.id}`}
+                            >
+                              <Trash2 size={13} /> Delete
+                            </button>
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
