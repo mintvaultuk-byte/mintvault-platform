@@ -17,6 +17,7 @@ import { registerPreGradeRoutes } from "./routes/pre-grade";
 import { registerStolenRoutes } from "./routes/stolen";
 import { registerEmbeddingRoutes } from "./routes/embedding";
 import { registerPromotionRoutes } from "./routes/admin/promotions";
+import { migratePromotionsSchema } from "./services/promotionService";
 import {
   BUILD_STAMP,
   pricingTiers,
@@ -1272,6 +1273,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   createEstimateFreeUsesTable().catch(() => {});
   createEbayPriceCacheTable().catch(() => {});
   seedTierCapacityTable().catch(() => {});
+  migratePromotionsSchema().catch((e: any) => console.error("[promotions-migrate] error:", e.message));
   migrateAccountSchema()
     .then(() => migrateMarketplaceSchema())
     .catch((e: any) => console.error("[startup-migration] error:", e.message));

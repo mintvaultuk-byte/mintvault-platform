@@ -69,6 +69,43 @@ function log(msg: string, extra?: Record<string, unknown>) {
   console.log(`[promotions] ${msg}${extra ? " " + JSON.stringify(extra) : ""}`);
 }
 
+/**
+ * Idempotent boot migration — ensures the promotions table, its single-active
+ * partial unique index, and the stacking_mode column exist. Mirrors
+ * migrations/add-promotions.sql exactly so prod gets the same schema staging
+ * was verified on. Safe to run on every boot (all IF NOT EXISTS). Called from
+ * registerRoutes() alongside the other startup migrations.
+ */
+export async function migratePromotionsSchema(): Promise<void> {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS promotions (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      banner_text VARCHAR(200) NOT NULL,
+      standard_pct INTEGER NOT NULL DEFAULT 0 CHECK (standard_pct BETWEEN 0 AND 100),
+      priority_pct INTEGER NOT NULL DEFAULT 0 CHECK (priority_pct BETWEEN 0 AND 100),
+      express_pct  INTEGER NOT NULL DEFAULT 0 CHECK (express_pct  BETWEEN 0 AND 100),
+      standard_coupon_id VARCHAR(100),
+      priority_coupon_id VARCHAR(100),
+      express_coupon_id  VARCHAR(100),
+      active BOOLEAN NOT NULL DEFAULT false,
+      expires_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS one_active_promotion
+      ON promotions ((active)) WHERE active = true
+  `);
+  await db.execute(sql`
+    ALTER TABLE promotions
+      ADD COLUMN IF NOT EXISTS stacking_mode VARCHAR(20) NOT NULL DEFAULT 'best_of'
+      CHECK (stacking_mode IN ('best_of', 'stack_on_top'))
+  `);
+  console.log("[promotions-migrate] promotions table + one_active_promotion index + stacking_mode ensured");
+}
+
 /** The single active promotion, or null. Expiry is enforced at READ time: a
  *  promo whose expires_at has passed is treated as not active everywhere this
  *  helper is consumed (live grading checkout, public pricing banner, admin
