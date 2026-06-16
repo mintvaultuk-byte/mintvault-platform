@@ -1,8 +1,6 @@
 import { useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ArrowRight, Check, CheckCheck, Shield, Clock, Zap } from "lucide-react";
-import NumberFlow from "@number-flow/react";
 import GradientButton from "@/components/ui/gradient-button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { TimelineContent } from "@/components/ui/timeline-animation";
@@ -14,6 +12,8 @@ import DarkSectionGlow from "@/components/v2/dark-section-glow";
 import { pricingTiers, insuranceTiers, insuranceSurchargeBands } from "@shared/schema";
 import { ADDON_PRICES, ADDON_ORDER } from "@shared/addons";
 import { cn } from "@/lib/utils";
+import { useActivePromo } from "@/hooks/use-active-promo";
+import { PromoBanner, TierPriceWithPromo } from "@/components/v2/promo-display";
 
 const SILVER = {
   label: "Silver Vault",
@@ -56,26 +56,11 @@ const revealVariants = {
   hidden: { filter: "blur(10px)", y: -20, opacity: 0 },
 };
 
-type ActivePromo = {
-  bannerText: string;
-  tiers: Record<string, { pct: number; originalPrice: number; discountedPrice: number }>;
-};
-
 export default function PricingV2() {
   const pricingRef = useRef<HTMLDivElement>(null);
 
-  // Active promotion (banner + per-tier struck/discounted prices). Server is the
-  // source of truth for the discounted price; a missing promo just returns null.
-  const { data: promoData } = useQuery<{ promo: ActivePromo | null }>({
-    queryKey: ["/api/promotions/active"],
-    queryFn: async () => {
-      const res = await fetch("/api/promotions/active");
-      if (!res.ok) return { promo: null };
-      return res.json();
-    },
-    staleTime: 60_000,
-  });
-  const promo = promoData?.promo ?? null;
+  // Active promotion — shared source used by every pricing surface.
+  const promo = useActivePromo();
 
   const faqRefs = useRef<(HTMLDivElement | null)[]>([]);
   useEffect(() => {
@@ -174,18 +159,7 @@ export default function PricingV2() {
             </p>
           </div>
 
-          {promo && (
-            <div
-              className="mb-10 mx-auto max-w-3xl text-center rounded-2xl px-6 py-4 font-bold"
-              style={{
-                color: "var(--v2-gold)",
-                border: "1px solid var(--v2-gold-soft, rgba(212,175,55,0.4))",
-                background: "rgba(212,175,55,0.06)",
-              }}
-            >
-              {promo.bannerText}
-            </div>
-          )}
+          <PromoBanner promo={promo} />
 
           <div className="flex justify-center">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6 w-full" style={{ maxWidth: "1080px" }}>
@@ -198,7 +172,6 @@ export default function PricingV2() {
                 };
                 const price = tier.pricePerCard / 100;
                 const days = tier.turnaroundDays ?? 0;
-                const tierPromo = promo?.tiers?.[tier.id];
 
                 return (
                   <TimelineContent
@@ -229,36 +202,7 @@ export default function PricingV2() {
                           <h3 className="xl:text-3xl md:text-2xl text-3xl font-semibold text-white">{d.shortName}</h3>
                         </div>
                         <p className="xl:text-sm md:text-xs text-sm text-[#888] mb-4">{d.blurb}</p>
-                        <div className="flex items-baseline gap-2 flex-wrap">
-                          {tierPromo ? (
-                            <>
-                              <span className="text-2xl font-semibold text-[#777] line-through">
-                                {poundsFromPence(tierPromo.originalPrice)}
-                              </span>
-                              <span className="text-4xl font-semibold" style={{ color: "var(--v2-gold)" }}>
-                                £
-                                <NumberFlow
-                                  value={tierPromo.discountedPrice / 100}
-                                  className="text-4xl font-semibold"
-                                />
-                              </span>
-                              <span className="text-[#888]">/ card</span>
-                            </>
-                          ) : (
-                            <>
-                              <span className="text-4xl font-semibold text-white">
-                                £
-                                <NumberFlow value={price} className="text-4xl font-semibold" />
-                              </span>
-                              <span className="text-[#888] ml-1">/ card</span>
-                            </>
-                          )}
-                        </div>
-                        {tierPromo && (
-                          <span className="inline-flex items-center mt-2 w-fit bg-gradient-to-r from-[#B8960C] to-[#D4AF37] text-[#1a1400] px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider no-text-shadow">
-                            {tierPromo.pct}% off
-                          </span>
-                        )}
+                        <TierPriceWithPromo tierId={tier.id} fullPricePounds={price} promo={promo} />
                         <p className="text-xs text-[#666] mt-1">{days} working day turnaround</p>
                       </CardHeader>
 

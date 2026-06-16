@@ -2,9 +2,10 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { ArrowRight, Shield, Cpu, MapPin, RefreshCw, CheckCheck, Clock, Zap } from "lucide-react";
-import NumberFlow from "@number-flow/react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { useActivePromo } from "@/hooks/use-active-promo";
+import { PromoBanner, TierPriceWithPromo } from "@/components/v2/promo-display";
 import HeaderV2 from "@/components/v2/header-v2";
 import FooterV2 from "@/components/v2/footer-v2";
 import AmbientLayer from "@/components/v2/ambient-layer";
@@ -225,6 +226,9 @@ export default function HomeV2() {
     },
     staleTime: 60_000,
   });
+
+  // Active promotion — shared source used by every pricing surface.
+  const promo = useActivePromo();
 
   useEffect(() => {
     if (statsError) console.error("Homepage stats fetch failed:", statsError);
@@ -462,6 +466,8 @@ export default function HomeV2() {
               </p>
             </div>
 
+            <PromoBanner promo={promo} />
+
             <div className="flex justify-center">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-6 w-full" style={{ maxWidth: "1080px" }}>
                 {pricingTiers.map((tier) => {
@@ -493,13 +499,7 @@ export default function HomeV2() {
                           <h3 className="xl:text-3xl md:text-2xl text-3xl font-semibold text-white">{d.shortName}</h3>
                         </div>
                         <p className="xl:text-sm md:text-xs text-sm text-[#888] mb-4">{d.blurb}</p>
-                        <div className="flex items-baseline gap-1">
-                          <span className="text-4xl font-semibold text-white">
-                            £
-                            <NumberFlow value={price} className="text-4xl font-semibold" />
-                          </span>
-                          <span className="text-[#888] ml-1">/ card</span>
-                        </div>
+                        <TierPriceWithPromo tierId={tier.id} fullPricePounds={price} promo={promo} />
                         <p className="text-xs text-[#666] mt-1">{days} working day turnaround</p>
                       </CardHeader>
 
