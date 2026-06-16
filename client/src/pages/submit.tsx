@@ -4,13 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { apiRequest } from "@/lib/queryClient";
-import {
-  pricingTiers,
-  submissionTypes,
-  calculateOrderTotals,
-  getInsuranceTier,
-  getInsuranceSurchargePerCard,
-} from "@shared/schema";
+import { pricingTiers, submissionTypes, getInsuranceTier, getInsuranceSurchargePerCard } from "@shared/schema";
 import type { PricingTier } from "@shared/schema";
 import {
   ArrowLeft,
@@ -827,6 +821,57 @@ function Step2Cards({ state, setState }: { state: WizardState; setState: (s: Wiz
   );
 }
 
+type GradingQuote = {
+  subtotalPence: number;
+  discountType: string | null;
+  effectiveDiscountAmount: number;
+  effectiveDiscountPercent: number;
+  discountedSubtotal: number;
+  shipping: number;
+  shippingLabel: string;
+  totalInsuranceFee: number;
+  insuranceSurchargeLabel: string;
+  total: number;
+  promoApplied: boolean;
+};
+
+/**
+ * Authoritative checkout quote from the server — the SAME code path
+ * (computeGradingQuote → resolveGradingDiscount) the PaymentIntent uses, so the
+ * displayed total equals the charged amount by construction. The wizard DISPLAYS
+ * these figures; it never computes the discount or total itself. keepPreviousData
+ * (placeholderData) means a new quote never flashes a wrong number while loading.
+ */
+function useGradingQuote(tier: PricingTier | undefined, state: WizardState) {
+  const tierId = tier?.id ?? state.tier;
+  return useQuery<GradingQuote>({
+    queryKey: ["/api/grading/quote", state.type, tierId, state.quantity, state.declaredValue],
+    queryFn: async () => {
+      const res = await apiRequest("POST", "/api/grading/quote", {
+        type: state.type,
+        tier: tierId,
+        quantity: state.quantity,
+        declaredValue: state.declaredValue,
+      });
+      return res.json();
+    },
+    enabled: !!tierId && state.quantity >= 1,
+    placeholderData: (prev) => prev,
+    staleTime: 30_000,
+  });
+}
+
+/** Friendly label for the discount line, from the server's resolved discountType. */
+function quoteDiscountLabel(q: GradingQuote): string {
+  const t = q.discountType || "";
+  const pct = q.effectiveDiscountPercent;
+  if (t === "promo") return `Promotion (${pct}% off)`;
+  if (t === "vault_club_silver") return `Vault Club discount (${pct}%)`;
+  if (t === "bulk") return `Bulk discount (${pct}%)`;
+  if (t.includes("promo")) return `Promotion + member discount (${pct}% off)`;
+  return `Discount (${pct}%)`;
+}
+
 function Step3Review({
   state,
   setState,
@@ -841,18 +886,14 @@ function Step3Review({
   vcTier?: string | null;
 }) {
   const typeName = submissionTypes.find((t) => t.id === state.type)?.name || state.type;
-  const totals = calculateOrderTotals(tier?.pricePerCard || 0, state.quantity, state.declaredValue);
-
-  const bulkPercent = totals.discountPercent;
-  const effectivePercent = Math.max(vcPercent, bulkPercent);
-  const effectiveAmount =
-    effectivePercent > 0 ? Math.round(((tier?.pricePerCard || 0) * state.quantity * effectivePercent) / 100) : 0;
-  const vcWins = vcPercent > bulkPercent && vcPercent > 0;
-  const discountLabel = vcWins
-    ? `${vcTier ? vcTier.charAt(0).toUpperCase() + vcTier.slice(1) : ""} Vault Club discount (${vcPercent}%)`
-    : `Bulk discount (${bulkPercent}%)`;
-  const effectiveTotal =
-    (tier?.pricePerCard || 0) * state.quantity - effectiveAmount + totals.shipping + totals.totalInsuranceFee;
+  // All money figures come from the server quote (single source of truth — same
+  // code path as the PaymentIntent). vault-club status + active promo are resolved
+  // server-side; the wizard does NO discount/total math. (vcPercent/vcTier props
+  // retained for the parent contract; the displayed discount now derives from the
+  // quote's resolved discountType.)
+  void vcPercent;
+  void vcTier;
+  const { data: quote } = useGradingQuote(tier, state);
 
   return (
     <div>
@@ -959,43 +1000,45 @@ function Step3Review({
           <div className="border-t border-[#D4AF37]/20 pt-3 mt-3 space-y-2">
             <SummaryRow
               label="Service Fees"
-              value={`£${(totals.subtotal / 100).toFixed(2)}`}
+              value={quote ? `£${(quote.subtotalPence / 100).toFixed(2)}` : "…"}
               testId="text-summary-subtotal"
             />
-            {effectivePercent > 0 && (
+            {quote && quote.effectiveDiscountAmount > 0 && (
               <div className="flex justify-between items-center">
-                <span className="text-[#D4AF37]/80 text-sm">{discountLabel}</span>
+                <span className="text-[#D4AF37]/80 text-sm">{quoteDiscountLabel(quote)}</span>
                 <span className="text-[#D4AF37] font-medium text-sm" data-testid="text-summary-discount">
-                  -£{(effectiveAmount / 100).toFixed(2)}
+                  -£{(quote.effectiveDiscountAmount / 100).toFixed(2)}
                 </span>
               </div>
             )}
-            {vcWins && <p className="text-[10px] text-[#D4AF37]/60 italic text-right">Vault Club benefit applied</p>}
+            {quote?.discountType?.includes("vault_club") && (
+              <p className="text-[10px] text-[#D4AF37]/60 italic text-right">Vault Club benefit applied</p>
+            )}
             <div className="flex justify-between items-start">
               <div className="flex-1">
                 <span className="text-[#D4AF37]/60 text-sm" data-testid="text-summary-shipping-label">
-                  Fully Insured Return Shipping ({totals.shippingLabel})
+                  Fully Insured Return Shipping ({quote?.shippingLabel ?? "…"})
                 </span>
               </div>
               <span
                 className="text-[#1A1A1A] font-medium text-sm ml-4 whitespace-nowrap"
                 data-testid="text-summary-shipping"
               >
-                £{(totals.shipping / 100).toFixed(2)}
+                {quote ? `£${(quote.shipping / 100).toFixed(2)}` : "…"}
               </span>
             </div>
-            {totals.totalInsuranceFee > 0 && (
+            {quote && quote.totalInsuranceFee > 0 && (
               <div className="flex justify-between items-start">
                 <div className="flex-1">
                   <span className="text-[#D4AF37]/60 text-sm" data-testid="text-summary-insurance-label">
-                    Insurance Protection ({totals.insuranceSurchargeLabel})
+                    Insurance Protection ({quote.insuranceSurchargeLabel})
                   </span>
                 </div>
                 <span
                   className="text-[#1A1A1A] font-medium text-sm ml-4 whitespace-nowrap"
                   data-testid="text-summary-insurance-fee"
                 >
-                  £{(totals.totalInsuranceFee / 100).toFixed(2)}
+                  £{(quote.totalInsuranceFee / 100).toFixed(2)}
                 </span>
               </div>
             )}
@@ -1022,7 +1065,7 @@ function Step3Review({
             <div className="flex justify-between items-center pt-2 border-t border-[#D4AF37]/20">
               <span className="text-[#D4AF37] font-bold uppercase tracking-wider">Total</span>
               <span className="text-[#1A1A1A] font-bold text-xl" data-testid="text-summary-total">
-                £{(effectiveTotal / 100).toFixed(2)}
+                {quote ? `£${(quote.total / 100).toFixed(2)}` : "Calculating…"}
               </span>
             </div>
           </div>
@@ -1240,13 +1283,11 @@ function Step5Payment({
   const [marketingConsent, setMarketingConsent] = useState(false);
   const flags = useFeatureFlags();
 
-  const totals = calculateOrderTotals(tier?.pricePerCard || 0, state.quantity, state.declaredValue);
-  const bulkPercent = totals.discountPercent;
-  const effectivePercent = Math.max(vcPercent, bulkPercent);
-  const effectiveAmount =
-    effectivePercent > 0 ? Math.round(((tier?.pricePerCard || 0) * state.quantity * effectivePercent) / 100) : 0;
-  const effectiveTotal =
-    (tier?.pricePerCard || 0) * state.quantity - effectiveAmount + totals.shipping + totals.totalInsuranceFee;
+  // The "Pay £X" amount comes from the server quote — the SAME computeGradingQuote
+  // the PaymentIntent uses — so the button shows exactly what will be charged.
+  void vcPercent;
+  void vcTier;
+  const { data: quote } = useGradingQuote(tier, state);
 
   const createPaymentMutation = useMutation({
     mutationFn: async () => {
@@ -1539,13 +1580,13 @@ function Step5Payment({
         <GradientButton
           as="button"
           type="submit"
-          disabled={isPending || !stripe || !liabilityAccepted || !termsAccepted}
+          disabled={isPending || !stripe || !liabilityAccepted || !termsAccepted || !quote}
           height="48px"
           className="gradient-btn-filled w-full"
           data-testid="button-pay"
         >
           <CreditCard size={18} />
-          {isPending ? "Processing..." : `Pay £${(effectiveTotal / 100).toFixed(2)} Securely`}
+          {isPending ? "Processing..." : !quote ? "Calculating…" : `Pay £${(quote.total / 100).toFixed(2)} Securely`}
         </GradientButton>
       </form>
     </div>

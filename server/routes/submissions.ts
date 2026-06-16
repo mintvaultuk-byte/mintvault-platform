@@ -1,24 +1,13 @@
 import type { Express } from "express";
 import rateLimit from "express-rate-limit";
 import crypto from "crypto";
-import { calculateOrderTotals, getVaultClubDiscountPercent, serviceTierToPricingTier, auditLog } from "@shared/schema";
+import { serviceTierToPricingTier, auditLog } from "@shared/schema";
 import { storage } from "../storage";
 import { getUncachableStripeClient } from "../stripeClient";
 import { sendSubmissionConfirmation, sendSubmissionConfirmationV2 } from "../email";
-import { getActivePromotion } from "../services/promotionService";
-import { resolveGradingDiscount } from "../services/gradingDiscount";
+import { computeGradingQuote } from "../services/gradingQuote";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
-
-/** Count unused, unexpired credits of a given type */
-async function countCreditsRemaining(userId: string, creditType: string = "member"): Promise<number> {
-  const rows = await db.execute(sql`
-    SELECT COUNT(*) AS cnt FROM member_credits
-    WHERE user_id = ${userId} AND credit_type = ${creditType}
-      AND used_at IS NULL AND expires_at > NOW()
-  `);
-  return parseInt((rows.rows[0] as any)?.cnt ?? "0", 10);
-}
 
 /** Consume a single credit of the given type. Returns true if consumed. */
 async function consumeCredit(userId: string, creditType: string, submissionId: number): Promise<boolean> {
@@ -87,6 +76,47 @@ const paymentRateLimit = rateLimit({
 });
 
 export function registerSubmissionRoutes(app: Express): void {
+  // Authoritative grading quote — the SAME computeGradingQuote() the PaymentIntent
+  // uses, so the wizard can display the exact charged total without doing any money
+  // math itself. Read-only: reads the session user's vault-club status + active
+  // promo server-side; never trusts a client-supplied percentage. No DB writes.
+  app.post("/api/grading/quote", async (req, res) => {
+    try {
+      const { type, tier, quantity, declaredValue, applyCredit, creditType } = req.body ?? {};
+      const serviceType = typeof type === "string" && type ? type : "grading";
+      if (!tier || typeof tier !== "string") {
+        return res.status(400).json({ error: "tier is required" });
+      }
+      const qty = Math.trunc(Number(quantity));
+      if (!Number.isFinite(qty) || qty < 1) {
+        return res.status(400).json({ error: "quantity must be a positive integer" });
+      }
+      const dbTier = await storage.getServiceTier(serviceType, tier);
+      if (!dbTier) {
+        return res.status(400).json({ error: `Invalid or inactive tier "${tier}" for service "${serviceType}"` });
+      }
+      const tierData = serviceTierToPricingTier(dbTier);
+      if (!tierData.pricePerCard || tierData.pricePerCard <= 0) {
+        return res.status(400).json({ error: "Tier has an invalid price configuration" });
+      }
+      const totalDeclaredValue = Math.max(0, parseFloat(declaredValue) || 0);
+      const quote = await computeGradingQuote({
+        serviceType,
+        tier,
+        pricePerCard: tierData.pricePerCard,
+        quantity: qty,
+        declaredValue: totalDeclaredValue,
+        userId: (req.session as any)?.userId ?? null,
+        applyCredit: !!applyCredit,
+        creditType,
+      });
+      res.json(quote);
+    } catch (err: any) {
+      console.error("[grading/quote] error:", err?.message || err);
+      res.status(500).json({ error: "Failed to compute quote" });
+    }
+  });
+
   app.post("/api/create-payment-intent", paymentRateLimit, async (req, res) => {
     try {
       const {
@@ -254,84 +284,42 @@ export function registerSubmissionRoutes(app: Express): void {
         return res.status(400).json({ error: "Quantity mismatch" });
       }
 
-      const totals = calculateOrderTotals(tierData.pricePerCard, authoritativeQuantity, totalDeclaredValue);
-
-      // Vault Club Silver discount (10%) vs bulk discount — apply max(vc, bulk).
-      let vcTier: string | null = null;
-      let vcStatus: string | null = null;
-      let vcPercent = 0;
-      if (req.session?.userId) {
-        const vcRows = await db.execute(sql`
-          SELECT vault_club_tier, vault_club_status FROM users
-          WHERE id = ${(req.session as any).userId} AND deleted_at IS NULL LIMIT 1
-        `);
-        if (vcRows.rows.length > 0) {
-          const u = vcRows.rows[0] as any;
-          vcTier = u.vault_club_tier ?? null;
-          vcStatus = u.vault_club_status ?? null;
-          vcPercent = getVaultClubDiscountPercent(vcTier, vcStatus);
-        }
-      }
-
-      const bulkPercent = totals.discountPercent;
-      const subtotalPence = tierData.pricePerCard * authoritativeQuantity;
-
-      // ── Active promotion (limited-time) ────────────────────────────────────
-      // Resolved SERVER-SIDE from the active promo row — a client-supplied
-      // percentage or coupon id is NEVER trusted. The grading checkout is a
-      // PaymentIntent (no Stripe coupon), so the promo is applied the SAME way
-      // vault-club/bulk are: by reducing the charged amount. The minted Stripe
-      // coupon is not used here. A missing/broken promo falls back to 0% — it
-      // must NEVER block checkout, hence the try/catch.
-      let promoPercent = 0;
-      let promoId: number | null = null;
-      let promoStackingMode: "best_of" | "stack_on_top" = "best_of";
-      try {
-        // Promo applies to GRADING checkouts only (it's advertised on the
-        // grading pricing page). Reholder/crossover/authentication never get it,
-        // even if they reuse the standard/priority/express tier ids.
-        const promo = serviceType === "grading" ? await getActivePromotion() : null;
-        if (promo && promo.active === true) {
-          // Map the checkout tier id → the promo's tier column. The promo tier
-          // key space is exactly standard/priority/express (prompt 1); any other
-          // tier id gets no promo.
-          const promoPctByTier: Record<string, number> = {
-            standard: promo.standard_pct,
-            priority: promo.priority_pct,
-            express: promo.express_pct,
-          };
-          const pct = promoPctByTier[tier];
-          if (typeof pct === "number" && pct > 0) {
-            promoPercent = Math.max(0, Math.min(100, Math.trunc(pct)));
-            promoId = promo.id;
-            promoStackingMode = promo.stacking_mode === "stack_on_top" ? "stack_on_top" : "best_of";
-          }
-        }
-      } catch (err: any) {
-        console.error("[promo] checkout resolve failed — charging full price:", err?.message || err);
-      }
-
-      // Resolve the charged discount (vault-club vs bulk vs promo) in ONE place —
-      // server/services/gradingDiscount.ts — so the route and tests share the
-      // exact same logic. Behaviour is identical to the prior inline code.
-      const { effectiveDiscountAmount, effectiveDiscountPercent, discountType, discountedSubtotal, promoApplied } =
-        resolveGradingDiscount({ subtotalPence, vcPercent, bulkPercent, promoPercent, promoStackingMode });
-
-      // ── Credit application (Vault Club Silver/Gold) ────────────────────────
-      let creditApplied = false;
-      let creditAmountPence = 0;
-      let creditTypeApplied: string | null = null;
-      if (applyCredit && req.session?.userId) {
-        const ct = requestedCreditType === "reholder" ? "reholder" : "standard_grade";
-        const hasCredit = await countCreditsRemaining((req.session as any).userId, ct);
-        if (hasCredit > 0) {
-          creditAmountPence = tierData.pricePerCard;
-          creditApplied = true;
-          creditTypeApplied = ct;
-        }
-      }
-
-      const total = Math.max(0, discountedSubtotal - creditAmountPence + totals.shipping + totals.totalInsuranceFee);
+      // Single source of truth for the charged total — server/services/gradingQuote.ts.
+      // The /api/grading/quote endpoint calls the SAME helper with the SAME inputs,
+      // so the wizard's displayed total and this PaymentIntent amount are identical
+      // by construction. Vault-club status + active promo are resolved server-side.
+      const quote = await computeGradingQuote({
+        serviceType,
+        tier,
+        pricePerCard: tierData.pricePerCard,
+        quantity: authoritativeQuantity,
+        declaredValue: totalDeclaredValue,
+        userId: (req.session as any)?.userId ?? null,
+        applyCredit: !!applyCredit,
+        creditType: requestedCreditType,
+      });
+      const {
+        vcTier,
+        vcStatus,
+        vcPercent,
+        bulkPercent,
+        promoPercent,
+        promoId,
+        promoStackingMode,
+        effectiveDiscountAmount,
+        effectiveDiscountPercent,
+        discountType,
+        discountedSubtotal,
+        promoApplied,
+        creditApplied,
+        creditAmountPence,
+        creditTypeApplied,
+        shipping,
+        totalInsuranceFee,
+        insuranceSurchargePerCard,
+        shippingLabel,
+        total,
+      } = quote;
 
       const declaredValuePerCard =
         authoritativeQuantity > 0 ? Math.ceil(totalDeclaredValue / authoritativeQuantity) : 0;
@@ -362,12 +350,12 @@ export function registerSubmissionRoutes(app: Express): void {
         phone: phone || null,
         shippingAddress,
         turnaroundDays,
-        shippingCost: totals.shipping,
-        shippingInsuranceTier: totals.shippingLabel,
+        shippingCost: shipping,
+        shippingInsuranceTier: shippingLabel,
         gradingCost: discountedSubtotal,
         pricePerCardAtPurchase: tierData.pricePerCard,
-        insuranceFee: totals.totalInsuranceFee,
-        insuranceSurchargePerCard: totals.insuranceSurchargePerCard,
+        insuranceFee: totalInsuranceFee,
+        insuranceSurchargePerCard: insuranceSurchargePerCard,
         liabilityAccepted: true,
         liabilityAcceptedAt: new Date(),
         liabilityAcceptedIp: clientIp,
@@ -472,8 +460,8 @@ export function registerSubmissionRoutes(app: Express): void {
           promoStackingMode: promoId !== null ? promoStackingMode : "",
           declaredValue: String(totalDeclaredValue),
           declaredValuePerCard: String(declaredValuePerCard),
-          shippingInsurance: totals.shippingLabel,
-          insuranceFee: String(totals.totalInsuranceFee),
+          shippingInsurance: shippingLabel,
+          insuranceFee: String(totalInsuranceFee),
           highValue: String(highValueFlag),
           ...(creditApplied
             ? {
