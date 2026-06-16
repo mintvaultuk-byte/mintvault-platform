@@ -63,7 +63,7 @@ export default function SubmitSuccessPage() {
         >
           Submission Received!
         </h1>
-        <p className="text-[#555555]" data-testid="text-success-subtitle">
+        <p className="text-[#E8E4DC]" data-testid="text-success-subtitle">
           Thank you for your order. Your submission has been confirmed.
         </p>
       </div>
@@ -110,7 +110,7 @@ export default function SubmitSuccessPage() {
           <Download size={18} className="text-[#D4AF37]" />
           <h3 className="text-[#D4AF37] font-semibold tracking-wider text-sm uppercase">Shipping Label</h3>
         </div>
-        <p className="text-[#555555] text-sm mb-4">
+        <p className="text-[#E8E4DC] text-sm mb-4">
           Download your pre-addressed shipping label. Print it, attach it to the outside of your package, and send it to
           us.
         </p>
@@ -130,8 +130,8 @@ export default function SubmitSuccessPage() {
         </div>
         <div className="text-[#555555] text-sm space-y-3">
           <div className="space-y-1.5">
-            <p className="text-[#1A1A1A] font-medium text-xs uppercase tracking-wider">Before you ship:</p>
-            <ol className="list-decimal list-inside text-[#555555] text-xs space-y-1">
+            <p className="text-[#E8E4DC] font-medium text-xs uppercase tracking-wider">Before you ship:</p>
+            <ol className="list-decimal list-inside text-[#E8E4DC] text-xs space-y-1">
               <li>Print the packing slip above and include it inside the box</li>
               <li>
                 Write your Submission ID (<span className="text-[#D4AF37] font-mono font-bold">{subId}</span>) on the
@@ -141,7 +141,7 @@ export default function SubmitSuccessPage() {
               <li>Use tracked, insured shipping for your protection</li>
             </ol>
           </div>
-          <p className="text-[#1A1A1A] font-medium text-xs uppercase tracking-wider mt-3">Send to:</p>
+          <p className="text-[#E8E4DC] font-medium text-xs uppercase tracking-wider mt-3">Send to:</p>
           <div
             className="border border-[#E8E4DC] rounded p-3 bg-[#FAFAF8] font-mono text-xs leading-relaxed"
             data-testid="text-shipping-address"
@@ -195,7 +195,7 @@ function ConfirmRow({
     <div className="flex justify-between items-center border-b border-[#D4AF37]/10 pb-2 last:border-0">
       <span className="text-[#D4AF37] text-sm">{label}</span>
       <span
-        className={`font-medium text-sm ${highlight ? "text-[#D4AF37] font-mono font-bold" : "text-[#1A1A1A]"}`}
+        className={`font-medium text-sm ${highlight ? "text-[#D4AF37] font-mono font-bold" : "text-[#E8E4DC]"}`}
         data-testid={testId}
       >
         {value}
