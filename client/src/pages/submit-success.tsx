@@ -161,7 +161,7 @@ export default function SubmitSuccessPage() {
       <div className="flex flex-col sm:flex-row gap-3">
         <Link href="/submit" className="flex-1">
           <button
-            className="w-full border border-[#D4AF37] bg-white text-[#D4AF37] py-2.5 rounded font-medium tracking-wide transition-all hover:bg-[#D4AF37]/10"
+            className="w-full bg-[#D4AF37] text-[#1A1400] py-2.5 rounded font-semibold tracking-wide transition-all hover:bg-[#B8960C]"
             data-testid="button-another-submission"
           >
             Submit Another Order
