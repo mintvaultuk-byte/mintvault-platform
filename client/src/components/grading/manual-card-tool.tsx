@@ -1,5 +1,18 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
-import { Loader2, Crop, X, Check, Undo2, ZoomIn, ZoomOut, Maximize, Target, RotateCcw } from "lucide-react";
+import {
+  Loader2,
+  Crop,
+  X,
+  Check,
+  Undo2,
+  ZoomIn,
+  ZoomOut,
+  Maximize,
+  Target,
+  RotateCcw,
+  Minus,
+  Plus,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Point } from "./crop-geometry";
 import { detectCardBounds, boundsToOuterEdges } from "./crop-tools";
@@ -114,6 +127,13 @@ const GRAB_PX = 40;
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 16;
 const ZOOM_STEP = 1.5;
+// Rotate / straighten (deskew) bounds — the SINGLE source of the clamp, shared
+// by the slider AND the ± steppers so they can never use a different limit. The
+// slider's own step stays 0.5; the steppers nudge a finer 0.1° (readout is
+// toFixed(1)).
+const ROTATION_MIN = -15;
+const ROTATION_MAX = 15;
+const ROTATION_STEP_FINE = 0.1;
 // Thin mat margin (0–100 units) added around the outer bbox before cropping, so
 // a deskew rotation doesn't clip the card corners.
 const CROP_MARGIN_PCT = 1.0;
@@ -395,6 +415,20 @@ export default function ManualCardTool({
   function zoomFit() {
     if (zoom === 1) return;
     zoomBy(1 / zoom);
+  }
+
+  // ± steppers for the Rotate / straighten slider — they write the SAME
+  // `rotation` state the slider uses (no separate path). Functional updater so
+  // there's no stale-closure on rotation. Math.round(...*10)/10 kills float
+  // drift (0.1 + 0.2 = 0.30000000000000004) so the toFixed(1) readout stays
+  // clean AND the rotation_deg sent to /recrop is exact. Clamped to the shared
+  // ROTATION_MIN/MAX. (0 is the "auto from dots" sentinel — clamping naturally
+  // re-enters it when stepping lands back on 0.0; no special-casing needed.)
+  function nudgeRotation(delta: number) {
+    setRotation((r) => {
+      const next = Math.round((r + delta) * 10) / 10;
+      return Math.max(ROTATION_MIN, Math.min(ROTATION_MAX, next));
+    });
   }
 
   // Side-by-side capture: work clockwise TOP → RIGHT → BOTTOM → LEFT, placing
@@ -2010,15 +2044,35 @@ export default function ManualCardTool({
               <span className="text-[var(--admin-ink)] font-semibold flex items-center gap-1">
                 <RotateCcw size={12} /> Rotate / straighten
               </span>
+              <button
+                type="button"
+                onClick={() => nudgeRotation(-ROTATION_STEP_FINE)}
+                disabled={rotation <= ROTATION_MIN}
+                aria-label="Rotate −0.1°"
+                title="Rotate −0.1°"
+                className="p-1.5 rounded border border-[var(--admin-line)] hover:bg-[var(--admin-panel3)] hover:text-[var(--admin-gold)] disabled:opacity-30 disabled:cursor-not-allowed text-[var(--admin-ink)]"
+              >
+                <Minus size={14} />
+              </button>
               <input
                 type="range"
-                min="-15"
-                max="15"
+                min={ROTATION_MIN}
+                max={ROTATION_MAX}
                 step="0.5"
                 value={rotation}
                 onChange={(e) => setRotation(Number(e.target.value))}
                 className="flex-1 max-w-[240px] accent-[var(--admin-gold)]"
               />
+              <button
+                type="button"
+                onClick={() => nudgeRotation(+ROTATION_STEP_FINE)}
+                disabled={rotation >= ROTATION_MAX}
+                aria-label="Rotate +0.1°"
+                title="Rotate +0.1°"
+                className="p-1.5 rounded border border-[var(--admin-line)] hover:bg-[var(--admin-panel3)] hover:text-[var(--admin-gold)] disabled:opacity-30 disabled:cursor-not-allowed text-[var(--admin-ink)]"
+              >
+                <Plus size={14} />
+              </button>
               <span className="text-[var(--admin-gold)] font-mono w-14 text-right">{rotation.toFixed(1)}°</span>
               <span className="text-[var(--admin-ink-faint)] text-[10px]">
                 {rotation === 0 ? "(auto from dots)" : "(manual)"}
