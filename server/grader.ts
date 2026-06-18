@@ -653,6 +653,18 @@ export async function getSubmissionRefForCert(certId: number): Promise<string | 
 
 // ── Cert-level assignment (admin) ─────────────────────────────────────────────
 
+/**
+ * Bind an int[] as ARRAY[$1, $2, …]::int[]. Interpolating a JS array directly —
+ * ANY(${ids}::int[]) — makes the Neon driver pass it as a single scalar param,
+ * which Postgres rejects with "malformed array literal". Binding each id as its
+ * own parameter sidesteps that. Callers guarantee a non-empty, int-filtered array.
+ */
+const intArray = (ids: number[]) =>
+  sql`ARRAY[${sql.join(
+    ids.map((id) => sql`${id}`),
+    sql`, `
+  )}]::int[]`;
+
 /** Assign a batch of CERTIFICATES to a grader. Never touches 'approved' certs. */
 export async function assignCerts(graderId: string, certIds: number[], adminUser: string) {
   if (!(await isGrader(graderId))) return { ok: false as const, status: 400, error: "Not a valid grader" };
@@ -662,7 +674,7 @@ export async function assignCerts(graderId: string, certIds: number[], adminUser
     UPDATE certificates
     SET assigned_grader_id = ${graderId}, grader_status = 'assigned', assigned_at = NOW(),
         rejection_reason = NULL, updated_at = NOW()
-    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND grader_status <> 'approved'
+    WHERE id = ANY(${intArray(clean)}) AND deleted_at IS NULL AND grader_status <> 'approved'
     RETURNING id
   `);
   await storage.writeAuditLog("certificate", clean.join(","), "grader_assign", adminUser, {
@@ -678,13 +690,15 @@ export async function reassignCerts(graderId: string, certIds: number[], adminUs
   if (!(await isGrader(graderId))) return { ok: false as const, status: 400, error: "Not a valid grader" };
   const clean = certIds.filter((n) => Number.isInteger(n) && n > 0);
   if (!clean.length) return { ok: false as const, status: 400, error: "No certificate ids" };
-  const before = await db.execute(sql`SELECT id, assigned_grader_id FROM certificates WHERE id = ANY(${clean}::int[])`);
+  const before = await db.execute(
+    sql`SELECT id, assigned_grader_id FROM certificates WHERE id = ANY(${intArray(clean)})`
+  );
   const fromMap = Object.fromEntries((before.rows as any[]).map((x) => [String(x.id), x.assigned_grader_id ?? null]));
   const r = await db.execute(sql`
     UPDATE certificates
     SET assigned_grader_id = ${graderId}, grader_status = 'assigned', assigned_at = NOW(),
         rejection_reason = NULL, updated_at = NOW()
-    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND grader_status <> 'approved'
+    WHERE id = ANY(${intArray(clean)}) AND deleted_at IS NULL AND grader_status <> 'approved'
     RETURNING id
   `);
   await storage.writeAuditLog("certificate", clean.join(","), "grader_reassign", adminUser, {
@@ -700,12 +714,14 @@ export async function reassignCerts(graderId: string, certIds: number[], adminUs
 export async function unassignCerts(certIds: number[], adminUser: string) {
   const clean = certIds.filter((n) => Number.isInteger(n) && n > 0);
   if (!clean.length) return { ok: false as const, status: 400, error: "No certificate ids" };
-  const before = await db.execute(sql`SELECT id, assigned_grader_id FROM certificates WHERE id = ANY(${clean}::int[])`);
+  const before = await db.execute(
+    sql`SELECT id, assigned_grader_id FROM certificates WHERE id = ANY(${intArray(clean)})`
+  );
   const fromMap = Object.fromEntries((before.rows as any[]).map((x) => [String(x.id), x.assigned_grader_id ?? null]));
   const r = await db.execute(sql`
     UPDATE certificates
     SET assigned_grader_id = NULL, grader_status = 'unassigned', assigned_at = NULL, updated_at = NOW()
-    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND grader_status <> 'approved'
+    WHERE id = ANY(${intArray(clean)}) AND deleted_at IS NULL AND grader_status <> 'approved'
     RETURNING id
   `);
   await storage.writeAuditLog("certificate", clean.join(","), "grader_unassign", adminUser, {
