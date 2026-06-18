@@ -440,14 +440,44 @@ export default function ManualCardTool({
           ? `Side ${activeSide + 1} of 4 — ${SIDE_NAMES[activeSide]}. Click the OUTER edge (card edge).`
           : `Side ${activeSide + 1} of 4 — ${SIDE_NAMES[activeSide]}. Click the INNER edge (border meets artwork).`;
 
-  function toPct(e: MouseEvent | React.MouseEvent): Point | null {
+  // Screen (client) px → image % (0–100) in the card's UNROTATED source frame.
+  // During capture the stage container is visually rotated by `rotation`° about
+  // its centre (STEP 2); to store dots in source coordinates we INVERSE-rotate
+  // the click about that SAME centre. At rotation 0 (or in defects, where no
+  // capture rotation is applied) this is the original direct mapping. Returns
+  // UNCLAMPED % — callers clamp where appropriate. Zoom/pan stay handled by the
+  // live getBoundingClientRect read, unchanged.
+  function screenToImagePct(clientX: number, clientY: number): Point | null {
     const el = containerRef.current;
     if (!el) return null;
     const r = el.getBoundingClientRect();
-    return {
-      x: clamp(((e.clientX - r.left) / r.width) * 100),
-      y: clamp(((e.clientY - r.top) / r.height) * 100),
-    };
+    if (rotation === 0 || phase !== "capture") {
+      return { x: ((clientX - r.left) / r.width) * 100, y: ((clientY - r.top) / r.height) * 100 };
+    }
+    // Rotated stage: getBoundingClientRect returns the AABB of the rotated box,
+    // whose centre is the rotation-invariant stage centre (= the CSS
+    // transform-origin). Inverse-rotate the click about it by -rotation in
+    // SCREEN px using the UNROTATED on-screen size, then to %. offsetWidth/Height
+    // are read live and are transform-INDEPENDENT (they ignore the rotate), so
+    // they give the true unrotated size with zero stale-closure risk and always
+    // reflect the current zoom. Rotating in px (not %) avoids aspect distortion
+    // on a non-square card. This is the exact inverse of rotate(rotation°), so a
+    // stored dot re-renders precisely under the cursor.
+    const W = el.offsetWidth;
+    const H = el.offsetHeight;
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const rad = (rotation * Math.PI) / 180;
+    const sx = clientX - cx;
+    const sy = clientY - cy;
+    const ux = sx * Math.cos(rad) + sy * Math.sin(rad); // R(-rotation) · (sx,sy)
+    const uy = -sx * Math.sin(rad) + sy * Math.cos(rad);
+    return { x: ((ux + W / 2) / W) * 100, y: ((uy + H / 2) / H) * 100 };
+  }
+
+  function toPct(e: MouseEvent | React.MouseEvent): Point | null {
+    const p = screenToImagePct(e.clientX, e.clientY);
+    return p ? { x: clamp(p.x), y: clamp(p.y) } : null;
   }
 
   function placePoint(pt: Point) {
@@ -488,13 +518,22 @@ export default function ManualCardTool({
   function nearestDot(clientX: number, clientY: number): { pass: DotPass; index: number } | null {
     const el = containerRef.current;
     if (!el) return null;
+    // Map the click into the card frame (rotation-aware), then measure distance
+    // to each dot there. Rotation is an isometry, so card-frame distance equals
+    // true on-screen distance — GRAB_PX stays a screen-px threshold.
+    const cp = screenToImagePct(clientX, clientY);
+    if (!cp) return null;
+    // %→screen-px scale = the UNROTATED card size. At rotation 0 that's exactly
+    // the live rect (byte-identical to the old grab math); when rotated the rect
+    // is the AABB, so use renderW/H (the true unrotated on-screen size).
+    const rotated = rotation !== 0 && phase === "capture";
     const r = el.getBoundingClientRect();
+    const W = rotated ? el.offsetWidth : r.width;
+    const H = rotated ? el.offsetHeight : r.height;
     let best: { pass: DotPass; index: number } | null = null;
     let bestD = Infinity;
     for (const c of allDots()) {
-      const px = r.left + (c.p.x / 100) * r.width;
-      const py = r.top + (c.p.y / 100) * r.height;
-      const d = Math.hypot(clientX - px, clientY - py);
+      const d = Math.hypot(((cp.x - c.p.x) / 100) * W, ((cp.y - c.p.y) / 100) * H);
       if (d < bestD) {
         bestD = d;
         best = { pass: c.pass, index: c.index };
@@ -629,13 +668,8 @@ export default function ManualCardTool({
       return;
     }
     if (activeArr.length < 4) {
-      const el = containerRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      placePoint({
-        x: clamp(((t.clientX - r.left) / r.width) * 100),
-        y: clamp(((t.clientY - r.top) / r.height) * 100),
-      });
+      const pt = toPct({ clientX: t.clientX, clientY: t.clientY } as MouseEvent);
+      if (pt) placePoint(pt);
       return;
     }
     const hit = nearestDot(t.clientX, t.clientY);
@@ -662,10 +696,16 @@ export default function ManualCardTool({
   useEffect(() => {
     if (!drag) return;
     function applyDelta(clientX: number, clientY: number) {
-      const cw = containerRef.current?.clientWidth || 1;
-      const ch = containerRef.current?.clientHeight || 1;
-      const dx = ((clientX - drag!.startMouse.x) / cw) * 100;
-      const dy = ((clientY - drag!.startMouse.y) / ch) * 100;
+      // Convert BOTH endpoints through the rotation-aware mapping, so a drag
+      // while the stage is rotated moves the dot along the CARD's axes (not the
+      // screen's). UNCLAMPED so only the final position clamps, matching the
+      // prior edge behaviour. At rotation 0 this reduces to the original
+      // screen-delta-as-% mapping.
+      const cur = screenToImagePct(clientX, clientY);
+      const st = screenToImagePct(drag!.startMouse.x, drag!.startMouse.y);
+      if (!cur || !st) return;
+      const dx = cur.x - st.x;
+      const dy = cur.y - st.y;
       const next = drag!.startPts.map((p) => ({ ...p }));
       const base = drag!.startPts[drag!.index];
       let moved = { x: clamp(base.x + dx), y: clamp(base.y + dy) };
@@ -700,7 +740,11 @@ export default function ManualCardTool({
       window.removeEventListener("touchend", onUp);
       window.removeEventListener("touchcancel", onUp);
     };
-  }, [drag]);
+    // rotation/phase are read (via screenToImagePct) inside applyDelta, so the
+    // drag listeners must re-bind if they change — prevents a stale-closure
+    // coordinate frame if the slider moves mid-drag. (The unrotated size is read
+    // live from offsetWidth, so it never goes stale and needs no dep.)
+  }, [drag, rotation, phase]);
 
   // Measure the available image-area box; re-measure on resize / chrome reflow
   // (e.g. the banner or controls wrapping). The card image is capped to this box
@@ -1332,6 +1376,18 @@ export default function ManualCardTool({
             <div
               ref={containerRef}
               className="relative rounded-lg bg-[var(--admin-panel2)] flex-shrink-0"
+              // STEP 2 — live straighten preview. Rotating the STAGE CONTAINER
+              // (not the <img> alone) rotates the card image, the SVG crop/edge
+              // overlay AND the 8 dots together as one layer about the centre,
+              // so placed dots stay glued to the card and relative geometry is
+              // preserved. Capture phase only (defects shows the already-
+              // straightened crop). The pointer→image mapping inverse-rotates
+              // about this same centre, so clicks/drags land in source coords.
+              style={
+                phase === "capture" && rotation !== 0
+                  ? { transform: `rotate(${rotation}deg)`, transformOrigin: "center center" }
+                  : undefined
+              }
               onMouseDown={onContainerMouseDown}
               onMouseMove={onContainerMouseMove}
               onMouseLeave={() => {
