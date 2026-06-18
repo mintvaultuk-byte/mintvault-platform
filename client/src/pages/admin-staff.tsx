@@ -160,6 +160,10 @@ export default function AdminStaffPage() {
   const [qLoading, setQLoading] = useState(false);
   const [gSel, setGSel] = useState<Set<number>>(new Set());
   const [gStaff, setGStaff] = useState("");
+  // Inline outcome shown right beside the Assign buttons — the top-of-page
+  // banner is off-screen when the admin is acting on the queue, which made
+  // every assign look like it "did nothing".
+  const [gOutcome, setGOutcome] = useState<{ kind: "ok" | "warn" | "err"; text: string } | null>(null);
 
   const loadQueue = useCallback(async (filter: string) => {
     setQLoading(true);
@@ -189,20 +193,59 @@ export default function AdminStaffPage() {
   async function assignGrade(action: "assign" | "reassign" | "unassign") {
     setMsg(null);
     setErr(null);
+    setGOutcome(null);
     const cert_ids = Array.from(gSel);
-    if (!cert_ids.length) return setErr("Select cards first");
-    if (action !== "unassign" && !gStaff) return setErr("Pick a grader");
-    const res = await fetch(`/api/admin/graders/${action}`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ grader_id: gStaff, cert_ids }),
-    });
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok) return setErr(d.error || `${action} failed`);
-    setMsg(`Grade ${action}: ${d.count} card(s)`);
-    loadQueue(qFilter);
-    load();
+    // Every exit path below surfaces a visible outcome — assign must never no-op silently.
+    if (!cert_ids.length) {
+      setGOutcome({ kind: "err", text: "Select at least one card first." });
+      return;
+    }
+    if (action !== "unassign" && !gStaff) {
+      setGOutcome({ kind: "err", text: "Pick a grader first." });
+      return;
+    }
+    const verb = action === "assign" ? "Assigned" : action === "reassign" ? "Reassigned" : "Unassigned";
+    try {
+      const res = await fetch(`/api/admin/graders/${action}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grader_id: gStaff, cert_ids }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setGOutcome({ kind: "err", text: d.error || `${action} failed (HTTP ${res.status})` });
+        return;
+      }
+      const n = Number(d.count ?? 0);
+      if (n === 0) {
+        // 200 but nothing changed — the old code showed this as a green "0 card(s)"
+        // success, indistinguishable from "nothing happened". Surface it as a warning.
+        // (A grader without the capability is a 400 handled above, not a 0-count success.)
+        setGOutcome({
+          kind: "warn",
+          text: `0 of ${cert_ids.length} card(s) ${action}ed — nothing changed. ${
+            action === "unassign"
+              ? "They may already be unassigned."
+              : "They may already be approved or no longer in the queue."
+          }`,
+        });
+      } else {
+        setGOutcome({ kind: "ok", text: `${verb} ${n} card(s).` });
+      }
+    } catch (e: any) {
+      setGOutcome({ kind: "err", text: `Network error — ${e?.message || "request failed"}. Nothing was changed.` });
+      return;
+    }
+    // The assign has committed — the outcome set above is FINAL. Refresh the queue
+    // and staff counts best-effort; a refetch failure must NEVER flip a real success
+    // into "nothing changed" (loadQueue has no catch of its own and would throw here).
+    try {
+      await loadQueue(qFilter);
+    } catch {
+      /* refetch hiccup — the assign already stuck; queue may show stale until next load */
+    }
+    void load();
   }
 
   // SCAN assignment (submission-level)
@@ -484,6 +527,20 @@ export default function AdminStaffPage() {
                   Unassign
                 </button>
               </div>
+              {gOutcome && (
+                <div
+                  className={`mt-2 text-xs rounded px-3 py-2 border ${
+                    gOutcome.kind === "ok"
+                      ? "text-emerald-400 bg-emerald-950/40 border-emerald-900"
+                      : gOutcome.kind === "warn"
+                        ? "text-amber-300 bg-amber-950/40 border-amber-900"
+                        : "text-red-400 bg-red-950/40 border-red-900"
+                  }`}
+                  data-testid="grade-assign-outcome"
+                >
+                  {gOutcome.text}
+                </div>
+              )}
             </>
           )}
         </section>

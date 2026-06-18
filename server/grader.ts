@@ -336,9 +336,18 @@ export async function authenticateGrader(
 
 // ── Assignment (admin) ────────────────────────────────────────────────────────
 
+/**
+ * A user is assignable for grading iff they hold the grade capability — NOT iff
+ * role='grader'. The unified-staff model (e670cea) grants grading via the
+ * can_grade flag on role='staff'/'grader'/'senior_grader' accounts, so gating on
+ * role alone silently rejected valid staff graders: assign/reassign returned 400
+ * "Not a valid grader" and the card never moved. This mirrors the admin picker,
+ * which lists can_grade users. Admins/customers have can_grade=false, so they are
+ * correctly excluded.
+ */
 async function isGrader(graderId: string): Promise<boolean> {
   const r = await db.execute(
-    sql`SELECT 1 FROM users WHERE id = ${graderId} AND role = 'grader' AND deleted_at IS NULL LIMIT 1`
+    sql`SELECT 1 FROM users WHERE id = ${graderId} AND can_grade = true AND deleted_at IS NULL LIMIT 1`
   );
   return r.rows.length > 0;
 }
