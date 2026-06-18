@@ -147,6 +147,9 @@ function GradeTab() {
           certIdStr={c.certIdStr}
           cardName={c.cardName || ""}
           cardSet={c.setName || ""}
+          cardNumber={c.cardNumber}
+          cardYear={c.year}
+          cardVariant={c.variant}
           cardGame={c.cardGame || undefined}
           existingGrade={c.grade}
           onGradeApproved={async () => {

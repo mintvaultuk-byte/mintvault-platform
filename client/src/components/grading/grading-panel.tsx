@@ -117,6 +117,11 @@ interface Props {
   certIdStr?: string;
   cardName: string;
   cardSet: string;
+  /** Read-only identity extras shown to graders (admins get the editable
+   *  CertificateForm above the panel instead). Optional — omitted fields hide. */
+  cardNumber?: string | null;
+  cardYear?: string | null;
+  cardVariant?: string | null;
   existingGrade?: string | null;
   onGradeApproved?: (certId?: string, grade?: string) => void;
   onCertUpdated?: () => void;
@@ -209,6 +214,9 @@ export default function GradingPanel({
   certIdStr,
   cardName,
   cardSet,
+  cardNumber,
+  cardYear,
+  cardVariant,
   existingGrade,
   onGradeApproved,
   onCertUpdated,
@@ -1521,6 +1529,29 @@ export default function GradingPanel({
 
   return (
     <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4 space-y-5">
+      {/* Card identity — read-only for graders. Admins instead get the editable
+          CertificateForm rendered above the panel, so this is graderMode-only to
+          avoid duplicating it. Graders can never edit identity (admin-only). */}
+      {graderMode && (
+        <div
+          className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel2)] px-3 py-2"
+          data-testid="grader-card-identity"
+        >
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="font-mono text-xs text-[var(--admin-gold)]">{certIdStr || ""}</span>
+            <span className="text-sm font-bold text-[var(--admin-ink)]">{cardName || "Unidentified card"}</span>
+          </div>
+          <div className="text-[11px] text-[var(--admin-ink-dim)] mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+            {cardSet && <span>{cardSet}</span>}
+            {cardNumber && <span>· #{cardNumber}</span>}
+            {cardYear && <span>· {cardYear}</span>}
+            {cardVariant && <span>· {cardVariant}</span>}
+          </div>
+          <p className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)] mt-1">
+            Card identity (read-only)
+          </p>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">
           Manual Grading Workstation
@@ -2594,7 +2625,7 @@ export default function GradingPanel({
                         className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1"
                       >
                         <option value="">Override (auto)</option>
-                        {[10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((g) => (
+                        {[10, 9.5, 9, 8.5, 8, 7.5, 7, 6.5, 6, 5.5, 5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1].map((g) => (
                           <option key={g} value={g}>
                             {g}
                           </option>
