@@ -21,6 +21,7 @@ import {
   LogOut,
   Check,
   Tag,
+  Users,
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
 
@@ -75,6 +76,7 @@ const NAV: NavSection[] = [
       { key: "promotions", label: "Promotions", icon: Tag },
       { key: "capacity", label: "Capacity", icon: Database },
       { key: "printing", label: "Printing", icon: Printer },
+      { href: "/admin/staff", label: "Staff", icon: Users },
     ],
   },
   {
