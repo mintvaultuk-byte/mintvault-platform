@@ -129,6 +129,11 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (req.session && req.session.isAdmin) {
     return next();
   }
+  // A logged-in GRADER must NEVER reach an admin route — explicit 403 (not 401)
+  // so it's unambiguous this is a role denial, not a missing session.
+  if (req.session && (req.session as any).isGrader) {
+    return res.status(403).json({ error: "Forbidden: graders cannot access admin endpoints" });
+  }
   return res.status(401).json({ error: "Unauthorized" });
 }
 
@@ -136,7 +141,10 @@ export function adminIpAllowlist(req: Request, res: Response, next: NextFunction
   const allowlist = process.env.ADMIN_IP_ALLOWLIST;
   if (!allowlist) return next();
 
-  const allowed = allowlist.split(",").map(ip => ip.trim()).filter(Boolean);
+  const allowed = allowlist
+    .split(",")
+    .map((ip) => ip.trim())
+    .filter(Boolean);
   if (allowed.length === 0) return next();
 
   const clientIp = getClientIp(req);
@@ -158,7 +166,12 @@ declare module "express-session" {
     // Legacy customer magic link auth (dashboard)
     customerEmail: string;
     // Unified account auth
-    userId: string;    // UUID of the logged-in user
+    userId: string; // UUID of the logged-in user
     userEmail: string; // email, cached for convenience
+    // Restricted grader auth (server/grader.ts) — a 4th, mutually-exclusive
+    // login type. Set ONLY by /api/grader/login; cleared on every other login.
+    isGrader: boolean;
+    graderId: string; // users.id of the grader (role='grader')
+    graderEmail: string;
   }
 }

@@ -19,6 +19,8 @@ import { registerEmbeddingRoutes } from "./routes/embedding";
 import { registerPromotionRoutes } from "./routes/admin/promotions";
 import { migratePromotionsSchema } from "./services/promotionService";
 import { migratePaymentIdempotencySchema } from "./webhookHandlers";
+import { registerGraderRoutes } from "./routes/grader";
+import { migrateGraderSchema, getSubmissionIdForCert, getSubmissionAssignment, isGraderLocked } from "./grader";
 import {
   BUILD_STAMP,
   pricingTiers,
@@ -1261,6 +1263,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   seedTierCapacityTable().catch(() => {});
   migratePromotionsSchema().catch((e: any) => console.error("[promotions-migrate] error:", e.message));
   migratePaymentIdempotencySchema().catch((e: any) => console.error("[payment-idempotency-migrate] error:", e.message));
+  migrateGraderSchema().catch((e: any) => console.error("[grader-migrate] error:", e.message));
   migrateAccountSchema()
     .then(() => migrateMarketplaceSchema())
     .catch((e: any) => console.error("[startup-migration] error:", e.message));
@@ -1283,6 +1286,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Domain route modules ───────────────────────────────────────────────────
   registerPublicRoutes(app);
   registerAuthRoutes(app);
+  registerGraderRoutes(app);
   registerSubmissionRoutes(app);
   registerAdminSubmissionRoutes(app);
   registerAdminConfigRoutes(app);
@@ -3010,6 +3014,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const id = parseInt(String(req.params.id), 10);
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      // Restricted-grader lock — while a card is in a grader's workflow the
+      // admin approves it via POST /api/admin/submissions/:id/approve-grade, not
+      // by directly approving the certificate here.
+      {
+        const sid = await getSubmissionIdForCert(id);
+        if (sid) {
+          const a = await getSubmissionAssignment(sid);
+          if (a && a.assignedGraderId && a.gradingStatus !== "approved") {
+            return res.status(409).json({ error: "This card is assigned to a grader" });
+          }
+        }
+      }
 
       const { centering, corners, edges, surface, overall, gradeType, grading_time_seconds } = req.body;
 
@@ -9692,6 +9709,19 @@ Defects (admin-confirmed): ${defectLines}`;
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
+      // Restricted-grader lock — an admin must NOT grade a card that's assigned
+      // to a grader and still in their workflow (assigned/pending_review). The
+      // admin reviews + publishes via POST /api/admin/submissions/:id/approve-grade.
+      {
+        const sid = await getSubmissionIdForCert(id);
+        if (sid) {
+          const a = await getSubmissionAssignment(sid);
+          if (a && a.assignedGraderId && a.gradingStatus !== "approved") {
+            return res.status(409).json({ error: "This card is assigned to a grader" });
+          }
+        }
+      }
+
       const b = req.body;
       const overallGrade = b.overall_grade;
       const isNonNum = overallGrade === "AA" || overallGrade === "NO";
@@ -9900,6 +9930,10 @@ Defects (admin-confirmed): ${defectLines}`;
       const id = parseInt(String(req.params.id), 10);
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      // Restricted-grader lock — see /grade handler. Admin publishes a
+      // grader-assigned card via POST /api/admin/submissions/:id/approve-grade.
+      if (await isGraderLocked(id)) return res.status(409).json({ error: "This card is assigned to a grader" });
 
       const b = req.body;
       const overallGrade = b.overall_grade;
@@ -11229,6 +11263,10 @@ Defects (admin-confirmed): ${defectLines}`;
       const id = parseInt(String(req.params.id), 10);
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      // Restricted-grader lock — an admin must not AI-grade a card that's in a
+      // grader's workflow. Use the grader approval flow instead.
+      if (await isGraderLocked(id)) return res.status(409).json({ error: "This card is assigned to a grader" });
 
       const c = cert as any;
       const frontKey = c.gradingFrontOriginal || c.frontImagePath;

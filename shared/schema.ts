@@ -242,6 +242,16 @@ export const submissions = pgTable("submissions", {
   // every change writes an audit_log row.
   marketingFeatureConsent: boolean("marketing_feature_consent").notNull().default(false),
   marketingFeatureConsentAt: timestamp("marketing_feature_consent_at", { withTimezone: true }),
+  // ── Restricted-grader assignment (migrateGraderSchema) ────────────────────
+  // A submission can be assigned to a single grader (users.id, role='grader').
+  // grading_status drives the workflow: unassigned → assigned → pending_review
+  // → approved. The actual grade still lives on the linked certificate; these
+  // columns track WHO may grade it and WHERE it is in review. Columns are added
+  // idempotently at boot; see server/grader.ts migrateGraderSchema().
+  assignedGraderId: varchar("assigned_grader_id"),
+  gradingStatus: varchar("grading_status", { length: 20 }).notNull().default("unassigned"),
+  assignedAt: timestamp("assigned_at", { withTimezone: true }),
+  gradedAt: timestamp("graded_at", { withTimezone: true }),
 });
 
 export const submissionItems = pgTable("submission_items", {

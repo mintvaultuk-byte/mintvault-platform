@@ -914,6 +914,10 @@ export function registerAuthRoutes(app: Express): void {
       (req.session as any).customerEmail = user.email;
       (req.session as any).isAdmin = false;
       (req.session as any).adminEmail = undefined;
+      // Defensive: a fresh session from regenerate() has no grader fields, but
+      // clear them explicitly so an account login can never carry a grader role.
+      (req.session as any).isGrader = false;
+      (req.session as any).graderId = undefined;
 
       await db.execute(sql`
         UPDATE users SET last_login_at = NOW(), last_login_ip = ${ip}, failed_login_count = 0 WHERE id = ${user.id as string}
