@@ -68,7 +68,8 @@ const FAQS = [
   },
   {
     q: "How does Silver stack with bulk discounts?",
-    a: "We apply whichever saves you more, never both. Silver's 10% wins on smaller orders; the bulk discount (5/10/15% at 10/25/50+ cards) overtakes Silver at 50+ cards. Tied at 25 cards, Silver wins.",
+    // bulk figures: keep in sync with bulkDiscountTiers (shared/schema.ts)
+    a: "We apply whichever saves you more, never both. Silver's 10% wins on smaller orders; the bulk discount (5/7.5/10% at 10/25/50+ cards) overtakes Silver at 50+ cards. Tied at 25 cards, Silver wins.",
   },
   {
     q: "What if I don't submit often?",
@@ -414,7 +415,7 @@ export default function VaultClubV2() {
               <p className="font-body text-sm md:text-base leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
                 The basket applies whichever saves you more, never both. Silver&rsquo;s{" "}
                 {SILVER.grading_discount_percent}% wins up to 49 cards per submission. The bulk discount overtakes
-                Silver at 50+ cards (15% bracket). Either way, you get the better number.
+                Silver at 50+ cards (10% bracket). Either way, you get the better number.
               </p>
             </div>
             <div>

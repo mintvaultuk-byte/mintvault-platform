@@ -17,7 +17,8 @@ const faqs = [
   },
   {
     question: "Are there bulk discounts for card grading?",
-    answer: "Yes. MintVault offers bulk discounts for submissions of 10 or more cards. Discounts are applied automatically: 5% off for 10–24 cards, 10% off for 25–49 cards, and 15% off for 50+ cards.",
+    // keep in sync with bulkDiscountTiers (shared/schema.ts); serialised into faqSchema JSON-LD (Google-indexed).
+    answer: "Yes. MintVault offers bulk discounts for submissions of 10 or more cards. Discounts are applied automatically: 5% off for 10–24 cards, 7.5% off for 25–49 cards, and 10% off for 50+ cards.",
   },
   {
     question: "What is included in the grading cost?",

@@ -146,7 +146,7 @@ export default function PsaAlternativeUk() {
               <li>Predictable turnaround: 5 to 40 working days, with no international shipping delays added</li>
               <li>Transparent pricing from £19 per card — what you see is what you pay</li>
               <li>UK-based support team available in your time zone</li>
-              <li>Bulk discounts up to 15% make large submissions significantly more affordable than shipping overseas</li>
+              <li>Bulk discounts up to 10% make large submissions significantly more affordable than shipping overseas</li>
             </ul>
             <p className="mt-3">
               Some collectors also use PSA or BGS for specific high-value pieces intended for the international auction market. MintVault complements this approach perfectly — grade your broader collection domestically with the speed and cost savings of a UK service, and reserve international grading only where global brand recognition is essential to your selling strategy.

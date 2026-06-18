@@ -961,10 +961,11 @@ function SectionVI() {
           Bulk discounts apply automatically at checkout based on your card count. The more cards you submit, the more you save per card.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-10">
+          {/* bulk figures: keep in sync with bulkDiscountTiers (shared/schema.ts) — max 10% (DMCC) */}
           {[
             { label: "10–24 cards", body: <><strong style={{ color: V.ink }}>5% off</strong> the per-card grading fee.</> },
-            { label: "25–49 cards", body: <><strong style={{ color: V.ink }}>10% off</strong> the per-card grading fee.</> },
-            { label: "50+ cards",   body: <><strong style={{ color: V.ink }}>15% off</strong> the per-card grading fee.</> },
+            { label: "25–49 cards", body: <><strong style={{ color: V.ink }}>7.5% off</strong> the per-card grading fee.</> },
+            { label: "50+ cards",   body: <><strong style={{ color: V.ink }}>10% off</strong> the per-card grading fee.</> },
           ].map((ex) => (
             <div key={ex.label} style={{ borderRadius: 8, padding: 24, backgroundColor: V.paperSunk, border: `1px solid ${V.line}` }}>
               <p style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', monospace", fontSize: 10, textTransform: "uppercase", letterSpacing: "0.15em", marginBottom: 12, color: V.gold }}>

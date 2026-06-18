@@ -183,7 +183,7 @@ export default function CardGradingServiceUk() {
             ))}
           </div>
           <p className="text-[#d4d4d4] text-sm">
-            Bulk discounts of up to 15% are available for larger submissions. Visit our <Link href="/" className="text-[#D4AF37] hover:underline" data-testid="link-pricing">pricing page</Link> for full details.
+            Bulk discounts of up to 10% are available for larger submissions. Visit our <Link href="/" className="text-[#D4AF37] hover:underline" data-testid="link-pricing">pricing page</Link> for full details.
           </p>
         </section>
 

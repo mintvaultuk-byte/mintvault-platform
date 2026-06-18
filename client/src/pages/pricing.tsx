@@ -9,7 +9,7 @@ import FooterV2 from "@/components/v2/footer-v2";
 import SectionEyebrow from "@/components/v2/section-eyebrow";
 import AmbientLayer from "@/components/v2/ambient-layer";
 import DarkSectionGlow from "@/components/v2/dark-section-glow";
-import { pricingTiers, insuranceTiers, insuranceSurchargeBands } from "@shared/schema";
+import { pricingTiers, insuranceTiers, insuranceSurchargeBands, bulkDiscountTiers } from "@shared/schema";
 import { ADDON_PRICES, ADDON_ORDER } from "@shared/addons";
 import { cn } from "@/lib/utils";
 import { useActivePromo } from "@/hooks/use-active-promo";
@@ -620,27 +620,27 @@ export default function PricingV2() {
             you save per card.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-10">
-            {[
-              { range: "10–24 cards", discount: "5% off" },
-              { range: "25–49 cards", discount: "10% off" },
-              { range: "50+ cards", discount: "15% off" },
-            ].map((tier) => (
-              <div
-                key={tier.range}
-                className="rounded-lg p-6"
-                style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}
-              >
-                <p
-                  className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3"
-                  style={{ color: "var(--v2-gold)" }}
+            {/* Derived from bulkDiscountTiers (shared/schema.ts) — the engine's source of truth, so the
+                advertised % can never drift from what checkout actually applies (DMCC). */}
+            {bulkDiscountTiers
+              .filter((tier) => tier.percent > 0)
+              .map((tier) => (
+                <div
+                  key={tier.label}
+                  className="rounded-lg p-6"
+                  style={{ backgroundColor: "var(--v2-paper-sunk)", border: "1px solid var(--v2-line)" }}
                 >
-                  {tier.range}
-                </p>
-                <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
-                  <strong style={{ color: "var(--v2-ink)" }}>{tier.discount}</strong> the per-card grading fee.
-                </p>
-              </div>
-            ))}
+                  <p
+                    className="font-mono-v2 text-[10px] uppercase tracking-widest mb-3"
+                    style={{ color: "var(--v2-gold)" }}
+                  >
+                    {tier.label}
+                  </p>
+                  <p className="font-body text-sm leading-relaxed" style={{ color: "var(--v2-ink-soft)" }}>
+                    <strong style={{ color: "var(--v2-ink)" }}>{tier.percent}% off</strong> the per-card grading fee.
+                  </p>
+                </div>
+              ))}
           </div>
         </div>
       </section>

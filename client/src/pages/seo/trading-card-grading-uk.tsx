@@ -29,7 +29,8 @@ const faqs = [
   },
   {
     question: "How much does trading card grading cost in the UK?",
-    answer: "Grading starts from £19 per card (Vault Queue tier, 40 working days). Standard is £25 (15 working days) and Express is £45 (5 working days). Bulk discounts of up to 15% apply to larger submissions. Visit our <a href='/' class='text-[#D4AF37] hover:underline'>pricing page</a> for full details.",
+    // keep in sync with bulkDiscountTiers (shared/schema.ts) — max 10%; serialised into faqSchema JSON-LD (Google-indexed).
+    answer: "Grading starts from £19 per card (Vault Queue tier, 40 working days). Standard is £25 (15 working days) and Express is £45 (5 working days). Bulk discounts of up to 10% apply to larger submissions. Visit our <a href='/' class='text-[#D4AF37] hover:underline'>pricing page</a> for full details.",
   },
   {
     question: "Do graded trading cards sell for more than raw cards?",
