@@ -16,14 +16,44 @@ type Staff = {
   gradeApproved: number;
   scanAssigned: number;
 };
-type Cert = {
+type QueueRow = {
   certId: number;
   certIdStr: string;
   cardName: string | null;
+  setName: string | null;
   cardNumber: string | null;
-  gradingStatus: string;
-  graderEmail: string | null;
+  year: string | null;
+  variant: string | null;
+  graderStatus: string;
+  assignedGraderId: string | null;
+  assignedGraderEmail: string | null;
+  redoCount: number;
+  rejectionReason: string | null;
+  hasImages: boolean;
+  submissionRef: string | null;
+  submissionId: number | null;
 };
+
+const QUEUE_FILTERS = [
+  { key: "needs_grading", label: "Needs grading" },
+  { key: "assigned", label: "Assigned" },
+  { key: "pending_review", label: "Pending review" },
+  { key: "rejected", label: "Rejected" },
+  { key: "all", label: "All" },
+] as const;
+
+function statusClass(s: string): string {
+  switch (s) {
+    case "assigned":
+      return "text-sky-400";
+    case "pending_review":
+      return "text-amber-400";
+    case "approved":
+      return "text-emerald-400";
+    default:
+      return "text-[#E8E4DC]/60";
+  }
+}
 
 export default function AdminStaffPage() {
   const [, navigate] = useLocation();
@@ -123,28 +153,44 @@ export default function AdminStaffPage() {
     setMsg(`Per-card rate set to £${Number(rate).toFixed(2)}`);
   }
 
-  // GRADE assignment (cert-level)
-  const [gSubId, setGSubId] = useState("");
-  const [certs, setCerts] = useState<Cert[]>([]);
+  // GRADE assignment — cross-submission grading queue (cert-level)
+  const [qFilter, setQFilter] = useState<string>("needs_grading");
+  const [queue, setQueue] = useState<QueueRow[]>([]);
+  const [qMeta, setQMeta] = useState<{ total: number; cap: number; capped: boolean } | null>(null);
+  const [qLoading, setQLoading] = useState(false);
   const [gSel, setGSel] = useState<Set<number>>(new Set());
   const [gStaff, setGStaff] = useState("");
-  async function loadCerts(e: React.FormEvent) {
-    e.preventDefault();
+
+  const loadQueue = useCallback(async (filter: string) => {
+    setQLoading(true);
     setErr(null);
-    setCerts([]);
-    setGSel(new Set());
-    const id = parseInt(gSubId, 10);
-    if (!Number.isInteger(id) || id <= 0) return setErr("Enter a submission ID");
-    const res = await fetch(`/api/admin/submissions/${id}/certs`, { credentials: "include" });
-    const d = await res.json().catch(() => ({}));
-    if (!res.ok) return setErr(d.error || "Failed to load certs");
-    setCerts(d.certs || []);
-  }
+    try {
+      const res = await fetch(`/api/admin/grading-queue?status=${encodeURIComponent(filter)}`, {
+        credentials: "include",
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErr(d.error || "Failed to load grading queue");
+        setQueue([]);
+        setQMeta(null);
+        return;
+      }
+      setQueue(d.queue || []);
+      setQMeta({ total: d.total ?? 0, cap: d.cap ?? 200, capped: !!d.capped });
+      setGSel(new Set());
+    } finally {
+      setQLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (authed) loadQueue(qFilter);
+  }, [authed, qFilter, loadQueue]);
+
   async function assignGrade(action: "assign" | "reassign" | "unassign") {
     setMsg(null);
     setErr(null);
     const cert_ids = Array.from(gSel);
-    if (!cert_ids.length) return setErr("Select certificates");
+    if (!cert_ids.length) return setErr("Select cards first");
     if (action !== "unassign" && !gStaff) return setErr("Pick a grader");
     const res = await fetch(`/api/admin/graders/${action}`, {
       method: "POST",
@@ -155,7 +201,7 @@ export default function AdminStaffPage() {
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return setErr(d.error || `${action} failed`);
     setMsg(`Grade ${action}: ${d.count} card(s)`);
-    loadCerts({ preventDefault() {} } as any);
+    loadQueue(qFilter);
     load();
   }
 
@@ -191,6 +237,15 @@ export default function AdminStaffPage() {
       return n;
     });
   }
+  function toggleSelectAll(ids: number[]) {
+    setGSel((prev) => {
+      const allOn = ids.length > 0 && ids.every((id) => prev.has(id));
+      const n = new Set(prev);
+      if (allOn) ids.forEach((id) => n.delete(id));
+      else ids.forEach((id) => n.add(id));
+      return n;
+    });
+  }
 
   if (authed !== true) {
     return (
@@ -202,6 +257,9 @@ export default function AdminStaffPage() {
 
   const graders = staff.filter((s) => s.caps.grade);
   const scanners = staff.filter((s) => s.caps.scan);
+  // Only cards with images are selectable — you can't grade (or assign) an imageless card.
+  const visibleSelectable = queue.filter((q) => q.hasImages).map((q) => q.certId);
+  const allVisibleSelected = visibleSelectable.length > 0 && visibleSelectable.every((id) => gSel.has(id));
 
   return (
     <div className="min-h-screen bg-black text-[#E8E4DC] px-4 py-6">
@@ -285,32 +343,116 @@ export default function AdminStaffPage() {
         </section>
 
         <section className="border border-[#D4AF37]/20 rounded-lg p-4">
-          <h2 className="text-[#D4AF37] font-semibold text-sm mb-3">Assign cards to grade (by submission)</h2>
-          <form onSubmit={loadCerts} className="flex gap-2 mb-3">
-            <input
-              className="ss-input"
-              placeholder="Submission ID"
-              value={gSubId}
-              onChange={(e) => setGSubId(e.target.value)}
-            />
-            <button className="border border-[#D4AF37]/40 px-4 py-2 rounded text-sm hover:bg-[#D4AF37]/10">
-              Load cards
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <h2 className="text-[#D4AF37] font-semibold text-sm">Grading queue</h2>
+            <div className="flex flex-wrap gap-1">
+              {QUEUE_FILTERS.map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => setQFilter(f.key)}
+                  className={`text-[11px] px-2.5 py-1 rounded border ${
+                    qFilter === f.key
+                      ? "bg-[#D4AF37] text-[#1A1400] border-[#D4AF37] font-bold"
+                      : "border-[#D4AF37]/30 text-[#E8E4DC]/70 hover:bg-[#D4AF37]/10"
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] text-[#E8E4DC]/50 mb-2">
+            <span>
+              {qLoading
+                ? "Loading…"
+                : qMeta
+                  ? `${queue.length} shown${
+                      qMeta.capped ? ` · ${qMeta.total} total (capped at ${qMeta.cap})` : ` · ${qMeta.total} total`
+                    }`
+                  : ""}
+            </span>
+            <button onClick={() => loadQueue(qFilter)} className="hover:text-[#D4AF37]">
+              ↻ Refresh
             </button>
-          </form>
-          {certs.length > 0 && (
+          </div>
+
+          {!qLoading && queue.length === 0 ? (
+            <p className="text-[#E8E4DC]/50 text-xs py-3">No cards in this view.</p>
+          ) : (
             <>
-              <ul className="space-y-1 mb-3 max-h-56 overflow-auto">
-                {certs.map((c) => (
-                  <li key={c.certId} className="flex items-center gap-2 text-sm border-b border-[#D4AF37]/10 pb-1">
-                    <input type="checkbox" checked={gSel.has(c.certId)} onChange={() => toggleSel(c.certId)} />
-                    <span className="font-mono text-xs text-[#D4AF37]">{c.certIdStr}</span>
-                    <span className="truncate flex-1">{c.cardName || "Unidentified"}</span>
-                    <span className="text-[10px] uppercase text-[#E8E4DC]/50">{c.gradingStatus.replace("_", " ")}</span>
-                    {c.graderEmail && <span className="text-[10px] text-[#E8E4DC]/40">→ {c.graderEmail}</span>}
-                  </li>
-                ))}
-              </ul>
-              <div className="flex flex-wrap gap-2 items-center">
+              <div className="max-h-80 overflow-auto border border-[#D4AF37]/10 rounded">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-black">
+                    <tr className="text-[#E8E4DC]/50 text-[10px] uppercase text-left">
+                      <th className="py-1.5 px-2 w-8">
+                        <input
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          onChange={() => toggleSelectAll(visibleSelectable)}
+                          disabled={visibleSelectable.length === 0}
+                          title="Select all gradeable cards in view"
+                        />
+                      </th>
+                      <th>Cert</th>
+                      <th>Card</th>
+                      <th>Set / Year</th>
+                      <th>Status</th>
+                      <th>Grader</th>
+                      <th className="text-center px-2">Imgs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {queue.map((q) => (
+                      <tr key={q.certId} className={`border-t border-[#D4AF37]/10 ${q.hasImages ? "" : "opacity-50"}`}>
+                        <td className="px-2 py-1.5">
+                          <input
+                            type="checkbox"
+                            disabled={!q.hasImages}
+                            checked={gSel.has(q.certId)}
+                            onChange={() => toggleSel(q.certId)}
+                            title={q.hasImages ? "" : "No images — can't grade yet"}
+                          />
+                        </td>
+                        <td className="font-mono text-[11px] text-[#D4AF37] whitespace-nowrap pr-2">{q.certIdStr}</td>
+                        <td className="truncate max-w-[150px]">
+                          {q.cardName || "Unidentified"}
+                          {q.cardNumber ? <span className="text-[#E8E4DC]/40"> #{q.cardNumber}</span> : null}
+                          {q.redoCount > 0 && (
+                            <span className="ml-1 text-[9px] text-amber-400 border border-amber-700/50 rounded px-1">
+                              REDO×{q.redoCount}
+                            </span>
+                          )}
+                        </td>
+                        <td className="text-[11px] text-[#E8E4DC]/60 whitespace-nowrap pr-2">
+                          {q.setName || "—"}
+                          {q.year ? ` · ${q.year}` : ""}
+                        </td>
+                        <td className="text-[10px] uppercase whitespace-nowrap pr-2">
+                          <span className={statusClass(q.graderStatus)}>{q.graderStatus.replace("_", " ")}</span>
+                        </td>
+                        <td className="text-[10px] text-[#E8E4DC]/50 truncate max-w-[130px]">
+                          {q.assignedGraderEmail || "—"}
+                        </td>
+                        <td className="text-center px-2">
+                          {q.hasImages ? (
+                            <span className="text-emerald-400" title="Front + back present">
+                              ✓
+                            </span>
+                          ) : (
+                            <span className="text-red-400" title="Missing front and/or back image">
+                              ✗
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex flex-wrap gap-2 items-center mt-3">
+                <span className="text-[11px] text-[#E8E4DC]/60 whitespace-nowrap">{gSel.size} selected</span>
                 <select
                   className="ss-input flex-1 min-w-[160px]"
                   value={gStaff}

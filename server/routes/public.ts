@@ -592,21 +592,21 @@ export function registerPublicRoutes(app: Express): void {
       const setCond = set ? sql` AND LOWER(set_name) LIKE LOWER(${`%${likeEscape(set)}%`})` : sql``;
 
       const result = await db.execute(sql`
-        SELECT cert_id, card_name, set_name, card_game, grade_overall, created_at
+        SELECT certificate_number, card_name, set_name, card_game, grade, issued_at
         FROM certificates
         WHERE status = 'active' AND deleted_at IS NULL AND grade_type = 'numeric'${cardCond}${setCond}
-        ORDER BY grade_overall DESC NULLS LAST, created_at DESC
+        ORDER BY grade DESC NULLS LAST, issued_at DESC
         LIMIT 500
       `);
 
       res.json(
         (result.rows as any[]).map((r) => ({
-          certId: r.cert_id,
+          certId: r.certificate_number,
           cardName: r.card_name,
           setName: r.set_name,
           cardGame: r.card_game,
-          grade: r.grade_overall,
-          gradedAt: r.created_at,
+          grade: r.grade,
+          gradedAt: r.issued_at,
         }))
       );
     } catch (err) {

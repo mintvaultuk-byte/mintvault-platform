@@ -10299,7 +10299,71 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Build 4: Grading queue endpoints ──────────────────────────────────────
 
-  app.get("/api/admin/grading-queue", requireAdmin, async (_req, res) => {
+  app.get("/api/admin/grading-queue", requireAdmin, async (req, res) => {
+    // Two shapes share this path:
+    //  • ?status=<filter>  → rich, PII-FREE admin assignment queue (staff page).
+    //  • no param          → legacy in-app grading queue (dashboard Grading tab).
+    // Branching on the param keeps the legacy consumer byte-for-byte unchanged.
+    const statusParam = typeof req.query.status === "string" ? req.query.status : null;
+
+    if (statusParam) {
+      try {
+        const VALID = ["needs_grading", "assigned", "pending_review", "rejected", "all"];
+        const f = VALID.includes(statusParam) ? statusParam : "needs_grading";
+        const CAP = 200;
+        // Gradeable = BOTH a front and a back source present (display or original).
+        const hasImages = sql`((cert.front_image_path IS NOT NULL OR cert.grading_front_original IS NOT NULL) AND (cert.back_image_path IS NOT NULL OR cert.grading_back_original IS NOT NULL))`;
+        // Server-side filter per view. Literals are constants (not user input);
+        // the only external value (statusParam) is whitelisted above.
+        const where =
+          f === "needs_grading"
+            ? sql`cert.deleted_at IS NULL AND cert.grader_status = 'unassigned' AND ${hasImages}`
+            : f === "assigned"
+              ? sql`cert.deleted_at IS NULL AND cert.grader_status = 'assigned'`
+              : f === "pending_review"
+                ? sql`cert.deleted_at IS NULL AND cert.grader_status = 'pending_review'`
+                : f === "rejected"
+                  ? sql`cert.deleted_at IS NULL AND cert.grader_status = 'assigned' AND cert.redo_count > 0`
+                  : sql`cert.deleted_at IS NULL AND cert.grader_status IN ('unassigned','assigned','pending_review')`;
+        const rows = await db.execute(sql`
+          SELECT cert.id AS cert_id, cert.certificate_number AS cert_id_str, cert.card_name, cert.set_name,
+                 cert.card_number_display AS card_number, cert.year_text AS year, cert.variant,
+                 cert.grader_status, cert.assigned_grader_id, cert.redo_count, cert.rejection_reason,
+                 u.email AS grader_email, s.tracking_number AS submission_ref, s.id AS submission_id,
+                 ${hasImages} AS has_images
+          FROM certificates cert
+          LEFT JOIN cards c ON cert.card_id = c.id
+          LEFT JOIN submissions s ON s.id = c.submission_id
+          LEFT JOIN users u ON u.id = cert.assigned_grader_id
+          WHERE ${where}
+          ORDER BY cert.id ASC
+          LIMIT ${CAP}
+        `);
+        const countRes = await db.execute(sql`SELECT COUNT(*)::int AS n FROM certificates cert WHERE ${where}`);
+        const total = Number((countRes.rows[0] as any)?.n ?? 0);
+        const queue = (rows.rows as any[]).map((r) => ({
+          certId: Number(r.cert_id),
+          certIdStr: normalizeCertId(r.cert_id_str),
+          cardName: r.card_name ?? null,
+          setName: r.set_name ?? null,
+          cardNumber: r.card_number ?? null,
+          year: r.year ?? null,
+          variant: r.variant ?? null,
+          graderStatus: r.grader_status ?? "unassigned",
+          assignedGraderId: r.assigned_grader_id ?? null,
+          assignedGraderEmail: r.grader_email ?? null,
+          redoCount: Number(r.redo_count ?? 0),
+          rejectionReason: r.rejection_reason ?? null,
+          hasImages: !!r.has_images,
+          submissionRef: r.submission_ref ?? null,
+          submissionId: r.submission_id != null ? Number(r.submission_id) : null,
+        }));
+        return res.json({ queue, status: f, cap: CAP, total, capped: total > CAP });
+      } catch (err: any) {
+        return res.status(500).json({ error: err.message });
+      }
+    }
+
     try {
       const rows = await db.execute(sql`
         SELECT id, certificate_number AS cert_id, card_name, set_name, card_game,
