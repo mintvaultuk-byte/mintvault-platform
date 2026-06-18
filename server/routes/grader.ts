@@ -62,7 +62,7 @@ const GRADER_PROXY_ACTIONS = new Set([
 ]);
 
 /** Ownership gate (cert-level): the cert must be assigned to THIS grader and not
- *  yet approved. Returns the current grading_status for status-specific checks. */
+ *  yet approved. Returns the current grader_status for status-specific checks. */
 async function authorizeGraderCert(
   req: Request,
   certId: number
@@ -120,7 +120,7 @@ export function registerGraderRoutes(app: Express): void {
     try {
       const graderId = (req.session as any).graderId as string;
       const rows = await db.execute(sql`
-        SELECT cert.id AS cert_id, cert.cert_id AS cert_id_str, cert.grading_status, cert.assigned_at,
+        SELECT cert.id AS cert_id, cert.cert_id AS cert_id_str, cert.grader_status, cert.assigned_at,
                cert.rejection_reason, cert.redo_count, cert.card_game, cert.set_name, cert.card_name,
                cert.card_number_display AS card_number, cert.year_text AS year, cert.variant, cert.grade,
                c.submission_id, s.tracking_number AS submission_ref, s.service_tier
@@ -128,7 +128,7 @@ export function registerGraderRoutes(app: Express): void {
         JOIN cards c ON cert.card_id = c.id
         JOIN submissions s ON s.id = c.submission_id
         WHERE cert.assigned_grader_id = ${graderId}
-          AND cert.grading_status IN ('assigned', 'pending_review')
+          AND cert.grader_status IN ('assigned', 'pending_review')
           AND cert.deleted_at IS NULL
         ORDER BY cert.assigned_at DESC NULLS LAST, cert.id DESC
       `);
@@ -154,7 +154,7 @@ export function registerGraderRoutes(app: Express): void {
           year: r.year ?? null,
           variant: r.variant ?? null,
           grade: r.grade ?? null,
-          gradingStatus: r.grading_status,
+          gradingStatus: r.grader_status,
           rejectionReason: r.rejection_reason ?? null,
           redoCount: Number(r.redo_count ?? 0),
         });
@@ -224,7 +224,7 @@ export function registerGraderRoutes(app: Express): void {
         // AUTO-PUBLISH FLIP: publish directly, skip admin review.
         await db.execute(sql`
           UPDATE certificates SET grade_approved_at = NOW(), grade_approved_by = ${graderEmail}, status = 'active',
-            grading_status = 'approved', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
+            grader_status = 'approved', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
         `);
         await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
           auto_published: true,
@@ -233,7 +233,7 @@ export function registerGraderRoutes(app: Express): void {
       }
 
       await db.execute(sql`
-        UPDATE certificates SET grading_status = 'pending_review', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
+        UPDATE certificates SET grader_status = 'pending_review', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
       `);
       await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {});
       return res.json({ ok: true, gradingStatus: "pending_review" });

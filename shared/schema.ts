@@ -490,7 +490,11 @@ export const certificates = pgTable("certificates", {
   // → approved; reject bounces pending_review → assigned (rejection_reason +
   // redo_count++).
   assignedGraderId: varchar("assigned_grader_id"),
-  gradingStatus: varchar("grading_status", { length: 20 }).notNull().default("unassigned"),
+  // Column is grader_status (NOT grading_status): certificates ALREADY has a
+  // pre-existing grading_status='submitted' workflow column (routes.ts Build 6)
+  // owned by another feature — the grader system uses its OWN column so it never
+  // clobbers that one.
+  graderStatus: varchar("grader_status", { length: 20 }).notNull().default("unassigned"),
   assignedAt: timestamp("assigned_at", { withTimezone: true }),
   gradedAt: timestamp("graded_at", { withTimezone: true }),
   rejectionReason: text("rejection_reason"),

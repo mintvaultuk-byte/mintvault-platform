@@ -172,7 +172,7 @@ export interface CertAssignment {
 /** Cert-level assignment/workflow read (grader v2 — no submission join). */
 export async function getCertAssignment(certId: number): Promise<CertAssignment | null> {
   const r = await db.execute(sql`
-    SELECT id, assigned_grader_id, grading_status, redo_count, rejection_reason
+    SELECT id, assigned_grader_id, grader_status, redo_count, rejection_reason
     FROM certificates WHERE id = ${certId} AND deleted_at IS NULL LIMIT 1
   `);
   const row = r.rows[0] as any;
@@ -180,7 +180,7 @@ export async function getCertAssignment(certId: number): Promise<CertAssignment 
   return {
     certId: Number(row.id),
     assignedGraderId: row.assigned_grader_id ?? null,
-    gradingStatus: (row.grading_status ?? "unassigned") as GradingStatus,
+    gradingStatus: (row.grader_status ?? "unassigned") as GradingStatus,
     redoCount: Number(row.redo_count ?? 0),
     rejectionReason: row.rejection_reason ?? null,
   };
@@ -241,7 +241,7 @@ export async function getCertificatesForSubmission(submissionId: number): Promis
     SELECT cert.id AS cert_id, cert.cert_id AS cert_id_str, cert.card_game, cert.set_name,
            cert.card_name, cert.card_number_display AS card_number, cert.year_text AS year, cert.variant,
            cert.grade AS grade, cert.grade_approved_at AS grade_approved_at,
-           cert.assigned_grader_id, cert.grading_status, cert.redo_count
+           cert.assigned_grader_id, cert.grader_status, cert.redo_count
     FROM certificates cert
     JOIN cards c ON cert.card_id = c.id
     WHERE c.submission_id = ${submissionId} AND cert.deleted_at IS NULL
@@ -259,7 +259,7 @@ export async function getCertificatesForSubmission(submissionId: number): Promis
     grade: row.grade ?? null,
     gradeApprovedAt: row.grade_approved_at ?? null,
     assignedGraderId: row.assigned_grader_id ?? null,
-    gradingStatus: row.grading_status ?? "unassigned",
+    gradingStatus: row.grader_status ?? "unassigned",
     redoCount: Number(row.redo_count ?? 0),
   }));
 }
@@ -502,7 +502,7 @@ export async function buildCertGradingPayload(certId: number): Promise<any | nul
     privateNotes: "",
     // Cert-level workflow state — drives the grader panel's "rejected, redo"
     // banner and the queue chips.
-    gradingStatus: (c as any).gradingStatus || "unassigned",
+    gradingStatus: (c as any).graderStatus || "unassigned",
     rejectionReason: (c as any).rejectionReason || null,
     redoCount: (c as any).redoCount ?? 0,
     gradeApprovedBy: c.gradeApprovedBy || null,
@@ -609,7 +609,7 @@ export async function migrateGraderCertSchema(): Promise<void> {
   await db.execute(sql`
     ALTER TABLE certificates
       ADD COLUMN IF NOT EXISTS assigned_grader_id VARCHAR,
-      ADD COLUMN IF NOT EXISTS grading_status VARCHAR(20) NOT NULL DEFAULT 'unassigned',
+      ADD COLUMN IF NOT EXISTS grader_status VARCHAR(20) NOT NULL DEFAULT 'unassigned',
       ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS graded_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS rejection_reason TEXT,
@@ -618,15 +618,15 @@ export async function migrateGraderCertSchema(): Promise<void> {
   await db.execute(
     sql`CREATE INDEX IF NOT EXISTS idx_certificates_assigned_grader ON certificates (assigned_grader_id)`
   );
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_certificates_grading_status ON certificates (grading_status)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_certificates_grader_status ON certificates (grader_status)`);
   await db.execute(sql`
-    UPDATE certificates SET grading_status = 'approved'
-    WHERE grading_status = 'unassigned' AND grade_approved_at IS NOT NULL
+    UPDATE certificates SET grader_status = 'approved'
+    WHERE grader_status = 'unassigned' AND grade_approved_at IS NOT NULL
   `);
   await db.execute(sql`
     INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
     SELECT 'schema', 'certificates', 'grader_cert_schema_migrate', NULL,
-           ${{ columns: ["assigned_grader_id", "grading_status", "assigned_at", "graded_at", "rejection_reason", "redo_count"] }}::jsonb
+           ${{ columns: ["assigned_grader_id", "grader_status", "assigned_at", "graded_at", "rejection_reason", "redo_count"] }}::jsonb
     WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'grader_cert_schema_migrate')
   `);
   console.log("[grader-cert-migrate] certificates assignment columns + indexes ensured");
@@ -651,9 +651,9 @@ export async function assignCerts(graderId: string, certIds: number[], adminUser
   if (!clean.length) return { ok: false as const, status: 400, error: "No certificate ids" };
   const r = await db.execute(sql`
     UPDATE certificates
-    SET assigned_grader_id = ${graderId}, grading_status = 'assigned', assigned_at = NOW(),
+    SET assigned_grader_id = ${graderId}, grader_status = 'assigned', assigned_at = NOW(),
         rejection_reason = NULL, updated_at = NOW()
-    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND grading_status <> 'approved'
+    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND grader_status <> 'approved'
     RETURNING id
   `);
   await storage.writeAuditLog("certificate", clean.join(","), "grader_assign", adminUser, {
@@ -673,9 +673,9 @@ export async function reassignCerts(graderId: string, certIds: number[], adminUs
   const fromMap = Object.fromEntries((before.rows as any[]).map((x) => [String(x.id), x.assigned_grader_id ?? null]));
   const r = await db.execute(sql`
     UPDATE certificates
-    SET assigned_grader_id = ${graderId}, grading_status = 'assigned', assigned_at = NOW(),
+    SET assigned_grader_id = ${graderId}, grader_status = 'assigned', assigned_at = NOW(),
         rejection_reason = NULL, updated_at = NOW()
-    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND grading_status <> 'approved'
+    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND grader_status <> 'approved'
     RETURNING id
   `);
   await storage.writeAuditLog("certificate", clean.join(","), "grader_reassign", adminUser, {
@@ -695,8 +695,8 @@ export async function unassignCerts(certIds: number[], adminUser: string) {
   const fromMap = Object.fromEntries((before.rows as any[]).map((x) => [String(x.id), x.assigned_grader_id ?? null]));
   const r = await db.execute(sql`
     UPDATE certificates
-    SET assigned_grader_id = NULL, grading_status = 'unassigned', assigned_at = NULL, updated_at = NOW()
-    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND grading_status <> 'approved'
+    SET assigned_grader_id = NULL, grader_status = 'unassigned', assigned_at = NULL, updated_at = NOW()
+    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND grader_status <> 'approved'
     RETURNING id
   `);
   await storage.writeAuditLog("certificate", clean.join(","), "grader_unassign", adminUser, {
@@ -712,7 +712,7 @@ export async function getCertsForSubmission(submissionId: number) {
   const r = await db.execute(sql`
     SELECT cert.id AS cert_id, cert.cert_id AS cert_id_str, cert.card_name, cert.set_name,
            cert.card_number_display AS card_number, cert.year_text AS year, cert.variant,
-           cert.assigned_grader_id, cert.grading_status, cert.redo_count, u.email AS grader_email
+           cert.assigned_grader_id, cert.grader_status, cert.redo_count, u.email AS grader_email
     FROM certificates cert JOIN cards c ON cert.card_id = c.id
     LEFT JOIN users u ON u.id = cert.assigned_grader_id
     WHERE c.submission_id = ${submissionId} AND cert.deleted_at IS NULL
@@ -728,7 +728,7 @@ export async function getCertsForSubmission(submissionId: number) {
     variant: row.variant ?? null,
     assignedGraderId: row.assigned_grader_id ?? null,
     graderEmail: row.grader_email ?? null,
-    gradingStatus: row.grading_status ?? "unassigned",
+    gradingStatus: row.grader_status ?? "unassigned",
     redoCount: Number(row.redo_count ?? 0),
   }));
 }
@@ -744,7 +744,7 @@ export async function rejectCertGrade(certId: number, reason: string | null, adm
   }
   await db.execute(sql`
     UPDATE certificates
-    SET grading_status = 'assigned', rejection_reason = ${reason || null}, redo_count = redo_count + 1,
+    SET grader_status = 'assigned', rejection_reason = ${reason || null}, redo_count = redo_count + 1,
         graded_at = NULL, updated_at = NOW()
     WHERE id = ${certId}
   `);
@@ -766,7 +766,7 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   }
   await approveCertGrade(certId, adminUser);
   await db.execute(sql`
-    UPDATE certificates SET grading_status = 'approved', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
+    UPDATE certificates SET grader_status = 'approved', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
   `);
   await storage.writeAuditLog("certificate", String(certId), "grade_approve", adminUser, { via: "grader_review" });
   return { ok: true as const };
@@ -802,8 +802,8 @@ export async function setGraderRate(rate: number, adminUser: string): Promise<vo
 export async function getGraderEarnings(graderId: string) {
   const r = await db.execute(sql`
     SELECT
-      COUNT(*) FILTER (WHERE grading_status = 'approved')::int AS approved,
-      COUNT(*) FILTER (WHERE grading_status = 'pending_review')::int AS pending_review,
+      COUNT(*) FILTER (WHERE grader_status = 'approved')::int AS approved,
+      COUNT(*) FILTER (WHERE grader_status = 'pending_review')::int AS pending_review,
       COUNT(*) FILTER (WHERE redo_count > 0)::int AS flagged
     FROM certificates WHERE assigned_grader_id = ${graderId} AND deleted_at IS NULL
   `);
@@ -823,9 +823,9 @@ export async function getGraderEarnings(graderId: string) {
 export async function getGraderCountsForAdmin() {
   const r = await db.execute(sql`
     SELECT u.id, u.email, u.display_name,
-      COUNT(cert.id) FILTER (WHERE cert.grading_status = 'approved')::int AS approved,
-      COUNT(cert.id) FILTER (WHERE cert.grading_status = 'pending_review')::int AS pending_review,
-      COUNT(cert.id) FILTER (WHERE cert.grading_status = 'assigned')::int AS assigned,
+      COUNT(cert.id) FILTER (WHERE cert.grader_status = 'approved')::int AS approved,
+      COUNT(cert.id) FILTER (WHERE cert.grader_status = 'pending_review')::int AS pending_review,
+      COUNT(cert.id) FILTER (WHERE cert.grader_status = 'assigned')::int AS assigned,
       COUNT(cert.id) FILTER (WHERE cert.redo_count > 0)::int AS flagged
     FROM users u
     LEFT JOIN certificates cert ON cert.assigned_grader_id = u.id AND cert.deleted_at IS NULL
