@@ -584,22 +584,20 @@ export function registerPublicRoutes(app: Express): void {
       const set = typeof req.query.set === "string" ? req.query.set.trim() : "";
       if (!card && !set) return res.status(400).json({ error: "card or set required" });
 
-      const cardEsc = card.replace(/'/g, "''").replace(/%/g, "\\%");
-      const setEsc = set.replace(/'/g, "''").replace(/%/g, "\\%");
+      // H2: escape LIKE wildcards (\ % _) so user input matches literally, and pass the
+      // value as a BOUND PARAMETER — never interpolated into the SQL string. Behaviour is
+      // unchanged for normal searches; _ / \ now match literally (previously only % was escaped).
+      const likeEscape = (s: string) => s.replace(/[\\%_]/g, "\\$&");
+      const cardCond = card ? sql` AND LOWER(card_name) LIKE LOWER(${`%${likeEscape(card)}%`})` : sql``;
+      const setCond = set ? sql` AND LOWER(set_name) LIKE LOWER(${`%${likeEscape(set)}%`})` : sql``;
 
-      const conditions: string[] = [`status = 'active'`, `deleted_at IS NULL`, `grade_type = 'numeric'`];
-      if (card) conditions.push(`LOWER(card_name) LIKE LOWER('%${cardEsc}%')`);
-      if (set) conditions.push(`LOWER(set_name) LIKE LOWER('%${setEsc}%')`);
-
-      const result = await db.execute(
-        sql.raw(`
+      const result = await db.execute(sql`
         SELECT cert_id, card_name, set_name, card_game, grade_overall, created_at
         FROM certificates
-        WHERE ${conditions.join(" AND ")}
+        WHERE status = 'active' AND deleted_at IS NULL AND grade_type = 'numeric'${cardCond}${setCond}
         ORDER BY grade_overall DESC NULLS LAST, created_at DESC
         LIMIT 500
-      `)
-      );
+      `);
 
       res.json(
         (result.rows as any[]).map((r) => ({

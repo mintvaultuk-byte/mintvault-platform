@@ -14151,46 +14151,6 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
-  // ── Population — filtered cert list ─────────────────────────────────────────
-  app.get("/api/population/certs", async (req, res) => {
-    try {
-      const card = typeof req.query.card === "string" ? req.query.card.trim() : "";
-      const set = typeof req.query.set === "string" ? req.query.set.trim() : "";
-      if (!card && !set) return res.status(400).json({ error: "card or set required" });
-
-      const cardEsc = card.replace(/'/g, "''").replace(/%/g, "\\%");
-      const setEsc = set.replace(/'/g, "''").replace(/%/g, "\\%");
-
-      const conditions: string[] = [`status = 'active'`, `deleted_at IS NULL`, `grade_type = 'numeric'`];
-      if (card) conditions.push(`LOWER(card_name) LIKE LOWER('%${cardEsc}%')`);
-      if (set) conditions.push(`LOWER(set_name) LIKE LOWER('%${setEsc}%')`);
-
-      const result = await db.execute(
-        sql.raw(`
-        SELECT cert_id, card_name, set_name, card_game, grade_overall, created_at
-        FROM certificates
-        WHERE ${conditions.join(" AND ")}
-        ORDER BY grade_overall DESC NULLS LAST, created_at DESC
-        LIMIT 500
-      `)
-      );
-
-      res.json(
-        (result.rows as any[]).map((r) => ({
-          certId: r.cert_id,
-          cardName: r.card_name,
-          setName: r.set_name,
-          cardGame: r.card_game,
-          grade: r.grade_overall,
-          gradedAt: r.created_at,
-        }))
-      );
-    } catch (err) {
-      console.error("[population/certs] error:", err);
-      res.status(500).json({ error: "Failed to load certificates." });
-    }
-  });
-
   // ── Account auth (/api/auth/*) ────────────────────────────────────────────
 
   function getClientIpForAuth(req: any): string {
