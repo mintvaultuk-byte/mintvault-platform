@@ -129,7 +129,7 @@ export function registerGraderRoutes(app: Express): void {
     try {
       const graderId = (req.session as any).graderId as string;
       const rows = await db.execute(sql`
-        SELECT cert.id AS cert_id, cert.cert_id AS cert_id_str, cert.grader_status, cert.assigned_at,
+        SELECT cert.id AS cert_id, cert.certificate_number AS cert_id_str, cert.grader_status, cert.assigned_at,
                cert.rejection_reason, cert.redo_count, cert.card_game, cert.set_name, cert.card_name,
                cert.card_number_display AS card_number, cert.year_text AS year, cert.variant, cert.grade,
                c.submission_id, s.tracking_number AS submission_ref, s.service_tier
