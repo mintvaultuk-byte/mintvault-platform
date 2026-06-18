@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { Loader2, Crop, X, RotateCcw, Crosshair } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { quadBounds, quadRotation, type Point, type CropQuad } from "./crop-geometry";
+import { quadBounds, quadRotation, resolveDeskew, type Point, type CropQuad } from "./crop-geometry";
+import { detectCardBounds, boundsToQuad } from "./crop-tools";
 
 interface Props {
   side: "front" | "back";
@@ -216,9 +217,9 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   async function handleApply() {
     // Compute bounding box + rotation from quad for the backend
     const bounds = quadBounds(quad);
-    const autoRotation = rotation || quadRotation(quad, imgDims.w, imgDims.h);
-    // Only apply quad-derived rotation if slider is at zero AND quad is visibly skewed
-    const effectiveRotation = Math.abs(rotation) > 0.1 ? rotation : Math.abs(autoRotation) > 0.3 ? autoRotation : 0;
+    // Slider override wins; else the quad's top-edge tilt straightens the card.
+    // resolveDeskew is the ONE shared slider→auto→zero rule (crop-geometry.ts).
+    const effectiveRotation = resolveDeskew(quadRotation(quad, imgDims.w, imgDims.h), rotation);
 
     const payload = {
       side,
@@ -230,21 +231,21 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       quad: { tl: quad.tl, tr: quad.tr, br: quad.br, bl: quad.bl },
     };
 
-    // \u2500\u2500 OPTIMISTIC PATH \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    // ── OPTIMISTIC PATH ────────────────────────────────────────────────────
     // Panel owns the upload: fire it in the background and close INSTANTLY. The
     // panel's per-side cropSync tracks/retries it and blocks approval until it
     // lands; the viewer refreshes to the new crop when the upload completes.
     if (onStartCropUpload) {
-      onStartCropUpload(payload); // non-awaited \u2014 runs in the background
+      onStartCropUpload(payload); // non-awaited — runs in the background
       toast({
-        title: `${side} crop applied \u2014 saving in the background`,
+        title: `${side} crop applied — saving in the background`,
         description: "You can keep working; approval waits until the crop is saved.",
       });
       onDone();
       return;
     }
 
-    // \u2500\u2500 LEGACY SYNCHRONOUS PATH (no panel upload owner) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    // ── LEGACY SYNCHRONOUS PATH (no panel upload owner) ─────────────────────
     setSaving(true);
     try {
       const r = await fetch(`/api/admin/certificates/${certId}/recrop`, {
@@ -256,7 +257,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       const j = await r.json();
       if (!r.ok) throw new Error(j.error || "Recrop failed");
       toast({
-        title: `${side} image cropped${Math.abs(effectiveRotation) > 0.1 ? ` and rotated ${effectiveRotation.toFixed(1)}\u00B0` : ""}, variants regenerated`,
+        title: `${side} image cropped${Math.abs(effectiveRotation) > 0.1 ? ` and rotated ${effectiveRotation.toFixed(1)}°` : ""}, variants regenerated`,
       });
       onDone();
     } catch (e: any) {
@@ -269,26 +270,14 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   async function handleAutoDetect() {
     setDetecting(true);
     try {
-      const r = await fetch(`/api/admin/certificates/${certId}/detect-card-bounds`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ side }),
-      });
-      const j = await r.json();
-      if (j.ok && j.bounds) {
-        const { left_pct: l, top_pct: t, width_pct: w, height_pct: h } = j.bounds;
-        setQuad({
-          tl: { x: l, y: t },
-          tr: { x: l + w, y: t },
-          br: { x: l + w, y: t + h },
-          bl: { x: l, y: t + h },
-        });
-        toast({ title: "Card detected \u2014 quad fitted to edges" });
+      const bounds = await detectCardBounds(certId, side);
+      if (bounds) {
+        setQuad(boundsToQuad(bounds));
+        toast({ title: "Card detected — quad fitted to edges" });
       } else {
         toast({
           title: "Auto-detect failed",
-          description: j.message || "Drag corners manually",
+          description: "Drag corners manually",
           variant: "destructive",
         });
       }
@@ -308,7 +297,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
       <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 flex items-center justify-between border-b border-[var(--admin-line)]">
         <div>
           <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest flex items-center gap-2">
-            <Crop size={14} /> Perspective Crop \u2014 {side}
+            <Crop size={14} /> Perspective Crop — {side}
           </p>
           <p className="text-[var(--admin-ink-dim)] text-[10px]">
             Drag each corner independently to match the card edges. Drag inside to move all corners. Esc to cancel.
@@ -433,10 +422,10 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
           </button>
           <div className="flex-1" />
           <span className="text-[var(--admin-ink-dim)] text-xs font-mono">
-            {Math.round(bounds.width_pct)}% \u00D7 {Math.round(bounds.height_pct)}%
+            {Math.round(bounds.width_pct)}% × {Math.round(bounds.height_pct)}%
           </span>
           {Math.abs(derivedAngle) > 0.3 && (
-            <span className="text-[var(--admin-gold)]/60 text-xs font-mono">skew {derivedAngle.toFixed(1)}\u00B0</span>
+            <span className="text-[var(--admin-gold)]/60 text-xs font-mono">skew {derivedAngle.toFixed(1)}°</span>
           )}
         </div>
 
@@ -452,7 +441,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
             onChange={(e) => setRotation(Number(e.target.value))}
             className="flex-1 max-w-[200px] accent-[var(--admin-gold)]"
           />
-          <span className="text-[var(--admin-gold)] font-mono w-14 text-right">{rotation.toFixed(1)}\u00B0</span>
+          <span className="text-[var(--admin-gold)] font-mono w-14 text-right">{rotation.toFixed(1)}°</span>
           {Math.abs(rotation) > 0.1 && (
             <button
               type="button"
@@ -480,8 +469,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
             className="flex items-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-6 py-2.5 rounded-lg hover:opacity-90 disabled:opacity-50"
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <Crop size={13} />}
-            {saving ? "Cropping..." : "Apply Crop"}{" "}
-            <span className="text-[#1A1400]/50 text-[9px] normal-case">\u21B5</span>
+            {saving ? "Cropping..." : "Apply Crop"} <span className="text-[#1A1400]/50 text-[9px] normal-case">↵</span>
           </button>
         </div>
       </div>

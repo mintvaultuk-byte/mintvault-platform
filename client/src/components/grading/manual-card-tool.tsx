@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
-import { Loader2, Crop, X, Check, Undo2, ZoomIn, ZoomOut, Maximize, Target } from "lucide-react";
+import { Loader2, Crop, X, Check, Undo2, ZoomIn, ZoomOut, Maximize, Target, RotateCcw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { type Point } from "./crop-geometry";
+import { detectCardBounds, boundsToOuterEdges } from "./crop-tools";
 import {
   computeCardTool,
   cropBoxForEdges,
@@ -262,6 +263,7 @@ export default function ManualCardTool({
   const [rotation, setRotation] = useState(0);
   const [imgDims, setImgDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
   const [saving, setSaving] = useState(false);
+  const [detecting, setDetecting] = useState(false);
   // Crosshair / reticle / guide colour palette — session-scoped (React state,
   // no localStorage per spec). Default = brand gold/green; swatch picker in
   // the floating panel lets the operator switch to high-contrast hues for
@@ -761,6 +763,12 @@ export default function ManualCardTool({
       else if ((e.key === "Backspace" || e.key === "Delete") && outerPts.length + innerPts.length > 0) {
         e.preventDefault();
         undoLast();
+      } else if (e.key === "a" || e.key === "A") {
+        e.preventDefault();
+        if (!detecting) handleAutoDetect();
+      } else if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        resetAll();
       } else if (e.key === "+" || e.key === "=") {
         e.preventDefault();
         zoomInBtn();
@@ -775,7 +783,7 @@ export default function ManualCardTool({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
     // eslint-disable-next-line
-  }, [outerPts, innerPts, mode, rotation, canCompute, saving, zoom, phase, defectBatch, defectPickerOpen]);
+  }, [outerPts, innerPts, mode, rotation, canCompute, saving, zoom, phase, defectBatch, defectPickerOpen, detecting]);
 
   // Defensive guard against losing placed-but-uncomputed dots to an
   // accidental browser-back (trackpad swipe, Cmd+Left, etc.) or tab close.
@@ -807,6 +815,46 @@ export default function ManualCardTool({
   function setModeSafe(m: CardToolMode) {
     setMode(m);
     if (m === "outer-only") setInnerPts([]);
+  }
+
+  // Full reset — wipe both dot passes + the deskew override back to a clean
+  // capture (the Card Tool counterpart to Manual Crop's Reset / R). Distinct
+  // from the per-pass "clear" links, which drop only one pass.
+  function resetAll() {
+    setOuterPts([]);
+    setInnerPts([]);
+    setRotation(0);
+    setHover(null);
+    setDrag(null);
+  }
+
+  // Auto-Detect the card edges on the server (shared with Manual Crop) and seat
+  // the four OUTER dots on the detected bounds, in [TOP,RIGHT,BOTTOM,LEFT]
+  // order. The operator then places the inner dots and fine-tunes. The detected
+  // box is axis-aligned, so the auto deskew starts at 0. Inner dots are cleared
+  // so the side-by-side capture resumes cleanly from the inner pass.
+  async function handleAutoDetect() {
+    setDetecting(true);
+    try {
+      const bounds = await detectCardBounds(certId, side);
+      if (bounds) {
+        setOuterPts(boundsToOuterEdges(bounds));
+        setInnerPts([]);
+        setHover(null);
+        setDrag(null);
+        toast({ title: "Card detected — outer edges fitted. Place the inner dots, then Compute." });
+      } else {
+        toast({
+          title: "Auto-detect failed",
+          description: "Place the outer dots manually.",
+          variant: "destructive",
+        });
+      }
+    } catch (e: any) {
+      toast({ title: "Auto-detect error", description: e.message, variant: "destructive" });
+    } finally {
+      setDetecting(false);
+    }
   }
 
   async function handleCompute() {
@@ -1836,6 +1884,28 @@ export default function ManualCardTool({
       <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 border-t border-[var(--admin-line)] space-y-1.5 sm:space-y-3">
         {phase === "capture" ? (
           <>
+            {/* Row 0: quick actions — Auto-Detect + full Reset (parity with Manual Crop) */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={handleAutoDetect}
+                disabled={detecting}
+                className="flex items-center gap-1.5 text-[var(--admin-gold)] text-xs border border-[var(--admin-gold)]/30 px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg hover:bg-[var(--admin-gold)]/10 disabled:opacity-50 transition-colors"
+              >
+                {detecting ? <Loader2 size={12} className="animate-spin" /> : <Target size={12} />}
+                {detecting ? "Detecting..." : "Auto-Detect"}{" "}
+                <span className="text-[var(--admin-ink-dim)] text-[9px]">A</span>
+              </button>
+              <button
+                type="button"
+                onClick={resetAll}
+                disabled={totalPlaced === 0 && rotation === 0}
+                className="flex items-center gap-1 text-[var(--admin-ink-dim)] text-xs border border-[var(--admin-line)] px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg hover:bg-[var(--admin-panel3)] hover:text-[var(--admin-ink)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                <RotateCcw size={12} /> Reset <span className="text-[var(--admin-ink-dim)] text-[9px]">R</span>
+              </button>
+            </div>
+
             {/* Row 1: dot status + clear + live readout */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-mono" style={{ color: palette.outer }}>
@@ -1879,19 +1949,21 @@ export default function ManualCardTool({
               )}
             </div>
 
-            {/* Row 2: deskew override */}
+            {/* Row 2: rotate / straighten (deskew override) */}
             <div className="flex items-center gap-2 text-xs">
-              <span className="text-[var(--admin-ink-dim)]">Deskew override</span>
+              <span className="text-[var(--admin-ink)] font-semibold flex items-center gap-1">
+                <RotateCcw size={12} /> Rotate / straighten
+              </span>
               <input
                 type="range"
-                min="-5"
-                max="5"
-                step="0.25"
+                min="-15"
+                max="15"
+                step="0.5"
                 value={rotation}
                 onChange={(e) => setRotation(Number(e.target.value))}
-                className="flex-1 max-w-[200px] accent-[var(--admin-gold)]"
+                className="flex-1 max-w-[240px] accent-[var(--admin-gold)]"
               />
-              <span className="text-[var(--admin-gold)] font-mono w-14 text-right">{rotation.toFixed(2)}°</span>
+              <span className="text-[var(--admin-gold)] font-mono w-14 text-right">{rotation.toFixed(1)}°</span>
               <span className="text-[var(--admin-ink-faint)] text-[10px]">
                 {rotation === 0 ? "(auto from dots)" : "(manual)"}
               </span>

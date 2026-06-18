@@ -49,3 +49,20 @@ export function quadRotation(q: CropQuad, naturalWidth = 0, naturalHeight = 0): 
   const dyPx = ((q.tr.y - q.tl.y) / 100) * h;
   return Math.atan2(dyPx, dxPx) * (180 / Math.PI);
 }
+
+/**
+ * The deskew priority shared by EVERY crop tool: a non-zero manual slider
+ * override (|slider| > 0.1) always wins; otherwise the auto-derived angle is
+ * used only when it is visibly skewed (|auto| > 0.3); otherwise 0 (no rotation).
+ *
+ * This is the ONE implementation of that rule — Manual Crop (quadRotation as the
+ * auto source) and the 8-dot Card Tool (edgeRotation as the auto source) both
+ * delegate here, so the slider→auto→zero blend can never drift apart between the
+ * two tools. The small dead-zone keeps a slightly-off auto angle (from two
+ * hand-placed points) from nudging an otherwise-straight card.
+ */
+export function resolveDeskew(autoAngle: number, sliderDeg: number): number {
+  if (Math.abs(sliderDeg) > 0.1) return sliderDeg;
+  if (Math.abs(autoAngle) > 0.3) return autoAngle;
+  return 0;
+}

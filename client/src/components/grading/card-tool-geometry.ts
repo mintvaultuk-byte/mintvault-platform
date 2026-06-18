@@ -27,7 +27,7 @@
  * for the centering math (they only matter for the deskew centre line / display).
  */
 
-import type { CropQuad, Point } from "./crop-geometry";
+import { resolveDeskew, type CropQuad, type Point } from "./crop-geometry";
 import { computeCentering, type Rect } from "./centering-from-rects";
 import type { CenteringSide } from "@shared/centering";
 
@@ -166,10 +166,7 @@ export function edgeRotation(outerPts: Point[], naturalWidth = 0, naturalHeight 
  * angle is possible — the dead-zone + slider override keep it safe.
  */
 export function effectiveDeskew(outerPts: Point[], sliderDeg: number, naturalWidth = 0, naturalHeight = 0): number {
-  const auto = edgeRotation(outerPts, naturalWidth, naturalHeight);
-  if (Math.abs(sliderDeg) > 0.1) return sliderDeg;
-  if (Math.abs(auto) > 0.3) return auto;
-  return 0;
+  return resolveDeskew(edgeRotation(outerPts, naturalWidth, naturalHeight), sliderDeg);
 }
 
 /**

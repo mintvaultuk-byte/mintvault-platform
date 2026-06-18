@@ -453,6 +453,42 @@ export default function GradingPanel({
     }
   }
 
+  /**
+   * STEP 4 measurement-integrity guard. When the operator RE-STRAIGHTENS or
+   * re-crops a side via the Manual Crop (perspective) tool AFTER that side's
+   * centering was committed, the committed centering was measured against the
+   * OLD crop/rotation and is now stale — so we clear it and force a "Redo
+   * centering". This guarantees the MVGS centering/grade never reads off
+   * pre-straighten numbers. (The Card Tool path needs no guard: its Compute
+   * derives the crop, deskew and centering from the SAME 8 dots in one gesture,
+   * so they can never diverge.) No-op + silent when nothing was committed for
+   * the side. Non-destructive: clears in-memory state only; the cert's centering
+   * columns are overwritten by the next manual-centering save.
+   */
+  function invalidateCenteringForSide(side: "front" | "back") {
+    const hadCentering =
+      side === "front" ? !!(frontLR || frontTB || manualOuterFront) : !!(backLR || backTB || manualOuterBack);
+    if (!hadCentering) return;
+    if (side === "front") {
+      setFrontLR("");
+      setFrontTB("");
+      setManualOuterFront(null);
+      setManualInnerFront(null);
+    } else {
+      setBackLR("");
+      setBackTB("");
+      setManualOuterBack(null);
+      setManualInnerBack(null);
+    }
+    setCenteringOverride(null);
+    clearOverallOverrideIfSet();
+    toast({
+      title: `${side} re-straightened — centering cleared`,
+      description: "Redo centering on the straightened image so the grade matches.",
+      variant: "destructive",
+    });
+  }
+
   // Quick-grade mode
   const [quickGrade, setQuickGrade] = useState(() => {
     try {
@@ -1718,7 +1754,13 @@ export default function GradingPanel({
                 // Perspective crop tool plugs into the SAME per-side crop-sync
                 // lifecycle as the 8-dot card tool (background upload, retries,
                 // catch-all approval gate). front/back tracked independently.
-                onStartCropUpload={(payload) => runRecrop(payload.side, payload)}
+                // STEP 4: a Manual-Crop re-straighten invalidates this side's
+                // committed centering FIRST (it was measured on the old crop),
+                // forcing a Redo so the grade never reads pre-straighten numbers.
+                onStartCropUpload={(payload) => {
+                  invalidateCenteringForSide(payload.side);
+                  return runRecrop(payload.side, payload);
+                }}
                 onSideChange={setViewerSide}
                 onZoomChange={setViewerZoom}
                 onModeChange={setViewerMode}
