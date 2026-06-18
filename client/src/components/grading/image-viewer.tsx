@@ -136,6 +136,8 @@ interface Props {
   }>;
   onWhiteningLinesChange?: (next: NonNullable<Props["whiteningLines"]>) => void;
   onCreaseLinesChange?: (next: NonNullable<Props["creaseLines"]>) => void;
+  /** API base for cert endpoints: '/api/admin' (default) or '/api/grader'. */
+  apiBase?: string;
 }
 
 // Auto-map legacy `type` strings (from DEFECT_TYPES list or AI-defect
@@ -245,6 +247,7 @@ export default function ImageViewer({
   creaseLines = [],
   onWhiteningLinesChange,
   onCreaseLinesChange,
+  apiBase = "/api/admin",
 }: Props) {
   // Inline defect-edit popover anchored to a clicked marker. Null = closed.
   // Stores the defect id rather than the whole defect so we always read fresh
@@ -762,7 +765,7 @@ export default function ImageViewer({
                         e.stopPropagation();
                         if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
                         try {
-                          const r = await fetch(`/api/admin/certificates/${certId}/images/${s}`, {
+                          const r = await fetch(`${apiBase}/certificates/${certId}/images/${s}`, {
                             method: "DELETE",
                             credentials: "include",
                           });
@@ -1633,6 +1636,7 @@ export default function ImageViewer({
             }}
             onCancel={() => setManualCropSide(null)}
             onStartCropUpload={onStartCropUpload}
+            apiBase={apiBase}
           />
         </Suspense>
       )}

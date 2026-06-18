@@ -1,12 +1,14 @@
 import { useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
+import GradingPanel from "../components/grading/grading-panel";
 
 /**
- * Restricted-grader dashboard. Shows ONLY this grader's assigned cards and is
- * strictly PII-free — every datum comes from /api/grader/* endpoints that never
- * return a customer name/email/address. There are NO links to admin, customers,
- * pop reports, other graders or settings. Server-side guards back every call;
- * this UI is a convenience, not the security boundary.
+ * Restricted-grader dashboard (v2 — cert-level). Shows ONLY this grader's
+ * assigned CARDS (certificates) and is strictly PII-free — every datum comes
+ * from /api/grader/* endpoints that never return a customer name/email/address.
+ * Grading runs the REAL MVGS panel (the same component admins use), mounted with
+ * apiBase='/api/grader' + graderMode so the grader crops/centres/analyses/
+ * identifies/saves a draft and Submits for approval — never publishes.
  */
 type Card = {
   certId: number;
@@ -18,39 +20,30 @@ type Card = {
   year: string | null;
   variant: string | null;
   grade: string | null;
-};
-type QueueItem = {
-  submissionId: number;
-  submissionRef: string;
   gradingStatus: string;
-  cardCount: number;
-  serviceTier: string | null;
-  cards: Card[];
+  rejectionReason: string | null;
+  redoCount: number;
 };
-
-const GRADE_TYPES = [
-  { value: "numeric", label: "Numeric (1–10)" },
-  { value: "authentic_altered", label: "Authentic Altered (AA)" },
-  { value: "not_original", label: "Not Graded (NO)" },
-];
+type QueueItem = { submissionId: number; submissionRef: string; serviceTier: string | null; cards: Card[] };
+type Earnings = { approved: number; pendingReview: number; flagged: number; rate: number; earned: number };
 
 export default function GraderPage() {
   const [, navigate] = useLocation();
   const [authed, setAuthed] = useState<boolean | null>(null);
-  const [email, setEmail] = useState<string>("");
+  const [email, setEmail] = useState("");
   const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [earnings, setEarnings] = useState<Earnings | null>(null);
   const [active, setActive] = useState<{ item: QueueItem; card: Card } | null>(null);
 
-  // ── Gate ────────────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch("/api/grader/session", { credentials: "include" });
-        const data = await res.json();
+        const d = await res.json();
         if (!cancelled) {
-          setAuthed(!!data.authenticated);
-          setEmail(data.email || "");
+          setAuthed(!!d.authenticated);
+          setEmail(d.email || "");
         }
       } catch {
         if (!cancelled) setAuthed(false);
@@ -60,19 +53,21 @@ export default function GraderPage() {
       cancelled = true;
     };
   }, []);
-
   useEffect(() => {
     if (authed === false) navigate("/grader/login", { replace: true });
   }, [authed, navigate]);
 
-  const loadQueue = useCallback(async () => {
-    const res = await fetch("/api/grader/queue", { credentials: "include" });
-    if (res.ok) setQueue((await res.json()).items || []);
+  const refresh = useCallback(async () => {
+    const [q, e] = await Promise.all([
+      fetch("/api/grader/queue", { credentials: "include" }),
+      fetch("/api/grader/earnings", { credentials: "include" }),
+    ]);
+    if (q.ok) setQueue((await q.json()).items || []);
+    if (e.ok) setEarnings(await e.json());
   }, []);
-
   useEffect(() => {
-    if (authed) loadQueue();
-  }, [authed, loadQueue]);
+    if (authed) refresh();
+  }, [authed, refresh]);
 
   async function logout() {
     await fetch("/api/grader/logout", { method: "POST", credentials: "include" });
@@ -87,6 +82,44 @@ export default function GraderPage() {
     );
   }
 
+  if (active) {
+    const c = active.card;
+    return (
+      <div className="min-h-screen bg-black text-[#E8E4DC]">
+        <header className="flex items-center justify-between px-5 py-3 border-b border-[#D4AF37]/20">
+          <button onClick={() => setActive(null)} className="text-[#D4AF37] text-xs hover:underline">
+            ← Back to queue
+          </button>
+          <span className="text-[#E8E4DC]/60 text-xs font-mono">{active.item.submissionRef}</span>
+        </header>
+        {c.rejectionReason && (
+          <div className="mx-auto max-w-3xl mt-3 px-4">
+            <div className="border border-amber-500/50 bg-amber-950/30 text-amber-300 rounded-lg px-4 py-2 text-sm">
+              <span className="font-bold uppercase text-[11px] tracking-wide">Sent back for redo</span> —{" "}
+              {c.rejectionReason}
+            </div>
+          </div>
+        )}
+        <GradingPanel
+          apiBase="/api/grader"
+          graderMode
+          certId={c.certId}
+          certIdStr={c.certIdStr}
+          cardName={c.cardName || ""}
+          cardSet={c.setName || ""}
+          cardGame={c.cardGame || undefined}
+          existingGrade={c.grade}
+          onGradeApproved={async () => {
+            await refresh();
+            setActive(null);
+          }}
+          onCertUpdated={() => {}}
+        />
+      </div>
+    );
+  }
+
+  const cardCount = queue.reduce((n, it) => n + it.cards.length, 0);
   return (
     <div className="min-h-screen bg-black text-[#E8E4DC]">
       <header className="flex items-center justify-between px-5 py-3 border-b border-[#D4AF37]/20">
@@ -99,55 +132,71 @@ export default function GraderPage() {
         </div>
       </header>
 
-      {active ? (
-        <GraderGradeView
-          item={active.item}
-          card={active.card}
-          onBack={() => setActive(null)}
-          onSubmitted={async () => {
-            await loadQueue();
-            setActive(null);
-          }}
-        />
-      ) : (
-        <main className="max-w-3xl mx-auto px-4 py-6">
-          {queue.length === 0 ? (
-            <p className="text-[#E8E4DC]/60 text-sm text-center py-12">No cards assigned to you right now.</p>
-          ) : (
-            <ul className="space-y-3">
-              {queue.map((item) =>
-                item.cards.map((card) => (
-                  <li
-                    key={card.certId}
-                    className="border border-[#D4AF37]/20 rounded-lg p-4 flex items-center justify-between gap-4"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-[#D4AF37] font-mono text-xs">{item.submissionRef}</div>
-                      <div className="font-semibold truncate">
-                        {card.cardName || "Unidentified card"}{" "}
-                        {card.cardNumber && <span className="text-[#E8E4DC]/50">#{card.cardNumber}</span>}
-                      </div>
-                      <div className="text-[#E8E4DC]/50 text-xs">
-                        {[card.setName, card.year, card.variant, card.cardGame].filter(Boolean).join(" · ")}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <StatusChip status={item.gradingStatus} />
-                      <button
-                        onClick={() => setActive({ item, card })}
-                        disabled={item.gradingStatus !== "assigned"}
-                        className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#B8960C] disabled:opacity-40"
-                      >
-                        {item.gradingStatus === "assigned" ? "Grade" : "Submitted"}
-                      </button>
-                    </div>
-                  </li>
-                ))
-              )}
-            </ul>
-          )}
-        </main>
+      {earnings && (
+        <div className="max-w-3xl mx-auto px-4 pt-4">
+          <div className="grid grid-cols-4 gap-2 text-center">
+            <Stat label="Approved" value={String(earnings.approved)} />
+            <Stat label="Pending" value={String(earnings.pendingReview)} />
+            <Stat label="Flagged" value={String(earnings.flagged)} />
+            <Stat
+              label="Earned"
+              value={earnings.rate > 0 ? `£${earnings.earned.toFixed(2)}` : "—"}
+              sub={earnings.rate > 0 ? `@ £${earnings.rate.toFixed(2)}/card` : "rate unset"}
+            />
+          </div>
+        </div>
       )}
+
+      <main className="max-w-3xl mx-auto px-4 py-5">
+        {cardCount === 0 ? (
+          <p className="text-[#E8E4DC]/60 text-sm text-center py-12">No cards assigned to you right now.</p>
+        ) : (
+          <ul className="space-y-3">
+            {queue.flatMap((item) =>
+              item.cards.map((card) => (
+                <li
+                  key={card.certId}
+                  className="border border-[#D4AF37]/20 rounded-lg p-4 flex items-center justify-between gap-4"
+                >
+                  <div className="min-w-0">
+                    <div className="text-[#D4AF37] font-mono text-xs">{item.submissionRef}</div>
+                    <div className="font-semibold truncate">
+                      {card.cardName || "Unidentified card"}{" "}
+                      {card.cardNumber && <span className="text-[#E8E4DC]/50">#{card.cardNumber}</span>}
+                    </div>
+                    <div className="text-[#E8E4DC]/50 text-xs">
+                      {[card.setName, card.year, card.variant, card.cardGame].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {card.redoCount > 0 && (
+                      <span className="text-[10px] uppercase tracking-wide text-amber-400">redo</span>
+                    )}
+                    <StatusChip status={card.gradingStatus} />
+                    <button
+                      onClick={() => setActive({ item, card })}
+                      disabled={card.gradingStatus !== "assigned"}
+                      className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#B8960C] disabled:opacity-40"
+                    >
+                      {card.gradingStatus === "assigned" ? "Grade" : "Submitted"}
+                    </button>
+                  </div>
+                </li>
+              ))
+            )}
+          </ul>
+        )}
+      </main>
+    </div>
+  );
+}
+
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="border border-[#D4AF37]/20 rounded-lg py-2">
+      <div className="text-[#D4AF37] font-extrabold text-lg">{value}</div>
+      <div className="text-[#E8E4DC]/60 text-[10px] uppercase tracking-wide">{label}</div>
+      {sub && <div className="text-[#E8E4DC]/30 text-[9px]">{sub}</div>}
     </div>
   );
 }
@@ -164,208 +213,5 @@ function StatusChip({ status }: { status: string }) {
     >
       {status.replace("_", " ")}
     </span>
-  );
-}
-
-// ── Single-card grading view ──────────────────────────────────────────────────
-function GraderGradeView({
-  item,
-  card,
-  onBack,
-  onSubmitted,
-}: {
-  item: QueueItem;
-  card: Card;
-  onBack: () => void;
-  onSubmitted: () => void;
-}) {
-  const [images, setImages] = useState<Record<string, string | null>>({});
-  const [form, setForm] = useState({
-    overall_grade: card.grade || "",
-    grade_type: "numeric",
-    grade_centering: "",
-    grade_corners: "",
-    grade_edges: "",
-    grade_surface: "",
-    auth_status: "genuine",
-    grade_explanation: "",
-  });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      const [imgRes, grRes] = await Promise.all([
-        fetch(`/api/grader/certificates/${card.certId}/images`, { credentials: "include" }),
-        fetch(`/api/grader/certificates/${card.certId}/grading`, { credentials: "include" }),
-      ]);
-      if (imgRes.ok) setImages((await imgRes.json()).urls || {});
-      if (grRes.ok) {
-        const g = await grRes.json();
-        setForm((f) => ({
-          ...f,
-          overall_grade: g.grade ?? f.overall_grade,
-          grade_centering: g.centeringScore ?? "",
-          grade_corners: g.cornersScore ?? "",
-          grade_edges: g.edgesScore ?? "",
-          grade_surface: g.surfaceScore ?? "",
-          auth_status: g.authStatus || "genuine",
-          grade_explanation: g.gradeExplanation || "",
-        }));
-      }
-    })();
-  }, [card.certId]);
-
-  async function submit() {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/grader/certificates/${card.certId}/grade`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        setError(j.error || "Submit failed");
-        return;
-      }
-      onSubmitted();
-    } catch (e: any) {
-      setError(e.message || "Submit failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
-  const front = images.front_display || images.front_original;
-  const back = images.back_display || images.back_original;
-
-  return (
-    <main className="max-w-5xl mx-auto px-4 py-5">
-      <button onClick={onBack} className="text-[#D4AF37] text-xs mb-3 hover:underline">
-        ← Back to queue
-      </button>
-      <div className="text-xs text-[#D4AF37] font-mono">{item.submissionRef}</div>
-      <h2 className="text-lg font-bold mb-4">
-        {card.cardName || "Unidentified card"}{" "}
-        {card.cardNumber && <span className="text-[#E8E4DC]/50">#{card.cardNumber}</span>}
-      </h2>
-
-      <div className="grid md:grid-cols-2 gap-5">
-        <div className="grid grid-cols-2 gap-2">
-          {[front, back].map((src, i) =>
-            src ? (
-              <img
-                key={i}
-                src={src}
-                alt={i === 0 ? "front" : "back"}
-                className="w-full rounded border border-[#D4AF37]/20"
-              />
-            ) : (
-              <div
-                key={i}
-                className="aspect-[3/4] rounded border border-[#D4AF37]/10 flex items-center justify-center text-[#E8E4DC]/30 text-xs"
-              >
-                No scan
-              </div>
-            )
-          )}
-        </div>
-
-        <div className="space-y-3">
-          {error && (
-            <div className="text-red-400 text-xs bg-red-950/40 border border-red-900 rounded px-3 py-2">{error}</div>
-          )}
-          <Field label="Grade type">
-            <select value={form.grade_type} onChange={(e) => set("grade_type", e.target.value)} className="gr-input">
-              {GRADE_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          {form.grade_type === "numeric" && (
-            <>
-              <Field label="Overall grade">
-                <input
-                  value={form.overall_grade}
-                  onChange={(e) => set("overall_grade", e.target.value)}
-                  className="gr-input"
-                  placeholder="e.g. 9.5"
-                />
-              </Field>
-              <div className="grid grid-cols-2 gap-2">
-                <Field label="Centering">
-                  <input
-                    value={form.grade_centering}
-                    onChange={(e) => set("grade_centering", e.target.value)}
-                    className="gr-input"
-                  />
-                </Field>
-                <Field label="Corners">
-                  <input
-                    value={form.grade_corners}
-                    onChange={(e) => set("grade_corners", e.target.value)}
-                    className="gr-input"
-                  />
-                </Field>
-                <Field label="Edges">
-                  <input
-                    value={form.grade_edges}
-                    onChange={(e) => set("grade_edges", e.target.value)}
-                    className="gr-input"
-                  />
-                </Field>
-                <Field label="Surface">
-                  <input
-                    value={form.grade_surface}
-                    onChange={(e) => set("grade_surface", e.target.value)}
-                    className="gr-input"
-                  />
-                </Field>
-              </div>
-            </>
-          )}
-          <Field label="Authenticity">
-            <select value={form.auth_status} onChange={(e) => set("auth_status", e.target.value)} className="gr-input">
-              <option value="genuine">Genuine</option>
-              <option value="altered">Altered</option>
-              <option value="counterfeit">Counterfeit</option>
-            </select>
-          </Field>
-          <Field label="Grade notes (public)">
-            <textarea
-              value={form.grade_explanation}
-              onChange={(e) => set("grade_explanation", e.target.value)}
-              className="gr-input min-h-[60px]"
-            />
-          </Field>
-          <button
-            onClick={submit}
-            disabled={busy}
-            className="w-full bg-[#D4AF37] text-[#1A1400] font-bold py-2.5 rounded hover:bg-[#B8960C] disabled:opacity-50"
-          >
-            {busy ? "Submitting…" : "Submit for review"}
-          </button>
-          <p className="text-[#E8E4DC]/40 text-[11px] text-center">
-            Submitting sends this card to an admin for approval.
-          </p>
-        </div>
-      </div>
-      <style>{`.gr-input{width:100%;background:#000;border:1px solid rgba(212,175,55,0.3);border-radius:4px;padding:6px 8px;color:#E8E4DC;font-size:13px;outline:none}.gr-input:focus{border-color:#D4AF37}`}</style>
-    </main>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="text-[#E8E4DC]/70 text-[11px]">{label}</span>
-      <div className="mt-1">{children}</div>
-    </label>
   );
 }

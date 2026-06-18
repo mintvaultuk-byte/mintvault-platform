@@ -1,13 +1,17 @@
 /**
  * server/routes/grader.ts — restricted-grader endpoints + admin grader management.
+ * GRADER V2: cert-level. A grader is assigned individual CERTIFICATES (not whole
+ * submissions), so each card in a multi-card submission is graded independently.
  *
  * Two surfaces:
  *  • /api/grader/*  — grader-only (requireGrader). PII-FREE: never returns a
- *    customer name/email/phone/address. Scoped to the grader's OWN assigned
- *    submissions; a grader can only read/grade certificates whose owning
- *    submission is assigned to them.
- *  • /api/admin/graders/* + /api/admin/submissions/:id/approve-grade —
- *    admin-only (requireAdmin) account management, batch assignment, approval.
+ *    customer name/email/phone/address. Ownership-scoped to the grader's OWN
+ *    assigned certs (authorizeGraderCert). The panel actions (crop/centre/
+ *    analyse/identify/grade-card/generate-description) are served by a single
+ *    DELEGATION PROXY that re-dispatches to the unchanged, PII-free admin
+ *    handlers after verifying ownership — so the MVGS panel is reused, not forked.
+ *  • /api/admin/graders/* etc. — admin-only (requireAdmin): accounts, cert-level
+ *    assignment, approve/reject of pending_review certs, the per-card rate.
  */
 import type { Express, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
@@ -17,25 +21,26 @@ import {
   requireGrader,
   authenticateGrader,
   createGraderAccount,
-  listGraders,
-  assignSubmissions,
-  reassignSubmissions,
-  unassignSubmissions,
-  getAssignmentsForSubmissions,
-  getSubmissionIdForCert,
-  getSubmissionAssignment,
-  getCertificatesForSubmission,
+  getCertAssignment,
+  assignCerts,
+  reassignCerts,
+  unassignCerts,
+  getCertsForSubmission,
   buildCertImagesPayload,
   buildCertGradingPayload,
   applyCertGradeDraft,
-  approveCertGrade,
+  approveGraderCert,
+  rejectCertGrade,
+  getGraderEarnings,
+  getGraderCountsForAdmin,
+  getGraderRate,
+  setGraderRate,
+  stripGraderPii,
   GRADER_AUTO_PUBLISH,
 } from "../grader";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
-// Public grader login — generous for legit retries, tight enough to deter
-// credential stuffing (mirrors the account-auth rate-limit posture).
 const graderLoginLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
@@ -44,19 +49,31 @@ const graderLoginLimit = rateLimit({
   message: { error: "Too many login attempts. Please wait a few minutes and try again." },
 });
 
-/** Resolve + authorize: the cert's owning submission must be assigned to this grader. */
+/** Panel actions the grader proxy may delegate to the admin handlers. */
+const GRADER_PROXY_ACTIONS = new Set([
+  "recrop",
+  "manual-centering",
+  "detect-card-bounds",
+  "identify-and-analyze",
+  "identify",
+  "analyze",
+  "grade-card",
+  "generate-description",
+]);
+
+/** Ownership gate (cert-level): the cert must be assigned to THIS grader and not
+ *  yet approved. Returns the current grading_status for status-specific checks. */
 async function authorizeGraderCert(
   req: Request,
   certId: number
-): Promise<{ ok: true; submissionId: number; gradingStatus: string } | { ok: false; status: number; error: string }> {
+): Promise<{ ok: true; gradingStatus: string } | { ok: false; status: number; error: string }> {
   const graderId = (req.session as any).graderId as string;
-  const sid = await getSubmissionIdForCert(certId);
-  if (!sid) return { ok: false, status: 404, error: "Not found" };
-  const a = await getSubmissionAssignment(sid);
-  if (!a || a.assignedGraderId !== graderId) {
+  const a = await getCertAssignment(certId);
+  if (!a) return { ok: false, status: 404, error: "Not found" };
+  if (a.assignedGraderId !== graderId || a.gradingStatus === "approved") {
     return { ok: false, status: 403, error: "This card is not assigned to you" };
   }
-  return { ok: true, submissionId: sid, gradingStatus: a.gradingStatus };
+  return { ok: true, gradingStatus: a.gradingStatus };
 }
 
 export function registerGraderRoutes(app: Express): void {
@@ -69,8 +86,6 @@ export function registerGraderRoutes(app: Express): void {
         await storage.writeAuditLog("grader_auth", String(email || "unknown"), "grader_login_failure", null, {});
         return res.status(401).json({ error: "invalid_credentials" });
       }
-      // Regenerate to prevent session fixation, then set grader identity and
-      // CLEAR every other login type's fields (no privilege bleed).
       await new Promise<void>((resolve, reject) => req.session.regenerate((e) => (e ? reject(e) : resolve())));
       const s = req.session as any;
       s.isGrader = true;
@@ -96,40 +111,63 @@ export function registerGraderRoutes(app: Express): void {
 
   app.get("/api/grader/session", (req: Request, res: Response) => {
     const s = req.session as any;
-    if (s && s.isGrader && s.graderId) return res.json({ authenticated: true, email: s.graderEmail });
+    if (s && s.isGrader && s.graderId && !s.isAdmin) return res.json({ authenticated: true, email: s.graderEmail });
     return res.json({ authenticated: false });
   });
 
-  // ── Grader queue (PII-FREE) ─────────────────────────────────────────────────
-  // ONLY this grader's submissions in 'assigned' | 'pending_review'. Selects
-  // zero customer columns — submission ref + service tier + card metadata only.
+  // ── Grader queue (PII-FREE, cert-level, grouped by submission) ──────────────
   app.get("/api/grader/queue", requireGrader, async (req: Request, res: Response) => {
     try {
       const graderId = (req.session as any).graderId as string;
-      const subs = await db.execute(sql`
-        SELECT id, tracking_number, grading_status, assigned_at, card_count, service_tier, service_type
-        FROM submissions
-        WHERE assigned_grader_id = ${graderId}
-          AND grading_status IN ('assigned', 'pending_review')
-          AND deleted_at IS NULL
-        ORDER BY assigned_at DESC NULLS LAST, id DESC
+      const rows = await db.execute(sql`
+        SELECT cert.id AS cert_id, cert.cert_id AS cert_id_str, cert.grading_status, cert.assigned_at,
+               cert.rejection_reason, cert.redo_count, cert.card_game, cert.set_name, cert.card_name,
+               cert.card_number_display AS card_number, cert.year_text AS year, cert.variant, cert.grade,
+               c.submission_id, s.tracking_number AS submission_ref, s.service_tier
+        FROM certificates cert
+        JOIN cards c ON cert.card_id = c.id
+        JOIN submissions s ON s.id = c.submission_id
+        WHERE cert.assigned_grader_id = ${graderId}
+          AND cert.grading_status IN ('assigned', 'pending_review')
+          AND cert.deleted_at IS NULL
+        ORDER BY cert.assigned_at DESC NULLS LAST, cert.id DESC
       `);
-      const items = await Promise.all(
-        (subs.rows as any[]).map(async (s) => ({
-          submissionId: Number(s.id),
-          submissionRef: s.tracking_number,
-          gradingStatus: s.grading_status,
-          assignedAt: s.assigned_at,
-          cardCount: s.card_count,
-          serviceTier: s.service_tier,
-          serviceType: s.service_type,
-          cards: await getCertificatesForSubmission(Number(s.id)),
-        }))
-      );
-      return res.json({ items });
+      // Group certs by submission for the UI (one card row per cert).
+      const bySub = new Map<string, any>();
+      for (const r of rows.rows as any[]) {
+        const key = String(r.submission_id);
+        if (!bySub.has(key)) {
+          bySub.set(key, {
+            submissionId: Number(r.submission_id),
+            submissionRef: r.submission_ref,
+            serviceTier: r.service_tier ?? null,
+            cards: [],
+          });
+        }
+        bySub.get(key).cards.push({
+          certId: Number(r.cert_id),
+          certIdStr: r.cert_id_str,
+          cardGame: r.card_game ?? null,
+          setName: r.set_name ?? null,
+          cardName: r.card_name ?? null,
+          cardNumber: r.card_number ?? null,
+          year: r.year ?? null,
+          variant: r.variant ?? null,
+          grade: r.grade ?? null,
+          gradingStatus: r.grading_status,
+          rejectionReason: r.rejection_reason ?? null,
+          redoCount: Number(r.redo_count ?? 0),
+        });
+      }
+      return res.json({ items: Array.from(bySub.values()) });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
+  });
+
+  app.get("/api/grader/earnings", requireGrader, async (req: Request, res: Response) => {
+    const graderId = (req.session as any).graderId as string;
+    return res.json(await getGraderEarnings(graderId));
   });
 
   // ── Grader cert reads (ownership-scoped, PII-free) ──────────────────────────
@@ -151,42 +189,53 @@ export function registerGraderRoutes(app: Express): void {
     return res.json(payload);
   });
 
-  // ── Grader submit (STEP 4 enforcement) ──────────────────────────────────────
+  // ── Grader DRAFT save (repeatable; status stays 'assigned') ─────────────────
   app.put("/api/grader/certificates/:id/grade", requireGrader, async (req: Request, res: Response) => {
     try {
       const certId = parseInt(String(req.params.id), 10);
       const auth = await authorizeGraderCert(req, certId);
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-      // Must be in the 'assigned' state to submit (not already pending/approved).
       if (auth.gradingStatus !== "assigned") {
-        return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not gradeable` });
+        return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not editable` });
+      }
+      await applyCertGradeDraft(certId, req.body || {});
+      return res.json({ ok: true, gradingStatus: "assigned" });
+    } catch (e: any) {
+      console.error("[grader] draft save error:", e.message);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Grader SUBMIT for approval (assigned → pending_review) ───────────────────
+  // Registered BEFORE the generic :action proxy so 'submit' isn't proxied.
+  app.post("/api/grader/certificates/:id/submit", requireGrader, async (req: Request, res: Response) => {
+    try {
+      const certId = parseInt(String(req.params.id), 10);
+      const auth = await authorizeGraderCert(req, certId);
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      if (auth.gradingStatus !== "assigned") {
+        return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not submittable` });
       }
       const graderEmail = (req.session as any).graderEmail as string;
-
-      await applyCertGradeDraft(certId, req.body || {});
+      // Persist any final edits in the same action, then transition.
+      if (req.body && Object.keys(req.body).length) await applyCertGradeDraft(certId, req.body);
 
       if (GRADER_AUTO_PUBLISH) {
-        // AUTO-PUBLISH FLIP: publish the grade directly, skip admin review.
-        await approveCertGrade(certId, graderEmail);
+        // AUTO-PUBLISH FLIP: publish directly, skip admin review.
         await db.execute(sql`
-          UPDATE submissions SET grading_status = 'approved', graded_at = NOW(), updated_at = NOW()
-          WHERE id = ${auth.submissionId}
+          UPDATE certificates SET grade_approved_at = NOW(), grade_approved_by = ${graderEmail}, status = 'active',
+            grading_status = 'approved', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
         `);
         await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
-          submission_id: auth.submissionId,
           auto_published: true,
         });
         return res.json({ ok: true, gradingStatus: "approved" });
       }
 
-      // Default: move to pending_review for an admin to approve.
       await db.execute(sql`
-        UPDATE submissions SET grading_status = 'pending_review', graded_at = NOW(), updated_at = NOW()
-        WHERE id = ${auth.submissionId}
+        UPDATE certificates SET grading_status = 'pending_review', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
       `);
-      await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
-        submission_id: auth.submissionId,
-      });
+      await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {});
       return res.json({ ok: true, gradingStatus: "pending_review" });
     } catch (e: any) {
       console.error("[grader] submit error:", e.message);
@@ -194,9 +243,30 @@ export function registerGraderRoutes(app: Express): void {
     }
   });
 
-  // ── Admin: grader account management ────────────────────────────────────────
+  // ── Grader panel-action DELEGATION PROXY ────────────────────────────────────
+  // Verify grader OWNERSHIP, then re-dispatch to the unchanged admin handler
+  // (PII-free, cert-scoped). __graderProxy lets requireAdmin pass for this one
+  // request only. Body is already parsed; express.json() is a no-op on re-handle.
+  app.post("/api/grader/certificates/:id/:action", requireGrader, async (req: Request, res: Response) => {
+    const action = String(req.params.action);
+    if (!GRADER_PROXY_ACTIONS.has(action)) return res.status(404).json({ error: "Unknown action" });
+    const certId = parseInt(String(req.params.id), 10);
+    const auth = await authorizeGraderCert(req, certId);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    (req as any).__graderProxy = true;
+    // PII GUARD (defence-in-depth): proxied admin handlers may return the full
+    // certificate (incl. owner/claim fields). Strip every PII key from the
+    // response before it reaches the grader, regardless of handler shape.
+    const origJson = res.json.bind(res);
+    (res as any).json = (body: any) => origJson(stripGraderPii(body));
+    const qs = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+    req.url = `/api/admin/certificates/${certId}/${action}${qs}`;
+    return (req.app as any).handle(req, res);
+  });
+
+  // ── Admin: grader accounts (+ per-grader counts) ────────────────────────────
   app.get("/api/admin/graders", requireAdmin, async (_req: Request, res: Response) => {
-    return res.json({ graders: await listGraders() });
+    return res.json({ graders: await getGraderCountsForAdmin() });
   });
 
   app.post("/api/admin/graders", requireAdmin, async (req: Request, res: Response) => {
@@ -207,67 +277,63 @@ export function registerGraderRoutes(app: Express): void {
     return res.status(201).json({ id: result.id, email: result.email });
   });
 
-  // ── Admin: batch assignment ─────────────────────────────────────────────────
-  app.post("/api/admin/graders/assign", requireAdmin, async (req: Request, res: Response) => {
-    const { grader_id, submission_ids } = req.body || {};
+  // ── Admin: per-card grader rate (earnings display) ──────────────────────────
+  app.get("/api/admin/grader-rate", requireAdmin, async (_req: Request, res: Response) => {
+    return res.json({ rate: await getGraderRate() });
+  });
+  app.post("/api/admin/grader-rate", requireAdmin, async (req: Request, res: Response) => {
     const adminUser = (req.session as any).adminEmail || "admin";
-    const r = await assignSubmissions(
-      String(grader_id),
-      Array.isArray(submission_ids) ? submission_ids.map(Number) : [],
-      adminUser
-    );
+    const rate = Number((req.body || {}).rate);
+    if (!Number.isFinite(rate) || rate < 0) return res.status(400).json({ error: "Invalid rate" });
+    await setGraderRate(rate, adminUser);
+    return res.json({ ok: true, rate });
+  });
+
+  // ── Admin: cert-level assignment ────────────────────────────────────────────
+  app.get("/api/admin/submissions/:id/certs", requireAdmin, async (req: Request, res: Response) => {
+    const sid = parseInt(String(req.params.id), 10);
+    return res.json({ certs: await getCertsForSubmission(sid) });
+  });
+
+  app.post("/api/admin/graders/assign", requireAdmin, async (req: Request, res: Response) => {
+    const { grader_id, cert_ids } = req.body || {};
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const r = await assignCerts(String(grader_id), Array.isArray(cert_ids) ? cert_ids.map(Number) : [], adminUser);
     if (!r.ok) return res.status(r.status).json({ error: r.error });
     return res.json({ ok: true, count: r.count });
   });
 
   app.post("/api/admin/graders/reassign", requireAdmin, async (req: Request, res: Response) => {
-    const { grader_id, submission_ids } = req.body || {};
+    const { grader_id, cert_ids } = req.body || {};
     const adminUser = (req.session as any).adminEmail || "admin";
-    const r = await reassignSubmissions(
-      String(grader_id),
-      Array.isArray(submission_ids) ? submission_ids.map(Number) : [],
-      adminUser
-    );
+    const r = await reassignCerts(String(grader_id), Array.isArray(cert_ids) ? cert_ids.map(Number) : [], adminUser);
     if (!r.ok) return res.status(r.status).json({ error: r.error });
     return res.json({ ok: true, count: r.count });
   });
 
   app.post("/api/admin/graders/unassign", requireAdmin, async (req: Request, res: Response) => {
-    const { submission_ids } = req.body || {};
+    const { cert_ids } = req.body || {};
     const adminUser = (req.session as any).adminEmail || "admin";
-    const r = await unassignSubmissions(Array.isArray(submission_ids) ? submission_ids.map(Number) : [], adminUser);
+    const r = await unassignCerts(Array.isArray(cert_ids) ? cert_ids.map(Number) : [], adminUser);
     if (!r.ok) return res.status(r.status).json({ error: r.error });
     return res.json({ ok: true, count: r.count });
   });
 
-  app.post("/api/admin/graders/assignments", requireAdmin, async (req: Request, res: Response) => {
-    const { submission_ids } = req.body || {};
-    const map = await getAssignmentsForSubmissions(Array.isArray(submission_ids) ? submission_ids.map(Number) : []);
-    return res.json({ assignments: map });
+  // ── Admin: approve / reject a grader-submitted (pending_review) cert ────────
+  app.post("/api/admin/certificates/:id/approve-grader-grade", requireAdmin, async (req: Request, res: Response) => {
+    const certId = parseInt(String(req.params.id), 10);
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const r = await approveGraderCert(certId, adminUser);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json({ ok: true, gradingStatus: "approved" });
   });
 
-  // ── Admin: approve a grader-submitted submission (pending_review → approved) ──
-  app.post("/api/admin/submissions/:id/approve-grade", requireAdmin, async (req: Request, res: Response) => {
-    try {
-      const sid = parseInt(String(req.params.id), 10);
-      const a = await getSubmissionAssignment(sid);
-      if (!a) return res.status(404).json({ error: "Submission not found" });
-      if (a.gradingStatus !== "pending_review") {
-        return res.status(409).json({ error: `Submission is '${a.gradingStatus}', not pending review` });
-      }
-      const adminUser = (req.session as any).adminEmail || "admin";
-      const certs = await getCertificatesForSubmission(sid);
-      for (const c of certs) await approveCertGrade(c.certId, adminUser);
-      await db.execute(sql`
-        UPDATE submissions SET grading_status = 'approved', graded_at = NOW(), updated_at = NOW() WHERE id = ${sid}
-      `);
-      await storage.writeAuditLog("submission", String(sid), "grade_approve", adminUser, {
-        cert_ids: certs.map((c) => c.certId),
-      });
-      return res.json({ ok: true, gradingStatus: "approved", approved: certs.length });
-    } catch (e: any) {
-      console.error("[grader] approve error:", e.message);
-      return res.status(500).json({ error: e.message });
-    }
+  app.post("/api/admin/certificates/:id/reject-grade", requireAdmin, async (req: Request, res: Response) => {
+    const certId = parseInt(String(req.params.id), 10);
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const reason = typeof (req.body || {}).reason === "string" ? (req.body.reason as string).slice(0, 1000) : null;
+    const r = await rejectCertGrade(certId, reason, adminUser);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json({ ok: true, gradingStatus: "assigned" });
   });
 }

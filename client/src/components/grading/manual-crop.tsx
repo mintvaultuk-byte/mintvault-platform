@@ -10,6 +10,8 @@ interface Props {
   rawImageUrl: string;
   onDone: () => void;
   onCancel: () => void;
+  /** API base for cert endpoints: '/api/admin' (default) or '/api/grader'. */
+  apiBase?: string;
   /** Panel-owned background crop upload (same per-side cropSync lifecycle the
    *  8-dot card tool uses). When provided, Apply fires this in the background
    *  and closes INSTANTLY instead of awaiting /recrop — the panel tracks the
@@ -61,7 +63,15 @@ function pointInQuad(px: number, py: number, q: CropQuad): boolean {
 
 const CORNER_LABELS: Record<keyof CropQuad, string> = { tl: "TL", tr: "TR", br: "BR", bl: "BL" };
 
-export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel, onStartCropUpload }: Props) {
+export default function ManualCrop({
+  side,
+  certId,
+  rawImageUrl,
+  onDone,
+  onCancel,
+  onStartCropUpload,
+  apiBase = "/api/admin",
+}: Props) {
   const [quad, setQuad] = useState<CropQuad>({ ...DEFAULT_QUAD });
   const [rotation, setRotation] = useState(0);
   // Natural pixel dimensions of the raw image, captured on load. Needed so the
@@ -248,7 +258,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
     // ── LEGACY SYNCHRONOUS PATH (no panel upload owner) ─────────────────────
     setSaving(true);
     try {
-      const r = await fetch(`/api/admin/certificates/${certId}/recrop`, {
+      const r = await fetch(`${apiBase}/certificates/${certId}/recrop`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -270,7 +280,7 @@ export default function ManualCrop({ side, certId, rawImageUrl, onDone, onCancel
   async function handleAutoDetect() {
     setDetecting(true);
     try {
-      const bounds = await detectCardBounds(certId, side);
+      const bounds = await detectCardBounds(certId, side, apiBase);
       if (bounds) {
         setQuad(boundsToQuad(bounds));
         toast({ title: "Card detected — quad fitted to edges" });

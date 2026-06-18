@@ -20,7 +20,7 @@ import { registerPromotionRoutes } from "./routes/admin/promotions";
 import { migratePromotionsSchema } from "./services/promotionService";
 import { migratePaymentIdempotencySchema } from "./webhookHandlers";
 import { registerGraderRoutes } from "./routes/grader";
-import { migrateGraderSchema, getSubmissionIdForCert, getSubmissionAssignment, isGraderLocked } from "./grader";
+import { migrateGraderSchema, migrateGraderCertSchema, isGraderLocked } from "./grader";
 import {
   BUILD_STAMP,
   pricingTiers,
@@ -1264,6 +1264,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   migratePromotionsSchema().catch((e: any) => console.error("[promotions-migrate] error:", e.message));
   migratePaymentIdempotencySchema().catch((e: any) => console.error("[payment-idempotency-migrate] error:", e.message));
   migrateGraderSchema().catch((e: any) => console.error("[grader-migrate] error:", e.message));
+  migrateGraderCertSchema().catch((e: any) => console.error("[grader-cert-migrate] error:", e.message));
   migrateAccountSchema()
     .then(() => migrateMarketplaceSchema())
     .catch((e: any) => console.error("[startup-migration] error:", e.message));
@@ -3015,18 +3016,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
-      // Restricted-grader lock — while a card is in a grader's workflow the
-      // admin approves it via POST /api/admin/submissions/:id/approve-grade, not
-      // by directly approving the certificate here.
-      {
-        const sid = await getSubmissionIdForCert(id);
-        if (sid) {
-          const a = await getSubmissionAssignment(sid);
-          if (a && a.assignedGraderId && a.gradingStatus !== "approved") {
-            return res.status(409).json({ error: "This card is assigned to a grader" });
-          }
-        }
-      }
+      // Restricted-grader lock (cert-level). While a card is in a grader's
+      // workflow the admin approves/rejects it via the grader-review endpoints,
+      // not by directly approving the certificate here.
+      if (await isGraderLocked(id)) return res.status(409).json({ error: "This card is assigned to a grader" });
 
       const { centering, corners, edges, surface, overall, gradeType, grading_time_seconds } = req.body;
 
@@ -9709,18 +9702,9 @@ Defects (admin-confirmed): ${defectLines}`;
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
 
-      // Restricted-grader lock — an admin must NOT grade a card that's assigned
-      // to a grader and still in their workflow (assigned/pending_review). The
-      // admin reviews + publishes via POST /api/admin/submissions/:id/approve-grade.
-      {
-        const sid = await getSubmissionIdForCert(id);
-        if (sid) {
-          const a = await getSubmissionAssignment(sid);
-          if (a && a.assignedGraderId && a.gradingStatus !== "approved") {
-            return res.status(409).json({ error: "This card is assigned to a grader" });
-          }
-        }
-      }
+      // Restricted-grader lock (cert-level). An admin must NOT grade-write a card
+      // that's assigned to a grader and still in their workflow.
+      if (await isGraderLocked(id)) return res.status(409).json({ error: "This card is assigned to a grader" });
 
       const b = req.body;
       const overallGrade = b.overall_grade;

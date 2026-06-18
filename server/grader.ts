@@ -29,6 +29,63 @@ export const GRADER_AUTO_PUBLISH = false;
 
 export type GradingStatus = "unassigned" | "assigned" | "pending_review" | "approved";
 
+/**
+ * Keys that must NEVER reach a grader. The delegation proxy reuses unchanged
+ * admin handlers, some of which return the full certificate (incl. owner/claim
+ * fields) — so we recursively strip these from EVERY proxied response as
+ * defence-in-depth, independent of any one handler's response shape. Covers
+ * camelCase + snake_case owner/claim/customer/return fields and private_notes.
+ */
+const GRADER_PII_KEYS = new Set<string>([
+  "ownerName",
+  "ownerEmail",
+  "ownershipStatus",
+  "ownershipToken",
+  "currentOwnerUserId",
+  "claimCodeHash",
+  "claimCodeUsedAt",
+  "privateNotes",
+  "customerEmail",
+  "customerFirstName",
+  "customerLastName",
+  "phone",
+  "returnAddressLine1",
+  "returnAddressLine2",
+  "returnCity",
+  "returnCounty",
+  "returnPostcode",
+  "owner_name",
+  "owner_email",
+  "ownership_status",
+  "ownership_token",
+  "current_owner_user_id",
+  "claim_code_hash",
+  "claim_code_used_at",
+  "private_notes",
+  "customer_email",
+  "customer_first_name",
+  "customer_last_name",
+  "return_address_line1",
+  "return_address_line2",
+  "return_city",
+  "return_county",
+  "return_postcode",
+]);
+
+/** Recursively remove any GRADER_PII_KEYS from a response value (object/array). */
+export function stripGraderPii(value: any): any {
+  if (Array.isArray(value)) return value.map(stripGraderPii);
+  if (value && typeof value === "object") {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (GRADER_PII_KEYS.has(k)) continue;
+      out[k] = stripGraderPii(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 // ── Boot migration (idempotent, additive) ─────────────────────────────────────
 
 /**
@@ -104,18 +161,41 @@ export async function getSubmissionIdForCert(certId: number): Promise<number | n
   return row ? Number(row.sid) : null;
 }
 
+export interface CertAssignment {
+  certId: number;
+  assignedGraderId: string | null;
+  gradingStatus: GradingStatus;
+  redoCount: number;
+  rejectionReason: string | null;
+}
+
+/** Cert-level assignment/workflow read (grader v2 — no submission join). */
+export async function getCertAssignment(certId: number): Promise<CertAssignment | null> {
+  const r = await db.execute(sql`
+    SELECT id, assigned_grader_id, grading_status, redo_count, rejection_reason
+    FROM certificates WHERE id = ${certId} AND deleted_at IS NULL LIMIT 1
+  `);
+  const row = r.rows[0] as any;
+  if (!row) return null;
+  return {
+    certId: Number(row.id),
+    assignedGraderId: row.assigned_grader_id ?? null,
+    gradingStatus: (row.grading_status ?? "unassigned") as GradingStatus,
+    redoCount: Number(row.redo_count ?? 0),
+    rejectionReason: row.rejection_reason ?? null,
+  };
+}
+
 /**
- * True if a certificate's owning submission is assigned to a grader and still in
- * their workflow (assignedGraderId set && grading_status !== 'approved') — in
- * which case an ADMIN must not grade/publish it directly (use the approval flow).
- * An ORPHAN cert with no owning submission returns false: it cannot be assigned
- * to a grader (assignment lives on submissions), so there is nothing to lock and
- * normal admin grading proceeds. Used to gate every admin grade/approve handler.
+ * True if a CERTIFICATE is assigned to a grader and still in their workflow
+ * (assigned_grader_id set && grading_status !== 'approved') — in which case an
+ * ADMIN must not grade/publish it directly (use the grader approve/reject flow).
+ * Cert-level (grader v2): reads certificates directly, no submission resolution.
+ * Gates every admin GRADE-WRITE handler; admin approve/reject use their own
+ * pending_review gate and are exempt from this lock.
  */
 export async function isGraderLocked(certId: number): Promise<boolean> {
-  const sid = await getSubmissionIdForCert(certId);
-  if (!sid) return false;
-  const a = await getSubmissionAssignment(sid);
+  const a = await getCertAssignment(certId);
   return !!(a && a.assignedGraderId && a.gradingStatus !== "approved");
 }
 
@@ -140,9 +220,7 @@ export async function getSubmissionAssignment(submissionId: number): Promise<Sub
 }
 
 /** The certificate(s) for a submission, with PII-FREE card metadata only. */
-export async function getCertificatesForSubmission(
-  submissionId: number
-): Promise<
+export async function getCertificatesForSubmission(submissionId: number): Promise<
   Array<{
     certId: number;
     certIdStr: string;
@@ -154,12 +232,16 @@ export async function getCertificatesForSubmission(
     variant: string | null;
     grade: string | null;
     gradeApprovedAt: string | null;
+    assignedGraderId: string | null;
+    gradingStatus: string;
+    redoCount: number;
   }>
 > {
   const r = await db.execute(sql`
     SELECT cert.id AS cert_id, cert.cert_id AS cert_id_str, cert.card_game, cert.set_name,
-           cert.card_name, cert.card_number, cert.year, cert.variant,
-           cert.grade AS grade, cert.grade_approved_at AS grade_approved_at
+           cert.card_name, cert.card_number_display AS card_number, cert.year_text AS year, cert.variant,
+           cert.grade AS grade, cert.grade_approved_at AS grade_approved_at,
+           cert.assigned_grader_id, cert.grading_status, cert.redo_count
     FROM certificates cert
     JOIN cards c ON cert.card_id = c.id
     WHERE c.submission_id = ${submissionId} AND cert.deleted_at IS NULL
@@ -176,6 +258,9 @@ export async function getCertificatesForSubmission(
     variant: row.variant ?? null,
     grade: row.grade ?? null,
     gradeApprovedAt: row.grade_approved_at ?? null,
+    assignedGraderId: row.assigned_grader_id ?? null,
+    gradingStatus: row.grading_status ?? "unassigned",
+    redoCount: Number(row.redo_count ?? 0),
   }));
 }
 
@@ -415,6 +500,11 @@ export async function buildCertGradingPayload(certId: number): Promise<any | nul
     // overwrites the admin's private notes (the grader form omits this field, so
     // applyCertGradeDraft's pick() preserves the existing value on submit).
     privateNotes: "",
+    // Cert-level workflow state — drives the grader panel's "rejected, redo"
+    // banner and the queue chips.
+    gradingStatus: (c as any).gradingStatus || "unassigned",
+    rejectionReason: (c as any).rejectionReason || null,
+    redoCount: (c as any).redoCount ?? 0,
     gradeApprovedBy: c.gradeApprovedBy || null,
     gradeApprovedAt: c.gradeApprovedAt || null,
     gradeStrengthScore: c.gradeStrengthScore ?? null,
@@ -502,4 +592,254 @@ export async function approveCertGrade(certId: number, adminUser: string): Promi
     SET grade_approved_at = NOW(), grade_approved_by = ${adminUser}, status = 'active', updated_at = NOW()
     WHERE id = ${certId}
   `);
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// GRADER V2 — cert-level migration, assignment, reject/approve, earnings
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Grader v2 boot migration: cert-level assignment + workflow columns. Idempotent
+ * + additive (ADD COLUMN IF NOT EXISTS). Backfill: certs already graded-live
+ * (grade_approved_at NOT NULL) → 'approved', only touching the 'unassigned'
+ * default. One-time audit row. The v1 submission-level columns (migrateGraderSchema)
+ * stay in place but are now DEAD.
+ */
+export async function migrateGraderCertSchema(): Promise<void> {
+  await db.execute(sql`
+    ALTER TABLE certificates
+      ADD COLUMN IF NOT EXISTS assigned_grader_id VARCHAR,
+      ADD COLUMN IF NOT EXISTS grading_status VARCHAR(20) NOT NULL DEFAULT 'unassigned',
+      ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS graded_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS rejection_reason TEXT,
+      ADD COLUMN IF NOT EXISTS redo_count INTEGER NOT NULL DEFAULT 0
+  `);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_certificates_assigned_grader ON certificates (assigned_grader_id)`
+  );
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_certificates_grading_status ON certificates (grading_status)`);
+  await db.execute(sql`
+    UPDATE certificates SET grading_status = 'approved'
+    WHERE grading_status = 'unassigned' AND grade_approved_at IS NOT NULL
+  `);
+  await db.execute(sql`
+    INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+    SELECT 'schema', 'certificates', 'grader_cert_schema_migrate', NULL,
+           ${{ columns: ["assigned_grader_id", "grading_status", "assigned_at", "graded_at", "rejection_reason", "redo_count"] }}::jsonb
+    WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'grader_cert_schema_migrate')
+  `);
+  console.log("[grader-cert-migrate] certificates assignment columns + indexes ensured");
+}
+
+/** Submission tracking_number for a cert (queue display context only — no PII). */
+export async function getSubmissionRefForCert(certId: number): Promise<string | null> {
+  const r = await db.execute(sql`
+    SELECT s.tracking_number AS ref
+    FROM certificates cert JOIN cards c ON cert.card_id = c.id JOIN submissions s ON s.id = c.submission_id
+    WHERE cert.id = ${certId} LIMIT 1
+  `);
+  return (r.rows[0] as any)?.ref ?? null;
+}
+
+// ── Cert-level assignment (admin) ─────────────────────────────────────────────
+
+/** Assign a batch of CERTIFICATES to a grader. Never touches 'approved' certs. */
+export async function assignCerts(graderId: string, certIds: number[], adminUser: string) {
+  if (!(await isGrader(graderId))) return { ok: false as const, status: 400, error: "Not a valid grader" };
+  const clean = certIds.filter((n) => Number.isInteger(n) && n > 0);
+  if (!clean.length) return { ok: false as const, status: 400, error: "No certificate ids" };
+  const r = await db.execute(sql`
+    UPDATE certificates
+    SET assigned_grader_id = ${graderId}, grading_status = 'assigned', assigned_at = NOW(),
+        rejection_reason = NULL, updated_at = NOW()
+    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND grading_status <> 'approved'
+    RETURNING id
+  `);
+  await storage.writeAuditLog("certificate", clean.join(","), "grader_assign", adminUser, {
+    grader_id: graderId,
+    cert_ids: clean,
+    count: r.rows.length,
+  });
+  return { ok: true as const, count: r.rows.length };
+}
+
+/** Reassign a batch of certs to a different grader; audits from→to. */
+export async function reassignCerts(graderId: string, certIds: number[], adminUser: string) {
+  if (!(await isGrader(graderId))) return { ok: false as const, status: 400, error: "Not a valid grader" };
+  const clean = certIds.filter((n) => Number.isInteger(n) && n > 0);
+  if (!clean.length) return { ok: false as const, status: 400, error: "No certificate ids" };
+  const before = await db.execute(sql`SELECT id, assigned_grader_id FROM certificates WHERE id = ANY(${clean}::int[])`);
+  const fromMap = Object.fromEntries((before.rows as any[]).map((x) => [String(x.id), x.assigned_grader_id ?? null]));
+  const r = await db.execute(sql`
+    UPDATE certificates
+    SET assigned_grader_id = ${graderId}, grading_status = 'assigned', assigned_at = NOW(),
+        rejection_reason = NULL, updated_at = NOW()
+    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND grading_status <> 'approved'
+    RETURNING id
+  `);
+  await storage.writeAuditLog("certificate", clean.join(","), "grader_reassign", adminUser, {
+    grader_id: graderId,
+    from: fromMap,
+    cert_ids: clean,
+    count: r.rows.length,
+  });
+  return { ok: true as const, count: r.rows.length };
+}
+
+/** Unassign a batch of certs (back to 'unassigned'). Never touches 'approved'. */
+export async function unassignCerts(certIds: number[], adminUser: string) {
+  const clean = certIds.filter((n) => Number.isInteger(n) && n > 0);
+  if (!clean.length) return { ok: false as const, status: 400, error: "No certificate ids" };
+  const before = await db.execute(sql`SELECT id, assigned_grader_id FROM certificates WHERE id = ANY(${clean}::int[])`);
+  const fromMap = Object.fromEntries((before.rows as any[]).map((x) => [String(x.id), x.assigned_grader_id ?? null]));
+  const r = await db.execute(sql`
+    UPDATE certificates
+    SET assigned_grader_id = NULL, grading_status = 'unassigned', assigned_at = NULL, updated_at = NOW()
+    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND grading_status <> 'approved'
+    RETURNING id
+  `);
+  await storage.writeAuditLog("certificate", clean.join(","), "grader_unassign", adminUser, {
+    from: fromMap,
+    cert_ids: clean,
+    count: r.rows.length,
+  });
+  return { ok: true as const, count: r.rows.length };
+}
+
+/** A submission's certs + current assignee (admin picker, PII-FREE). */
+export async function getCertsForSubmission(submissionId: number) {
+  const r = await db.execute(sql`
+    SELECT cert.id AS cert_id, cert.cert_id AS cert_id_str, cert.card_name, cert.set_name,
+           cert.card_number_display AS card_number, cert.year_text AS year, cert.variant,
+           cert.assigned_grader_id, cert.grading_status, cert.redo_count, u.email AS grader_email
+    FROM certificates cert JOIN cards c ON cert.card_id = c.id
+    LEFT JOIN users u ON u.id = cert.assigned_grader_id
+    WHERE c.submission_id = ${submissionId} AND cert.deleted_at IS NULL
+    ORDER BY cert.id ASC
+  `);
+  return (r.rows as any[]).map((row) => ({
+    certId: Number(row.cert_id),
+    certIdStr: row.cert_id_str,
+    cardName: row.card_name ?? null,
+    setName: row.set_name ?? null,
+    cardNumber: row.card_number ?? null,
+    year: row.year ?? null,
+    variant: row.variant ?? null,
+    assignedGraderId: row.assigned_grader_id ?? null,
+    graderEmail: row.grader_email ?? null,
+    gradingStatus: row.grading_status ?? "unassigned",
+    redoCount: Number(row.redo_count ?? 0),
+  }));
+}
+
+// ── Reject / approve (admin sanctioned actions on a pending_review cert) ───────
+
+/** Reject a grader-submitted cert: pending_review → assigned, store reason, +redo. */
+export async function rejectCertGrade(certId: number, reason: string | null, adminUser: string) {
+  const a = await getCertAssignment(certId);
+  if (!a) return { ok: false as const, status: 404, error: "Certificate not found" };
+  if (a.gradingStatus !== "pending_review") {
+    return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
+  }
+  await db.execute(sql`
+    UPDATE certificates
+    SET grading_status = 'assigned', rejection_reason = ${reason || null}, redo_count = redo_count + 1,
+        graded_at = NULL, updated_at = NOW()
+    WHERE id = ${certId}
+  `);
+  await storage.writeAuditLog("certificate", String(certId), "grade_reject", adminUser, { reason: reason || null });
+  return { ok: true as const };
+}
+
+/**
+ * Approve a grader-submitted cert (EXEMPT from the grade-write lock; allowed
+ * ONLY from 'pending_review'). Publishes ONLY this cert (grade_approved_at +
+ * status='active') and marks it 'approved' + graded_at — never touches sibling
+ * certs of the same submission.
+ */
+export async function approveGraderCert(certId: number, adminUser: string) {
+  const a = await getCertAssignment(certId);
+  if (!a) return { ok: false as const, status: 404, error: "Certificate not found" };
+  if (a.gradingStatus !== "pending_review") {
+    return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
+  }
+  await approveCertGrade(certId, adminUser);
+  await db.execute(sql`
+    UPDATE certificates SET grading_status = 'approved', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
+  `);
+  await storage.writeAuditLog("certificate", String(certId), "grade_approve", adminUser, { via: "grader_review" });
+  return { ok: true as const };
+}
+
+// ── Earnings (display-only; NO deduction logic) ───────────────────────────────
+
+/** Per-card grader rate from pipeline_settings (raw SQL; null/0 when unset). */
+export async function getGraderRate(): Promise<number> {
+  const r = await db.execute(sql`SELECT value FROM pipeline_settings WHERE key = 'grader_card_rate' LIMIT 1`);
+  const v = (r.rows[0] as any)?.value;
+  if (v == null) return 0;
+  const n = typeof v === "number" ? v : typeof v === "object" && v.rate != null ? Number(v.rate) : Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Admin sets the per-card rate (audited). */
+export async function setGraderRate(rate: number, adminUser: string): Promise<void> {
+  const clean = Number.isFinite(rate) && rate >= 0 ? rate : 0;
+  await db.execute(sql`
+    INSERT INTO pipeline_settings (key, value, updated_by, updated_at)
+    VALUES ('grader_card_rate', ${JSON.stringify({ rate: clean })}::jsonb, ${adminUser}, NOW())
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+  `);
+  await storage.writeAuditLog("setting", "grader_card_rate", "grader_rate_set", adminUser, { rate: clean });
+}
+
+/**
+ * A grader's own earnings snapshot. earned = approved × rate (display only —
+ * flagged/rejected cards simply don't count until redone+approved; NEVER
+ * subtract). Rate may be 0/unset.
+ */
+export async function getGraderEarnings(graderId: string) {
+  const r = await db.execute(sql`
+    SELECT
+      COUNT(*) FILTER (WHERE grading_status = 'approved')::int AS approved,
+      COUNT(*) FILTER (WHERE grading_status = 'pending_review')::int AS pending_review,
+      COUNT(*) FILTER (WHERE redo_count > 0)::int AS flagged
+    FROM certificates WHERE assigned_grader_id = ${graderId} AND deleted_at IS NULL
+  `);
+  const c = (r.rows[0] as any) || {};
+  const rate = await getGraderRate();
+  const approved = Number(c.approved || 0);
+  return {
+    approved,
+    pendingReview: Number(c.pending_review || 0),
+    flagged: Number(c.flagged || 0),
+    rate,
+    earned: approved * rate,
+  };
+}
+
+/** Per-grader counts for the admin graders page. */
+export async function getGraderCountsForAdmin() {
+  const r = await db.execute(sql`
+    SELECT u.id, u.email, u.display_name,
+      COUNT(cert.id) FILTER (WHERE cert.grading_status = 'approved')::int AS approved,
+      COUNT(cert.id) FILTER (WHERE cert.grading_status = 'pending_review')::int AS pending_review,
+      COUNT(cert.id) FILTER (WHERE cert.grading_status = 'assigned')::int AS assigned,
+      COUNT(cert.id) FILTER (WHERE cert.redo_count > 0)::int AS flagged
+    FROM users u
+    LEFT JOIN certificates cert ON cert.assigned_grader_id = u.id AND cert.deleted_at IS NULL
+    WHERE u.role = 'grader' AND u.deleted_at IS NULL
+    GROUP BY u.id, u.email, u.display_name
+    ORDER BY u.created_at DESC
+  `);
+  return (r.rows as any[]).map((x) => ({
+    id: x.id,
+    email: x.email,
+    displayName: x.display_name ?? null,
+    approved: Number(x.approved || 0),
+    pendingReview: Number(x.pending_review || 0),
+    assigned: Number(x.assigned || 0),
+    flagged: Number(x.flagged || 0),
+  }));
 }

@@ -18,8 +18,12 @@ import type { CropBox } from "./card-tool-geometry";
  * manual placement). The same endpoint Manual Crop has always used; extracted
  * here verbatim so the Card Tool can call it without duplicating the fetch.
  */
-export async function detectCardBounds(certId: number, side: "front" | "back"): Promise<CropBox | null> {
-  const r = await fetch(`/api/admin/certificates/${certId}/detect-card-bounds`, {
+export async function detectCardBounds(
+  certId: number,
+  side: "front" | "back",
+  apiBase = "/api/admin"
+): Promise<CropBox | null> {
+  const r = await fetch(`${apiBase}/certificates/${certId}/detect-card-bounds`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },

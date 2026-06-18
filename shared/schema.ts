@@ -482,6 +482,19 @@ export const certificates = pgTable("certificates", {
     .default([]),
   gradeApprovedBy: text("grade_approved_by"),
   gradeApprovedAt: timestamp("grade_approved_at"),
+  // ── Restricted-grader assignment, CERT-LEVEL (migrateGraderCertSchema) ─────
+  // Grader v2 re-grains assignment from submissions → certificates so each card
+  // in a multi-card submission is graded/locked independently. The v1
+  // submissions.assigned_grader_id/grading_status columns are now DEAD (left in
+  // place, to be dropped later). Workflow: unassigned → assigned → pending_review
+  // → approved; reject bounces pending_review → assigned (rejection_reason +
+  // redo_count++).
+  assignedGraderId: varchar("assigned_grader_id"),
+  gradingStatus: varchar("grading_status", { length: 20 }).notNull().default("unassigned"),
+  assignedAt: timestamp("assigned_at", { withTimezone: true }),
+  gradedAt: timestamp("graded_at", { withTimezone: true }),
+  rejectionReason: text("rejection_reason"),
+  redoCount: integer("redo_count").notNull().default(0),
   // Admin-controlled marketing-pool flag. Distinct from
   // submissions.marketing_feature_consent (user opt-in, legal record) —
   // this column gates the weekly-reel pool regardless of consent state.

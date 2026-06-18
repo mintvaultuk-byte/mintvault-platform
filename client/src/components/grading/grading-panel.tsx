@@ -126,6 +126,15 @@ interface Props {
   /** Callback when user manually identifies a card from the AI panel's Search TCG */
   onManualIdentification?: (identification: Record<string, unknown>) => void;
   cardGame?: string;
+  /** API base for ALL cert endpoints: '/api/admin' (default) or '/api/grader'.
+   *  Threaded to ImageViewer + ManualCardTool + every fetch/queryKey so the
+   *  SAME panel serves both admin and restricted-grader, never forked. */
+  apiBase?: string;
+  /** Restricted-grader mode: the primary action submits for approval (POST
+   *  /submit) instead of publishing (PUT /approve), and the publish-only UI is
+   *  relabelled. A grader can crop/centre/analyse/identify/save-draft but never
+   *  publishes a live grade. */
+  graderMode?: boolean;
 }
 
 // Defaults use 0 to indicate "not yet graded" — prevents false Black Label on ungraded certs
@@ -207,15 +216,17 @@ export default function GradingPanel({
   onPendingAnalysisConsumed,
   onManualIdentification,
   cardGame,
+  apiBase = "/api/admin",
+  graderMode = false,
 }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   // Image URLs
   const { data: imageData } = useQuery<{ urls: Record<string, string | null>; quality: Record<string, any> }>({
-    queryKey: [`/api/admin/certificates/${certId}/images`],
+    queryKey: [`${apiBase}/certificates/${certId}/images`],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/certificates/${certId}/images`, { credentials: "include" });
+      const res = await fetch(`${apiBase}/certificates/${certId}/images`, { credentials: "include" });
       if (!res.ok) return { urls: {}, quality: {} };
       return res.json();
     },
@@ -224,9 +235,9 @@ export default function GradingPanel({
 
   // Grading data
   const { data: gradingData } = useQuery<any>({
-    queryKey: [`/api/admin/certificates/${certId}/grading`],
+    queryKey: [`${apiBase}/certificates/${certId}/grading`],
     queryFn: async () => {
-      const res = await fetch(`/api/admin/certificates/${certId}/grading`, { credentials: "include" });
+      const res = await fetch(`${apiBase}/certificates/${certId}/grading`, { credentials: "include" });
       if (!res.ok) return null;
       return res.json();
     },
@@ -758,7 +769,7 @@ export default function GradingPanel({
   async function saveEditedGrade(): Promise<void> {
     setEditSaving(true);
     try {
-      const res = await fetch(`/api/admin/certificates/${certId}/grade`, {
+      const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -773,7 +784,7 @@ export default function GradingPanel({
       // refetch so we don't thrash. Keys mirror the existing approveGrade()
       // invalidation set plus public logbook + verify endpoints.
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });
+      queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/grading`] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/printing/browser"] });
       if (certIdStr) {
@@ -796,7 +807,7 @@ export default function GradingPanel({
     const seq = ++autoSaveSeqRef.current;
     setAutoSaveStatus("saving");
     try {
-      const res = await fetch(`/api/admin/certificates/${certId}/grade`, {
+      const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1299,7 +1310,7 @@ export default function GradingPanel({
     return (
       <CaptureWizard
         certId={certId}
-        onComplete={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
+        onComplete={() => queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] })}
         existingQuality={imageData?.quality}
       />
     );
@@ -1308,7 +1319,7 @@ export default function GradingPanel({
   async function saveDraft() {
     setSaving(true);
     try {
-      const res = await fetch(`/api/admin/certificates/${certId}/grade`, {
+      const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1318,7 +1329,7 @@ export default function GradingPanel({
       if (!res.ok) throw new Error(data.error || "Save failed");
       toast({ title: "Draft saved" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });
+      queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/grading`] });
     } catch (e: any) {
       toast({ title: "Save failed", description: e.message, variant: "destructive" });
     } finally {
@@ -1343,13 +1354,13 @@ export default function GradingPanel({
     try {
       // Persist current state first so the server's read of the cert reflects
       // the admin's just-set subgrades + confirmed defects.
-      await fetch(`/api/admin/certificates/${certId}/grade`, {
+      await fetch(`${apiBase}/certificates/${certId}/grade`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildPayload()),
       });
-      const res = await fetch(`/api/admin/certificates/${certId}/generate-description`, {
+      const res = await fetch(`${apiBase}/certificates/${certId}/generate-description`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1388,7 +1399,7 @@ export default function GradingPanel({
     const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        const res = await fetch(`/api/admin/certificates/${certId}/recrop`, {
+        const res = await fetch(`${apiBase}/certificates/${certId}/recrop`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -1403,7 +1414,7 @@ export default function GradingPanel({
             prev[side].status === "synced" ? { ...prev, [side]: { status: "idle", payload: null } } : prev
           );
         }, 2500);
-        queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
+        queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] });
         return typeof json.displayUrl === "string" ? json.displayUrl : undefined;
       } catch (e: any) {
         if (attempt < maxAttempts) {
@@ -1465,25 +1476,39 @@ export default function GradingPanel({
         autoSaveTimerRef.current = null;
       }
       const elapsedSeconds = Math.round((Date.now() - gradingStartedAtRef.current) / 1000);
-      const res = await fetch(`/api/admin/certificates/${certId}/approve`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...buildPayload(), grading_time_seconds: elapsedSeconds }),
-      });
+      // GRADER MODE: submit for admin review (POST /submit) — never publishes.
+      // ADMIN MODE: publish the grade live (PUT /approve).
+      const res = graderMode
+        ? await fetch(`${apiBase}/certificates/${certId}/submit`, {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(buildPayload()),
+          })
+        : await fetch(`${apiBase}/certificates/${certId}/approve`, {
+            method: "PUT",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...buildPayload(), grading_time_seconds: elapsedSeconds }),
+          });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Approve failed");
+      if (!res.ok) throw new Error(data.error || (graderMode ? "Submit failed" : "Approve failed"));
       setApproved(true);
       setShowConfirm(false);
-      // Mirror server-side approve into local state so the post-approve
-      // banner appears immediately without waiting for the next gradingData
-      // refetch.
-      setGradeApprovedAt(new Date().toISOString());
-      setGradeApprovedBy("Cornelius Oliver");
-      toast({ title: `${certIdStr || "Certificate"} approved & published — ${finalGradeOverall} ${label}` });
+      if (!graderMode) {
+        // Mirror server-side approve into local state so the post-approve
+        // banner appears immediately. Graders don't publish, so skip this.
+        setGradeApprovedAt(new Date().toISOString());
+        setGradeApprovedBy("Cornelius Oliver");
+      }
+      toast({
+        title: graderMode
+          ? `${certIdStr || "Certificate"} submitted for approval`
+          : `${certIdStr || "Certificate"} approved & published — ${finalGradeOverall} ${label}`,
+      });
       onGradeApproved?.(certIdStr, finalGradeOverall);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-      queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });
+      queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/grading`] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
     } catch (e: any) {
       toast({ title: "Approve failed", description: e.message, variant: "destructive" });
@@ -1618,10 +1643,13 @@ export default function GradingPanel({
             cardGame={cardGame}
           />
         </div>
-        <ReprocessButton
-          certId={certId}
-          onDone={() => queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })}
-        />
+        {/* Admin-only image op (hits /api/admin) — hidden for graders. */}
+        {!graderMode && (
+          <ReprocessButton
+            certId={certId}
+            onDone={() => queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] })}
+          />
+        )}
       </div>
 
       {/* Two-panel layout */}
@@ -1668,7 +1696,7 @@ export default function GradingPanel({
                           e.stopPropagation();
                           if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
                           try {
-                            const r = await fetch(`/api/admin/certificates/${certId}/images/${s}`, {
+                            const r = await fetch(`${apiBase}/certificates/${certId}/images/${s}`, {
                               method: "DELETE",
                               credentials: "include",
                             });
@@ -1676,7 +1704,7 @@ export default function GradingPanel({
                               const d = await r.json();
                               throw new Error(d.error);
                             }
-                            queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
+                            queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] });
                           } catch {}
                         }}
                         className="flex-shrink-0 rounded-r border border-l-0 border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-red)] hover:border-[var(--admin-red)]/40 px-1.5 py-1 transition-all"
@@ -1693,6 +1721,7 @@ export default function GradingPanel({
           <div style={{ margin: "32px 60px 0" }}>
             <div className="relative" style={{ overflow: "visible" }}>
               <ImageViewer
+                apiBase={apiBase}
                 urls={urls}
                 defects={defects}
                 onDefectAdded={(d) => setDefects((prev) => [...prev, d])}
@@ -1749,7 +1778,7 @@ export default function GradingPanel({
                 }
                 certId={certId}
                 onImageDeleted={() =>
-                  queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] })
+                  queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] })
                 }
                 // Perspective crop tool plugs into the SAME per-side crop-sync
                 // lifecycle as the 8-dot card tool (background upload, retries,
@@ -2714,7 +2743,9 @@ export default function GradingPanel({
                         ? "Crop failed — retry"
                         : cropPendingSides.length > 0
                           ? "Crop syncing…"
-                          : "Approve & Publish"}
+                          : graderMode
+                            ? "Submit for approval"
+                            : "Approve & Publish"}
                 </button>
               ) : (
                 <div className="w-full flex items-center justify-center gap-2 bg-[var(--admin-green)]/10 border border-[var(--admin-green)]/40 text-[var(--admin-green)] text-xs font-bold uppercase px-4 py-2.5 rounded">
@@ -2784,6 +2815,7 @@ export default function GradingPanel({
           is identical — no new server route, no divergent save semantics). */}
       {manualCardToolSide && (manualCardToolSide === "front" ? urls.front_original : urls.back_original) && (
         <ManualCardTool
+          apiBase={apiBase}
           certId={certId}
           side={manualCardToolSide}
           rawImageUrl={(manualCardToolSide === "front" ? urls.front_original : urls.back_original) as string}
@@ -2818,8 +2850,8 @@ export default function GradingPanel({
             clearOverallOverrideIfSet();
           }}
           onDone={() => {
-            queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/images`] });
-            queryClient.invalidateQueries({ queryKey: [`/api/admin/certificates/${certId}/grading`] });
+            queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] });
+            queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/grading`] });
             setManualCardToolSide(null);
           }}
           onCancel={() => setManualCardToolSide(null)}
@@ -2895,7 +2927,13 @@ export default function GradingPanel({
                 disabled={approving}
                 className="flex-1 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-40"
               >
-                {approving ? "Publishing…" : "Approve & Publish"}
+                {approving
+                  ? graderMode
+                    ? "Submitting…"
+                    : "Publishing…"
+                  : graderMode
+                    ? "Submit for approval"
+                    : "Approve & Publish"}
               </button>
             </div>
           </div>

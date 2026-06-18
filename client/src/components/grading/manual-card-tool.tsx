@@ -96,6 +96,8 @@ interface Props {
   /** When opening directly in "defects", the already-cropped display image URL
    *  to load as the defects-phase <img> (no /recrop re-run needed). */
   existingCroppedUrl?: string;
+  /** API base for cert endpoints: '/api/admin' (default) or '/api/grader'. */
+  apiBase?: string;
 }
 
 /** Body of POST /api/admin/certificates/:id/recrop. */
@@ -273,6 +275,7 @@ export default function ManualCardTool({
   onRetryCrop,
   initialPhase = "capture",
   existingCroppedUrl,
+  apiBase = "/api/admin",
 }: Props) {
   const [mode, setMode] = useState<CardToolMode>("full");
   const [outerPts, setOuterPts] = useState<Point[]>([]);
@@ -914,7 +917,7 @@ export default function ManualCardTool({
   async function handleAutoDetect() {
     setDetecting(true);
     try {
-      const bounds = await detectCardBounds(certId, side);
+      const bounds = await detectCardBounds(certId, side, apiBase);
       if (bounds) {
         setOuterPts(boundsToOuterEdges(bounds));
         setInnerPts([]);
@@ -973,7 +976,7 @@ export default function ManualCardTool({
       // lands; in the legacy path it's awaited inline (below).
       const sendCentering = async () => {
         if (!(mode === "full" && centering)) return;
-        const cenRes = await fetch(`/api/admin/certificates/${certId}/manual-centering`, {
+        const cenRes = await fetch(`${apiBase}/certificates/${certId}/manual-centering`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
@@ -1044,7 +1047,7 @@ export default function ManualCardTool({
       }
 
       // ── LEGACY SYNCHRONOUS PATH (no defects phase / no upload owner) ─────
-      const cropRes = await fetch(`/api/admin/certificates/${certId}/recrop`, {
+      const cropRes = await fetch(`${apiBase}/certificates/${certId}/recrop`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
