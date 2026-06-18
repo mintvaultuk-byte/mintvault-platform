@@ -1,0 +1,339 @@
+/**
+ * server/staff.ts — unified staff accounts + capability toggles.
+ *
+ * One staff account carries any of three capabilities: can_grade / can_scan /
+ * can_print. role stays customer/admin/staff; capabilities (not role) decide
+ * which tools a staffer may use. ADMIN implicitly has ALL capabilities and is
+ * NEVER gated on these flags. Builds on the existing grader machinery (session,
+ * delegation proxy, PII sanitizer) — re-gates it on capabilities, never rewrites.
+ *
+ * Grain: SCAN is whole-submission (a physical box). GRADE is cert-level (grader
+ * v2). PRINT is a global slab-label queue. PII (customer name/email/address)
+ * lives only on submissions and is NEVER returned by any /api/staff/* surface.
+ */
+import type { Request, Response, NextFunction } from "express";
+import sharp from "sharp";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
+import { storage } from "./storage";
+import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
+import { uploadToR2 } from "./r2";
+
+export type Capability = "grade" | "scan" | "print";
+export interface Caps {
+  grade: boolean;
+  scan: boolean;
+  print: boolean;
+}
+
+// ── Boot migrations (idempotent, additive, collision-checked: confirmed new) ──
+
+/** users.can_grade / can_scan / can_print + backfill grader→can_grade. */
+export async function migrateStaffCapabilitiesSchema(): Promise<void> {
+  await db.execute(sql`
+    ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS can_grade BOOLEAN NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS can_scan  BOOLEAN NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS can_print BOOLEAN NOT NULL DEFAULT false
+  `);
+  // Backfill: existing grader / senior_grader users get can_grade. Only touches
+  // rows still at the false default, so it's idempotent and never flips a flag
+  // an admin set. NEVER touches customer/admin roles.
+  await db.execute(sql`
+    UPDATE users SET can_grade = true
+    WHERE role IN ('grader', 'senior_grader') AND can_grade = false AND deleted_at IS NULL
+  `);
+  await db.execute(sql`
+    INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+    SELECT 'schema', 'users', 'staff_capabilities_migrate', NULL,
+           ${{ columns: ["can_grade", "can_scan", "can_print"], backfill: "role IN (grader,senior_grader) -> can_grade" }}::jsonb
+    WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'staff_capabilities_migrate')
+  `);
+  console.log("[staff-caps-migrate] users capability columns ensured + grader backfill");
+}
+
+/** submissions.scan_assigned_to / scan_status / scan_assigned_at (NEW — not the
+ *  dead v1 grader columns). */
+export async function migrateScanSchema(): Promise<void> {
+  await db.execute(sql`
+    ALTER TABLE submissions
+      ADD COLUMN IF NOT EXISTS scan_assigned_to VARCHAR,
+      ADD COLUMN IF NOT EXISTS scan_status VARCHAR(20) NOT NULL DEFAULT 'unassigned',
+      ADD COLUMN IF NOT EXISTS scan_assigned_at TIMESTAMPTZ
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_submissions_scan_assigned ON submissions (scan_assigned_to)`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_submissions_scan_status ON submissions (scan_status)`);
+  await db.execute(sql`
+    INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
+    SELECT 'schema', 'submissions', 'scan_schema_migrate', NULL,
+           ${{ columns: ["scan_assigned_to", "scan_status", "scan_assigned_at"] }}::jsonb
+    WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'scan_schema_migrate')
+  `);
+  console.log("[scan-migrate] submissions scan columns + indexes ensured");
+}
+
+// ── Middleware ────────────────────────────────────────────────────────────────
+
+/** Authenticated staff only (mutually exclusive with admin). 401 otherwise. */
+export function requireStaff(req: Request, res: Response, next: NextFunction) {
+  const s = req.session as any;
+  if (s && s.isStaff && s.staffId && !s.isAdmin) return next();
+  return res.status(401).json({ error: "Unauthorized" });
+}
+
+/** Staff session that holds a specific capability. 401 if not staff, 403 if the
+ *  capability is missing. Put on EVERY tool endpoint — a missed gate is a hole. */
+export function requireCapability(cap: Capability) {
+  const key = cap === "grade" ? "capGrade" : cap === "scan" ? "capScan" : "capPrint";
+  return (req: Request, res: Response, next: NextFunction) => {
+    const s = req.session as any;
+    if (!(s && s.isStaff && s.staffId && !s.isAdmin)) return res.status(401).json({ error: "Unauthorized" });
+    if (!s[key]) return res.status(403).json({ error: `Forbidden: missing '${cap}' capability` });
+    return next();
+  };
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+/** A user is "staff" iff they have ≥1 capability (admins use the admin login). */
+export async function authenticateStaff(
+  email: string,
+  password: string
+): Promise<{ ok: true; id: string; email: string; displayName: string | null; caps: Caps } | { ok: false }> {
+  const cleanEmail = String(email || "")
+    .toLowerCase()
+    .trim();
+  if (!cleanEmail || !password) return { ok: false };
+  const r = await db.execute(sql`
+    SELECT id, email, display_name, password_hash, role, deleted_at, can_grade, can_scan, can_print
+    FROM users WHERE LOWER(email) = ${cleanEmail} LIMIT 1
+  `);
+  const u = r.rows[0] as any;
+  if (!u || u.deleted_at || u.role === "admin" || !u.password_hash) return { ok: false };
+  const caps: Caps = { grade: !!u.can_grade, scan: !!u.can_scan, print: !!u.can_print };
+  if (!caps.grade && !caps.scan && !caps.print) return { ok: false };
+  const valid = await verifyPassword(password, u.password_hash);
+  if (!valid) return { ok: false };
+  await db.execute(sql`UPDATE users SET last_login_at = NOW() WHERE id = ${u.id}`);
+  return { ok: true, id: u.id, email: u.email, displayName: u.display_name ?? null, caps };
+}
+
+// ── Admin: staff accounts + capability toggles ────────────────────────────────
+
+/** All staff (any capability), with their caps + grade/scan workload counts. */
+export async function listStaffWithCounts() {
+  const r = await db.execute(sql`
+    SELECT u.id, u.email, u.display_name, u.can_grade, u.can_scan, u.can_print,
+      (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'assigned')::int AS grade_assigned,
+      (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'pending_review')::int AS grade_pending,
+      (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'approved')::int AS grade_approved,
+      (SELECT COUNT(*) FROM submissions s WHERE s.scan_assigned_to = u.id AND s.deleted_at IS NULL AND s.scan_status = 'assigned')::int AS scan_assigned
+    FROM users u
+    WHERE u.deleted_at IS NULL AND u.role <> 'admin' AND u.role <> 'customer'
+      AND (u.can_grade OR u.can_scan OR u.can_print)
+    ORDER BY u.created_at DESC
+  `);
+  return (r.rows as any[]).map((u) => ({
+    id: u.id,
+    email: u.email,
+    displayName: u.display_name ?? null,
+    caps: { grade: !!u.can_grade, scan: !!u.can_scan, print: !!u.can_print },
+    gradeAssigned: Number(u.grade_assigned || 0),
+    gradePending: Number(u.grade_pending || 0),
+    gradeApproved: Number(u.grade_approved || 0),
+    scanAssigned: Number(u.scan_assigned || 0),
+  }));
+}
+
+/** Create a staff account (role='staff') with capability flags. Rejects on
+ *  duplicate email or weak password. No self-signup — admin only. */
+export async function createStaffAccount(
+  email: string,
+  password: string,
+  displayName: string | null,
+  caps: Caps,
+  adminUser: string
+): Promise<{ ok: true; id: string; email: string } | { ok: false; status: number; error: string }> {
+  const cleanEmail = String(email || "")
+    .toLowerCase()
+    .trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return { ok: false, status: 400, error: "Invalid email address" };
+  const pw = validatePassword(password || "");
+  if (!pw.valid) return { ok: false, status: 400, error: pw.message || "Weak password" };
+  const existing = await db.execute(sql`SELECT id, deleted_at FROM users WHERE LOWER(email) = ${cleanEmail} LIMIT 1`);
+  if ((existing.rows[0] as any) && !(existing.rows[0] as any).deleted_at) {
+    return { ok: false, status: 409, error: "An account with that email already exists" };
+  }
+  const hash = await hashPassword(password);
+  const r = await db.execute(sql`
+    INSERT INTO users (email, password_hash, display_name, role, email_verified, can_grade, can_scan, can_print, created_at, updated_at)
+    VALUES (${cleanEmail}, ${hash}, ${displayName?.trim() || null}, 'staff', true, ${!!caps.grade}, ${!!caps.scan}, ${!!caps.print}, NOW(), NOW())
+    RETURNING id, email
+  `);
+  const row = r.rows[0] as any;
+  await storage.writeAuditLog("user", row.id, "staff_create", adminUser, { email: cleanEmail, caps });
+  return { ok: true, id: row.id, email: row.email };
+}
+
+/** Set a staffer's capability flags (admin). Audited. */
+export async function setStaffCapabilities(userId: string, caps: Partial<Caps>, adminUser: string) {
+  const u = await db.execute(sql`SELECT id, role FROM users WHERE id = ${userId} AND deleted_at IS NULL LIMIT 1`);
+  if (!(u.rows[0] as any)) return { ok: false as const, status: 404, error: "User not found" };
+  if ((u.rows[0] as any).role === "admin")
+    return { ok: false as const, status: 400, error: "Admins already have all capabilities" };
+  await db.execute(sql`
+    UPDATE users SET
+      can_grade = ${caps.grade === undefined ? sql`can_grade` : caps.grade},
+      can_scan  = ${caps.scan === undefined ? sql`can_scan` : caps.scan},
+      can_print = ${caps.print === undefined ? sql`can_print` : caps.print},
+      updated_at = NOW()
+    WHERE id = ${userId}
+  `);
+  await storage.writeAuditLog("user", userId, "staff_capabilities_set", adminUser, caps as Record<string, unknown>);
+  return { ok: true as const };
+}
+
+// ── Scanner: assignment (submission-level) ────────────────────────────────────
+
+async function canScan(userId: string): Promise<boolean> {
+  const r = await db.execute(
+    sql`SELECT 1 FROM users WHERE id = ${userId} AND can_scan = true AND deleted_at IS NULL LIMIT 1`
+  );
+  return r.rows.length > 0;
+}
+
+export async function assignScanSubmissions(staffId: string, submissionIds: number[], adminUser: string) {
+  if (!(await canScan(staffId))) return { ok: false as const, status: 400, error: "Not a can_scan staffer" };
+  const clean = submissionIds.filter((n) => Number.isInteger(n) && n > 0);
+  if (!clean.length) return { ok: false as const, status: 400, error: "No submission ids" };
+  const r = await db.execute(sql`
+    UPDATE submissions
+    SET scan_assigned_to = ${staffId}, scan_status = 'assigned', scan_assigned_at = NOW(), updated_at = NOW()
+    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND scan_status <> 'scanned'
+    RETURNING id
+  `);
+  await storage.writeAuditLog("submission", clean.join(","), "scan_assign", adminUser, {
+    staff_id: staffId,
+    submission_ids: clean,
+    count: r.rows.length,
+  });
+  return { ok: true as const, count: r.rows.length };
+}
+
+export async function unassignScanSubmissions(submissionIds: number[], adminUser: string) {
+  const clean = submissionIds.filter((n) => Number.isInteger(n) && n > 0);
+  if (!clean.length) return { ok: false as const, status: 400, error: "No submission ids" };
+  const r = await db.execute(sql`
+    UPDATE submissions
+    SET scan_assigned_to = NULL, scan_status = 'unassigned', scan_assigned_at = NULL, updated_at = NOW()
+    WHERE id = ANY(${clean}::int[]) AND deleted_at IS NULL AND scan_status <> 'scanned'
+    RETURNING id
+  `);
+  await storage.writeAuditLog("submission", clean.join(","), "scan_unassign", adminUser, {
+    submission_ids: clean,
+    count: r.rows.length,
+  });
+  return { ok: true as const, count: r.rows.length };
+}
+
+/** The cards a scanner must photograph for one submission (PII-FREE). */
+async function scanCardsForSubmission(submissionId: number) {
+  const r = await db.execute(sql`
+    SELECT cert.id AS cert_id, cert.cert_id AS cert_id_str, cert.card_name, cert.set_name,
+           cert.card_number_display AS card_number, cert.year_text AS year, cert.variant,
+           cert.grading_front_original, cert.grading_back_original, cert.front_image_path, cert.back_image_path
+    FROM certificates cert JOIN cards c ON cert.card_id = c.id
+    WHERE c.submission_id = ${submissionId} AND cert.deleted_at IS NULL
+    ORDER BY cert.id ASC
+  `);
+  return (r.rows as any[]).map((row) => ({
+    certId: Number(row.cert_id),
+    certIdStr: row.cert_id_str,
+    cardName: row.card_name ?? null,
+    setName: row.set_name ?? null,
+    cardNumber: row.card_number ?? null,
+    year: row.year ?? null,
+    variant: row.variant ?? null,
+    hasFront: !!(row.grading_front_original || row.front_image_path),
+    hasBack: !!(row.grading_back_original || row.back_image_path),
+  }));
+}
+
+/** This scanner's queue: assigned submissions + which cards still need front/back. PII-FREE. */
+export async function getScanQueue(staffId: string) {
+  const subs = await db.execute(sql`
+    SELECT id, tracking_number, scan_status, scan_assigned_at, card_count, service_tier
+    FROM submissions
+    WHERE scan_assigned_to = ${staffId} AND scan_status IN ('assigned') AND deleted_at IS NULL
+    ORDER BY scan_assigned_at DESC NULLS LAST, id DESC
+  `);
+  const items = await Promise.all(
+    (subs.rows as any[]).map(async (s) => ({
+      submissionId: Number(s.id),
+      submissionRef: s.tracking_number,
+      scanStatus: s.scan_status,
+      cardCount: s.card_count,
+      serviceTier: s.service_tier ?? null,
+      cards: await scanCardsForSubmission(Number(s.id)),
+    }))
+  );
+  return items;
+}
+
+/** The submission a cert belongs to, IF it is scan-assigned to this staffer. */
+export async function authorizeScanCert(staffId: string, certId: number): Promise<number | null> {
+  const r = await db.execute(sql`
+    SELECT s.id AS sid
+    FROM certificates cert JOIN cards c ON cert.card_id = c.id JOIN submissions s ON s.id = c.submission_id
+    WHERE cert.id = ${certId} AND s.scan_assigned_to = ${staffId} AND s.scan_status = 'assigned' AND s.deleted_at IS NULL
+    LIMIT 1
+  `);
+  const row = r.rows[0] as any;
+  return row ? Number(row.sid) : null;
+}
+
+/**
+ * Store a raw scan onto a certificate (the scanner's job is capture; the grader
+ * crops via the card tool). Re-encodes to JPEG (strips EXIF), uploads to the
+ * same R2 key the admin upload path uses, sets the original + canonical display
+ * path. Then, if every card in the submission now has front+back, flips the
+ * submission to 'scanned'. PII-FREE. Returns whether the submission is complete.
+ */
+export async function recordScanUpload(
+  certId: number,
+  certIdStr: string,
+  side: "front" | "back",
+  buffer: Buffer,
+  submissionId: number,
+  staffEmail: string
+): Promise<{ submissionScanned: boolean }> {
+  const jpeg = await sharp(buffer).rotate().jpeg({ quality: 85, mozjpeg: true }).toBuffer();
+  const key = `grading/${certIdStr}/${side}_original.jpg`;
+  await uploadToR2(key, jpeg, "image/jpeg");
+  if (side === "front") {
+    await db.execute(
+      sql`UPDATE certificates SET grading_front_original = ${key}, front_image_path = ${key}, updated_at = NOW() WHERE id = ${certId}`
+    );
+  } else {
+    await db.execute(
+      sql`UPDATE certificates SET grading_back_original = ${key}, back_image_path = ${key}, updated_at = NOW() WHERE id = ${certId}`
+    );
+  }
+  await storage.writeAuditLog("certificate", String(certId), "scan_upload", staffEmail, {
+    side,
+    submission_id: submissionId,
+  });
+
+  // Submission complete when every card has both originals.
+  const cards = await scanCardsForSubmission(submissionId);
+  const complete = cards.length > 0 && cards.every((c) => c.hasFront && c.hasBack);
+  if (complete) {
+    await db.execute(
+      sql`UPDATE submissions SET scan_status = 'scanned', updated_at = NOW() WHERE id = ${submissionId} AND scan_status = 'assigned'`
+    );
+    await storage.writeAuditLog("submission", String(submissionId), "scan_complete", staffEmail, {
+      cards: cards.length,
+    });
+  }
+  return { submissionScanned: complete };
+}

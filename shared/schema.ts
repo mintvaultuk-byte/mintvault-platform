@@ -99,6 +99,13 @@ export const users = pgTable("users", {
   // which is dormant in v1 — the gated render path at routes.ts:2950 stays
   // anonymous regardless of either column. Per-event consent UX deferred.
   publicName: boolean("public_name").notNull().default(false),
+  // ── Staff capability flags (migrateStaffCapabilitiesSchema) ────────────────
+  // Unify staff into ONE account + capability toggles. role stays
+  // customer/admin/staff; these booleans say which tools a staffer may use.
+  // ADMIN implicitly has all capabilities (never gated on these flags).
+  canGrade: boolean("can_grade").notNull().default(false),
+  canScan: boolean("can_scan").notNull().default(false),
+  canPrint: boolean("can_print").notNull().default(false),
 });
 
 export type User = typeof users.$inferSelect;
@@ -252,6 +259,12 @@ export const submissions = pgTable("submissions", {
   gradingStatus: varchar("grading_status", { length: 20 }).notNull().default("unassigned"),
   assignedAt: timestamp("assigned_at", { withTimezone: true }),
   gradedAt: timestamp("graded_at", { withTimezone: true }),
+  // ── Scanner assignment (migrateScanSchema) — NEW columns, do NOT reuse the
+  // dead v1 grader columns above (slated for drop). A physical box = a
+  // submission; admin assigns it to a can_scan staffer to photograph its cards.
+  scanAssignedTo: varchar("scan_assigned_to"),
+  scanStatus: varchar("scan_status", { length: 20 }).notNull().default("unassigned"),
+  scanAssignedAt: timestamp("scan_assigned_at", { withTimezone: true }),
 });
 
 export const submissionItems = pgTable("submission_items", {

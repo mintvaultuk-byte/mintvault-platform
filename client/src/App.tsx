@@ -32,6 +32,9 @@ const AdminPage = lazy(() => import("@/pages/admin"));
 const GraderLoginPage = lazy(() => import("@/pages/grader-login"));
 const GraderPage = lazy(() => import("@/pages/grader"));
 const AdminGradersPage = lazy(() => import("@/pages/admin-graders"));
+const StaffLoginPage = lazy(() => import("@/pages/staff-login"));
+const StaffPage = lazy(() => import("@/pages/staff"));
+const AdminStaffPage = lazy(() => import("@/pages/admin-staff"));
 const AdminInstagramPage = lazy(() => import("@/pages/admin-instagram"));
 const AdminWeeklyReelPage = lazy(() => import("@/pages/admin-weekly-reel"));
 const AdminMvgsCalibrationPage = lazy(() => import("@/pages/admin-mvgs-calibration"));
@@ -214,11 +217,16 @@ function Router() {
           <Route path="/pricing-demo" component={PricingDemo} />
           <Route path="/admin" component={AdminPage} />
           <Route path="/admin/promotions" component={AdminPage} />
-          <Route path="/admin/graders" component={AdminGradersPage} />
+          <Route path="/admin/graders" component={AdminStaffPage} />
+          <Route path="/admin/staff" component={AdminStaffPage} />
           <Route path="/grader/login">
             <GraderLoginPage />
           </Route>
           <Route path="/grader" component={GraderPage} />
+          <Route path="/staff/login">
+            <StaffLoginPage />
+          </Route>
+          <Route path="/staff" component={StaffPage} />
           <Route path="/admin/instagram" component={AdminInstagramPage} />
           <Route path="/admin/weekly-reel" component={AdminWeeklyReelPage} />
           <Route path="/admin/mvgs-calibration" component={AdminMvgsCalibrationPage} />

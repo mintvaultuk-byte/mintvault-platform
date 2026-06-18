@@ -17,8 +17,8 @@ import type { Express, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { requireAdmin } from "../auth";
 import { storage } from "../storage";
+import { requireCapability, authenticateStaff } from "../staff";
 import {
-  requireGrader,
   authenticateGrader,
   createGraderAccount,
   getCertAssignment,
@@ -81,14 +81,23 @@ export function registerGraderRoutes(app: Express): void {
   app.post("/api/grader/login", graderLoginLimit, async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body || {};
-      const result = await authenticateGrader(email, password);
+      // Unified: a "grader" is now a staffer with the 'grade' capability. This
+      // legacy endpoint loads full capabilities (the client /grader/login page
+      // redirects to /staff/login; this stays a working alias).
+      const result = await authenticateStaff(email, password);
       if (!result.ok) {
-        await storage.writeAuditLog("grader_auth", String(email || "unknown"), "grader_login_failure", null, {});
+        await storage.writeAuditLog("staff_auth", String(email || "unknown"), "grader_login_failure", null, {});
         return res.status(401).json({ error: "invalid_credentials" });
       }
       await new Promise<void>((resolve, reject) => req.session.regenerate((e) => (e ? reject(e) : resolve())));
       const s = req.session as any;
-      s.isGrader = true;
+      s.isStaff = true;
+      s.staffId = result.id;
+      s.staffEmail = result.email;
+      s.capGrade = result.caps.grade;
+      s.capScan = result.caps.scan;
+      s.capPrint = result.caps.print;
+      s.isGrader = result.caps.grade;
       s.graderId = result.id;
       s.graderEmail = result.email;
       s.isAdmin = false;
@@ -97,8 +106,8 @@ export function registerGraderRoutes(app: Express): void {
       s.userId = undefined;
       s.userEmail = undefined;
       s.customerEmail = undefined;
-      await storage.writeAuditLog("grader_auth", result.id, "grader_login", result.email, {});
-      return res.json({ email: result.email, displayName: result.displayName });
+      await storage.writeAuditLog("staff_auth", result.id, "grader_login", result.email, { caps: result.caps });
+      return res.json({ email: result.email, displayName: result.displayName, caps: result.caps });
     } catch (e: any) {
       console.error("[grader] login error:", e.message);
       return res.status(500).json({ error: "Login failed" });
@@ -116,7 +125,7 @@ export function registerGraderRoutes(app: Express): void {
   });
 
   // ── Grader queue (PII-FREE, cert-level, grouped by submission) ──────────────
-  app.get("/api/grader/queue", requireGrader, async (req: Request, res: Response) => {
+  app.get("/api/grader/queue", requireCapability("grade"), async (req: Request, res: Response) => {
     try {
       const graderId = (req.session as any).graderId as string;
       const rows = await db.execute(sql`
@@ -165,13 +174,13 @@ export function registerGraderRoutes(app: Express): void {
     }
   });
 
-  app.get("/api/grader/earnings", requireGrader, async (req: Request, res: Response) => {
+  app.get("/api/grader/earnings", requireCapability("grade"), async (req: Request, res: Response) => {
     const graderId = (req.session as any).graderId as string;
     return res.json(await getGraderEarnings(graderId));
   });
 
   // ── Grader cert reads (ownership-scoped, PII-free) ──────────────────────────
-  app.get("/api/grader/certificates/:id/images", requireGrader, async (req: Request, res: Response) => {
+  app.get("/api/grader/certificates/:id/images", requireCapability("grade"), async (req: Request, res: Response) => {
     const certId = parseInt(String(req.params.id), 10);
     const auth = await authorizeGraderCert(req, certId);
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
@@ -180,7 +189,7 @@ export function registerGraderRoutes(app: Express): void {
     return res.json(payload);
   });
 
-  app.get("/api/grader/certificates/:id/grading", requireGrader, async (req: Request, res: Response) => {
+  app.get("/api/grader/certificates/:id/grading", requireCapability("grade"), async (req: Request, res: Response) => {
     const certId = parseInt(String(req.params.id), 10);
     const auth = await authorizeGraderCert(req, certId);
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
@@ -190,7 +199,7 @@ export function registerGraderRoutes(app: Express): void {
   });
 
   // ── Grader DRAFT save (repeatable; status stays 'assigned') ─────────────────
-  app.put("/api/grader/certificates/:id/grade", requireGrader, async (req: Request, res: Response) => {
+  app.put("/api/grader/certificates/:id/grade", requireCapability("grade"), async (req: Request, res: Response) => {
     try {
       const certId = parseInt(String(req.params.id), 10);
       const auth = await authorizeGraderCert(req, certId);
@@ -208,7 +217,7 @@ export function registerGraderRoutes(app: Express): void {
 
   // ── Grader SUBMIT for approval (assigned → pending_review) ───────────────────
   // Registered BEFORE the generic :action proxy so 'submit' isn't proxied.
-  app.post("/api/grader/certificates/:id/submit", requireGrader, async (req: Request, res: Response) => {
+  app.post("/api/grader/certificates/:id/submit", requireCapability("grade"), async (req: Request, res: Response) => {
     try {
       const certId = parseInt(String(req.params.id), 10);
       const auth = await authorizeGraderCert(req, certId);
@@ -247,7 +256,7 @@ export function registerGraderRoutes(app: Express): void {
   // Verify grader OWNERSHIP, then re-dispatch to the unchanged admin handler
   // (PII-free, cert-scoped). __graderProxy lets requireAdmin pass for this one
   // request only. Body is already parsed; express.json() is a no-op on re-handle.
-  app.post("/api/grader/certificates/:id/:action", requireGrader, async (req: Request, res: Response) => {
+  app.post("/api/grader/certificates/:id/:action", requireCapability("grade"), async (req: Request, res: Response) => {
     const action = String(req.params.action);
     if (!GRADER_PROXY_ACTIONS.has(action)) return res.status(404).json({ error: "Unknown action" });
     const certId = parseInt(String(req.params.id), 10);

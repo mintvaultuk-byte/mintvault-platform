@@ -1,0 +1,244 @@
+/**
+ * server/routes/staff.ts — unified staff surface (capabilities) + admin staff mgmt.
+ *
+ *  • /api/staff/login + /session + /logout — one staff login that loads the
+ *    person's capabilities into the session.
+ *  • /api/staff/scan/*  — can_scan only. PII-FREE. Submission-grained queue +
+ *    raw front/back upload onto certs (the grader crops later).
+ *  • /api/staff/print/* — can_print only. A re-dispatch proxy to the admin
+ *    SLAB-label paths ONLY (never /api/submissions shipping labels), so a
+ *    printer can never reach a customer address; JSON responses are PII-sanitised.
+ *  • /api/admin/staff/* — admin only: account list+create, capability toggles,
+ *    scan assignment.
+ *
+ * The existing grader routes (server/routes/grader.ts) are re-gated on
+ * requireCapability('grade'); the grade session aliases graderId=staffId so that
+ * machinery (proxy, ownership, sanitizer) is reused unchanged.
+ */
+import type { Express, Request, Response } from "express";
+import rateLimit from "express-rate-limit";
+import multer from "multer";
+import { requireAdmin } from "../auth";
+import { storage } from "../storage";
+import { db } from "../db";
+import { sql } from "drizzle-orm";
+import {
+  requireCapability,
+  authenticateStaff,
+  createStaffAccount,
+  listStaffWithCounts,
+  setStaffCapabilities,
+  assignScanSubmissions,
+  unassignScanSubmissions,
+  getScanQueue,
+  authorizeScanCert,
+  recordScanUpload,
+} from "../staff";
+import { stripGraderPii } from "../grader";
+
+const staffLoginLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many login attempts. Please wait a few minutes and try again." },
+});
+
+const scanUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+export function registerStaffRoutes(app: Express): void {
+  // ── Staff auth ──────────────────────────────────────────────────────────────
+  app.post("/api/staff/login", staffLoginLimit, async (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body || {};
+      const r = await authenticateStaff(email, password);
+      if (!r.ok) {
+        await storage.writeAuditLog("staff_auth", String(email || "unknown"), "staff_login_failure", null, {});
+        return res.status(401).json({ error: "invalid_credentials" });
+      }
+      await new Promise<void>((resolve, reject) => req.session.regenerate((e) => (e ? reject(e) : resolve())));
+      const s = req.session as any;
+      s.isStaff = true;
+      s.staffId = r.id;
+      s.staffEmail = r.email;
+      s.capGrade = r.caps.grade;
+      s.capScan = r.caps.scan;
+      s.capPrint = r.caps.print;
+      // Back-compat: the grade routes + delegation proxy read graderId/graderEmail
+      // and gate on the 'grade' capability — alias them to the staff identity so
+      // the grader machinery is reused unchanged.
+      s.graderId = r.id;
+      s.graderEmail = r.email;
+      s.isGrader = r.caps.grade;
+      // Clear every other login type (no privilege bleed).
+      s.isAdmin = false;
+      s.adminEmail = undefined;
+      s.pendingAdmin = false;
+      s.userId = undefined;
+      s.userEmail = undefined;
+      s.customerEmail = undefined;
+      await storage.writeAuditLog("staff_auth", r.id, "staff_login", r.email, { caps: r.caps });
+      return res.json({ email: r.email, displayName: r.displayName, caps: r.caps });
+    } catch (e: any) {
+      console.error("[staff] login error:", e.message);
+      return res.status(500).json({ error: "Login failed" });
+    }
+  });
+
+  app.post("/api/staff/logout", (req: Request, res: Response) => {
+    req.session.destroy(() => res.json({ ok: true }));
+  });
+
+  app.get("/api/staff/session", (req: Request, res: Response) => {
+    const s = req.session as any;
+    if (s && s.isStaff && s.staffId && !s.isAdmin) {
+      return res.json({
+        authenticated: true,
+        email: s.staffEmail,
+        caps: { grade: !!s.capGrade, scan: !!s.capScan, print: !!s.capPrint },
+      });
+    }
+    return res.json({ authenticated: false });
+  });
+
+  // ── Scanner (can_scan) — PII-FREE, submission-grained ───────────────────────
+  app.get("/api/staff/scan/queue", requireCapability("scan"), async (req: Request, res: Response) => {
+    try {
+      return res.json({ items: await getScanQueue((req.session as any).staffId) });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post(
+    "/api/staff/scan/certificates/:id/upload",
+    requireCapability("scan"),
+    scanUpload.fields([
+      { name: "front", maxCount: 1 },
+      { name: "back", maxCount: 1 },
+    ]),
+    async (req: Request, res: Response) => {
+      try {
+        const certId = parseInt(String(req.params.id), 10);
+        const staffId = (req.session as any).staffId as string;
+        const staffEmail = (req.session as any).staffEmail as string;
+        const sid = await authorizeScanCert(staffId, certId);
+        if (!sid) return res.status(403).json({ error: "This card is not in your scan queue" });
+        const cr = await db.execute(sql`SELECT cert_id FROM certificates WHERE id = ${certId} LIMIT 1`);
+        const certIdStr = (cr.rows[0] as any)?.cert_id;
+        if (!certIdStr) return res.status(404).json({ error: "Not found" });
+        const files = req.files as Record<string, Express.Multer.File[]> | undefined;
+        if (!files?.front?.[0] && !files?.back?.[0]) return res.status(400).json({ error: "No front/back image" });
+        let scanned = false;
+        if (files?.front?.[0]) {
+          ({ submissionScanned: scanned } = await recordScanUpload(
+            certId,
+            certIdStr,
+            "front",
+            files.front[0].buffer,
+            sid,
+            staffEmail
+          ));
+        }
+        if (files?.back?.[0]) {
+          ({ submissionScanned: scanned } = await recordScanUpload(
+            certId,
+            certIdStr,
+            "back",
+            files.back[0].buffer,
+            sid,
+            staffEmail
+          ));
+        }
+        return res.json({ ok: true, submissionScanned: scanned });
+      } catch (e: any) {
+        console.error("[staff] scan upload error:", e.message);
+        return res.status(500).json({ error: e.message });
+      }
+    }
+  );
+
+  // ── Printer (can_print) — re-dispatch proxy to admin SLAB paths ONLY ────────
+  // Sets __graderProxy (the same authorized-staff flag requireAdmin honours),
+  // sanitises JSON responses, and rewrites ONLY to admin slab/print/browser
+  // paths — never /api/submissions, so a customer ADDRESS is never reachable.
+  function printProxy(adminPath: (req: Request) => string) {
+    return (req: Request, res: Response) => {
+      (req as any).__graderProxy = true;
+      const origJson = res.json.bind(res);
+      (res as any).json = (body: any) => origJson(stripGraderPii(body));
+      const qs = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+      req.url = adminPath(req) + qs;
+      return (req.app as any).handle(req, res);
+    };
+  }
+  app.get(
+    "/api/staff/print/browser",
+    requireCapability("print"),
+    printProxy(() => "/api/admin/printing/browser")
+  );
+  app.get(
+    "/api/staff/print/label/:certId/:filename",
+    requireCapability("print"),
+    printProxy(
+      (req) =>
+        `/api/admin/certificates/label/${encodeURIComponent(String(req.params.certId))}/${encodeURIComponent(String(req.params.filename))}`
+    )
+  );
+  app.post(
+    "/api/staff/print/batch",
+    requireCapability("print"),
+    printProxy(() => "/api/admin/print-batch")
+  );
+
+  // ── Admin: staff accounts + capability toggles + scan assignment ────────────
+  app.get("/api/admin/staff", requireAdmin, async (_req: Request, res: Response) => {
+    return res.json({ staff: await listStaffWithCounts() });
+  });
+
+  app.post("/api/admin/staff", requireAdmin, async (req: Request, res: Response) => {
+    const { email, password, display_name, can_grade, can_scan, can_print } = req.body || {};
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const result = await createStaffAccount(
+      email,
+      password,
+      display_name ?? null,
+      { grade: !!can_grade, scan: !!can_scan, print: !!can_print },
+      adminUser
+    );
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.status(201).json({ id: result.id, email: result.email });
+  });
+
+  app.post("/api/admin/staff/:id/capabilities", requireAdmin, async (req: Request, res: Response) => {
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const { can_grade, can_scan, can_print } = req.body || {};
+    const caps: { grade?: boolean; scan?: boolean; print?: boolean } = {};
+    if (typeof can_grade === "boolean") caps.grade = can_grade;
+    if (typeof can_scan === "boolean") caps.scan = can_scan;
+    if (typeof can_print === "boolean") caps.print = can_print;
+    const r = await setStaffCapabilities(String(req.params.id), caps, adminUser);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json({ ok: true });
+  });
+
+  app.post("/api/admin/staff/scan/assign", requireAdmin, async (req: Request, res: Response) => {
+    const { staff_id, submission_ids } = req.body || {};
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const r = await assignScanSubmissions(
+      String(staff_id),
+      Array.isArray(submission_ids) ? submission_ids.map(Number) : [],
+      adminUser
+    );
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json({ ok: true, count: r.count });
+  });
+
+  app.post("/api/admin/staff/scan/unassign", requireAdmin, async (req: Request, res: Response) => {
+    const { submission_ids } = req.body || {};
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const r = await unassignScanSubmissions(Array.isArray(submission_ids) ? submission_ids.map(Number) : [], adminUser);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json({ ok: true, count: r.count });
+  });
+}

@@ -21,6 +21,8 @@ import { migratePromotionsSchema } from "./services/promotionService";
 import { migratePaymentIdempotencySchema } from "./webhookHandlers";
 import { registerGraderRoutes } from "./routes/grader";
 import { migrateGraderSchema, migrateGraderCertSchema, isGraderLocked } from "./grader";
+import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
+import { registerStaffRoutes } from "./routes/staff";
 import {
   BUILD_STAMP,
   pricingTiers,
@@ -1265,6 +1267,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   migratePaymentIdempotencySchema().catch((e: any) => console.error("[payment-idempotency-migrate] error:", e.message));
   migrateGraderSchema().catch((e: any) => console.error("[grader-migrate] error:", e.message));
   migrateGraderCertSchema().catch((e: any) => console.error("[grader-cert-migrate] error:", e.message));
+  migrateStaffCapabilitiesSchema().catch((e: any) => console.error("[staff-caps-migrate] error:", e.message));
+  migrateScanSchema().catch((e: any) => console.error("[scan-migrate] error:", e.message));
   migrateAccountSchema()
     .then(() => migrateMarketplaceSchema())
     .catch((e: any) => console.error("[startup-migration] error:", e.message));
@@ -1288,6 +1292,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerPublicRoutes(app);
   registerAuthRoutes(app);
   registerGraderRoutes(app);
+  registerStaffRoutes(app);
   registerSubmissionRoutes(app);
   registerAdminSubmissionRoutes(app);
   registerAdminConfigRoutes(app);

@@ -180,5 +180,13 @@ declare module "express-session" {
     isGrader: boolean;
     graderId: string; // users.id of the grader (role='grader')
     graderEmail: string;
+    // Unified staff auth (server/staff.ts) — one account + capability flags. The
+    // grade routes alias graderId=staffId so the grader machinery is reused.
+    isStaff: boolean;
+    staffId: string;
+    staffEmail: string;
+    capGrade: boolean;
+    capScan: boolean;
+    capPrint: boolean;
   }
 }
