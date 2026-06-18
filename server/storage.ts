@@ -532,10 +532,17 @@ export class DatabaseStorage implements IStorage {
     // Uses the admin bypass to step around the status-transition trigger, which
     // rejects the uppercase "DRAFT" stored at submission creation.  Transitions
     // to "paid" — the correct next state per the trigger's own transition map.
+    //
+    // ATOMIC SINGLE-WINNER: only the FIRST caller flips the row; RETURNING id
+    // tells us who won. Returns true ONLY for the caller that actually
+    // transitioned it — a replayed Stripe event or a webhook-vs-confirm-payment
+    // race gets false. This is the idempotency gate for fulfilment (credit
+    // consume + promo redeem must run exactly once).
     const numId = id;
+    let won = false;
     await db.transaction(async (tx) => {
       await tx.execute(sql`SET LOCAL mintvault.admin_bypass = 'true'`);
-      await tx.execute(sql`
+      const r = await tx.execute(sql`
         UPDATE submissions
         SET status = 'paid',
             payment_status = 'paid',
@@ -543,9 +550,11 @@ export class DatabaseStorage implements IStorage {
         WHERE id = ${numId}
           AND LOWER(status) = 'draft'
           AND payment_status != 'paid'
+        RETURNING id
       `);
+      won = r.rows.length > 0;
     });
-    return true;
+    return won;
   }
 
   async getSubmissionByPaymentIntentId(paymentIntentId: string): Promise<any | undefined> {

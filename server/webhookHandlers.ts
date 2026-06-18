@@ -1,36 +1,84 @@
-import Stripe from 'stripe';
-import { getStripeSecretKey } from './stripeClient';
-import { storage } from './storage';
-import { sendSubmissionConfirmation } from './email';
-import { db } from './db';
-import { sql } from 'drizzle-orm';
-import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus, quarterKey } from './vault-club-tiers';
-import { findUserByStripeCustomerId, insertVaultClubEvent, grantMemberCredits } from './vault-club';
-import { writeAuthAudit } from './account-auth';
-import { auditLog } from '@shared/schema';
-import {
-  sendVaultClubWelcomeEmail,
-  sendVaultClubCancelledEmail,
-  sendVaultClubPaymentFailedEmail,
-} from './email';
+import Stripe from "stripe";
+import { getStripeSecretKey } from "./stripeClient";
+import { storage } from "./storage";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
+import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus, quarterKey } from "./vault-club-tiers";
+import { findUserByStripeCustomerId, insertVaultClubEvent, grantMemberCredits } from "./vault-club";
+import { writeAuthAudit } from "./account-auth";
+import { auditLog } from "@shared/schema";
+import { fulfilPaidSubmission } from "./routes/submissions";
+import { sendVaultClubWelcomeEmail, sendVaultClubCancelledEmail, sendVaultClubPaymentFailedEmail } from "./email";
+
+/**
+ * Boot migration for payment idempotency. Idempotent + additive — safe to run
+ * on every boot.
+ *  - stripe_webhook_events: a generic processed-event ledger so a replayed
+ *    Stripe event id becomes a no-op (belt-and-suspenders behind the atomic
+ *    paid-transition gate inside fulfilPaidSubmission).
+ *  - uq_member_credits_used_for_submission: a partial UNIQUE index guaranteeing
+ *    a single submission can never consume more than one Vault Club credit. It
+ *    is wrapped in its own try/catch with a LOUD log: if a legacy duplicate
+ *    already exists the index build fails HERE (never silently) without
+ *    blocking boot, so the data issue is surfaced rather than swallowed.
+ */
+export async function migratePaymentIdempotencySchema(): Promise<void> {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS stripe_webhook_events (
+      stripe_event_id TEXT PRIMARY KEY,
+      event_type TEXT,
+      processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  try {
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_member_credits_used_for_submission
+        ON member_credits (used_for_submission_id)
+        WHERE used_for_submission_id IS NOT NULL
+    `);
+    console.log("[payment-idempotency-migrate] stripe_webhook_events + uq_member_credits_used_for_submission ensured");
+  } catch (e: any) {
+    console.error(
+      "[payment-idempotency-migrate] ⚠️ uq_member_credits_used_for_submission FAILED — " +
+        "likely a pre-existing duplicate used_for_submission_id. Resolve manually; boot continues.",
+      e?.message || e
+    );
+  }
+}
+
+/**
+ * Atomically claim a Stripe event id for processing. Returns true the FIRST time
+ * an id is seen (caller should process), false if it was already recorded
+ * (caller should skip). The INSERT ... ON CONFLICT DO NOTHING makes the claim
+ * race-safe across concurrent webhook deliveries.
+ */
+async function claimStripeEvent(eventId: string, eventType: string): Promise<boolean> {
+  const res = await db.execute(sql`
+    INSERT INTO stripe_webhook_events (stripe_event_id, event_type)
+    VALUES (${eventId}, ${eventType})
+    ON CONFLICT (stripe_event_id) DO NOTHING
+    RETURNING stripe_event_id
+  `);
+  return res.rows.length > 0;
+}
 
 export class WebhookHandlers {
   static async processWebhook(payload: Buffer, signature: string): Promise<void> {
     if (!Buffer.isBuffer(payload)) {
       throw new Error(
-        'STRIPE WEBHOOK ERROR: Payload must be a Buffer. ' +
-        'Ensure webhook route is registered BEFORE app.use(express.json()).'
+        "STRIPE WEBHOOK ERROR: Payload must be a Buffer. " +
+          "Ensure webhook route is registered BEFORE app.use(express.json())."
       );
     }
 
     const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
     const webhookSecret2 = process.env.STRIPE_WEBHOOK_SECRET_2;
     if (!webhookSecret) {
-      throw new Error('STRIPE_WEBHOOK_SECRET env var is not set');
+      throw new Error("STRIPE_WEBHOOK_SECRET env var is not set");
     }
 
     const secretKey = await getStripeSecretKey();
-    const stripe = new Stripe(secretKey, { apiVersion: '2025-08-27.basil' as any });
+    const stripe = new Stripe(secretKey, { apiVersion: "2025-08-27.basil" as any });
 
     // Try primary secret first, then secondary (used when two Stripe webhook
     // endpoints are active simultaneously — e.g. during DNS cutover when both
@@ -48,7 +96,7 @@ export class WebhookHandlers {
 
     // ── Existing grading payment flow ──────────────────────────────────────────
 
-    if (event.type === 'payment_intent.succeeded') {
+    if (event.type === "payment_intent.succeeded") {
       const pi = event.data.object as Stripe.PaymentIntent;
       console.log(`[webhook] payment_intent.succeeded for PI ${pi.id}`);
 
@@ -58,60 +106,41 @@ export class WebhookHandlers {
         return;
       }
 
-      // Idempotency: skip if already marked paid
-      if (submission.paymentStatus === 'paid') {
-        console.log(`[webhook] Submission ${submission.submissionId} already paid — skipping duplicate`);
+      // Belt-and-suspenders event dedup. The atomic paid-transition gate inside
+      // fulfilPaidSubmission is the real guard; this just avoids reprocessing a
+      // replayed Stripe event id at all (e.g. Stripe re-delivering on timeout).
+      const fresh = await claimStripeEvent(event.id, event.type);
+      if (!fresh) {
+        console.log(`[webhook] event ${event.id} (${event.type}) already processed — skipping`);
         return;
       }
 
-      await storage.markSubmissionAsPaid(Number(submission.id));
-      // Set estimated completion date based on service tier
-      storage.setEstimatedCompletionDate(Number(submission.id)).catch(() => {});
-
-      if (submission.email) {
-        let user = await storage.getUserByEmail(submission.email);
-        if (!user) {
-          user = await storage.createUser({
-            email: submission.email,
-            firstName: submission.firstName || undefined,
-            lastName: submission.lastName || undefined,
-          });
-        }
-        await storage.updateSubmission(Number(submission.id), { userId: user.id });
-      }
-
-      sendSubmissionConfirmation({
-        email: submission.email || '',
-        firstName: submission.firstName || 'Customer',
-        submissionId: submission.submissionId,
-        cardCount: submission.cardCount || 0,
-        tier: submission.serviceTier || 'standard',
-        total: pi.amount || 0,
-        serviceType: submission.serviceType || undefined,
-        crossoverCompany: submission.crossoverCompany || undefined,
-        crossoverOriginalGrade: submission.crossoverOriginalGrade || undefined,
-        crossoverCertNumber: submission.crossoverCertNumber || undefined,
-      }).catch((err: any) => console.error('[webhook] Email send error:', err.message));
-
-      console.log(`[webhook] Submission ${submission.submissionId} → status=new paymentStatus=paid`);
+      // SHARED idempotent fulfilment — the SAME function /api/confirm-payment
+      // calls. Whoever wins the atomic paid transition runs the once-only
+      // side-effects (mark paid, consume credit, redeem promo, link user,
+      // email); the other caller is a logged no-op. This closes the inverse gap
+      // where a webhook-only completion previously never consumed the credit or
+      // redeemed the promo code.
+      await fulfilPaidSubmission(submission, pi.metadata || {}, pi.amount || 0);
+      console.log(`[webhook] Submission ${submission.submissionId} fulfilment dispatched (paymentStatus=paid)`);
     }
 
     // ── Existing estimate credits checkout ─────────────────────────────────────
 
-    if (event.type === 'checkout.session.completed') {
+    if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
       const meta = session.metadata || {};
 
       // Vault Club subscription checkout
-      if (session.mode === 'subscription' && meta.user_id) {
+      if (session.mode === "subscription" && meta.user_id) {
         await WebhookHandlers.handleSubscriptionCheckoutCompleted(event.id, session, stripe);
         return;
       }
 
       // Legacy estimate credits checkout
-      if (meta.type === 'estimate_credits') {
-        const email = (meta.email || '').trim().toLowerCase();
-        const credits = parseInt(meta.credits || '0', 10);
+      if (meta.type === "estimate_credits") {
+        const email = (meta.email || "").trim().toLowerCase();
+        const credits = parseInt(meta.credits || "0", 10);
         if (!email || credits <= 0) return;
 
         console.log(`[webhook] estimate_credits: +${credits} for ${email}`);
@@ -133,46 +162,46 @@ export class WebhookHandlers {
             `);
           }
         } catch (err: any) {
-          console.error('[webhook] estimate_credits upsert error:', err.message);
+          console.error("[webhook] estimate_credits upsert error:", err.message);
         }
       }
     }
 
     // ── Vault Club subscription events ────────────────────────────────────────
 
-    if (event.type === 'customer.subscription.updated') {
+    if (event.type === "customer.subscription.updated") {
       await WebhookHandlers.handleSubscriptionUpdated(event.id, event.data.object as Stripe.Subscription);
     }
 
-    if (event.type === 'customer.subscription.deleted') {
+    if (event.type === "customer.subscription.deleted") {
       await WebhookHandlers.handleSubscriptionDeleted(event.id, event.data.object as Stripe.Subscription);
     }
 
-    if (event.type === 'invoice.payment_succeeded') {
+    if (event.type === "invoice.payment_succeeded") {
       await WebhookHandlers.handleInvoicePaymentSucceeded(event.id, event.data.object as Stripe.Invoice);
     }
 
-    if (event.type === 'invoice.payment_failed') {
+    if (event.type === "invoice.payment_failed") {
       await WebhookHandlers.handleInvoicePaymentFailed(event.id, event.data.object as Stripe.Invoice);
     }
 
     // ── Stripe Connect marketplace events ────────────────────────────────────
 
-    if (event.type === 'account.updated') {
+    if (event.type === "account.updated") {
       // Connect account event — only handle if we recognise it as ours
       const account = event.data.object as Stripe.Account;
-      if (account.metadata?.mintvault_purpose === 'marketplace_seller') {
+      if (account.metadata?.mintvault_purpose === "marketplace_seller") {
         await WebhookHandlers.handleConnectAccountUpdated(event, stripe);
       }
     }
 
-    if (event.type === 'account.application.deauthorized') {
+    if (event.type === "account.application.deauthorized") {
       await WebhookHandlers.handleConnectAccountDeauthorized(event);
     }
 
-    if (event.type === 'capability.updated') {
+    if (event.type === "capability.updated") {
       // Log only for now — the account.updated handler will capture the derived state
-      console.log('[webhook] capability.updated for account:', event.account);
+      console.log("[webhook] capability.updated for account:", event.account);
     }
   }
 
@@ -181,7 +210,7 @@ export class WebhookHandlers {
   private static async handleSubscriptionCheckoutCompleted(
     eventId: string,
     session: Stripe.Checkout.Session,
-    stripe: Stripe,
+    stripe: Stripe
   ): Promise<void> {
     const meta = session.metadata || {};
     const userId = meta.user_id;
@@ -189,7 +218,7 @@ export class WebhookHandlers {
     const interval = meta.interval;
 
     if (!userId || !tier || !(tier in VAULT_CLUB_TIERS)) {
-      console.warn('[webhook] subscription checkout missing metadata:', meta);
+      console.warn("[webhook] subscription checkout missing metadata:", meta);
       return;
     }
 
@@ -199,8 +228,8 @@ export class WebhookHandlers {
       sub = await stripe.subscriptions.retrieve(subscriptionId);
     }
 
-    const isTrialing = sub?.status === 'trialing';
-    const status = isTrialing ? 'trialing' : 'active';
+    const isTrialing = sub?.status === "trialing";
+    const status = isTrialing ? "trialing" : "active";
     const renewsAt = (sub as any)?.current_period_end
       ? new Date((sub as any).current_period_end * 1000).toISOString()
       : null;
@@ -231,12 +260,17 @@ export class WebhookHandlers {
     `);
 
     await insertVaultClubEvent({
-      userId, stripeEventId: eventId,
-      eventType: 'subscription.created', tier, status,
+      userId,
+      stripeEventId: eventId,
+      eventType: "subscription.created",
+      tier,
+      status,
     });
 
     // Fetch user for email + username (username determines whether showroom_active flipped on)
-    const userRows = await db.execute(sql`SELECT email, display_name, username FROM users WHERE id = ${userId} LIMIT 1`);
+    const userRows = await db.execute(
+      sql`SELECT email, display_name, username FROM users WHERE id = ${userId} LIMIT 1`
+    );
     const user = userRows.rows[0] as any;
     if (user?.email) {
       sendVaultClubWelcomeEmail({
@@ -246,20 +280,17 @@ export class WebhookHandlers {
       }).catch(() => {});
     }
 
-    await writeAuthAudit('vault_club.subscribed', userId, 'webhook', { tier, status });
+    await writeAuthAudit("vault_club.subscribed", userId, "webhook", { tier, status });
     if (user?.username) {
-      await writeAuthAudit('showroom.activated', userId, 'stripe-webhook', { tier, subscriptionId });
+      await writeAuthAudit("showroom.activated", userId, "stripe-webhook", { tier, subscriptionId });
     }
     console.log(`[webhook] Vault Club subscribed: user=${userId} tier=${tier} status=${status}`);
   }
 
   // ── Subscription updated ───────────────────────────────────────────────────
 
-  private static async handleSubscriptionUpdated(
-    eventId: string,
-    sub: Stripe.Subscription,
-  ): Promise<void> {
-    const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
+  private static async handleSubscriptionUpdated(eventId: string, sub: Stripe.Subscription): Promise<void> {
+    const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
     const user = await findUserByStripeCustomerId(customerId);
     if (!user) {
       console.warn(`[webhook] subscription.updated: no user for customer ${customerId}`);
@@ -270,22 +301,19 @@ export class WebhookHandlers {
     // Extract tier from subscription price metadata
     const priceItem = sub.items?.data?.[0];
     const tierFromMeta = priceItem?.price?.metadata?.mintvault_tier as VaultClubTier | undefined;
-    const tier = (tierFromMeta && tierFromMeta in VAULT_CLUB_TIERS) ? tierFromMeta : (user.vault_club_tier as VaultClubTier | null);
+    const tier =
+      tierFromMeta && tierFromMeta in VAULT_CLUB_TIERS ? tierFromMeta : (user.vault_club_tier as VaultClubTier | null);
 
     const status = sub.status;
     const renewsAt = (sub as any).current_period_end
       ? new Date((sub as any).current_period_end * 1000).toISOString()
       : null;
-    const cancelsAt = sub.cancel_at
-      ? new Date(sub.cancel_at * 1000).toISOString()
-      : null;
+    const cancelsAt = sub.cancel_at ? new Date(sub.cancel_at * 1000).toISOString() : null;
 
     // If tier changed, refresh AI credits to new tier amount
     const previousTier = user.vault_club_tier as VaultClubTier | null;
     const tierChanged = tier && previousTier && tier !== previousTier;
-    const newCredits = tier && tierChanged
-      ? VAULT_CLUB_TIERS[tier].ai_credits_monthly
-      : null;
+    const newCredits = tier && tierChanged ? VAULT_CLUB_TIERS[tier].ai_credits_monthly : null;
 
     await db.execute(sql`
       UPDATE users SET
@@ -300,21 +328,21 @@ export class WebhookHandlers {
     `);
 
     await insertVaultClubEvent({
-      userId, stripeEventId: eventId,
-      eventType: 'subscription.updated', tier, status: status,
+      userId,
+      stripeEventId: eventId,
+      eventType: "subscription.updated",
+      tier,
+      status: status,
     });
 
-    await writeAuthAudit('vault_club.updated', userId, 'webhook', { tier, status });
+    await writeAuthAudit("vault_club.updated", userId, "webhook", { tier, status });
     console.log(`[webhook] Vault Club updated: user=${userId} tier=${tier} status=${status}`);
   }
 
   // ── Subscription deleted ───────────────────────────────────────────────────
 
-  private static async handleSubscriptionDeleted(
-    eventId: string,
-    sub: Stripe.Subscription,
-  ): Promise<void> {
-    const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
+  private static async handleSubscriptionDeleted(eventId: string, sub: Stripe.Subscription): Promise<void> {
+    const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
     const user = await findUserByStripeCustomerId(customerId);
     if (!user) return;
     const userId = user.id as string;
@@ -331,8 +359,10 @@ export class WebhookHandlers {
     `);
 
     await insertVaultClubEvent({
-      userId, stripeEventId: eventId,
-      eventType: 'subscription.deleted', status: 'canceled',
+      userId,
+      stripeEventId: eventId,
+      eventType: "subscription.deleted",
+      status: "canceled",
     });
 
     const userRows = await db.execute(sql`SELECT email, display_name FROM users WHERE id = ${userId} LIMIT 1`);
@@ -341,23 +371,20 @@ export class WebhookHandlers {
       sendVaultClubCancelledEmail({ email: userRow.email, displayName: userRow.display_name || null }).catch(() => {});
     }
 
-    await writeAuthAudit('vault_club.canceled', userId, 'webhook', {});
-    await writeAuthAudit('showroom.deactivated', userId, 'stripe-webhook', {
-      tier: 'silver',
+    await writeAuthAudit("vault_club.canceled", userId, "webhook", {});
+    await writeAuthAudit("showroom.deactivated", userId, "stripe-webhook", {
+      tier: "silver",
       subscriptionId: sub.id,
-      reason: 'subscription_cancelled',
+      reason: "subscription_cancelled",
     });
     console.log(`[webhook] Vault Club canceled: user=${userId}`);
   }
 
   // ── Invoice payment succeeded ──────────────────────────────────────────────
 
-  private static async handleInvoicePaymentSucceeded(
-    eventId: string,
-    invoice: Stripe.Invoice,
-  ): Promise<void> {
+  private static async handleInvoicePaymentSucceeded(eventId: string, invoice: Stripe.Invoice): Promise<void> {
     if (!invoice.customer) return;
-    const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer.id;
+    const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer.id;
     const user = await findUserByStripeCustomerId(customerId);
     if (!user) return;
     const userId = user.id as string;
@@ -365,7 +392,7 @@ export class WebhookHandlers {
     if (!tier) return;
 
     // Only refill credits on recurring invoices (billing_reason = 'subscription_cycle')
-    const isRenewal = (invoice as any).billing_reason === 'subscription_cycle';
+    const isRenewal = (invoice as any).billing_reason === "subscription_cycle";
 
     if (isRenewal) {
       // Refill AI credits (no rollover)
@@ -400,24 +427,23 @@ export class WebhookHandlers {
     }
 
     await insertVaultClubEvent({
-      userId, stripeEventId: eventId,
-      eventType: 'invoice.payment_succeeded', tier,
-      status: 'active',
+      userId,
+      stripeEventId: eventId,
+      eventType: "invoice.payment_succeeded",
+      tier,
+      status: "active",
       amountPence: invoice.amount_paid || null,
     });
 
-    await writeAuthAudit('vault_club.renewed', userId, 'webhook', { tier });
+    await writeAuthAudit("vault_club.renewed", userId, "webhook", { tier });
     console.log(`[webhook] Vault Club invoice paid: user=${userId} tier=${tier} renewal=${isRenewal}`);
   }
 
   // ── Invoice payment failed ─────────────────────────────────────────────────
 
-  private static async handleInvoicePaymentFailed(
-    eventId: string,
-    invoice: Stripe.Invoice,
-  ): Promise<void> {
+  private static async handleInvoicePaymentFailed(eventId: string, invoice: Stripe.Invoice): Promise<void> {
     if (!invoice.customer) return;
-    const customerId = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer.id;
+    const customerId = typeof invoice.customer === "string" ? invoice.customer : invoice.customer.id;
     const user = await findUserByStripeCustomerId(customerId);
     if (!user) return;
     const userId = user.id as string;
@@ -442,14 +468,18 @@ export class WebhookHandlers {
     }
 
     await insertVaultClubEvent({
-      userId, stripeEventId: eventId,
-      eventType: 'invoice.payment_failed', status: isGrace ? 'grace' : 'past_due',
+      userId,
+      stripeEventId: eventId,
+      eventType: "invoice.payment_failed",
+      status: isGrace ? "grace" : "past_due",
     });
 
     const userRows = await db.execute(sql`SELECT email, display_name FROM users WHERE id = ${userId} LIMIT 1`);
     const userRow = userRows.rows[0] as any;
     if (userRow?.email) {
-      sendVaultClubPaymentFailedEmail({ email: userRow.email, displayName: userRow.display_name || null }).catch(() => {});
+      sendVaultClubPaymentFailedEmail({ email: userRow.email, displayName: userRow.display_name || null }).catch(
+        () => {}
+      );
     }
 
     console.log(`[webhook] Vault Club payment failed: user=${userId} attempt=${attemptCount} grace=${isGrace}`);
@@ -457,16 +487,13 @@ export class WebhookHandlers {
 
   // ── Stripe Connect: account.updated ──────────────────────────────────────
 
-  private static async handleConnectAccountUpdated(
-    event: Stripe.Event,
-    _stripe: Stripe,
-  ): Promise<void> {
+  private static async handleConnectAccountUpdated(event: Stripe.Event, _stripe: Stripe): Promise<void> {
     const account = event.data.object as Stripe.Account;
     const mintvaultUserId = account.metadata?.mintvault_user_id;
     const purpose = account.metadata?.mintvault_purpose;
 
-    if (!mintvaultUserId || purpose !== 'marketplace_seller') {
-      console.warn('[webhook] account.updated: missing or non-marketplace metadata, skipping', account.id);
+    if (!mintvaultUserId || purpose !== "marketplace_seller") {
+      console.warn("[webhook] account.updated: missing or non-marketplace metadata, skipping", account.id);
       return;
     }
 
@@ -477,13 +504,13 @@ export class WebhookHandlers {
 
     let newStatus: string;
     if (disabled) {
-      newStatus = 'suspended';
+      newStatus = "suspended";
     } else if (chargesEnabled && payoutsEnabled && detailsSubmitted) {
-      newStatus = 'active';
+      newStatus = "active";
     } else if (detailsSubmitted) {
-      newStatus = 'pending'; // submitted but still verifying
+      newStatus = "pending"; // submitted but still verifying
     } else {
-      newStatus = 'pending'; // still onboarding
+      newStatus = "pending"; // still onboarding
     }
 
     // Read current status to detect activation transition
@@ -508,9 +535,9 @@ export class WebhookHandlers {
     `);
 
     await db.insert(auditLog).values({
-      entityType: 'user',
+      entityType: "user",
       entityId: mintvaultUserId,
-      action: 'marketplace.seller_account_updated',
+      action: "marketplace.seller_account_updated",
       adminUser: null,
       details: {
         stripe_account_id: account.id,
@@ -524,22 +551,22 @@ export class WebhookHandlers {
     });
 
     // Detect first-time activation
-    if (newStatus === 'active' && previousStatus !== 'active') {
+    if (newStatus === "active" && previousStatus !== "active") {
       // TODO: send "You're ready to sell on MintVault" email
-      console.log('[marketplace] seller activated:', mintvaultUserId);
+      console.log("[marketplace] seller activated:", mintvaultUserId);
     }
 
-    console.log(`[webhook] account.updated: user=${mintvaultUserId} status=${previousStatus}→${newStatus} charges=${chargesEnabled} payouts=${payoutsEnabled}`);
+    console.log(
+      `[webhook] account.updated: user=${mintvaultUserId} status=${previousStatus}→${newStatus} charges=${chargesEnabled} payouts=${payoutsEnabled}`
+    );
   }
 
   // ── Stripe Connect: account.application.deauthorized ─────────────────────
 
-  private static async handleConnectAccountDeauthorized(
-    event: Stripe.Event,
-  ): Promise<void> {
+  private static async handleConnectAccountDeauthorized(event: Stripe.Event): Promise<void> {
     const accountId = event.account as string;
     if (!accountId) {
-      console.warn('[webhook] account.application.deauthorized: no account ID on event');
+      console.warn("[webhook] account.application.deauthorized: no account ID on event");
       return;
     }
 
@@ -564,9 +591,9 @@ export class WebhookHandlers {
     `);
 
     await db.insert(auditLog).values({
-      entityType: 'user',
+      entityType: "user",
       entityId: userId,
-      action: 'marketplace.seller_deauthorized',
+      action: "marketplace.seller_deauthorized",
       adminUser: null,
       details: { stripe_connect_account_id: accountId },
     });

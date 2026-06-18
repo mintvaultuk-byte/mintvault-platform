@@ -67,6 +67,139 @@ async function getTierCapacity(tierSlug: string): Promise<CapacityEntry> {
   return entry;
 }
 
+/**
+ * Idempotent fulfilment of a paid grading submission. Called by BOTH
+ * /api/confirm-payment AND the Stripe grading webhook (payment_intent.succeeded).
+ *
+ * The atomic markSubmissionAsPaid() gate is the single source of truth for
+ * "who fulfils": only the FIRST caller to flip the submission to paid runs the
+ * once-only side-effects (consume Vault Club credit, redeem promo code, link
+ * user, send confirmation email). Every other caller — a Stripe retry, the
+ * webhook racing confirm-payment, or a double-clicked confirm — short-circuits
+ * to a logged no-op. This closes the double-consume hole (credit/promo counted
+ * twice) AND the inverse gap (a webhook-only completion that previously never
+ * consumed the credit or redeemed the code).
+ *
+ * NEVER throws on a side-effect failure: the charge already succeeded, so a
+ * failed email or credit lookup must not bubble up and 500 the caller. Every
+ * branch logs with the human submissionId for traceability.
+ */
+export async function fulfilPaidSubmission(
+  submission: any,
+  piMeta: Record<string, string | undefined>,
+  piAmount: number
+): Promise<{ fulfilled: boolean }> {
+  const sid: string = submission.submissionId;
+  const numId = Number(submission.id);
+
+  // ATOMIC GATE — only the first transition to paid wins.
+  const won = await storage.markSubmissionAsPaid(numId);
+  if (!won) {
+    console.log(`[fulfil] submission ${sid} already paid, skipping (idempotent no-op)`);
+    return { fulfilled: false };
+  }
+  console.log(`[fulfil] submission ${sid} — first paid transition, fulfilling`);
+
+  storage
+    .setEstimatedCompletionDate(numId)
+    .catch((e: any) => console.error(`[fulfil] submission ${sid} setEstimatedCompletionDate error:`, e?.message || e));
+
+  // Consume a Vault Club credit if one was applied at checkout.
+  if (piMeta.creditApplied === "true" && piMeta.creditType && submission.email) {
+    try {
+      const creditUser = await storage.getUserByEmail(submission.email);
+      if (creditUser) {
+        const consumed = await consumeCredit(creditUser.id, piMeta.creditType, numId);
+        if (!consumed) {
+          console.error(
+            `[fulfil] submission ${sid} credit NOT consumed (none available for ${piMeta.creditType}) — reconcile`
+          );
+        } else {
+          console.log(`[fulfil] submission ${sid} consumed 1 ${piMeta.creditType} credit`);
+        }
+      } else {
+        console.error(`[fulfil] submission ${sid} creditApplied but no user for ${submission.email} — reconcile`);
+      }
+    } catch (e: any) {
+      console.error(`[fulfil] submission ${sid} credit consume error:`, e?.message || e);
+    }
+  }
+
+  // Redeem the promo code (atomic increment + audit, cap-guarded) if one
+  // discounted this order. The charge already reflects the discount, so we
+  // never fail fulfilment on a redeem error.
+  if (piMeta.promoCodeId) {
+    const codeId = Number(piMeta.promoCodeId);
+    if (Number.isInteger(codeId) && codeId > 0) {
+      try {
+        await redeemPromoCode(
+          codeId,
+          piMeta.promoCode || null,
+          piMeta.promoCodePercent ? Number(piMeta.promoCodePercent) : null,
+          numId
+        );
+        console.log(`[fulfil] submission ${sid} redeemed promo code id=${codeId}`);
+      } catch (e: any) {
+        console.error(`[fulfil] submission ${sid} promo redeem error:`, e?.message || e);
+      }
+    }
+  }
+
+  // Link (or create) the customer user record.
+  if (submission.email) {
+    try {
+      let user = await storage.getUserByEmail(submission.email);
+      if (!user) {
+        user = await storage.createUser({
+          email: submission.email,
+          firstName: submission.firstName || submission.first_name || undefined,
+          lastName: submission.lastName || submission.last_name || undefined,
+        });
+      }
+      await storage.updateSubmission(submission.id, { userId: user.id });
+    } catch (e: any) {
+      console.error(`[fulfil] submission ${sid} user-link error:`, e?.message || e);
+    }
+  }
+
+  // Confirmation email (V2 with legal terms when the flag is live, else legacy
+  // with crossover fields). Fire-and-forget — logged, never blocks.
+  try {
+    const packingSlipToken = crypto.createHmac("sha256", getSignedUrlSecret()).update(sid).digest("hex").slice(0, 16);
+    const { FEATURE_FLAGS: FF2 } = await import("../config/feature-flags");
+    const { TERMS_VERSION: TV2 } = await import("../config/legal");
+    const emailData = {
+      email: submission.email || "",
+      firstName: submission.firstName || submission.first_name || "Customer",
+      submissionId: sid,
+      cardCount: submission.cardCount || submission.card_count || 0,
+      tier: submission.serviceTier || submission.service_tier || "standard",
+      total: piAmount || 0,
+      serviceType: submission.serviceType || submission.service_type || undefined,
+      labelToken: packingSlipToken,
+    };
+    if (FF2.LEGAL_PAGES_LIVE) {
+      sendSubmissionConfirmationV2({
+        ...emailData,
+        termsVersion: TV2,
+        termsAcceptedAt: new Date().toISOString(),
+      }).catch((e: any) => console.error(`[fulfil] submission ${sid} confirmation email (v2) error:`, e?.message || e));
+    } else {
+      sendSubmissionConfirmation({
+        ...emailData,
+        crossoverCompany: submission.crossover_company || submission.crossoverCompany || undefined,
+        crossoverOriginalGrade: submission.crossover_original_grade || submission.crossoverOriginalGrade || undefined,
+        crossoverCertNumber: submission.crossover_cert_number || submission.crossoverCertNumber || undefined,
+      }).catch((e: any) => console.error(`[fulfil] submission ${sid} confirmation email error:`, e?.message || e));
+    }
+  } catch (e: any) {
+    console.error(`[fulfil] submission ${sid} email dispatch error:`, e?.message || e);
+  }
+
+  console.log(`[fulfil] submission ${sid} fulfilled (paymentStatus=paid)`);
+  return { fulfilled: true };
+}
+
 // Payment endpoints — generous for legit users retrying declined cards
 const paymentRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -589,99 +722,17 @@ export function registerSubmissionRoutes(app: Express): void {
       const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
 
       if (paymentIntent.status === "succeeded") {
-        if (submission.paymentStatus === "paid") {
-          // Already processed (e.g. webhook fired first) — return success without re-processing
-          const packingSlipToken = crypto
-            .createHmac("sha256", getSignedUrlSecret())
-            .update(submission.submissionId)
-            .digest("hex")
-            .slice(0, 16);
-          return res.json({
-            success: true,
-            submissionId: submission.submissionId,
-            status: submission.status,
-            packingSlipToken,
-          });
-        }
-        await storage.markSubmissionAsPaid(Number(submission.id));
-        storage.setEstimatedCompletionDate(Number(submission.id)).catch(() => {});
-
-        // Consume Vault Club credit if one was applied at checkout
-        const piMeta = paymentIntent.metadata || {};
-        if (piMeta.creditApplied === "true" && piMeta.creditType) {
-          if (submission.email) {
-            const creditUser = await storage.getUserByEmail(submission.email);
-            if (creditUser) {
-              await consumeCredit(creditUser.id, piMeta.creditType, Number(submission.id)).catch((e: any) =>
-                console.error("[checkout] credit consume error:", e.message)
-              );
-            }
-          }
-        }
-
-        // Redeem the promo code (atomic increment + audit, cap-guarded) if one
-        // discounted this order. Same first-transition guard as credit above, so it
-        // counts exactly once. Never fails the payment — the charge already reflects
-        // the discount.
-        if (piMeta.promoCodeId) {
-          const codeId = Number(piMeta.promoCodeId);
-          if (Number.isInteger(codeId) && codeId > 0) {
-            await redeemPromoCode(
-              codeId,
-              piMeta.promoCode || null,
-              piMeta.promoCodePercent ? Number(piMeta.promoCodePercent) : null,
-              Number(submission.id)
-            ).catch((e: any) => console.error("[checkout] promo code redeem error:", e.message));
-          }
-        }
-
-        if (submission.email) {
-          let user = await storage.getUserByEmail(submission.email);
-          if (!user) {
-            user = await storage.createUser({
-              email: submission.email,
-              firstName: submission.firstName || undefined,
-              lastName: submission.lastName || undefined,
-            });
-          }
-          await storage.updateSubmission(submission.id, {
-            userId: user.id,
-          });
-        }
+        // Idempotent fulfilment — the once-only side-effects (mark paid, consume
+        // credit, redeem promo, link user, email) run for exactly ONE caller
+        // (this handler or the Stripe webhook, whoever wins the atomic paid
+        // transition). A duplicate/raced confirm is a safe no-op.
+        await fulfilPaidSubmission(submission, paymentIntent.metadata || {}, paymentIntent.amount || 0);
 
         const packingSlipToken = crypto
           .createHmac("sha256", getSignedUrlSecret())
           .update(submission.submissionId)
           .digest("hex")
           .slice(0, 16);
-
-        const { FEATURE_FLAGS: FF2 } = await import("../config/feature-flags");
-        const { TERMS_VERSION: TV2 } = await import("../config/legal");
-        const emailData = {
-          email: submission.email || "",
-          firstName: submission.firstName || "Customer",
-          submissionId: submission.submissionId,
-          cardCount: submission.cardCount || 0,
-          tier: submission.serviceTier || "standard",
-          total: paymentIntent.amount || 0,
-          serviceType: submission.serviceType || undefined,
-          labelToken: packingSlipToken,
-        };
-        if (FF2.LEGAL_PAGES_LIVE) {
-          sendSubmissionConfirmationV2({
-            ...emailData,
-            termsVersion: TV2,
-            termsAcceptedAt: new Date().toISOString(),
-          }).catch(() => {});
-        } else {
-          sendSubmissionConfirmation({
-            ...emailData,
-            crossoverCompany: submission.crossover_company || undefined,
-            crossoverOriginalGrade: submission.crossover_original_grade || undefined,
-            crossoverCertNumber: submission.crossover_cert_number || undefined,
-          }).catch(() => {});
-        }
-
         return res.json({
           success: true,
           submissionId: submission.submissionId,
