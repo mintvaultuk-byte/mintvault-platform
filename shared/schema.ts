@@ -1147,7 +1147,12 @@ export function isValidNumericGrade(grade: number): boolean {
 }
 
 export function isNonNumericGrade(gradeType: string): boolean {
-  return gradeType === "NO" || gradeType === "AA";
+  // Accept the legacy long-form aliases that some grade write-paths persisted
+  // ("not_original" == NO / Authentic, "authentic_altered" == AA) so cert pages,
+  // /verify, search, labels and PDFs classify those certs correctly. New writes
+  // should use the canonical "NO"/"AA"; normalising the write-paths + a data
+  // backfill is the follow-up that lets these aliases be removed again.
+  return gradeType === "NO" || gradeType === "AA" || gradeType === "not_original" || gradeType === "authentic_altered";
 }
 
 export function gradeLabel(grade: number): string {
@@ -1174,8 +1179,8 @@ export function gradeLabel(grade: number): string {
 }
 
 export function gradeLabelFull(gradeType: string, gradeOverall: string): string {
-  if (gradeType === "NO") return "AUTHENTIC";
-  if (gradeType === "AA") return "AUTHENTIC ALTERED";
+  if (gradeType === "NO" || gradeType === "not_original") return "AUTHENTIC";
+  if (gradeType === "AA" || gradeType === "authentic_altered") return "AUTHENTIC ALTERED";
   // Tier NAME from the exact grade via the canonical MVGS tier table — no
   // rounding, so half grades read their TRUE tier (8.5 → "NM-MINT+", 9.5 →
   // "MINT+") and agree with the displayed number. Same source the cert page,
