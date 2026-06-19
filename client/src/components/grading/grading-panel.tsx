@@ -25,6 +25,9 @@ import CrossGradeDisplay from "./cross-grade-display";
 // (/api/pokemon-sets, /api/cards/autofill) are public — no auth change needed.
 import { PokemonSetPicker } from "@/components/certificate-form";
 import { autofillCard } from "@/lib/api";
+// Same canonical variant list the admin CertificateForm uses (client-side
+// constant — no auth needed, unlike the admin-only /api/admin/variant-options).
+import { VARIANT_OPTIONS } from "@/lib/variantOptions";
 
 // Shared calculation imports (client-side re-implementations)
 import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel } from "./grade-logic";
@@ -588,7 +591,8 @@ export default function GradingPanel({
           return;
         }
         setShowConfirm(true);
-      } else if (e.key === "q" || e.key === "Q") {
+      } else if ((e.key === "q" || e.key === "Q") && !graderMode) {
+        // Quick Grade is admin-only — graders use the full MVGS panel.
         setQuickGrade((v) => {
           const next = !v;
           try {
@@ -1681,15 +1685,23 @@ export default function GradingPanel({
                 </label>
                 <label className="flex flex-col gap-0.5 col-span-2">
                   <span className={lbl}>Variant</span>
+                  {/* Datalist combobox: suggests the canonical variant labels but
+                      still saves any free-typed value (matches the admin form). */}
                   <input
                     type="text"
                     value={idVariant}
                     placeholder="Holo"
                     disabled={idLocked}
+                    list="grader-variant-options"
                     onChange={(e) => setIdVariant(e.target.value)}
                     data-testid="input-identity-variant"
                     className={inputCls}
                   />
+                  <datalist id="grader-variant-options">
+                    {VARIANT_OPTIONS.filter((v) => v.code !== "NONE" && v.code !== "OTHER").map((v) => (
+                      <option key={v.code} value={v.label} />
+                    ))}
+                  </datalist>
                 </label>
               </div>
             </div>
@@ -1717,23 +1729,26 @@ export default function GradingPanel({
           >
             Revert to AI
           </button>
-          <button
-            type="button"
-            onClick={() =>
-              setQuickGrade((v) => {
-                const next = !v;
-                try {
-                  localStorage.setItem("mv_quick_grade", next ? "1" : "0");
-                } catch {}
-                return next;
-              })
-            }
-            className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[var(--admin-gold)]/20 text-[var(--admin-gold)] border border-[var(--admin-gold)]/40" : "text-[var(--admin-ink-dim)] border border-[var(--admin-line)] hover:text-[var(--admin-ink-dim)]"}`}
-            title="Toggle quick-grade mode (Q)"
-          >
-            <Zap size={10} />
-            Quick
-          </button>
+          {/* Quick Grade is admin-only — graders use the full MVGS panel. */}
+          {!graderMode && (
+            <button
+              type="button"
+              onClick={() =>
+                setQuickGrade((v) => {
+                  const next = !v;
+                  try {
+                    localStorage.setItem("mv_quick_grade", next ? "1" : "0");
+                  } catch {}
+                  return next;
+                })
+              }
+              className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[var(--admin-gold)]/20 text-[var(--admin-gold)] border border-[var(--admin-gold)]/40" : "text-[var(--admin-ink-dim)] border border-[var(--admin-line)] hover:text-[var(--admin-ink-dim)]"}`}
+              title="Toggle quick-grade mode (Q)"
+            >
+              <Zap size={10} />
+              Quick
+            </button>
+          )}
           {approved && (
             <span className="flex items-center gap-1.5 text-[var(--admin-green)] text-xs">
               <CheckCircle2 size={13} />
@@ -1769,7 +1784,7 @@ export default function GradingPanel({
         </label>
       )}
 
-      {quickGrade && (
+      {!graderMode && quickGrade && (
         <QuickGrade
           subgrades={{ centering, corners: sub.corners, edges: sub.edges, surface: sub.surface }}
           onChange={(s) => {
