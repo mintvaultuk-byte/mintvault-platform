@@ -26,6 +26,7 @@ import {
   requireCapability,
   authenticateStaff,
   createStaffAccount,
+  deleteStaffAccount,
   listStaffWithCounts,
   setStaffCapabilities,
   assignScanSubmissions,
@@ -227,6 +228,15 @@ export function registerStaffRoutes(app: Express): void {
     if (typeof can_scan === "boolean") caps.scan = can_scan;
     if (typeof can_print === "boolean") caps.print = can_print;
     const r = await setStaffCapabilities(String(req.params.id), caps, adminUser);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json({ ok: true });
+  });
+
+  // Soft-delete a staff account (deleted_at). Blocks admins + staffers with open
+  // grading work; audited. See deleteStaffAccount.
+  app.delete("/api/admin/staff/:id", requireAdmin, async (req: Request, res: Response) => {
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const r = await deleteStaffAccount(String(req.params.id), adminUser);
     if (!r.ok) return res.status(r.status).json({ error: r.error });
     return res.json({ ok: true });
   });

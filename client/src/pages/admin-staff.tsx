@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
+import { Trash2 } from "lucide-react";
 
 /**
  * Admin staff hub (evolves admin-graders). One staff account list with per-person
@@ -126,6 +127,19 @@ export default function AdminStaffPage() {
     setNEmail("");
     setNPw("");
     setNName("");
+    load();
+  }
+
+  async function deleteStaff(s: Staff) {
+    setMsg(null);
+    setErr(null);
+    if (!window.confirm(`Delete ${s.email}? This cannot be undone.`)) return;
+    const res = await fetch(`/api/admin/staff/${s.id}`, { method: "DELETE", credentials: "include" });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      return setErr(d.error || "Failed to delete staff");
+    }
+    setMsg(`Deleted ${s.email}`);
     load();
   }
 
@@ -618,6 +632,7 @@ export default function AdminStaffPage() {
                   <th>Scan</th>
                   <th>Print</th>
                   <th>Workload</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -638,6 +653,17 @@ export default function AdminStaffPage() {
                     <td className="text-xs text-[#E8E4DC]/70">
                       {s.caps.grade && `${s.gradeAssigned}a/${s.gradePending}p/${s.gradeApproved}✓ `}
                       {s.caps.scan && `${s.scanAssigned} box`}
+                    </td>
+                    <td className="text-right">
+                      <button
+                        type="button"
+                        onClick={() => deleteStaff(s)}
+                        title={`Delete ${s.email}`}
+                        data-testid={`button-delete-staff-${s.id}`}
+                        className="text-[#E8E4DC]/30 hover:text-red-400 p-1 rounded transition-colors"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </td>
                   </tr>
                 ))}

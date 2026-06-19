@@ -193,6 +193,41 @@ export async function setStaffCapabilities(userId: string, caps: Partial<Caps>, 
   return { ok: true as const };
 }
 
+/**
+ * Soft-delete a staff account (sets deleted_at — NEVER a hard delete). Refuses
+ * admin accounts, and refuses anyone still holding open grading work
+ * (grader_status 'assigned'/'pending_review') until those certs are reassigned.
+ * Audited.
+ */
+export async function deleteStaffAccount(staffId: string, adminUser: string) {
+  const u = await db.execute(
+    sql`SELECT id, email, role, can_grade, can_scan, can_print FROM users WHERE id = ${staffId} AND deleted_at IS NULL LIMIT 1`
+  );
+  const row = u.rows[0] as any;
+  if (!row) return { ok: false as const, status: 404, error: "Staff account not found" };
+  if (row.role === "admin") return { ok: false as const, status: 400, error: "Admin accounts cannot be deleted here" };
+
+  const open = await db.execute(
+    sql`SELECT COUNT(*)::int AS n FROM certificates
+        WHERE assigned_grader_id = ${staffId} AND grader_status IN ('assigned', 'pending_review') AND deleted_at IS NULL`
+  );
+  const n = Number((open.rows[0] as any)?.n || 0);
+  if (n > 0) return { ok: false as const, status: 400, error: `Reassign ${n} card(s) before deleting.` };
+
+  const r = await db.execute(
+    sql`UPDATE users SET deleted_at = NOW(), updated_at = NOW()
+        WHERE id = ${staffId} AND role <> 'admin' AND deleted_at IS NULL RETURNING id`
+  );
+  if (!r.rows.length) return { ok: false as const, status: 409, error: "Account is not deletable or already deleted" };
+
+  await storage.writeAuditLog("user", staffId, "staff_deleted", adminUser, {
+    email: row.email,
+    role: row.role,
+    caps: { grade: !!row.can_grade, scan: !!row.can_scan, print: !!row.can_print },
+  });
+  return { ok: true as const };
+}
+
 // ── Scanner: assignment (submission-level) ────────────────────────────────────
 
 async function canScan(userId: string): Promise<boolean> {
