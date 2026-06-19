@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from "react";
+import { Fragment, useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
-import { Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 
 /**
  * Admin staff hub (evolves admin-graders). One staff account list with per-person
@@ -147,6 +147,61 @@ export default function AdminStaffPage() {
       return setErr(d.error || "Failed to delete staff");
     }
     setMsg(`Deleted ${s.email}`);
+    load();
+  }
+
+  // Per-row edit of a staff member's login email / password. The server refuses
+  // admin + non-staff rows; a blank password Save is a deliberate no-op.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editEmail, setEditEmail] = useState("");
+  const [editPw, setEditPw] = useState("");
+
+  function startEdit(s: Staff) {
+    setMsg(null);
+    setErr(null);
+    setEditingId(s.id);
+    setEditEmail(s.email);
+    setEditPw("");
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setEditEmail("");
+    setEditPw("");
+  }
+
+  async function saveEmail(s: Staff) {
+    setMsg(null);
+    setErr(null);
+    const email = editEmail.trim();
+    if (!email) return setErr("Enter an email address.");
+    if (email.toLowerCase() === s.email.toLowerCase()) return setErr("That's already their email — nothing changed.");
+    const res = await fetch(`/api/admin/staff/${s.id}/email`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return setErr(d.error || "Failed to update email");
+    setMsg("Email updated");
+    cancelEdit();
+    load();
+  }
+
+  async function savePassword(s: Staff) {
+    setMsg(null);
+    setErr(null);
+    if (!editPw.trim()) return setErr("Enter a new password first — nothing was changed.");
+    const res = await fetch(`/api/admin/staff/${s.id}/password`, {
+      method: "PATCH",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: editPw }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return setErr(d.error || "Failed to reset password");
+    setMsg("Password reset — they sign in at /staff/login with the new password");
+    cancelEdit();
     load();
   }
 
@@ -644,35 +699,100 @@ export default function AdminStaffPage() {
               </thead>
               <tbody>
                 {staff.map((s) => (
-                  <tr key={s.id} className="border-t border-[#D4AF37]/10">
-                    <td className="py-1.5">
-                      {s.displayName || "—"} <span className="text-[#E8E4DC]/50 text-xs">{s.email}</span>
-                    </td>
-                    {(["grade", "scan", "print"] as const).map((cap) => (
-                      <td key={cap}>
-                        <input
-                          type="checkbox"
-                          checked={s.caps[cap]}
-                          onChange={(e) => toggleCap(s.id, cap, e.target.checked)}
-                        />
+                  <Fragment key={s.id}>
+                    <tr className="border-t border-[#D4AF37]/10">
+                      <td className="py-1.5">
+                        {s.displayName || "—"} <span className="text-[#E8E4DC]/50 text-xs">{s.email}</span>
                       </td>
-                    ))}
-                    <td className="text-xs text-[#E8E4DC]/70">
-                      {s.caps.grade && `${s.gradeAssigned}a/${s.gradePending}p/${s.gradeApproved}✓ `}
-                      {s.caps.scan && `${s.scanAssigned} box`}
-                    </td>
-                    <td className="text-right">
-                      <button
-                        type="button"
-                        onClick={() => deleteStaff(s)}
-                        title={`Delete ${s.email}`}
-                        data-testid={`button-delete-staff-${s.id}`}
-                        className="text-[#E8E4DC]/30 hover:text-red-400 p-1 rounded transition-colors"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </tr>
+                      {(["grade", "scan", "print"] as const).map((cap) => (
+                        <td key={cap}>
+                          <input
+                            type="checkbox"
+                            checked={s.caps[cap]}
+                            onChange={(e) => toggleCap(s.id, cap, e.target.checked)}
+                          />
+                        </td>
+                      ))}
+                      <td className="text-xs text-[#E8E4DC]/70">
+                        {s.caps.grade && `${s.gradeAssigned}a/${s.gradePending}p/${s.gradeApproved}✓ `}
+                        {s.caps.scan && `${s.scanAssigned} box`}
+                      </td>
+                      <td className="text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() => (editingId === s.id ? cancelEdit() : startEdit(s))}
+                          title={`Edit ${s.email}`}
+                          data-testid={`button-edit-staff-${s.id}`}
+                          className="text-[#E8E4DC]/30 hover:text-[#D4AF37] p-1 rounded transition-colors"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => deleteStaff(s)}
+                          title={`Delete ${s.email}`}
+                          data-testid={`button-delete-staff-${s.id}`}
+                          className="text-[#E8E4DC]/30 hover:text-red-400 p-1 rounded transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                    {editingId === s.id && (
+                      <tr className="border-t border-[#D4AF37]/10 bg-[#D4AF37]/5">
+                        <td colSpan={6} className="px-2 py-3">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+                            <div className="flex items-center gap-2 flex-1 min-w-[220px]">
+                              <input
+                                className="ss-input"
+                                type="email"
+                                value={editEmail}
+                                onChange={(e) => setEditEmail(e.target.value)}
+                                placeholder="Email"
+                                aria-label={`Email for ${s.email}`}
+                                data-testid={`input-edit-email-${s.id}`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => saveEmail(s)}
+                                className="border border-[#D4AF37]/40 px-3 py-1.5 rounded text-xs whitespace-nowrap hover:bg-[#D4AF37]/10"
+                                data-testid={`button-save-email-${s.id}`}
+                              >
+                                Save email
+                              </button>
+                            </div>
+                            <div className="flex items-center gap-2 flex-1 min-w-[220px]">
+                              <input
+                                className="ss-input"
+                                type="text"
+                                value={editPw}
+                                onChange={(e) => setEditPw(e.target.value)}
+                                placeholder="Set new password"
+                                autoComplete="new-password"
+                                aria-label={`New password for ${s.email}`}
+                                data-testid={`input-edit-password-${s.id}`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => savePassword(s)}
+                                className="border border-[#D4AF37]/40 px-3 py-1.5 rounded text-xs whitespace-nowrap hover:bg-[#D4AF37]/10"
+                                data-testid={`button-save-password-${s.id}`}
+                              >
+                                Save password
+                              </button>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={cancelEdit}
+                              className="text-[#E8E4DC]/40 hover:text-[#E8E4DC] text-xs px-2 py-1.5 whitespace-nowrap"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

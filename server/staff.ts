@@ -238,6 +238,109 @@ export async function setStaffCapabilities(userId: string, caps: Partial<Caps>, 
 }
 
 /**
+ * Guard shared by the email/password edit endpoints. A row is editable here ONLY
+ * if it is a LIVE staff account (deleted_at IS NULL), NEVER an admin, and NEVER a
+ * plain customer — "staff" = role in (staff/grader/senior_grader) AND ≥1
+ * capability, mirroring listStaffWithCounts + setStaffCapabilities's refusal
+ * pattern. Returns the current row or a typed refusal.
+ */
+async function loadStaffForEdit(
+  userId: string
+): Promise<
+  { ok: true; row: { id: string; email: string; role: string } } | { ok: false; status: number; error: string }
+> {
+  const r = await db.execute(sql`
+    SELECT id, email, role, can_grade, can_scan, can_print
+    FROM users WHERE id = ${userId} AND deleted_at IS NULL LIMIT 1
+  `);
+  const row = r.rows[0] as any;
+  if (!row) return { ok: false, status: 404, error: "Staff account not found" };
+  if (row.role === "admin") return { ok: false, status: 400, error: "Admin accounts cannot be edited here" };
+  const isStaffRole = row.role === "staff" || row.role === "grader" || row.role === "senior_grader";
+  const hasCap = !!(row.can_grade || row.can_scan || row.can_print);
+  if (!isStaffRole || !hasCap) return { ok: false, status: 400, error: "Not a staff account" };
+  return { ok: true, row: { id: String(row.id), email: String(row.email), role: String(row.role) } };
+}
+
+/**
+ * Change a staffer's login email (admin). Staff-only via loadStaffForEdit (never
+ * admin/customer). Normalises to lowercase (same as createStaffAccount), enforces
+ * uniqueness against every OTHER row case-insensitively (with the users.email
+ * unique index as a backstop → 409), and audits staff_email_changed
+ * {old_email,new_email}. Because authenticateStaff matches on LOWER(email), this
+ * changes their /staff/login email.
+ */
+export async function updateStaffEmail(
+  userId: string,
+  email: string,
+  adminUser: string
+): Promise<{ ok: true; email: string } | { ok: false; status: number; error: string }> {
+  const guard = await loadStaffForEdit(userId);
+  if (!guard.ok) return guard;
+  const cleanEmail = String(email || "")
+    .toLowerCase()
+    .trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return { ok: false, status: 400, error: "Invalid email address" };
+  const oldEmail = guard.row.email;
+  // Same email (case-insensitive) → no-op; don't write a spurious audit row.
+  if (
+    cleanEmail ===
+    String(oldEmail || "")
+      .toLowerCase()
+      .trim()
+  )
+    return { ok: true, email: cleanEmail };
+
+  const dup = await db.execute(
+    sql`SELECT id FROM users WHERE LOWER(email) = ${cleanEmail} AND id <> ${userId} LIMIT 1`
+  );
+  if (dup.rows.length) return { ok: false, status: 409, error: "That email is already in use" };
+
+  try {
+    const upd = await db.execute(
+      sql`UPDATE users SET email = ${cleanEmail}, updated_at = NOW()
+          WHERE id = ${userId} AND deleted_at IS NULL AND role <> 'admin' RETURNING id`
+    );
+    // Zero rows = the row vanished/changed between guard and UPDATE — surface, never succeed silently.
+    if (!upd.rows.length) return { ok: false, status: 409, error: "Email not updated" };
+  } catch (e: any) {
+    if (e?.code === "23505") return { ok: false, status: 409, error: "That email is already in use" };
+    throw e;
+  }
+  await storage.writeAuditLog("user", userId, "staff_email_changed", adminUser, {
+    old_email: oldEmail,
+    new_email: cleanEmail,
+  });
+  return { ok: true, email: cleanEmail };
+}
+
+/**
+ * Reset a staffer's login password (admin). Staff-only via loadStaffForEdit
+ * (never admin/customer). Runs the SAME validatePassword rules + hashPassword
+ * path as createStaffAccount; NEVER stores or logs plain text. Audits
+ * staff_password_reset with NO password value in details. Changes /staff/login.
+ */
+export async function resetStaffPassword(
+  userId: string,
+  password: string,
+  adminUser: string
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const guard = await loadStaffForEdit(userId);
+  if (!guard.ok) return guard;
+  const pw = validatePassword(password || "");
+  if (!pw.valid) return { ok: false, status: 400, error: pw.message || "Weak password" };
+  const hash = await hashPassword(password);
+  const upd = await db.execute(
+    sql`UPDATE users SET password_hash = ${hash}, updated_at = NOW()
+        WHERE id = ${userId} AND deleted_at IS NULL AND role <> 'admin' RETURNING id`
+  );
+  if (!upd.rows.length) return { ok: false, status: 409, error: "Password not updated" };
+  // details is intentionally empty — NEVER the password (plain OR hash).
+  await storage.writeAuditLog("user", userId, "staff_password_reset", adminUser, {});
+  return { ok: true };
+}
+
+/**
  * Soft-delete a staff account (sets deleted_at — NEVER a hard delete). Refuses
  * admin accounts, and refuses anyone still holding open grading work
  * (grader_status 'assigned'/'pending_review') until those certs are reassigned.

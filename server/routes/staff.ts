@@ -29,6 +29,8 @@ import {
   deleteStaffAccount,
   listStaffWithCounts,
   setStaffCapabilities,
+  updateStaffEmail,
+  resetStaffPassword,
   assignScanSubmissions,
   unassignScanSubmissions,
   getScanQueue,
@@ -230,6 +232,26 @@ export function registerStaffRoutes(app: Express): void {
     if (typeof can_scan === "boolean") caps.scan = can_scan;
     if (typeof can_print === "boolean") caps.print = can_print;
     const r = await setStaffCapabilities(String(req.params.id), caps, adminUser);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json({ ok: true });
+  });
+
+  // Change a staffer's login email. Staff-only (never admin/customer); enforces
+  // case-insensitive uniqueness (409); audits staff_email_changed {old,new}.
+  app.patch("/api/admin/staff/:id/email", requireAdmin, async (req: Request, res: Response) => {
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const { email } = req.body || {};
+    const r = await updateStaffEmail(String(req.params.id), String(email ?? ""), adminUser);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json({ ok: true, email: r.email });
+  });
+
+  // Reset a staffer's login password. Staff-only; same validate/hash path as
+  // create; audits staff_password_reset with NO password in details.
+  app.patch("/api/admin/staff/:id/password", requireAdmin, async (req: Request, res: Response) => {
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const { password } = req.body || {};
+    const r = await resetStaffPassword(String(req.params.id), String(password ?? ""), adminUser);
     if (!r.ok) return res.status(r.status).json({ error: r.error });
     return res.json({ ok: true });
   });
