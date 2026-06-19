@@ -59,7 +59,10 @@ export default function AdminStaffPage() {
   const [, navigate] = useLocation();
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [staff, setStaff] = useState<Staff[]>([]);
-  const [rate, setRate] = useState(0);
+  // Rate is a STRING buffer so decimals type cleanly. A controlled type=number
+  // bound to Number() strips the "0." intermediate (spec returns "" for it), which
+  // made sub-£1 values like 0.80 impossible to enter. Parsed to a number on save.
+  const [rate, setRate] = useState("0");
   const [dailyTarget, setDailyTarget] = useState(20);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -87,7 +90,7 @@ export default function AdminStaffPage() {
     if (s.ok) setStaff((await s.json()).staff || []);
     if (r.ok) {
       const d = await r.json();
-      setRate(d.rate || 0);
+      setRate(String(d.rate ?? 0));
       setDailyTarget(d.dailyTarget || 20);
     }
   }, []);
@@ -148,14 +151,16 @@ export default function AdminStaffPage() {
     e.preventDefault();
     setMsg(null);
     setErr(null);
+    const rateNum = Number(rate);
+    if (!Number.isFinite(rateNum) || rateNum < 0) return setErr("Enter a valid rate, e.g. 0.80");
     const res = await fetch("/api/admin/grader-rate", {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rate, dailyTarget }),
+      body: JSON.stringify({ rate: rateNum, dailyTarget }),
     });
     if (!res.ok) return setErr("Failed to save rate");
-    setMsg(`Saved · £${Number(rate).toFixed(2)}/card · target ${dailyTarget} cards/day`);
+    setMsg(`Saved · £${rateNum.toFixed(2)}/card · target ${dailyTarget} cards/day`);
   }
 
   // GRADE assignment — cross-submission grading queue (cert-level)
@@ -380,11 +385,12 @@ export default function AdminStaffPage() {
               <span className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/50">Rate (£/card)</span>
               <input
                 className="ss-input w-32"
-                type="number"
-                min="0"
-                step="0.01"
+                type="text"
+                inputMode="decimal"
+                placeholder="e.g. 0.80"
                 value={rate}
-                onChange={(e) => setRate(Number(e.target.value))}
+                onChange={(e) => setRate(e.target.value.replace(/[^0-9.]/g, ""))}
+                data-testid="input-rate"
               />
             </label>
             <label className="flex flex-col gap-1">
