@@ -136,8 +136,13 @@ export function registerGraderRoutes(app: Express): void {
                cert.card_number_display AS card_number, cert.year_text AS year, cert.variant, cert.grade,
                c.submission_id, s.tracking_number AS submission_ref, s.service_tier
         FROM certificates cert
-        JOIN cards c ON cert.card_id = c.id
-        JOIN submissions s ON s.id = c.submission_id
+        -- LEFT JOIN: a cert assigned at the cert level can have a NULL card_id (no
+        -- linked card row). getGraderAnalytics counts certs directly with no join,
+        -- so an INNER JOIN here silently dropped those assigned certs from the queue
+        -- (the count showed N "assigned" while the list was empty). Card name/set/etc.
+        -- come from cert.* columns regardless; only submission grouping goes null.
+        LEFT JOIN cards c ON cert.card_id = c.id
+        LEFT JOIN submissions s ON s.id = c.submission_id
         WHERE cert.assigned_grader_id = ${graderId}
           AND cert.grader_status IN ('assigned', 'pending_review')
           AND cert.deleted_at IS NULL

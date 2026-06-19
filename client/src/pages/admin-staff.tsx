@@ -56,6 +56,17 @@ function statusClass(s: string): string {
   }
 }
 
+// If you've signed into the staff/grader portal in this browser, that login
+// replaces your admin session (shared cookie), so admin endpoints return 403
+// "graders cannot access admin endpoints". Surface a clear re-login hint instead
+// of a vague "failed" banner. Returns null when it's some other error.
+function adminBlockedMsg(status: number, err?: string): string | null {
+  if (status === 403 && /graders cannot access admin/i.test(err || "")) {
+    return "You're signed into the staff portal in this browser, so admin actions are blocked here. Sign in again at /admin/login, then try again.";
+  }
+  return null;
+}
+
 export default function AdminStaffPage() {
   const [, navigate] = useLocation();
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -122,7 +133,7 @@ export default function AdminStaffPage() {
       }),
     });
     const d = await res.json().catch(() => ({}));
-    if (!res.ok) return setErr(d.error || "Failed to create staff");
+    if (!res.ok) return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to create staff");
     if (d.promoted) {
       setMsg(
         `Existing account promoted to staff — ${d.email} signs in at /staff/login with their existing password ` +
@@ -144,7 +155,7 @@ export default function AdminStaffPage() {
     const res = await fetch(`/api/admin/staff/${s.id}`, { method: "DELETE", credentials: "include" });
     if (!res.ok) {
       const d = await res.json().catch(() => ({}));
-      return setErr(d.error || "Failed to delete staff");
+      return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to delete staff");
     }
     setMsg(`Deleted ${s.email}`);
     load();
@@ -182,7 +193,7 @@ export default function AdminStaffPage() {
       body: JSON.stringify({ email }),
     });
     const d = await res.json().catch(() => ({}));
-    if (!res.ok) return setErr(d.error || "Failed to update email");
+    if (!res.ok) return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to update email");
     setMsg("Email updated");
     cancelEdit();
     load();
@@ -199,7 +210,7 @@ export default function AdminStaffPage() {
       body: JSON.stringify({ password: editPw }),
     });
     const d = await res.json().catch(() => ({}));
-    if (!res.ok) return setErr(d.error || "Failed to reset password");
+    if (!res.ok) return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to reset password");
     setMsg("Password reset — they sign in at /staff/login with the new password");
     cancelEdit();
     load();
@@ -218,7 +229,7 @@ export default function AdminStaffPage() {
     });
     if (!res.ok) {
       const d = await res.json().catch(() => ({}));
-      return setErr(d.error || "Failed to update");
+      return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to update");
     }
     load();
   }
@@ -235,7 +246,10 @@ export default function AdminStaffPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rate: rateNum, dailyTarget }),
     });
-    if (!res.ok) return setErr("Failed to save rate");
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}) as any);
+      return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to save rate");
+    }
     setMsg(`Saved · £${rateNum.toFixed(2)}/card · target ${dailyTarget} cards/day`);
   }
 
@@ -353,7 +367,7 @@ export default function AdminStaffPage() {
       body: JSON.stringify({ staff_id: sStaff, submission_ids }),
     });
     const d = await res.json().catch(() => ({}));
-    if (!res.ok) return setErr(d.error || `${action} failed`);
+    if (!res.ok) return setErr(adminBlockedMsg(res.status, d.error) || d.error || `${action} failed`);
     setMsg(`Scan ${action}: ${d.count} submission(s)`);
     load();
   }
