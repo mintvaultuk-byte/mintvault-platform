@@ -342,7 +342,6 @@ export const certificates = pgTable("certificates", {
   issuedByUserId: varchar("issued_by_user_id"),
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("issued_at").notNull().defaultNow(),
-  certSeq: integer("cert_seq"),
   qrPayloadUrl: text("qr_payload_url"),
   labelType: text("label_type").notNull().default("Standard"),
   gradeType: text("grade_type").notNull().default("numeric"),
@@ -954,7 +953,6 @@ export const insertCertificateSchema = createInsertSchema(certificates).omit({
   issuedByUserId: true,
   deletedAt: true,
   createdAt: true,
-  certSeq: true,
   qrPayloadUrl: true,
   updatedAt: true,
   nfcUid: true,
@@ -1203,6 +1201,18 @@ export const tierCapacity = pgTable("tier_capacity", {
 });
 
 export type TierCapacityRecord = typeof tierCapacity.$inferSelect;
+
+// ── Certificate number allocator ────────────────────────────────────────────
+// Single-row counter (id = 1) that hands out monotonic MV numbers via an atomic
+// UPDATE ... RETURNING in storage.getNextCertId(). Declared here for the single
+// source of truth; the table is created idempotently (CREATE TABLE IF NOT EXISTS)
+// at allocation time so a fresh database self-bootstraps. Was previously created
+// implicitly and invisible to the schema.
+export const certCounter = pgTable("cert_counter", {
+  id: integer("id").primaryKey().default(1),
+  lastIssued: integer("last_issued").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+});
 
 // ── Stolen card registry ─────────────────────────────────────────────────────
 // When a card owner reports their graded card as stolen, a report is created

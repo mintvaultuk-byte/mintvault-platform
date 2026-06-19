@@ -1139,8 +1139,8 @@ function CertsView({
     if (statusFilter === "active" && c.status === "voided") return false;
     if (gradeTypeFilter !== "all") {
       const gt: string = (c as any).gradeType || "numeric";
-      if (gradeTypeFilter === "authentic" && gt !== "NO") return false;
-      if (gradeTypeFilter === "altered" && gt !== "AA") return false;
+      if (gradeTypeFilter === "authentic" && gt !== "NO" && gt !== "not_original") return false;
+      if (gradeTypeFilter === "altered" && gt !== "AA" && gt !== "authentic_altered") return false;
       if (gradeTypeFilter === "numeric" && isNonNumericGrade(gt)) return false;
     }
     if (gradeFilter) {
@@ -1192,8 +1192,8 @@ function CertsView({
     if (statusFilter === "active" && c.status === "voided") continue;
     if (gradeTypeFilter !== "all") {
       const gt: string = (c as any).gradeType || "numeric";
-      if (gradeTypeFilter === "authentic" && gt !== "NO") continue;
-      if (gradeTypeFilter === "altered" && gt !== "AA") continue;
+      if (gradeTypeFilter === "authentic" && gt !== "NO" && gt !== "not_original") continue;
+      if (gradeTypeFilter === "altered" && gt !== "AA" && gt !== "authentic_altered") continue;
       if (gradeTypeFilter === "numeric" && isNonNumericGrade(gt)) continue;
     }
     gradingCounts[gradingStatus(c)]++;

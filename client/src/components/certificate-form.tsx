@@ -1666,10 +1666,12 @@ export default function CertificateForm({
           {isNonNum && (
             <div className="bg-[var(--admin-gold)]/5 border border-[var(--admin-gold)]/20 rounded-lg p-3">
               <p className="text-[var(--admin-gold)] text-sm font-semibold">
-                {form.gradeType === "NO" ? "AUTHENTIC – No Numerical Grade" : "AUTHENTIC ALTERED – No Numerical Grade"}
+                {form.gradeType === "NO" || form.gradeType === "not_original"
+                  ? "AUTHENTIC – No Numerical Grade"
+                  : "AUTHENTIC ALTERED – No Numerical Grade"}
               </p>
               <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
-                {form.gradeType === "NO"
+                {form.gradeType === "NO" || form.gradeType === "not_original"
                   ? "Card verified as authentic. No numerical grade or subgrades assigned."
                   : "Card verified as authentic but has been altered. No numerical grade or subgrades assigned."}
               </p>

@@ -696,7 +696,7 @@ async function drawFront(
   } else {
     // Non-numeric (AUTHENTIC / AUTHENTIC ALTERED)
     ctx.textAlign = "center";
-    if (gradeType === "AA") {
+    if (gradeType === "AA" || gradeType === "authentic_altered") {
       ctx.textBaseline = "middle";
       ctx.font = `bold 28px Arial, Helvetica, sans-serif`;
       ctx.fillStyle = "#1A1A1A";

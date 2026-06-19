@@ -1153,6 +1153,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getNextCertId(): Promise<string> {
+    // Self-bootstrap the allocator table (no-op once it exists). Version-controls
+    // the DDL that was previously only created implicitly; matches shared/schema.ts certCounter.
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS cert_counter (
+      id integer PRIMARY KEY DEFAULT 1,
+      last_issued integer NOT NULL DEFAULT 0,
+      updated_at timestamptz DEFAULT NOW()
+    )`);
     await db.execute(sql`INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`);
     const result = await db.execute(
       sql`UPDATE cert_counter SET last_issued = last_issued + 1, updated_at = NOW() WHERE id = 1 RETURNING last_issued`
@@ -1221,9 +1228,9 @@ export class DatabaseStorage implements IStorage {
 
     for (const cert of allCerts) {
       const gradeType = cert.gradeType || "numeric";
-      if (gradeType === "NO") {
+      if (gradeType === "NO" || gradeType === "not_original") {
         authenticOnlyCount++;
-      } else if (gradeType === "AA") {
+      } else if (gradeType === "AA" || gradeType === "authentic_altered") {
         authenticAlteredCount++;
       } else if (cert.gradeOverall) {
         const g = Math.floor(parseFloat(cert.gradeOverall));
@@ -1279,11 +1286,11 @@ export class DatabaseStorage implements IStorage {
 
     for (const m of matching) {
       const mGradeType = m.gradeType || "numeric";
-      if (mGradeType === "NO") {
+      if (mGradeType === "NO" || mGradeType === "not_original") {
         authenticOnlyCount++;
         continue;
       }
-      if (mGradeType === "AA") {
+      if (mGradeType === "AA" || mGradeType === "authentic_altered") {
         authenticAlteredCount++;
         continue;
       }

@@ -377,7 +377,7 @@ export default function CertDetailPage() {
               <div className="text-3xl font-bold text-[#D4AF37] mb-1" data-testid="text-grade-label">
                 {cert.grade}
               </div>
-              {cert.gradeType === "AA" && (
+              {(cert.gradeType === "AA" || cert.gradeType === "authentic_altered") && (
                 <div
                   className="text-amber-400/80 text-sm tracking-wider uppercase mt-1"
                   data-testid="text-grade-status"

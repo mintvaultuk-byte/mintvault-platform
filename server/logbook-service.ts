@@ -125,9 +125,9 @@ export async function buildLogbookData(certIdInput: string) {
     },
 
     grades: {
-      overall: isNonNum ? (gradeType === "authentic_altered" ? "AA" : "NO") : gradeNum,
+      overall: isNonNum ? (gradeType === "authentic_altered" || gradeType === "AA" ? "AA" : "NO") : gradeNum,
       gradeLabel: isNonNum
-        ? gradeType === "authentic_altered"
+        ? gradeType === "authentic_altered" || gradeType === "AA"
           ? "AUTHENTIC ALTERED"
           : "NOT ORIGINAL"
         : isBlack
@@ -157,9 +157,9 @@ export async function buildLogbookData(certIdInput: string) {
 
     authentication: {
       status:
-        c.gradeType === "authentic_altered"
+        c.gradeType === "authentic_altered" || c.gradeType === "AA"
           ? "authentic_altered"
-          : c.gradeType === "not_original"
+          : c.gradeType === "not_original" || c.gradeType === "NO"
             ? "not_original"
             : "genuine",
       notes: report.overall || null,

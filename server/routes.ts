@@ -3291,7 +3291,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           status: c.status || "active",
         },
         grade: {
-          overall: isNonNum ? (gradeType === "authentic_altered" ? "AA" : "NO") : gradeNum,
+          overall: isNonNum ? (gradeType === "authentic_altered" || gradeType === "AA" ? "AA" : "NO") : gradeNum,
           label: isNonNum ? gradeLabelFull(gradeType, "0") : mvgsTierName(gradeNum).toUpperCase(),
           labelType,
           isBlackLabel: isBlack,
@@ -3368,7 +3368,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const gradeNum = isNonNum ? 0 : parseFloat(c.gradeOverall || c.grade || "0");
       const isBlack = !isNonNum && gradeNum === 10 && c.labelType === "black";
       const gLabel = isNonNum
-        ? gradeType === "authentic_altered"
+        ? gradeType === "authentic_altered" || gradeType === "AA"
           ? "AUTHENTIC ALTERED"
           : "NOT ORIGINAL"
         : mvgsTierName(gradeNum).toUpperCase();
@@ -3427,7 +3427,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       doc
         .fontSize(48)
         .fillColor(GOLD)
-        .text(isNonNum ? (gradeType === "authentic_altered" ? "AA" : "NO") : String(gradeNum), { align: "center" });
+        .text(isNonNum ? (gradeType === "authentic_altered" || gradeType === "AA" ? "AA" : "NO") : String(gradeNum), {
+          align: "center",
+        });
       doc.fontSize(14).fillColor(DARK).text(gLabel, { align: "center" });
       doc.moveDown(0.5);
 
@@ -9752,7 +9754,7 @@ Defects (admin-confirmed): ${defectLines}`;
           edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_edges)}::numeric,     edges_score)`},
           surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_surface)}::numeric,   surface_score)`},
           grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
-          grade_type          = ${isNonNum ? (overallGrade === "AA" ? "authentic_altered" : "not_original") : "numeric"},
+          grade_type          = ${isNonNum ? (overallGrade === "AA" ? "AA" : "NO") : "numeric"},
           grade_strength_score = ${gradeChanged ? sql`NULL` : sql`grade_strength_score`},
           corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
           edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
@@ -10046,7 +10048,7 @@ Defects (admin-confirmed): ${defectLines}`;
         )
           ? "black"
           : "Standard";
-      const gradeType = isNonNum ? (overallGrade === "AA" ? "authentic_altered" : "not_original") : "numeric";
+      const gradeType = isNonNum ? (overallGrade === "AA" ? "AA" : "NO") : "numeric";
 
       await db.execute(sql`
         UPDATE certificates SET
