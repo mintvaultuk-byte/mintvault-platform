@@ -1699,7 +1699,13 @@ export default function GradingPanel({
                   />
                   <datalist id="grader-variant-options">
                     {VARIANT_OPTIONS.filter((v) => v.code !== "NONE" && v.code !== "OTHER").map((v) => (
-                      <option key={v.code} value={v.label} />
+                      // value stays the bare label (saved value unchanged); the abbreviation is
+                      // display-only via the option label, e.g. "Double Rare (RR)".
+                      <option
+                        key={v.code}
+                        value={v.label}
+                        label={v.abbreviation ? `${v.label} (${v.abbreviation})` : undefined}
+                      />
                     ))}
                   </datalist>
                 </label>
