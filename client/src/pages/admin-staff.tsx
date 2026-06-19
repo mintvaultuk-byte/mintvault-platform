@@ -60,6 +60,7 @@ export default function AdminStaffPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [rate, setRate] = useState(0);
+  const [dailyTarget, setDailyTarget] = useState(20);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -84,7 +85,11 @@ export default function AdminStaffPage() {
       fetch("/api/admin/grader-rate", { credentials: "include" }),
     ]);
     if (s.ok) setStaff((await s.json()).staff || []);
-    if (r.ok) setRate((await r.json()).rate || 0);
+    if (r.ok) {
+      const d = await r.json();
+      setRate(d.rate || 0);
+      setDailyTarget(d.dailyTarget || 20);
+    }
   }, []);
   useEffect(() => {
     if (authed) load();
@@ -147,10 +152,10 @@ export default function AdminStaffPage() {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rate }),
+      body: JSON.stringify({ rate, dailyTarget }),
     });
     if (!res.ok) return setErr("Failed to save rate");
-    setMsg(`Per-card rate set to £${Number(rate).toFixed(2)}`);
+    setMsg(`Saved · £${Number(rate).toFixed(2)}/card · target ${dailyTarget} cards/day`);
   }
 
   // GRADE assignment — cross-submission grading queue (cert-level)
@@ -369,18 +374,33 @@ export default function AdminStaffPage() {
         </section>
 
         <section className="border border-[#D4AF37]/20 rounded-lg p-4">
-          <h2 className="text-[#D4AF37] font-semibold text-sm mb-3">Per-card grade rate</h2>
-          <form onSubmit={saveRate} className="flex items-end gap-2">
-            <input
-              className="ss-input w-40"
-              type="number"
-              min="0"
-              step="0.01"
-              value={rate}
-              onChange={(e) => setRate(Number(e.target.value))}
-            />
+          <h2 className="text-[#D4AF37] font-semibold text-sm mb-3">Per-card grade rate & daily target</h2>
+          <form onSubmit={saveRate} className="flex items-end gap-2 flex-wrap">
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/50">Rate (£/card)</span>
+              <input
+                className="ss-input w-32"
+                type="number"
+                min="0"
+                step="0.01"
+                value={rate}
+                onChange={(e) => setRate(Number(e.target.value))}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/50">Daily target (cards/day)</span>
+              <input
+                className="ss-input w-40"
+                type="number"
+                min="1"
+                step="1"
+                value={dailyTarget}
+                onChange={(e) => setDailyTarget(Number(e.target.value))}
+                data-testid="input-daily-target"
+              />
+            </label>
             <button className="bg-[#D4AF37] text-[#1A1400] font-bold py-2 px-4 rounded text-sm hover:bg-[#B8960C]">
-              Save rate
+              Save
             </button>
           </form>
         </section>

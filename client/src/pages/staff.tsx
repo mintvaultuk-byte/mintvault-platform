@@ -111,12 +111,149 @@ type GCard = {
 };
 type GItem = { submissionRef: string; cards: GCard[] };
 
+type Analytics = {
+  rate: number;
+  dailyTarget: number;
+  week: { approved: number; earnings: number; startDate: string };
+  month: { approved: number; earnings: number; startDate: string };
+  today: { approved: number };
+  queue: { assigned: number; pendingReview: number };
+  approval: { approved: number; bounced: number; rate: number };
+  lifetime: { approved: number; earnings: number };
+};
+
+function Stat({
+  label,
+  big,
+  sub,
+  subLabel,
+  rateNotSet,
+}: {
+  label: string;
+  big: string;
+  sub?: string;
+  subLabel?: string;
+  rateNotSet?: boolean;
+}) {
+  return (
+    <div className="border border-[#D4AF37]/20 rounded-lg p-3">
+      <div className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/50">
+        {label}
+        {subLabel ? ` · ${subLabel}` : ""}
+      </div>
+      <div className="text-[#D4AF37] text-xl font-extrabold mt-1 leading-none">{big}</div>
+      {sub && <div className="text-[11px] text-[#E8E4DC]/50 mt-1">{sub}</div>}
+      {rateNotSet && <div className="text-[10px] text-amber-400/80 mt-0.5">(rate not set)</div>}
+    </div>
+  );
+}
+
+/** Always-visible analytics strip above the grader card list. Loading → skeleton;
+ *  error/not-ready (a === null && !loading) → renders nothing (never blocks the queue). */
+function GradeAnalytics({ a, loading }: { a: Analytics | null; loading: boolean }) {
+  if (!a) {
+    if (!loading) return null;
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5" aria-hidden>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="border border-[#D4AF37]/20 rounded-lg p-3">
+            <div className="h-2 w-16 bg-[#D4AF37]/10 rounded animate-pulse" />
+            <div className="h-5 w-20 bg-[#D4AF37]/10 rounded animate-pulse mt-2" />
+            <div className="h-2 w-24 bg-[#D4AF37]/10 rounded animate-pulse mt-2" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+  const rateSet = a.rate > 0;
+  const money = (v: number) => (rateSet ? `£${v.toFixed(2)}` : "—");
+  const target = a.dailyTarget || 20;
+  const todayN = a.today.approved;
+  const now = new Date();
+  const dayFrac = (now.getUTCHours() * 60 + now.getUTCMinutes()) / 1440;
+  const pace = todayN >= target ? "Ahead" : todayN >= 0.7 * target && dayFrac >= 0.7 ? "On pace" : "Behind";
+  const paceCls =
+    pace === "Ahead"
+      ? "text-emerald-400 border-emerald-500/40 bg-emerald-950/30"
+      : pace === "On pace"
+        ? "text-[#D4AF37] border-[#D4AF37]/40 bg-[#D4AF37]/10"
+        : "text-red-400 border-red-500/40 bg-red-950/30";
+  const pct = target > 0 ? Math.min(100, Math.round((todayN / target) * 100)) : 0;
+  const inQueue = a.queue.assigned + a.queue.pendingReview;
+
+  return (
+    <div className="mb-5 space-y-4" data-testid="grade-analytics">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Stat
+          label="This week"
+          big={money(a.week.earnings)}
+          sub={`${a.week.approved} cards approved`}
+          rateNotSet={!rateSet}
+        />
+        <Stat
+          label="This month"
+          big={money(a.month.earnings)}
+          sub={`${a.month.approved} cards approved`}
+          rateNotSet={!rateSet}
+        />
+        <Stat
+          label="Approval rate"
+          subLabel="30d"
+          big={`${a.approval.rate}%`}
+          sub={`${a.approval.approved} approved / ${a.approval.bounced} bounced`}
+        />
+        <Stat
+          label="Lifetime"
+          big={`${a.lifetime.approved} cards`}
+          sub={rateSet ? `${money(a.lifetime.earnings)} total` : "earnings —"}
+          rateNotSet={!rateSet}
+        />
+      </div>
+      <div className="border border-[#D4AF37]/20 rounded-lg p-4 space-y-3">
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs text-[#E8E4DC]/70">
+              <span className="text-[#D4AF37] font-bold">{todayN}</span> / {target} cards today
+            </span>
+            <span
+              className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${paceCls}`}
+              data-testid="pace-badge"
+            >
+              {pace}
+            </span>
+          </div>
+          <div className="h-2 bg-[#D4AF37]/10 rounded-full overflow-hidden">
+            <div className="h-full bg-[#D4AF37] transition-all" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+        <div className="text-xs text-[#E8E4DC]/60">
+          <span className="text-[#E8E4DC]/80 font-semibold">{a.queue.assigned}</span> assigned ·{" "}
+          <span className="text-[#E8E4DC]/80 font-semibold">{a.queue.pendingReview}</span> pending review · {inQueue}{" "}
+          total in queue
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function GradeTab() {
   const [queue, setQueue] = useState<GItem[]>([]);
   const [active, setActive] = useState<{ ref: string; card: GCard } | null>(null);
+  const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [aLoading, setALoading] = useState(true);
   const load = useCallback(async () => {
     const r = await fetch("/api/grader/queue", { credentials: "include" });
     if (r.ok) setQueue((await r.json()).items || []);
+    // Analytics — best-effort; any error is silent and never blocks the queue.
+    setALoading(true);
+    try {
+      const ar = await fetch("/api/staff/analytics", { credentials: "include" });
+      if (ar.ok) setAnalytics(await ar.json());
+    } catch {
+      /* silent */
+    } finally {
+      setALoading(false);
+    }
   }, []);
   useEffect(() => {
     load();
@@ -164,6 +301,7 @@ function GradeTab() {
   const count = queue.reduce((n, it) => n + it.cards.length, 0);
   return (
     <main className="max-w-3xl mx-auto px-4 py-5">
+      <GradeAnalytics a={analytics} loading={aLoading} />
       {count === 0 ? (
         <p className="text-[#E8E4DC]/60 text-sm text-center py-12">No cards assigned to you.</p>
       ) : (

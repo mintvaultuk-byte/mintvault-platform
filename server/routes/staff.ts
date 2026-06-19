@@ -34,7 +34,7 @@ import {
   authorizeScanCert,
   recordScanUpload,
 } from "../staff";
-import { stripGraderPii } from "../grader";
+import { stripGraderPii, getGraderAnalytics } from "../grader";
 
 const staffLoginLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -99,6 +99,15 @@ export function registerStaffRoutes(app: Express): void {
       });
     }
     return res.json({ authenticated: false });
+  });
+
+  // ── Grader analytics (can_grade) — PII-FREE dashboard for the GradeTab ──────
+  app.get("/api/staff/analytics", requireCapability("grade"), async (req: Request, res: Response) => {
+    try {
+      return res.json(await getGraderAnalytics((req.session as any).staffId));
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   // ── Scanner (can_scan) — PII-FREE, submission-grained ───────────────────────

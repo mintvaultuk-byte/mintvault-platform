@@ -35,6 +35,8 @@ import {
   getGraderCountsForAdmin,
   getGraderRate,
   setGraderRate,
+  getGraderDailyTarget,
+  setGraderDailyTarget,
   stripGraderPii,
   GRADER_AUTO_PUBLISH,
 } from "../grader";
@@ -288,14 +290,23 @@ export function registerGraderRoutes(app: Express): void {
 
   // ── Admin: per-card grader rate (earnings display) ──────────────────────────
   app.get("/api/admin/grader-rate", requireAdmin, async (_req: Request, res: Response) => {
-    return res.json({ rate: await getGraderRate() });
+    return res.json({ rate: await getGraderRate(), dailyTarget: await getGraderDailyTarget() });
   });
   app.post("/api/admin/grader-rate", requireAdmin, async (req: Request, res: Response) => {
     const adminUser = (req.session as any).adminEmail || "admin";
-    const rate = Number((req.body || {}).rate);
-    if (!Number.isFinite(rate) || rate < 0) return res.status(400).json({ error: "Invalid rate" });
-    await setGraderRate(rate, adminUser);
-    return res.json({ ok: true, rate });
+    const body = req.body || {};
+    // rate and dailyTarget are independent — save each only when a valid value is
+    // provided so saving one never clobbers the other (rate stays Cornelius's call).
+    const rate = Number(body.rate);
+    const hasRate = body.rate !== undefined && body.rate !== null && body.rate !== "";
+    if (hasRate && (!Number.isFinite(rate) || rate < 0)) return res.status(400).json({ error: "Invalid rate" });
+    const dailyTarget = Number(body.dailyTarget);
+    const hasTarget = body.dailyTarget !== undefined && body.dailyTarget !== null && body.dailyTarget !== "";
+    if (hasTarget && (!Number.isFinite(dailyTarget) || dailyTarget <= 0))
+      return res.status(400).json({ error: "Invalid daily target" });
+    if (hasRate) await setGraderRate(rate, adminUser);
+    if (hasTarget) await setGraderDailyTarget(dailyTarget, adminUser);
+    return res.json({ ok: true, rate: await getGraderRate(), dailyTarget: await getGraderDailyTarget() });
   });
 
   // ── Admin: cert-level assignment ────────────────────────────────────────────

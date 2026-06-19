@@ -824,6 +824,80 @@ export async function setGraderRate(rate: number, adminUser: string): Promise<vo
   await storage.writeAuditLog("setting", "grader_card_rate", "grader_rate_set", adminUser, { rate: clean });
 }
 
+/** Admin-configurable daily card target (sibling pipeline_settings key — never
+ *  touches grader_card_rate). Defaults to 20 when unset. */
+export async function getGraderDailyTarget(): Promise<number> {
+  const r = await db.execute(sql`SELECT value FROM pipeline_settings WHERE key = 'grader_daily_target' LIMIT 1`);
+  const v = (r.rows[0] as any)?.value;
+  if (v == null) return 20;
+  const n = typeof v === "number" ? v : typeof v === "object" && v.target != null ? Number(v.target) : Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 20;
+}
+
+export async function setGraderDailyTarget(target: number, adminUser: string): Promise<void> {
+  const clean = Number.isFinite(target) && target > 0 ? Math.round(target) : 20;
+  await db.execute(sql`
+    INSERT INTO pipeline_settings (key, value, updated_by, updated_at)
+    VALUES ('grader_daily_target', ${JSON.stringify({ target: clean })}::jsonb, ${adminUser}, NOW())
+    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = NOW()
+  `);
+  await storage.writeAuditLog("setting", "grader_daily_target", "grader_daily_target_set", adminUser, {
+    target: clean,
+  });
+}
+
+/**
+ * PII-FREE analytics snapshot for one staffer/grader. All windows are UTC:
+ * week = Monday 00:00, month = 1st 00:00, today = 00:00. earnings = approved ×
+ * rate (rate may be 0/unset → caller shows "—"). Approval rate over the last 30
+ * days; a cert that bounced (redo_count>0) then approved counts toward BOTH
+ * approved and bounced (the honest rate). No customer/submission columns read.
+ */
+export async function getGraderAnalytics(graderId: string) {
+  const now = new Date();
+  const daysSinceMon = (now.getUTCDay() + 6) % 7; // Mon=0 … Sun=6
+  const weekStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysSinceMon));
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const weekISO = weekStart.toISOString();
+  const monthISO = monthStart.toISOString();
+  const dayISO = dayStart.toISOString();
+
+  const r = await db.execute(sql`
+    SELECT
+      COUNT(*) FILTER (WHERE grader_status='approved' AND grade_approved_at >= ${weekISO}::timestamptz)::int  AS week_approved,
+      COUNT(*) FILTER (WHERE grader_status='approved' AND grade_approved_at >= ${monthISO}::timestamptz)::int AS month_approved,
+      COUNT(*) FILTER (WHERE grader_status='approved' AND grade_approved_at >= ${dayISO}::timestamptz)::int   AS today_approved,
+      COUNT(*) FILTER (WHERE grader_status='approved')::int                                                   AS lifetime_approved,
+      COUNT(*) FILTER (WHERE grader_status='assigned')::int                                                   AS q_assigned,
+      COUNT(*) FILTER (WHERE grader_status='pending_review')::int                                             AS q_pending,
+      COUNT(*) FILTER (WHERE grader_status='approved' AND grade_approved_at >= NOW() - INTERVAL '30 days')::int AS appr30,
+      COUNT(*) FILTER (WHERE redo_count > 0 AND grade_approved_at >= NOW() - INTERVAL '30 days')::int           AS bounced30
+    FROM certificates
+    WHERE assigned_grader_id = ${graderId} AND deleted_at IS NULL
+  `);
+  const c = (r.rows[0] as any) || {};
+  const num = (x: any) => Number(x || 0);
+  const rate = await getGraderRate();
+  const dailyTarget = await getGraderDailyTarget();
+  const weekApproved = num(c.week_approved);
+  const monthApproved = num(c.month_approved);
+  const lifetimeApproved = num(c.lifetime_approved);
+  const appr30 = num(c.appr30);
+  const bounced30 = num(c.bounced30);
+  const denom = appr30 + bounced30;
+  return {
+    rate,
+    dailyTarget,
+    week: { approved: weekApproved, earnings: weekApproved * rate, startDate: weekISO },
+    month: { approved: monthApproved, earnings: monthApproved * rate, startDate: monthISO },
+    today: { approved: num(c.today_approved) },
+    queue: { assigned: num(c.q_assigned), pendingReview: num(c.q_pending) },
+    approval: { approved: appr30, bounced: bounced30, rate: denom > 0 ? Math.round((appr30 / denom) * 100) : 0 },
+    lifetime: { approved: lifetimeApproved, earnings: lifetimeApproved * rate },
+  };
+}
+
 /**
  * A grader's own earnings snapshot. earned = approved × rate (display only —
  * flagged/rejected cards simply don't count until redone+approved; NEVER
