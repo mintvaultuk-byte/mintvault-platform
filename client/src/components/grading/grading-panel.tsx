@@ -20,6 +20,11 @@ import ManualCardTool from "./manual-card-tool";
 // mark-mode and manual-card-tool defects phase as a tool palette, alongside
 // the pin tool. The launcher button + overlay mount are gone from this panel.
 import CrossGradeDisplay from "./cross-grade-display";
+// Reuse the EXACT admin set-name combobox + card autofill so the grader identity
+// editor feels identical to the admin CertificateForm. Both back-end endpoints
+// (/api/pokemon-sets, /api/cards/autofill) are public — no auth change needed.
+import { PokemonSetPicker } from "@/components/certificate-form";
+import { autofillCard } from "@/lib/api";
 
 // Shared calculation imports (client-side re-implementations)
 import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel } from "./grade-logic";
@@ -375,6 +380,39 @@ export default function GradingPanel({
   const [idNumber, setIdNumber] = useState(cardNumber || "");
   const [idYear, setIdYear] = useState(cardYear || "");
   const [idVariant, setIdVariant] = useState(cardVariant || "");
+  // Set CODE captured when a set is chosen from the picker (precise autofill key);
+  // free-typed set names fall back to the name itself, same as the admin form.
+  const [idSetCode, setIdSetCode] = useState("");
+  const [idAutofilling, setIdAutofilling] = useState(false);
+  // Card autofill — mirrors CertificateForm.handleAutofill: set(+number) → card
+  // master → fill name/year/variant. Same /api/cards/autofill endpoint + pattern.
+  async function graderAutofill() {
+    const lookupSetId = (idSetCode || idSet).trim();
+    if (!lookupSetId || !idNumber.trim()) return;
+    setIdAutofilling(true);
+    try {
+      const result = await autofillCard({
+        setId: lookupSetId,
+        cardNumber: idNumber,
+        language: "English",
+        allowFallbackLanguage: true,
+      });
+      const m = result.match;
+      if (m) {
+        if (m.cardName) setIdName(m.cardName.toUpperCase());
+        if (m.year) setIdYear(m.year);
+        if (m.variant) setIdVariant(m.variant);
+        if (result.setName) setIdSet(result.setName);
+        toast({ title: "Card details auto-filled" });
+      } else {
+        toast({ title: "No match found", description: "Check set + number, or enter details manually." });
+      }
+    } catch (e: any) {
+      toast({ title: "Auto-fill failed", description: e.message, variant: "destructive" });
+    } finally {
+      setIdAutofilling(false);
+    }
+  }
 
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
@@ -1562,39 +1600,97 @@ export default function GradingPanel({
       {graderMode &&
         (() => {
           const idLocked = gradeApprovedAt != null && !editMode;
-          const fields: { label: string; value: string; set: (v: string) => void; ph: string; w?: string }[] = [
-            { label: "Card name", value: idName, set: setIdName, ph: "Charizard", w: "col-span-2" },
-            { label: "Set", value: idSet, set: setIdSet, ph: "Base Set", w: "col-span-2" },
-            { label: "Number", value: idNumber, set: setIdNumber, ph: "4" },
-            { label: "Year", value: idYear, set: setIdYear, ph: "1999" },
-            { label: "Variant", value: idVariant, set: setIdVariant, ph: "Holo", w: "col-span-2" },
-          ];
+          const inputCls =
+            "w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1 outline-none focus:border-[var(--admin-gold)]/60 disabled:opacity-60 disabled:cursor-not-allowed";
+          const lbl = "text-[9px] uppercase tracking-wider text-[var(--admin-ink-dim)]";
           return (
             <div
-              className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel2)] px-3 py-2"
+              className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel2)] px-3 py-2 space-y-2"
               data-testid="grader-card-identity"
             >
-              <div className="flex items-baseline justify-between gap-2 flex-wrap mb-1.5">
+              <div className="flex items-baseline justify-between gap-2 flex-wrap">
                 <span className="font-mono text-xs text-[var(--admin-gold)]">{certIdStr || ""}</span>
                 <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
                   Card identity{idLocked ? " (approved — read-only)" : " · editable"}
                 </span>
               </div>
+
+              {/* Set name — identical combobox to the admin CertificateForm
+                  (free text + suggestions from /api/pokemon-sets). Admin-only
+                  "add custom set" is hidden for graders. */}
+              <div className={idLocked ? "pointer-events-none opacity-60" : ""}>
+                <PokemonSetPicker
+                  value={idSet}
+                  onChange={(name, id) => {
+                    setIdSet(name);
+                    setIdSetCode(id || "");
+                  }}
+                  allowAddSet={false}
+                  testId="input-identity-set"
+                />
+              </div>
+
               <div className="grid grid-cols-4 gap-2">
-                {fields.map((f) => (
-                  <label key={f.label} className={`flex flex-col gap-0.5 ${f.w ?? ""}`}>
-                    <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-dim)]">{f.label}</span>
+                <label className="flex flex-col gap-0.5 col-span-2">
+                  <span className={lbl}>Card name</span>
+                  <input
+                    type="text"
+                    value={idName}
+                    placeholder="Charizard"
+                    disabled={idLocked}
+                    onChange={(e) => setIdName(e.target.value)}
+                    data-testid="input-identity-card-name"
+                    className={inputCls}
+                  />
+                </label>
+                <label className="flex flex-col gap-0.5 col-span-2">
+                  <span className={lbl}>Number</span>
+                  <div className="flex gap-1">
                     <input
                       type="text"
-                      value={f.value}
-                      placeholder={f.ph}
+                      value={idNumber}
+                      placeholder="4"
                       disabled={idLocked}
-                      onChange={(e) => f.set(e.target.value)}
-                      data-testid={`input-identity-${f.label.toLowerCase().replace(/\s+/g, "-")}`}
-                      className="bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1 outline-none focus:border-[var(--admin-gold)]/60 disabled:opacity-60 disabled:cursor-not-allowed"
+                      onChange={(e) => setIdNumber(e.target.value)}
+                      data-testid="input-identity-number"
+                      className={inputCls}
                     />
-                  </label>
-                ))}
+                    <button
+                      type="button"
+                      onClick={graderAutofill}
+                      disabled={idLocked || idAutofilling || !(idSetCode || idSet).trim() || !idNumber.trim()}
+                      title="Auto-fill name / year / variant from the card database (set + number)"
+                      data-testid="button-identity-autofill"
+                      className="shrink-0 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] text-[10px] font-bold uppercase px-2 rounded hover:bg-[var(--admin-gold)]/10 disabled:opacity-30 disabled:cursor-not-allowed"
+                    >
+                      {idAutofilling ? "…" : "Auto-fill"}
+                    </button>
+                  </div>
+                </label>
+                <label className="flex flex-col gap-0.5 col-span-2">
+                  <span className={lbl}>Year</span>
+                  <input
+                    type="text"
+                    value={idYear}
+                    placeholder="1999"
+                    disabled={idLocked}
+                    onChange={(e) => setIdYear(e.target.value)}
+                    data-testid="input-identity-year"
+                    className={inputCls}
+                  />
+                </label>
+                <label className="flex flex-col gap-0.5 col-span-2">
+                  <span className={lbl}>Variant</span>
+                  <input
+                    type="text"
+                    value={idVariant}
+                    placeholder="Holo"
+                    disabled={idLocked}
+                    onChange={(e) => setIdVariant(e.target.value)}
+                    data-testid="input-identity-variant"
+                    className={inputCls}
+                  />
+                </label>
               </div>
             </div>
           );

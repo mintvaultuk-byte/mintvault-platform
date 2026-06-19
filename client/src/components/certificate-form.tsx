@@ -2357,14 +2357,18 @@ interface PokemonSet {
   source?: string;
 }
 
-function PokemonSetPicker({
+export function PokemonSetPicker({
   value,
   onChange,
   testId,
+  allowAddSet = true,
 }: {
   value: string;
   onChange: (name: string, id?: string) => void;
   testId?: string;
+  /** Show the admin-only "Add custom set" affordance (POSTs /api/admin/custom-sets).
+   *  Graders pass false — they can still pick existing sets or type free text. */
+  allowAddSet?: boolean;
 }) {
   const { toast } = useToast();
   const [query, setQuery] = useState(value);
@@ -2487,22 +2491,24 @@ function PokemonSetPicker({
               </span>
             </button>
           ))}
-          {/* Add new set button */}
-          <button
-            type="button"
-            onClick={() => {
-              setShowAddForm(true);
-              setAddForm((f) => ({ ...f, setId: query, setName: "" }));
-            }}
-            className="w-full text-left px-3 py-2.5 text-xs text-[var(--admin-gold)] font-bold hover:bg-[var(--admin-gold)]/5 border-t border-[var(--admin-line)] flex items-center gap-1"
-          >
-            <Plus size={12} /> Add new set{query ? ` "${query}"` : ""}
-          </button>
+          {/* Add new set button (admin only) */}
+          {allowAddSet && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowAddForm(true);
+                setAddForm((f) => ({ ...f, setId: query, setName: "" }));
+              }}
+              className="w-full text-left px-3 py-2.5 text-xs text-[var(--admin-gold)] font-bold hover:bg-[var(--admin-gold)]/5 border-t border-[var(--admin-line)] flex items-center gap-1"
+            >
+              <Plus size={12} /> Add new set{query ? ` "${query}"` : ""}
+            </button>
+          )}
         </div>
       )}
 
       {/* Add set modal */}
-      {showAddForm && (
+      {allowAddSet && showAddForm && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
           onClick={() => setShowAddForm(false)}
