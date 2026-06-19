@@ -566,6 +566,11 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<vo
     UPDATE certificates SET
       grade = ${gradeNum},
       grade_type = ${gradeType},
+      card_name           = ${pick(body.card_name, cert.cardName)},
+      set_name            = ${pick(body.set_name, cert.setName)},
+      card_number_display = ${pick(body.card_number_display, cert.cardNumber)},
+      year_text           = ${pick(body.year_text, cert.year)},
+      variant             = ${pick(body.variant, cert.variant)},
       centering_score = ${num(body.grade_centering, cert.gradeCentering)},
       corners_score   = ${num(body.grade_corners, cert.gradeCorners)},
       edges_score     = ${num(body.grade_edges, cert.gradeEdges)},

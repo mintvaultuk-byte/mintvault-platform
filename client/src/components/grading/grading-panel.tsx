@@ -366,6 +366,16 @@ export default function GradingPanel({
   const [surfaceOverride, setSurfaceOverride] = useState<number | null>(null);
   const [overallOverride, setOverallOverride] = useState<number | null>(null);
 
+  // Editable card identity (grader mode only). Seeded once from props on mount;
+  // the grader flow remounts the panel per card, so seed-once is correct. Edits
+  // ride the existing debounced auto-save (buildPayload → /grade →
+  // applyCertGradeDraft). Admins edit identity via CertificateForm instead.
+  const [idName, setIdName] = useState(cardName || "");
+  const [idSet, setIdSet] = useState(cardSet || "");
+  const [idNumber, setIdNumber] = useState(cardNumber || "");
+  const [idYear, setIdYear] = useState(cardYear || "");
+  const [idVariant, setIdVariant] = useState(cardVariant || "");
+
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
 
@@ -882,6 +892,11 @@ export default function GradingPanel({
     edgesOverride,
     surfaceOverride,
     overallOverride,
+    idName,
+    idSet,
+    idNumber,
+    idYear,
+    idVariant,
   ]);
 
   function handleAiComplete(analysis: AiAnalysisResult, identification: AiIdentification | null) {
@@ -1244,6 +1259,17 @@ export default function GradingPanel({
       private_notes: privateNotes,
     };
 
+    // Grader-editable card identity. Only sent in graderMode — admins edit
+    // identity via CertificateForm, so the admin grade-save never carries these
+    // (and applyCertGradeDraft, which reads them, is grader-only anyway).
+    if (graderMode) {
+      out.card_name = idName.trim();
+      out.set_name = idSet.trim();
+      out.card_number_display = idNumber.trim();
+      out.year_text = idYear.trim();
+      out.variant = idVariant.trim();
+    }
+
     // Subgrade scalars — omit if 0/null (zone state at empty default).
     // Reads from `sub` so the MVGS-derived subgrades ship to the server when
     // any defect is MVGS-classified; falls back to AI/manual subgrades
@@ -1529,29 +1555,50 @@ export default function GradingPanel({
 
   return (
     <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4 space-y-5">
-      {/* Card identity — read-only for graders. Admins instead get the editable
-          CertificateForm rendered above the panel, so this is graderMode-only to
-          avoid duplicating it. Graders can never edit identity (admin-only). */}
-      {graderMode && (
-        <div
-          className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel2)] px-3 py-2"
-          data-testid="grader-card-identity"
-        >
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="font-mono text-xs text-[var(--admin-gold)]">{certIdStr || ""}</span>
-            <span className="text-sm font-bold text-[var(--admin-ink)]">{cardName || "Unidentified card"}</span>
-          </div>
-          <div className="text-[11px] text-[var(--admin-ink-dim)] mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
-            {cardSet && <span>{cardSet}</span>}
-            {cardNumber && <span>· #{cardNumber}</span>}
-            {cardYear && <span>· {cardYear}</span>}
-            {cardVariant && <span>· {cardVariant}</span>}
-          </div>
-          <p className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)] mt-1">
-            Card identity (read-only)
-          </p>
-        </div>
-      )}
+      {/* Card identity — EDITABLE for graders (they hold the card and may correct
+          AI pre-grade errors before submitting). Edits ride the panel's debounced
+          auto-save. graderMode-only: admins edit identity via the CertificateForm
+          rendered above the panel. The cert number itself is not editable. */}
+      {graderMode &&
+        (() => {
+          const idLocked = gradeApprovedAt != null && !editMode;
+          const fields: { label: string; value: string; set: (v: string) => void; ph: string; w?: string }[] = [
+            { label: "Card name", value: idName, set: setIdName, ph: "Charizard", w: "col-span-2" },
+            { label: "Set", value: idSet, set: setIdSet, ph: "Base Set", w: "col-span-2" },
+            { label: "Number", value: idNumber, set: setIdNumber, ph: "4" },
+            { label: "Year", value: idYear, set: setIdYear, ph: "1999" },
+            { label: "Variant", value: idVariant, set: setIdVariant, ph: "Holo", w: "col-span-2" },
+          ];
+          return (
+            <div
+              className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel2)] px-3 py-2"
+              data-testid="grader-card-identity"
+            >
+              <div className="flex items-baseline justify-between gap-2 flex-wrap mb-1.5">
+                <span className="font-mono text-xs text-[var(--admin-gold)]">{certIdStr || ""}</span>
+                <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+                  Card identity{idLocked ? " (approved — read-only)" : " · editable"}
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                {fields.map((f) => (
+                  <label key={f.label} className={`flex flex-col gap-0.5 ${f.w ?? ""}`}>
+                    <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-dim)]">{f.label}</span>
+                    <input
+                      type="text"
+                      value={f.value}
+                      placeholder={f.ph}
+                      disabled={idLocked}
+                      onChange={(e) => f.set(e.target.value)}
+                      data-testid={`input-identity-${f.label.toLowerCase().replace(/\s+/g, "-")}`}
+                      className="bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1 outline-none focus:border-[var(--admin-gold)]/60 disabled:opacity-60 disabled:cursor-not-allowed"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       <div className="flex items-center justify-between">
         <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">
           Manual Grading Workstation
