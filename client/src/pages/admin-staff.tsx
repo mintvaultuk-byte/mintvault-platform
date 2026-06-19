@@ -123,7 +123,14 @@ export default function AdminStaffPage() {
     });
     const d = await res.json().catch(() => ({}));
     if (!res.ok) return setErr(d.error || "Failed to create staff");
-    setMsg(`Staff created: ${d.email}`);
+    if (d.promoted) {
+      setMsg(
+        `Existing account promoted to staff — ${d.email} signs in at /staff/login with their existing password ` +
+          `(the password you typed was ignored).${d.reactivated ? " Account reactivated." : ""}`
+      );
+    } else {
+      setMsg(`Staff account created: ${d.email}`);
+    }
     setNEmail("");
     setNPw("");
     setNName("");

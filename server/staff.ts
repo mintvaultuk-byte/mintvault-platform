@@ -145,34 +145,78 @@ export async function listStaffWithCounts() {
   }));
 }
 
-/** Create a staff account (role='staff') with capability flags. Rejects on
- *  duplicate email or weak password. No self-signup — admin only. */
+/**
+ * Create OR promote a staff account (admin only). A brand-new email creates a
+ * fresh role='staff' account. An EXISTING email PROMOTES that account: grants the
+ * requested capabilities (merged, never clobbering existing caps), flips a
+ * customer to role='staff' so they show in the staff list, reactivates a
+ * soft-deleted account, and fills an empty display name — but NEVER touches the
+ * password (they keep signing in with their existing one) and NEVER modifies an
+ * admin account. `promoted` distinguishes the two outcomes for the UI.
+ */
 export async function createStaffAccount(
   email: string,
   password: string,
   displayName: string | null,
   caps: Caps,
   adminUser: string
-): Promise<{ ok: true; id: string; email: string } | { ok: false; status: number; error: string }> {
+): Promise<
+  | { ok: true; id: string; email: string; promoted: boolean; reactivated: boolean }
+  | { ok: false; status: number; error: string }
+> {
   const cleanEmail = String(email || "")
     .toLowerCase()
     .trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return { ok: false, status: 400, error: "Invalid email address" };
+
+  const existing = await db.execute(
+    sql`SELECT id, role, deleted_at FROM users WHERE LOWER(email) = ${cleanEmail} LIMIT 1`
+  );
+  const row = existing.rows[0] as any;
+
+  if (row) {
+    // ── PROMOTE an existing account — never touches the password ──────────────
+    if (row.role === "admin") return { ok: false, status: 400, error: "That email is an admin account" };
+    const reactivated = !!row.deleted_at;
+    // Reactivate (clear deleted_at), promote customer→staff so they appear in the
+    // staff list, and fill an EMPTY display name only. setStaffCapabilities below
+    // grants the caps without clobbering — this UPDATE deliberately leaves caps alone.
+    await db.execute(sql`
+      UPDATE users SET
+        deleted_at = NULL,
+        role = CASE WHEN role = 'customer' THEN 'staff' ELSE role END,
+        display_name = COALESCE(NULLIF(display_name, ''), ${displayName?.trim() || null}),
+        updated_at = NOW()
+      WHERE id = ${row.id}
+    `);
+    // Grant only the requested-true caps via the existing capability path, so an
+    // existing capability is never turned off (merge, not replace).
+    const grant: Partial<Caps> = {};
+    if (caps.grade) grant.grade = true;
+    if (caps.scan) grant.scan = true;
+    if (caps.print) grant.print = true;
+    if (Object.keys(grant).length) await setStaffCapabilities(row.id, grant, adminUser);
+    await storage.writeAuditLog("user", row.id, "staff_promoted", adminUser, {
+      email: cleanEmail,
+      caps,
+      was_existing: true,
+      reactivated,
+    });
+    return { ok: true, id: row.id, email: cleanEmail, promoted: true, reactivated };
+  }
+
+  // ── CREATE a brand-new staff account (password required + validated here only) ──
   const pw = validatePassword(password || "");
   if (!pw.valid) return { ok: false, status: 400, error: pw.message || "Weak password" };
-  const existing = await db.execute(sql`SELECT id, deleted_at FROM users WHERE LOWER(email) = ${cleanEmail} LIMIT 1`);
-  if ((existing.rows[0] as any) && !(existing.rows[0] as any).deleted_at) {
-    return { ok: false, status: 409, error: "An account with that email already exists" };
-  }
   const hash = await hashPassword(password);
   const r = await db.execute(sql`
     INSERT INTO users (email, password_hash, display_name, role, email_verified, can_grade, can_scan, can_print, created_at, updated_at)
     VALUES (${cleanEmail}, ${hash}, ${displayName?.trim() || null}, 'staff', true, ${!!caps.grade}, ${!!caps.scan}, ${!!caps.print}, NOW(), NOW())
     RETURNING id, email
   `);
-  const row = r.rows[0] as any;
-  await storage.writeAuditLog("user", row.id, "staff_create", adminUser, { email: cleanEmail, caps });
-  return { ok: true, id: row.id, email: row.email };
+  const newRow = r.rows[0] as any;
+  await storage.writeAuditLog("user", newRow.id, "staff_create", adminUser, { email: cleanEmail, caps });
+  return { ok: true, id: newRow.id, email: newRow.email, promoted: false, reactivated: false };
 }
 
 /** Set a staffer's capability flags (admin). Audited. */

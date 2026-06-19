@@ -217,7 +217,9 @@ export function registerStaffRoutes(app: Express): void {
       adminUser
     );
     if (!result.ok) return res.status(result.status).json({ error: result.error });
-    return res.status(201).json({ id: result.id, email: result.email });
+    return res
+      .status(result.promoted ? 200 : 201)
+      .json({ id: result.id, email: result.email, promoted: result.promoted, reactivated: result.reactivated });
   });
 
   app.post("/api/admin/staff/:id/capabilities", requireAdmin, async (req: Request, res: Response) => {
