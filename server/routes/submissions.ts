@@ -718,6 +718,17 @@ export function registerSubmissionRoutes(app: Express): void {
         return res.status(404).json({ error: "Submission not found" });
       }
 
+      // SECURITY — bind the PaymentIntent to THIS submission before fulfilling.
+      // The PI id was stored on the submission when the PaymentIntent was created
+      // (create-payment-intent → stripePaymentId), with a server-computed amount.
+      // Without this check a caller could confirm an arbitrary draft submission
+      // using ANY succeeded PaymentIntent (e.g. a cheap one they paid for),
+      // bypassing the real charge. Matching the id also guarantees the amount,
+      // since the client never sets the PI amount.
+      if (!submission.stripePaymentId || submission.stripePaymentId !== paymentIntentId) {
+        return res.status(400).json({ error: "Payment does not match this submission" });
+      }
+
       const stripe = await getUncachableStripeClient();
       const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
 

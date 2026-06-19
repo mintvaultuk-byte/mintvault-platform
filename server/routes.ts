@@ -14366,15 +14366,18 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       const { token } = req.query;
       if (!token || typeof token !== "string") return res.redirect("/login?error=expired_link");
-      const rows = await db.execute(sql`
-        SELECT * FROM account_magic_link_tokens WHERE token = ${token} LIMIT 1
+      // Atomic single-use consume — succeeds only if the token exists, is
+      // unconsumed and unexpired, all in one statement. Prevents a race where
+      // two parallel requests both observe consumed_at IS NULL and both create
+      // a session. (matches verifyMagicToken in customer-auth.ts)
+      const consumed = await db.execute(sql`
+        UPDATE account_magic_link_tokens
+        SET consumed_at = NOW()
+        WHERE token = ${token} AND consumed_at IS NULL AND expires_at > NOW()
+        RETURNING user_id
       `);
-      if (!rows.rows.length) return res.redirect("/login?error=expired_link");
-      const rec = rows.rows[0] as any;
-      if (rec.consumed_at || new Date(rec.expires_at) < new Date()) {
-        return res.redirect("/login?error=expired_link");
-      }
-      await db.execute(sql`UPDATE account_magic_link_tokens SET consumed_at = NOW() WHERE token = ${token}`);
+      if (!consumed.rows.length) return res.redirect("/login?error=expired_link");
+      const rec = consumed.rows[0] as any;
       const user = await findUserById(rec.user_id);
       if (!user || user.deleted_at) return res.redirect("/login?error=expired_link");
 
@@ -14423,15 +14426,21 @@ Defects (admin-confirmed): ${defectLines}`;
       const pwCheck = validatePassword(new_password);
       if (!pwCheck.valid) return res.status(400).json({ error: pwCheck.message });
 
-      const rows = await db.execute(sql`SELECT * FROM password_reset_tokens WHERE token = ${token} LIMIT 1`);
-      if (!rows.rows.length) return res.status(400).json({ error: "Invalid or expired reset link" });
-      const rec = rows.rows[0] as any;
-      if (rec.consumed_at || new Date(rec.expires_at) < new Date()) {
-        return res.status(400).json({ error: "Reset link has expired. Please request a new one." });
-      }
       const hash = await hashPassword(new_password);
+      // Atomic single-use consume — succeeds only if the token exists, is
+      // unconsumed and unexpired, in one statement. Prevents a race where two
+      // parallel requests both pass the check and both reset the password.
+      const consumed = await db.execute(sql`
+        UPDATE password_reset_tokens
+        SET consumed_at = NOW()
+        WHERE token = ${token} AND consumed_at IS NULL AND expires_at > NOW()
+        RETURNING user_id
+      `);
+      if (!consumed.rows.length) {
+        return res.status(400).json({ error: "Reset link is invalid or has expired. Please request a new one." });
+      }
+      const rec = consumed.rows[0] as any;
       await db.execute(sql`UPDATE users SET password_hash = ${hash}, updated_at = NOW() WHERE id = ${rec.user_id}`);
-      await db.execute(sql`UPDATE password_reset_tokens SET consumed_at = NOW() WHERE token = ${token}`);
       // Destroy all sessions for this user by updating their password (sessions will fail to re-validate)
       const user = await findUserById(rec.user_id);
       if (user) {
@@ -14450,14 +14459,18 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       const { token } = req.query;
       if (!token || typeof token !== "string") return res.redirect("/dashboard?verified=error");
-      const rows = await db.execute(sql`SELECT * FROM email_verification_tokens WHERE token = ${token} LIMIT 1`);
-      if (!rows.rows.length) return res.redirect("/dashboard?verified=error");
-      const rec = rows.rows[0] as any;
-      if (rec.consumed_at || new Date(rec.expires_at) < new Date()) return res.redirect("/verify-email?error=expired");
+      // Atomic single-use consume — prevents a parallel double-consume race.
+      const consumed = await db.execute(sql`
+        UPDATE email_verification_tokens
+        SET consumed_at = NOW()
+        WHERE token = ${token} AND consumed_at IS NULL AND expires_at > NOW()
+        RETURNING user_id
+      `);
+      if (!consumed.rows.length) return res.redirect("/verify-email?error=expired");
+      const rec = consumed.rows[0] as any;
       await db.execute(
         sql`UPDATE users SET email_verified = true, email_verified_at = NOW(), updated_at = NOW() WHERE id = ${rec.user_id}`
       );
-      await db.execute(sql`UPDATE email_verification_tokens SET consumed_at = NOW() WHERE token = ${token}`);
       await writeAuthAudit("auth.email.verified", rec.user_id, getClientIpForAuth(req), {});
       return res.redirect("/dashboard?verified=true");
     } catch (err: any) {
