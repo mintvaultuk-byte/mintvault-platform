@@ -49,6 +49,10 @@ scripts/_snapshots/
 scripts/_*
 server/scripts/
 
+# Standalone Electron app for Cricut label printing — separate concern, not
+# part of the main MintVault build/import graph.
+scripts/cricut-app/
+
 # Backup files
 *.bak
 

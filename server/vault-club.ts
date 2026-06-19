@@ -12,7 +12,13 @@ import { sql } from "drizzle-orm";
 import { requireAuth, requireAdmin } from "./middleware/auth";
 import { getStripeSecretKey } from "./stripeClient";
 import { writeAuthAudit } from "./account-auth";
-import { VAULT_CLUB_TIERS, type VaultClubTier, isActiveStatus, endOfCurrentQuarter, quarterKey } from "./vault-club-tiers";
+import {
+  VAULT_CLUB_TIERS,
+  type VaultClubTier,
+  isActiveStatus,
+  endOfCurrentQuarter,
+  quarterKey,
+} from "./vault-club-tiers";
 import { VAULT_CLUB_PRICE_IDS, getPriceId } from "./vault-club-config";
 import { getVaultClubDiscountPercent } from "@shared/schema";
 
@@ -48,7 +54,6 @@ async function countMemberCreditsRemaining(userId: string): Promise<number> {
 // ── Route registration ─────────────────────────────────────────────────────────
 
 export function registerVaultClubRoutes(app: Express): void {
-
   // ── GET /api/vault-club/me ─────────────────────────────────────────────────
   app.get("/api/vault-club/me", requireAuth, async (req: Request, res: Response) => {
     try {
@@ -105,7 +110,11 @@ export function registerVaultClubRoutes(app: Express): void {
 
       const priceId = getPriceId(tier, interval);
       if (!priceId) {
-        return res.status(503).json({ error: "Stripe products not yet configured. Run POST /api/admin/vault-club/setup-stripe-products first." });
+        return res
+          .status(503)
+          .json({
+            error: "Stripe products not yet configured. Run POST /api/admin/vault-club/setup-stripe-products first.",
+          });
       }
 
       const user = await getUserVaultClub(userId);
@@ -241,7 +250,7 @@ export function registerVaultClubRoutes(app: Express): void {
       const stripe = await getStripe();
       const results: Record<string, { product_id: string; month_price_id: string; year_price_id: string }> = {};
 
-      const tierEntries: Array<[VaultClubTier, typeof VAULT_CLUB_TIERS[VaultClubTier]]> = [
+      const tierEntries: Array<[VaultClubTier, (typeof VAULT_CLUB_TIERS)[VaultClubTier]]> = [
         ["bronze", VAULT_CLUB_TIERS.bronze],
         ["silver", VAULT_CLUB_TIERS.silver],
         ["gold", VAULT_CLUB_TIERS.gold],
@@ -250,9 +259,7 @@ export function registerVaultClubRoutes(app: Express): void {
       for (const [tierKey, tierDef] of tierEntries) {
         // Check for existing product with this tier metadata
         const existingProducts = await stripe.products.list({ limit: 100 });
-        let product = existingProducts.data.find(
-          (p) => p.metadata?.mintvault_tier === tierKey
-        );
+        let product = existingProducts.data.find((p) => p.metadata?.mintvault_tier === tierKey);
 
         if (!product) {
           product = await stripe.products.create({
@@ -266,9 +273,7 @@ export function registerVaultClubRoutes(app: Express): void {
 
         // Monthly price
         const existingPrices = await stripe.prices.list({ product: product.id, limit: 100 });
-        let monthPrice = existingPrices.data.find(
-          (p) => p.metadata?.mintvault_interval === "month" && p.active
-        );
+        let monthPrice = existingPrices.data.find((p) => p.metadata?.mintvault_interval === "month" && p.active);
         if (!monthPrice) {
           monthPrice = await stripe.prices.create({
             product: product.id,
@@ -283,9 +288,7 @@ export function registerVaultClubRoutes(app: Express): void {
         }
 
         // Annual price
-        let yearPrice = existingPrices.data.find(
-          (p) => p.metadata?.mintvault_interval === "year" && p.active
-        );
+        let yearPrice = existingPrices.data.find((p) => p.metadata?.mintvault_interval === "year" && p.active);
         if (!yearPrice) {
           yearPrice = await stripe.prices.create({
             product: product.id,
@@ -318,7 +321,7 @@ export function registerVaultClubRoutes(app: Express): void {
       return res.json({ success: true, products: results });
     } catch (err: any) {
       console.error("[vault-club] setup-stripe-products error:", err.message);
-      return res.status(500).json({ error: err.message });
+      return res.status(500).json({ error: "Failed to configure Stripe products. Check server logs." });
     }
   });
 }
@@ -345,7 +348,9 @@ export async function findUserByStripeCustomerId(customerId: string): Promise<Re
  * will be removed when Phase 1B updates webhooks to use the new perk model.
  */
 export async function grantMemberCredits(userId: string, tier: VaultClubTier, source: string): Promise<void> {
-  void userId; void tier; void source;
+  void userId;
+  void tier;
+  void source;
   console.log("[vault-club] grantMemberCredits skipped — quarterly_reholders perk deprecated 2026-04-19");
   return;
 }
@@ -371,5 +376,7 @@ export async function insertVaultClubEvent(params: {
          ${params.rawPayload ? JSON.stringify(params.rawPayload) : null}::jsonb)
       ON CONFLICT (stripe_event_id) DO NOTHING
     `);
-  } catch { /* non-critical */ }
+  } catch {
+    /* non-critical */
+  }
 }
