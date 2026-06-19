@@ -361,4 +361,31 @@ export function registerGraderRoutes(app: Express): void {
     if (!r.ok) return res.status(r.status).json({ error: r.error });
     return res.json({ ok: true, gradingStatus: "assigned" });
   });
+
+  // ── Admin: read a cert's submitted grade + images for the review panel ──────
+  // Reuses the PII-FREE grader payload builders (grade/subgrades + card images
+  // only — never customer fields). Admin-only; used by the /admin/staff
+  // pending-review approval surface.
+  app.get("/api/admin/certificates/:id/grade-review", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const certId = parseInt(String(req.params.id), 10);
+      const grading = await buildCertGradingPayload(certId);
+      if (!grading) return res.status(404).json({ error: "Certificate not found" });
+      const images = await buildCertImagesPayload(certId);
+      return res.json({
+        gradingStatus: grading.gradingStatus,
+        overall: grading.grade,
+        subgrades: {
+          centering: grading.centeringScore,
+          corners: grading.cornersScore,
+          edges: grading.edgesScore,
+          surface: grading.surfaceScore,
+        },
+        images: images?.urls ?? {},
+      });
+    } catch (e: any) {
+      console.error("[admin] grade-review error:", e.message);
+      return res.status(500).json({ error: e.message });
+    }
+  });
 }

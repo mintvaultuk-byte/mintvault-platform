@@ -348,6 +348,92 @@ export default function AdminStaffPage() {
     void load();
   }
 
+  // ── Pending-review approval ───────────────────────────────────────────────
+  // Admin reviews a grader-submitted cert (submitted grade + subgrades + the
+  // images it was graded against), then approves (publishes live) or rejects
+  // with a required note (bounces to the grader's queue for redo). Reuses the
+  // existing approve-grader-grade / reject-grade endpoints.
+  const [reviewCert, setReviewCert] = useState<QueueRow | null>(null);
+  const [reviewData, setReviewData] = useState<{
+    overall: number | string | null;
+    subgrades: { centering: unknown; corners: unknown; edges: unknown; surface: unknown };
+    images: Record<string, string | null>;
+  } | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [showReject, setShowReject] = useState(false);
+  const [rejectNote, setRejectNote] = useState("");
+
+  async function openReview(q: QueueRow) {
+    setMsg(null);
+    setErr(null);
+    setReviewCert(q);
+    setReviewData(null);
+    setShowReject(false);
+    setRejectNote("");
+    setReviewLoading(true);
+    try {
+      const res = await fetch(`/api/admin/certificates/${q.certId}/grade-review`, { credentials: "include" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setReviewCert(null);
+        return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to load the review");
+      }
+      setReviewData(d);
+    } finally {
+      setReviewLoading(false);
+    }
+  }
+  function closeReview() {
+    setReviewCert(null);
+    setReviewData(null);
+    setShowReject(false);
+    setRejectNote("");
+  }
+  async function approveReview() {
+    if (!reviewCert) return;
+    setMsg(null);
+    setErr(null);
+    setReviewBusy(true);
+    try {
+      const res = await fetch(`/api/admin/certificates/${reviewCert.certId}/approve-grader-grade`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Approve failed");
+      setMsg(`Approved ${reviewCert.certIdStr} — grade is now live on the public cert page.`);
+      closeReview();
+      await loadQueue(qFilter);
+      void load();
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+  async function rejectReview() {
+    if (!reviewCert) return;
+    if (!rejectNote.trim()) return setErr("Enter a rejection note for the grader.");
+    setMsg(null);
+    setErr(null);
+    setReviewBusy(true);
+    try {
+      const res = await fetch(`/api/admin/certificates/${reviewCert.certId}/reject-grade`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: rejectNote.trim() }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Reject failed");
+      setMsg(`Rejected ${reviewCert.certIdStr} — bounced to the grader's queue for redo.`);
+      closeReview();
+      await loadQueue(qFilter);
+      void load();
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+
   // SCAN assignment (submission-level)
   const [sIds, setSIds] = useState("");
   const [sStaff, setSStaff] = useState("");
@@ -589,6 +675,16 @@ export default function AdminStaffPage() {
                         </td>
                         <td className="text-[10px] uppercase whitespace-nowrap pr-2">
                           <span className={statusClass(q.graderStatus)}>{q.graderStatus.replace("_", " ")}</span>
+                          {q.graderStatus === "pending_review" && (
+                            <button
+                              type="button"
+                              onClick={() => openReview(q)}
+                              data-testid={`button-review-${q.certId}`}
+                              className="ml-2 normal-case border border-[#D4AF37]/40 text-[#D4AF37] rounded px-2 py-0.5 hover:bg-[#D4AF37]/10"
+                            >
+                              Review
+                            </button>
+                          )}
                         </td>
                         <td className="text-[10px] text-[#E8E4DC]/50 truncate max-w-[130px]">
                           {q.assignedGraderEmail || "—"}
@@ -813,6 +909,109 @@ export default function AdminStaffPage() {
           )}
         </section>
       </div>
+
+      {reviewCert && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-start sm:items-center justify-center p-4 overflow-auto"
+          onClick={closeReview}
+        >
+          <div
+            className="bg-[#0c0c0c] border border-[#D4AF37]/30 rounded-lg max-w-2xl w-full p-4 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="text-[#D4AF37] font-semibold text-sm">
+                Review {reviewCert.certIdStr} — {reviewCert.cardName || "Unidentified"}
+              </h3>
+              <button
+                onClick={closeReview}
+                className="text-[#E8E4DC]/40 hover:text-[#E8E4DC] text-lg leading-none px-1"
+                aria-label="Close review"
+              >
+                ×
+              </button>
+            </div>
+            {reviewLoading || !reviewData ? (
+              <p className="text-[#E8E4DC]/50 text-xs py-8 text-center">Loading…</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  {(["front", "back"] as const).map((sideKey) => {
+                    const url =
+                      reviewData.images[`${sideKey}_display`] || reviewData.images[`${sideKey}_original`] || null;
+                    return (
+                      <div key={sideKey} className="border border-[#D4AF37]/10 rounded overflow-hidden bg-black">
+                        {url ? (
+                          <img src={url} alt={sideKey} className="w-full h-auto object-contain max-h-72" />
+                        ) : (
+                          <div className="h-40 flex items-center justify-center text-[#E8E4DC]/30 text-xs">
+                            no {sideKey} image
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="text-[#D4AF37] font-extrabold text-lg">Grade: {reviewData.overall ?? "—"}</div>
+                  <div className="text-xs text-[#E8E4DC]/70 flex gap-3 flex-wrap">
+                    <span>Centering {String(reviewData.subgrades.centering ?? "—")}</span>
+                    <span>Corners {String(reviewData.subgrades.corners ?? "—")}</span>
+                    <span>Edges {String(reviewData.subgrades.edges ?? "—")}</span>
+                    <span>Surface {String(reviewData.subgrades.surface ?? "—")}</span>
+                  </div>
+                </div>
+                {!showReject ? (
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={approveReview}
+                      disabled={reviewBusy}
+                      data-testid="button-approve-grade"
+                      className="bg-emerald-600 text-white font-bold px-4 py-2 rounded text-sm hover:bg-emerald-500 disabled:opacity-50"
+                    >
+                      Approve — publish grade
+                    </button>
+                    <button
+                      onClick={() => setShowReject(true)}
+                      disabled={reviewBusy}
+                      data-testid="button-reject-grade"
+                      className="border border-red-700/60 text-red-400 px-4 py-2 rounded text-sm hover:bg-red-950/40 disabled:opacity-50"
+                    >
+                      Reject…
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2 pt-1">
+                    <textarea
+                      className="ss-input min-h-[60px]"
+                      placeholder="Reason for rejection (shown to the grader) — required"
+                      value={rejectNote}
+                      onChange={(e) => setRejectNote(e.target.value)}
+                      data-testid="input-reject-note"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={rejectReview}
+                        disabled={reviewBusy}
+                        className="bg-red-600 text-white font-bold px-4 py-2 rounded text-sm hover:bg-red-500 disabled:opacity-50"
+                      >
+                        Confirm reject
+                      </button>
+                      <button
+                        onClick={() => setShowReject(false)}
+                        disabled={reviewBusy}
+                        className="border border-[#D4AF37]/40 px-4 py-2 rounded text-sm hover:bg-[#D4AF37]/10"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
       <style>{`.ss-input{width:100%;background:#000;border:1px solid rgba(212,175,55,0.3);border-radius:4px;padding:8px;color:#E8E4DC;font-size:13px;outline:none}.ss-input:focus{border-color:#D4AF37}`}</style>
     </div>
   );

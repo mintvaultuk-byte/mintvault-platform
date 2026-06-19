@@ -313,6 +313,10 @@ export default function ImageViewer({
   const [showDefects, setShowDefects] = useState(true);
   const [showCentering, setShowCentering] = useState(false);
   const [markMode, setMarkModeRaw] = useState(false);
+  // Pin tap-vs-scroll discrimination: screen coords of the last pointerdown over
+  // the card. A pin only drops if the pointer barely moved by the click — a
+  // touch scroll-drag fires a synthetic click that otherwise dropped a defect.
+  const tapStartRef = useRef<{ x: number; y: number } | null>(null);
   const [fullscreen, setFullscreenRaw] = useState(false);
 
   // MVGS v2.1 — mark-mode tool palette. `pin` (existing) | `whitening` |
@@ -514,6 +518,12 @@ export default function ImageViewer({
     cancelBatch();
   }
 
+  // Record the press origin so handleContainerClick can tell a tap from a
+  // scroll/pan drag (pin tool only; mirrors the card tool's screen-px threshold).
+  function handleMarkPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (markMode && markTool === "pin") tapStartRef.current = { x: e.clientX, y: e.clientY };
+  }
+
   function handleContainerClick(e: React.MouseEvent<HTMLDivElement>) {
     if (dragging) return;
     // Line tools intercept clicks via mousedown/mouseup (see handleMouseDown
@@ -521,6 +531,12 @@ export default function ImageViewer({
     // doesn't fire too. lineStart != null = a drag is in progress.
     if (markMode && markTool !== "pin") return;
     if (markMode && imgElRef.current) {
+      // Tap vs scroll/pan: if the pointer moved more than 8px (screen) between
+      // pointerdown and this click, it was a scroll/pan — not a pin tap. A touch
+      // scroll-drag fires a synthetic click; without this it dropped a defect pin.
+      const tapStart = tapStartRef.current;
+      tapStartRef.current = null;
+      if (tapStart && Math.hypot(e.clientX - tapStart.x, e.clientY - tapStart.y) > 8) return;
       // Double-click shortcut: two clicks within 280ms = "Done" — open the
       // type picker on the current batch instead of dropping a 2nd pin.
       const now = Date.now();
@@ -847,6 +863,7 @@ export default function ImageViewer({
                 padding: "1.5%",
               }
         }
+        onPointerDown={handleMarkPointerDown}
         onClick={handleContainerClick}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}

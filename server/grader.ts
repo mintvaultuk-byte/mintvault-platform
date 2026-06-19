@@ -798,7 +798,18 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   await db.execute(sql`
     UPDATE certificates SET grader_status = 'approved', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
   `);
-  await storage.writeAuditLog("certificate", String(certId), "grade_approve", adminUser, { via: "grader_review" });
+  // Snapshot the published grade into the approval audit row.
+  const c = (await storage.getCertificate(certId)) as any;
+  await storage.writeAuditLog("certificate", String(certId), "grade_approve", adminUser, {
+    via: "grader_review",
+    overall: c?.gradeOverall ?? null,
+    subgrades: {
+      centering: c?.gradeCentering ?? null,
+      corners: c?.gradeCorners ?? null,
+      edges: c?.gradeEdges ?? null,
+      surface: c?.gradeSurface ?? null,
+    },
+  });
   return { ok: true as const };
 }
 
