@@ -813,6 +813,39 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   return { ok: true as const };
 }
 
+/** {overall, subgrades} snapshot of a cert's current grade — for the admin-edit audit. */
+async function gradeSnapshot(certId: number) {
+  const c = (await storage.getCertificate(certId)) as any;
+  return {
+    overall: c?.gradeOverall ?? null,
+    subgrades: {
+      centering: c?.gradeCentering ?? null,
+      corners: c?.gradeCorners ?? null,
+      edges: c?.gradeEdges ?? null,
+      surface: c?.gradeSurface ?? null,
+    },
+  };
+}
+
+/**
+ * Admin edits a pending_review cert's DRAFT grade during review (the grading
+ * panel in adminReview mode auto-saves here). Deliberately NOT grader-locked —
+ * reviewing a grader's submission is the whole point — but pending_review-gated
+ * and NON-publishing (only Approve publishes). Reuses the grader's draft writer
+ * applyCertGradeDraft. Audits admin_grade_edit {before, after}.
+ */
+export async function adminReviewSaveDraft(certId: number, body: any, adminUser: string) {
+  const a = await getCertAssignment(certId);
+  if (!a) return { ok: false as const, status: 404, error: "Certificate not found" };
+  if (a.gradingStatus !== "pending_review")
+    return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
+  const before = await gradeSnapshot(certId);
+  await applyCertGradeDraft(certId, body);
+  const after = await gradeSnapshot(certId);
+  await storage.writeAuditLog("certificate", String(certId), "admin_grade_edit", adminUser, { before, after });
+  return { ok: true as const };
+}
+
 // ── Earnings (display-only; NO deduction logic) ───────────────────────────────
 
 /** Per-card grader rate from pipeline_settings (raw SQL; null/0 when unset). */

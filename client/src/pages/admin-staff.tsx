@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
 import { Pencil, Trash2 } from "lucide-react";
+import GradingPanel from "../components/grading/grading-panel";
 
 /**
  * Admin staff hub (evolves admin-graders). One staff account list with per-person
@@ -354,61 +355,24 @@ export default function AdminStaffPage() {
   // with a required note (bounces to the grader's queue for redo). Reuses the
   // existing approve-grader-grade / reject-grade endpoints.
   const [reviewCert, setReviewCert] = useState<QueueRow | null>(null);
-  const [reviewData, setReviewData] = useState<{
-    overall: number | string | null;
-    subgrades: { centering: unknown; corners: unknown; edges: unknown; surface: unknown };
-    images: Record<string, string | null>;
-  } | null>(null);
-  const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [showReject, setShowReject] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
 
-  async function openReview(q: QueueRow) {
+  // Open the FULL grading panel (adminReview mode) for a pending_review cert. The
+  // panel self-hydrates from /api/admin/grade-review/* and handles inspection +
+  // edit + save-then-approve; this wrapper supplies identity, Reject, and refresh.
+  function openReview(q: QueueRow) {
     setMsg(null);
     setErr(null);
-    setReviewCert(q);
-    setReviewData(null);
     setShowReject(false);
     setRejectNote("");
-    setReviewLoading(true);
-    try {
-      const res = await fetch(`/api/admin/certificates/${q.certId}/grade-review`, { credentials: "include" });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setReviewCert(null);
-        return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to load the review");
-      }
-      setReviewData(d);
-    } finally {
-      setReviewLoading(false);
-    }
+    setReviewCert(q);
   }
   function closeReview() {
     setReviewCert(null);
-    setReviewData(null);
     setShowReject(false);
     setRejectNote("");
-  }
-  async function approveReview() {
-    if (!reviewCert) return;
-    setMsg(null);
-    setErr(null);
-    setReviewBusy(true);
-    try {
-      const res = await fetch(`/api/admin/certificates/${reviewCert.certId}/approve-grader-grade`, {
-        method: "POST",
-        credentials: "include",
-      });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Approve failed");
-      setMsg(`Approved ${reviewCert.certIdStr} — grade is now live on the public cert page.`);
-      closeReview();
-      await loadQueue(qFilter);
-      void load();
-    } finally {
-      setReviewBusy(false);
-    }
   }
   async function rejectReview() {
     if (!reviewCert) return;
@@ -911,104 +875,99 @@ export default function AdminStaffPage() {
       </div>
 
       {reviewCert && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 flex items-start sm:items-center justify-center p-4 overflow-auto"
-          onClick={closeReview}
-        >
-          <div
-            className="bg-[#0c0c0c] border border-[#D4AF37]/30 rounded-lg max-w-2xl w-full p-4 space-y-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="text-[#D4AF37] font-semibold text-sm">
-                Review {reviewCert.certIdStr} — {reviewCert.cardName || "Unidentified"}
-              </h3>
-              <button
-                onClick={closeReview}
-                className="text-[#E8E4DC]/40 hover:text-[#E8E4DC] text-lg leading-none px-1"
-                aria-label="Close review"
-              >
-                ×
-              </button>
-            </div>
-            {reviewLoading || !reviewData ? (
-              <p className="text-[#E8E4DC]/50 text-xs py-8 text-center">Loading…</p>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 gap-2">
-                  {(["front", "back"] as const).map((sideKey) => {
-                    const url =
-                      reviewData.images[`${sideKey}_display`] || reviewData.images[`${sideKey}_original`] || null;
-                    return (
-                      <div key={sideKey} className="border border-[#D4AF37]/10 rounded overflow-hidden bg-black">
-                        {url ? (
-                          <img src={url} alt={sideKey} className="w-full h-auto object-contain max-h-72" />
-                        ) : (
-                          <div className="h-40 flex items-center justify-center text-[#E8E4DC]/30 text-xs">
-                            no {sideKey} image
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="text-[#D4AF37] font-extrabold text-lg">Grade: {reviewData.overall ?? "—"}</div>
-                  <div className="text-xs text-[#E8E4DC]/70 flex gap-3 flex-wrap">
-                    <span>Centering {String(reviewData.subgrades.centering ?? "—")}</span>
-                    <span>Corners {String(reviewData.subgrades.corners ?? "—")}</span>
-                    <span>Edges {String(reviewData.subgrades.edges ?? "—")}</span>
-                    <span>Surface {String(reviewData.subgrades.surface ?? "—")}</span>
-                  </div>
-                </div>
-                {!showReject ? (
-                  <div className="flex gap-2 pt-1">
+        <div className="fixed inset-0 z-50 bg-black/90 overflow-auto" data-testid="grade-review-overlay">
+          <div className="min-h-screen p-3">
+            <div className="max-w-6xl mx-auto bg-black border border-[#D4AF37]/30 rounded-lg">
+              <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[#D4AF37]/20 sticky top-0 bg-black z-10">
+                <h3 className="text-[#D4AF37] font-semibold text-sm truncate">
+                  Review {reviewCert.certIdStr} — {reviewCert.cardName || "Unidentified"}
+                  <span className="text-[#E8E4DC]/50 font-normal">
+                    {[
+                      reviewCert.setName,
+                      reviewCert.cardNumber ? `#${reviewCert.cardNumber}` : null,
+                      reviewCert.year,
+                      reviewCert.variant,
+                    ]
+                      .filter(Boolean)
+                      .map((x) => ` · ${x}`)
+                      .join("")}
+                  </span>
+                </h3>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {!showReject && (
                     <button
-                      onClick={approveReview}
-                      disabled={reviewBusy}
-                      data-testid="button-approve-grade"
-                      className="bg-emerald-600 text-white font-bold px-4 py-2 rounded text-sm hover:bg-emerald-500 disabled:opacity-50"
-                    >
-                      Approve — publish grade
-                    </button>
-                    <button
+                      type="button"
                       onClick={() => setShowReject(true)}
                       disabled={reviewBusy}
                       data-testid="button-reject-grade"
-                      className="border border-red-700/60 text-red-400 px-4 py-2 rounded text-sm hover:bg-red-950/40 disabled:opacity-50"
+                      className="border border-red-700/60 text-red-400 px-3 py-1.5 rounded text-xs hover:bg-red-950/40 disabled:opacity-50"
                     >
                       Reject…
                     </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={closeReview}
+                    className="text-[#E8E4DC]/50 hover:text-[#E8E4DC] text-xl leading-none px-2"
+                    aria-label="Close review"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+              {showReject && (
+                <div className="px-4 py-3 border-b border-red-900/40 bg-red-950/20 space-y-2">
+                  <textarea
+                    className="ss-input min-h-[60px]"
+                    placeholder="Reason for rejection (shown to the grader) — required"
+                    value={rejectNote}
+                    onChange={(e) => setRejectNote(e.target.value)}
+                    data-testid="input-reject-note"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={rejectReview}
+                      disabled={reviewBusy}
+                      className="bg-red-600 text-white font-bold px-4 py-2 rounded text-sm hover:bg-red-500 disabled:opacity-50"
+                    >
+                      Confirm reject — bounce to grader
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowReject(false)}
+                      disabled={reviewBusy}
+                      className="border border-[#D4AF37]/40 px-4 py-2 rounded text-sm hover:bg-[#D4AF37]/10"
+                    >
+                      Cancel
+                    </button>
                   </div>
-                ) : (
-                  <div className="space-y-2 pt-1">
-                    <textarea
-                      className="ss-input min-h-[60px]"
-                      placeholder="Reason for rejection (shown to the grader) — required"
-                      value={rejectNote}
-                      onChange={(e) => setRejectNote(e.target.value)}
-                      data-testid="input-reject-note"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={rejectReview}
-                        disabled={reviewBusy}
-                        className="bg-red-600 text-white font-bold px-4 py-2 rounded text-sm hover:bg-red-500 disabled:opacity-50"
-                      >
-                        Confirm reject
-                      </button>
-                      <button
-                        onClick={() => setShowReject(false)}
-                        disabled={reviewBusy}
-                        className="border border-[#D4AF37]/40 px-4 py-2 rounded text-sm hover:bg-[#D4AF37]/10"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
+                </div>
+              )}
+              <div className="p-3">
+                {/* The SAME grading panel the grader/admin use — adminReview mode is
+                    charge-safe (no AI/recrop/delete) and its Approve does an explicit
+                    save-then-publish via approve-grader-grade. */}
+                <GradingPanel
+                  adminReview
+                  apiBase="/api/admin/grade-review"
+                  certId={reviewCert.certId}
+                  certIdStr={reviewCert.certIdStr}
+                  cardName={reviewCert.cardName || ""}
+                  cardSet={reviewCert.setName || ""}
+                  cardNumber={reviewCert.cardNumber}
+                  cardYear={reviewCert.year}
+                  cardVariant={reviewCert.variant}
+                  onGradeApproved={() => {
+                    setMsg(`Approved ${reviewCert.certIdStr} — grade is now live on the public cert page.`);
+                    closeReview();
+                    void loadQueue(qFilter);
+                    void load();
+                  }}
+                  onCertUpdated={() => {}}
+                />
+              </div>
+            </div>
           </div>
         </div>
       )}

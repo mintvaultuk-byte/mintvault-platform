@@ -148,6 +148,11 @@ interface Props {
    *  relabelled. A grader can crop/centre/analyse/identify/save-draft but never
    *  publishes a live grade. */
   graderMode?: boolean;
+  /** Admin grade-review mode: reuse the FULL panel to review a grader-submitted
+   *  (pending_review) cert. Charge-safe — hides the AI panel / reprocess / recrop /
+   *  delete-image; the primary action saves the (possibly corrected) draft then
+   *  publishes via approve-grader-grade. Mount with apiBase="/api/admin/grade-review". */
+  adminReview?: boolean;
 }
 
 // Defaults use 0 to indicate "not yet graded" — prevents false Black Label on ungraded certs
@@ -234,6 +239,7 @@ export default function GradingPanel({
   cardGame,
   apiBase = "/api/admin",
   graderMode = false,
+  adminReview = false,
 }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -1465,6 +1471,9 @@ export default function GradingPanel({
   // final failure it flips the gate to "failed" (blocking approval) and toasts
   // — never a silent failure. Survives the tool closing because it lives here.
   async function runRecrop(side: "front" | "back", payload: any): Promise<string | undefined> {
+    // Admin-review is charge/side-effect-safe: never re-crop or re-upload the
+    // grader's images. Centering measurements still update locally (draft auto-save).
+    if (adminReview) return undefined;
     // Functional updates only — front and back upload loops run concurrently
     // and must never read/write a stale snapshot of the other side's slot.
     if (cropSyncedTimerRef.current[side]) {
@@ -1552,21 +1561,43 @@ export default function GradingPanel({
         autoSaveTimerRef.current = null;
       }
       const elapsedSeconds = Math.round((Date.now() - gradingStartedAtRef.current) / 1000);
+      // ADMIN-REVIEW MODE: explicit save-then-approve. Persist the (possibly
+      //   corrected) draft via the non-publishing review endpoint, THEN publish
+      //   via the existing grader-review approve, so the PUBLISHED grade is the
+      //   edited one — not the grader's original.
       // GRADER MODE: submit for admin review (POST /submit) — never publishes.
       // ADMIN MODE: publish the grade live (PUT /approve).
-      const res = graderMode
-        ? await fetch(`${apiBase}/certificates/${certId}/submit`, {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(buildPayload()),
-          })
-        : await fetch(`${apiBase}/certificates/${certId}/approve`, {
-            method: "PUT",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...buildPayload(), grading_time_seconds: elapsedSeconds }),
-          });
+      let res: Response;
+      if (adminReview) {
+        const saveRes = await fetch(`${apiBase}/certificates/${certId}/grade`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildPayload()),
+        });
+        if (!saveRes.ok) {
+          const sd = await saveRes.json().catch(() => ({}));
+          throw new Error(sd.error || "Save failed");
+        }
+        res = await fetch(`/api/admin/certificates/${certId}/approve-grader-grade`, {
+          method: "POST",
+          credentials: "include",
+        });
+      } else if (graderMode) {
+        res = await fetch(`${apiBase}/certificates/${certId}/submit`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildPayload()),
+        });
+      } else {
+        res = await fetch(`${apiBase}/certificates/${certId}/approve`, {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...buildPayload(), grading_time_seconds: elapsedSeconds }),
+        });
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || (graderMode ? "Submit failed" : "Approve failed"));
       setApproved(true);
@@ -1825,27 +1856,31 @@ export default function GradingPanel({
         />
       )}
 
-      {/* AI Panel + Reprocess */}
-      <div className="flex items-start gap-3">
-        <div className="flex-1">
-          <AiPanel
-            certId={certId}
-            onAnalysisComplete={handleAiComplete}
-            referenceImageUrl={aiIdentification?.referenceImageUrl}
-            externalAnalysis={pendingAnalysis}
-            onExternalAnalysisConsumed={onPendingAnalysisConsumed}
-            onManualIdentification={onManualIdentification}
-            cardGame={cardGame}
-          />
+      {/* AI Panel + Reprocess — HIDDEN in admin-review: every AI/CV action here
+          hits /api/admin (hardcoded) and would burn credits + overwrite the
+          grader's work. Review is read/charge-safe. */}
+      {!adminReview && (
+        <div className="flex items-start gap-3">
+          <div className="flex-1">
+            <AiPanel
+              certId={certId}
+              onAnalysisComplete={handleAiComplete}
+              referenceImageUrl={aiIdentification?.referenceImageUrl}
+              externalAnalysis={pendingAnalysis}
+              onExternalAnalysisConsumed={onPendingAnalysisConsumed}
+              onManualIdentification={onManualIdentification}
+              cardGame={cardGame}
+            />
+          </div>
+          {/* Admin-only image op (hits /api/admin) — hidden for graders. */}
+          {!graderMode && (
+            <ReprocessButton
+              certId={certId}
+              onDone={() => queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] })}
+            />
+          )}
         </div>
-        {/* Admin-only image op (hits /api/admin) — hidden for graders. */}
-        {!graderMode && (
-          <ReprocessButton
-            certId={certId}
-            onDone={() => queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] })}
-          />
-        )}
-      </div>
+      )}
 
       {/* Two-panel layout */}
       <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5">
@@ -1883,7 +1918,7 @@ export default function GradingPanel({
                       {s}
                       {count > 0 ? ` (${count})` : ""}
                     </button>
-                    {hasImage && certId && (
+                    {hasImage && certId && !adminReview && (
                       <button
                         type="button"
                         title={`Delete ${s} image`}
@@ -2826,24 +2861,27 @@ export default function GradingPanel({
             </div>
 
             {/* Generate Description (Option B — Haiku writes grade rationale
-              from the admin's manual subgrades + confirmed defects). */}
-            <div>
-              <button
-                type="button"
-                onClick={generateDescription}
-                disabled={generatingDescription || subgradesIncomplete}
-                title={
-                  subgradesIncomplete
-                    ? "Set all four subgrades first"
-                    : "Write a grade rationale paragraph using the current subgrades + confirmed defects"
-                }
-                className="w-full flex items-center justify-center gap-2 border border-[var(--admin-gold)]/30 text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/60 text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                data-testid="btn-generate-description"
-              >
-                {generatingDescription ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
-                {generatingDescription ? "Writing description…" : "Generate Description"}
-              </button>
-            </div>
+              from the admin's manual subgrades + confirmed defects).
+              Hidden in admin-review — paid LLM call, charge-safe. */}
+            {!adminReview && (
+              <div>
+                <button
+                  type="button"
+                  onClick={generateDescription}
+                  disabled={generatingDescription || subgradesIncomplete}
+                  title={
+                    subgradesIncomplete
+                      ? "Set all four subgrades first"
+                      : "Write a grade rationale paragraph using the current subgrades + confirmed defects"
+                  }
+                  className="w-full flex items-center justify-center gap-2 border border-[var(--admin-gold)]/30 text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/60 text-xs font-bold uppercase px-4 py-2.5 rounded transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  data-testid="btn-generate-description"
+                >
+                  {generatingDescription ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                  {generatingDescription ? "Writing description…" : "Generate Description"}
+                </button>
+              </div>
+            )}
 
             {/* Notes */}
             <div className="bg-[var(--admin-panel2)] rounded-lg p-3">

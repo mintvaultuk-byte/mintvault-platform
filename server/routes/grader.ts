@@ -29,6 +29,7 @@ import {
   buildCertImagesPayload,
   buildCertGradingPayload,
   applyCertGradeDraft,
+  adminReviewSaveDraft,
   approveGraderCert,
   rejectCertGrade,
   getGraderEarnings,
@@ -362,29 +363,40 @@ export function registerGraderRoutes(app: Express): void {
     return res.json({ ok: true, gradingStatus: "assigned" });
   });
 
-  // ── Admin: read a cert's submitted grade + images for the review panel ──────
-  // Reuses the PII-FREE grader payload builders (grade/subgrades + card images
-  // only — never customer fields). Admin-only; used by the /admin/staff
-  // pending-review approval surface.
-  app.get("/api/admin/certificates/:id/grade-review", requireAdmin, async (req: Request, res: Response) => {
+  // ── Admin grade-review namespace ────────────────────────────────────────────
+  // Drives the SAME grading panel (mounted with apiBase="/api/admin/grade-review"
+  // + adminReview) to review a grader-submitted (pending_review) cert with the
+  // full inspection tools. requireAdmin, PII-free (reuses the grader builders),
+  // NOT grader-locked, pending_review-gated, NON-publishing. Approve/Reject stay
+  // the existing approve-grader-grade / reject-grade endpoints below.
+  app.get("/api/admin/grade-review/certificates/:id/grading", requireAdmin, async (req: Request, res: Response) => {
+    const certId = parseInt(String(req.params.id), 10);
+    const a = await getCertAssignment(certId);
+    if (!a) return res.status(404).json({ error: "Certificate not found" });
+    if (a.gradingStatus !== "pending_review")
+      return res.status(409).json({ error: `Card is '${a.gradingStatus}', not pending review` });
+    const grading = await buildCertGradingPayload(certId);
+    if (!grading) return res.status(404).json({ error: "Certificate not found" });
+    return res.json(grading);
+  });
+  app.get("/api/admin/grade-review/certificates/:id/images", requireAdmin, async (req: Request, res: Response) => {
+    const certId = parseInt(String(req.params.id), 10);
+    const a = await getCertAssignment(certId);
+    if (!a) return res.status(404).json({ error: "Certificate not found" });
+    if (a.gradingStatus !== "pending_review")
+      return res.status(409).json({ error: `Card is '${a.gradingStatus}', not pending review` });
+    const images = await buildCertImagesPayload(certId);
+    if (!images) return res.status(404).json({ error: "Certificate not found" });
+    return res.json(images);
+  });
+  app.put("/api/admin/grade-review/certificates/:id/grade", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const certId = parseInt(String(req.params.id), 10);
-      const grading = await buildCertGradingPayload(certId);
-      if (!grading) return res.status(404).json({ error: "Certificate not found" });
-      const images = await buildCertImagesPayload(certId);
-      return res.json({
-        gradingStatus: grading.gradingStatus,
-        overall: grading.grade,
-        subgrades: {
-          centering: grading.centeringScore,
-          corners: grading.cornersScore,
-          edges: grading.edgesScore,
-          surface: grading.surfaceScore,
-        },
-        images: images?.urls ?? {},
-      });
+      const adminUser = (req.session as any).adminEmail || "admin";
+      const r = await adminReviewSaveDraft(parseInt(String(req.params.id), 10), req.body || {}, adminUser);
+      if (!r.ok) return res.status(r.status).json({ error: r.error });
+      return res.json({ ok: true });
     } catch (e: any) {
-      console.error("[admin] grade-review error:", e.message);
+      console.error("[admin grade-review save] error:", e.message);
       return res.status(500).json({ error: e.message });
     }
   });
