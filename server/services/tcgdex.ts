@@ -54,6 +54,7 @@ export interface CardLookupResult {
   total_cards: number;
   external_card_id: string;
   rarity: string | null;
+  resolved_lang: string; // TCGdex lang code the card actually resolved on (ja/en/ko/zh-tw/zh-cn/…) — authoritative for the card's language
 }
 
 // ── Per-language set cache (24h TTL) ──────────────────────────────────────
@@ -302,5 +303,6 @@ export async function lookupCard(
     total_cards: setData.cardCount.official,
     external_card_id: card.id,
     rarity: card.rarity || null,
+    resolved_lang: resolvedLang,
   };
 }

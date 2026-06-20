@@ -1045,6 +1045,7 @@ export function registerAdminConfigRoutes(app: Express): void {
         total_cards: result.total_cards,
         external_card_id: result.external_card_id,
         rarity: result.rarity,
+        resolved_lang: result.resolved_lang, // lang the lookup resolved on — drives the form's Language auto-fill
         set_exists: setExists || auto_added,
         auto_added,
         needs_manual_add,

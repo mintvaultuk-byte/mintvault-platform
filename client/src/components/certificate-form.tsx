@@ -429,7 +429,11 @@ export default function CertificateForm({
           cardNumber: pick(id.detected_number, prev.cardNumber),
           year: pick(id.detected_year, prev.year),
           rarity: pick(id.detected_rarity, prev.rarity),
-          language: pick(id.detected_language, prev.language),
+          // Language is deterministic (script-based detection), so always fill it when
+          // identify returns one — don't gate on confidence like the other fields, or the
+          // non-empty "English" default keeps it stuck. The TCGdex lookup below overrides
+          // with the authoritative resolved language when a set resolves. Stays editable.
+          language: id.detected_language || prev.language,
           // variant intentionally untouched.
         }));
         toast({
@@ -490,11 +494,28 @@ export default function CertificateForm({
       const td = await r.json();
       if (!td.found) return;
 
+      // Authoritative language: the endpoint the card actually resolved on (the set code
+      // determines it). Maps the TCGdex lang code to the form's Language value. Overrides
+      // identify's detected_language. Falls through to prev if the code is unknown.
+      const langLabel: Record<string, string> = {
+        ja: "Japanese",
+        en: "English",
+        ko: "Korean",
+        "zh-tw": "Chinese",
+        "zh-cn": "Chinese",
+        fr: "French",
+        de: "German",
+        es: "Spanish",
+        it: "Italian",
+        pt: "Portuguese",
+      };
+
       setForm((prev) => ({
         ...prev,
         cardName: td.card_name?.toUpperCase() || prev.cardName,
         setName: td.set_name || prev.setName,
         year: td.release_date ? td.release_date.split("-")[0] : prev.year,
+        language: (td.resolved_lang && langLabel[td.resolved_lang]) || prev.language,
       }));
 
       const badge = td.auto_added ? " (set auto-added)" : td.needs_manual_add ? " (set needs manual add)" : "";
