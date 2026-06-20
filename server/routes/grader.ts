@@ -400,4 +400,25 @@ export function registerGraderRoutes(app: Express): void {
       return res.status(500).json({ error: e.message });
     }
   });
+
+  // Card-tool / AI panel actions (recrop, manual-centering, detect-card-bounds,
+  // identify, analyze, …). The review panel reuses the same inspection tools, so
+  // proxy these to the unchanged admin handlers — exactly like the grader proxy,
+  // but gated on requireAdmin + pending_review (no grader-ownership check). Without
+  // this, the card tool's saves 404'd to the SPA in review mode ("Unexpected token
+  // '<'" / Centering save failed). PII-stripped to match this namespace.
+  app.post("/api/admin/grade-review/certificates/:id/:action", requireAdmin, async (req: Request, res: Response) => {
+    const action = String(req.params.action);
+    if (!GRADER_PROXY_ACTIONS.has(action)) return res.status(404).json({ error: "Unknown action" });
+    const certId = parseInt(String(req.params.id), 10);
+    const a = await getCertAssignment(certId);
+    if (!a) return res.status(404).json({ error: "Certificate not found" });
+    if (a.gradingStatus !== "pending_review")
+      return res.status(409).json({ error: `Card is '${a.gradingStatus}', not pending review` });
+    const origJson = res.json.bind(res);
+    (res as any).json = (body: any) => origJson(stripGraderPii(body));
+    const qs = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+    req.url = `/api/admin/certificates/${certId}/${action}${qs}`;
+    return (req.app as any).handle(req, res);
+  });
 }
