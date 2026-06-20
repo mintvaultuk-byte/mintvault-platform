@@ -407,49 +407,50 @@ export default function CertificateForm({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Identify failed");
 
-      setIdentifyConfidence(data.confidence ?? null);
-      setIdentifyVerified(!!data.verified);
+      // /identify returns everything NESTED under `identification`, with
+      // detected_* names + set_code — NOT flat card_name/set_id. Read from there.
+      // (Reading the old flat shape made the guard always-false → 0 TCGdex lookups.)
+      const id = data.identification ?? data;
 
-      if (data.detailsWritten !== false) {
+      setIdentifyConfidence(id.confidence ?? null);
+      setIdentifyVerified(!!id.verified);
+
+      if (id.detected_name || id.set_code || id.detected_number) {
         const isEmpty = (v: any) => !v || v === "" || v === "(pending)" || v === "(untitled)";
-        const overwrite = data.verified || data.confidence === "high";
+        const overwrite = !!id.verified || id.confidence === "high";
+        // Overwrite on high-confidence/verified, otherwise only fill blanks — fields stay editable.
+        const pick = (next: any, prev: any) => (overwrite ? next || prev : isEmpty(prev) ? next || prev : prev);
         setForm((prev) => ({
           ...prev,
-          cardName: overwrite
-            ? data.card_name || prev.cardName
-            : isEmpty(prev.cardName)
-              ? data.card_name || prev.cardName
-              : prev.cardName,
-          setName: overwrite
-            ? data.set_name || prev.setName
-            : isEmpty(prev.setName)
-              ? data.set_name || prev.setName
-              : prev.setName,
-          cardNumber: overwrite
-            ? data.card_number || prev.cardNumber
-            : isEmpty(prev.cardNumber)
-              ? data.card_number || prev.cardNumber
-              : prev.cardNumber,
-          year: overwrite ? data.year || prev.year : isEmpty(prev.year) ? data.year || prev.year : prev.year,
-          rarity: overwrite
-            ? data.rarity || prev.rarity
-            : isEmpty(prev.rarity)
-              ? data.rarity || prev.rarity
-              : prev.rarity,
-          language: overwrite
-            ? data.language || prev.language
-            : isEmpty(prev.language)
-              ? data.language || prev.language
-              : prev.language,
+          cardName: pick(id.detected_name, prev.cardName),
+          // setName is intentionally NOT taken from the AI — TCGdex is the SOLE
+          // source of set metadata (runTcgdexPrefill below). Prefilling it from
+          // detected_set was the original Scarlet & Violet mis-prefill bug.
+          cardNumber: pick(id.detected_number, prev.cardNumber),
+          year: pick(id.detected_year, prev.year),
+          rarity: pick(id.detected_rarity, prev.rarity),
+          language: pick(id.detected_language, prev.language),
+          // variant intentionally untouched.
         }));
         toast({
           title: "Card identified",
-          description: `${data.card_name || "Card"} — ${data.set_name || "Unknown set"}`,
+          description: `${id.detected_name || id.officialName || "Card"}${id.detected_number ? ` · #${id.detected_number}` : ""}`,
         });
 
-        // TCGdex enrichment: if AI returned a set code, query TCGdex for canonical metadata
-        if (data.set_id && data.card_number) {
-          runTcgdexPrefill(data.set_id, data.card_number, data.language || "English", certificate?.id);
+        // TCGdex enrichment — the ONLY source of canonical set/name/year. Fires
+        // whenever the AI extracted a set code + number.
+        if (id.set_code && id.detected_number) {
+          console.info("[tcgdex-prefill] firing lookup", {
+            code: id.set_code,
+            number: id.detected_number,
+            lang: id.detected_language,
+          });
+          runTcgdexPrefill(id.set_code, id.detected_number, id.detected_language || "English", certificate?.id);
+        } else {
+          console.info("[tcgdex-prefill] skipped — no set_code/number from identify", {
+            set_code: id.set_code,
+            detected_number: id.detected_number,
+          });
         }
       } else {
         toast({

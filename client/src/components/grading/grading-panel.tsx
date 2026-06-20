@@ -1086,7 +1086,17 @@ export default function GradingPanel({
 
     // TCGdex prefill: if the AI extracted a set code, query TCGdex for canonical metadata
     if (identification?.set_code && identification.detected_number) {
+      console.info("[tcgdex-prefill] firing lookup", {
+        code: identification.set_code,
+        number: identification.detected_number,
+        lang: identification.detected_language,
+      });
       runTcgdexLookup(identification.set_code, identification.detected_number, identification.detected_language);
+    } else if (identification) {
+      console.info("[tcgdex-prefill] skipped — no set_code/number from identify", {
+        set_code: identification.set_code,
+        detected_number: identification.detected_number,
+      });
     }
   }
 
