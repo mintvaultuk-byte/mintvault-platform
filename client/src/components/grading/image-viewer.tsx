@@ -1008,8 +1008,20 @@ export default function ImageViewer({
               (() => {
                 const cd = side === "front" ? centeringFront : centeringBack;
                 if (!cd) return null;
-                const outer = cd.outerFrame || { left_pct: 0, right_pct: 100, top_pct: 0, bottom_pct: 100 };
-                const inner = cd.innerFrame;
+                // Manual frames persist as {left,top,right,bottom}; AI frames as
+                // {*_pct}. Normalise both to *_pct so the overlay renders either
+                // source — without this, manual-centered certs drew nothing.
+                const norm = (f: any) =>
+                  f
+                    ? {
+                        left_pct: f.left_pct ?? f.left,
+                        right_pct: f.right_pct ?? f.right,
+                        top_pct: f.top_pct ?? f.top,
+                        bottom_pct: f.bottom_pct ?? f.bottom,
+                      }
+                    : null;
+                const outer = norm(cd.outerFrame) || { left_pct: 0, right_pct: 100, top_pct: 0, bottom_pct: 100 };
+                const inner = norm(cd.innerFrame);
                 // Compute geometric centering from outer + inner frame coordinates
                 let lPct = 50,
                   rPct = 50,
