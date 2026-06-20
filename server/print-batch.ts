@@ -223,7 +223,7 @@ const PDF9P_INSERT_W_MM_P = 44; // suffix _P to avoid clash with existing PDF9_I
 // so the Cricut sheet stays untouched even if a caller passes 5.
 export const MAX_CERTS_PER_BATCH = 8;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
-export const SHEET_LAYOUT_VERSION = "v31";
+export const SHEET_LAYOUT_VERSION = "v32"; // v32: restored variant line to front label (buildVariantLine wiring) — busts cached print-batch sheets
 
 // Per-side cut bleed inset — slices through the printed border, not the
 // paper outside.

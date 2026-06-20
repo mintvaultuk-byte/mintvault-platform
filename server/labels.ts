@@ -857,11 +857,11 @@ async function drawFront(
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
   const yearText = cert.year || "";
   const setNameText = cert.setName ? cert.setName.toUpperCase() : "";
-  const variantText = cert.variant ? cert.variant.toUpperCase() : "";
 
   const lines = [
     cardNameText,
     yearText && setNameText ? yearText + " " + setNameText : yearText || setNameText,
+    buildVariantLine(cert),
     cert.rarity ? buildRarityText(cert).toUpperCase() : "",
   ].filter((s) => s.trim().length > 0);
 
