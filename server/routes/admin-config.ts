@@ -1035,9 +1035,11 @@ export function registerAdminConfigRoutes(app: Express): void {
 
       return res.json({
         found: true,
-        card_name: result.card_name,
+        card_name: result.card_name, // English — what the prefill uses
+        card_name_local: result.card_name_local, // native-language original
         set_id: result.set_id,
-        set_name: result.set_name,
+        set_name: result.set_name, // English
+        set_name_local: result.set_name_local, // native-language original
         series: result.series,
         release_date: result.release_date,
         total_cards: result.total_cards,

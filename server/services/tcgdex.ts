@@ -34,7 +34,8 @@ export interface TcgdexCard {
   id: string; // "SV5K-075"
   localId: string; // "075"
   name: string; // native-language name
-  englishName?: string; // present on non-en endpoints
+  englishName?: string; // present on some non-en endpoints (NOT reliable)
+  dexId?: number[]; // National Pokédex number(s) — used to resolve the English name
   set: { id: string; name: string; cardCount?: number };
   rarity?: string;
   category?: string;
@@ -43,9 +44,11 @@ export interface TcgdexCard {
 }
 
 export interface CardLookupResult {
-  card_name: string;
+  card_name: string; // English (for a UK cert)
+  card_name_local: string; // native-language original (kept in case it's wanted)
   set_id: string;
-  set_name: string;
+  set_name: string; // English
+  set_name_local: string; // native-language original
   series: string;
   release_date: string | null;
   total_cards: number;
@@ -116,6 +119,48 @@ const SERIES_ENGLISH: Record<string, string> = {
 
 function englishSeriesName(serieId: string, serieName: string): string {
   return SERIES_ENGLISH[serieId] || serieName;
+}
+
+// ── Japanese set code → established English collector set name ───────────────
+// TCGdex has NO English name for Japan-only set IDs (their cards map into a
+// different/merged English release — e.g. sv5K's cards appear in English
+// "Temporal Forces"). For a UK cert we want the Japanese set's real English
+// collector name ("Wild Force"), NOT the merged English-release name. This is a
+// curated reference table (same pattern as SERIES_ENGLISH above), NOT machine
+// translation. Keyed by UPPERCASE TCGdex set ID. Unmapped codes fall back to the
+// localized TCGdex set name (and are logged so they can be added here).
+// ⚠️ Use the JAPANESE set's English name, never the merged English-release name.
+const JP_SET_ENGLISH_NAME: Record<string, string> = {
+  SV5K: "Wild Force",
+  SV5M: "Cyber Judge",
+  SV4K: "Ancient Roar",
+  SV4M: "Future Flash",
+  SV3K: "Ruler of the Black Flame",
+  SV3: "Raging Surf",
+  SV2P: "Snow Hazard",
+  SV2D: "Clay Burst",
+  SV1S: "Scarlet ex",
+  SV1V: "Violet ex",
+  // Add more JP SV-era codes here as needed (unmapped → localized name, logged).
+};
+
+/**
+ * Resolve the canonical English card name from a National Pokédex number via
+ * TCGdex's English card data (e.g. dexId 579 → "Reuniclus"). Uses TCGdex's
+ * actual English data — NOT machine translation. Only resolves SINGLE-species
+ * cards: multi-Pokémon cards (Tag Team etc.) would mis-resolve to one name.
+ * Returns null for cards with no usable dexId or no English match.
+ */
+async function englishCardNameByDexId(dexId: number[] | undefined): Promise<string | null> {
+  if (!Array.isArray(dexId) || dexId.length !== 1 || !Number.isFinite(dexId[0])) return null;
+  try {
+    const res = await rateLimitedFetch(`${BASE_URL}/en/cards?dexId=${encodeURIComponent(String(dexId[0]))}`, "en");
+    if (!res.ok) return null;
+    const cards = (await res.json()) as Array<{ name?: string }>;
+    return cards.find((c) => c.name)?.name || null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Public API ────────────────────────────────────────────────────────────
@@ -203,13 +248,31 @@ export async function lookupCard(
     return null;
   }
 
-  const cardName = card.englishName || card.name;
   const releaseDate = setData.releaseDate || null;
 
+  // ── English SET name: curated JP-code map → localized fallback ──────────────
+  const upperSetId = tcgdexSetId.toUpperCase();
+  const mappedSetName = JP_SET_ENGLISH_NAME[upperSetId];
+  if (!mappedSetName && resolvedLang !== "en") {
+    console.log(
+      `[tcgdex] no English set-name mapping for "${tcgdexSetId}" (lang=${resolvedLang}) — using localized "${setData.name}". Add it to JP_SET_ENGLISH_NAME if you want it in English.`
+    );
+  }
+  const setNameEnglish = mappedSetName || setData.name;
+
+  // ── English CARD name: englishName → dexId lookup → localized fallback ──────
+  let cardNameEnglish: string | null = card.englishName || null;
+  if (!cardNameEnglish && resolvedLang !== "en") {
+    cardNameEnglish = await englishCardNameByDexId(card.dexId);
+  }
+  cardNameEnglish = cardNameEnglish || card.name;
+
   return {
-    card_name: cardName,
+    card_name: cardNameEnglish,
+    card_name_local: card.name,
     set_id: tcgdexSetId,
-    set_name: setData.name,
+    set_name: setNameEnglish,
+    set_name_local: setData.name,
     series: englishSeriesName(setData.serie.id, setData.serie.name),
     release_date: releaseDate,
     total_cards: setData.cardCount.official,
