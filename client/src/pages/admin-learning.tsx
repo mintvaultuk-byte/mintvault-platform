@@ -74,6 +74,15 @@ const FLAG_COPY: Record<string, { title: string; description: string }> = {
     title: "Public Pre-Grade tool",
     description: "Powers /tools/estimate — public-facing free AI grading estimate.",
   },
+  AI_CARD_LOOKUP_PREFILL_ENABLED: {
+    title: "TCGdex card lookup",
+    description: "Queries TCGdex to prefill set/card metadata in the grading form. Read-only — no DB writes.",
+  },
+  AI_AUTO_ADD_MISSING_SETS_ENABLED: {
+    title: "Auto-add missing sets",
+    description:
+      "When a TCGdex-confirmed set is missing from custom sets, insert it automatically. OFF = surfaces 'add manually' prompt.",
+  },
 };
 
 interface LearningOverview {

@@ -126,6 +126,8 @@ export interface AiIdentification {
   officialNumber: string | null;
   referenceImageUrl: string | null;
   dbSource: string | null;
+  /** Printed set code from AI (e.g. "sv5K") — used for TCGdex lookup */
+  set_code?: string | null;
 }
 
 interface Props {

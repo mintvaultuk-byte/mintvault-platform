@@ -727,6 +727,8 @@ export const certificates = pgTable("certificates", {
   // is a future op (set embedded_at = NULL to re-queue).
   embedding: vector1536("embedding"),
   embeddedAt: timestamp("embedded_at", { withTimezone: true }),
+  // TCGdex canonical card ID (e.g. "SV5K-075"). Populated by card-lookup.
+  externalCardId: text("external_card_id"),
 });
 
 export const certificateImages = pgTable("certificate_images", {
@@ -790,6 +792,24 @@ export const auditLog = pgTable("audit_log", {
   details: jsonb("details").$type<Record<string, unknown>>().default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// ── Pending set lookups (TCGdex card-lookup queue) ────────────────────────
+// Written when a TCGdex-confirmed set is not in custom_sets and auto-add is
+// OFF. Admin reviews the queue and adds manually. status: pending | resolved.
+export const pendingSetLookups = pgTable("pending_set_lookups", {
+  id: serial("id").primaryKey(),
+  printedCode: text("printed_code").notNull(),
+  cardNumber: text("card_number").notNull(),
+  language: text("language").notNull().default("en"),
+  certId: text("cert_id"),
+  status: text("status").notNull().default("pending"),
+  tcgdexData: jsonb("tcgdex_data").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  resolvedBy: text("resolved_by"),
+});
+
+export type PendingSetLookup = typeof pendingSetLookups.$inferSelect;
 
 // ── Community wall posts ──────────────────────────────────────────────────
 // Backs /community (public gallery) + /admin/community (moderation). Manual

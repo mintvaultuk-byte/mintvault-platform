@@ -84,7 +84,9 @@ export async function migrateMarketplaceSchema(): Promise<void> {
     )
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_listings_status ON marketplace_listings(status)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_listings_seller ON marketplace_listings(seller_user_id)`);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_listings_seller ON marketplace_listings(seller_user_id)`
+  );
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_listings_cert_id ON marketplace_listings(cert_id)`);
   await db.execute(sql`
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_marketplace_listings_active_cert
@@ -102,7 +104,9 @@ export async function migrateMarketplaceSchema(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_listing_images_listing_id ON marketplace_listing_images(listing_id)`);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_listing_images_listing_id ON marketplace_listing_images(listing_id)`
+  );
 
   // ── marketplace_offers ────────────────────────────────────────────────────
   await db.execute(sql`
@@ -123,7 +127,9 @@ export async function migrateMarketplaceSchema(): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_offers_listing ON marketplace_offers(listing_id)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_offers_buyer ON marketplace_offers(buyer_user_id)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_offers_seller ON marketplace_offers(seller_user_id)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_offers_status ON marketplace_offers(status) WHERE status = 'pending'`);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_offers_status ON marketplace_offers(status) WHERE status = 'pending'`
+  );
 
   // ── marketplace_orders ────────────────────────────────────────────────────
   await db.execute(sql`
@@ -168,8 +174,12 @@ export async function migrateMarketplaceSchema(): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_orders_seller ON marketplace_orders(seller_user_id)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_orders_listing ON marketplace_orders(listing_id)`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_orders_status ON marketplace_orders(status)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_orders_escrow_release ON marketplace_orders(escrow_release_at) WHERE status = 'delivered'`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_orders_payment_intent ON marketplace_orders(stripe_payment_intent_id) WHERE stripe_payment_intent_id IS NOT NULL`);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_orders_escrow_release ON marketplace_orders(escrow_release_at) WHERE status = 'delivered'`
+  );
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_orders_payment_intent ON marketplace_orders(stripe_payment_intent_id) WHERE stripe_payment_intent_id IS NOT NULL`
+  );
 
   // ── marketplace_order_events ──────────────────────────────────────────────
   await db.execute(sql`
@@ -183,8 +193,12 @@ export async function migrateMarketplaceSchema(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_order_events_order_id ON marketplace_order_events(order_id)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_order_events_type ON marketplace_order_events(event_type)`);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_order_events_order_id ON marketplace_order_events(order_id)`
+  );
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_order_events_type ON marketplace_order_events(event_type)`
+  );
 
   // ── marketplace_shipments ─────────────────────────────────────────────────
   await db.execute(sql`
@@ -206,8 +220,12 @@ export async function migrateMarketplaceSchema(): Promise<void> {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_shipments_order_id ON marketplace_shipments(order_id)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_shipments_tracking ON marketplace_shipments(tracking_number) WHERE tracking_number IS NOT NULL`);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_shipments_order_id ON marketplace_shipments(order_id)`
+  );
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_shipments_tracking ON marketplace_shipments(tracking_number) WHERE tracking_number IS NOT NULL`
+  );
 
   // ── marketplace_conversations + marketplace_messages ──────────────────────
   await db.execute(sql`
@@ -223,9 +241,15 @@ export async function migrateMarketplaceSchema(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_conversations_buyer ON marketplace_conversations(buyer_user_id)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_conversations_seller ON marketplace_conversations(seller_user_id)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_conversations_listing ON marketplace_conversations(listing_id) WHERE listing_id IS NOT NULL`);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_conversations_buyer ON marketplace_conversations(buyer_user_id)`
+  );
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_conversations_seller ON marketplace_conversations(seller_user_id)`
+  );
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_conversations_listing ON marketplace_conversations(listing_id) WHERE listing_id IS NOT NULL`
+  );
 
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS marketplace_messages (
@@ -237,8 +261,12 @@ export async function migrateMarketplaceSchema(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_messages_conversation_id ON marketplace_messages(conversation_id)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_messages_created_at ON marketplace_messages(created_at)`);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_messages_conversation_id ON marketplace_messages(conversation_id)`
+  );
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_messages_created_at ON marketplace_messages(created_at)`
+  );
 
   // ── marketplace_reviews ───────────────────────────────────────────────────
   await db.execute(sql`
@@ -253,7 +281,9 @@ export async function migrateMarketplaceSchema(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_reviews_reviewee ON marketplace_reviews(reviewee_user_id)`);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_reviews_reviewee ON marketplace_reviews(reviewee_user_id)`
+  );
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_reviews_direction ON marketplace_reviews(direction)`);
 
   // ── marketplace_disputes ──────────────────────────────────────────────────
@@ -293,7 +323,9 @@ export async function migrateMarketplaceSchema(): Promise<void> {
       ON marketplace_watchlist(user_id, listing_id)
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_watchlist_user ON marketplace_watchlist(user_id)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_watchlist_listing ON marketplace_watchlist(listing_id)`);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_watchlist_listing ON marketplace_watchlist(listing_id)`
+  );
 
   // ── marketplace_dac7_quarterly ────────────────────────────────────────────
   await db.execute(sql`
@@ -309,7 +341,9 @@ export async function migrateMarketplaceSchema(): Promise<void> {
       UNIQUE (seller_user_id, year, quarter)
     )
   `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_dac7_seller ON marketplace_dac7_quarterly(seller_user_id)`);
+  await db.execute(
+    sql`CREATE INDEX IF NOT EXISTS idx_marketplace_dac7_seller ON marketplace_dac7_quarterly(seller_user_id)`
+  );
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_dac7_year ON marketplace_dac7_quarterly(year)`);
 
   // ── Custom sets (cards not in public TCG API) ────────────────────────────
@@ -346,19 +380,34 @@ export async function migrateMarketplaceSchema(): Promise<void> {
   // Backfill tier_id from tier_slug if it exists
   await db.execute(sql`UPDATE tier_capacity SET tier_id = tier_slug WHERE tier_id IS NULL AND tier_slug IS NOT NULL`);
   // Create unique index on tier_id if not exists
-  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_tier_capacity_tier_id ON tier_capacity(tier_id) WHERE tier_id IS NOT NULL`);
+  await db.execute(
+    sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_tier_capacity_tier_id ON tier_capacity(tier_id) WHERE tier_id IS NOT NULL`
+  );
 
   // Make legacy columns nullable
-  try { await db.execute(sql`ALTER TABLE tier_capacity ALTER COLUMN max_active DROP NOT NULL`); } catch {}
-  try { await db.execute(sql`ALTER TABLE tier_capacity ALTER COLUMN force_open DROP NOT NULL`); } catch {}
-  try { await db.execute(sql`ALTER TABLE tier_capacity ALTER COLUMN max_active SET DEFAULT 0`); } catch {}
-  try { await db.execute(sql`ALTER TABLE tier_capacity ALTER COLUMN force_open SET DEFAULT false`); } catch {}
+  try {
+    await db.execute(sql`ALTER TABLE tier_capacity ALTER COLUMN max_active DROP NOT NULL`);
+  } catch {}
+  try {
+    await db.execute(sql`ALTER TABLE tier_capacity ALTER COLUMN force_open DROP NOT NULL`);
+  } catch {}
+  try {
+    await db.execute(sql`ALTER TABLE tier_capacity ALTER COLUMN max_active SET DEFAULT 0`);
+  } catch {}
+  try {
+    await db.execute(sql`ALTER TABLE tier_capacity ALTER COLUMN force_open SET DEFAULT false`);
+  } catch {}
 
   // Seed defaults for any missing tiers
   for (const t of [
-    { id: "standard", max: 30 }, { id: "priority", max: 20 }, { id: "express", max: 15 },
-    { id: "gold", max: 10 }, { id: "gold-elite", max: 5 }, { id: "reholder", max: 20 },
-    { id: "crossover", max: 15 }, { id: "authentication", max: 15 },
+    { id: "standard", max: 30 },
+    { id: "priority", max: 20 },
+    { id: "express", max: 15 },
+    { id: "gold", max: 10 },
+    { id: "gold-elite", max: 5 },
+    { id: "reholder", max: 20 },
+    { id: "crossover", max: 15 },
+    { id: "authentication", max: 15 },
   ]) {
     const exists = await db.execute(sql`SELECT 1 FROM tier_capacity WHERE tier_id = ${t.id} LIMIT 1`);
     if (exists.rows.length === 0) {
@@ -368,6 +417,24 @@ export async function migrateMarketplaceSchema(): Promise<void> {
       `);
     }
   }
+
+  // ── TCGdex card-lookup infrastructure ────────────────────────────────────
+  await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS external_card_id TEXT`);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS pending_set_lookups (
+      id SERIAL PRIMARY KEY,
+      printed_code TEXT NOT NULL,
+      card_number TEXT NOT NULL,
+      language TEXT NOT NULL DEFAULT 'en',
+      cert_id TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      tcgdex_data JSONB,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      resolved_at TIMESTAMPTZ,
+      resolved_by TEXT
+    )
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_pending_set_lookups_status ON pending_set_lookups (status)`);
 
   console.log("[marketplace-schema] migration complete");
 }

@@ -446,6 +446,11 @@ export default function CertificateForm({
           title: "Card identified",
           description: `${data.card_name || "Card"} — ${data.set_name || "Unknown set"}`,
         });
+
+        // TCGdex enrichment: if AI returned a set code, query TCGdex for canonical metadata
+        if (data.set_id && data.card_number) {
+          runTcgdexPrefill(data.set_id, data.card_number, data.language || "English", certificate?.id);
+        }
       } else {
         toast({
           title: "Couldn't identify confidently",
@@ -457,6 +462,44 @@ export default function CertificateForm({
       toast({ title: "Identify failed", description: e.message, variant: "destructive" });
     } finally {
       setIdentifyLoading(false);
+    }
+  }
+
+  /** TCGdex canonical metadata lookup — enriches set/card fields after AI identify */
+  async function runTcgdexPrefill(setCode: string, cardNumber: string, language: string, certDbId?: number) {
+    const langMap: Record<string, string> = {
+      english: "en",
+      japanese: "ja",
+      french: "fr",
+      german: "de",
+      spanish: "es",
+      italian: "it",
+      portuguese: "pt",
+      korean: "ko",
+      "traditional chinese": "zh-tw",
+      "simplified chinese": "zh-cn",
+    };
+    const lang = langMap[language.toLowerCase()] || "en";
+    try {
+      const r = await fetch(
+        `/api/admin/tcgdex-lookup?code=${encodeURIComponent(setCode)}&number=${encodeURIComponent(cardNumber)}&lang=${encodeURIComponent(lang)}${certDbId ? `&certId=${certDbId}` : ""}`,
+        { credentials: "include" }
+      );
+      if (!r.ok) return;
+      const td = await r.json();
+      if (!td.found) return;
+
+      setForm((prev) => ({
+        ...prev,
+        cardName: td.card_name?.toUpperCase() || prev.cardName,
+        setName: td.set_name || prev.setName,
+        year: td.release_date ? td.release_date.split("-")[0] : prev.year,
+      }));
+
+      const badge = td.auto_added ? " (set auto-added)" : td.needs_manual_add ? " (set needs manual add)" : "";
+      toast({ title: `TCGdex enriched${badge}`, description: `${td.card_name} — ${td.set_name}` });
+    } catch {
+      // Silent — TCGdex enrichment is best-effort
     }
   }
 

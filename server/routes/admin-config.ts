@@ -4,6 +4,8 @@ import { requireAdmin } from "../auth";
 import { uploadToR2 } from "../r2";
 import { db } from "../db";
 import { sql, inArray } from "drizzle-orm";
+import { lookupCard, isAllowedLang } from "../services/tcgdex";
+import { getFeatureFlag } from "../config/feature-flags";
 
 function normalizeCertId(raw: string): string {
   const m = raw.match(/^MV-?0*(\d+)$/i);
@@ -285,8 +287,10 @@ export function registerAdminConfigRoutes(app: Express): void {
       console.log(`[custom-set] added "${setId}" — ${setName}`);
       res.json({ ok: true, setId, setName });
     } catch (err: any) {
-      if (err.code === "23505") return res.status(409).json({ error: `Set ID "${req.body.setId}" already exists` });
-      res.status(500).json({ error: err.message });
+      const pgCode = err.code || err.cause?.code;
+      if (pgCode === "23505") return res.status(409).json({ error: `Set "${req.body.setId}" already exists` });
+      console.error("[custom-set] insert failed:", err);
+      res.status(500).json({ error: "Couldn't add set — check server logs" });
     }
   });
 
@@ -295,7 +299,8 @@ export function registerAdminConfigRoutes(app: Express): void {
       await db.execute(sql`DELETE FROM custom_sets WHERE set_id = ${req.params.setId}`);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error("[custom-set] delete failed:", err);
+      res.status(500).json({ error: "Couldn't delete set — check server logs" });
     }
   });
 
@@ -893,6 +898,159 @@ export function registerAdminConfigRoutes(app: Express): void {
     } catch (err: any) {
       console.error("[ai-capture-health] failed:", err);
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── TCGdex card lookup (admin-authed, gated by feature flag) ────────────
+  // GET /api/admin/tcgdex-lookup?code=SV5K&number=075&lang=ja&certId=MV123
+  //
+  // Returns canonical card/set metadata from TCGdex. If auto_add_missing_sets
+  // is ON and the set is confirmed but missing from custom_sets, inserts it.
+  // Otherwise writes to pending_set_lookups for manual review.
+
+  const CODE_RE = /^[A-Za-z0-9._-]{1,20}$/;
+  const NUMBER_RE = /^[A-Za-z0-9/_-]{1,10}$/;
+
+  app.get("/api/admin/tcgdex-lookup", requireAdmin, async (req, res) => {
+    try {
+      // ── Feature gate ────────────────────────────────────────────────────
+      const lookupEnabled = await getFeatureFlag("AI_CARD_LOOKUP_PREFILL_ENABLED");
+      if (!lookupEnabled) {
+        return res.status(503).json({ error: "Card lookup is disabled" });
+      }
+
+      // ── Input validation (OWASP: whitelist chars, these flow into URLs) ─
+      const code = String(req.query.code || "").trim();
+      const number = String(req.query.number || "").trim();
+      const lang = String(req.query.lang || "en")
+        .trim()
+        .toLowerCase();
+      const certId = req.query.certId ? String(req.query.certId).trim() : null;
+
+      if (!code || !number) {
+        return res.status(400).json({ error: "code and number are required" });
+      }
+      if (!CODE_RE.test(code)) {
+        return res.status(400).json({ error: "Invalid set code format" });
+      }
+      if (!NUMBER_RE.test(number)) {
+        return res.status(400).json({ error: "Invalid card number format" });
+      }
+      if (!isAllowedLang(lang)) {
+        return res.status(400).json({ error: `Unsupported language: ${lang}` });
+      }
+
+      const adminEmail = req.session.adminEmail || "admin";
+      console.log(`[card-lookup] code="${code}" number="${number}" lang="${lang}" certId="${certId}" by=${adminEmail}`);
+
+      // ── TCGdex resolution ───────────────────────────────────────────────
+      const result = await lookupCard(code, number, lang);
+      if (!result) {
+        return res.json({
+          found: false,
+          message: "Card not found in TCGdex",
+        });
+      }
+
+      // ── Check if set exists in custom_sets ──────────────────────────────
+      const existingSet = await db.execute(
+        sql`SELECT set_id FROM custom_sets WHERE LOWER(set_id) = LOWER(${result.set_id}) LIMIT 1`
+      );
+      const setExists = existingSet.rows.length > 0;
+
+      let needs_manual_add = false;
+      let auto_added = false;
+
+      if (!setExists) {
+        const autoAddEnabled = await getFeatureFlag("AI_AUTO_ADD_MISSING_SETS_ENABLED");
+
+        if (autoAddEnabled) {
+          // ── Auto-seed: insert into custom_sets ────────────────────────
+          try {
+            await db.execute(sql`
+              INSERT INTO custom_sets (set_id, set_name, series, release_date, total_cards, created_by)
+              VALUES (
+                ${result.set_id},
+                ${result.set_name},
+                ${result.series},
+                ${result.release_date},
+                ${result.total_cards},
+                ${"auto:tcgdex"}
+              )
+            `);
+            auto_added = true;
+
+            await storage.writeAuditLog("custom_set", result.set_id, "auto_seed", "system:tcgdex", {
+              source: "tcgdex",
+              tcgdex_card_id: result.external_card_id,
+              before: null,
+              after: {
+                set_id: result.set_id,
+                set_name: result.set_name,
+                series: result.series,
+                release_date: result.release_date,
+                total_cards: result.total_cards,
+              },
+            });
+
+            console.log(`[card-lookup] auto-seeded set "${result.set_id}" — ${result.set_name}`);
+          } catch (seedErr: any) {
+            const pgCode = seedErr.code || seedErr.cause?.code;
+            if (pgCode === "23505") {
+              // Race condition: another request inserted it first — fine
+              console.log(`[card-lookup] set "${result.set_id}" already exists (race ok)`);
+            } else {
+              console.error(`[card-lookup] auto-seed failed for "${result.set_id}":`, seedErr);
+              needs_manual_add = true;
+            }
+          }
+        } else {
+          // ── Manual path: upsert pending_set_lookups ───────────────────
+          needs_manual_add = true;
+
+          try {
+            await db.execute(sql`
+              INSERT INTO pending_set_lookups (printed_code, card_number, language, cert_id, tcgdex_data)
+              VALUES (
+                ${code},
+                ${number},
+                ${lang},
+                ${certId},
+                ${JSON.stringify({
+                  set_id: result.set_id,
+                  set_name: result.set_name,
+                  series: result.series,
+                  release_date: result.release_date,
+                  total_cards: result.total_cards,
+                  external_card_id: result.external_card_id,
+                })}::jsonb
+              )
+            `);
+            console.log(`[card-lookup] queued pending set lookup: code="${code}" → "${result.set_id}"`);
+          } catch (queueErr: any) {
+            console.error("[card-lookup] pending_set_lookups insert failed:", queueErr);
+          }
+        }
+      }
+
+      return res.json({
+        found: true,
+        card_name: result.card_name,
+        set_id: result.set_id,
+        set_name: result.set_name,
+        series: result.series,
+        release_date: result.release_date,
+        total_cards: result.total_cards,
+        external_card_id: result.external_card_id,
+        rarity: result.rarity,
+        set_exists: setExists || auto_added,
+        auto_added,
+        needs_manual_add,
+        source: "tcgdex",
+      });
+    } catch (err: any) {
+      console.error("[card-lookup] failed:", err);
+      res.status(500).json({ error: "Card lookup failed — check server logs" });
     }
   });
 }

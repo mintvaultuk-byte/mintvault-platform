@@ -42,16 +42,20 @@ export const FEATURE_FLAGS = {
   // Default-OFF flags use === "true" (require explicit opt-in).
   // These are now ENV DEFAULTS — runtime overrides live in feature_overrides
   // and are read via getFeatureFlag() below.
-  AI_IDENTIFY_ENABLED:           process.env.AI_IDENTIFY_ENABLED         !== "false", // default ON
-  AI_DEFECT_SUGGEST_ENABLED:     process.env.AI_DEFECT_SUGGEST_ENABLED   === "true",  // default OFF
-  AI_HAIKU_QUICK_GRADE_ENABLED:  process.env.AI_HAIKU_QUICK_GRADE_ENABLED === "true", // default OFF
-  AI_FULL_GRADE_ENABLED:         process.env.AI_FULL_GRADE_ENABLED       === "true",  // default OFF
-  AI_CENTERING_ENABLED:          process.env.AI_CENTERING_ENABLED        === "true",  // default OFF
-  AI_STANDALONE_DETECT_ENABLED:  process.env.AI_STANDALONE_DETECT_ENABLED === "true", // default OFF
-  AI_STANDALONE_GRADE_ENABLED:   process.env.AI_STANDALONE_GRADE_ENABLED === "true",  // default OFF
-  AI_DESCRIPTION_GEN_ENABLED:    process.env.AI_DESCRIPTION_GEN_ENABLED  !== "false", // default ON
-  AI_GPT_SECOND_OPINION_ENABLED: process.env.AI_GPT_SECOND_OPINION_ENABLED === "true",// default OFF
-  AI_PUBLIC_ESTIMATE_ENABLED:    process.env.AI_PUBLIC_ESTIMATE_ENABLED  !== "false", // default ON
+  AI_IDENTIFY_ENABLED: process.env.AI_IDENTIFY_ENABLED !== "false", // default ON
+  AI_DEFECT_SUGGEST_ENABLED: process.env.AI_DEFECT_SUGGEST_ENABLED === "true", // default OFF
+  AI_HAIKU_QUICK_GRADE_ENABLED: process.env.AI_HAIKU_QUICK_GRADE_ENABLED === "true", // default OFF
+  AI_FULL_GRADE_ENABLED: process.env.AI_FULL_GRADE_ENABLED === "true", // default OFF
+  AI_CENTERING_ENABLED: process.env.AI_CENTERING_ENABLED === "true", // default OFF
+  AI_STANDALONE_DETECT_ENABLED: process.env.AI_STANDALONE_DETECT_ENABLED === "true", // default OFF
+  AI_STANDALONE_GRADE_ENABLED: process.env.AI_STANDALONE_GRADE_ENABLED === "true", // default OFF
+  AI_DESCRIPTION_GEN_ENABLED: process.env.AI_DESCRIPTION_GEN_ENABLED !== "false", // default ON
+  AI_GPT_SECOND_OPINION_ENABLED: process.env.AI_GPT_SECOND_OPINION_ENABLED === "true", // default OFF
+  AI_PUBLIC_ESTIMATE_ENABLED: process.env.AI_PUBLIC_ESTIMATE_ENABLED !== "false", // default ON
+
+  // ── TCGdex card-lookup flags ──────────────────────────────────────────────
+  AI_CARD_LOOKUP_PREFILL_ENABLED: process.env.AI_CARD_LOOKUP_PREFILL_ENABLED !== "false", // default ON
+  AI_AUTO_ADD_MISSING_SETS_ENABLED: process.env.AI_AUTO_ADD_MISSING_SETS_ENABLED === "true", // default OFF
 } as const;
 
 /** All AI flag names that participate in the runtime-toggle system. */
@@ -66,9 +70,11 @@ export const AI_FLAG_NAMES = [
   "AI_DESCRIPTION_GEN_ENABLED",
   "AI_GPT_SECOND_OPINION_ENABLED",
   "AI_PUBLIC_ESTIMATE_ENABLED",
+  "AI_CARD_LOOKUP_PREFILL_ENABLED",
+  "AI_AUTO_ADD_MISSING_SETS_ENABLED",
 ] as const;
 
-export type AiFlagName = typeof AI_FLAG_NAMES[number];
+export type AiFlagName = (typeof AI_FLAG_NAMES)[number];
 
 // ── Override cache ────────────────────────────────────────────────────────
 // Snapshot of every override row in feature_overrides, refreshed at most
@@ -123,12 +129,14 @@ export async function getFeatureFlag(name: AiFlagName): Promise<boolean> {
 }
 
 /** Snapshot of ALL AI flags' resolved state. Used by the dashboard endpoint. */
-export async function getAllAiFlags(): Promise<{
-  name: AiFlagName;
-  enabled: boolean;
-  envDefault: boolean;
-  overrideSet: boolean;
-}[]> {
+export async function getAllAiFlags(): Promise<
+  {
+    name: AiFlagName;
+    enabled: boolean;
+    envDefault: boolean;
+    overrideSet: boolean;
+  }[]
+> {
   const snapshot = await getCachedSnapshot();
   return AI_FLAG_NAMES.map((name) => ({
     name,

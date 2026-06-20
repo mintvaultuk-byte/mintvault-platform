@@ -1083,6 +1083,55 @@ export default function GradingPanel({
 
     // Notify parent to refresh cert data (AI autofills card name/set/number on the server)
     onCertUpdated?.();
+
+    // TCGdex prefill: if the AI extracted a set code, query TCGdex for canonical metadata
+    if (identification?.set_code && identification.detected_number) {
+      runTcgdexLookup(identification.set_code, identification.detected_number, identification.detected_language);
+    }
+  }
+
+  /** Fire TCGdex lookup and prefill set/name fields with canonical data */
+  async function runTcgdexLookup(setCode: string, cardNumber: string, language?: string) {
+    // Map common language names to TCGdex lang codes
+    const langMap: Record<string, string> = {
+      english: "en",
+      japanese: "ja",
+      french: "fr",
+      german: "de",
+      spanish: "es",
+      italian: "it",
+      portuguese: "pt",
+      korean: "ko",
+      "traditional chinese": "zh-tw",
+      "simplified chinese": "zh-cn",
+    };
+    const lang = langMap[(language || "english").toLowerCase()] || "en";
+
+    try {
+      const res = await fetch(
+        `/api/admin/tcgdex-lookup?code=${encodeURIComponent(setCode)}&number=${encodeURIComponent(cardNumber)}&lang=${encodeURIComponent(lang)}&certId=${encodeURIComponent(String(certId))}`,
+        { credentials: "include" }
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.found) return;
+
+      // Prefill with canonical TCGdex data (keep fields editable)
+      if (data.card_name) setIdName(data.card_name.toUpperCase());
+      if (data.set_name) setIdSet(data.set_name);
+      if (data.set_id) setIdSetCode(data.set_id);
+      if (data.release_date) {
+        const year = data.release_date.split("-")[0];
+        if (year) setIdYear(year);
+      }
+      // Variant: best-effort only — don't overwrite if uncertain
+      // TCGdex rarity != MintVault variant taxonomy
+
+      const badge = data.auto_added ? " (set auto-added)" : data.needs_manual_add ? " (set needs manual add)" : "";
+      toast({ title: `TCGdex: ${data.card_name}${badge}`, description: `Set: ${data.set_name} · Source: TCGdex` });
+    } catch {
+      // Silent fail — TCGdex lookup is best-effort, form stays editable
+    }
   }
 
   /**
