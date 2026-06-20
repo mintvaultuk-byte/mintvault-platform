@@ -141,23 +141,45 @@ const JP_SET_ENGLISH_NAME: Record<string, string> = {
   SV2D: "Clay Burst",
   SV1S: "Scarlet ex",
   SV1V: "Violet ex",
+  SV2A: "Pokémon Card 151", // EN release "151"; market name "Pokémon Card 151"
+  SV6: "Mask of Change", // dominant market name (Bulbapedia: "Transformation Mask"); EN release "Twilight Masquerade"
+  SV7: "Stellar Miracle", // EN release "Stellar Crown"
+  SV8: "Super Electric Breaker", // EN release "Surging Sparks"
   // Add more JP SV-era codes here as needed (unmapped → localized name, logged).
 };
+
+// Card-type suffix tokens (ex / V / VMAX / …). These are written in Latin at the
+// END of the card name in EVERY language — "リザードンex" / "Charizard ex",
+// "ザシアンV" / "Zacian V" — so the suffix survives across JP/KO/ZH. Longest-first
+// so VMAX matches before V. \b avoids false hits inside words (e.g. "Vortex").
+const CARD_SUFFIX_RE = /\b(VMAX|VSTAR|V-UNION|VUNION|BREAK|Prime|LEGEND|GX|EX|ex|V)\s*$/;
+function cardSuffix(name: string): string {
+  const m = name.match(CARD_SUFFIX_RE);
+  return m ? m[1] : "";
+}
 
 /**
  * Resolve the canonical English card name from a National Pokédex number via
  * TCGdex's English card data (e.g. dexId 579 → "Reuniclus"). Uses TCGdex's
  * actual English data — NOT machine translation. Only resolves SINGLE-species
  * cards: multi-Pokémon cards (Tag Team etc.) would mis-resolve to one name.
+ * Picks the English card whose card-type SUFFIX matches the localized card's
+ * suffix, so "ウネルミナモex" → "Walking Wake ex", not the bare "Walking Wake".
  * Returns null for cards with no usable dexId or no English match.
  */
-async function englishCardNameByDexId(dexId: number[] | undefined): Promise<string | null> {
+async function englishCardNameByDexId(dexId: number[] | undefined, localizedName: string): Promise<string | null> {
   if (!Array.isArray(dexId) || dexId.length !== 1 || !Number.isFinite(dexId[0])) return null;
   try {
     const res = await rateLimitedFetch(`${BASE_URL}/en/cards?dexId=${encodeURIComponent(String(dexId[0]))}`, "en");
     if (!res.ok) return null;
-    const cards = (await res.json()) as Array<{ name?: string }>;
-    return cards.find((c) => c.name)?.name || null;
+    const named = ((await res.json()) as Array<{ name?: string }>).filter(
+      (c): c is { name: string } => typeof c.name === "string" && c.name.length > 0
+    );
+    if (!named.length) return null;
+    const want = cardSuffix(localizedName).toLowerCase();
+    // Prefer the English print whose suffix matches (ex↔ex, V↔V, plain↔plain).
+    const match = named.find((c) => cardSuffix(c.name).toLowerCase() === want);
+    return (match || named[0]).name;
   } catch {
     return null;
   }
@@ -261,9 +283,11 @@ export async function lookupCard(
   const setNameEnglish = mappedSetName || setData.name;
 
   // ── English CARD name: englishName → dexId lookup → localized fallback ──────
+  // PRIMARY: card.englishName (rarely present, but includes the full suffix).
+  // FALLBACK: dexId → English species, matched to the localized card's suffix.
   let cardNameEnglish: string | null = card.englishName || null;
   if (!cardNameEnglish && resolvedLang !== "en") {
-    cardNameEnglish = await englishCardNameByDexId(card.dexId);
+    cardNameEnglish = await englishCardNameByDexId(card.dexId, card.name);
   }
   cardNameEnglish = cardNameEnglish || card.name;
 
