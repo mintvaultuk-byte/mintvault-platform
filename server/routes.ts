@@ -3189,7 +3189,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const isNonNum = isNonNumericGrade(gradeType);
       const gradeNum = isNonNum ? 0 : parseFloat(c.gradeOverall || c.grade || "0");
       const labelType = c.labelType || "Standard";
-      const isBlack = !isNonNum && gradeNum === 10 && labelType === "black";
+      // Pristine 10P from the MVGS gate (same authority as the slab + v908 surfaces),
+      // never the stored label_type flag.
+      const isBlack = !isNonNum && (await certIsPristine(c));
 
       // Signed image URLs — grading variants
       async function signedOrNull(key: string | null | undefined): Promise<string | null> {
@@ -3370,7 +3372,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const gradeType = c.gradeType || "numeric";
       const isNonNum = isNonNumericGrade(gradeType);
       const gradeNum = isNonNum ? 0 : parseFloat(c.gradeOverall || c.grade || "0");
-      const isBlack = !isNonNum && gradeNum === 10 && c.labelType === "black";
+      // Pristine 10P from the MVGS gate (same authority as the slab + v908 surfaces),
+      // never the stored label_type flag.
+      const isBlack = !isNonNum && (await certIsPristine(c));
       const gLabel = isNonNum
         ? gradeType === "authentic_altered" || gradeType === "AA"
           ? "AUTHENTIC ALTERED"
