@@ -7,6 +7,7 @@ import { getR2SignedUrl } from "./r2";
 import { signLogbook, certToCanonical, verifyLogbook } from "./logbook-signing";
 import { isNonNumericGrade } from "@shared/schema";
 import { mvgsGradeLabel, mvgsTierName } from "@shared/mvgs-scoring";
+import { certIsPristine } from "./lib/cert-pristine";
 import { getOwnerChain } from "./ownership-service";
 import { APP_BASE_URL } from "./app-url";
 import { db } from "./db";
@@ -50,7 +51,7 @@ export async function buildLogbookData(certIdInput: string) {
   const gradeType = c.gradeType || "numeric";
   const isNonNum = isNonNumericGrade(gradeType);
   const gradeNum = isNonNum ? 0 : parseFloat(c.gradeOverall || "0");
-  const isBlack = !isNonNum && gradeNum === 10 && c.labelType === "black";
+  const isBlack = !isNonNum && (await certIsPristine(c));
 
   // Images
   const [frontUrl, backUrl] = await Promise.all([
@@ -133,7 +134,14 @@ export async function buildLogbookData(certIdInput: string) {
         : isBlack
           ? "PRISTINE 10P"
           : typeof c.gradeStrengthScore === "number" && c.gradeStrengthScore >= 1
-            ? mvgsGradeLabel(c.gradeStrengthScore).toUpperCase()
+            ? // The gate (isBlack via certIsPristine) is the SOLE Pristine authority.
+              // mvgsGradeLabel returns "PRISTINE 10P" for any strength score >= 96
+              // (mvgs-scoring.ts), which would re-introduce Pristine here even though
+              // the gate said no. Cap it to the Gem Mint tier so the strength band
+              // can never override the gate — matching PDF/cert/vault (mvgsTierName).
+              mvgsGradeLabel(c.gradeStrengthScore).toUpperCase() === "PRISTINE 10P"
+              ? `${mvgsTierName(gradeNum)} ${gradeNum}`.toUpperCase()
+              : mvgsGradeLabel(c.gradeStrengthScore).toUpperCase()
             : // Legacy certs (no MVGS score): use the MVGS tier table, not the
               // rounding gradeLabelFull, so the name agrees with the exact
               // half-grade number and with the slab (8.5 → "NM-MINT+ 8.5").

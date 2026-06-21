@@ -5,6 +5,7 @@ import type { CertificateRecord } from "@shared/schema";
 import { isNonNumericGrade, gradeLabelFull } from "@shared/schema";
 import { mvgsTierName } from "@shared/mvgs-scoring";
 import { APP_BASE_URL } from "./app-url";
+import { certIsPristine } from "./lib/cert-pristine";
 
 // ── Page geometry ────────────────────────────────────────────────────────────
 const PAGE_W = 595.28;
@@ -254,6 +255,9 @@ export async function generateCertificateDocument(cert: CertificateRecord, owner
       y += 16;
 
       const isNonNumeric = isNonNumericGrade(cert.gradeType);
+      // Pristine 10P from the MVGS gate (same authority as the slab), never the
+      // stored label_type flag — a defect-bearing card must not wear Pristine.
+      const isPristineGate = await certIsPristine(cert);
       const gradeText = isNonNumeric
         ? gradeLabelFull(cert.gradeType, String(cert.gradeOverall ?? ""))
         : cert.gradeOverall != null
@@ -266,7 +270,7 @@ export async function generateCertificateDocument(cert: CertificateRecord, owner
       const gradeName = isNonNumeric
         ? gradeLabelFull(cert.gradeType, String(cert.gradeOverall ?? ""))
         : cert.gradeOverall != null
-          ? cert.labelType === "black"
+          ? isPristineGate
             ? "PRISTINE 10P"
             : // Tier NAME from the grade itself via mvgsTierName (the gold box
               // beside this already prints the number) — never from the strength

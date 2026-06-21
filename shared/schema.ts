@@ -1342,6 +1342,9 @@ export interface PublicCertificate {
   // existed. UI gates rendering on both fields.
   gradeStrengthScore: number | null;
   labelType: string;
+  /** Pristine 10P / black-label, derived live from the MVGS gate (isPristine),
+   *  NOT the stored label_type flag. Single source of truth for display. */
+  isBlackLabel: boolean;
   frontImageUrl: string | null;
   backImageUrl: string | null;
   gradedDate: string;

@@ -40,6 +40,7 @@ import {
 import { mvgsTierName } from "@shared/mvgs-scoring";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
 import { isBlackLabel } from "@shared/pristine";
+import { certIsPristine } from "./lib/cert-pristine";
 import { isServiceValidForCarrier } from "@shared/carriers";
 import { centeringAxisGrade } from "@shared/centering";
 import { storage, deductAiCredits } from "./storage";
@@ -434,6 +435,9 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
     gradeSurface: c.gradeSurface != null ? String(c.gradeSurface) : null,
     gradeStrengthScore: c.gradeStrengthScore != null ? Number(c.gradeStrengthScore) : null,
     labelType: c.labelType || "Standard",
+    // Pristine 10P from the MVGS gate (same authority as the slab), never the
+    // stored label_type flag.
+    isBlackLabel: await certIsPristine(c),
     frontImageUrl: frontUrl,
     backImageUrl: backUrl,
     gradedDate: c.createdAt ? new Date(c.createdAt).toISOString().split("T")[0] : "",
@@ -3874,7 +3878,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const gradeType = c.gradeType || "numeric";
       const isNonNum = isNonNumericGrade(gradeType);
       const gradeNum = isNonNum ? 0 : parseFloat(c.gradeOverall || "0");
-      const isBlack = !isNonNum && gradeNum === 10 && c.labelType === "black";
+      const isBlack = !isNonNum && (await certIsPristine(c));
 
       async function signedOrNull(key: string | null | undefined): Promise<string | null> {
         if (!key) return null;

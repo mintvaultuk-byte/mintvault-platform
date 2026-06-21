@@ -415,14 +415,14 @@ export default function CertDetailPage() {
               )}
               <div className="text-[#D4AF37] font-semibold tracking-widest text-sm" data-testid="text-grade-label">
                 {displayedGrade != null
-                  ? // Black Label short-circuit: any cert flagged as "black"
-                    // is PRISTINE 10P regardless of grade. Otherwise the tier
+                  ? // Pristine 10P comes from the MVGS gate (cert.isBlackLabel),
+                    // not the stored flag. Otherwise the tier
                     // NAME comes from the grade itself via mvgsTierName \u2014 same
                     // source the slab uses \u2014 so the name always agrees with the
                     // number, including half grades (8.5 \u2192 "NM-MINT+"). Never
                     // derive the name from the strength score: its band can
                     // disagree with the half grade and read "MINT 8.5".
-                    cert.labelType === "black"
+                    cert.isBlackLabel
                     ? "PRISTINE 10P"
                     : cert.gradeType === "numeric" && cert.gradeNumeric > 0
                       ? mvgsTierName(cert.gradeNumeric).toUpperCase()
