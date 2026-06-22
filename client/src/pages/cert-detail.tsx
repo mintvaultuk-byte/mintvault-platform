@@ -467,7 +467,15 @@ export default function CertDetailPage() {
                   data-testid="mvgs-score-panel"
                 >
                   <span className="text-[#D4AF37] text-sm font-bold" data-testid="text-mvgs-score">
-                    MVGS Score: {cert.gradeStrengthScore}/100 · {mvgsGradeLabel(cert.gradeStrengthScore)}
+                    {/* Pristine 10P comes from the MVGS gate (cert.isBlackLabel), not the
+                        ≥96 score band: a high score that fails the gate shows its real grade
+                        (e.g. Gem Mint 10), matching the slab/PDF/headline. Same gate as v908/v909. */}
+                    MVGS Score: {cert.gradeStrengthScore}/100 ·{" "}
+                    {cert.isBlackLabel
+                      ? "Pristine 10P"
+                      : mvgsGradeLabel(cert.gradeStrengthScore) === "Pristine 10P"
+                        ? `${mvgsTierName(cert.gradeNumeric)} ${cert.gradeNumeric}`
+                        : mvgsGradeLabel(cert.gradeStrengthScore)}
                   </span>
                   <span
                     className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[#D4AF37]/40 text-[#D4AF37] text-[10px] cursor-help"
