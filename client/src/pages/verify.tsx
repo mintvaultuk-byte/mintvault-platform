@@ -21,6 +21,9 @@ interface VerifyResult {
   language: string | null;
   grade: string;
   gradeNumeric: number;
+  // Pristine 10P from the MVGS gate (certIsPristine) — an overlay on top of the
+  // base tier in `grade`, never the stored label_type. Optional for back-compat.
+  isBlackLabel?: boolean;
   gradedDate: string | null;
   ownershipStatus: "claimed" | "unclaimed" | string;
   verifyUrl: string;
@@ -158,6 +161,16 @@ function ResultCard({ result }: { result: VerifyResult }) {
           {result.grade && result.gradeNumeric > 0 && (
             <p className="font-body text-xs mt-1" style={{ color: "var(--v2-ink-mute)" }}>
               {result.grade}
+            </p>
+          )}
+          {/* Pristine 10P overlay — only when the MVGS gate says so (matches the
+              slab + logbook). The base tier above ("GEM MINT") is unchanged. */}
+          {result.isBlackLabel && (
+            <p
+              className="font-body text-[10px] uppercase tracking-[0.2em] mt-1 font-semibold"
+              style={{ color: "var(--v2-gold)" }}
+            >
+              Pristine 10P
             </p>
           )}
         </div>

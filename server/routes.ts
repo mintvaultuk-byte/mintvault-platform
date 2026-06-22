@@ -1999,6 +1999,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           ? gradeLabelFull(gradeType, dbCert.gradeOverall || "0")
           : mvgsTierName(gradeNumeric as number).toUpperCase(),
         gradeNumeric,
+        // Pristine 10P overlay — from the MVGS gate (certIsPristine, the same
+        // authority as the slab, logbook, and reports), NOT the stored
+        // label_type. The `grade` tier text above stays the base tier
+        // ("GEM MINT" for a 10); the client adds the Pristine overlay when true.
+        isBlackLabel: !isNonNum && (await certIsPristine(dbCert)),
         gradedDate: dbCert.createdAt ? new Date(dbCert.createdAt).toISOString().split("T")[0] : null,
         ownershipStatus: dbCert.ownershipStatus || "unclaimed",
         stolenStatus: (dbCert as any).stolenStatus || null,
