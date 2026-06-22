@@ -8,7 +8,9 @@
 import type { Express, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { db } from "./db";
-import { sql } from "drizzle-orm";
+import { sql, and, eq, isNotNull, inArray } from "drizzle-orm";
+import { certificates } from "@shared/schema";
+import { certIsPristine } from "./lib/cert-pristine";
 import { writeAuthAudit } from "./account-auth";
 import { requireAuth } from "./middleware/auth";
 import { getR2SignedUrl } from "./r2";
@@ -17,20 +19,80 @@ import { isActiveStatus } from "./vault-club-tiers";
 // ── Reserved usernames ────────────────────────────────────────────────────────
 
 const RESERVED = new Set([
-  "admin", "mintvault", "mint-vault", "mintvaultuk", "vault", "support", "help",
-  "api", "www", "mail", "staff", "team", "cornelius", "oliver", "neil", "sophie",
-  "tinylegends", "tinylegendsranch", "apex", "apexdigital", "apexdigitalco",
-  "root", "system", "login", "signup", "dashboard", "showroom", "showrooms",
-  "club", "vaultclub", "pricing", "terms", "privacy", "contact", "about",
-  "grading", "pop", "popreport", "verify", "tools", "community",
+  "admin",
+  "mintvault",
+  "mint-vault",
+  "mintvaultuk",
+  "vault",
+  "support",
+  "help",
+  "api",
+  "www",
+  "mail",
+  "staff",
+  "team",
+  "cornelius",
+  "oliver",
+  "neil",
+  "sophie",
+  "tinylegends",
+  "tinylegendsranch",
+  "apex",
+  "apexdigital",
+  "apexdigitalco",
+  "root",
+  "system",
+  "login",
+  "signup",
+  "dashboard",
+  "showroom",
+  "showrooms",
+  "club",
+  "vaultclub",
+  "pricing",
+  "terms",
+  "privacy",
+  "contact",
+  "about",
+  "grading",
+  "pop",
+  "popreport",
+  "verify",
+  "tools",
+  "community",
 ]);
 
 // Basic UK profanity blocklist — common words only
 const PROFANITY = new Set([
-  "fuck", "shit", "cunt", "cock", "dick", "piss", "wank", "arse", "arsehole",
-  "asshole", "ass", "bitch", "bastard", "bollocks", "bugger", "twat", "whore",
-  "slut", "fag", "faggot", "nigger", "prick", "spastic", "retard", "bellend",
-  "tosser", "wanker", "shite", "knob",
+  "fuck",
+  "shit",
+  "cunt",
+  "cock",
+  "dick",
+  "piss",
+  "wank",
+  "arse",
+  "arsehole",
+  "asshole",
+  "ass",
+  "bitch",
+  "bastard",
+  "bollocks",
+  "bugger",
+  "twat",
+  "whore",
+  "slut",
+  "fag",
+  "faggot",
+  "nigger",
+  "prick",
+  "spastic",
+  "retard",
+  "bellend",
+  "tosser",
+  "wanker",
+  "shite",
+  "knob",
 ]);
 
 // ── Username validation ───────────────────────────────────────────────────────
@@ -49,7 +111,8 @@ export function validateUsernameFormat(username: string): {
     return { ok: false, message: "Only lowercase letters, numbers, and hyphens. Cannot start or end with a hyphen." };
   }
   if (/--/.test(username)) return { ok: false, message: "Cannot contain consecutive hyphens" };
-  if (!/^[a-z0-9-]+$/.test(username)) return { ok: false, message: "Only lowercase letters, numbers, and hyphens allowed" };
+  if (!/^[a-z0-9-]+$/.test(username))
+    return { ok: false, message: "Only lowercase letters, numbers, and hyphens allowed" };
   // Profanity check — any word in the username
   const parts = username.split("-");
   for (const part of parts) {
@@ -98,26 +161,32 @@ interface CacheEntry<T> {
 class SimpleCache<T> {
   private store = new Map<string, CacheEntry<T>>();
   private ttlMs: number;
-  constructor(ttlMs: number) { this.ttlMs = ttlMs; }
+  constructor(ttlMs: number) {
+    this.ttlMs = ttlMs;
+  }
   get(key: string): T | null {
     const entry = this.store.get(key);
     if (!entry) return null;
-    if (Date.now() > entry.expiry) { this.store.delete(key); return null; }
+    if (Date.now() > entry.expiry) {
+      this.store.delete(key);
+      return null;
+    }
     return entry.data;
   }
   set(key: string, data: T): void {
     this.store.set(key, { data, expiry: Date.now() + this.ttlMs });
   }
-  invalidate(key: string): void { this.store.delete(key); }
+  invalidate(key: string): void {
+    this.store.delete(key);
+  }
 }
 
-const showroomCache = new SimpleCache<unknown>(60_000);  // 60s TTL
+const showroomCache = new SimpleCache<unknown>(60_000); // 60s TTL
 const showroomsListCache = new SimpleCache<unknown>(60_000);
 
 // ── Route registration ────────────────────────────────────────────────────────
 
 export function registerShowroomRoutes(app: Express): void {
-
   const checkUsernameLimit = rateLimit({
     windowMs: 60 * 1000,
     max: 30,
@@ -179,7 +248,9 @@ export function registerShowroomRoutes(app: Express): void {
           reserved: "That username is reserved and cannot be claimed.",
           taken: "That username has already been taken.",
         };
-        return res.status(409).json({ error: messages[result.reason] || "Username not available", reason: result.reason });
+        return res
+          .status(409)
+          .json({ error: messages[result.reason] || "Username not available", reason: result.reason });
       }
 
       await db.execute(sql`
@@ -263,7 +334,7 @@ export function registerShowroomRoutes(app: Express): void {
       }
       const user = userRows.rows[0] as any;
 
-      const ownerTier = isActiveStatus(user.vault_club_status) ? (user.vault_club_tier || null) : null;
+      const ownerTier = isActiveStatus(user.vault_club_status) ? user.vault_club_tier || null : null;
 
       if (!user.showroom_active) {
         const payload = {
@@ -296,14 +367,36 @@ export function registerShowroomRoutes(app: Express): void {
         ORDER BY c.issued_at DESC
       `);
 
+      // Pristine/black per card via the shared MVGS gate (subgrades + deductions),
+      // never grade alone — consistent with the directory (/api/showrooms) and the
+      // display surfaces. Load this owner's claimed+graded certs and gate each.
+      const ownerCerts = await db
+        .select()
+        .from(certificates)
+        .where(
+          and(
+            eq(certificates.currentOwnerUserId, user.id),
+            eq(certificates.ownershipStatus, "claimed"),
+            isNotNull(certificates.gradeApprovedBy)
+          )
+        );
+      const pristineByCertId = new Map<string, boolean>();
+      for (const oc of ownerCerts) {
+        pristineByCertId.set(oc.certId, await certIsPristine(oc));
+      }
+
       const cards = await Promise.all(
         certsRows.rows.map(async (c: any) => {
           let frontImageUrl: string | null = null;
           if (c.front_image_path) {
-            try { frontImageUrl = await getR2SignedUrl(c.front_image_path, 3600); } catch { /* ok */ }
+            try {
+              frontImageUrl = await getR2SignedUrl(c.front_image_path, 3600);
+            } catch {
+              /* ok */
+            }
           }
           const grade = c.grade_overall != null ? parseFloat(String(c.grade_overall)) : null;
-          const isBlackLabel = grade !== null && grade >= 10;
+          const isBlackLabel = pristineByCertId.get(c.cert_id) ?? false;
           return {
             cert_id: c.cert_id,
             card_name: c.card_name || null,
@@ -320,11 +413,11 @@ export function registerShowroomRoutes(app: Express): void {
 
       // Stats
       const total_cards = cards.length;
-      const numericGrades = cards.map(c => c.grade).filter((g): g is number => g !== null);
+      const numericGrades = cards.map((c) => c.grade).filter((g): g is number => g !== null);
       const average_grade = numericGrades.length
         ? Math.round((numericGrades.reduce((a, b) => a + b, 0) / numericGrades.length) * 10) / 10
         : null;
-      const black_label_count = cards.filter(c => c.is_black_label).length;
+      const black_label_count = cards.filter((c) => c.is_black_label).length;
       const grade_breakdown: Record<string, number> = {};
       for (const g of numericGrades) {
         const key = String(Math.floor(g));
@@ -365,10 +458,9 @@ export function registerShowroomRoutes(app: Express): void {
 
     try {
       const rows = await db.execute(sql`
-        SELECT u.username, u.display_name, u.showroom_bio, u.showroom_claimed_at,
+        SELECT u.id AS user_id, u.username, u.display_name, u.showroom_bio, u.showroom_claimed_at,
           u.vault_club_tier, u.vault_club_status,
-          COUNT(DISTINCT c.id) AS total_cards,
-          COUNT(DISTINCT CASE WHEN c.grade = 10 THEN c.id END) AS black_label_count
+          COUNT(DISTINCT c.id) AS total_cards
         FROM users u
         LEFT JOIN certificates c
           ON c.current_owner_user_id = u.id
@@ -383,14 +475,41 @@ export function registerShowroomRoutes(app: Express): void {
         LIMIT ${limit} OFFSET ${offset}
       `);
 
+      // black_label_count via the shared MVGS gate (subgrades + deductions),
+      // never grade alone — grade 10 ≠ Pristine. Load the page's owners'
+      // claimed+graded certs and count the ones isPristine() calls black.
+      // (Until the stored label_type is reconciled, deriving from the gate is
+      // the only correct source. Per-cert async gate + uncached calibration
+      // load is acceptable for this cached, paginated, small claimed set.)
+      const ownerIds = rows.rows.map((r: any) => r.user_id).filter(Boolean) as string[];
+      const blackByOwner = new Map<string, number>();
+      if (ownerIds.length > 0) {
+        const claimedCerts = await db
+          .select()
+          .from(certificates)
+          .where(
+            and(
+              inArray(certificates.currentOwnerUserId, ownerIds),
+              eq(certificates.ownershipStatus, "claimed"),
+              isNotNull(certificates.gradeApprovedBy)
+            )
+          );
+        for (const c of claimedCerts) {
+          if (await certIsPristine(c)) {
+            const owner = c.currentOwnerUserId;
+            if (owner) blackByOwner.set(owner, (blackByOwner.get(owner) ?? 0) + 1);
+          }
+        }
+      }
+
       const showrooms = rows.rows.map((r: any) => ({
         username: r.username,
         display_name: r.display_name || r.username,
         bio: r.showroom_bio ? r.showroom_bio.slice(0, 100) : null,
         total_cards: parseInt(r.total_cards || "0", 10),
-        black_label_count: parseInt(r.black_label_count || "0", 10),
+        black_label_count: blackByOwner.get(r.user_id) ?? 0,
         claimed_at: r.showroom_claimed_at,
-        vault_club_tier: isActiveStatus(r.vault_club_status) ? (r.vault_club_tier || null) : null,
+        vault_club_tier: isActiveStatus(r.vault_club_status) ? r.vault_club_tier || null : null,
       }));
 
       const payload = { showrooms, limit, offset };

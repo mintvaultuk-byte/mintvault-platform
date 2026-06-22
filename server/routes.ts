@@ -5287,7 +5287,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
 
         const certGrade = !isNonNum ? parseFloat(req.body.gradeOverall || "0") : 0;
-        const computedLabelType = certGrade === 10 ? "black" : "Standard";
+        // Pristine/black via the shared MVGS gate, never grade alone. This path
+        // stores null subgrades (Pristine is established only by the grading-save
+        // paths that run the full subgrade+deduction gate), so isBlackLabel()
+        // returns false here → "Standard". Same gate as approve-grade/grade-card.
+        const computedLabelType =
+          !isNonNum && isBlackLabel({ centering: -1, corners: -1, edges: -1, surface: -1 }, certGrade)
+            ? "black"
+            : "Standard";
 
         const data = {
           labelType: computedLabelType,
@@ -5404,8 +5411,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           }
         }
 
-        const updateGrade = !isNonNumUpdate ? parseFloat(req.body.gradeOverall || "0") : 0;
-        const computedLabelTypeUpdate = updateGrade === 10 ? "black" : "Standard";
+        // Grade to persist — the edit form always sends it, so it's preserved.
+        // Reused for the gate below and the data object so they can't diverge.
+        const finalGradeOverall = isNonNumUpdate
+          ? null
+          : typeof req.body.gradeOverall === "string" && req.body.gradeOverall.trim()
+            ? req.body.gradeOverall
+            : null;
+        // Pristine/black via the shared gate (certIsPristine) on the FINAL cert
+        // state. This is a metadata editor — it does NOT carry subgrades, so the
+        // gate reads the cert's EXISTING subgrades + measurements (preserved
+        // below — no longer wiped to null) with the final grade. A genuine
+        // Pristine cert keeps its black label through an unrelated metadata edit;
+        // a grade change to a non-Pristine value correctly flips it to Standard.
+        const computedLabelTypeUpdate =
+          !isNonNumUpdate &&
+          (await certIsPristine({ ...existing, gradeOverall: finalGradeOverall, gradeType: gradeTypeUpdate } as any))
+            ? "black"
+            : "Standard";
 
         const data: any = {
           labelType: computedLabelTypeUpdate,
@@ -5425,20 +5448,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           language: req.body.language || "English",
           year: req.body.year,
           notes: req.body.notes || null,
-          // Coerce empty/whitespace to null. The `grade` column is NUMERIC(4,1);
-          // Postgres rejects "" with 22P02 invalid input syntax for type numeric.
-          // Mirrors the `req.body.X || null` pattern used by every other nullable
-          // string field in this data object. Numeric-grade-only (non-numeric grade
-          // types stay null regardless).
-          gradeOverall: isNonNumUpdate
-            ? null
-            : typeof req.body.gradeOverall === "string" && req.body.gradeOverall.trim()
-              ? req.body.gradeOverall
-              : null,
-          gradeCentering: null,
-          gradeCorners: null,
-          gradeEdges: null,
-          gradeSurface: null,
+          gradeOverall: finalGradeOverall,
+          // Subgrades are intentionally NOT written here: this metadata editor
+          // doesn't carry them, and writing null wiped real grading data on
+          // every edit (pre-existing data-loss bug) and demoted Pristine certs.
+          // Omitting them preserves the stored centering/corners/edges/surface
+          // scores so the gate above sees the cert's true subgrades.
           status: req.body.status || existing.status,
         };
 
