@@ -41,6 +41,7 @@ import { mvgsTierName } from "@shared/mvgs-scoring";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
 import { isBlackLabel } from "@shared/pristine";
 import { certIsPristine } from "./lib/cert-pristine";
+import { enqueueScanJob } from "./lib/scan-job-queue";
 import { isServiceValidForCarrier } from "@shared/carriers";
 import { centeringAxisGrade } from "@shared/centering";
 import { storage, deductAiCredits } from "./storage";
@@ -12012,7 +12013,7 @@ Defects (admin-confirmed): ${defectLines}`;
       { name: "back", maxCount: 1 },
     ]),
     async (req, res) => {
-      const { createCertForScan, uploadRawScansToR2, processScanInBackground, markRawUploaded } =
+      const { createCertForScan, uploadRawScansToR2, processScanInBackground, markRawUploaded, pgErrorDetail } =
         await import("./scan-ingest-service");
       const { getSetting } = await import("./lib/pipeline-settings");
       const elapsedMs = (start: bigint) => Number(process.hrtime.bigint() - start) / 1e6;
@@ -12105,15 +12106,15 @@ Defects (admin-confirmed): ${defectLines}`;
               // Raw PUT failed → raw_uploaded stays false. The scanner retains the
               // inbox file; the reconciler / next re-drive retries. Do NOT process.
               console.error(
-                `[scan-ingest] ${ci.certId}: raw R2 upload FAILED (raw_uploaded stays false): ${rawErr?.message ?? rawErr}`
+                `[scan-ingest] ${ci.certId}: raw R2 upload FAILED (raw_uploaded stays false): ${rawErr?.message ?? rawErr}${pgErrorDetail(rawErr)}`
               );
               return;
             }
-            await processScanInBackground(ci, frontBuf, backBuf, { skipAi: !autoAiOn }).catch((e) =>
-              console.error(
-                `[scan-ingest] background runner crashed cert=${ci.certId}: ${e?.message ?? e}\n${e?.stack ?? "(no stack)"}`
-              )
-            );
+            // Heavy CPU work (sharp variants + AI) is SERIALIZED through the scan
+            // job queue (default 1 at a time) so a burst of scans can't saturate
+            // the single shared vCPU. Raw is already confirmed above (fast
+            // file-move); only the heavy pipeline queues.
+            enqueueScanJob(() => processScanInBackground(ci, frontBuf, backBuf, { skipAi: !autoAiOn }), ci.certId);
           })();
         });
 
@@ -12133,7 +12134,9 @@ Defects (admin-confirmed): ${defectLines}`;
           message: `Certificate ${ci.certId} created. Raw upload + processing in background.`,
         });
       } catch (err: any) {
-        console.error(`[scan-ingest] error${certInfo ? ` (cert=${certInfo.certId})` : ""}: ${err.message}`);
+        console.error(
+          `[scan-ingest] error${certInfo ? ` (cert=${certInfo.certId})` : ""}: ${err.message}${pgErrorDetail(err)}`
+        );
         res.status(500).json({ error: `Scan ingest failed: ${err.message}`, certId: certInfo?.certId || null });
       }
     }

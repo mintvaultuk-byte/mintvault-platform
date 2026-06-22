@@ -18,6 +18,30 @@ import {
   type EnrichedCardData,
   type AiGrading,
 } from "./ai-grading-service";
+import { runScanJob } from "./lib/scan-job-queue";
+
+/**
+ * Build a server-log suffix exposing the Postgres SQLSTATE + detail behind a
+ * failed query. Drizzle wraps the pg error, so its message is only
+ * "Failed query: <sql>"; the code/detail live on the error or its `.cause`.
+ * SERVER LOGS ONLY — never returned to clients. This is why tonight's exact
+ * cause was unreadable: the catches logged only err.message.
+ */
+export function pgErrorDetail(err: any): string {
+  const code = err?.code ?? err?.cause?.code;
+  const detail = err?.detail ?? err?.cause?.detail;
+  const routine = err?.routine ?? err?.cause?.routine;
+  const parts: string[] = [];
+  if (code) parts.push(`SQLSTATE=${code}`);
+  if (detail) parts.push(`detail=${detail}`);
+  if (routine) parts.push(`routine=${routine}`);
+  return parts.length ? ` [${parts.join(" ")}]` : "";
+}
+
+/** Elapsed ms since a process.hrtime.bigint() mark. */
+function elapsedMs(start: bigint): number {
+  return Number(process.hrtime.bigint() - start) / 1e6;
+}
 
 /**
  * Boot migration — scanner durability columns on `certificates`. Additive +
@@ -166,7 +190,7 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
       WHERE scan_status = 'failed' AND raw_uploaded = true
       ORDER BY updated_at ASC LIMIT ${limit}`)) as any;
   } catch (e: any) {
-    console.error("[reconciler] query (failed) error:", e?.message);
+    console.error(`[reconciler] query (failed) error: ${e?.message}${pgErrorDetail(e)}`);
     failed = { rows: [] };
   }
   for (const row of failed.rows) {
@@ -182,9 +206,11 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
         continue;
       }
       console.log(`[reconciler] re-driving pipeline for ${certNum} from retained R2 raw`);
-      await processScanInBackground({ id: certId, certId: certNum }, frontBuf, backBuf, {});
+      // Serialize re-drive through the SAME scan queue so a reconciler sweep can't
+      // pile heavy pipelines onto a concurrent foreground scan burst.
+      await runScanJob(() => processScanInBackground({ id: certId, certId: certNum }, frontBuf, backBuf, {}), certNum);
     } catch (e: any) {
-      console.error(`[reconciler] re-drive failed ${certNum}: ${e?.message ?? e}`);
+      console.error(`[reconciler] re-drive failed ${certNum}: ${e?.message ?? e}${pgErrorDetail(e)}`);
     }
   }
 
@@ -197,7 +223,7 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
         AND issued_at < NOW() - ((${stale})::text || ' minutes')::interval
       ORDER BY issued_at ASC LIMIT 50`)) as any;
   } catch (e: any) {
-    console.error("[reconciler] query (no-raw) error:", e?.message);
+    console.error(`[reconciler] query (no-raw) error: ${e?.message}${pgErrorDetail(e)}`);
     noRaw = { rows: [] };
   }
   const stuck = noRaw.rows.map((r) => r.certificate_number);
@@ -261,16 +287,21 @@ export async function processScanInBackground(
   backBuf: Buffer | null,
   opts: { skipAi?: boolean } = {}
 ): Promise<void> {
+  const t0 = process.hrtime.bigint();
   try {
     console.log(`[process-scan] start cert=${certInfo.certId} (id=${certInfo.id})`);
-    const { frontVariants, backVariants } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
+    const { frontVariants, backVariants, timing } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
     console.log(`[process-scan] images processed cert=${certInfo.certId}`);
 
+    let aiMs = 0;
     if (!opts.skipAi) {
+      const tAi = process.hrtime.bigint();
       try {
         const aiResult = await runAiOnCert(certInfo.id, frontVariants.cropped, backVariants?.cropped || null);
+        aiMs = elapsedMs(tAi);
         console.log(`[process-scan] AI done cert=${certInfo.certId} grade=${aiResult.grade}`);
       } catch (aiErr: any) {
+        aiMs = elapsedMs(tAi);
         // AI failure doesn't fail the whole job — images are processed,
         // admin can manually trigger AI from the grading panel.
         console.error(
@@ -280,10 +311,17 @@ export async function processScanInBackground(
     }
 
     await setScanStatus(certInfo.id, null);
+    // Per-step timing for capacity sizing (server log ONLY, never client-exposed).
+    // sharp + r2 come from uploadImagesToCert's internal split; ai = both Haiku
+    // calls + TCG verify; total = the whole background pipeline (processing → done).
+    // One scan in isolation gives clean, uncontended numbers for sizing 2 scanners.
+    console.log(
+      `[scan-timing] cert=${certInfo.certId} sharp=${timing.sharpMs.toFixed(0)}ms ai=${aiMs.toFixed(0)}ms r2=${timing.r2Ms.toFixed(0)}ms total=${elapsedMs(t0).toFixed(0)}ms`
+    );
     console.log(`[process-scan] ready cert=${certInfo.certId}`);
   } catch (err: any) {
     console.error(
-      `[process-scan] failed cert=${certInfo.certId}: ${err?.message ?? err}\n${err?.stack ?? "(no stack)"}`
+      `[process-scan] failed cert=${certInfo.certId}: ${err?.message ?? err}${pgErrorDetail(err)}\n${err?.stack ?? "(no stack)"}`
     );
     await setScanStatus(certInfo.id, "failed");
     try {
@@ -323,7 +361,8 @@ export async function uploadImagesToCert(
   certId: number,
   frontBuffer: Buffer,
   backBuffer: Buffer | null
-): Promise<{ frontVariants: any; backVariants: any | null }> {
+): Promise<{ frontVariants: any; backVariants: any | null; timing: { sharpMs: number; r2Ms: number } }> {
+  const tImg = process.hrtime.bigint();
   const { maskRoundedCorners, tightenForDisplay } = await import("./image-processing");
   const sharp = (await import("sharp")).default;
 
@@ -419,6 +458,13 @@ export async function uploadImagesToCert(
   const backDisplayPng = backMaskedPng ? await toDisplayPng(backMaskedPng) : null;
   const backDisplayJpeg = backMaskedPng ? await toDisplayJpeg(backMaskedPng) : null;
 
+  // All sharp/variant generation (resize + variants + display derivatives) is
+  // done above; the R2 PUTs are kicked off + awaited below. This split is the
+  // basis for the [scan-timing] sharp vs r2 numbers (small overlap: a couple of
+  // PUTs start during the build, and makeDisplayDerivative does a tiny resize
+  // inside the upload — counted under r2; negligible for sizing).
+  const sharpMs = elapsedMs(tImg);
+
   // Upload all to R2 — explicit extension map per variant kind
   const prefix = `images/grading/${certId}`;
   const uploadKeys: Record<string, string> = {};
@@ -483,7 +529,9 @@ export async function uploadImagesToCert(
     );
   }
 
+  const tR2 = process.hrtime.bigint();
   await Promise.all(uploads);
+  const r2Ms = elapsedMs(tR2);
   console.log(`[scan-ingest] cert=${certId}: uploaded ${uploads.length} image artefacts to R2 (incl. display PNG)`);
 
   // Persist R2 keys + crop_geometry forensics
@@ -517,7 +565,7 @@ export async function uploadImagesToCert(
     WHERE id = ${certId}
   `);
 
-  return { frontVariants, backVariants };
+  return { frontVariants, backVariants, timing: { sharpMs, r2Ms } };
 }
 
 /**
