@@ -43,17 +43,17 @@ const grades = [
   {
     grade: "6.5",
     label: "EX-MINT+",
-    desc: "Between Excellent-Near Mint and Near Mint. Modest wear and light gloss loss noticeable on close inspection, no major defects.",
+    desc: "Between Excellent-Mint and Near Mint. Modest wear and light gloss loss noticeable on close inspection, no major defects.",
   },
   {
     grade: "6",
-    label: "EXCELLENT-NEAR MINT",
+    label: "EXCELLENT-MINT",
     desc: "Noticeable wear but still presentable. Minor creasing possible. Light loss of gloss.",
   },
   {
     grade: "5.5",
     label: "EXCELLENT+",
-    desc: "Between Excellent and Excellent-Near Mint. Clear wear without disqualifying creases or stains; presents better than a 5.",
+    desc: "Between Excellent and Excellent-Mint. Clear wear without disqualifying creases or stains; presents better than a 5.",
   },
   {
     grade: "5",
