@@ -1258,6 +1258,11 @@ async function createEbayPriceCacheTable() {
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
   // v213 pricing migration + seed service tiers, estimate_credits, admin credits, column migrations
   migrateServiceTiersV213().catch(() => {});
+  // cert_counter allocator table — created ONCE here at boot (awaited so the
+  // hot allocation path can assume it exists), replacing the per-scan
+  // CREATE TABLE IF NOT EXISTS that raced the catalogs under concurrent scans
+  // (SQLSTATE 23505 pg_type_typname_nsp_index / 42710). Idempotent + race-safe.
+  await storage.ensureCertCounterTable().catch((e: any) => console.error("[cert_counter-migrate] error:", e?.message));
   recordLabelArtworkV424Audit().catch(() => {});
   seedEstimateCreditsTable().catch(() => {});
   seedAdminCredits().catch(() => {});

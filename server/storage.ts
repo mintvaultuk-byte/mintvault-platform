@@ -145,6 +145,7 @@ export interface IStorage {
   listCertificates(filters?: CertificateFilters): Promise<CertificateRecord[]>;
   searchCertificates(query: string): Promise<CertificateRecord[]>;
   getNextCertId(): Promise<string>;
+  ensureCertCounterTable(): Promise<void>;
 
   saveNfcData(
     id: number,
@@ -1152,14 +1153,59 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(certificates.createdAt));
   }
 
+  /**
+   * Idempotent, concurrency-safe creation of the cert_counter allocator table.
+   * Runs ONCE at startup (registerRoutes). This DDL previously ran as
+   * CREATE TABLE IF NOT EXISTS on every getNextCertId() call; two concurrent
+   * scans hitting that runtime DDL raced in the Postgres system catalogs and
+   * threw 23505 (pg_type_typname_nsp_index) / 42710 (type already exists),
+   * 500-ing the scan ingest. We create it once at boot and swallow the
+   * catalog-race SQLSTATEs so two app machines booting at once are safe too.
+   * The schema change is audited exactly once via the LOCKED audit_log schema.
+   */
+  async ensureCertCounterTable(): Promise<void> {
+    try {
+      await db.execute(sql`CREATE TABLE IF NOT EXISTS cert_counter (
+        id integer PRIMARY KEY DEFAULT 1,
+        last_issued integer NOT NULL DEFAULT 0,
+        updated_at timestamptz NOT NULL DEFAULT NOW()
+      )`);
+    } catch (err: any) {
+      const code = err?.code ?? err?.cause?.code;
+      // 23505 pg_type race / 42710 duplicate_object / 42P07 relation exists — a
+      // concurrent creator won the race; the table now exists, which is the goal.
+      if (code !== "23505" && code !== "42710" && code !== "42P07") throw err;
+    }
+    // Seed the single counter row (id=1) once; safe to repeat (DML, not DDL).
+    await db.execute(sql`INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`);
+    // Audit the schema change exactly once (idempotent via WHERE NOT EXISTS).
+    try {
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+        SELECT 'schema', 'cert_counter', 'create_table', 'system_migration',
+               ${JSON.stringify({
+                 migration: "ensureCertCounterTable",
+                 reason:
+                   "moved cert_counter DDL off the per-allocation hot path; concurrent CREATE TABLE IF NOT EXISTS raced the catalogs (SQLSTATE 23505 pg_type_typname_nsp_index / 42710)",
+                 columns: ["id", "last_issued", "updated_at"],
+               })}::jsonb, NOW()
+        WHERE NOT EXISTS (
+          SELECT 1 FROM audit_log
+          WHERE entity_type = 'schema' AND entity_id = 'cert_counter' AND action = 'create_table'
+        )
+      `);
+    } catch (auditErr: any) {
+      // Auditing is best-effort — never let it undo a successful table ensure.
+      console.error("[cert_counter-migrate] audit_log insert failed:", auditErr?.message);
+    }
+  }
+
   async getNextCertId(): Promise<string> {
-    // Self-bootstrap the allocator table (no-op once it exists). Version-controls
-    // the DDL that was previously only created implicitly; matches shared/schema.ts certCounter.
-    await db.execute(sql`CREATE TABLE IF NOT EXISTS cert_counter (
-      id integer PRIMARY KEY DEFAULT 1,
-      last_issued integer NOT NULL DEFAULT 0,
-      updated_at timestamptz DEFAULT NOW()
-    )`);
+    // DDL-free hot path: the cert_counter table is created once at startup by
+    // ensureCertCounterTable() (registerRoutes), NOT here. This path now does
+    // only concurrency-safe DML against the existing table — an idempotent seed
+    // then an atomic increment — so concurrent scans can no longer race the
+    // system catalogs (the 23505/42710 incident on the per-scan CREATE TABLE).
     await db.execute(sql`INSERT INTO cert_counter (id, last_issued) VALUES (1, 0) ON CONFLICT (id) DO NOTHING`);
     const result = await db.execute(
       sql`UPDATE cert_counter SET last_issued = last_issued + 1, updated_at = NOW() WHERE id = 1 RETURNING last_issued`
