@@ -176,7 +176,7 @@ export default function StandardPage() {
                 </thead>
                 <tbody>
                   {[
-                    ["96-100", "Pristine 10P"],
+                    ["96-100", "Gem Mint 10"],
                     ["91-95", "Gem Mint 10"],
                     ["86-90", "Mint+ 9.5"],
                     ["81-85", "Mint 9"],
@@ -184,12 +184,18 @@ export default function StandardPage() {
                     ["71-75", "NM-Mint 8"],
                     ["66-70", "NM+ 7.5"],
                     ["61-65", "Near Mint 7"],
-                    ["51-60", "Excellent-Mint 6"],
-                    ["41-50", "Excellent 5"],
-                    ["31-40", "Very Good-Excellent 4"],
-                    ["21-30", "Good 3"],
-                    ["11-20", "Fair 2"],
-                    ["1-10", "Poor 1"],
+                    ["56-60", "Excellent-Mint+ 6.5"],
+                    ["51-55", "Excellent-Mint 6"],
+                    ["46-50", "Excellent+ 5.5"],
+                    ["41-45", "Excellent 5"],
+                    ["36-40", "Very Good-Excellent+ 4.5"],
+                    ["31-35", "Very Good-Excellent 4"],
+                    ["26-30", "Very Good+ 3.5"],
+                    ["21-25", "Very Good 3"],
+                    ["16-20", "Good+ 2.5"],
+                    ["11-15", "Good 2"],
+                    ["6-10", "Fair 1.5"],
+                    ["1-5", "Poor 1"],
                   ].map(([score, grade]) => (
                     <tr key={score}>
                       <td className={codeCls}>{score}</td>
@@ -201,6 +207,12 @@ export default function StandardPage() {
             </div>
             <p className={`${para} mt-4`}>
               The 0–100 score is shown on every MintVault certificate beside the headline grade.
+            </p>
+            <p className={`${para} mt-4`}>
+              <strong className="text-[#D4AF37]/80 not-italic">Black Label — Pristine 10P</strong> sits above Gem Mint
+              10 and is not a score band. It is awarded only when all four subgrades — centering, corners, edges, and
+              surface — individually score a perfect 10 with zero defect deductions. A 100/100 carrying any underlying
+              deduction is Gem Mint 10, not Pristine 10P.
             </p>
           </section>
 
@@ -350,9 +362,12 @@ export default function StandardPage() {
               grade:
             </p>
 
-            <h3 className={subTitle}>Grade 10 / Pristine 10P</h3>
+            <h3 className={subTitle}>Grade 10 / Black Label — Pristine 10P</h3>
             <p className={para}>
-              Zero whitening visible to the naked eye. Under 10× magnification: zero ink/coating loss permitted.
+              Zero whitening visible to the naked eye. Under 10× magnification: zero ink/coating loss permitted. Black
+              Label — Pristine 10P is awarded only when all four subgrades — centering, corners, edges, and surface —
+              individually score a perfect 10 with zero defect deductions; a card that meets Gem Mint 10 overall but
+              carries any underlying deduction is Gem Mint 10, not Pristine 10P.
             </p>
 
             <h3 className={subTitle}>Grade 9.5 (Mint+)</h3>
