@@ -29,7 +29,7 @@ contextBridge.exposeInMainWorld("scanner", {
   retryLast:         ()            => ipcRenderer.invoke("retry-last"),
   resetBuffered:     ()            => ipcRenderer.invoke("reset-buffered"),
   restartWatcher:    ()            => ipcRenderer.invoke("restart-watcher"),
-  clearBufferedState:()            => ipcRenderer.invoke("clear-buffered-state"),
+  resetScanner:      ()            => ipcRenderer.invoke("reset-scanner"),
   forwardToCert:     (certId)      => ipcRenderer.invoke("forward-to-cert", certId),
   hidePopover:       ()            => ipcRenderer.invoke("hide-popover"),
   openInbox:         ()            => ipcRenderer.invoke("open-inbox"),

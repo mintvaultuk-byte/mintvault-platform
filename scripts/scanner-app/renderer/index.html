@@ -69,11 +69,11 @@
         </p>
       </div>
       <div class="settings-test">
-        <button class="btn danger" id="clearBufferedBtn">Clear buffered state</button>
+        <button class="btn danger" id="clearBufferedBtn">Reset scanner</button>
         <p class="hint">
-          Emergency reset when the scanner-watcher daemon gets stuck.
-          Deletes ~/mintvault-scans/watcher-state.json and kickstarts
-          com.mintvault.scanner-watcher. UI refreshes after 2 s.
+          Recover the scanner if it stops processing scans. Restarts the
+          in-process watcher; if that isn't enough it reloads, and if needed
+          repairs + reinstalls, the com.mintvault.scanner agent. Safe anytime.
         </p>
       </div>
     </div>

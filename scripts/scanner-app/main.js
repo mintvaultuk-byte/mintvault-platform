@@ -23,6 +23,7 @@ const os    = require("node:os");
 const stateMod = require("./lib/state");
 const server   = require("./lib/server-client");
 const { Watcher, INBOX, FAILED } = require("./lib/watcher");
+const agentPlist = require("./lib/agent-plist");
 
 // macOS: this is a menu-bar-only app, no Dock icon.
 if (process.platform === "darwin" && app.dock) app.dock.hide();
@@ -62,20 +63,59 @@ function playSystemSound(filename) {
   }
 }
 
-// ── Reboot ───────────────────────────────────────────────────────────────
+// ── Reset / recovery ───────────────────────────────────────────────────────
+// The scanner IS the com.mintvault.scanner LaunchAgent (this Electron app).
+// Recovery escalates: Soft (in-process watcher restart, handled in the
+// reset-scanner IPC) → Reload/Repair (reset-agent.sh, spawned DETACHED because
+// the launchctl tiers kill+relaunch this very process). Single source of truth
+// for the plist is lib/agent-plist.js. The legacy com.mintvault.scanner-watcher
+// daemon is decommissioned and NEVER touched here.
 
-// Reboots the scanner-app LaunchAgent via launchctl kickstart -k.
-// Shows a brief notification before firing so the operator knows it's intentional.
+const RESET_HELPER = path.join(__dirname, "reset-agent.sh");
+const SCANNER_LOG  = agentPlist.paths().logPath;
+const LAST_RESET   = path.join(os.homedir(), "mintvault-scans", "last-reset.json");
+
+// Append a timestamped line to the operator log (tray "Show logs" target).
+function logToFile(msg) {
+  try {
+    fs.appendFileSync(SCANNER_LOG, `[${new Date().toISOString()}] [reset] ${msg}\n`);
+  } catch (err) {
+    console.warn(`[reset] log append failed: ${err.message}`);
+  }
+}
+
+// Spawn the detached Reload/Repair escalation. It outlives this process being
+// killed by kickstart; the agent's KeepAlive relaunches us and we surface the
+// outcome from last-reset.json on boot.
+function spawnResetAgent(reason) {
+  logToFile(`escalating to reload/repair (reason: ${reason})`);
+  const child = spawn("/bin/bash", [RESET_HELPER, reason], { stdio: "ignore", detached: true });
+  child.on("error", (e) => logToFile(`reset-agent spawn failed: ${e.message}`));
+  child.unref();
+}
+
+// On boot, surface the plain-English outcome of a prior Reload/Repair (the app
+// was killed mid-reset by kickstart — this is how the operator learns it worked).
+function surfacePriorResetStatus() {
+  try {
+    if (!fs.existsSync(LAST_RESET)) return;
+    const st = JSON.parse(fs.readFileSync(LAST_RESET, "utf8"));
+    fs.unlinkSync(LAST_RESET); // one-shot
+    if (st && st.status) {
+      const { Notification } = require("electron");
+      new Notification({ title: "MintVault Scanner", body: st.status }).show();
+      logToFile(`prior reset outcome: ${st.status}${st.reason ? ` (${st.reason})` : ""}`);
+    }
+  } catch (err) {
+    console.warn(`[reset] could not read ${LAST_RESET}: ${err.message}`);
+  }
+}
+
+// "Reboot scanner" tray item → full reload/repair of the LIVE agent.
 function rebootScanner() {
   const { Notification } = require("electron");
-  new Notification({ title: "MintVault Scanner", body: "Rebooting…" }).show();
-  // Small delay so the notification is visible before the process dies.
-  setTimeout(() => {
-    spawn("launchctl", ["kickstart", "-k", "gui/501/com.mintvault.scanner-app"], {
-      stdio: "ignore",
-      detached: true,
-    }).unref();
-  }, 500);
+  new Notification({ title: "MintVault Scanner", body: "Reloading agent…" }).show();
+  setTimeout(() => spawnResetAgent("tray: Reboot scanner"), 500);
 }
 
 // ── Tray ─────────────────────────────────────────────────────────────────
@@ -371,28 +411,32 @@ function setupIpc() {
     return { ok: true };
   });
 
-  // Emergency reset for the separate scanner-watcher LaunchAgent (the
-  // legacy daemon at com.mintvault.scanner-watcher that still writes
-  // ~/mintvault-scans/watcher-state.json). Operator clicks this when the
-  // watcher gets stuck and won't process new scans. Deletes the state
-  // file then kickstarts the LaunchAgent so it comes back fresh.
-  ipcMain.handle("clear-buffered-state", async () => {
-    const statePath = path.join(os.homedir(), "mintvault-scans", "watcher-state.json");
+  // Reset the scanner — 3-tier escalation against the LIVE com.mintvault.scanner
+  // agent (this app), never the decommissioned scanner-watcher. Tier 1 (Soft)
+  // restarts the in-process chokidar watcher here; if that can't recover, we
+  // hand off to reset-agent.sh (Reload/Repair) which outlives this process
+  // being killed by kickstart. The operator gets a plain-English status, never
+  // a raw exit code.
+  ipcMain.handle("reset-scanner", async () => {
+    // Tier 1 — Soft: restart the in-process watcher + clear the buffered pair.
     try {
-      if (fs.existsSync(statePath)) fs.unlinkSync(statePath);
+      logToFile("Soft: in-process watcher restart");
+      await watcher.stop();
+      watcher.resetBuffered();
+      await watcher.start();
+      if (watcher.chokidar) {
+        logToFile("Soft OK → watching");
+        pushStateToRenderer();
+        refreshTray();
+        return { ok: true, tier: "soft", status: "Restarted" };
+      }
+      logToFile("Soft: watcher did not come back up → escalating");
     } catch (err) {
-      return { ok: false, step: "unlink", error: err.message };
+      logToFile(`Soft failed: ${err.message} → escalating`);
     }
-    return new Promise((resolve) => {
-      const proc = spawn("launchctl", ["kickstart", "-k", "gui/501/com.mintvault.scanner-watcher"]);
-      let stderr = "";
-      proc.stderr.on("data", (d) => { stderr += d.toString(); });
-      proc.on("error", (err) => resolve({ ok: false, step: "launchctl-spawn", error: err.message }));
-      proc.on("close", (code) => {
-        if (code === 0) resolve({ ok: true });
-        else resolve({ ok: false, step: "launchctl-exit", error: `exit ${code}: ${stderr.trim()}` });
-      });
-    });
+    // Tier 2/3 — Reload/Repair via the detached helper (kills+relaunches us).
+    spawnResetAgent("in-app Soft tier insufficient");
+    return { ok: true, tier: "reload", status: "Reloading agent…", escalated: true };
   });
 
   ipcMain.handle("forward-to-cert", async (_e, certId) => {
@@ -471,6 +515,7 @@ app.whenReady().then(async () => {
 
   await watcher.start();
   refreshTray();
+  surfacePriorResetStatus();
 });
 
 app.on("window-all-closed", (e) => {

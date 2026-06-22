@@ -421,27 +421,25 @@ els.testScanBtn.addEventListener("click", async () => {
   }
 });
 
-// Emergency reset — clear watcher state file + kickstart the scanner-watcher
-// LaunchAgent, then re-poll state after 2 s so the UI reflects whatever the
-// watcher comes back with.
+// Reset the scanner — escalates Soft (in-process restart) → Reload → Repair
+// against the live com.mintvault.scanner agent. Shows a plain-English status.
+// If it escalates, the agent restarts and surfaces the final outcome
+// ("Reloaded agent" / "Repaired + reinstalled agent" / "Manual fix needed")
+// via a notification on relaunch.
 els.clearBufferedBtn.addEventListener("click", async () => {
-  if (!window.confirm("Emergency reset?\n\nThis deletes ~/mintvault-scans/watcher-state.json and kickstarts com.mintvault.scanner-watcher.")) return;
+  if (!window.confirm("Reset the scanner?\n\nRestarts the watcher; if needed, reloads or repairs the scanner agent. Safe to run anytime.")) return;
   els.clearBufferedBtn.disabled = true;
   const original = els.clearBufferedBtn.textContent;
   els.clearBufferedBtn.textContent = "Resetting…";
-  const r = await window.scanner.clearBufferedState();
+  const r = await window.scanner.resetScanner();
   setTimeout(async () => {
     const cur = await window.scanner.getState();
     if (cur) renderState(cur);
     els.clearBufferedBtn.disabled = false;
-    if (r.ok) {
-      els.clearBufferedBtn.textContent = "Reset OK";
-      setTimeout(() => { els.clearBufferedBtn.textContent = original; }, 1500);
-    } else {
-      els.clearBufferedBtn.textContent = `Failed: ${(r.error || "unknown").slice(0, 30)}`;
-      setTimeout(() => { els.clearBufferedBtn.textContent = original; }, 4000);
-    }
-  }, 2000);
+    // Plain-English status — never a raw exit code.
+    els.clearBufferedBtn.textContent = (r && r.status) ? r.status : (r && r.ok ? "Done" : "Manual fix needed");
+    setTimeout(() => { els.clearBufferedBtn.textContent = original; }, (r && r.escalated) ? 4000 : 1800);
+  }, (r && r.escalated) ? 300 : 1500);
 });
 
 // ── Boot ─────────────────────────────────────────────────────────────────
