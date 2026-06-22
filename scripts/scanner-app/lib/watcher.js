@@ -64,6 +64,14 @@ const RETRYABLE_STATUSES = new Set([502, 503, 504]);
 const PERMANENT_STATUSES = new Set([400, 401, 403, 404]);
 const MAX_RETRIES = 5;
 const RETRY_BACKOFF = [5_000, 10_000, 20_000, 30_000, 60_000]; // 5s, 10s, 20s, 30s, 60s
+// Max-lifetime guard: total POST attempts across ALL sessions (incl. restart
+// re-drives) before a stuck pair is moved to failed/ and stops retrying forever.
+const MAX_LIFETIME_ATTEMPTS = 5;
+// After a successful (immediate) ingest response the server is still backgrounding
+// the raw R2 PUT. The watcher holds the inbox file until raw_uploaded=true here,
+// then moves it (the core-invariant completion signal).
+const RAW_CONFIRM_POLL_MS = 2_000;
+const RAW_CONFIRM_TIMEOUT_MS = 120_000; // 2 min; on timeout the file stays in inbox for the reconciler
 
 // AUTO-mode mint throttle: refuse to mint a new cert if one was created less
 // than this long ago. Guards against a runaway AUTO batch minting a flood of
@@ -177,25 +185,60 @@ class Watcher extends EventEmitter {
     this.writePendingQueue(q);
   }
 
+  /** Read a single pending entry by key (null if absent). */
+  getPending(key) {
+    return this.readPendingQueue().find((e) => e.key === key) || null;
+  }
+
+  /** Content-derived, STABLE ingest idempotency key for a front+back pair.
+   *  Identical bytes → identical key on every retry and after a process restart,
+   *  so a re-driven ingest resolves to the SAME server cert (never a duplicate).
+   *  Persisted in the pending entry and re-read on re-drive — never regenerated
+   *  per-attempt. A genuinely new scan (new bytes) yields a new key → new cert. */
+  deriveIngestKey(hashes) {
+    const basis = `${hashes?.front || "nofront"}:${hashes?.back || "noback"}`;
+    return `mvscan:${crypto.createHash("sha256").update(basis).digest("hex")}`;
+  }
+
   /** On startup, re-drive every entry still in the queue. Files already gone
    *  from disk (upload had actually succeeded before the crash, queue write
    *  just didn't land) are dropped as stale. Awaited sequentially. */
   async requeuePending() {
     const pending = this.readPendingQueue();
     if (!pending.length) return;
-    this.log(`startup: re-queueing ${pending.length} interrupted upload(s) from pending-queue.json`);
+    this.log(`startup: reconciling ${pending.length} interrupted upload(s) from pending-queue.json`);
     for (const entry of pending) {
       try {
-        if (entry.type === "pair" && entry.frontPath && fs.existsSync(entry.frontPath)) {
-          await this.uploadPair(entry.frontPath, entry.backPath || null);
-        } else if (entry.type === "manual" && entry.filePath && fs.existsSync(entry.filePath)) {
+        const frontHere = entry.frontPath && fs.existsSync(entry.frontPath);
+        const manualHere = entry.type === "manual" && entry.filePath && fs.existsSync(entry.filePath);
+        if (entry.type === "pair" && frontHere) {
+          // File retained → re-drive. The PERSISTED content key makes the server
+          // resolve to the SAME cert (no duplicate, no rescan).
+          await this.uploadPair(entry.frontPath, entry.backPath || null, 0, null, entry.idempotencyKey || null);
+          continue;
+        }
+        if (manualHere) {
           await this.uploadManual(entry.filePath, entry.certId, entry.side, entry.replaceExisting, entry.source || "requeue");
+          continue;
+        }
+        // File GONE — do NOT blind-drop (the old silent-discard bug). Reconcile
+        // against R2: if the cert's raw is confirmed, the work completed (crash
+        // between move and queue-write) → safe to drop. Otherwise the scan was
+        // LOST mid-flight → keep the entry + surface LOUD, never discard silently.
+        if (entry.certId) {
+          let s;
+          try { s = await server.getScanStatus(entry.certId); } catch { s = null; }
+          if (s && s.ok && s.body && s.body.raw_uploaded === true) {
+            this.log(`reconcile: ${entry.certId} confirmed in R2 (file already moved) — dropping queue entry ${entry.key}`);
+            this.removePending(entry.key);
+          } else {
+            this.log(`⚠️ LOST SCAN: ${entry.key} file gone AND cert ${entry.certId} raw NOT confirmed — manual recovery needed, entry kept`, "error");
+          }
         } else {
-          this.log(`pending entry stale (file gone), dropping: ${entry.key}`, "warn");
-          this.removePending(entry.key);
+          this.log(`⚠️ LOST SCAN: ${entry.key} file gone and no certId recorded — manual recovery needed, entry kept`, "error");
         }
       } catch (err) {
-        this.log(`re-queue failed for ${entry.key}: ${err.message}`, "error");
+        this.log(`reconcile failed for ${entry.key}: ${err.message}`, "error");
       }
     }
   }
@@ -467,61 +510,89 @@ class Watcher extends EventEmitter {
     this.log(`scan arrived during ${cur.state} — leaving in inbox: ${path.basename(filePath)}`, "warn");
   }
 
-  async uploadPair(frontPath, backPath, retryCount = 0, hashes = null) {
+  async uploadPair(frontPath, backPath, retryCount = 0, hashes = null, idempotencyKey = null) {
     if (this.uploading && retryCount === 0) return;
     this.uploading = true;
     this.lastPair = { frontPath, backPath };
-    // Hash the source bytes once (first attempt) so we can record this upload
-    // for dedup after it succeeds. Threaded through retries to avoid re-reads.
+    // Hash the source bytes once (first attempt) — for dedup AND to derive the
+    // stable content key. Threaded through retries to avoid re-reads.
     if (retryCount === 0 && !hashes) {
       hashes = {
         front: await this.sha256File(frontPath),
         back: backPath ? await this.sha256File(backPath) : null,
       };
     }
-    // Record this upload as in-flight on the first attempt (not on retries —
-    // addPending is keyed, so the entry already exists across retry rounds).
+    // Content-derived key: a fresh ingest derives it; a re-drive (requeue) passes
+    // the PERSISTED key in — never regenerated per-attempt.
+    if (!idempotencyKey) idempotencyKey = this.deriveIngestKey(hashes);
+
     if (retryCount === 0) {
-      this.addPending({ key: frontPath, type: "pair", frontPath, backPath });
+      // Max-lifetime guard — `attempts` counts fresh start-of-ingest tries
+      // (initial + each restart re-drive), persisted across restarts. We make up
+      // to MAX_LIFETIME_ATTEMPTS tries; this invocation is terminal once those
+      // are already used (prior.attempts has reached the max).
+      const prior = this.getPending(idempotencyKey);
+      const priorAttempts = prior?.attempts || 0;
+      const attempts = priorAttempts + 1;
+      if (attempts > MAX_LIFETIME_ATTEMPTS) {
+        this.uploading = false;
+        this.log(`pair exhausted ${MAX_LIFETIME_ATTEMPTS} lifetime attempts — moving to failed/`, "error");
+        return this.failPair(frontPath, backPath, `exhausted ${MAX_LIFETIME_ATTEMPTS} attempts; last: ${prior?.lastError || "unknown"}`, 0, {
+          terminal: true,
+          attempts: priorAttempts, // the actual number of tries made
+          idempotencyKey,
+        });
+      }
+      this.addPending({ key: idempotencyKey, type: "pair", frontPath, backPath, idempotencyKey, attempts, certId: prior?.certId || null });
     }
+
     stateMod.set({ state: "uploading" });
     this.emitState();
     const retryLabel = retryCount > 0 ? ` (retry ${retryCount}/${MAX_RETRIES})` : "";
-    this.log(`uploading pair: ${path.basename(frontPath)} + ${path.basename(backPath)}${retryLabel}`);
+    this.log(`uploading pair: ${path.basename(frontPath)} + ${path.basename(backPath)}${retryLabel} [${idempotencyKey.slice(7, 17)}…]`);
 
     let r;
-    try { r = await server.uploadPair(frontPath, backPath); }
+    try { r = await server.uploadPair(frontPath, backPath, idempotencyKey); }
     catch (err) { r = { ok: false, status: 0, body: { error: `network: ${err.message}` } }; }
 
     if (!r.ok) {
       const reason = r.body?.error || `HTTP ${r.status}`;
-      // Retry on 502/503 with exponential backoff, up to MAX_RETRIES.
+      this.patchPending(idempotencyKey, { lastError: reason });
       if (RETRYABLE_STATUSES.has(r.status) && retryCount < MAX_RETRIES) {
         const delay = RETRY_BACKOFF[retryCount] || RETRY_BACKOFF[RETRY_BACKOFF.length - 1];
         this.log(`upload got ${r.status}, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES}): ${reason}`, "warn");
         await new Promise(rs => setTimeout(rs, delay));
-        return this.uploadPair(frontPath, backPath, retryCount + 1, hashes);
+        return this.uploadPair(frontPath, backPath, retryCount + 1, hashes, idempotencyKey);
       }
       this.uploading = false;
-      return this.failPair(frontPath, backPath, reason, r.status);
+      return this.failPair(frontPath, backPath, reason, r.status, { idempotencyKey });
     }
 
-    // Success.
+    // Success — the server has ALLOCATED the cert (immediate response), but the
+    // raw R2 PUT is still backgrounded. Record certId on the pending entry, then
+    // HOLD the inbox file until raw_uploaded=true before moving it (the invariant).
     const certId = r.body?.certId || null;
-    // Throttle clock: a cert was just minted.
     this.lastCertMintAt = Date.now();
-    // Record both sides for content-hash dedup.
+    if (certId) this.patchPending(idempotencyKey, { certId });
     if (certId && hashes) {
       this.recordUpload(hashes.front, certId, "front");
       if (hashes.back) this.recordUpload(hashes.back, certId, "back");
     }
-    const processedDir = this.dateFolder(PROCESSED);
-    this.moveFile(frontPath, processedDir);
-    this.moveFile(backPath,  processedDir);
-    this.removePending(frontPath);
+
+    const confirmed = await this.confirmAndMove(certId, frontPath, backPath, idempotencyKey, r.body?.raw_uploaded === true);
     this.bufferedFront = null;
     this.lastPair = null;
     this.uploading = false;
+
+    if (!confirmed) {
+      // Raw not confirmed within the window — file STAYS in inbox, pending entry
+      // retained; the reconciler / next restart finishes it. Not an error.
+      this.log(`${certId}: cert created but raw not yet confirmed — file held in inbox for reconcile`, "warn");
+      stateMod.set({ state: "idle", bufferedFront: null });
+      this.emitState();
+      return;
+    }
+
     stateMod.set({
       state: "success",
       bufferedFront: null,
@@ -534,12 +605,9 @@ class Watcher extends EventEmitter {
       stateMod.pushRecent({ certId, side: "back",  source: "auto" });
     }
     this.emitState();
-    this.log(`SUCCESS: ${certId || "(no certId)"} — pair uploaded`);
-    // Refresh next-cert hint after each successful upload.
+    this.log(`SUCCESS: ${certId || "(no certId)"} — pair uploaded + raw confirmed in R2`);
     this.refreshNextCert(true);
     setTimeout(() => {
-      // After the success flash, return to idle so the next scan is treated
-      // as a new front. Stable behaviour matches the old watcher.
       const s = stateMod.get();
       if (s.state === "success") {
         stateMod.set({ state: "idle" });
@@ -548,15 +616,55 @@ class Watcher extends EventEmitter {
     }, 1_500);
   }
 
-  failPair(frontPath, backPath, reason, httpStatus) {
+  /** Merge fields into an existing pending entry (no-op if absent). */
+  patchPending(key, fields) {
+    const q = this.readPendingQueue();
+    const i = q.findIndex((e) => e.key === key);
+    if (i === -1) return;
+    q[i] = { ...q[i], ...fields };
+    this.writePendingQueue(q);
+  }
+
+  /** CORE INVARIANT: hold the inbox file until the server confirms raw_uploaded=
+   *  true (raw scans durably in R2), then drop the queue entry and move the file
+   *  to processed/ as the final act. A crash anywhere before the move leaves the
+   *  file in inbox for the reconciler — re-drive is idempotent (same content key
+   *  → same cert, deterministic R2 keys overwrite). Returns true if moved. */
+  async confirmAndMove(certId, frontPath, backPath, idempotencyKey, alreadyConfirmed) {
+    if (!certId) return false;
+    let rawOk = alreadyConfirmed;
+    if (!rawOk) {
+      const deadline = Date.now() + RAW_CONFIRM_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        await new Promise((rs) => setTimeout(rs, RAW_CONFIRM_POLL_MS));
+        let s;
+        try { s = await server.getScanStatus(certId); } catch { s = null; }
+        if (s && s.ok && s.body && s.body.raw_uploaded === true) { rawOk = true; break; }
+      }
+    }
+    if (!rawOk) return false; // leave file in inbox for the reconciler
+    // R2 confirmed → move the files (the completion signal), THEN drop the queue
+    // entry. If we crash between the two, the entry survives WITH its certId, so
+    // requeuePending reconciles it against R2 (raw_uploaded=true → safe to drop)
+    // rather than relying on the moved file being re-detected.
+    const processedDir = this.dateFolder(PROCESSED);
+    this.moveFile(frontPath, processedDir);
+    if (backPath) this.moveFile(backPath, processedDir);
+    this.removePending(idempotencyKey);
+    return true;
+  }
+
+  failPair(frontPath, backPath, reason, httpStatus, opts = {}) {
+    const key = opts.idempotencyKey || frontPath;
     this.log(`FAILED ${path.basename(frontPath)}: ${reason}`, "error");
 
-    // Server errors (502/503/504) after all retries: keep files in inbox and
-    // leave them in pending-queue.json so they retry on next restart.
-    const isPermanent = PERMANENT_STATUSES.has(httpStatus);
-    if (!isPermanent) {
+    // Move to failed/ ONLY when terminal: a permanent client error (4xx) OR the
+    // max-lifetime guard tripped. Transient server errors (5xx) keep the files in
+    // inbox + pending-queue for restart retry — the lifetime guard in uploadPair
+    // eventually routes them here with { terminal: true }, so no retry-forever.
+    const moveToFailed = opts.terminal === true || PERMANENT_STATUSES.has(httpStatus);
+    if (!moveToFailed) {
       this.log(`server error (${httpStatus || "unknown"}) — keeping files in inbox for retry on restart`);
-      // addPending was already called at upload start — leave it in the queue
       this.bufferedFront = null;
       this.lastPair = { frontPath, backPath };
       stateMod.set({ state: "error", bufferedFront: null, lastError: reason });
@@ -564,8 +672,8 @@ class Watcher extends EventEmitter {
       return;
     }
 
-    // Permanent client error (400/401/403/404): move to failed/, drop from queue.
-    this.removePending(frontPath);
+    // Terminal — move to failed/, write a .error.txt sidecar, drop from queue.
+    this.removePending(key);
     const failDir = this.dateFolder(FAILED);
     let movedFront = null;
     let movedBack  = null;
@@ -581,8 +689,11 @@ class Watcher extends EventEmitter {
         this.log(`back file already gone, skipping move: ${path.basename(backPath)}`, "warn");
       }
     }
-    if (movedFront) this.writeError(movedFront, reason);
-    if (movedBack)  this.writeError(movedBack,  reason);
+    const sidecar = opts.terminal
+      ? `${reason}\nattempts: ${opts.attempts ?? MAX_LIFETIME_ATTEMPTS}/${MAX_LIFETIME_ATTEMPTS}`
+      : reason;
+    if (movedFront) this.writeError(movedFront, sidecar);
+    if (movedBack)  this.writeError(movedBack,  sidecar);
     this.bufferedFront = null;
     this.lastPair = { frontPath: movedFront, backPath: movedBack };
     stateMod.set({ state: "error", bufferedFront: null, lastError: reason });

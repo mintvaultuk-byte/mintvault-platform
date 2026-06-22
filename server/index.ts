@@ -508,6 +508,21 @@ async function runTransferV2Sweep() {
   setTimeout(runArchivalSweep, 60_000);
   setInterval(runArchivalSweep, 24 * 60 * 60 * 1000);
 
+  // Scan reconciler — re-drive failed pipelines from retained R2 raw + surface
+  // never-confirmed ingests for scanner re-supply. First run 90s after boot,
+  // then every 5 min. Idempotent + soft-fails if the durability columns are
+  // missing (pre-migration). Safe across both Fly machines (idempotent keys).
+  async function runScanReconciler() {
+    try {
+      const { reconcileStuckScans } = await import("./scan-ingest-service");
+      await reconcileStuckScans({ staleMinutes: 10 });
+    } catch (err: any) {
+      log(`reconcile error: ${err?.message || err}`, "scan-reconciler");
+    }
+  }
+  setTimeout(runScanReconciler, 90_000);
+  setInterval(runScanReconciler, 5 * 60 * 1000);
+
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

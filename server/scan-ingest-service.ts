@@ -8,7 +8,7 @@
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
-import { uploadToR2 } from "./r2";
+import { uploadToR2, getR2Buffer, listR2Keys } from "./r2";
 import {
   generateImageVariants,
   identifyCardFromBuffer,
@@ -20,26 +20,192 @@ import {
 } from "./ai-grading-service";
 
 /**
- * Create a new certificate for an admin scan.
- * Returns the DB row with id and certificate_number.
+ * Boot migration — scanner durability columns on `certificates`. Additive +
+ * idempotent (safe on every startup; cert_counter idiom).
+ *   raw_uploaded: false until the raw scans are CONFIRMED in R2 — the scanner's
+ *     precondition for moving the inbox file (the core invariant).
+ *   ingest_idempotency_key: content-derived, stable-across-retries key. Its
+ *     UNIQUE index is the atomic gate that makes a re-driven/raced ingest
+ *     resolve to the SAME cert instead of allocating a duplicate.
  */
-export async function createCertForScan(): Promise<{ id: number; certId: string; referenceNumber: string }> {
+export async function ensureCertDurabilitySchema(): Promise<void> {
+  await db.execute(sql`ALTER TABLE certificates
+    ADD COLUMN IF NOT EXISTS raw_uploaded BOOLEAN NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS ingest_idempotency_key TEXT`);
+  // The unique index IS the concurrency gate (a check-then-insert would race —
+  // the cert_counter lesson). NULLs are non-distinct in a Postgres unique index,
+  // so legacy / non-idempotent rows (null key) never collide. Swallow the
+  // catalog-race SQLSTATEs so two machines booting at once are safe.
+  try {
+    await db.execute(
+      sql`CREATE UNIQUE INDEX IF NOT EXISTS uq_certificates_ingest_idem ON certificates (ingest_idempotency_key)`
+    );
+  } catch (err: any) {
+    const code = err?.code ?? err?.cause?.code;
+    if (code !== "23505" && code !== "42710" && code !== "42P07") throw err;
+  }
+  try {
+    await db.execute(sql`
+      INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+      SELECT 'schema', 'certificates', 'cert_durability_migrate', 'system_migration',
+             ${JSON.stringify({ columns: ["raw_uploaded", "ingest_idempotency_key"], index: "uq_certificates_ingest_idem" })}::jsonb, NOW()
+      WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'cert_durability_migrate')`);
+  } catch (auditErr: any) {
+    console.error("[cert-durability-migrate] audit insert failed:", auditErr?.message);
+  }
+  console.log("[cert-durability-migrate] certificates.raw_uploaded + ingest_idempotency_key + unique index ensured");
+}
+
+/**
+ * Idempotent, concurrency-safe cert creation for an admin scan.
+ *
+ * `idempotencyKey` is derived by the scanner from the scan CONTENT (front+back
+ * SHA) and is STABLE across retries + process restarts — so a re-driven ingest
+ * (crash recovery, or a retry racing the original) resolves to the SAME cert,
+ * never a duplicate:
+ *   1. fast path — a committed cert for this key exists → return it (no alloc).
+ *   2. else allocate a number + INSERT gated by the UNIQUE index
+ *      (ON CONFLICT DO NOTHING). The index, not a check-then-insert, is the
+ *      atomic primitive against concurrent same-key POSTs.
+ *   3. lost the concurrent race (a sibling POST with the same key inserted
+ *      first) → re-select the winner. The number from step 2's getNextCertId()
+ *      becomes a harmless counter gap; NO second cert is created.
+ * A null key (interactive admin_ui ingest) skips the gate and always allocates —
+ * NULLs don't collide in the unique index.
+ */
+export async function createCertForScan(idempotencyKey?: string | null): Promise<{
+  id: number;
+  certId: string;
+  referenceNumber: string;
+  rawUploaded: boolean;
+  scanStatus: string | null;
+  reused: boolean;
+}> {
+  // Normalise: empty / whitespace-only → no key (null), so a blank never lands
+  // in the unique index (where a 2nd blank would 500 on a duplicate-key clash).
+  idempotencyKey = typeof idempotencyKey === "string" && idempotencyKey.trim() ? idempotencyKey.trim() : null;
+  const norm = (n: string) => String(n).replace(/^MV-?0+/, "MV");
+  const mapRow = (r: any, reused: boolean) => ({
+    id: r.id as number,
+    certId: norm(r.certificate_number),
+    referenceNumber: r.reference_number as string,
+    rawUploaded: r.raw_uploaded === true,
+    scanStatus: (r.scan_status as string) ?? null,
+    reused,
+  });
+
+  // 1. Idempotent replay — the original ingest already committed this cert.
+  if (idempotencyKey) {
+    const existing = await db.execute(sql`
+      SELECT id, certificate_number, reference_number, raw_uploaded, scan_status
+      FROM certificates WHERE ingest_idempotency_key = ${idempotencyKey} LIMIT 1`);
+    if (existing.rows.length) {
+      const row = mapRow(existing.rows[0], true);
+      console.log(`[scan-ingest] idempotent replay → existing ${row.certId} (raw_uploaded=${row.rawUploaded})`);
+      return row;
+    }
+  }
+
+  // 2. Allocate + insert, gated by the unique index on ingest_idempotency_key.
   const { generateReferenceNumber } = await import("./reference-number");
   const certNumber = await storage.getNextCertId();
   const refNum = generateReferenceNumber();
-
-  const result = await db.execute(sql`
-    INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, source)
-    VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin_scan', NOW(), NOW(), ${refNum}, 'admin_scan')
-    RETURNING id, certificate_number
+  const ins = await db.execute(sql`
+    INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, source, raw_uploaded, scan_status, ingest_idempotency_key)
+    VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin_scan', NOW(), NOW(), ${refNum}, 'admin_scan', false, 'processing', ${idempotencyKey ?? null})
+    ON CONFLICT (ingest_idempotency_key) DO NOTHING
+    RETURNING id, certificate_number, reference_number, raw_uploaded, scan_status
   `);
+  if (ins.rows.length) {
+    const row = mapRow(ins.rows[0], false);
+    console.log(`[scan-ingest] created cert ${row.certId} (id=${row.id}) ref=${refNum}`);
+    return row;
+  }
 
-  const row = result.rows[0] as any;
-  // Normalise cert ID (MV-0000000134 → MV134)
-  const normalised = row.certificate_number.replace(/^MV-?0+/, "MV");
+  // 3. Lost a concurrent same-key race — a sibling POST inserted first. Our
+  //    getNextCertId() number is a harmless counter gap; resolve to the winner.
+  const winner = await db.execute(sql`
+    SELECT id, certificate_number, reference_number, raw_uploaded, scan_status
+    FROM certificates WHERE ingest_idempotency_key = ${idempotencyKey} LIMIT 1`);
+  if (!winner.rows.length) throw new Error(`idempotency conflict but no winning row for key`);
+  const row = mapRow(winner.rows[0], true);
+  console.log(
+    `[scan-ingest] concurrent same-key race resolved → ${row.certId} (counter tick MV${certNumber.replace(/\D/g, "")} skipped)`
+  );
+  return row;
+}
 
-  console.log(`[scan-ingest] created cert ${normalised} (id=${row.id}) with ref=${refNum}`);
-  return { id: row.id, certId: normalised, referenceNumber: refNum };
+/**
+ * Mark raw scans confirmed in R2 — set ONLY after uploadRawScansToR2 resolves.
+ * This flag is the scanner's precondition for moving the inbox file to processed/.
+ */
+export async function markRawUploaded(certId: number): Promise<void> {
+  await db.execute(sql`UPDATE certificates SET raw_uploaded = true, updated_at = NOW() WHERE id = ${certId}`);
+}
+
+/**
+ * Reconciler — boot + interval sweep for incomplete scan ingests. Idempotent
+ * and dedup-safe (deterministic R2 keys, no rescan).
+ *
+ *  (A) scan_status='failed' AND raw_uploaded=true: the raw scans ARE in R2, but
+ *      the heavy pipeline failed. Re-drive processing from the retained raw.
+ *  (B) raw_uploaded=false older than N min: the server has NO bytes (they live
+ *      only in the scanner's retained inbox file) — it CANNOT fix this itself.
+ *      Surface LOUD; recovery is the scanner re-driving the idempotent ingest.
+ *  Both classes are queryable for the admin Capture Health view.
+ */
+export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?: number } = {}): Promise<void> {
+  const stale = opts.staleMinutes ?? 10;
+  const limit = opts.limit ?? 20;
+
+  // (A) Re-drive pipeline failures from R2 raw.
+  let failed: { rows: any[] };
+  try {
+    failed = (await db.execute(sql`
+      SELECT id, certificate_number FROM certificates
+      WHERE scan_status = 'failed' AND raw_uploaded = true
+      ORDER BY updated_at ASC LIMIT ${limit}`)) as any;
+  } catch (e: any) {
+    console.error("[reconciler] query (failed) error:", e?.message);
+    failed = { rows: [] };
+  }
+  for (const row of failed.rows) {
+    const certId = row.id as number;
+    const certNum = String(row.certificate_number);
+    try {
+      const frontKeys = await listR2Keys(`images/grading/${certId}/raw_front`);
+      const backKeys = await listR2Keys(`images/grading/${certId}/raw_back`);
+      const frontBuf = frontKeys.length ? await getR2Buffer(frontKeys[0]) : null;
+      const backBuf = backKeys.length ? await getR2Buffer(backKeys[0]) : null;
+      if (!frontBuf) {
+        console.warn(`[reconciler] ${certNum}: scan_status=failed but no raw_front in R2 — cannot re-drive`);
+        continue;
+      }
+      console.log(`[reconciler] re-driving pipeline for ${certNum} from retained R2 raw`);
+      await processScanInBackground({ id: certId, certId: certNum }, frontBuf, backBuf, {});
+    } catch (e: any) {
+      console.error(`[reconciler] re-drive failed ${certNum}: ${e?.message ?? e}`);
+    }
+  }
+
+  // (B) Raw never confirmed — surface for scanner re-supply (server can't fix).
+  let noRaw: { rows: any[] };
+  try {
+    noRaw = (await db.execute(sql`
+      SELECT certificate_number FROM certificates
+      WHERE raw_uploaded = false AND scan_status = 'processing'
+        AND issued_at < NOW() - ((${stale})::text || ' minutes')::interval
+      ORDER BY issued_at ASC LIMIT 50`)) as any;
+  } catch (e: any) {
+    console.error("[reconciler] query (no-raw) error:", e?.message);
+    noRaw = { rows: [] };
+  }
+  const stuck = noRaw.rows.map((r) => r.certificate_number);
+  if (stuck.length) {
+    console.warn(
+      `[reconciler] ${stuck.length} cert(s) raw_uploaded=false >${stale}min — awaiting scanner re-supply: ${stuck.join(", ")}`
+    );
+  }
 }
 
 /**

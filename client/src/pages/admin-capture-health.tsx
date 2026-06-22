@@ -153,6 +153,58 @@ function FieldDetail({ check, fieldKey }: { check: any; fieldKey: keyof CertRow[
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────
+// ── Incomplete-scan surfacing ──────────────────────────────────────────────
+// Makes a stuck ingest visible instead of silent-until-a-customer-opens-it:
+//   • failed   — background pipeline failed; the server reconciler re-drives it
+//                from retained R2 raw on its 5-min sweep.
+//   • rawNotConfirmed — raw scans never confirmed in R2 (>10 min); the server
+//                can't fix it (no bytes) — the scanner must re-supply.
+function ScanHealthPanel() {
+  const { data, refetch, isFetching } = useQuery<{
+    failed: Array<{ certId: string; scanStatus: string; at: string | null }>;
+    rawNotConfirmed: Array<{ certId: string; at: string | null }>;
+  }>({
+    queryKey: ["/api/admin/scan-health"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/scan-health", { credentials: "include" });
+      if (!res.ok) throw new Error(`scan-health ${res.status}`);
+      return res.json();
+    },
+    refetchInterval: 60_000,
+  });
+
+  const failed = data?.failed ?? [];
+  const noRaw = data?.rawNotConfirmed ?? [];
+  if (!failed.length && !noRaw.length) return null;
+
+  return (
+    <Panel bodyClassName="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-[var(--admin-ink)] flex items-center gap-1.5">
+          <AlertTriangle size={14} className="text-[var(--admin-amber)]" />
+          Incomplete scans
+        </p>
+        <AdminButton type="button" size="sm" onClick={() => refetch()} disabled={isFetching}>
+          <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
+          Refresh
+        </AdminButton>
+      </div>
+      {failed.length > 0 && (
+        <div className="text-xs text-[var(--admin-ink-dim)]">
+          <strong className="text-[var(--admin-ink)]">{failed.length}</strong> pipeline-failed (auto re-driving):{" "}
+          {failed.map((f) => f.certId).join(", ")}
+        </div>
+      )}
+      {noRaw.length > 0 && (
+        <div className="text-xs text-[var(--admin-ink-dim)]">
+          <strong className="text-[var(--admin-amber)]">{noRaw.length}</strong> raw-not-confirmed &gt;10 min (awaiting
+          scanner re-supply): {noRaw.map((f) => f.certId).join(", ")}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 export default function AdminCaptureHealthPage() {
   const [sinceDays, setSinceDays] = useState<number | null>(7);
   const [onlyFailing, setOnlyFailing] = useState(false);
@@ -208,6 +260,8 @@ export default function AdminCaptureHealthPage() {
           </AdminButton>
         </div>
       </div>
+
+      <ScanHealthPanel />
 
       {isLoading && (
         <div className="flex items-center justify-center py-20">

@@ -1,4 +1,11 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand, ListObjectsV2Command, HeadObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+  DeleteObjectCommand,
+  ListObjectsV2Command,
+  HeadObjectCommand,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 let s3Client: S3Client | null = null;
@@ -46,30 +53,63 @@ const DEFAULT_CACHE_CONTROL = "public, max-age=31536000, immutable";
 
 export async function uploadToR2(key: string, body: Buffer, contentType: string): Promise<string> {
   const client = getClient();
-  await client.send(new PutObjectCommand({
-    Bucket: getBucket(),
-    Key: key,
-    Body: body,
-    ContentType: contentType,
-    CacheControl: DEFAULT_CACHE_CONTROL,
-  }));
+  await client.send(
+    new PutObjectCommand({
+      Bucket: getBucket(),
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+      CacheControl: DEFAULT_CACHE_CONTROL,
+    })
+  );
   return key;
 }
 
 export async function getR2SignedUrl(key: string, expiresInSeconds: number = 600): Promise<string> {
   const client = getClient();
-  return getSignedUrl(client, new GetObjectCommand({
-    Bucket: getBucket(),
-    Key: key,
-  }), { expiresIn: expiresInSeconds });
+  return getSignedUrl(
+    client,
+    new GetObjectCommand({
+      Bucket: getBucket(),
+      Key: key,
+    }),
+    { expiresIn: expiresInSeconds }
+  );
 }
 
 export async function deleteFromR2(key: string): Promise<void> {
   const client = getClient();
-  await client.send(new DeleteObjectCommand({
-    Bucket: getBucket(),
-    Key: key,
-  }));
+  await client.send(
+    new DeleteObjectCommand({
+      Bucket: getBucket(),
+      Key: key,
+    })
+  );
+}
+
+/** Download an R2 object into a Buffer (null on missing / any error). Used by the
+ *  scan reconciler to re-drive processing from the retained raw scans. */
+export async function getR2Buffer(key: string): Promise<Buffer | null> {
+  try {
+    const out = await getClient().send(new GetObjectCommand({ Bucket: getBucket(), Key: key }));
+    if (!out.Body) return null;
+    const chunks: Buffer[] = [];
+    for await (const chunk of out.Body as any) chunks.push(Buffer.from(chunk));
+    return Buffer.concat(chunks);
+  } catch {
+    return null;
+  }
+}
+
+/** List object keys under a prefix — used to locate raw_front.* / raw_back.*
+ *  whose extension varies (.tif/.jpg/.png). */
+export async function listR2Keys(prefix: string): Promise<string[]> {
+  try {
+    const out = await getClient().send(new ListObjectsV2Command({ Bucket: getBucket(), Prefix: prefix }));
+    return (out.Contents || []).map((o) => o.Key || "").filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -81,10 +121,12 @@ export async function deleteFromR2(key: string): Promise<void> {
 export async function headR2(key: string): Promise<{ lastModified: Date } | null> {
   try {
     const client = getClient();
-    const result = await client.send(new HeadObjectCommand({
-      Bucket: getBucket(),
-      Key: key,
-    }));
+    const result = await client.send(
+      new HeadObjectCommand({
+        Bucket: getBucket(),
+        Key: key,
+      })
+    );
     return result.LastModified ? { lastModified: result.LastModified } : null;
   } catch {
     return null;
@@ -119,11 +161,13 @@ export async function cleanupStalePreGradeImages(maxAgeMs = 60 * 60 * 1000): Pro
   let continuationToken: string | undefined;
 
   do {
-    const list = await client.send(new ListObjectsV2Command({
-      Bucket: bucket,
-      Prefix: prefix,
-      ContinuationToken: continuationToken,
-    }));
+    const list = await client.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        ContinuationToken: continuationToken,
+      })
+    );
 
     for (const obj of list.Contents ?? []) {
       if (!obj.Key) continue;

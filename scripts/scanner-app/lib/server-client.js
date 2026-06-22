@@ -46,25 +46,55 @@ async function toJpegBuffer(filePath) {
 // STALL_TIMEOUT_MS of zero progress. Content-Length is set explicitly
 // (all parts are in-memory buffers/strings with known length) so the server
 // gets a non-chunked multipart body.
-async function postForm(url, form) {
+// Once the body is fully flushed, the no-progress watchdog would false-positive
+// (there are no more bytes to send — exactly the bug that 504'd large uploads
+// while the server processed). So after the form ends we switch to a bounded
+// wait for the server's reply. Generous headroom for a backgrounded raw PUT.
+const RESPONSE_TIMEOUT_MS = 5 * 60_000;
+
+async function postForm(url, form, extraHeaders = {}) {
   const fetch = await getFetch();
 
   let contentLength;
   try { contentLength = form.getLengthSync(); } catch { contentLength = undefined; }
-  const headers = { ...authHeaders(), ...form.getHeaders() };
+  const headers = { ...authHeaders(), ...form.getHeaders(), ...extraHeaders };
   if (contentLength != null) headers["content-length"] = String(contentLength);
 
   const controller = new AbortController();
   let lastFlush = Date.now();
+  let bytesSent = 0;
+  let bodyEnded = false;
   const counter = new Transform({
-    transform(chunk, _enc, cb) { lastFlush = Date.now(); cb(null, chunk); },
+    transform(chunk, _enc, cb) {
+      lastFlush = Date.now();
+      bytesSent += chunk.length;
+      cb(null, chunk);
+    },
   });
   form.on("error", (err) => counter.destroy(err));
   form.pipe(counter);
+  // Body fully produced + accepted downstream → stop the no-progress abort and
+  // start the bounded response wait.
+  counter.on("end", () => {
+    bodyEnded = true;
+    lastFlush = Date.now();
+  });
 
   const watchdog = setInterval(() => {
-    if (Date.now() - lastFlush > STALL_TIMEOUT_MS) {
-      console.warn(`[server-client] upload stalled — no bytes flushed for ${STALL_TIMEOUT_MS / 1000}s, aborting for retry`);
+    const idle = Date.now() - lastFlush;
+    if (!bodyEnded) {
+      // Phase 1 — body still transferring: abort only on a genuine stall.
+      if (idle > STALL_TIMEOUT_MS) {
+        console.warn(
+          `[server-client] upload STALLED mid-transfer — sent ${bytesSent}/${contentLength ?? "?"} bytes, no progress ${STALL_TIMEOUT_MS / 1000}s — aborting for retry`
+        );
+        controller.abort();
+      }
+    } else if (idle > RESPONSE_TIMEOUT_MS) {
+      // Phase 2 — body fully sent, server slow to reply.
+      console.warn(
+        `[server-client] no response ${RESPONSE_TIMEOUT_MS / 1000}s after full ${bytesSent}-byte upload — aborting`
+      );
       controller.abort();
     }
   }, 5_000);
@@ -77,7 +107,10 @@ async function postForm(url, form) {
     return { ok: res.ok, status: res.status, body };
   } catch (err) {
     if (err.name === "AbortError") {
-      return { ok: false, status: 504, body: { error: `upload stalled (no progress for ${STALL_TIMEOUT_MS / 1000}s)` } };
+      const reason = bodyEnded
+        ? `server slow — no reply ${RESPONSE_TIMEOUT_MS / 1000}s after full upload`
+        : `upload stalled — no progress ${STALL_TIMEOUT_MS / 1000}s (${bytesSent}/${contentLength ?? "?"} bytes)`;
+      return { ok: false, status: 504, body: { error: reason } };
     }
     throw err;
   } finally {
@@ -166,17 +199,25 @@ async function softDeleteCert(certId, reason) {
  * endpoint. Server allocates the next cert and runs identification + AI on
  * both sides. Same multipart shape as the old watcher.
  */
-async function uploadPair(frontPath, backPath) {
+async function uploadPair(frontPath, backPath, idempotencyKey) {
   const form = new FormData();
   // Convert to full-resolution JPEG in memory; the raw TIFF/PNG stays on disk.
   form.append("front", await toJpegBuffer(frontPath), { filename: "front.jpg", contentType: "image/jpeg" });
   if (backPath) form.append("back", await toJpegBuffer(backPath), { filename: "back.jpg", contentType: "image/jpeg" });
-  // Intentionally omit client_source — server defaults to "admin_ui" which
-  // routes to the async AI branch. The sync branch (client_source="scanner_app")
-  // blocked the response on AI completion (~20 s added). The renderer doesn't
-  // consume aiStatus/aiResult anyway, so the async response is shape-compatible
-  // for the desktop app. ~48 s → ~23 s scan-ingest response.
-  return postForm(`${API_BASE}/api/admin/scan-ingest`, form);
+  // Content-derived idempotency key (front+back SHA, computed by the watcher and
+  // stable across retries/restarts). The server's UNIQUE-index gate makes a
+  // re-driven/raced ingest resolve to the SAME cert — never a duplicate.
+  const headers = idempotencyKey ? { "x-idempotency-key": idempotencyKey } : {};
+  return postForm(`${API_BASE}/api/admin/scan-ingest`, form, headers);
+}
+
+/**
+ * Poll a cert's ingest durability status. The watcher holds the inbox file until
+ * raw_uploaded === true here, then moves it (the core-invariant completion
+ * signal). Also the reconcile probe after a crash.
+ */
+async function getScanStatus(certId) {
+  return getJson(`/api/admin/scan-status/${encodeURIComponent(certId)}`);
 }
 
 /**
@@ -201,4 +242,5 @@ module.exports = {
   softDeleteCert,
   uploadPair,
   attachImage,
+  getScanStatus,
 };

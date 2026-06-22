@@ -1263,6 +1263,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // CREATE TABLE IF NOT EXISTS that raced the catalogs under concurrent scans
   // (SQLSTATE 23505 pg_type_typname_nsp_index / 42710). Idempotent + race-safe.
   await storage.ensureCertCounterTable().catch((e: any) => console.error("[cert_counter-migrate] error:", e?.message));
+  // Scanner durability columns (raw_uploaded + ingest_idempotency_key + the
+  // unique gate) — awaited before listen so the idempotent ingest path can rely
+  // on them existing. Additive + idempotent.
+  await import("./scan-ingest-service")
+    .then((m) => m.ensureCertDurabilitySchema())
+    .catch((e: any) => console.error("[cert-durability-migrate] error:", e?.message));
   recordLabelArtworkV424Audit().catch(() => {});
   seedEstimateCreditsTable().catch(() => {});
   seedAdminCredits().catch(() => {});
@@ -11995,14 +12001,23 @@ Defects (admin-confirmed): ${defectLines}`;
   app.post(
     "/api/admin/scan-ingest",
     requireScannerOrAdmin,
+    // Timing marker captured BEFORE multer, so we can log body-receive (multer)
+    // duration separately from handler/processing time.
+    (req, _res, next) => {
+      (req as any)._ingestT0 = process.hrtime.bigint();
+      next();
+    },
     scanUpload.fields([
       { name: "front", maxCount: 1 },
       { name: "back", maxCount: 1 },
     ]),
     async (req, res) => {
-      const { createCertForScan, uploadRawScansToR2, setScanStatus, processScanInBackground } =
+      const { createCertForScan, uploadRawScansToR2, processScanInBackground, markRawUploaded } =
         await import("./scan-ingest-service");
       const { getSetting } = await import("./lib/pipeline-settings");
+      const elapsedMs = (start: bigint) => Number(process.hrtime.bigint() - start) / 1e6;
+      const tHandler = process.hrtime.bigint();
+      const multerMs = (req as any)._ingestT0 ? elapsedMs((req as any)._ingestT0 as bigint) : null;
       let certInfo: { id: number; certId: string } | null = null;
 
       try {
@@ -12028,52 +12043,94 @@ Defects (admin-confirmed): ${defectLines}`;
         const frontExt = extFromName(frontFile.originalname);
         const backExt = backFile ? extFromName(backFile.originalname) : "bin";
 
+        // Content-derived idempotency key (front+back SHA), stable across the
+        // scanner's retries + restarts. The UNIQUE-index gate in createCertForScan
+        // makes a re-driven / raced ingest resolve to the SAME cert — no duplicate.
+        const idempotencyKey =
+          (req.headers["x-idempotency-key"] as string | undefined)?.trim() ||
+          (req.body?.idempotency_key ? String(req.body.idempotency_key).trim() : "") ||
+          null;
+
         console.log(
-          `[scan-ingest] starting: front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? (backBuf.length / 1024).toFixed(0) + "KB" : "none"} source=${clientSource}`
+          `[scan-ingest] starting: front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? (backBuf.length / 1024).toFixed(0) + "KB" : "none"} source=${clientSource} multer=${multerMs != null ? multerMs.toFixed(0) + "ms" : "?"} key=${idempotencyKey ? idempotencyKey.slice(0, 12) + "…" : "none"}`
         );
 
-        // Step 1 (sync): Create cert.
-        certInfo = await createCertForScan();
-        console.log(`[scan-ingest] cert created: ${certInfo.certId} (id=${certInfo.id})`);
+        // Step 1 (sync): idempotent cert allocation — same key → same cert.
+        const ci = await createCertForScan(idempotencyKey);
+        certInfo = { id: ci.id, certId: ci.certId };
 
-        // Step 2 (sync): Upload RAW scanner buffers to R2 for durability,
-        // and mark the cert as processing. The heavy deskew+crop+variants
-        // pipeline + AI runs in the background closure below.
-        await uploadRawScansToR2(
-          certInfo.id,
-          { buffer: frontBuf, mimeType: frontFile.mimetype, ext: frontExt },
-          backBuf && backFile ? { buffer: backBuf, mimeType: backFile.mimetype, ext: backExt } : null
-        );
-        await setScanStatus(certInfo.id, "processing");
-        if (notes) {
-          await db.execute(sql`UPDATE certificates SET notes = ${notes} WHERE id = ${certInfo.id}`);
+        // Idempotent replay of an already-COMPLETE cert (raw confirmed in R2):
+        // nothing to redo — reply so the watcher sees raw_uploaded=true and moves
+        // the inbox file. This is the crash-between-move-and-removePending path.
+        if (ci.reused && ci.rawUploaded) {
+          console.log(`[scan-ingest] ${ci.certId}: idempotent replay of complete cert — no reprocess`);
+          return res.json({
+            certId: ci.certId,
+            dbId: ci.id,
+            raw_uploaded: true,
+            scan_status: ci.scanStatus,
+            reused: true,
+            status: ci.scanStatus ?? "ready",
+            workstationUrl: `/admin#grading-${ci.id}`,
+            message: `Certificate ${ci.certId} already ingested.`,
+          });
         }
 
-        // Step 3 (async): kick off the background pipeline. Buffers are
-        // passed by reference; node-canvas/sharp release the event loop
-        // during native work so the response is sent first.
+        if (notes) {
+          await db.execute(sql`UPDATE certificates SET notes = ${notes} WHERE id = ${ci.id}`);
+        }
+
+        // Step 2 (async — Fix A): background the RAW R2 upload + the heavy
+        // pipeline, and respond IMMEDIATELY — the server no longer holds the
+        // request open for the raw PUT, which closes the client's 60s no-progress
+        // window. The CORE INVARIANT still holds: raw_uploaded flips true ONLY
+        // after the raw PUT confirms, and the scanner keeps the inbox file until
+        // it polls raw_uploaded=true. Crash before that → file retained → re-drive
+        // (same key → same cert) + deterministic R2 keys make it idempotent.
         const autoAiOn = await getSetting("ai_auto_ingest_enabled", true);
-        const captured = certInfo;
         setImmediate(() => {
-          processScanInBackground(captured, frontBuf, backBuf, { skipAi: !autoAiOn }).catch((e) =>
-            console.error(
-              `[scan-ingest] background runner crashed cert=${captured.certId}: ${e?.message ?? e}\n${e?.stack ?? "(no stack)"}`
-            )
-          );
+          void (async () => {
+            const tBg = process.hrtime.bigint();
+            try {
+              await uploadRawScansToR2(
+                ci.id,
+                { buffer: frontBuf, mimeType: frontFile.mimetype, ext: frontExt },
+                backBuf && backFile ? { buffer: backBuf, mimeType: backFile.mimetype, ext: backExt } : null
+              );
+              await markRawUploaded(ci.id);
+              console.log(
+                `[scan-ingest] ${ci.certId}: raw confirmed in R2 (raw_uploaded=true) rawPut=${elapsedMs(tBg).toFixed(0)}ms`
+              );
+            } catch (rawErr: any) {
+              // Raw PUT failed → raw_uploaded stays false. The scanner retains the
+              // inbox file; the reconciler / next re-drive retries. Do NOT process.
+              console.error(
+                `[scan-ingest] ${ci.certId}: raw R2 upload FAILED (raw_uploaded stays false): ${rawErr?.message ?? rawErr}`
+              );
+              return;
+            }
+            await processScanInBackground(ci, frontBuf, backBuf, { skipAi: !autoAiOn }).catch((e) =>
+              console.error(
+                `[scan-ingest] background runner crashed cert=${ci.certId}: ${e?.message ?? e}\n${e?.stack ?? "(no stack)"}`
+              )
+            );
+          })();
         });
 
-        // Step 4 (sync return): tell the watcher the cert exists and is
-        // being processed. All client_source variants (scanner_app /
-        // watcher / admin_ui) get the same shape — the previous sync
-        // scanner_app path was dead code after the scanner-app refactor
-        // to display-only mode.
+        // Step 3 (sync return): immediate — cert exists; raw + processing async.
+        console.log(
+          `[scan-ingest] ${ci.certId}: responded in ${elapsedMs(tHandler).toFixed(0)}ms (raw+processing backgrounded)`
+        );
         res.json({
-          certId: certInfo.certId,
-          dbId: certInfo.id,
-          workstationUrl: `/admin#grading-${certInfo.id}`,
+          certId: ci.certId,
+          dbId: ci.id,
+          raw_uploaded: false,
+          scan_status: "processing",
+          reused: ci.reused,
+          workstationUrl: `/admin#grading-${ci.id}`,
           status: "processing",
           aiStatus: autoAiOn ? "queued" : "skipped",
-          message: `Certificate ${certInfo.certId} created. Image processing${autoAiOn ? " + AI" : ""} in background.`,
+          message: `Certificate ${ci.certId} created. Raw upload + processing in background.`,
         });
       } catch (err: any) {
         console.error(`[scan-ingest] error${certInfo ? ` (cert=${certInfo.certId})` : ""}: ${err.message}`);
@@ -12081,6 +12138,57 @@ Defects (admin-confirmed): ${defectLines}`;
       }
     }
   );
+
+  // ── Scan-status poll — the scanner holds the inbox file until raw_uploaded=true
+  // here, then moves it (the core-invariant completion signal). Also the reconcile
+  // probe used by requeuePending after a crash. Lightweight: two columns only. ──
+  app.get("/api/admin/scan-status/:certId", requireScannerOrAdmin, async (req, res) => {
+    try {
+      const cert = await findCertByIdFlex(String(req.params.certId));
+      if (!cert) return res.status(404).json({ error: "cert not found", certId: String(req.params.certId) });
+      const r = await db.execute(
+        sql`SELECT raw_uploaded, scan_status FROM certificates WHERE id = ${(cert as any).id} LIMIT 1`
+      );
+      const row = r.rows[0] as any;
+      res.json({
+        certId: normalizeCertId((cert as any).certId),
+        raw_uploaded: row?.raw_uploaded === true,
+        scan_status: row?.scan_status ?? null,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Scan health — incomplete ingests surfaced for the admin Capture Health
+  // view: pipeline failures (the reconciler re-drives these) + raw-never-confirmed
+  // (server can't fix; awaiting scanner re-supply). Makes an incomplete cert
+  // visible instead of silent-until-a-customer-opens-it. ──
+  app.get("/api/admin/scan-health", requireAdmin, async (_req, res) => {
+    try {
+      const failed = await db.execute(sql`
+        SELECT certificate_number, scan_status, updated_at FROM certificates
+        WHERE scan_status = 'failed' ORDER BY updated_at DESC LIMIT 100`);
+      const noRaw = await db.execute(sql`
+        SELECT certificate_number, issued_at FROM certificates
+        WHERE raw_uploaded = false AND scan_status = 'processing'
+          AND issued_at < NOW() - interval '10 minutes'
+        ORDER BY issued_at DESC LIMIT 100`);
+      res.json({
+        failed: (failed.rows as any[]).map((r) => ({
+          certId: normalizeCertId(r.certificate_number),
+          scanStatus: r.scan_status,
+          at: r.updated_at,
+        })),
+        rawNotConfirmed: (noRaw.rows as any[]).map((r) => ({
+          certId: normalizeCertId(r.certificate_number),
+          at: r.issued_at,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // ── Admin scan-history: list certs from scanner ───────────────────────────
 
