@@ -17,6 +17,7 @@ import { FEATURE_FLAGS } from "./config/feature-flags";
 import { sanitizeResponseBodyForLog } from "./lib/log-redaction";
 import { clientErrorMessage, newRequestId, scrubServerErrorBody } from "./lib/error-sanitize";
 import { csrfOriginCheck } from "./lib/csrf-origin";
+import { withAdvisoryLock } from "./lib/advisory-lock";
 import pg from "pg";
 import path from "path";
 
@@ -482,17 +483,32 @@ async function runTransferV2Sweep() {
 (async () => {
   await registerRoutes(httpServer, app);
 
+  // Phase 5: wrap recurring jobs that mutate state or send email in a Postgres
+  // advisory lock so only ONE machine runs each tick if we ever scale past one.
+  // Non-blocking + fail-closed; on a single machine the lock is always free, so
+  // behaviour is unchanged today.
+  const guard = (name: string, fn: () => Promise<void>) => () =>
+    withAdvisoryLock(pool, name, fn).then(
+      (r) => {
+        if (!r.ran) log("skipped — lock held by another instance", name);
+      },
+      (e: any) => log(`error: ${e?.message ?? e}`, name)
+    );
+  const guardedPreGradeCleanup = guard("pre-grade-cleanup", runPreGradeCleanup);
+  const guardedVaultClubGraceSweep = guard("vault-club-grace-sweep", runVaultClubGraceSweep);
+  const guardedTransferV2Sweep = guard("transfer-v2-sweep", runTransferV2Sweep);
+
   // Run cleanup once on startup, then every 24 hours
-  runPreGradeCleanup();
-  setInterval(runPreGradeCleanup, 24 * 60 * 60 * 1000);
+  guardedPreGradeCleanup();
+  setInterval(guardedPreGradeCleanup, 24 * 60 * 60 * 1000);
 
   // Run Vault Club grace sweep once on startup, then every 24 hours
-  runVaultClubGraceSweep();
-  setInterval(runVaultClubGraceSweep, 24 * 60 * 60 * 1000);
+  guardedVaultClubGraceSweep();
+  setInterval(guardedVaultClubGraceSweep, 24 * 60 * 60 * 1000);
 
   // Run transfer v2 sweep after 30s delay (let migrations finish), then every hour
-  setTimeout(runTransferV2Sweep, 30_000);
-  setInterval(runTransferV2Sweep, 60 * 60 * 1000);
+  setTimeout(guardedTransferV2Sweep, 30_000);
+  setInterval(guardedTransferV2Sweep, 60 * 60 * 1000);
 
   // RAG Phase 0 — hourly embed-corpus tick. First run after 60s so the
   // server is fully serving before we touch OpenAI; thereafter every
@@ -562,8 +578,9 @@ async function runTransferV2Sweep() {
       log(`sweep error: ${err?.message || err}`, "archival-b2");
     }
   }
-  setTimeout(runArchivalSweep, 60_000);
-  setInterval(runArchivalSweep, 24 * 60 * 60 * 1000);
+  const guardedArchivalSweep = guard("archival-sweep", runArchivalSweep);
+  setTimeout(guardedArchivalSweep, 60_000);
+  setInterval(guardedArchivalSweep, 24 * 60 * 60 * 1000);
 
   // Scan reconciler — re-drive failed pipelines from retained R2 raw + surface
   // never-confirmed ingests for scanner re-supply. First run 90s after boot,
@@ -577,8 +594,9 @@ async function runTransferV2Sweep() {
       log(`reconcile error: ${err?.message || err}`, "scan-reconciler");
     }
   }
-  setTimeout(runScanReconciler, 90_000);
-  setInterval(runScanReconciler, 5 * 60 * 1000);
+  const guardedScanReconciler = guard("scan-reconciler", runScanReconciler);
+  setTimeout(guardedScanReconciler, 90_000);
+  setInterval(guardedScanReconciler, 5 * 60 * 1000);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
