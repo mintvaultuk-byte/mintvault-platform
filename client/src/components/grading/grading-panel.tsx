@@ -1712,8 +1712,56 @@ export default function GradingPanel({
     );
   }
 
+  // TCGdex identity-confirmation light (DISPLAY ONLY — reads the ai_analysis flags
+  // the ID-only work already writes; no new state, no AI calls, no writes). THREE
+  // states so a card still identifying never looks like a failure:
+  //   green   → dbSource "pokemon-tcg-api" (name/set/number from a verified match)
+  //   red     → needs_identification_review (no TCG match — grader must verify)
+  //   pending → neither yet (identify in progress / not run / timed out)
+  // NOT gated on graderMode, so it renders on the admin panel AND every staff
+  // grader's panel (shared component).
+  const aiMeta = gradingData?.aiAnalysis;
+  const tcgState: "green" | "red" | "pending" =
+    aiMeta?.identification?.dbSource === "pokemon-tcg-api"
+      ? "green"
+      : aiMeta?.needs_identification_review === true
+        ? "red"
+        : "pending";
+  const tcgGuess: string | null = tcgState === "red" ? (aiMeta?.suggested_name ?? null) : null;
+
   return (
     <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4 space-y-5">
+      {/* TCGdex confirmation light — green=verified match · red=no match (verify) ·
+          pending=still identifying. Folds in the old amber "verify" note (red state). */}
+      <div
+        className={
+          "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] " +
+          (tcgState === "green"
+            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+            : tcgState === "red"
+              ? "border-red-500/40 bg-red-500/10 text-red-300"
+              : "border-amber-500/40 bg-amber-500/10 text-amber-300")
+        }
+        data-testid="tcgdex-status"
+      >
+        <span
+          className={
+            "inline-block h-2 w-2 rounded-full shrink-0 " +
+            (tcgState === "green" ? "bg-emerald-400" : tcgState === "red" ? "bg-red-400" : "bg-amber-400 animate-pulse")
+          }
+        />
+        <span className="font-semibold uppercase tracking-wider">
+          {tcgState === "green" ? "TCGdex confirmed" : tcgState === "red" ? "Not confirmed — verify" : "Identifying…"}
+        </span>
+        {tcgState === "red" && (
+          <span className="text-[var(--admin-ink-faint)]">
+            {tcgGuess
+              ? `AI guessed “${tcgGuess}” (unverified) — enter the correct identity.`
+              : "Enter the card identity before grading."}
+          </span>
+        )}
+      </div>
+
       {/* Card identity — EDITABLE for graders (they hold the card and may correct
           AI pre-grade errors before submitting). Edits ride the panel's debounced
           auto-save. graderMode-only: admins edit identity via the CertificateForm
@@ -1735,21 +1783,6 @@ export default function GradingPanel({
                   Card identity{idLocked ? " (approved — read-only)" : " · editable"}
                 </span>
               </div>
-
-              {/* TCGdex couldn't confirm the card → name/set/number were NOT
-                  auto-filled (we never trust Haiku's raw text). Tell the grader to
-                  verify, and show Haiku's unverified guess as a hint only. */}
-              {gradingData?.aiAnalysis?.needs_identification_review && (
-                <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-300">
-                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
-                  <span>
-                    Not confirmed against TCGdex — name/set/number aren&apos;t pre-filled.
-                    {gradingData.aiAnalysis.suggested_name
-                      ? ` AI guessed “${gradingData.aiAnalysis.suggested_name}” (unverified) — please verify before grading.`
-                      : " Please enter the card identity before grading."}
-                  </span>
-                </div>
-              )}
 
               {/* Set name — identical combobox to the admin CertificateForm
                   (free text + suggestions from /api/pokemon-sets). Admin-only
