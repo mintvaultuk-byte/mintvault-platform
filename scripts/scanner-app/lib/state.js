@@ -23,7 +23,12 @@ const fs   = require("node:fs");
 const os   = require("node:os");
 const path = require("node:path");
 
-const APP_SUPPORT = path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
+// State is isolated per-instance when MINTVAULT_SCANS_DIR is set — a TEST
+// instance keeps its state under <MINTVAULT_SCANS_DIR>/app-state/, NOT the shared
+// Application Support file, so it never clobbers the live scanner's state.json.
+const APP_SUPPORT = process.env.MINTVAULT_SCANS_DIR
+  ? path.join(process.env.MINTVAULT_SCANS_DIR, "app-state")
+  : path.join(os.homedir(), "Library", "Application Support", "MintVaultScanner");
 const STATE_PATH  = path.join(APP_SUPPORT, "state.json");
 const STATE_TMP   = path.join(APP_SUPPORT, "state.json.tmp");
 

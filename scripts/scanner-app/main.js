@@ -72,8 +72,13 @@ function playSystemSound(filename) {
 // daemon is decommissioned and NEVER touched here.
 
 const RESET_HELPER = path.join(__dirname, "reset-agent.sh");
-const SCANNER_LOG  = agentPlist.paths().logPath;
-const LAST_RESET   = path.join(os.homedir(), "mintvault-scans", "last-reset.json");
+// Reset-log + last-reset marker also respect MINTVAULT_SCANS_DIR so a TEST
+// instance keeps its own log/marker in its isolated dir, not the live scanner's.
+// agent-plist is intentionally left alone — it drives the LIVE launchd agent's
+// plist (don't run "Reset scanner" on a test instance; it targets the prod agent).
+const SCANS_BASE   = process.env.MINTVAULT_SCANS_DIR || path.join(os.homedir(), "mintvault-scans");
+const SCANNER_LOG  = path.join(SCANS_BASE, "scanner-app.log");
+const LAST_RESET   = path.join(SCANS_BASE, "last-reset.json");
 
 // Append a timestamped line to the operator log (tray "Show logs" target).
 function logToFile(msg) {
@@ -220,7 +225,7 @@ function buildTrayMenu() {
     { type: "separator" },
     { label: "Show window", click: () => showPopover() },
     { label: "Open inbox folder", click: () => shell.openPath(INBOX) },
-    { label: "Show logs", click: () => shell.openPath(path.join(os.homedir(), "mintvault-scans", "scanner-app.log")) },
+    { label: "Show logs", click: () => shell.openPath(SCANNER_LOG) },
     { label: "Retry failed (today)", click: async () => {
       const result = watcher.retryFailed();
       if (result.moved > 0) {
@@ -465,7 +470,7 @@ function setupIpc() {
   ipcMain.handle("open-inbox", () => { shell.openPath(INBOX); return { ok: true }; });
 
   ipcMain.handle("open-logs", () => {
-    shell.openPath(path.join(os.homedir(), "mintvault-scans", "scanner-app.log"));
+    shell.openPath(SCANNER_LOG);
     return { ok: true };
   });
 

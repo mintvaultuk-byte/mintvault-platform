@@ -25,7 +25,10 @@ const { EventEmitter } = require("node:events");
 const stateMod = require("./state");
 const server   = require("./server-client");
 
-const BASE      = path.join(os.homedir(), "mintvault-scans");
+// BASE is overridable via MINTVAULT_SCANS_DIR so an isolated TEST instance can
+// run on the same Mac without clobbering the live scanner's inbox / processed /
+// failed / pending-queue. Default: the shared ~/mintvault-scans (live agent).
+const BASE      = process.env.MINTVAULT_SCANS_DIR || path.join(os.homedir(), "mintvault-scans");
 const INBOX     = path.join(BASE, "inbox");
 const PROCESSED = path.join(BASE, "processed");
 const FAILED    = path.join(BASE, "failed");
