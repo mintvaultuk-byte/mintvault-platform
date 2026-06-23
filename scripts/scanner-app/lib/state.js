@@ -54,6 +54,14 @@ const DEFAULT = Object.freeze({
   // 30-minute auto-clear means an accidental overnight pause can't
   // strand a grading session — re-pause is one click.
   pausedUntil:      null,
+  // Scan-confirmation popup (blocking; multi-operator scan-one-write-one).
+  // Set on a completed AUTO pair from THIS Mac's own ingest response — the
+  // ASSIGNED number (never predictedNextCert). Shape:
+  //   { certId, thumb (data-URL of the captured front), status, note, ts }
+  //   status: "confirmed" | "raw_pending" | "incomplete"
+  // Cleared when the operator clicks OK (ack-confirm-card). Transient UI state
+  // — reset to null on boot (see load) so a crash can't strand the gate.
+  confirmCard:      null,
   // Settings — local prefs, never written to the server.
   autoOpenOnError:  true,
   // Audible feedback. Plays Glass.aiff on success, Sosumi.aiff on error
@@ -78,6 +86,14 @@ function load() {
     // Force MANUAL on every launch. AUTO must be re-armed by the operator
     // each session so a crash-restart can't silently resume runaway minting.
     mem.mode = "MANUAL";
+    // confirmCard is transient UI state — never resurrect a stale confirmation
+    // (a left-over would gate the watcher / block startup drain forever).
+    if (mem.confirmCard) {
+      console.warn(
+        `[state] RECOVERY: cleared a stale confirmation gate left by a prior run (was ${mem.confirmCard.certId || "incomplete scan"}) — startup drain can proceed`
+      );
+    }
+    mem.confirmCard = null;
   } catch {
     mem = { ...DEFAULT };
   }

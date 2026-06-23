@@ -175,6 +175,23 @@
     </div>
   </div>
 
+  <!-- Scan confirmation — BLOCKING. Shown when a card finishes scanning; the
+       operator must click OK before the next scan is processed (scan-one-write-
+       one). The number is THIS Mac's assigned cert from its own ingest response
+       — never the global "Next cert" forecast. -->
+  <div class="modal confirm-modal" id="confirmModal">
+    <div class="modal-card confirm-card">
+      <img id="confirmImg" class="confirm-img" alt="captured front" />
+      <div class="confirm-img-ph" id="confirmImgPlaceholder" style="display:none">front preview unavailable</div>
+      <div class="confirm-label" id="confirmLabel">This card is</div>
+      <div class="confirm-cert" id="confirmCert">—</div>
+      <div class="confirm-note" id="confirmNote"></div>
+      <div class="modal-actions">
+        <button class="btn primary confirm-ok" id="confirmOk">OK — number written, next card</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

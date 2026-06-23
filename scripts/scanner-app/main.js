@@ -405,6 +405,20 @@ function setupIpc() {
 
   ipcMain.handle("reset-buffered", async () => watcher.resetBuffered());
 
+  // Operator acknowledged the blocking scan-confirmation popup. Clear it, then
+  // drain any scans the gate HELD while it was up (scan-one-write-one). The
+  // drain re-gates as soon as the next pair completes, so one card at a time.
+  ipcMain.handle("ack-confirm-card", async () => {
+    stateMod.set({ confirmCard: null });
+    pushStateToRenderer();
+    // Drain held scans in the BACKGROUND — do NOT await. The ack must return
+    // immediately so the modal closes promptly and the OK button never hangs on
+    // a slow upload; drainInbox sets the next confirmCard when the next held
+    // pair completes, which re-opens the modal via the state-driven render.
+    watcher.drainInbox().catch((e) => console.error("[main] drainInbox after ack failed:", e?.message));
+    return { ok: true };
+  });
+
   ipcMain.handle("restart-watcher", async () => {
     await watcher.stop();
     await watcher.start();
@@ -479,15 +493,24 @@ app.whenReady().then(async () => {
   watcher = new Watcher();
   let lastErrorState = false;
   let lastSuccessState = false;
+  let lastConfirmPending = false;
   watcher.on("state-changed", () => {
     pushStateToRenderer();
     const s = stateMod.get();
     const isError   = s.state === "error";
     const isSuccess = s.state === "success";
+    const hasConfirm = !!s.confirmCard;
 
     // Auto-open popover on error transition (idle→error edge only).
     if (isError && !lastErrorState && s.autoOpenOnError && popover && !popover.isVisible()) {
       console.log(`[main] auto-opening popover on error: ${s.lastError || "(no message)"}`);
+      showPopover();
+    }
+
+    // Auto-open the popover when a scan confirmation appears (edge) — the
+    // blocking popup needs the window visible so the operator can't miss it.
+    if (hasConfirm && !lastConfirmPending && popover && !popover.isVisible()) {
+      console.log(`[main] auto-opening popover for scan confirmation: ${s.confirmCard.certId || "incomplete scan"}`);
       showPopover();
     }
 
@@ -499,8 +522,9 @@ app.whenReady().then(async () => {
       if (isError   && !lastErrorState)   playSystemSound("Sosumi.aiff");
     }
 
-    lastErrorState   = isError;
-    lastSuccessState = isSuccess;
+    lastErrorState     = isError;
+    lastSuccessState   = isSuccess;
+    lastConfirmPending = hasConfirm;
   });
   watcher.on("scan-detected", (evt) => {
     if (popover && !popover.isDestroyed()) {

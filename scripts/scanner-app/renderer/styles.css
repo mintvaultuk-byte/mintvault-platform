@@ -1,24 +1,33 @@
 /* MintVault Scanner — popover styling. Dark, minimal, gold accent. */
 :root {
-  --bg:        #0f0f0f;
-  --bg-2:      #161616;
-  --bg-3:      #1f1f1f;
-  --fg:        #efe9d8;
-  --muted:     #8a8478;
-  --border:    #2a2a2a;
-  --gold:      #d4a843;
-  --green:     #4ade80;
-  --orange:    #f59e0b;
-  --red:       #ef4444;
-  --blue:      #60a5fa;
+  --bg: #0f0f0f;
+  --bg-2: #161616;
+  --bg-3: #1f1f1f;
+  --fg: #efe9d8;
+  --muted: #8a8478;
+  --border: #2a2a2a;
+  --gold: #d4a843;
+  --green: #4ade80;
+  --orange: #f59e0b;
+  --red: #ef4444;
+  --blue: #60a5fa;
 }
 
-* { box-sizing: border-box; }
-html, body {
-  margin: 0; padding: 0;
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  font:
+    12px/1.4 -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    system-ui,
+    sans-serif;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -37,16 +46,21 @@ html, body {
   text-transform: uppercase;
   color: var(--gold);
 }
-.hdr-spacer { flex: 1; }
+.hdr-spacer {
+  flex: 1;
+}
 .hdr-btn {
   -webkit-app-region: no-drag;
-  background: none; border: none;
+  background: none;
+  border: none;
   color: var(--muted);
   font-size: 14px;
   padding: 0 6px;
   cursor: pointer;
 }
-.hdr-btn:hover { color: var(--fg); }
+.hdr-btn:hover {
+  color: var(--fg);
+}
 
 .row {
   padding: 10px 14px;
@@ -83,7 +97,9 @@ html, body {
   color: var(--muted);
   border: none;
   padding: 5px 14px;
-  font: inherit; font-size: 11px; font-weight: 700;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
   cursor: pointer;
   letter-spacing: 0.5px;
 }
@@ -98,8 +114,18 @@ html, body {
   justify-content: space-between;
   padding: 2px 0;
 }
-.stat-key { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-val { color: var(--fg); font-family: "SF Mono", Menlo, monospace; font-size: 12px; font-weight: 600; }
+.stat-key {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.stat-val {
+  color: var(--fg);
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+}
 
 /* Status */
 .status-text {
@@ -115,18 +141,34 @@ html, body {
   margin-top: 2px;
 }
 .dot {
-  width: 8px; height: 8px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--muted);
   display: inline-block;
 }
-.dot.idle           { background: var(--green); }
-.dot.front_buffered { background: var(--orange); }
-.dot.uploading      { background: var(--blue); animation: pulse 1.2s ease-in-out infinite; }
-.dot.success        { background: var(--green); }
-.dot.error          { background: var(--red); }
-.dot.manual_pending { background: var(--blue); }
-.dot.paused         { background: var(--muted); }
+.dot.idle {
+  background: var(--green);
+}
+.dot.front_buffered {
+  background: var(--orange);
+}
+.dot.uploading {
+  background: var(--blue);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.dot.success {
+  background: var(--green);
+}
+.dot.error {
+  background: var(--red);
+}
+.dot.manual_pending {
+  background: var(--blue);
+}
+.dot.paused {
+  background: var(--muted);
+}
 
 /* Pause / resume toggle, sits to the right of the status text. */
 .pause-btn {
@@ -143,38 +185,71 @@ html, body {
   letter-spacing: 0.5px;
   cursor: pointer;
 }
-.pause-btn:hover { color: var(--fg); border-color: var(--muted); }
-.pause-btn.active { background: var(--orange); color: #1a1400; border-color: var(--orange); }
+.pause-btn:hover {
+  color: var(--fg);
+  border-color: var(--muted);
+}
+.pause-btn.active {
+  background: var(--orange);
+  color: #1a1400;
+  border-color: var(--orange);
+}
 
 /* Settings — collapsible footer block. Vanilla JS toggles `hidden`. */
-.row.settings { padding-bottom: 14px; }
-.settings-toggle {
-  background: none; border: none;
-  color: var(--muted); font: inherit; font-size: 10px;
-  text-transform: uppercase; letter-spacing: 1px;
-  cursor: pointer; padding: 0;
+.row.settings {
+  padding-bottom: 14px;
 }
-.settings-toggle:hover { color: var(--fg); }
+.settings-toggle {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  cursor: pointer;
+  padding: 0;
+}
+.settings-toggle:hover {
+  color: var(--fg);
+}
 .settings-body {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px dashed var(--border);
-  display: flex; flex-direction: column; gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .settings-body .checkbox {
-  font-size: 11px; color: var(--fg);
+  font-size: 11px;
+  color: var(--fg);
 }
-.settings-test { display: flex; flex-direction: column; gap: 4px; }
-.hint.inline { color: var(--muted); font-style: italic; font-size: 10px; }
+.settings-test {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.hint.inline {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 10px;
+}
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.45; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
 }
 
 /* Recent */
 .recent {
   list-style: none;
-  margin: 0; padding: 0;
+  margin: 0;
+  padding: 0;
   font-family: "SF Mono", Menlo, monospace;
   font-size: 11px;
 }
@@ -184,7 +259,9 @@ html, body {
   justify-content: space-between;
   color: var(--fg);
 }
-.recent li .src { color: var(--muted); }
+.recent li .src {
+  color: var(--muted);
+}
 
 /* Actions */
 .row.actions {
@@ -204,10 +281,23 @@ html, body {
   font-weight: 600;
   cursor: pointer;
 }
-.btn:hover { border-color: var(--muted); }
-.btn.primary { background: var(--gold); color: #1a1400; border-color: var(--gold); }
-.btn.danger  { background: var(--red); color: #fff; border-color: var(--red); }
-.btn.ghost   { background: transparent; color: var(--muted); }
+.btn:hover {
+  border-color: var(--muted);
+}
+.btn.primary {
+  background: var(--gold);
+  color: #1a1400;
+  border-color: var(--gold);
+}
+.btn.danger {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+}
+.btn.ghost {
+  background: transparent;
+  color: var(--muted);
+}
 
 /* Modal */
 .modal {
@@ -219,7 +309,9 @@ html, body {
   justify-content: center;
   z-index: 100;
 }
-.modal.visible { display: flex; }
+.modal.visible {
+  display: flex;
+}
 .modal-card {
   background: var(--bg-2);
   border: 1px solid var(--border);
@@ -231,7 +323,9 @@ html, body {
   flex-direction: column;
   gap: 10px;
 }
-.modal-card.wide { max-width: 380px; }
+.modal-card.wide {
+  max-width: 380px;
+}
 .modal-title {
   font-size: 11px;
   text-transform: uppercase;
@@ -267,7 +361,10 @@ html, body {
   font-family: "SF Mono", Menlo, monospace;
   text-transform: uppercase;
 }
-.field input[type="text"]:focus { outline: none; border-color: var(--gold); }
+.field input[type="text"]:focus {
+  outline: none;
+  border-color: var(--gold);
+}
 
 /* Prefixed input — static "MV" sits to the left of a digits-only field. */
 .prefixed-input {
@@ -278,7 +375,9 @@ html, body {
   border-radius: 4px;
   overflow: hidden;
 }
-.prefixed-input:focus-within { border-color: var(--gold); }
+.prefixed-input:focus-within {
+  border-color: var(--gold);
+}
 .prefixed-input .prefix {
   background: var(--bg-3);
   color: var(--gold);
@@ -296,10 +395,22 @@ html, body {
   border-radius: 0;
   background: transparent;
 }
-.field-row { display: flex; align-items: center; gap: 10px; }
-.field-row > span { font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
-.radio, .checkbox {
-  display: inline-flex; align-items: center; gap: 4px;
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.field-row > span {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+}
+.radio,
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   cursor: pointer;
 }
@@ -327,9 +438,94 @@ html, body {
   padding: 6px 0;
   border-bottom: 1px solid var(--border);
 }
-.orphan-row:last-child { border-bottom: none; }
-.orphan-info { display: flex; flex-direction: column; gap: 2px; }
-.orphan-id   { color: var(--gold); font-weight: 700; }
-.orphan-meta { color: var(--muted); font-size: 10px; }
-.orphan-actions { display: flex; gap: 4px; }
-.orphan-actions .btn { padding: 3px 8px; font-size: 10px; }
+.orphan-row:last-child {
+  border-bottom: none;
+}
+.orphan-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.orphan-id {
+  color: var(--gold);
+  font-weight: 700;
+}
+.orphan-meta {
+  color: var(--muted);
+  font-size: 10px;
+}
+.orphan-actions {
+  display: flex;
+  gap: 4px;
+}
+.orphan-actions .btn {
+  padding: 3px 8px;
+  font-size: 10px;
+}
+
+/* ── Scan-confirmation popup (blocking, scan-one-write-one) ───────────────── */
+.confirm-card {
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  max-width: 340px;
+}
+.confirm-img {
+  width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #000;
+}
+.confirm-img-ph {
+  width: 100%;
+  height: 96px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 11px;
+}
+.confirm-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.confirm-cert {
+  font-size: 46px;
+  line-height: 1.05;
+  font-weight: 800;
+  color: var(--gold);
+  letter-spacing: 1px;
+}
+.confirm-cert.pending {
+  color: var(--orange);
+}
+.confirm-cert.warn {
+  color: var(--red);
+  font-size: 26px;
+}
+.confirm-note {
+  font-size: 12px;
+  color: var(--orange);
+  line-height: 1.35;
+  max-width: 300px;
+}
+.confirm-note.warn {
+  color: var(--red);
+  font-weight: 600;
+}
+.confirm-card .modal-actions {
+  width: 100%;
+}
+.confirm-ok {
+  width: 100%;
+  padding: 11px;
+  font-size: 14px;
+  font-weight: 700;
+}

@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld("scanner", {
   deleteCert:        (payload)     => ipcRenderer.invoke("delete-cert", payload),
   retryLast:         ()            => ipcRenderer.invoke("retry-last"),
   resetBuffered:     ()            => ipcRenderer.invoke("reset-buffered"),
+  ackConfirmCard:    ()            => ipcRenderer.invoke("ack-confirm-card"),
   restartWatcher:    ()            => ipcRenderer.invoke("restart-watcher"),
   resetScanner:      ()            => ipcRenderer.invoke("reset-scanner"),
   forwardToCert:     (certId)      => ipcRenderer.invoke("forward-to-cert", certId),

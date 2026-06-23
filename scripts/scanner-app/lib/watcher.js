@@ -200,6 +200,54 @@ class Watcher extends EventEmitter {
     return `mvscan:${crypto.createHash("sha256").update(basis).digest("hex")}`;
   }
 
+  /** Small JPEG data-URL of the captured front, for the confirmation popup.
+   *  Generated from the on-disk file (sharp decodes TIFF). Returns null on
+   *  failure — the popup still shows the number, just without the image. */
+  async makeFrontThumb(frontPath) {
+    try {
+      const sharp = require("sharp");
+      const buf = await sharp(frontPath, { limitInputPixels: false })
+        .rotate()
+        .resize(460, null, { fit: "inside" })
+        .jpeg({ quality: 68 })
+        .toBuffer();
+      return `data:image/jpeg;base64,${buf.toString("base64")}`;
+    } catch (err) {
+      this.log(`confirm thumb failed for ${path.basename(frontPath)}: ${err.message}`, "warn");
+      return null;
+    }
+  }
+
+  /** Process inbox files HELD by the confirmation gate, after the operator acks.
+   *  Stops as soon as a completed pair re-sets confirmCard (one card at a time),
+   *  preserving scan-one-write-one. Files are never lost — a restart's startup
+   *  drain re-runs this if an ack's drain didn't finish. */
+  async drainInbox() {
+    let files;
+    try {
+      files = fs
+        .readdirSync(INBOX)
+        .filter(
+          (f) => ACCEPTED.has(path.extname(f).toLowerCase()) && !f.startsWith("test-scan-") && !f.startsWith(".")
+        )
+        .sort();
+    } catch {
+      return;
+    }
+    for (const f of files) {
+      if (stateMod.get().confirmCard) break; // a completed pair re-gated — stop
+      const full = path.join(INBOX, f);
+      if (!fs.existsSync(full)) continue;
+      try {
+        await this.handleNewFile(full);
+      } catch (err) {
+        // One bad file must not abort the drain — it stays in inbox and is
+        // retried on the next ack or the startup drain. Logged loudly.
+        this.log(`drain: handleNewFile failed for ${f}: ${err.message} — held for retry`, "error");
+      }
+    }
+  }
+
   /** On startup, re-drive every entry still in the queue. Files already gone
    *  from disk (upload had actually succeeded before the crash, queue write
    *  just didn't land) are dropped as stale. Awaited sequentially. */
@@ -424,6 +472,19 @@ class Watcher extends EventEmitter {
       }
     }
 
+    // Scan-confirmation gate (scan-one-write-one). While a confirmation popup is
+    // awaiting acknowledgment, HOLD new scans in the inbox — they are processed
+    // on ack via drainInbox(). This stops a fast operator's next scan from
+    // replacing an unacknowledged confirmation. Stale confirmCards are cleared on
+    // boot (state.load), so this can never strand the startup drain.
+    {
+      const cc = stateMod.get().confirmCard;
+      if (cc) {
+        this.log(`scan HELD — acknowledge the current card (${cc.certId || "incomplete scan"}) first: ${filename}`);
+        return;
+      }
+    }
+
     // Wait for size to stabilise — SilverFast streams the scan file.
     const ok = await this.waitForStable(filePath);
     if (!ok) {
@@ -579,6 +640,17 @@ class Watcher extends EventEmitter {
       if (hashes.back) this.recordUpload(hashes.back, certId, "back");
     }
 
+    // Capture the front thumbnail NOW — confirmAndMove relocates the file on
+    // success, so grab it from frontPath first. Used by the blocking popup.
+    const frontThumb = await this.makeFrontThumb(frontPath);
+    const incompleteCard = {
+      certId: null,
+      thumb: frontThumb,
+      status: "incomplete",
+      note: "Scan incomplete — no number assigned. Do NOT label. Rescan this card.",
+      ts: Date.now(),
+    };
+
     const confirmed = await this.confirmAndMove(certId, frontPath, backPath, idempotencyKey, r.body?.raw_uploaded === true);
     this.bufferedFront = null;
     this.lastPair = null;
@@ -588,7 +660,22 @@ class Watcher extends EventEmitter {
       // Raw not confirmed within the window — file STAYS in inbox, pending entry
       // retained; the reconciler / next restart finishes it. Not an error.
       this.log(`${certId}: cert created but raw not yet confirmed — file held in inbox for reconcile`, "warn");
-      stateMod.set({ state: "idle", bufferedFront: null });
+      // The cert WAS created — STILL surface the assigned number so the operator
+      // can label the card (never leave a created cert with no number on screen),
+      // flagged "image still finalizing". No certId at all → tell them to rescan.
+      stateMod.set({
+        state: "idle",
+        bufferedFront: null,
+        confirmCard: certId
+          ? {
+              certId,
+              thumb: frontThumb,
+              status: "raw_pending",
+              note: "Image still finalizing — the number IS assigned. OK to write it on the card.",
+              ts: Date.now(),
+            }
+          : incompleteCard,
+      });
       this.emitState();
       return;
     }
@@ -599,6 +686,9 @@ class Watcher extends EventEmitter {
       lastUploadedCert: certId || stateMod.get().lastUploadedCert,
       sessionPaired: stateMod.get().sessionPaired + 1,
       lastError: null,
+      confirmCard: certId
+        ? { certId, thumb: frontThumb, status: "confirmed", note: null, ts: Date.now() }
+        : incompleteCard,
     });
     if (certId) {
       stateMod.pushRecent({ certId, side: "front", source: "auto" });

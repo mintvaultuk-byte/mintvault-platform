@@ -52,6 +52,15 @@ const els = {
   forwardCancel:     document.getElementById("forwardCancel"),
   forwardApply:      document.getElementById("forwardApply"),
 
+  // Scan confirmation (blocking)
+  confirmModal: document.getElementById("confirmModal"),
+  confirmImg:   document.getElementById("confirmImg"),
+  confirmImgPlaceholder: document.getElementById("confirmImgPlaceholder"),
+  confirmLabel: document.getElementById("confirmLabel"),
+  confirmCert:  document.getElementById("confirmCert"),
+  confirmNote:  document.getElementById("confirmNote"),
+  confirmOk:    document.getElementById("confirmOk"),
+
   // Soft-delete confirm
   deleteModal:   document.getElementById("deleteModal"),
   deleteCertId:  document.getElementById("deleteCertId"),
@@ -160,6 +169,35 @@ function renderState(s) {
       : "No cert uploaded yet this session";
     els.lastCertBtn.textContent = lastCert ? `Open ${lastCert}` : "Open last cert";
   }
+
+  // Scan-confirmation popup — BLOCKING. Shows THIS Mac's ASSIGNED cert number
+  // (s.confirmCard.certId, from this Mac's own ingest response), NEVER the
+  // global predictedNextCert forecast. Dismissed only by OK (ack-confirm-card).
+  if (els.confirmModal) {
+    const c = s.confirmCard;
+    if (c) {
+      if (c.thumb) {
+        els.confirmImg.src = c.thumb;
+        els.confirmImg.style.display = "";
+        if (els.confirmImgPlaceholder) els.confirmImgPlaceholder.style.display = "none";
+      } else {
+        els.confirmImg.removeAttribute("src");
+        els.confirmImg.style.display = "none";
+        if (els.confirmImgPlaceholder) els.confirmImgPlaceholder.style.display = "";
+      }
+      const incomplete = c.status === "incomplete" || !c.certId;
+      els.confirmLabel.textContent = incomplete ? "" : "This card is";
+      els.confirmCert.textContent = incomplete ? "SCAN INCOMPLETE" : c.certId;
+      els.confirmCert.classList.toggle("warn", incomplete);
+      els.confirmCert.classList.toggle("pending", !incomplete && c.status === "raw_pending");
+      els.confirmNote.textContent = c.note || "";
+      els.confirmNote.classList.toggle("warn", incomplete);
+      els.confirmOk.textContent = incomplete ? "OK — rescan this card" : "OK — number written, next card";
+      openModal(els.confirmModal);
+    } else {
+      closeModal(els.confirmModal);
+    }
+  }
 }
 
 // ── Header buttons ───────────────────────────────────────────────────────
@@ -169,6 +207,21 @@ els.restartBtn.addEventListener("click", async () => {
   els.restartBtn.disabled = true;
   await window.scanner.getState().then(renderState);
   els.restartBtn.disabled = false;
+});
+
+// Scan-confirmation OK — acknowledge, clear the popup, and let the main process
+// drain any scans the gate held while it was up (scan-one-write-one).
+els.confirmOk.addEventListener("click", async () => {
+  // No explicit closeModal here: the state-driven render hides the modal when
+  // confirmCard becomes null, and re-opens it if drainInbox surfaces the next
+  // held card. An explicit close would race with — and wrongly dismiss — that
+  // next confirmation.
+  els.confirmOk.disabled = true;
+  try {
+    await window.scanner.ackConfirmCard();
+  } finally {
+    els.confirmOk.disabled = false;
+  }
 });
 
 // ── Mode toggle ──────────────────────────────────────────────────────────
