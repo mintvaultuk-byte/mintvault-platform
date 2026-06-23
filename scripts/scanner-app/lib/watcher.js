@@ -22,8 +22,9 @@ const os       = require("node:os");
 const crypto   = require("node:crypto");
 const { EventEmitter } = require("node:events");
 
-const stateMod = require("./state");
-const server   = require("./server-client");
+const stateMod   = require("./state");
+const server     = require("./server-client");
+const backDetect = require("./back-detect");
 
 // BASE is overridable via MINTVAULT_SCANS_DIR so an isolated TEST instance can
 // run on the same Mac without clobbering the live scanner's inbox / processed /
@@ -233,7 +234,16 @@ class Watcher extends EventEmitter {
         .filter(
           (f) => ACCEPTED.has(path.extname(f).toLowerCase()) && !f.startsWith("test-scan-") && !f.startsWith(".")
         )
-        .sort();
+        // ARRIVAL order (mtime), NOT alphabetical. A held front+back pair must
+        // drain front-first; `.sort()` (lexicographic) put "Untitled (2).tif"
+        // before "Untitled.tif" and so buffered the back as the front — the
+        // MV219 swap (2026-06-23). Content detection in handleAutoFile is the
+        // real order-independent guarantee; mtime just keeps the FALLBACK order
+        // correct (oldest = scanned first = front) when detection can't confirm.
+        .map((f) => { try { return { f, mtime: fs.statSync(path.join(INBOX, f)).mtimeMs }; } catch { return null; } })
+        .filter(Boolean)
+        .sort((a, b) => a.mtime - b.mtime)
+        .map((e) => e.f);
     } catch {
       return;
     }
@@ -565,16 +575,38 @@ class Watcher extends EventEmitter {
         setTimeout(() => this.handleAutoFile(filePath), wait + 250);
         return;
       }
-      const front = this.bufferedFront;
+      const a = this.bufferedFront;
+      const b = filePath;
       this.bufferedFront = null;
-      return this.uploadPair(front, filePath);
+      // Decide front vs back by CONTENT, not arrival order (order-independent —
+      // see back-detect.js). Falls back to scan order (the buffered file `a` was
+      // scanned first = front) and FLAGS the card when detection can't confirm —
+      // never a silent guess. This governs which file becomes frontPath, so the
+      // cert's stored front AND the confirmation popup's thumbnail are both the
+      // true front regardless of the order the two scans arrived in.
+      let front = a, back = b, orientationUnconfirmed = false;
+      try {
+        const det = await backDetect.identifyFrontBack(a, b);
+        if (det.confident) {
+          front = det.front;
+          back = det.back;
+          this.log(`front/back by content — front=${path.basename(front)} back=${path.basename(back)} [${det.reason}]`);
+        } else {
+          orientationUnconfirmed = true;
+          this.log(`front/back UNCONFIRMED — falling back to scan order (front=${path.basename(a)}); card flagged for review [${det.reason}]`, "warn");
+        }
+      } catch (err) {
+        orientationUnconfirmed = true;
+        this.log(`front/back detection error — using scan order (front=${path.basename(a)}): ${err.message}`, "warn");
+      }
+      return this.uploadPair(front, back, 0, null, null, orientationUnconfirmed);
     }
     // uploading — buffer wins next pair would race; safest: leave file in
     // inbox, watcher will pick it up after the upload completes.
     this.log(`scan arrived during ${cur.state} — leaving in inbox: ${path.basename(filePath)}`, "warn");
   }
 
-  async uploadPair(frontPath, backPath, retryCount = 0, hashes = null, idempotencyKey = null) {
+  async uploadPair(frontPath, backPath, retryCount = 0, hashes = null, idempotencyKey = null, orientationUnconfirmed = false) {
     if (this.uploading && retryCount === 0) return;
     this.uploading = true;
     this.lastPair = { frontPath, backPath };
@@ -626,7 +658,7 @@ class Watcher extends EventEmitter {
         const delay = RETRY_BACKOFF[retryCount] || RETRY_BACKOFF[RETRY_BACKOFF.length - 1];
         this.log(`upload got ${r.status}, retrying in ${delay}ms (attempt ${retryCount + 1}/${MAX_RETRIES}): ${reason}`, "warn");
         await new Promise(rs => setTimeout(rs, delay));
-        return this.uploadPair(frontPath, backPath, retryCount + 1, hashes, idempotencyKey);
+        return this.uploadPair(frontPath, backPath, retryCount + 1, hashes, idempotencyKey, orientationUnconfirmed);
       }
       this.uploading = false;
       return this.failPair(frontPath, backPath, reason, r.status, { idempotencyKey });
@@ -674,7 +706,10 @@ class Watcher extends EventEmitter {
               certId,
               thumb: frontThumb,
               status: "raw_pending",
-              note: "Image still finalizing — the number IS assigned. OK to write it on the card.",
+              note: orientationUnconfirmed
+                ? "Image still finalizing — number IS assigned. ⚠ Front/back not auto-confirmed: verify before labelling."
+                : "Image still finalizing — the number IS assigned. OK to write it on the card.",
+              warn: orientationUnconfirmed,
               ts: Date.now(),
             }
           : incompleteCard,
@@ -690,7 +725,12 @@ class Watcher extends EventEmitter {
       sessionPaired: stateMod.get().sessionPaired + 1,
       lastError: null,
       confirmCard: certId
-        ? { certId, thumb: frontThumb, status: "confirmed", note: null, ts: Date.now() }
+        ? { certId, thumb: frontThumb, status: "confirmed",
+            note: orientationUnconfirmed
+              ? "⚠ Front/back not auto-confirmed — check the image above is the FRONT before labelling."
+              : null,
+            warn: orientationUnconfirmed,
+            ts: Date.now() }
         : incompleteCard,
     });
     if (certId) {

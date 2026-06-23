@@ -191,7 +191,10 @@ function renderState(s) {
       els.confirmCert.classList.toggle("warn", incomplete);
       els.confirmCert.classList.toggle("pending", !incomplete && c.status === "raw_pending");
       els.confirmNote.textContent = c.note || "";
-      els.confirmNote.classList.toggle("warn", incomplete);
+      // Red note for an incomplete scan OR an unconfirmed front/back (c.warn).
+      // The big number stays gold for c.warn — the NUMBER is correct; only the
+      // front/back image labelling needs a human glance.
+      els.confirmNote.classList.toggle("warn", incomplete || !!c.warn);
       els.confirmOk.textContent = incomplete ? "OK — rescan this card" : "OK — number written, next card";
       openModal(els.confirmModal);
     } else {
