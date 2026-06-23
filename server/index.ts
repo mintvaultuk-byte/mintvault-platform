@@ -14,6 +14,7 @@ import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
+import { sanitizeResponseBodyForLog } from "./lib/log-redaction";
 import pg from "pg";
 import path from "path";
 
@@ -286,8 +287,7 @@ app.use((req, res, next) => {
     if (reqPath.startsWith("/api")) {
       let logLine = `${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        const safeBody = { ...capturedJsonResponse };
-        delete safeBody.password;
+        const safeBody = sanitizeResponseBodyForLog(capturedJsonResponse);
         logLine += ` :: ${JSON.stringify(safeBody)}`;
       }
 

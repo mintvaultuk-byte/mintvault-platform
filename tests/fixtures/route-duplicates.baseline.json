@@ -1,0 +1,462 @@
+[
+  {
+    "route": "DELETE /api/admin/ai-feature-flags/:name",
+    "count": 2
+  },
+  {
+    "route": "DELETE /api/auth/delete-account",
+    "count": 2
+  },
+  {
+    "route": "GET /account/switch",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/ai-capture-health",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/ai-dashboard-stats",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/ai-divergence",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/ai-feature-flags",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/archival/status",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/capacity",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/certificates/:certId/claim-insert",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/certificates/:certId/ownership",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/db-info",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/embed-corpus/last-run",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/embedding-status",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/ownership-export",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/rarity-other-options",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/service-tiers",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/session",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/stats",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/stolen",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/submission-items/unlinked",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/submissions",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/submissions/:id",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/submissions/:id/packing-slip",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/submissions/export-csv",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/transfers",
+    "count": 2
+  },
+  {
+    "route": "GET /api/admin/variant-options",
+    "count": 2
+  },
+  {
+    "route": "GET /api/auth/magic-link/verify",
+    "count": 2
+  },
+  {
+    "route": "GET /api/auth/me",
+    "count": 2
+  },
+  {
+    "route": "GET /api/auth/verify-email",
+    "count": 2
+  },
+  {
+    "route": "GET /api/claim/verify",
+    "count": 2
+  },
+  {
+    "route": "GET /api/config/public-flags",
+    "count": 2
+  },
+  {
+    "route": "GET /api/customer/me",
+    "count": 2
+  },
+  {
+    "route": "GET /api/customer/portfolio",
+    "count": 2
+  },
+  {
+    "route": "GET /api/customer/verify/:token",
+    "count": 2
+  },
+  {
+    "route": "GET /api/featured-certificates",
+    "count": 2
+  },
+  {
+    "route": "GET /api/healthz",
+    "count": 2
+  },
+  {
+    "route": "GET /api/legal/:slug",
+    "count": 2
+  },
+  {
+    "route": "GET /api/population",
+    "count": 2
+  },
+  {
+    "route": "GET /api/public/collection/:userId",
+    "count": 2
+  },
+  {
+    "route": "GET /api/service-tiers",
+    "count": 2
+  },
+  {
+    "route": "GET /api/stolen/status/:certId",
+    "count": 2
+  },
+  {
+    "route": "GET /api/stolen/verify/:token",
+    "count": 2
+  },
+  {
+    "route": "GET /api/stripe/publishable-key",
+    "count": 2
+  },
+  {
+    "route": "GET /api/submissions/:submissionId",
+    "count": 2
+  },
+  {
+    "route": "GET /api/submissions/:submissionId/packing-slip",
+    "count": 2
+  },
+  {
+    "route": "GET /api/submissions/:submissionId/shipping-label",
+    "count": 2
+  },
+  {
+    "route": "GET /api/tier-capacity",
+    "count": 2
+  },
+  {
+    "route": "GET /api/transfer/new-owner-confirm",
+    "count": 2
+  },
+  {
+    "route": "GET /api/transfer/owner-confirm",
+    "count": 2
+  },
+  {
+    "route": "GET /api/v2/homepage-stats",
+    "count": 2
+  },
+  {
+    "route": "GET /api/v2/transfers/buyer-init/owner-confirm",
+    "count": 2
+  },
+  {
+    "route": "GET /api/v2/transfers/buyer-init/owner-dispute",
+    "count": 2
+  },
+  {
+    "route": "GET /api/v2/transfers/outgoing-confirm",
+    "count": 2
+  },
+  {
+    "route": "GET /api/v2/transfers/status/:certId",
+    "count": 2
+  },
+  {
+    "route": "GET /api/value-protection-tiers",
+    "count": 2
+  },
+  {
+    "route": "GET /api/version",
+    "count": 2
+  },
+  {
+    "route": "GET /auth/pin/reset/:token",
+    "count": 2
+  },
+  {
+    "route": "GET /m/login/:token",
+    "count": 2
+  },
+  {
+    "route": "GET /m/reset/:token",
+    "count": 2
+  },
+  {
+    "route": "PATCH /api/admin/submissions/:id/items/:itemId",
+    "count": 2
+  },
+  {
+    "route": "PATCH /api/admin/submissions/:id/notes",
+    "count": 2
+  },
+  {
+    "route": "POST /account/switch/cancel",
+    "count": 2
+  },
+  {
+    "route": "POST /account/switch/confirm",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/ai-feature-flags",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/archival/run",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/backfill-claim-codes",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/backup-card-master",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/capacity/pause-all",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/capacity/resume-all",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/certificates/:certId/assign-owner",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/certificates/:certId/regenerate-claim-code",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/claim-insert-sheet",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/embed-corpus/cert/:certId",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/embed-corpus/run",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/login",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/logout",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/pin",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/session",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/stolen/:certId/clear",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/submissions/:id/return-label",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/submissions/:id/status",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/transfers/:id/force-cancel",
+    "count": 2
+  },
+  {
+    "route": "POST /api/admin/transfers/:id/force-finalise",
+    "count": 2
+  },
+  {
+    "route": "POST /api/auth/forgot-password",
+    "count": 2
+  },
+  {
+    "route": "POST /api/auth/login",
+    "count": 2
+  },
+  {
+    "route": "POST /api/auth/logout",
+    "count": 2
+  },
+  {
+    "route": "POST /api/auth/logout-everywhere",
+    "count": 2
+  },
+  {
+    "route": "POST /api/auth/magic-link",
+    "count": 2
+  },
+  {
+    "route": "POST /api/auth/pin/forgot",
+    "count": 2
+  },
+  {
+    "route": "POST /api/auth/pin/login",
+    "count": 2
+  },
+  {
+    "route": "POST /api/auth/pin/setup",
+    "count": 2
+  },
+  {
+    "route": "POST /api/auth/resend-verification",
+    "count": 2
+  },
+  {
+    "route": "POST /api/auth/reset-password",
+    "count": 2
+  },
+  {
+    "route": "POST /api/auth/signup",
+    "count": 2
+  },
+  {
+    "route": "POST /api/claim/request",
+    "count": 2
+  },
+  {
+    "route": "POST /api/contact",
+    "count": 2
+  },
+  {
+    "route": "POST /api/customer/magic-link",
+    "count": 2
+  },
+  {
+    "route": "POST /api/mvgs/interest",
+    "count": 2
+  },
+  {
+    "route": "POST /api/pre-grade",
+    "count": 2
+  },
+  {
+    "route": "POST /api/pre-grade/preview",
+    "count": 2
+  },
+  {
+    "route": "POST /api/stolen/report",
+    "count": 2
+  },
+  {
+    "route": "POST /api/submissions/:submissionId/track",
+    "count": 2
+  },
+  {
+    "route": "POST /api/transfer/request",
+    "count": 2
+  },
+  {
+    "route": "POST /api/v2/transfers/cancel",
+    "count": 2
+  },
+  {
+    "route": "POST /api/v2/transfers/claim-by-code",
+    "count": 2
+  },
+  {
+    "route": "POST /api/v2/transfers/dispute",
+    "count": 2
+  },
+  {
+    "route": "POST /api/v2/transfers/incoming-confirm",
+    "count": 2
+  },
+  {
+    "route": "POST /api/v2/transfers/initiate",
+    "count": 2
+  },
+  {
+    "route": "POST /api/v2/waitlist",
+    "count": 2
+  },
+  {
+    "route": "PUT /api/admin/capacity/:tierId",
+    "count": 2
+  },
+  {
+    "route": "PUT /api/admin/service-tiers/:id",
+    "count": 2
+  },
+  {
+    "route": "PUT /api/auth/change-email",
+    "count": 2
+  },
+  {
+    "route": "PUT /api/auth/change-password",
+    "count": 2
+  },
+  {
+    "route": "PUT /api/auth/profile",
+    "count": 2
+  }
+]
