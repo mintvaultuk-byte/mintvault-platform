@@ -203,6 +203,9 @@ export function registerGraderRoutes(app: Express): void {
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
     const payload = await buildCertGradingPayload(certId);
     if (!payload) return res.status(404).json({ error: "Certificate not found" });
+    // Lazy AI pre-grade: it's deferred off the scan path, so compute it on open
+    // if absent. Fire-and-forget — never blocks the grader's panel load.
+    void import("../scan-ingest-service").then((m) => m.triggerLazyAiDraft(certId)).catch(() => {});
     return res.json(payload);
   });
 

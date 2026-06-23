@@ -208,7 +208,12 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
       console.log(`[reconciler] re-driving pipeline for ${certNum} from retained R2 raw`);
       // Serialize re-drive through the SAME scan queue so a reconciler sweep can't
       // pile heavy pipelines onto a concurrent foreground scan burst.
-      await runScanJob(() => processScanInBackground({ id: certId, certId: certNum }, frontBuf, backBuf, {}), certNum);
+      // skipAi: the AI pre-grade is deferred off the scan path (computed lazily
+      // on grader-open via triggerLazyAiDraft); the re-drive does sharp+r2 only.
+      await runScanJob(
+        () => processScanInBackground({ id: certId, certId: certNum }, frontBuf, backBuf, { skipAi: true }),
+        certNum
+      );
     } catch (e: any) {
       console.error(`[reconciler] re-drive failed ${certNum}: ${e?.message ?? e}${pgErrorDetail(e)}`);
     }
@@ -804,4 +809,47 @@ export function runAiOnCertIfIdle(
   });
   inFlightAutoAi.set(certId, p);
   return p;
+}
+
+/**
+ * Lazy AI pre-grade. The pre-grade (runAiOnCert: identification + centering) is
+ * now DEFERRED off the scan path — the scan job runs sharp+r2 only. Call this
+ * when a cert is OPENED for grading: if its AI pre-grade hasn't run yet, compute
+ * it now from the stored cropped R2 images so the grader sees it shortly after
+ * opening.
+ *
+ * Designed to be called fire-and-forget (`void triggerLazyAiDraft(id)`): it
+ * returns quickly and the AI runs in the background. Idempotent + safe to call
+ * on every open:
+ *   - no-op if ai_analysis is already populated (pre-grade already ran),
+ *   - no-op if the ai_auto_ingest_enabled master switch is off (manual-only mode),
+ *   - no-op if the sharp pipeline hasn't produced a cropped front yet,
+ *   - no-op if a run is already in-flight (runAiOnCertIfIdle's guard).
+ * Never throws.
+ */
+export async function triggerLazyAiDraft(certId: number): Promise<void> {
+  try {
+    const row = (await db.execute(sql`SELECT ai_analysis FROM certificates WHERE id = ${certId}`)).rows[0] as any;
+    if (!row) return;
+    const ai = row.ai_analysis;
+    const aiEmpty = !ai || (typeof ai === "object" && Object.keys(ai).length === 0);
+    if (!aiEmpty) return; // pre-grade already computed for this cert
+
+    const { getSetting } = await import("./lib/pipeline-settings");
+    if (!(await getSetting("ai_auto_ingest_enabled", true))) return; // master switch off → manual only
+
+    // runAiOnCert grades the deskewed/cropped variant the sharp pipeline wrote.
+    const fk = (await listR2Keys(`images/grading/${certId}/front_cropped`))[0];
+    if (!fk) return; // sharp pipeline not finished → nothing to grade yet
+    const bk = (await listR2Keys(`images/grading/${certId}/back_cropped`))[0];
+    const [fb, bb] = await Promise.all([getR2Buffer(fk), bk ? getR2Buffer(bk) : Promise.resolve(null)]);
+    if (!fb) return;
+
+    const p = runAiOnCertIfIdle(certId, fb, bb);
+    p?.then((r) =>
+      console.log(`[lazy-ai] cert=${certId} pre-grade computed on open (card=${r.cardName ?? "?"})`)
+    ).catch((e) => console.error(`[lazy-ai] cert=${certId} failed: ${e?.message ?? e}`));
+  } catch (e: any) {
+    console.error(`[lazy-ai] trigger failed cert=${certId}: ${e?.message ?? e}`);
+  }
 }

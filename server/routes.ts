@@ -9673,6 +9673,9 @@ Defects (admin-confirmed): ${defectLines}`;
       const cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
       const c = cert as any;
+      // Lazy AI pre-grade: it's deferred off the scan path, so compute it on open
+      // if absent. Fire-and-forget — never blocks the grading-panel load.
+      void import("./scan-ingest-service").then((m) => m.triggerLazyAiDraft(id)).catch(() => {});
       res.json({
         centeringFrontLr: c.centeringFrontLr || null,
         centeringFrontTb: c.centeringFrontTb || null,
@@ -12114,7 +12117,12 @@ Defects (admin-confirmed): ${defectLines}`;
             // job queue (default 1 at a time) so a burst of scans can't saturate
             // the single shared vCPU. Raw is already confirmed above (fast
             // file-move); only the heavy pipeline queues.
-            enqueueScanJob(() => processScanInBackground(ci, frontBuf, backBuf, { skipAi: !autoAiOn }), ci.certId);
+            // skipAi: ALWAYS defer the AI pre-grade off the scan path so the queue
+            // slot frees right after sharp+r2 (~10s sooner — the AI step is API-wait
+            // that used to block the slot). The pre-grade is computed lazily when a
+            // grader opens the cert (triggerLazyAiDraft). The ai_auto_ingest_enabled
+            // master switch still gates that lazy/manual AI compute.
+            enqueueScanJob(() => processScanInBackground(ci, frontBuf, backBuf, { skipAi: true }), ci.certId);
           })();
         });
 
@@ -12130,7 +12138,7 @@ Defects (admin-confirmed): ${defectLines}`;
           reused: ci.reused,
           workstationUrl: `/admin#grading-${ci.id}`,
           status: "processing",
-          aiStatus: autoAiOn ? "queued" : "skipped",
+          aiStatus: autoAiOn ? "deferred" : "skipped",
           message: `Certificate ${ci.certId} created. Raw upload + processing in background.`,
         });
       } catch (err: any) {
