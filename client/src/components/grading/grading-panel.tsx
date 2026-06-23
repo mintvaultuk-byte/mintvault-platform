@@ -1690,20 +1690,21 @@ export default function GradingPanel({
 
   const urls = imageData?.urls || {};
 
-  // On first open of a deferred cert, /grading BLOCKS ~10s while the server
-  // computes the AI pre-grade. Show a clean computing state for that wait instead
-  // of the all-zero editable form (which looks like a real grade and whose fields
-  // would be clobbered when the draft lands). adminReview hits a different,
-  // non-blocking endpoint so it's excluded; fast loads flash only a brief spinner.
+  // On first open of a deferred cert, /grading BLOCKS ~10s while the server runs
+  // card IDENTIFICATION (no grading — humans grade everything). Show a clean
+  // computing state for that wait instead of the all-zero editable form (which
+  // looks like a real grade and whose fields would be clobbered when the data
+  // lands). adminReview hits a different, non-blocking endpoint so it's excluded;
+  // fast loads flash only a brief spinner.
   if (gradingPending && !adminReview) {
     return (
       <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4">
         <div className="flex items-center gap-3 px-2 py-8 text-sm text-amber-300">
           <Loader2 size={18} className="animate-spin shrink-0" />
           <div>
-            <div className="font-semibold">Generating AI pre-grade…</div>
+            <div className="font-semibold">Identifying card…</div>
             <div className="text-[var(--admin-ink-faint)]">
-              Analysing this card (~10s). The grade panel opens automatically when it&apos;s ready.
+              Looking up this card (~10s). The grading panel opens automatically when it&apos;s ready.
             </div>
           </div>
         </div>
@@ -1734,6 +1735,21 @@ export default function GradingPanel({
                   Card identity{idLocked ? " (approved — read-only)" : " · editable"}
                 </span>
               </div>
+
+              {/* TCGdex couldn't confirm the card → name/set/number were NOT
+                  auto-filled (we never trust Haiku's raw text). Tell the grader to
+                  verify, and show Haiku's unverified guess as a hint only. */}
+              {gradingData?.aiAnalysis?.needs_identification_review && (
+                <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-300">
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                  <span>
+                    Not confirmed against TCGdex — name/set/number aren&apos;t pre-filled.
+                    {gradingData.aiAnalysis.suggested_name
+                      ? ` AI guessed “${gradingData.aiAnalysis.suggested_name}” (unverified) — please verify before grading.`
+                      : " Please enter the card identity before grading."}
+                  </span>
+                </div>
+              )}
 
               {/* Set name — identical combobox to the admin CertificateForm
                   (free text + suggestions from /api/pokemon-sets). Admin-only

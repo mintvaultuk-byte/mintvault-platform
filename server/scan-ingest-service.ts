@@ -603,6 +603,11 @@ export async function runAiOnCert(
     console.log(`[ai] skip auto-trigger: ai_auto_ingest_enabled is off for cert ${certId}`);
     return { cardName: null, grade: null, strengthScore: null };
   }
+  // ID-ONLY mode (default). The deferred/auto AI does card IDENTIFICATION +
+  // TCGdex prefill ONLY — no grade or subgrades (centering). Humans grade
+  // everything. This wires the previously documentation-only ai_ingest_identify_only
+  // toggle so the admin switch finally controls real behaviour.
+  const identifyOnly = await getSetting("ai_ingest_identify_only", true);
 
   // Resolve the MV-number for diagnostic context (retry logs, error traces).
   let certTag: string | number = certId;
@@ -614,13 +619,14 @@ export async function runAiOnCert(
     /* best-effort — fall back to numeric id */
   }
 
-  // Two parallel Haiku calls — identify + the grade call (used here only
-  // to extract centering; full grade is deferred to the admin's manual
-  // trigger). gradeCardFromBuffer is the only Haiku route that returns
-  // centering data; we discard corners/edges/surface/overall below.
+  // Identify (always) + the grade call (centering only — SKIPPED in identify-only
+  // mode, which is the default). gradeCardFromBuffer is a second Haiku call whose
+  // only use here is centering, a subgrade; with identifyOnly we never make it, so
+  // no grading AI runs on the auto path. The aiGrading===null branches below then
+  // skip every centering write.
   const [identification, aiGrading] = await Promise.all([
     identifyCardFromBuffer(frontCropped, "image/jpeg", certTag),
-    gradeCardFromBuffer(frontCropped, backCropped, certTag),
+    identifyOnly ? Promise.resolve(null) : gradeCardFromBuffer(frontCropped, backCropped, certTag),
   ]);
 
   const game = identification.detected_game?.toLowerCase() || "other";
@@ -662,9 +668,16 @@ export async function runAiOnCert(
   // TCG" gates unblock — even when set/number weren't confident.
   const aiConfidence = identification.confidence || "low";
   const shouldWriteDetails = tcgVerified || aiConfidence === "high";
-  const cardName = shouldWriteDetails ? enrichedId.officialName || enrichedId.detected_name || null : null;
+  // TCGdex is AUTHORITATIVE for name / set / number. Haiku's raw text is the
+  // source of wrong names (the original problem), so we write these ONLY from a
+  // verified TCGdex match — NEVER from Haiku's guess, even at "high" confidence.
+  // An unverified guess is surfaced as a flagged suggestion for the grader instead
+  // (needs_identification_review, below). card_game / rarity / year keep the
+  // medium-confidence write — card_game is a closed enum that unblocks the form's
+  // TCG search, and these aren't the card-identity fields.
+  const cardName = tcgVerified ? enrichedId.officialName || null : null;
   const setName = tcgVerified ? enrichedId.officialSet || enrichedId.detected_set || null : null;
-  const cardNumber = shouldWriteDetails ? enrichedId.detected_number || null : null;
+  const cardNumber = tcgVerified ? enrichedId.officialNumber || enrichedId.detected_number || null : null;
   const cardGame =
     enrichedId.detected_game && enrichedId.detected_game !== "other"
       ? enrichedId.detected_game
@@ -699,10 +712,20 @@ export async function runAiOnCert(
   const aiAnalysisPayload: Record<string, unknown> = {
     identification: enrichedId,
     model: "claude-haiku-4-5-20251001",
-    pipeline: "option_a_fast",
+    pipeline: identifyOnly ? "identify_only" : "option_a_fast",
   };
   if (aiGrading) {
     aiAnalysisPayload.centering = aiGrading.centering;
+  }
+  // TCGdex couldn't confirm the card → name/set/number were left null above
+  // (never trusted from Haiku). Surface Haiku's guess as a SUGGESTION the grader
+  // must verify, with a flag the panel shows so it isn't silently missing.
+  if (!tcgVerified) {
+    aiAnalysisPayload.needs_identification_review = true;
+    aiAnalysisPayload.suggested_name = identification.detected_name || null;
+    aiAnalysisPayload.suggested_set = enrichedId.detected_set || identification.set_code || null;
+    aiAnalysisPayload.suggested_number = identification.detected_number || null;
+    aiAnalysisPayload.suggested_confidence = aiConfidence;
   }
 
   // ai_defect_candidates intentionally NOT written here — the manual
@@ -773,7 +796,9 @@ export async function runAiOnCert(
 
   const centeringSubgrade = aiGrading?.centering?.subgrade ?? null;
   console.log(
-    `[scan-ingest] cert=${certId}: Option-A fast-path complete (identify + centering only) — card="${cardName}" game=${cardGame} centering=${centeringSubgrade} persisted=${centeringWritten}`
+    `[scan-ingest] cert=${certId}: ${identifyOnly ? "IDENTIFY-ONLY" : "identify + centering"} complete — card="${cardName}" game=${cardGame} tcg_verified=${tcgVerified}` +
+      `${tcgVerified ? "" : " (NEEDS REVIEW — name unconfirmed, left for grader)"}` +
+      `${identifyOnly ? "" : ` centering=${centeringSubgrade} persisted=${centeringWritten}`}`
   );
   return { cardName, grade: null, strengthScore: null };
 }
