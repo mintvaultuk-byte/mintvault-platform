@@ -15,6 +15,7 @@ import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
 import { sanitizeResponseBodyForLog } from "./lib/log-redaction";
+import { clientErrorMessage, newRequestId, scrubServerErrorBody } from "./lib/error-sanitize";
 import pg from "pg";
 import path from "path";
 
@@ -66,7 +67,8 @@ app.use((req, res, next) => {
   })();
   if (appUrlHost && host === appUrlHost) return next();
   if (host === "mintvault.fly.dev" || host.endsWith(".fly.dev")) {
-    console.log(`[canonical-redirect] ${req.method} ${req.originalUrl} from host=${host}`);
+    // Log the PATH only — req.originalUrl can carry tokens in the query string.
+    console.log(`[canonical-redirect] ${req.method} ${req.originalUrl.split("?")[0]} from host=${host}`);
     return res.redirect(301, `https://mintvaultuk.com${req.originalUrl}`);
   }
   next();
@@ -77,8 +79,14 @@ app.get("/health", (_req, res) => {
 });
 
 app.get("/api/db-check", async (_req, res) => {
+  // Phase 1 (security): in production this returns ONLY a generic liveness
+  // status — never the Neon hostname, database name, NODE_ENV, schema detail,
+  // or raw driver errors (all of which this previously leaked to any
+  // unauthenticated caller). Full diagnostics remain available in development.
+  const isProd = process.env.NODE_ENV === "production";
   const dbUrl = process.env.MINTVAULT_DATABASE_URL;
   if (!dbUrl) {
+    if (isProd) return res.status(503).json({ status: "error" });
     return res.json({
       error: "MINTVAULT_DATABASE_URL is not set",
       database_url_present: !!process.env.DATABASE_URL,
@@ -86,13 +94,16 @@ app.get("/api/db-check", async (_req, res) => {
     });
   }
   try {
-    const parsed = new URL(dbUrl);
     // Reuse the shared app pool instead of minting a new pool per request —
     // a per-request pool meant a fresh Neon pooler auth handshake on every
     // health-check hit, which was amplifying the 08P01 auth-timeout churn.
     const result = await pool.query(
       "SELECT to_regclass('public.cert_counter') AS cert_counter_exists, current_database() AS db_name"
     );
+    if (isProd) {
+      return res.json({ status: "ok" });
+    }
+    const parsed = new URL(dbUrl);
     res.json({
       env: process.env.NODE_ENV || "development",
       host: parsed.hostname,
@@ -102,6 +113,7 @@ app.get("/api/db-check", async (_req, res) => {
       connected_db: result.rows[0]?.db_name,
     });
   } catch (err: any) {
+    if (isProd) return res.status(503).json({ status: "error" });
     res.status(500).json({ error: err.message });
   }
 });
@@ -278,8 +290,28 @@ app.use((req, res, next) => {
 
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
+    let outgoing = bodyJson;
+    // Phase 1 (security): single choke point so the ~100 route handlers that
+    // catch their own errors and respond res.status(5xx).json({ error: err.message })
+    // never ship raw internal error text to clients in production. Full detail
+    // stays in server logs, correlated by requestId.
+    if (
+      process.env.NODE_ENV === "production" &&
+      res.statusCode >= 500 &&
+      bodyJson &&
+      typeof bodyJson === "object" &&
+      !Array.isArray(bodyJson)
+    ) {
+      const scrub = scrubServerErrorBody(bodyJson as Record<string, unknown>);
+      if (scrub) {
+        outgoing = scrub.body as typeof bodyJson;
+        if (!scrub.alreadyHandled) {
+          console.error(`[server-error] reqId=${scrub.requestId} status=${res.statusCode}: ${scrub.original}`);
+        }
+      }
+    }
+    capturedJsonResponse = outgoing;
+    return originalResJson.apply(res, [outgoing, ...args]);
   };
 
   res.on("finish", () => {
@@ -527,13 +559,21 @@ async function runTransferV2Sweep() {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
-    console.error("Internal Server Error:", err);
+    // Phase 1 (security): keep full detail server-side under a correlation id;
+    // 5xx responses in production return a generic message + that id only, so
+    // internal error text (DB driver messages, etc.) never reaches the client.
+    // 4xx messages are intentional and pass through.
+    const requestId = newRequestId();
+    console.error(`Internal Server Error [reqId=${requestId}]:`, err);
 
     if (res.headersSent) {
       return next(err);
     }
 
-    return res.status(status).json({ message });
+    const isProd = process.env.NODE_ENV === "production";
+    const body: Record<string, unknown> = { message: clientErrorMessage(status, message, isProd) };
+    if (status >= 500) body.requestId = requestId;
+    return res.status(status).json(body);
   });
 
   if (process.env.NODE_ENV === "production") {

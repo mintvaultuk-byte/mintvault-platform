@@ -1,19 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeResponseBodyForLog } from "../server/lib/log-redaction";
+import { sanitizeResponseBodyForLog, REDACTED } from "../server/lib/log-redaction";
 
 /**
- * Characterization tests for the response-body log sanitizer (Phase 0).
- *
- * These pin TODAY's behaviour (only `password` is stripped) so the Phase 1
- * widening of the deny-list is a controlled, test-driven change. The `it.todo`
- * cases below are the Phase 1 targets — fields that currently DO leak into
- * logs and must be redacted in security/redact-logs-and-errors.
+ * Phase 1 contract for the response-body log sanitizer. Sensitive fields are
+ * redacted (key preserved, value replaced) by KEY name and by VALUE shape,
+ * recursively through nested objects and arrays. Input is never mutated.
  */
-describe("sanitizeResponseBodyForLog (current behaviour)", () => {
-  it("strips the password field", () => {
-    expect(sanitizeResponseBodyForLog({ email: "a@b.com", password: "secret" })).toEqual({
-      email: "a@b.com",
-    });
+describe("sanitizeResponseBodyForLog", () => {
+  it("redacts the password field", () => {
+    expect(sanitizeResponseBodyForLog({ id: 1, password: "secret" })).toEqual({ id: 1, password: REDACTED });
   });
 
   it("does not mutate the input object", () => {
@@ -23,19 +18,95 @@ describe("sanitizeResponseBodyForLog (current behaviour)", () => {
   });
 
   it("passes through a body with no sensitive fields", () => {
-    expect(sanitizeResponseBodyForLog({ ok: true, id: 1 })).toEqual({ ok: true, id: 1 });
+    expect(sanitizeResponseBodyForLog({ ok: true, id: 1, certId: "MV1", grade: 9 })).toEqual({
+      ok: true,
+      id: 1,
+      certId: "MV1",
+      grade: 9,
+    });
   });
 
   it("returns undefined / non-object input unchanged", () => {
     expect(sanitizeResponseBodyForLog(undefined)).toBeUndefined();
   });
-});
 
-describe("sanitizeResponseBodyForLog (Phase 1 targets — not yet implemented)", () => {
-  // These currently FAIL by design (the fields still leak into logs today).
-  // Phase 1 widens the deny-list and converts each `it.todo` into a real `it`.
-  it.todo("redacts token / accessToken / refreshToken");
-  it.todo("redacts email and customerEmail");
-  it.todo("redacts signedUrl / uploadUrl / presigned R2 URLs");
-  it.todo("redacts authorization headers and cookies if present in the body");
+  // ── Phase 1 targets ──────────────────────────────────────────────────────
+  it("redacts token / accessToken / refreshToken (by key)", () => {
+    const out = sanitizeResponseBodyForLog({ token: "abc", accessToken: "x", refreshToken: "y", ok: true });
+    expect(out).toEqual({ token: REDACTED, accessToken: REDACTED, refreshToken: REDACTED, ok: true });
+  });
+
+  it("redacts email and customerEmail (by key)", () => {
+    const out = sanitizeResponseBodyForLog({ customerEmail: "a@b.com", email: "c@d.com", name: "Ada" });
+    expect(out).toEqual({ customerEmail: REDACTED, email: REDACTED, name: "Ada" });
+  });
+
+  it("redacts a Stripe client secret and signature (by key)", () => {
+    const out = sanitizeResponseBodyForLog({ clientSecret: "pi_123_secret_456", signature: "whsig", amount: 500 });
+    expect(out).toEqual({ clientSecret: REDACTED, signature: REDACTED, amount: 500 });
+  });
+
+  it("redacts a presigned R2/S3 URL by value shape, even under a benign key", () => {
+    const signed = "https://bucket.r2.cloudflarestorage.com/img/front.jpg?X-Amz-Signature=deadbeef&X-Amz-Expires=3600";
+    const out = sanitizeResponseBodyForLog({ frontImage: signed, plain: "https://mintvaultuk.com/cert/MV1" });
+    expect(out).toEqual({ frontImage: REDACTED, plain: "https://mintvaultuk.com/cert/MV1" });
+  });
+
+  it("redacts a JWT and an email found in a free-text value", () => {
+    const jwt = "eyJhbGciOiJ.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4";
+    const out = sanitizeResponseBodyForLog({ jwt, note: "sent to user@example.com" });
+    expect(out.jwt).toBe(REDACTED);
+    expect(out.note).toBe(REDACTED);
+  });
+
+  it("recurses into nested objects and arrays", () => {
+    const out = sanitizeResponseBodyForLog({
+      submissions: [
+        { id: 1, customerEmail: "a@b.com", grade: 10 },
+        { id: 2, customerEmail: "c@d.com", grade: 9 },
+      ],
+      meta: { sessionToken: "tok", count: 2 },
+    });
+    expect(out).toEqual({
+      submissions: [
+        { id: 1, customerEmail: REDACTED, grade: 10 },
+        { id: 2, customerEmail: REDACTED, grade: 9 },
+      ],
+      meta: { sessionToken: REDACTED, count: 2 },
+    });
+  });
+
+  it("does not redact a benign object shared across sibling fields (no false cycle)", () => {
+    const shared = { label: "common", n: 1 };
+    const out = sanitizeResponseBodyForLog({ a: shared, b: shared });
+    expect(out).toEqual({ a: { label: "common", n: 1 }, b: { label: "common", n: 1 } });
+  });
+
+  it("does not throw on a true cycle and redacts the back-reference", () => {
+    const node: any = { name: "root" };
+    node.self = node;
+    const out = sanitizeResponseBodyForLog(node);
+    expect(out.name).toBe("root");
+    expect(out.self).toBe(REDACTED);
+  });
+
+  it("preserves Date values (does not explode them into {})", () => {
+    const d = new Date("2026-06-23T00:00:00.000Z");
+    const out = sanitizeResponseBodyForLog({ createdAt: d, ok: true });
+    expect(out.createdAt).toBe(d);
+    expect(out.ok).toBe(true);
+  });
+
+  it("leaves short ids/uuids and ordinary urls intact (no over-redaction)", () => {
+    const out = sanitizeResponseBodyForLog({
+      certId: "MV12345",
+      uuid: "550e8400-e29b-41d4-a716-446655440000",
+      link: "https://mintvaultuk.com/cert/MV1",
+    });
+    expect(out).toEqual({
+      certId: "MV12345",
+      uuid: "550e8400-e29b-41d4-a716-446655440000",
+      link: "https://mintvaultuk.com/cert/MV1",
+    });
+  });
 });

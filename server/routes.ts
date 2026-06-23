@@ -139,6 +139,7 @@ import {
 } from "./email";
 import { requireAuth } from "./middleware/auth";
 import { requireScannerOrAdmin } from "./lib/scanner-auth";
+import { clientErrorMessage } from "./lib/error-sanitize";
 import { registerShowroomRoutes } from "./showroom";
 import { registerVaultClubRoutes } from "./vault-club";
 import { registerSellerRoutes } from "./marketplace-seller";
@@ -9522,7 +9523,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[detect-card-bounds] error:", err.message);
-      res.json({ ok: false, message: err.message });
+      res.json({ ok: false, message: clientErrorMessage(500, err.message, process.env.NODE_ENV === "production") });
     }
   });
 
@@ -10276,7 +10277,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ ok: true, id: (result.rows[0] as any)?.id });
     } catch (err: any) {
       console.error("[override-audit] insert error:", err.message);
-      res.json({ ok: false, error: err.message });
+      res.json({ ok: false, error: clientErrorMessage(500, err.message, process.env.NODE_ENV === "production") });
     }
   });
 
@@ -10302,7 +10303,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ ok: true, inserted });
     } catch (err: any) {
       console.error("[override-audit] batch error:", err.message);
-      res.json({ ok: false, error: err.message });
+      res.json({ ok: false, error: clientErrorMessage(500, err.message, process.env.NODE_ENV === "production") });
     }
   });
 
