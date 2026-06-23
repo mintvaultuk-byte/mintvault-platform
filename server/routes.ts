@@ -9672,11 +9672,14 @@ Defects (admin-confirmed): ${defectLines}`;
       const id = parseInt(String(req.params.id), 10);
       let cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
-      // AI pre-grade is deferred off the scan path. If it hasn't run for this cert,
-      // compute it NOW (bounded ~20s) and re-read so the draft is present on first
-      // paint — never silently absent until refresh. Fails gracefully.
+      // Card IDENTIFICATION is deferred off the scan path. If it hasn't run, compute
+      // it NOW (bounded ~20s) and re-read so it's present on first paint — never
+      // silently absent until refresh. Fails gracefully.
+      // Per-device AI-identify toggle: the client sends ?aiIdentify=0 when OFF, which
+      // SKIPS the identify call entirely (grader/admin enters the identity manually).
+      const aiIdentifyOff = req.query.aiIdentify === "0";
       const existingAi = (cert as any).aiAnalysis;
-      if (!existingAi || (typeof existingAi === "object" && Object.keys(existingAi).length === 0)) {
+      if (!aiIdentifyOff && (!existingAi || (typeof existingAi === "object" && Object.keys(existingAi).length === 0))) {
         const { ensureAiDraft } = await import("./scan-ingest-service");
         await ensureAiDraft(id);
         cert = (await storage.getCertificate(id)) ?? cert;

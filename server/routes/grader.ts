@@ -203,12 +203,15 @@ export function registerGraderRoutes(app: Express): void {
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
     let payload = await buildCertGradingPayload(certId);
     if (!payload) return res.status(404).json({ error: "Certificate not found" });
-    // AI pre-grade is deferred off the scan path. If it hasn't run for this cert,
-    // compute it NOW (bounded ~20s) and re-read, so the draft is present on first
-    // paint — the grader sees a computing state during the wait, never a draft
-    // that's silently absent until refresh. Fails gracefully (cert still served).
+    // Card IDENTIFICATION is deferred off the scan path. If it hasn't run for this
+    // cert, compute it NOW (bounded ~20s) and re-read, so it's present on first
+    // paint — the grader sees a computing state during the wait, never silently
+    // absent until refresh. Fails gracefully (cert still served).
+    // Per-device AI-identify toggle: the client sends ?aiIdentify=0 when OFF, which
+    // SKIPS the identify call entirely (grader enters the identity manually).
+    const aiIdentifyOff = req.query.aiIdentify === "0";
     const ai = (payload as any).aiAnalysis;
-    if (!ai || (typeof ai === "object" && Object.keys(ai).length === 0)) {
+    if (!aiIdentifyOff && (!ai || (typeof ai === "object" && Object.keys(ai).length === 0))) {
       const { ensureAiDraft } = await import("../scan-ingest-service");
       await ensureAiDraft(certId);
       payload = (await buildCertGradingPayload(certId)) ?? payload;
