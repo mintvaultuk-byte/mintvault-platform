@@ -45,5 +45,16 @@ COPY --from=builder /app/public ./public
 ENV NODE_ENV=production
 ENV PORT=5000
 
+# Drop root: run as the built-in unprivileged `node` user. chown so the app
+# keeps read/write access to /app (image processing may write temp files).
+RUN chown -R node:node /app
+USER node
+
 EXPOSE 5000
+
+# Liveness via node itself (no curl/wget in the slim image). Hits the in-process
+# /health route, which never touches the DB.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:5000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+
 CMD ["node", "dist/index.cjs"]

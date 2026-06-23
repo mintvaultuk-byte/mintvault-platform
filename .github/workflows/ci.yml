@@ -6,15 +6,27 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: the default GITHUB_TOKEN is broad; CI only needs to read the
+# repo. Any job that needs more must opt in explicitly.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref so a fast push doesn't pile up runners.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: Lint, Type Check, Test & Build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      # Third-party actions pinned to commit SHAs (supply-chain: a moved tag
+      # can't swap the action out from under us). Version in the trailing comment.
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: npm
@@ -33,6 +45,13 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Audit (high severity)
-        run: npm audit --audit-level=high
-        continue-on-error: true
+      # Blocking at CRITICAL: any critical advisory fails CI.
+      # Triaged exception (2026-06-23): 1 HIGH (vite GHSA-fx2h-pf6j-xcff, a
+      # build-time dep not present in the production runtime) is tracked
+      # separately; raise this to --audit-level=high once it's resolved via
+      # `npm audit fix`.
+      - name: Audit (critical, blocking)
+        run: npm audit --audit-level=critical
+
+      - name: Audit (high, informational)
+        run: npm audit --audit-level=high || true
