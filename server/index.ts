@@ -75,8 +75,26 @@ app.use((req, res, next) => {
   next();
 });
 
+// Liveness: process is up. No DB, no shared state — must stay cheap and always
+// answer 200 so Fly never cycles a machine over a transient DB blip.
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
+});
+
+// Readiness (Phase 4): the machine can actually serve — DB reachable AND the
+// cert_counter allocator table exists. Returns a generic status only (no infra
+// detail). Intended for a Fly readiness check so traffic isn't routed to a
+// machine that is up but not yet able to serve. Kept separate from /health so a
+// DB blip degrades readiness without killing liveness.
+app.get("/ready", async (_req, res) => {
+  try {
+    const result = await pool.query("SELECT to_regclass('public.cert_counter') AS cc");
+    const schemaReady = result.rows[0]?.cc != null;
+    if (!schemaReady) return res.status(503).json({ status: "not-ready" });
+    return res.status(200).json({ status: "ready" });
+  } catch {
+    return res.status(503).json({ status: "not-ready" });
+  }
 });
 
 app.get("/api/db-check", async (_req, res) => {
@@ -638,3 +656,33 @@ async function runTransferV2Sweep() {
     }
   );
 })();
+
+// Graceful shutdown (Phase 4): on Fly SIGTERM during a rolling deploy, stop
+// accepting new connections, let in-flight requests drain, close the DB pools,
+// then exit — instead of being hard-killed mid-request and leaking connections.
+// A hard deadline guarantees we still exit if a request hangs.
+// NOTE: set `kill_timeout` in fly.toml >= SHUTDOWN_DEADLINE_MS so Fly waits for
+// the drain instead of SIGKILLing early (Fly default is ~5s).
+let shuttingDown = false;
+function gracefulShutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log(`${signal} received — draining and shutting down`, "shutdown");
+
+  const SHUTDOWN_DEADLINE_MS = 10_000;
+  const force = setTimeout(() => {
+    log("drain deadline reached — forcing exit", "shutdown");
+    process.exit(0);
+  }, SHUTDOWN_DEADLINE_MS);
+  force.unref();
+
+  httpServer.close(() => {
+    log("http server closed to new connections", "shutdown");
+    Promise.allSettled([pool.end(), sessionPool.end()]).then(() => {
+      log("db pools closed — exiting cleanly", "shutdown");
+      process.exit(0);
+    });
+  });
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
