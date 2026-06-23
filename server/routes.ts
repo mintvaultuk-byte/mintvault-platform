@@ -12126,7 +12126,7 @@ Defects (admin-confirmed): ${defectLines}`;
             // skipAi: ALWAYS defer the AI pre-grade off the scan path so the queue
             // slot frees right after sharp+r2 (~10s sooner — the AI step is API-wait
             // that used to block the slot). The pre-grade is computed lazily when a
-            // grader opens the cert (triggerLazyAiDraft). The ai_auto_ingest_enabled
+            // grader opens the cert (ensureAiDraft). The ai_auto_ingest_enabled
             // master switch still gates that lazy/manual AI compute.
             enqueueScanJob(() => processScanInBackground(ci, frontBuf, backBuf, { skipAi: true }), ci.certId);
           })();

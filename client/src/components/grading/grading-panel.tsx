@@ -258,7 +258,9 @@ export default function GradingPanel({
   // Grading data. NOTE: the /grading request BLOCKS ~10s on the first open of a
   // cert whose AI pre-grade was deferred off the scan path — the server computes
   // it then and returns it in this payload, so the draft is present on first
-  // paint (not a later refresh). The aiComputing flag below surfaces that wait.
+  // paint (not a later refresh). `gradingPending` drives the computing-state
+  // early return below, so the grader sees a loading state for that wait rather
+  // than an all-zero editable form.
   const { data: gradingData, isPending: gradingPending } = useQuery<any>({
     queryKey: [`${apiBase}/certificates/${certId}/grading`],
     queryFn: async () => {
@@ -267,19 +269,6 @@ export default function GradingPanel({
       return res.json();
     },
   });
-
-  // Show the "AI pre-grade computing" banner only when the /grading load is
-  // genuinely slow (>800ms) — i.e. the server is generating the deferred pre-grade.
-  // A fast load (draft already present) never trips it, so no false banner flash.
-  const [aiComputing, setAiComputing] = useState(false);
-  useEffect(() => {
-    if (!gradingPending) {
-      setAiComputing(false);
-      return;
-    }
-    const t = setTimeout(() => setAiComputing(true), 800);
-    return () => clearTimeout(t);
-  }, [gradingPending]);
 
   // Manual centering state
   const [manualCenteringSide, setManualCenteringSide] = useState<"front" | "back" | null>(null);
@@ -1701,6 +1690,27 @@ export default function GradingPanel({
 
   const urls = imageData?.urls || {};
 
+  // On first open of a deferred cert, /grading BLOCKS ~10s while the server
+  // computes the AI pre-grade. Show a clean computing state for that wait instead
+  // of the all-zero editable form (which looks like a real grade and whose fields
+  // would be clobbered when the draft lands). adminReview hits a different,
+  // non-blocking endpoint so it's excluded; fast loads flash only a brief spinner.
+  if (gradingPending && !adminReview) {
+    return (
+      <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4">
+        <div className="flex items-center gap-3 px-2 py-8 text-sm text-amber-300">
+          <Loader2 size={18} className="animate-spin shrink-0" />
+          <div>
+            <div className="font-semibold">Generating AI pre-grade…</div>
+            <div className="text-[var(--admin-ink-faint)]">
+              Analysing this card (~10s). The grade panel opens automatically when it&apos;s ready.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4 space-y-5">
       {/* Card identity — EDITABLE for graders (they hold the card and may correct
@@ -1929,16 +1939,6 @@ export default function GradingPanel({
           focusField={quickFocusField}
           onFocusField={setQuickFocusField}
         />
-      )}
-
-      {/* AI pre-grade is deferred off the scan path; on first open it computes
-          server-side (~10s) and this banner tells the grader it's generating —
-          not a blank/frozen panel. Clears the moment the draft arrives. */}
-      {aiComputing && (
-        <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
-          <Loader2 size={14} className="animate-spin shrink-0" />
-          <span>Generating AI pre-grade — analysing this card (~10s). The panel will fill in automatically.</span>
-        </div>
       )}
 
       {/* AI Panel + Reprocess — HIDDEN in admin-review: every AI/CV action here

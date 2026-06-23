@@ -209,7 +209,7 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
       // Serialize re-drive through the SAME scan queue so a reconciler sweep can't
       // pile heavy pipelines onto a concurrent foreground scan burst.
       // skipAi: the AI pre-grade is deferred off the scan path (computed lazily
-      // on grader-open via triggerLazyAiDraft); the re-drive does sharp+r2 only.
+      // on grader-open via ensureAiDraft); the re-drive does sharp+r2 only.
       await runScanJob(
         () => processScanInBackground({ id: certId, certId: certNum }, frontBuf, backBuf, { skipAi: true }),
         certNum
@@ -788,6 +788,13 @@ export async function runAiOnCert(
 
 const inFlightAutoAi = new Map<number, Promise<unknown>>();
 
+// Lazy-AI failure backoff — certId → last attempt epoch-ms. A pre-grade that
+// ERRORS leaves ai_analysis empty; without this, ensureAiDraft would re-fire the
+// full blocking AI on every reopen of that cert. Cleared on process restart
+// (so a transient failure is retried after the cooldown / next boot).
+const lazyAiAttempt = new Map<number, number>();
+const LAZY_AI_COOLDOWN_MS = 90_000;
+
 /**
  * Fire runAiOnCert only if no auto-triggered AI call is currently in flight
  * for this cert. The DB-backed `ai_auto_ingest_enabled` kill-switch is
@@ -841,29 +848,48 @@ export async function ensureAiDraft(certId: number, opts: { timeoutMs?: number }
     const { getSetting } = await import("./lib/pipeline-settings");
     if (!(await getSetting("ai_auto_ingest_enabled", true))) return; // master switch off → manual only
 
-    // Reuse an in-flight run (a concurrent open may already be computing), else
-    // start one from the deskewed/cropped variant the sharp pipeline wrote.
+    // Prefer AWAITING an in-flight run — a concurrent open is already computing
+    // this cert, so both opens get the draft from one Anthropic call (no dup fire).
     let p = inFlightAutoAi.get(certId) ?? null;
     if (!p) {
+      // No live run. Back off if we attempted recently: a prior run that ERRORED
+      // leaves ai_analysis empty, and without this guard every reopen would re-fire
+      // the full blocking ~20s AI (and re-charge Haiku) forever.
+      const last = lazyAiAttempt.get(certId);
+      if (last && Date.now() - last < LAZY_AI_COOLDOWN_MS) return;
       const fk = (await listR2Keys(`images/grading/${certId}/front_cropped`))[0];
       if (!fk) return; // sharp pipeline not finished → nothing to grade yet
       const bk = (await listR2Keys(`images/grading/${certId}/back_cropped`))[0];
       const [fb, bb] = await Promise.all([getR2Buffer(fk), bk ? getR2Buffer(bk) : Promise.resolve(null)]);
       if (!fb) return;
+      lazyAiAttempt.set(certId, Date.now());
       // runAiOnCertIfIdle returns null if it raced and a sibling won — grab that
       // sibling's promise from the map so we still await the live run.
       p = runAiOnCertIfIdle(certId, fb, bb) ?? inFlightAutoAi.get(certId) ?? null;
     }
     if (!p) return;
 
+    // Bounded wait: settle when the AI finishes OR the cap elapses (then it keeps
+    // running in the background and lands on the next load). Clear the loser timer.
     const timeoutMs = opts.timeoutMs ?? 20_000;
-    const timedOut = await Promise.race([
-      p.then(() => false).catch(() => false),
-      new Promise<boolean>((r) => setTimeout(() => r(true), timeoutMs)),
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race<"done" | "error" | "timeout">([
+      p.then(
+        () => "done",
+        () => "error"
+      ),
+      new Promise<"timeout">((r) => {
+        timer = setTimeout(() => r("timeout"), timeoutMs);
+      }),
     ]);
-    if (timedOut) {
+    if (timer) clearTimeout(timer);
+    if (outcome === "timeout") {
       console.warn(
-        `[ensure-ai] cert=${certId} still computing after ${timeoutMs}ms — returning; draft will appear on next load`
+        `[ensure-ai] cert=${certId} still computing after ${timeoutMs}ms — returning; draft lands on next load`
+      );
+    } else if (outcome === "error") {
+      console.error(
+        `[ensure-ai] cert=${certId} pre-grade FAILED on open — cert still served, draft absent (backed off ${LAZY_AI_COOLDOWN_MS}ms)`
       );
     } else {
       console.log(`[ensure-ai] cert=${certId} pre-grade computed on open`);
