@@ -255,8 +255,11 @@ export default function GradingPanel({
     staleTime: 30_000,
   });
 
-  // Grading data
-  const { data: gradingData } = useQuery<any>({
+  // Grading data. NOTE: the /grading request BLOCKS ~10s on the first open of a
+  // cert whose AI pre-grade was deferred off the scan path — the server computes
+  // it then and returns it in this payload, so the draft is present on first
+  // paint (not a later refresh). The aiComputing flag below surfaces that wait.
+  const { data: gradingData, isPending: gradingPending } = useQuery<any>({
     queryKey: [`${apiBase}/certificates/${certId}/grading`],
     queryFn: async () => {
       const res = await fetch(`${apiBase}/certificates/${certId}/grading`, { credentials: "include" });
@@ -264,6 +267,19 @@ export default function GradingPanel({
       return res.json();
     },
   });
+
+  // Show the "AI pre-grade computing" banner only when the /grading load is
+  // genuinely slow (>800ms) — i.e. the server is generating the deferred pre-grade.
+  // A fast load (draft already present) never trips it, so no false banner flash.
+  const [aiComputing, setAiComputing] = useState(false);
+  useEffect(() => {
+    if (!gradingPending) {
+      setAiComputing(false);
+      return;
+    }
+    const t = setTimeout(() => setAiComputing(true), 800);
+    return () => clearTimeout(t);
+  }, [gradingPending]);
 
   // Manual centering state
   const [manualCenteringSide, setManualCenteringSide] = useState<"front" | "back" | null>(null);
@@ -1913,6 +1929,16 @@ export default function GradingPanel({
           focusField={quickFocusField}
           onFocusField={setQuickFocusField}
         />
+      )}
+
+      {/* AI pre-grade is deferred off the scan path; on first open it computes
+          server-side (~10s) and this banner tells the grader it's generating —
+          not a blank/frozen panel. Clears the moment the draft arrives. */}
+      {aiComputing && (
+        <div className="flex items-center gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300">
+          <Loader2 size={14} className="animate-spin shrink-0" />
+          <span>Generating AI pre-grade — analysing this card (~10s). The panel will fill in automatically.</span>
+        </div>
       )}
 
       {/* AI Panel + Reprocess — HIDDEN in admin-review: every AI/CV action here

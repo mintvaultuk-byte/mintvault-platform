@@ -812,22 +812,25 @@ export function runAiOnCertIfIdle(
 }
 
 /**
- * Lazy AI pre-grade. The pre-grade (runAiOnCert: identification + centering) is
- * now DEFERRED off the scan path — the scan job runs sharp+r2 only. Call this
- * when a cert is OPENED for grading: if its AI pre-grade hasn't run yet, compute
- * it now from the stored cropped R2 images so the grader sees it shortly after
- * opening.
+ * Lazy AI pre-grade, BLOCKING. The pre-grade (runAiOnCert: identification +
+ * centering) is DEFERRED off the scan path — the scan job runs sharp+r2 only.
+ * Call this when a cert is OPENED for grading and AWAIT it: if its pre-grade
+ * hasn't run yet, it computes it now from the stored cropped R2 images and
+ * RESOLVES once the result is persisted, so the caller can re-read the cert and
+ * return the draft on first paint (no later refresh needed).
  *
- * Designed to be called fire-and-forget (`void triggerLazyAiDraft(id)`): it
- * returns quickly and the AI runs in the background. Idempotent + safe to call
- * on every open:
+ * Bounded + safe to await on every open:
  *   - no-op if ai_analysis is already populated (pre-grade already ran),
  *   - no-op if the ai_auto_ingest_enabled master switch is off (manual-only mode),
  *   - no-op if the sharp pipeline hasn't produced a cropped front yet,
- *   - no-op if a run is already in-flight (runAiOnCertIfIdle's guard).
- * Never throws.
+ *   - reuses an in-flight run if a concurrent open already started one,
+ *   - bounded by timeoutMs (default 20s): on timeout it RETURNS while the AI
+ *     keeps running in the background (it'll be present on the next load) — so a
+ *     slow/hung AI never wedges the grading panel open.
+ * Never throws — on any failure the caller still serves the cert, gradeable
+ * without the draft.
  */
-export async function triggerLazyAiDraft(certId: number): Promise<void> {
+export async function ensureAiDraft(certId: number, opts: { timeoutMs?: number } = {}): Promise<void> {
   try {
     const row = (await db.execute(sql`SELECT ai_analysis FROM certificates WHERE id = ${certId}`)).rows[0] as any;
     if (!row) return;
@@ -838,18 +841,34 @@ export async function triggerLazyAiDraft(certId: number): Promise<void> {
     const { getSetting } = await import("./lib/pipeline-settings");
     if (!(await getSetting("ai_auto_ingest_enabled", true))) return; // master switch off → manual only
 
-    // runAiOnCert grades the deskewed/cropped variant the sharp pipeline wrote.
-    const fk = (await listR2Keys(`images/grading/${certId}/front_cropped`))[0];
-    if (!fk) return; // sharp pipeline not finished → nothing to grade yet
-    const bk = (await listR2Keys(`images/grading/${certId}/back_cropped`))[0];
-    const [fb, bb] = await Promise.all([getR2Buffer(fk), bk ? getR2Buffer(bk) : Promise.resolve(null)]);
-    if (!fb) return;
+    // Reuse an in-flight run (a concurrent open may already be computing), else
+    // start one from the deskewed/cropped variant the sharp pipeline wrote.
+    let p = inFlightAutoAi.get(certId) ?? null;
+    if (!p) {
+      const fk = (await listR2Keys(`images/grading/${certId}/front_cropped`))[0];
+      if (!fk) return; // sharp pipeline not finished → nothing to grade yet
+      const bk = (await listR2Keys(`images/grading/${certId}/back_cropped`))[0];
+      const [fb, bb] = await Promise.all([getR2Buffer(fk), bk ? getR2Buffer(bk) : Promise.resolve(null)]);
+      if (!fb) return;
+      // runAiOnCertIfIdle returns null if it raced and a sibling won — grab that
+      // sibling's promise from the map so we still await the live run.
+      p = runAiOnCertIfIdle(certId, fb, bb) ?? inFlightAutoAi.get(certId) ?? null;
+    }
+    if (!p) return;
 
-    const p = runAiOnCertIfIdle(certId, fb, bb);
-    p?.then((r) =>
-      console.log(`[lazy-ai] cert=${certId} pre-grade computed on open (card=${r.cardName ?? "?"})`)
-    ).catch((e) => console.error(`[lazy-ai] cert=${certId} failed: ${e?.message ?? e}`));
+    const timeoutMs = opts.timeoutMs ?? 20_000;
+    const timedOut = await Promise.race([
+      p.then(() => false).catch(() => false),
+      new Promise<boolean>((r) => setTimeout(() => r(true), timeoutMs)),
+    ]);
+    if (timedOut) {
+      console.warn(
+        `[ensure-ai] cert=${certId} still computing after ${timeoutMs}ms — returning; draft will appear on next load`
+      );
+    } else {
+      console.log(`[ensure-ai] cert=${certId} pre-grade computed on open`);
+    }
   } catch (e: any) {
-    console.error(`[lazy-ai] trigger failed cert=${certId}: ${e?.message ?? e}`);
+    console.error(`[ensure-ai] cert=${certId} failed: ${e?.message ?? e}`);
   }
 }

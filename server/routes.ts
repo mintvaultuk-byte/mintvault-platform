@@ -9670,12 +9670,18 @@ Defects (admin-confirmed): ${defectLines}`;
   app.get("/api/admin/certificates/:id/grading", requireAdmin, async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
-      const cert = await storage.getCertificate(id);
+      let cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
+      // AI pre-grade is deferred off the scan path. If it hasn't run for this cert,
+      // compute it NOW (bounded ~20s) and re-read so the draft is present on first
+      // paint — never silently absent until refresh. Fails gracefully.
+      const existingAi = (cert as any).aiAnalysis;
+      if (!existingAi || (typeof existingAi === "object" && Object.keys(existingAi).length === 0)) {
+        const { ensureAiDraft } = await import("./scan-ingest-service");
+        await ensureAiDraft(id);
+        cert = (await storage.getCertificate(id)) ?? cert;
+      }
       const c = cert as any;
-      // Lazy AI pre-grade: it's deferred off the scan path, so compute it on open
-      // if absent. Fire-and-forget — never blocks the grading-panel load.
-      void import("./scan-ingest-service").then((m) => m.triggerLazyAiDraft(id)).catch(() => {});
       res.json({
         centeringFrontLr: c.centeringFrontLr || null,
         centeringFrontTb: c.centeringFrontTb || null,
