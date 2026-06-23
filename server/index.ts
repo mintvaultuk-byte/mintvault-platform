@@ -16,6 +16,7 @@ import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
 import { sanitizeResponseBodyForLog } from "./lib/log-redaction";
 import { clientErrorMessage, newRequestId, scrubServerErrorBody } from "./lib/error-sanitize";
+import { csrfOriginCheck } from "./lib/csrf-origin";
 import pg from "pg";
 import path from "path";
 
@@ -329,6 +330,12 @@ app.use((req, res, next) => {
 
   next();
 });
+
+// Phase 2 (security): same-origin CSRF defense for cookie-authenticated,
+// state-changing requests. Runs after session/body parsing and before the route
+// handlers. Exempts the Stripe webhook (signature-authed) and scanner-token
+// requests; allows requests with no Origin/Referer (non-browser API clients).
+app.use(csrfOriginCheck);
 
 log(`ADMIN_PASSWORD env var: ${process.env.ADMIN_PASSWORD ? "SET" : "NOT SET"}`, "auth");
 // ADMIN_PIN env-var log removed 2026-05-04 — PIN is now per-user bcrypt on users.pin_hash.
