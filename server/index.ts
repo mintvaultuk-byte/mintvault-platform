@@ -15,7 +15,13 @@ import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
 import { sanitizeResponseBodyForLog } from "./lib/log-redaction";
-import { clientErrorMessage, newRequestId, productionErrorEnvelope } from "./lib/error-sanitize";
+import {
+  clientErrorMessage,
+  newRequestId,
+  errorEnvelope,
+  errorDetailsAllowed,
+  safeErrorSummary,
+} from "./lib/error-sanitize";
 import { csrfOriginCheck } from "./lib/csrf-origin";
 import { withAdvisoryLock } from "./lib/advisory-lock";
 import pg from "pg";
@@ -27,6 +33,7 @@ const httpServer = createServer(app);
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
+    requestId?: string;
   }
 }
 
@@ -42,6 +49,17 @@ export function log(message: string, source = "express") {
 }
 
 app.set("trust proxy", 1);
+
+// Phase 2 (security): assign a correlation id to EVERY request — before any
+// route, redirect, body parsing, or the Stripe webhook — and echo it as
+// X-Request-ID. Generic 5xx responses carry this id so support can correlate a
+// client error with the safe server-side log summary without any detail leaking.
+app.use((req, res, next) => {
+  const id = newRequestId();
+  req.requestId = id;
+  res.setHeader("X-Request-ID", id);
+  next();
+});
 
 // 301-redirect any *.fly.dev request to the canonical mintvaultuk.com.
 // First in the chain so it short-circuits before session, body-parsing, etc.
@@ -308,21 +326,40 @@ app.use((req, res, next) => {
   const reqPath = req.path;
   let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
+  // Phase 2: detail is shown only for explicit local debugging; otherwise
+  // EVERY 5xx (any key, via res.json OR res.send) collapses to a strict
+  // { error, requestId } envelope correlated by the request id. The interceptor
+  // logs only safe correlation metadata — never the original body.
+  const allowDetails = errorDetailsAllowed();
+  let enveloped = false;
+
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
-    // Phase 1 (security): single choke point so that in production EVERY 5xx
-    // JSON body — from the ~100 route handlers that respond directly, under any
-    // key (error/message/detail/details/debug/...) — collapses to a strict
-    // { error, requestId } envelope. No internal error text reaches the client.
-    // The interceptor logs ONLY safe correlation metadata (never the original).
-    const envelope = productionErrorEnvelope(res.statusCode, bodyJson, process.env.NODE_ENV === "production");
+    const env = errorEnvelope(res.statusCode, bodyJson, { allowDetails, requestId: req.requestId });
     let outgoing = bodyJson;
-    if (envelope.scrubbed) {
-      outgoing = envelope.body as typeof bodyJson;
-      console.error(`[server-error] reqId=${envelope.requestId} status=${res.statusCode} ${req.method} ${req.path}`);
+    if (env.scrubbed) {
+      enveloped = true;
+      outgoing = env.body as typeof bodyJson;
+      console.error(`[server-error] reqId=${env.requestId} status=${res.statusCode} ${req.method} ${req.path}`);
     }
     capturedJsonResponse = outgoing;
     return originalResJson.apply(res, [outgoing, ...args]);
+  };
+
+  // Cover the rare non-JSON 5xx (res.status(5xx).send("...")). res.json calls
+  // res.send internally but sets `enveloped` first, so a json 5xx is never
+  // double-processed here.
+  const originalResSend = res.send;
+  res.send = function (this: typeof res, body?: any) {
+    if (!enveloped && !allowDetails && res.statusCode >= 500) {
+      enveloped = true;
+      const env = errorEnvelope(res.statusCode, body, { allowDetails, requestId: req.requestId });
+      console.error(`[server-error] reqId=${env.requestId} status=${res.statusCode} ${req.method} ${req.path}`);
+      capturedJsonResponse = env.body as Record<string, any>;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      return originalResJson.apply(res, [env.body]);
+    }
+    return originalResSend.call(res, body);
   };
 
   res.on("finish", () => {
@@ -590,16 +627,16 @@ async function runTransferV2Sweep() {
   setTimeout(guardedScanReconciler, 90_000);
   setInterval(guardedScanReconciler, 5 * 60 * 1000);
 
-  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
+    const requestId = req.requestId ?? newRequestId();
 
-    // Phase 1 (security): keep full detail server-side under a correlation id;
-    // 5xx responses in production return a generic message + that id only, so
-    // internal error text (DB driver messages, etc.) never reaches the client.
-    // 4xx messages are intentional and pass through.
-    const requestId = newRequestId();
-    console.error(`Internal Server Error [reqId=${requestId}]:`, err);
+    // Phase 2 (security): log a SAFE summary only (error class + code + the
+    // request id + operation) — never the raw message/stack/connection string.
+    // The response interceptor enforces the generic 5xx envelope; intentional
+    // 4xx messages pass through.
+    console.error("[unhandled-error]", safeErrorSummary(err, { requestId, operation: `${req.method} ${req.path}` }));
 
     if (res.headersSent) {
       return next(err);
