@@ -26,6 +26,13 @@ import {
   Upload,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  buildReprintRequest,
+  isClaimed,
+  isValidReprintReason,
+  REPRINT_REASON_MIN,
+  REPRINT_REASON_MAX,
+} from "@/lib/reprint";
 
 type BrowserCert = CertificateRecord & { isPrinted: boolean; reprintCount: number };
 
@@ -767,6 +774,8 @@ export default function AdminCertBrowser() {
   const [igPostCert, setIgPostCert] = useState<BrowserCert | null>(null);
   const [attachCert, setAttachCert] = useState<BrowserCert | null>(null);
   const [reprintingId, setReprintingId] = useState<string | null>(null);
+  const [reprintReasonCert, setReprintReasonCert] = useState<BrowserCert | null>(null);
+  const [reprintReason, setReprintReason] = useState("");
 
   const {
     data: certs = [],
@@ -776,22 +785,31 @@ export default function AdminCertBrowser() {
     queryKey: ["/api/admin/printing/browser"],
   });
 
-  const handleReprint = useCallback(
-    async (cert: BrowserCert) => {
+  const doReprint = useCallback(
+    async (cert: BrowserCert, reason?: string) => {
       setReprintingId(cert.certId);
       try {
-        const res = await fetch(`/api/admin/printing/reprint/${cert.certId}?side=both`, {
+        // Route through the supported print-batch endpoints — the old
+        // /api/admin/printing/reprint/:certId route was removed in v525.
+        const { url, body } = buildReprintRequest(cert, reason);
+        const res = await fetch(url, {
           method: "POST",
           credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
         });
         if (!res.ok) throw new Error("Reprint failed");
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
+        const data = (await res.json()) as { pdfUrl?: string };
+        if (!data.pdfUrl) throw new Error("No pdfUrl in response");
+        const pdfRes = await fetch(data.pdfUrl, { credentials: "include" });
+        if (!pdfRes.ok) throw new Error("Artifact download failed");
+        const blob = await pdfRes.blob();
+        const objUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url;
+        a.href = objUrl;
         a.download = `${cert.certId}-reprint.pdf`;
         a.click();
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(objUrl);
         toast({ title: "Reprint generated", description: cert.certId });
         qc.invalidateQueries({ queryKey: ["/api/admin/printing/browser"] });
       } catch {
@@ -801,6 +819,20 @@ export default function AdminCertBrowser() {
       }
     },
     [toast, qc]
+  );
+
+  // Claimed certs require an audit reason -> open the reason dialog first;
+  // unclaimed certs reprint immediately via /api/admin/print-batch.
+  const handleReprint = useCallback(
+    (cert: BrowserCert) => {
+      if (isClaimed(cert)) {
+        setReprintReason("");
+        setReprintReasonCert(cert);
+      } else {
+        void doReprint(cert);
+      }
+    },
+    [doReprint]
   );
 
   const filtered = certs.filter((c) => {
@@ -903,6 +935,48 @@ export default function AdminCertBrowser() {
       {reportCert && <GradingReportModal cert={reportCert} onClose={() => setReportCert(null)} />}
       {igPostCert && <PostToIgModal cert={igPostCert} onClose={() => setIgPostCert(null)} />}
       {attachCert && <AttachImagesModal cert={attachCert} onClose={() => setAttachCert(null)} />}
+      {reprintReasonCert && (
+        <Dialog open onOpenChange={(o) => !o && setReprintReasonCert(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="text-[var(--admin-gold-hi)]">
+                Reprint claimed certificate {reprintReasonCert.certId}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2">
+              <Label htmlFor="reprint-reason">
+                Reason ({REPRINT_REASON_MIN}–{REPRINT_REASON_MAX} characters) — recorded in the audit trail
+              </Label>
+              <Textarea
+                id="reprint-reason"
+                value={reprintReason}
+                onChange={(e) => setReprintReason(e.target.value)}
+                rows={4}
+                placeholder="Why is this claimed certificate being reprinted?"
+              />
+              <p className="text-xs text-[#888888]">
+                {reprintReason.trim().length}/{REPRINT_REASON_MAX}
+              </p>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setReprintReasonCert(null)}>
+                Cancel
+              </Button>
+              <Button
+                disabled={!isValidReprintReason(reprintReason)}
+                onClick={() => {
+                  const cert = reprintReasonCert;
+                  setReprintReasonCert(null);
+                  if (cert) void doReprint(cert, reprintReason);
+                }}
+                className="bg-[var(--admin-gold)] hover:bg-[var(--admin-gold-hi)] text-[#1c1607] font-bold"
+              >
+                Reprint
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }

@@ -5205,13 +5205,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const email = req.session.customerEmail!;
       const submissions = await storage.getSubmissionsByEmail(email);
-      const secret = getSignedUrlSecret();
-      const result = submissions.map((sub: any) => {
-        const sid = sub.submissionId || sub.submission_id || "";
-        const token = sid ? crypto.createHmac("sha256", secret).update(sid).digest("hex").slice(0, 16) : "";
-        return { ...sub, packingSlipToken: token, shippingLabelToken: token };
-      });
-      res.json(result);
+      // Phase 1: no packing-slip/shipping-label bearer tokens are exposed. The
+      // dashboard downloads through authenticated, tokenless, ownership-checked
+      // routes (/api/customer/submissions/:submissionId/packing-slip|shipping-label).
+      res.json(submissions);
     } catch (err) {
       console.error("[customer] submissions error:", err);
       res.status(500).json({ error: "Failed to load submissions." });

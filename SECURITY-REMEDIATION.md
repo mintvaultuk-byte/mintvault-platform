@@ -111,3 +111,31 @@ An independent verification pass raised two MEDIUM findings; both are now closed
 npm run check   # tsc — clean
 npm test        # vitest — 315 pass
 ```
+
+---
+
+## Release Train A (branch `security/remediation-release`)
+
+Cherry-picked the 10 security/ops commits onto `origin/main` (excluding the
+unrelated `e62d650`). Then, per phase:
+
+### Phase 1 — customer downloads + admin reprint
+
+- NEW authenticated, tokenless, ownership-checked routes
+  `GET /api/customer/submissions/:submissionId/{packing-slip,shipping-label}`
+  (`requireCustomer`; ownership + state decided by
+  [server/lib/customer-documents.ts](server/lib/customer-documents.ts);
+  indistinguishable 404 for missing/deleted/wrong-owner; 400 for the owner's draft).
+- Extracted `buildPackingSlipPdf` / `buildShippingLabelPdf` in
+  [server/routes/submissions.ts](server/routes/submissions.ts) — shared with the
+  preserved public token-gated email routes (behaviour-identical).
+- Removed `packingSlipToken`/`shippingLabelToken` exposure from
+  `GET /api/customer/submissions`; dashboard now uses tokenless links.
+- Admin reprint: client routes through the supported `print-batch` /
+  `print-batch/reprint` (claimed → 10–500-char reason dialog) via
+  [client/src/lib/reprint.ts](client/src/lib/reprint.ts); the removed
+  `/api/admin/printing/reprint/:certId` is NOT restored.
+- Tests: BOLA/ownership (`customer-documents`), reprint routing (`reprint`),
+  client contract guard (`client-endpoint-contract`).
+- Review: 2 independent lenses (security/BOLA + regression/contract) → SHIP, 0 CRITICAL/HIGH.
+- Gate: tsc clean; 339 tests; routes 379/379, 0 duplicates.
