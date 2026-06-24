@@ -50,7 +50,7 @@ function countRawErrorLogs(): { total: number; perFile: Map<string, number> } {
 const BASELINE = 318;
 
 describe("raw-error-logging source guard", () => {
-  const { total, perFile } = countRawErrorLogs();
+  const { total } = countRawErrorLogs();
 
   it("does not add NEW raw-error message logging beyond the tracked baseline", () => {
     expect(
