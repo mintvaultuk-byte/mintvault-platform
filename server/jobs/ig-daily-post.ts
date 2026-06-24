@@ -20,7 +20,8 @@
  * IG_POST_ENABLED === "true" — see meta-poster.ts for the actual gate.
  */
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import { db } from "../db";
+import { db, pool } from "../db";
+import { withAdvisoryLock } from "../lib/advisory-lock";
 import { igPostQueue, igSettings, IG_POST_TYPES, type IgPostType } from "@shared/schema";
 import { fetchPostData, selectPostType } from "../ig/data-fetcher";
 import { generateIgImage } from "../ig/image-generator";
@@ -47,16 +48,16 @@ function nowInLondonHour(date: Date = new Date()): number {
     hour12: false,
     timeZone: "Europe/London",
   });
-  const hourStr = fmt.format(date);     // "10" / "23" / "00"
+  const hourStr = fmt.format(date); // "10" / "23" / "00"
   return parseInt(hourStr, 10);
 }
 
 function londonDateKey(date: Date = new Date()): string {
   // YYYY-MM-DD in London time. Used to check "have we posted today already".
   const fmt = new Intl.DateTimeFormat("en-GB", {
-    year:  "numeric",
+    year: "numeric",
     month: "2-digit",
-    day:   "2-digit",
+    day: "2-digit",
     timeZone: "Europe/London",
   });
   const parts = fmt.formatToParts(date);
@@ -69,11 +70,13 @@ async function hasPostedToday(londonDay: string): Promise<boolean> {
     const rows = await db
       .select({ id: igPostQueue.id })
       .from(igPostQueue)
-      .where(and(
-        sql`to_char(${igPostQueue.scheduledFor} AT TIME ZONE 'Europe/London', 'YYYY-MM-DD') = ${londonDay}`,
-        sql`${igPostQueue.status} IN ('posted','failed','skipped','ready','generating')`,
-        isNull(igPostQueue.deletedAt),
-      ))
+      .where(
+        and(
+          sql`to_char(${igPostQueue.scheduledFor} AT TIME ZONE 'Europe/London', 'YYYY-MM-DD') = ${londonDay}`,
+          sql`${igPostQueue.status} IN ('posted','failed','skipped','ready','generating')`,
+          isNull(igPostQueue.deletedAt)
+        )
+      )
       .limit(1);
     return rows.length > 0;
   } catch (err: any) {
@@ -101,7 +104,7 @@ async function isPostingEnabled(): Promise<boolean> {
 }
 
 export async function runIgDailyPost(
-  opts: { force?: boolean; postTypeOverride?: IgPostType } = {},
+  opts: { force?: boolean; postTypeOverride?: IgPostType } = {}
 ): Promise<{ status: string; postType?: IgPostType; queueId?: number; metaPostId?: string; reason?: string }> {
   const londonDay = londonDateKey();
 
@@ -183,15 +186,18 @@ export async function runIgDailyPost(
   const certPk = (data as any)._certPk ?? null;
   let queuedId: number;
   try {
-    const [queued] = await db.insert(igPostQueue).values({
-      scheduledFor:  new Date(),
-      postType,
-      certId:        certPk,
-      imageR2Key:    r2Key,
-      caption,
-      hashtags,
-      status:        "ready",
-    }).returning({ id: igPostQueue.id });
+    const [queued] = await db
+      .insert(igPostQueue)
+      .values({
+        scheduledFor: new Date(),
+        postType,
+        certId: certPk,
+        imageR2Key: r2Key,
+        caption,
+        hashtags,
+        status: "ready",
+      })
+      .returning({ id: igPostQueue.id });
     queuedId = queued.id;
   } catch (err: any) {
     // Likely ig_post_queue missing — return a marker so the dry-run CLI
@@ -203,15 +209,25 @@ export async function runIgDailyPost(
   // Stable audit-log metadata for every status transition on this run.
   const overrideMeta = opts.postTypeOverride ? { override_type: opts.postTypeOverride } : {};
 
-  try { await storage.writeAuditLog("ig_post", String(queuedId), "ready", null, { postType, certPk, r2Key, ...overrideMeta }); } catch {}
+  try {
+    await storage.writeAuditLog("ig_post", String(queuedId), "ready", null, {
+      postType,
+      certPk,
+      r2Key,
+      ...overrideMeta,
+    });
+  } catch {}
 
   // 6. Decide: live publish or dry-run?
   const enabled = await isPostingEnabled();
   if (!enabled) {
-    await db.update(igPostQueue)
+    await db
+      .update(igPostQueue)
       .set({ status: "ready", errorDetail: "IG_POST_ENABLED gate closed or admin toggle off" })
       .where(eq(igPostQueue.id, queuedId));
-    try { await storage.writeAuditLog("ig_post", String(queuedId), "dry-run", null, { postType, certPk, ...overrideMeta }); } catch {}
+    try {
+      await storage.writeAuditLog("ig_post", String(queuedId), "dry-run", null, { postType, certPk, ...overrideMeta });
+    } catch {}
     console.log(`[ig-cron] Dry-run only — queue row ${queuedId} left in 'ready' state.`);
     return { status: "dry-run", postType, queueId: queuedId };
   }
@@ -220,18 +236,31 @@ export async function runIgDailyPost(
   try {
     const result = await postToInstagram({ imageBuffer, caption, hashtags, r2Key });
     const metaPostId = result.metaPostId;
-    await db.update(igPostQueue)
+    await db
+      .update(igPostQueue)
       .set({ status: "posted", metaPostId, postedAt: new Date() })
       .where(eq(igPostQueue.id, queuedId));
-    try { await storage.writeAuditLog("ig_post", String(queuedId), "posted", null, { postType, certPk, metaPostId, ...overrideMeta }); } catch {}
+    try {
+      await storage.writeAuditLog("ig_post", String(queuedId), "posted", null, {
+        postType,
+        certPk,
+        metaPostId,
+        ...overrideMeta,
+      });
+    } catch {}
     console.log(`[ig-cron] Posted — queue=${queuedId} meta=${metaPostId}`);
     return { status: "posted", postType, queueId: queuedId, metaPostId };
   } catch (err: any) {
     const detail = String(err?.message ?? err);
-    await db.update(igPostQueue)
-      .set({ status: "failed", errorDetail: detail })
-      .where(eq(igPostQueue.id, queuedId));
-    try { await storage.writeAuditLog("ig_post", String(queuedId), "failed", null, { postType, certPk, error: detail, ...overrideMeta }); } catch {}
+    await db.update(igPostQueue).set({ status: "failed", errorDetail: detail }).where(eq(igPostQueue.id, queuedId));
+    try {
+      await storage.writeAuditLog("ig_post", String(queuedId), "failed", null, {
+        postType,
+        certPk,
+        error: detail,
+        ...overrideMeta,
+      });
+    } catch {}
     console.error(`[ig-cron] Publish failed for queue=${queuedId}: ${detail}`);
     return { status: "failed", postType, queueId: queuedId, reason: detail };
   }
@@ -240,6 +269,9 @@ export async function runIgDailyPost(
 // ── Scheduler — call this once at boot ─────────────────────────────────────
 
 let started = false;
+
+// Stable, unique advisory-lock name for the scheduled IG post tick.
+const IG_DAILY_POST_LOCK = "ig-daily-post";
 
 export function startIgDailyPostScheduler(): void {
   if (started) {
@@ -252,20 +284,31 @@ export function startIgDailyPostScheduler(): void {
     const tick = async () => {
       const hour = nowInLondonHour();
       if (hour !== POST_WINDOW_HOUR_LONDON) {
-        // Outside window — silent.
+        // Outside window — silent. No DB touched, so no lock needed.
         return;
       }
-      try {
-        const result = await runIgDailyPost();
-        if (result.status === "skipped") {
-          console.log("[ig-cron] Tick: already-posted-today (skipped)");
-        } else if (result.status === "dry-run") {
-          console.log("[ig-cron] Tick: dry-run completed");
-        } else {
-          console.log(`[ig-cron] Tick: ${result.status} (${result.postType})`);
+      // Advisory lock around the actual scheduled post so two Fly machines can't
+      // both post in the same window. Manual/admin force-run (runIgDailyPost
+      // called directly elsewhere) is intentionally NOT locked — it's an explicit
+      // single human action and the per-day idempotency (hasPostedToday) inside
+      // runIgDailyPost already prevents a same-day double-post; locking it would
+      // make a force-run silently skip while a tick holds the lock.
+      const outcome = await withAdvisoryLock(pool, IG_DAILY_POST_LOCK, async () => {
+        try {
+          const result = await runIgDailyPost();
+          if (result.status === "skipped") {
+            console.log("[ig-cron] Tick: already-posted-today (skipped)");
+          } else if (result.status === "dry-run") {
+            console.log("[ig-cron] Tick: dry-run completed");
+          } else {
+            console.log(`[ig-cron] Tick: ${result.status} (${result.postType})`);
+          }
+        } catch (err: any) {
+          console.error(`[ig-cron] Tick failed: ${err?.message ?? err}`);
         }
-      } catch (err: any) {
-        console.error(`[ig-cron] Tick failed: ${err?.message ?? err}`);
+      });
+      if (!outcome.ran) {
+        console.log("[ig-cron] Tick: advisory lock held by another instance — skipped");
       }
     };
 

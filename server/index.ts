@@ -508,13 +508,14 @@ async function runTransferV2Sweep() {
   setTimeout(async () => {
     try {
       const { runEmbedCorpusJob } = await import("./jobs/embed-corpus");
-      await runEmbedCorpusJob();
-      setInterval(
-        () => {
-          runEmbedCorpusJob().catch((e) => log(`[embed-corpus] unhandled: ${e.message}`, "embed-corpus"));
-        },
-        60 * 60 * 1000
-      );
+      // Advisory-locked like the other mutating jobs: only one instance runs the
+      // tick if MintVault ever scales past one Fly machine. (void-thunk because
+      // runEmbedCorpusJob returns stats, while the guard expects () => Promise<void>.)
+      const guardedEmbedCorpus = guard("embed-corpus", async () => {
+        await runEmbedCorpusJob();
+      });
+      await guardedEmbedCorpus();
+      setInterval(guardedEmbedCorpus, 60 * 60 * 1000);
     } catch (err: any) {
       log(`[embed-corpus] startup error: ${err?.message || err}`, "embed-corpus");
     }

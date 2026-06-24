@@ -35,15 +35,45 @@ raw-body ordering, scanner timing-safe token auth.
 
 ## Phase-by-phase (commit → controls → evidence)
 
-| Phase                  | Commit    | OWASP / ASVS             | Status                                                                                                                                                        |
-| ---------------------- | --------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0 — test safety net    | `f8f79bb` | V1 verification baseline | ✅ route-uniqueness guard, first `requireAdmin` test, log-redaction seam                                                                                      |
-| 1 — stop exposure      | `70847eb` | A01, A02, A04, A09       | ✅ recursive log redaction; response-layer 5xx scrubber (covers ~100 handlers); `/api/db-check` prod-gated; generic 5xx + requestId; redirect-log query strip |
-| 2 — CSRF               | `386a6d7` | A01; API8                | ✅ same-origin `csrfOriginCheck`; exempts Stripe webhook + scanner token                                                                                      |
-| 3 — route dedup        | `dfb78ba` | A06 maintainability      | ✅ 115 shadowed dup routes removed; zero-dup CI guard; behaviour-preserving (verified)                                                                        |
-| 4 — readiness/shutdown | `00f7615` | A06, A10                 | ✅ `/ready` probe; graceful SIGTERM drain                                                                                                                     |
-| 5 — job locking        | `b582d1d` | A06, A08                 | ✅ advisory-lock guard on 5 mutating jobs                                                                                                                     |
-| 6 — CI/container       | `da27292` | A02, A03, A08            | ✅ least-privilege CI, SHA-pinned actions, Dependabot, non-root Dockerfile + HEALTHCHECK, blocking critical audit                                             |
+| Phase                  | Commit                 | OWASP / ASVS             | Status                                                                                                                                                                                                 |
+| ---------------------- | ---------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0 — test safety net    | `f8f79bb`              | V1 verification baseline | ✅ route-uniqueness guard, first `requireAdmin` test, log-redaction seam                                                                                                                               |
+| 1 — stop exposure      | `70847eb` (+`439de29`) | A01, A02, A04, A09       | ✅ recursive log redaction; `/api/db-check` prod-gated; redirect-log query strip. Production 5xx now collapse to a STRICT `{ error, requestId }` envelope (every other key dropped — see M1 below)     |
+| 2 — CSRF               | `386a6d7`              | A01; API8                | ✅ same-origin `csrfOriginCheck`; exempts Stripe webhook + scanner token                                                                                                                               |
+| 3 — route dedup        | `dfb78ba`              | A06 maintainability      | ✅ 115 shadowed dup routes removed; zero-dup CI guard; behaviour-preserving (verified)                                                                                                                 |
+| 4 — readiness/shutdown | `00f7615`              | A06, A10                 | ✅ `/ready` probe; graceful SIGTERM drain                                                                                                                                                              |
+| 5 — job locking        | `b582d1d` (+ commit 2) | A06, A08                 | ✅ advisory-lock guard on ALL 8 mutating jobs (pre-grade-cleanup, vault-club-grace-sweep, transfer-v2-sweep, archival-sweep, scan-reconciler, embed-corpus, ig-daily-post, weekly-reel) — see M2 below |
+| 6 — CI/container       | `da27292`              | A02, A03, A08            | ✅ least-privilege CI, SHA-pinned actions, Dependabot, non-root Dockerfile + HEALTHCHECK, blocking critical audit                                                                                      |
+
+---
+
+## Post-verification remediation (2026-06-24)
+
+An independent verification pass raised two MEDIUM findings; both are now closed.
+
+- **M1 — production 5xx disclosure (closed, `439de29`).** The interceptor previously
+  rewrote only `error`/`message`, so raw errors under `detail`/`details`/`debug`
+  still reached clients ([routes.ts](server/routes.ts) seed/reset/grading,
+  [admin-submissions.ts](server/routes/admin-submissions.ts) step-back). Replaced
+  with `productionErrorEnvelope()`: in production every `status >= 500` JSON
+  response collapses to a strict `{ error: "Internal Server Error", requestId }` —
+  every other key dropped, including array/primitive bodies — and the interceptor
+  logs only correlation metadata (requestId, status, method, normalized path),
+  never the original. 4xx and non-production responses are untouched.
+- **M2 — unlocked mutating jobs (closed in this pass).** `embed-corpus`,
+  `ig-daily-post` and `weekly-reel` scheduled ticks are now wrapped in
+  `withAdvisoryLock` (embed via the `index.ts` guard; ig/weekly around the actual
+  post/reel execution inside their schedulers). All 8 mutating jobs are covered,
+  enforced by [tests/job-locks.test.ts](tests/job-locks.test.ts). Manual/admin
+  force-run paths are intentionally left unlocked (explicit human action; the
+  per-day idempotency inside the run functions already prevents double-runs).
+
+**Remaining LOW findings (deliberately deferred, accept-with-monitoring):**
+
+- **L3** — 5xx via `res.send`/`res.end` ([stolen.ts:155](server/routes/stolen.ts:155) generic; [routes.ts:1786/1801](server/routes.ts:1786) empty) and the pre-middleware probes (`/ready`, `/api/db-check`) are generic but carry **no requestId** (they bypass the `res.json` interceptor). No data leak.
+- **L4** — SIGTERM drains HTTP + closes pools but does not clear scheduled-job timers; a tick can still fire during the ≤10s drain (guarded by try/catch + advisory lock).
+- **L5** — ad-hoc `console.error(..., err.message)` in handlers and the central error handler log raw error text **server-side** (by design, for correlation); a sensitive value embedded in an error string could reach server logs.
+- **L6** — in development only, route-level 5xx still return raw `err.message` (the envelope is production-only, by design).
 
 ---
 

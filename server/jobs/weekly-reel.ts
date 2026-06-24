@@ -27,26 +27,25 @@
  */
 
 import { sql } from "drizzle-orm";
-import { db } from "../db";
+import { db, pool } from "../db";
+import { withAdvisoryLock } from "../lib/advisory-lock";
 import { auditLog, reelAnalytics, reelCardApprovals } from "@shared/schema";
 import { getR2SignedUrl, uploadToR2 } from "../r2";
 import { fetchWeeklyReelData, type WeeklyReelCard } from "../ig/weekly-reel-data";
 import { imageToVideo } from "../lib/segmind-client";
 import { getAllSettings, type PipelineSettings } from "../lib/pipeline-settings";
-import {
-  sendReelSummaryEmail, postReelWebhook, sendCardFeaturedEmail,
-} from "../lib/reel-notifications";
+import { sendReelSummaryEmail, postReelWebhook, sendCardFeaturedEmail } from "../lib/reel-notifications";
 import { publishToInstagram, publishToFacebook, getInstagramPeakHour } from "../lib/meta-publisher";
 import { publishToTikTok } from "../lib/tiktok-publisher";
 import { APP_BASE_URL } from "../app-url";
 
 const MIN_CARDS_TO_PUBLISH = 3;
 const TICK_INTERVAL_MS = 60 * 60 * 1000; // hourly
-const BOOT_DELAY_MS = 120 * 1000;        // 2 min after boot
-const SOURCE_URL_TTL_SECONDS = 60 * 60;  // 1h presign
+const BOOT_DELAY_MS = 120 * 1000; // 2 min after boot
+const SOURCE_URL_TTL_SECONDS = 60 * 60; // 1h presign
 
 /** Per-generation cost in USD. Segmind hfai-dop-lite list price = $0.40. */
-export const COST_PER_GENERATION = 0.40;
+export const COST_PER_GENERATION = 0.4;
 
 export interface PerCardResult {
   certNumber: string;
@@ -76,22 +75,21 @@ function utcDateKey(date: Date = new Date()): string {
 }
 
 function isScheduledMoment(settings: PipelineSettings, peakHour: number | null, date: Date = new Date()): boolean {
-  const targetHour = settings.smart_schedule && peakHour != null
-    ? peakHour
-    : settings.schedule_hour_utc;
-  return date.getUTCDay() === settings.schedule_day
-      && date.getUTCHours() === targetHour;
+  const targetHour = settings.smart_schedule && peakHour != null ? peakHour : settings.schedule_hour_utc;
+  return date.getUTCDay() === settings.schedule_day && date.getUTCHours() === targetHour;
 }
 
 async function hasRunForDate(dateKey: string): Promise<boolean> {
   try {
-    const rows = (await db.execute(sql`
+    const rows = (
+      await db.execute(sql`
       SELECT id FROM audit_log
       WHERE entity_type = 'weekly_reel'
         AND entity_id = ${dateKey}
         AND action = 'generated'
       LIMIT 1
-    `)).rows;
+    `)
+    ).rows;
     return rows.length > 0;
   } catch (err: any) {
     console.warn(`[weekly-reel] hasRunForDate lookup failed: ${err?.message ?? err}. Assuming false.`);
@@ -138,7 +136,7 @@ async function processOne(card: WeeklyReelCard, settings: PipelineSettings): Pro
  *  are left as-is so the operator can spot typos. */
 export function applyCaptionTemplate(
   template: string,
-  vars: { topGrade: string; cardCount: number; date: string; topCard: string },
+  vars: { topGrade: string; cardCount: number; date: string; topCard: string }
 ): string {
   return template
     .replace(/\{\{\s*topGrade\s*\}\}/g, vars.topGrade)
@@ -156,7 +154,7 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
     return { status: "skipped", reason: "pipeline-paused", date: dateKey };
   }
 
-  if (!opts.force && await hasRunForDate(dateKey)) {
+  if (!opts.force && (await hasRunForDate(dateKey))) {
     console.log(`[weekly-reel] already-generated-today (${dateKey}) — skipping`);
     return { status: "skipped", reason: "already-generated-today", date: dateKey };
   }
@@ -192,16 +190,18 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
   // 3. Per-card pipeline
   const results: PerCardResult[] = [];
   for (const card of data.cards) {
-    console.log(`[weekly-reel] ${card.certNumber}: grade=${card.grade} card=${card.cardName ?? "?"}${card.pinned ? " [PINNED]" : ""}`);
+    console.log(
+      `[weekly-reel] ${card.certNumber}: grade=${card.grade} card=${card.cardName ?? "?"}${card.pinned ? " [PINNED]" : ""}`
+    );
     const r = await processOne(card, settings);
     results.push(r);
   }
 
-  const successCount = results.filter(r => r.videoUrl !== null).length;
+  const successCount = results.filter((r) => r.videoUrl !== null).length;
   const failCount = results.length - successCount;
 
   // Caption (substituted) — stored in manifest for downstream consumers.
-  const top = results.find(r => r.videoUrl != null) ?? results[0];
+  const top = results.find((r) => r.videoUrl != null) ?? results[0];
   const caption = applyCaptionTemplate(settings.caption_template, {
     topGrade: top?.grade != null ? String(top.grade) : "—",
     cardCount: results.length,
@@ -253,7 +253,7 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
     cardCount: results.length,
     successCount,
     failCount,
-    cards: results.map(r => ({
+    cards: results.map((r) => ({
       certNumber: r.certNumber,
       grade: r.grade,
       cardName: r.cardName,
@@ -264,11 +264,7 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
   };
 
   try {
-    await uploadToR2(
-      manifestKey,
-      Buffer.from(JSON.stringify(manifest, null, 2), "utf-8"),
-      "application/json",
-    );
+    await uploadToR2(manifestKey, Buffer.from(JSON.stringify(manifest, null, 2), "utf-8"), "application/json");
   } catch (err: any) {
     console.error(`[weekly-reel] manifest upload failed: ${err?.message ?? err}`);
   }
@@ -311,9 +307,8 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
   }
 
   // 6. Analytics row — cost is per-generation × (cards + back clips)
-  const totalGenerations = successCount + (settings.include_back
-    ? results.filter(r => r.backVideoUrl != null).length
-    : 0);
+  const totalGenerations =
+    successCount + (settings.include_back ? results.filter((r) => r.backVideoUrl != null).length : 0);
   const estimatedCost = totalGenerations * COST_PER_GENERATION;
   try {
     await db.insert(reelAnalytics).values({
@@ -336,7 +331,8 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
     for (const r of results) {
       if (!r.videoUrl) continue;
       try {
-        const ownerRow = (await db.execute(sql`
+        const ownerRow = (
+          await db.execute(sql`
           SELECT s.email AS email
           FROM certificates c
           JOIN submission_items si ON si.id = c.submission_item_id
@@ -346,7 +342,8 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
             AND s.deleted_at IS NULL
             AND s.marketing_feature_consent = true
           LIMIT 1
-        `)).rows[0] as { email?: string } | undefined;
+        `)
+        ).rows[0] as { email?: string } | undefined;
         if (!ownerRow?.email) continue;
         await sendCardFeaturedEmail({
           toEmail: ownerRow.email,
@@ -364,21 +361,30 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
   // 7. Notifications — fire-and-forget; failures only warn.
   const summary = {
     date: dateKey,
-    status: failCount > 0 && successCount === 0 ? "failed" as const
-          : failCount > 0 ? "partial" as const
-          : "ok" as const,
+    status:
+      failCount > 0 && successCount === 0
+        ? ("failed" as const)
+        : failCount > 0
+          ? ("partial" as const)
+          : ("ok" as const),
     cardCount: results.length,
     successCount,
     failCount,
     manifestKey,
   };
   if (settings.notify_email) {
-    try { await sendReelSummaryEmail(settings.notify_email, summary); }
-    catch (err: any) { console.warn(`[weekly-reel] notify_email failed: ${err?.message ?? err}`); }
+    try {
+      await sendReelSummaryEmail(settings.notify_email, summary);
+    } catch (err: any) {
+      console.warn(`[weekly-reel] notify_email failed: ${err?.message ?? err}`);
+    }
   }
   if (settings.notify_webhook_url) {
-    try { await postReelWebhook(settings.notify_webhook_url, summary); }
-    catch (err: any) { console.warn(`[weekly-reel] notify_webhook failed: ${err?.message ?? err}`); }
+    try {
+      await postReelWebhook(settings.notify_webhook_url, summary);
+    } catch (err: any) {
+      console.warn(`[weekly-reel] notify_webhook failed: ${err?.message ?? err}`);
+    }
   }
 
   // 8. Auto-publish to social channels. Skipped entirely when card-approval
@@ -387,11 +393,14 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
   // so accounts that prefer staggered posting don't have to time it
   // manually.
   const canAutoPublish = !settings.require_card_approval && !settings.instagram_draft_mode && successCount > 0;
-  if (canAutoPublish && (settings.auto_post_instagram_video || settings.auto_post_facebook || settings.auto_post_tiktok)) {
+  if (
+    canAutoPublish &&
+    (settings.auto_post_instagram_video || settings.auto_post_facebook || settings.auto_post_tiktok)
+  ) {
     if (settings.post_delay_minutes > 0) {
       await new Promise<void>((res) => setTimeout(res, settings.post_delay_minutes * 60 * 1000));
     }
-    const topVideo = results.find(r => r.videoUrl != null);
+    const topVideo = results.find((r) => r.videoUrl != null);
     if (topVideo?.videoUrl) {
       if (settings.auto_post_instagram_video) {
         try {
@@ -437,7 +446,9 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
     }
   }
 
-  console.log(`[weekly-reel] DONE date=${dateKey} cardCount=${results.length} ok=${successCount} fail=${failCount} manifest=${manifestKey}`);
+  console.log(
+    `[weekly-reel] DONE date=${dateKey} cardCount=${results.length} ok=${successCount} fail=${failCount} manifest=${manifestKey}`
+  );
 
   return {
     status: "ok",
@@ -453,6 +464,9 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
 // ── Scheduler ──────────────────────────────────────────────────────────────
 
 let started = false;
+
+// Stable, unique advisory-lock name for the scheduled weekly-reel tick.
+const WEEKLY_REEL_LOCK = "weekly-reel";
 
 export function startWeeklyReelScheduler(): void {
   if (started) {
@@ -470,17 +484,27 @@ export function startWeeklyReelScheduler(): void {
       }
       const peakHour = settings.smart_schedule ? await getInstagramPeakHour() : null;
       if (!isScheduledMoment(settings, peakHour)) return;
-      try {
-        const result = await runWeeklyReel();
-        if (result.status === "skipped") {
-          console.log(`[weekly-reel] Tick: skipped (${result.reason})`);
-        } else if (result.status === "failed") {
-          console.warn(`[weekly-reel] Tick: failed (${result.reason})`);
-        } else {
-          console.log(`[weekly-reel] Tick: ok (${result.successCount}/${result.cardCount} ok)`);
+      // Advisory lock around the actual scheduled reel build/publish so two Fly
+      // machines can't both run it for the same slot. Manual/admin force-run
+      // (runWeeklyReel called directly) is intentionally NOT locked — explicit
+      // human action, and the day-key idempotency (hasRunForDate) inside
+      // runWeeklyReel already prevents a same-day double-run.
+      const outcome = await withAdvisoryLock(pool, WEEKLY_REEL_LOCK, async () => {
+        try {
+          const result = await runWeeklyReel();
+          if (result.status === "skipped") {
+            console.log(`[weekly-reel] Tick: skipped (${result.reason})`);
+          } else if (result.status === "failed") {
+            console.warn(`[weekly-reel] Tick: failed (${result.reason})`);
+          } else {
+            console.log(`[weekly-reel] Tick: ok (${result.successCount}/${result.cardCount} ok)`);
+          }
+        } catch (err: any) {
+          console.error(`[weekly-reel] Tick crash: ${err?.message ?? err}`);
         }
-      } catch (err: any) {
-        console.error(`[weekly-reel] Tick crash: ${err?.message ?? err}`);
+      });
+      if (!outcome.ran) {
+        console.log("[weekly-reel] Tick: advisory lock held by another instance — skipped");
       }
     };
     void tick();
