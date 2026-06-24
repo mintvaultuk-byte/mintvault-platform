@@ -15,7 +15,7 @@ import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
 import { sanitizeResponseBodyForLog } from "./lib/log-redaction";
-import { clientErrorMessage, newRequestId, scrubServerErrorBody } from "./lib/error-sanitize";
+import { clientErrorMessage, newRequestId, productionErrorEnvelope } from "./lib/error-sanitize";
 import { csrfOriginCheck } from "./lib/csrf-origin";
 import { withAdvisoryLock } from "./lib/advisory-lock";
 import pg from "pg";
@@ -310,25 +310,16 @@ app.use((req, res, next) => {
 
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
+    // Phase 1 (security): single choke point so that in production EVERY 5xx
+    // JSON body — from the ~100 route handlers that respond directly, under any
+    // key (error/message/detail/details/debug/...) — collapses to a strict
+    // { error, requestId } envelope. No internal error text reaches the client.
+    // The interceptor logs ONLY safe correlation metadata (never the original).
+    const envelope = productionErrorEnvelope(res.statusCode, bodyJson, process.env.NODE_ENV === "production");
     let outgoing = bodyJson;
-    // Phase 1 (security): single choke point so the ~100 route handlers that
-    // catch their own errors and respond res.status(5xx).json({ error: err.message })
-    // never ship raw internal error text to clients in production. Full detail
-    // stays in server logs, correlated by requestId.
-    if (
-      process.env.NODE_ENV === "production" &&
-      res.statusCode >= 500 &&
-      bodyJson &&
-      typeof bodyJson === "object" &&
-      !Array.isArray(bodyJson)
-    ) {
-      const scrub = scrubServerErrorBody(bodyJson as Record<string, unknown>);
-      if (scrub) {
-        outgoing = scrub.body as typeof bodyJson;
-        if (!scrub.alreadyHandled) {
-          console.error(`[server-error] reqId=${scrub.requestId} status=${res.statusCode}: ${scrub.original}`);
-        }
-      }
+    if (envelope.scrubbed) {
+      outgoing = envelope.body as typeof bodyJson;
+      console.error(`[server-error] reqId=${envelope.requestId} status=${res.statusCode} ${req.method} ${req.path}`);
     }
     capturedJsonResponse = outgoing;
     return originalResJson.apply(res, [outgoing, ...args]);

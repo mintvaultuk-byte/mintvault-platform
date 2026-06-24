@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clientErrorMessage, newRequestId, scrubServerErrorBody } from "../server/lib/error-sanitize";
+import { clientErrorMessage, newRequestId, productionErrorEnvelope } from "../server/lib/error-sanitize";
 
 describe("clientErrorMessage", () => {
   it("collapses 5xx to a generic message in production", () => {
@@ -30,36 +30,78 @@ describe("clientErrorMessage", () => {
   });
 });
 
-describe("scrubServerErrorBody", () => {
-  it("replaces an error field with a generic message + requestId", () => {
-    const r = scrubServerErrorBody({ error: 'relation "users" does not exist' });
-    expect(r).not.toBeNull();
-    expect(r!.body.error).toBe("Internal Server Error");
-    expect(typeof r!.body.requestId).toBe("string");
-    expect(r!.original).toBe('relation "users" does not exist');
-    expect(r!.alreadyHandled).toBe(false);
+describe("productionErrorEnvelope", () => {
+  const prod = (status: number, body: unknown) => productionErrorEnvelope(status, body, true);
+
+  it("collapses any 5xx body (error/message/detail/details/debug/arbitrary) to a strict envelope", () => {
+    const bodies: unknown[] = [
+      { error: 'relation "users" does not exist' },
+      { message: "ENOENT: no such file" },
+      { error: "Seed failed.", detail: "SQL: secret" },
+      { error: "Grading failed", details: "stacktrace at /app/server/x" },
+      { ok: false, debug: "host=ec2-1-2-3-4 db=prod_main" },
+      { whatever: "x", nested: { stack: "boom" } },
+    ];
+    for (const body of bodies) {
+      const r = prod(500, body);
+      expect(r.scrubbed).toBe(true);
+      expect(r.body).toEqual({ error: "Internal Server Error", requestId: r.requestId });
+      // strict: ONLY error + requestId — nothing else survives
+      expect(Object.keys(r.body as object).sort()).toEqual(["error", "requestId"]);
+    }
   });
 
-  it("replaces a message field and preserves other fields", () => {
-    const r = scrubServerErrorBody({ ok: false, message: "ENOENT: no such file" });
-    expect(r!.body).toMatchObject({ ok: false, message: "Internal Server Error" });
-    expect(r!.body.requestId).toBeDefined();
+  it("a mixed body cannot retain a secret detail field", () => {
+    const r = prod(500, { error: "safe", detail: "secret" });
+    expect((r.body as Record<string, unknown>).detail).toBeUndefined();
+    expect(JSON.stringify(r.body)).not.toContain("secret");
   });
 
-  it("preserves an existing requestId and marks alreadyHandled (central handler case)", () => {
-    const r = scrubServerErrorBody({ message: "boom", requestId: "abc-123" });
-    expect(r!.requestId).toBe("abc-123");
-    expect(r!.alreadyHandled).toBe(true);
+  it("preserves an existing requestId", () => {
+    const r = prod(500, { message: "boom", requestId: "abc-123" });
+    expect(r.requestId).toBe("abc-123");
+    expect(r.body).toEqual({ error: "Internal Server Error", requestId: "abc-123" });
   });
 
-  it("returns null when there is no error/message to scrub", () => {
-    expect(scrubServerErrorBody({ ok: true, data: [1, 2, 3] })).toBeNull();
+  it("generates a requestId when none is present", () => {
+    expect(prod(500, { error: "x" }).requestId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("does not mutate the input", () => {
-    const input = { error: "secret detail" };
-    scrubServerErrorBody(input);
-    expect(input).toEqual({ error: "secret detail" });
+    const input = { error: "x", detail: "secret" };
+    prod(500, input);
+    expect(input).toEqual({ error: "x", detail: "secret" });
+  });
+
+  it("never exposes the original error text anywhere in the result (cannot be logged)", () => {
+    const canary = "CANARY-SECRET-zzz999";
+    const r = prod(500, { error: "oops", detail: canary, message: canary, debug: canary });
+    expect(JSON.stringify(r)).not.toContain(canary);
+  });
+
+  it("leaves 4xx responses unchanged in production (client-actionable)", () => {
+    const body = { error: "Invalid certId", detail: "field x" };
+    const r = productionErrorEnvelope(400, body, true);
+    expect(r.scrubbed).toBe(false);
+    expect(r.body).toBe(body);
+  });
+
+  it("leaves non-production responses unchanged (dev keeps detail)", () => {
+    const body = { error: "boom", detail: "dev detail" };
+    const r = productionErrorEnvelope(500, body, false);
+    expect(r.scrubbed).toBe(false);
+    expect(r.body).toBe(body);
+  });
+
+  it("scrubs array and primitive 5xx bodies too (no leak via non-object body)", () => {
+    expect(productionErrorEnvelope(500, ["secret"], true).body).toEqual({
+      error: "Internal Server Error",
+      requestId: expect.any(String),
+    });
+    expect(productionErrorEnvelope(503, "raw text", true).body).toEqual({
+      error: "Internal Server Error",
+      requestId: expect.any(String),
+    });
   });
 });
 

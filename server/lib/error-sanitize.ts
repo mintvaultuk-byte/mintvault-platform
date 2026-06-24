@@ -7,15 +7,18 @@ import crypto from "node:crypto";
  * Two layers:
  *   - clientErrorMessage(): used by the central Express error handler for
  *     UNCAUGHT errors — 5xx in production collapse to a generic message.
- *   - scrubServerErrorBody(): used by the response-layer interceptor in
- *     server/index.ts to also neutralise the ~100 route handlers that catch
- *     their own errors and respond `res.status(5xx).json({ error: err.message })`
- *     directly (bypassing the central handler). One choke point covers them all,
- *     present and future, instead of editing every call site.
+ *   - productionErrorEnvelope(): used by the response-layer interceptor in
+ *     server/index.ts. In production it collapses EVERY 5xx JSON body to a
+ *     strict { error, requestId } envelope, dropping every other field (detail,
+ *     details, debug, stack, provider/SQL/path/host text). This is what stops
+ *     the ~100 route handlers that respond res.status(5xx).json({...}) directly
+ *     from leaking internal error text under ANY key — present or future.
  *
  * 4xx messages are intentional and client-actionable, so they always pass
  * through. Non-production keeps full detail for developer ergonomics.
  */
+
+const GENERIC_5XX_MESSAGE = "Internal Server Error";
 
 export function newRequestId(): string {
   return crypto.randomUUID();
@@ -23,36 +26,43 @@ export function newRequestId(): string {
 
 export function clientErrorMessage(status: number | undefined, message: string | undefined, isProd: boolean): string {
   const statusCode = typeof status === "number" && Number.isFinite(status) ? status : 500;
-  if (isProd && statusCode >= 500) return "Internal Server Error";
-  return message || "Internal Server Error";
+  if (isProd && statusCode >= 500) return GENERIC_5XX_MESSAGE;
+  return message || GENERIC_5XX_MESSAGE;
 }
 
-export interface ScrubResult {
-  body: Record<string, unknown>;
-  requestId: string;
-  original: string;
-  alreadyHandled: boolean;
+/** Pull a valid existing requestId out of a body, if present. */
+function existingRequestId(body: unknown): string | null {
+  if (body && typeof body === "object" && !Array.isArray(body)) {
+    const id = (body as Record<string, unknown>).requestId;
+    if (typeof id === "string" && id.length > 0) return id;
+  }
+  return null;
+}
+
+export interface ErrorEnvelopeResult {
+  /** true when the body was replaced by the strict envelope (production 5xx). */
+  scrubbed: boolean;
+  /** the body to send: the strict envelope when scrubbed, else the original. */
+  body: unknown;
+  /** present only when scrubbed — for safe log correlation. */
+  requestId?: string;
 }
 
 /**
- * For a 5xx response body carrying an `error` or `message` string, return a
- * scrubbed copy with that text replaced by a generic message plus a correlation
- * id (preserving an existing requestId so the central handler's id is kept).
- * Returns null when there is nothing to scrub. The caller decides WHEN to apply
- * it (production 5xx only) so non-prod keeps full detail.
+ * Production 5xx disclosure guard. For a production response with status >= 500
+ * it returns a STRICT envelope `{ error, requestId }` and nothing else — every
+ * other field is dropped, so no internal detail (detail/details/debug/stack/
+ * provider/SQL/path/host) can reach the client regardless of which key a handler
+ * used. A valid existing requestId is preserved for correlation; otherwise one
+ * is generated. The input is never mutated, and the original error text is
+ * deliberately NOT returned (so the interceptor cannot log it). 4xx responses
+ * and all non-production responses pass through untouched.
  */
-export function scrubServerErrorBody(body: Record<string, unknown>): ScrubResult | null {
-  const hasError = typeof body.error === "string";
-  const hasMessage = typeof body.message === "string";
-  if (!hasError && !hasMessage) return null;
-
-  const existingId = typeof body.requestId === "string" ? (body.requestId as string) : null;
-  const requestId = existingId ?? newRequestId();
-  const original = (hasError ? body.error : body.message) as string;
-
-  const scrubbed: Record<string, unknown> = { ...body, requestId };
-  if (hasError) scrubbed.error = "Internal Server Error";
-  if (hasMessage) scrubbed.message = "Internal Server Error";
-
-  return { body: scrubbed, requestId, original, alreadyHandled: existingId !== null };
+export function productionErrorEnvelope(status: number, body: unknown, isProd: boolean): ErrorEnvelopeResult {
+  const statusCode = typeof status === "number" && Number.isFinite(status) ? status : 500;
+  // Fail-safe: a non-numeric/odd status in production is treated as a server
+  // error and scrubbed rather than passed through.
+  if (!isProd || statusCode < 500) return { scrubbed: false, body };
+  const requestId = existingRequestId(body) ?? newRequestId();
+  return { scrubbed: true, body: { error: GENERIC_5XX_MESSAGE, requestId }, requestId };
 }
