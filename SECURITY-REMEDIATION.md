@@ -139,3 +139,107 @@ unrelated `e62d650`). Then, per phase:
   client contract guard (`client-endpoint-contract`).
 - Review: 2 independent lenses (security/BOLA + regression/contract) → SHIP, 0 CRITICAL/HIGH.
 - Gate: tsc clean; 339 tests; routes 379/379, 0 duplicates.
+
+### Phase 2 — error correlation + safe logging (`e5a6971`, `82fae2f`)
+
+- Every request gets a correlation id echoed as `X-Request-ID`; the central handler
+  - `res.json`/`res.send` interceptor collapse EVERY 5xx to
+    `{ error: "Internal Server Error", requestId }` in production
+    (`server/lib/error-sanitize.ts`).
+- `safeErrorSummary()` logs error class + provider-independent code + operation +
+  requestId only — never raw message/stack/DSN. A source guard
+  (`tests/raw-error-logging-guard.test.ts`) freezes the remaining raw-`err.message`
+  log backlog monotonic (can only shrink).
+- Tests: 24 `error-sanitize` cases + the source guard. Review: SHIP.
+
+### Phase 3 — scheduler lifecycle + graceful shutdown (`108614d`)
+
+- `server/lib/lifecycle.ts`: timer registry + in-flight guarded-job counter +
+  idempotent `runGracefulShutdown` (mark → cancel timers → drain traffic → drain
+  active jobs → close pools → exit; hard 10s deadline). Pools are never closed
+  while a guarded job runs.
+- All 8 job timers + keep-warm tracked; IG/weekly schedulers return idempotent
+  cleanups and drain in-flight ticks. Lock names/intervals/cadence unchanged.
+- Tests: 8 `lifecycle` cases. Independent reliability review: SHIP (a HIGH —
+  in-flight IG/weekly ticks not drained — was found and fixed pre-commit).
+
+### Phase 4 — Fly shutdown + production container (`6a32508`, `08c9c08`)
+
+- `fly.toml` + `fly.v2.toml`: `kill_signal=SIGTERM`, `kill_timeout=15s` (> the 10s
+  app deadline), `strategy=canary`, `wait_timeout=10m`, a `/ready` deploy-readiness
+  check (single-machine availability caveat documented inline).
+- `Dockerfile`: `npm prune --omit=dev` (verified zero devDeps in the runtime
+  require graph), `TMPDIR=/tmp`, `USER node` + node HEALTHCHECK preserved. Follow-up
+  `08c9c08` packages `content/legal/*.md` + `server/brand-logo.png` (read at
+  runtime) into the image, guarded by `tests/docker-runtime-assets.test.ts`.
+- Independent container/config review: SHIP (single-machine `/ready` finding
+  resolved pre-commit). ⚠️ Docker unavailable locally → image build + non-root
+  smoke + Trivy are OWED (CI/canary).
+
+### Phase 5 — CI, lint gate, supply chain (`1d5d404`)
+
+- Lint gate: `scripts/cricut-app/**` + `server/scripts/**` (gitignored vendored
+  tools holding all 1626 errors) excluded in `eslint.config.js` → `npm run lint`
+  exits 0; tracked app code keeps only warnings.
+- Dependency: vite `7.3.3 → 7.3.6` (lockfile only) resolves HIGH
+  `GHSA-fx2h-pf6j-xcff`; production audit 0 HIGH / 0 CRITICAL; no `--force`.
+- CI (`.github/workflows/ci.yml`): least-privilege per-job gates for lint, tsc,
+  tests, build, route-uniqueness, endpoint-contract, SBOM, prod/full audit,
+  dependency-review, gitleaks, CodeQL, Docker build + non-root smoke + Trivy,
+  ephemeral-Postgres. `checkout`/`setup-node` SHA-pinned; new actions tag-pinned +
+  marked `pin-to-sha: OWED`. Independent supply-chain review: SHIP.
+
+### Phase 6 — live HTTP authorization matrix (`cf258c9`)
+
+- Isolated live-HTTP harness (`tests/helpers/auth-harness.ts`) mounts the REAL
+  guards (requireAdmin/Auth/Customer/Grader/Staff/Capability/ScannerOrAdmin), real
+  `csrfOriginCheck`, real `authorizeSubmissionDownload`, and reconstructs the
+  two-layer 5xx wiring — the principal is injected via header (a faithful auth
+  double; no DB/scheduler/provider touched).
+- 37-test matrix across anonymous / legacy-customer / unified-user / grader /
+  staff(grade/scan/print) / admin / scanner: role enforcement, BOLA/IDOR,
+  `__graderProxy` in-app-only + forge-prevention, CSRF, scanner + Stripe
+  exemptions, generic 5xx, rate-limit + upload limits.
+- Independent OWASP access-control review: SHIP (4 findings resolved pre-commit).
+
+### Phase 7 — complete release-train gate (this commit)
+
+**Local gate — all green:**
+
+| Check                                 | Result                                                           |
+| ------------------------------------- | ---------------------------------------------------------------- |
+| `git diff --check origin/main...HEAD` | CLEAN                                                            |
+| `npm run check` (tsc)                 | 0 errors                                                         |
+| `npm run lint`                        | exit 0 (0 errors, 2253 warnings)                                 |
+| `npm test` (1 worker)                 | 399 passed / 25 files                                            |
+| `npm run build`                       | OK                                                               |
+| route inventory                       | 379 routes, 379 unique, 0 duplicates                             |
+| client/server endpoint contract       | 0 real unmatched                                                 |
+| production audit (`--omit=dev`)       | 0 HIGH / 0 CRITICAL (1 LOW: esbuild devtree)                     |
+| full audit                            | 0 HIGH / 0 CRITICAL (2 LOW: esbuild, @babel/core — build-time)   |
+| secret scan (local grep)              | clean (only the harness's dummy `sk_live_DEADBEEF` 5xx canaries) |
+
+**Three independent read-only reviews → all SHIP, 0 code-level CRITICAL/HIGH:**
+
+- **Security** (OWASP access-control, auth, CSRF, leakage, injection): SHIP.
+  MEDIUM = CI action SHA-pinning (OWED, CI-plane); LOW = 318-site raw-error log
+  backlog (frozen monotonic, Phase 18).
+- **Reliability** (shutdown, timers, locks, readiness, Fly, container): SHIP. 2 NITs.
+- **Regression** (customer docs, reprint, Stripe raw body, route inventory,
+  existing behaviour): SHIP. Core business logic (labels, schema, pricing,
+  packing/shipping) byte-unchanged; envelope scrubs 5xx only.
+
+**OWED — remote / human gates (cannot run locally; NOT validated here):**
+
+- Docker image build + non-root container smoke test + Trivy image scan (no local
+  Docker daemon).
+- First real CI run; SHA-pin the tag-pinned CI actions
+  (codeql/trivy/gitleaks/dependency-review/docker/upload-artifact).
+- gitleaks / CodeQL / dependency-review / ephemeral-Postgres jobs (GitHub-only).
+- Staging CSRF/auth smoke (admin + customer flows) per the human-gated checklist
+  above; first canary boot confirms the production image + `/ready` gate.
+
+**Verdict: SHIP to staging review.** No code-level CRITICAL/HIGH; all
+locally-runnable gates green. The residual items are remote-CI / Docker / human
+staging gates that must be exercised before any production deploy. No push or
+deploy performed.
