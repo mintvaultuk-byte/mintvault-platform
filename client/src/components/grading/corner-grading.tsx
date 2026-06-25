@@ -101,13 +101,14 @@ export function calcCornerSubgrade(v: CornerValues): { grade: number; worstKey: 
     ["Back Bottom-Left", v.backBL],
     ["Back Bottom-Right", v.backBR],
   ];
-  // Treat 0 as "unset" (the minimum legitimate grade in MintVault's scale is 1).
-  // Without this, partial input (e.g. only the visible front zones graded)
-  // produces a min of 0 and the summary stepper renders "—" — a regression
-  // surfaced when PR #45 removed the ai_analysis fallback that used to
-  // pre-fill all 8 zones from Opus output.
+  // 0 is the "unset" sentinel (dropdown shows "—"; the minimum real grade is 1).
+  // Option A — full marks by default: a card with NO zone marked carries no
+  // recorded deduction, so it scores a perfect 10 and a flawless Pristine 10
+  // finalizes without forcing the grader to type 10 into all eight zones.
+  // Grading is deduction-driven: mark a specific zone LOWER and the subgrade
+  // follows the worst MARKED zone (partial input still scores that zone, not 0).
   const set = entries.filter(([, g]) => g > 0);
-  if (set.length === 0) return { grade: 0, worstKey: "" };
+  if (set.length === 0) return { grade: 10, worstKey: "" };
   const worst = set.reduce((a, b) => (a[1] <= b[1] ? a : b));
   return { grade: worst[1], worstKey: worst[0] };
 }

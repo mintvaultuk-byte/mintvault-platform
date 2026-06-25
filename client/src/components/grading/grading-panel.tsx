@@ -155,7 +155,11 @@ interface Props {
   adminReview?: boolean;
 }
 
-// Defaults use 0 to indicate "not yet graded" — prevents false Black Label on ungraded certs
+// Zone arrays default to 0 = "not yet marked" — keeps buildPayload's hasContent
+// omit working (untouched zones aren't persisted; 0 ≠ NULL in COALESCE). The
+// derived corner/edge SUBGRADE now defaults to 10 when no zone is marked
+// (Option A — calcCornerSubgrade), so a flawless card is Pristine 10 with no
+// manual zone entry.
 const DEFAULT_CORNERS: CornerValues = {
   frontTL: 0,
   frontTR: 0,
@@ -1383,9 +1387,11 @@ export default function GradingPanel({
 
   function buildPayload() {
     // Companion to server-side COALESCE fix (PR #14): omit fields that don't
-    // carry information so the server preserves the existing DB value.
-    // calcCornerSubgrade(DEFAULT_CORNERS) returns 0 when zone state is empty —
-    // sending 0 would overwrite real data since 0 ≠ NULL in SQL's COALESCE.
+    // carry information so the server preserves the existing DB value. Corner/
+    // edge subgrades now default to 10 (Option A — calcCornerSubgrade), so a
+    // flawless card ships grade_corners/grade_edges = 10 instead of being
+    // omitted; the raw zone arrays still omit when untouched (hasContent below),
+    // matching the historical NULL-array Pristines (e.g. MV151).
     const out: Record<string, unknown> = {
       overall_grade: finalGradeOverall,
       auth_status: authStatus,
