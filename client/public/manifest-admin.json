@@ -1,10 +1,10 @@
 {
-  "id": "/admin",
+  "id": "https://mintvaultuk.com/admin",
   "name": "MintVault Admin",
   "short_name": "MintVault Admin",
   "description": "MintVault admin console — operations, certificates and grading insight.",
-  "start_url": "/admin",
-  "scope": "/",
+  "start_url": "https://mintvaultuk.com/admin",
+  "scope": "https://mintvaultuk.com/admin",
   "display": "standalone",
   "background_color": "#0f0f0f",
   "theme_color": "#D4AF37",
