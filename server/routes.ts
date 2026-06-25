@@ -2255,7 +2255,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.setHeader("Content-Length", String(image.length));
       res.end(image);
     } catch (err: any) {
-      console.error(`[share-image] ${format} failed for ${req.params.certNumber}: ${err?.message || err}`);
+      console.error("[share-image] %s failed for %s: %s", format, req.params.certNumber, err?.message || err);
       res.status(500).json({ error: "Share image generation failed" });
     }
   };
@@ -2303,7 +2303,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.setHeader("Content-Length", String(buf.length));
       res.end(buf);
     } catch (err: any) {
-      console.error(`[share-bg] failed for ${req.params.variant}: ${err?.message || err}`);
+      console.error("[share-bg] failed for %s: %s", req.params.variant, err?.message || err);
       res.status(500).json({ error: "Background generation failed" });
     }
   });
@@ -13986,7 +13986,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
       return res.json({ ok: result.status !== "no-data", ...result });
     } catch (err: any) {
-      console.error(`[embed-corpus/cert] ${req.params.certId} failed:`, err);
+      console.error("[embed-corpus/cert] %s failed:", req.params.certId, err);
       return res.status(500).json({ error: err.message });
     }
   });
