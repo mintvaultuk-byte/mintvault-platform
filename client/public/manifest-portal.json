@@ -1,10 +1,10 @@
 {
-  "id": "/staff",
+  "id": "https://mintvaultuk.com/staff",
   "name": "MintVault Staff Portal",
   "short_name": "MintVault",
   "description": "MintVault staff portal — grade, print and manage the grading queue. Web portal only; card scanning runs on the separate scanner desktop app.",
-  "start_url": "/staff",
-  "scope": "/",
+  "start_url": "https://mintvaultuk.com/staff",
+  "scope": "https://mintvaultuk.com/staff",
   "display": "standalone",
   "background_color": "#000000",
   "theme_color": "#D4AF37",
