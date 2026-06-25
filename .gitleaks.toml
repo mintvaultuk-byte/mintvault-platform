@@ -16,4 +16,13 @@ regexes = [
   '''postgres://(user|u|test):(pw|test)@''',
   # fixed dummy scanner token used by the authorization matrix
   '''test-scanner-token-value-1234567890''',
+  # fake Stripe-style value in tests/log-redaction.test.ts (redacted BY KEY, not
+  # value). Replaced in the working tree, but it persists in history (commit
+  # 70b0520) and gitleaks scans the PR commit range — allowlist the exact string.
+  '''pi_123_secret_456''',
+]
+# Scoped to the one redaction-test file (which asserts FIELD-NAME-based redaction,
+# so its dummy values are never real secrets). NOT a broad tests/** allowlist.
+paths = [
+  '''tests/log-redaction\.test\.ts''',
 ]
