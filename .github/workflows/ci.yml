@@ -6,8 +6,9 @@ on:
   pull_request:
     branches: [main]
 
-# Least privilege: the default GITHUB_TOKEN is broad; CI only needs to read the
-# repo. Any job that needs more must opt in explicitly.
+# Least privilege: the default GITHUB_TOKEN is broad; the workflow only needs to
+# read the repo. Each job re-declares the minimum it needs; only CodeQL widens to
+# security-events: write, and dependency-review to pull-requests: read.
 permissions:
   contents: read
 
@@ -16,42 +17,222 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# ─────────────────────────────────────────────────────────────────────────────
+# SUPPLY-CHAIN PINNING POLICY
+#   Third-party actions are pinned to a commit SHA (a moved tag can't swap the
+#   action out from under us), with the human-readable version in a trailing
+#   comment. actions/checkout + actions/setup-node carry verified SHAs.
+#
+#   ⚠️ OWED (Phase 5): the SHAs for the actions added in this commit
+#   (codeql-action, dependency-review-action, gitleaks-action, trivy-action,
+#   docker/*, upload-artifact) could NOT be resolved offline in this environment.
+#   They are pinned to version TAGS and marked `pin-to-sha: OWED`. Before this
+#   workflow is trusted, resolve each tag to its commit SHA (e.g. via
+#   `pin-github-action` / Dependabot) — a remote GitHub lookup. This whole file
+#   also still needs a real CI run to validate (it cannot execute locally).
+# ─────────────────────────────────────────────────────────────────────────────
+
 jobs:
-  check:
-    name: Lint, Type Check, Test & Build
+  quality:
+    name: Lint · Type-check · Route+Endpoint · Tests · Build
     runs-on: ubuntu-latest
     timeout-minutes: 20
-
+    permissions:
+      contents: read
     steps:
-      # Third-party actions pinned to commit SHAs (supply-chain: a moved tag
-      # can't swap the action out from under us). Version in the trailing comment.
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: npm
-
       - run: npm ci
 
-      - name: Lint
+      - name: Lint (eslint — 0 errors required)
         run: npm run lint
 
-      - name: Type check
+      - name: Type check (tsc)
         run: npm run check
 
-      - name: Test
+      # Explicit gates (also covered by the full suite, surfaced separately so a
+      # break is obvious): no duplicate routes, and every client call maps to a
+      # real server endpoint.
+      - name: Route uniqueness
+        run: npx vitest run tests/route-inventory.test.ts
+
+      - name: Client/server endpoint contract
+        run: npx vitest run tests/client-endpoint-contract.test.ts
+
+      - name: Tests (full suite)
         run: npm test
 
       - name: Build
         run: npm run build
 
-      # Blocking at CRITICAL: any critical advisory fails CI.
-      # Triaged exception (2026-06-23): 1 HIGH (vite GHSA-fx2h-pf6j-xcff, a
-      # build-time dep not present in the production runtime) is tracked
-      # separately; raise this to --audit-level=high once it's resolved via
-      # `npm audit fix`.
-      - name: Audit (critical, blocking)
+  dependencies:
+    name: Dependency audit + SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # Block unapproved HIGH/CRITICAL in the PRODUCTION dependency tree.
+      # (As of 2026-06-25 this is clean: the vite HIGH GHSA-fx2h-pf6j-xcff was
+      # resolved by bumping vite to 7.3.6; the only remaining advisories are
+      # build-time devDeps at LOW, surfaced informationally below.)
+      - name: Production audit (block HIGH/CRITICAL)
+        run: npm audit --omit=dev --audit-level=high
+
+      # Any CRITICAL anywhere (incl. devDeps) fails the build.
+      - name: Full audit (block CRITICAL)
         run: npm audit --audit-level=critical
 
-      - name: Audit (high, informational)
-        run: npm audit --audit-level=high || true
+      # Everything else is informational so reviewers see the LOW/devDep tail.
+      - name: Full audit (informational)
+        run: npm audit || true
+
+      # CycloneDX SBOM from the lockfile (no third-party action needed).
+      - name: Generate SBOM (CycloneDX)
+        # Pinned (not @latest) so a future release can't run unpinned in CI.
+        run: npx --yes @cyclonedx/cyclonedx-npm@5.0.0 --output-file sbom.cdx.json
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4 # pin-to-sha: OWED
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          if-no-files-found: error
+
+  dependency-review:
+    name: PR dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Dependency review (block HIGH on the PR diff)
+        uses: actions/dependency-review-action@v4 # pin-to-sha: OWED
+        with:
+          fail-on-severity: high
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0 # full history so gitleaks can scan all commits on the ref
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2 # pin-to-sha: OWED
+
+  codeql:
+    name: CodeQL (SAST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # CodeQL uploads its SARIF results
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3 # pin-to-sha: OWED
+        with:
+          languages: ${{ matrix.language }}
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3 # pin-to-sha: OWED
+
+  container:
+    name: Docker build · non-root smoke · Trivy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: docker/setup-buildx-action@v3 # pin-to-sha: OWED
+
+      - name: Build production image
+        uses: docker/build-push-action@v6 # pin-to-sha: OWED
+        with:
+          context: .
+          load: true
+          tags: mintvault:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Non-root smoke test: the image must NOT run as root and must be the
+      # built-in `node` user. CMD is overridden so this needs no app env/secrets.
+      - name: Non-root smoke test
+        run: |
+          set -euo pipefail
+          uid="$(docker run --rm mintvault:ci id -u)"
+          echo "container uid: $uid"
+          if [ "$uid" = "0" ]; then echo "::error::container runs as root"; exit 1; fi
+          user="$(docker run --rm mintvault:ci whoami)"
+          echo "container user: $user"
+          if [ "$user" != "node" ]; then echo "::error::expected 'node' user, got '$user'"; exit 1; fi
+          # Image must declare a HEALTHCHECK (liveness probe baked in).
+          if ! docker inspect --format '{{json .Config.Healthcheck}}' mintvault:ci | grep -q '/health'; then
+            echo "::error::image is missing the /health HEALTHCHECK"; exit 1
+          fi
+
+      - name: Trivy image scan (HIGH/CRITICAL, fixed only)
+        uses: aquasecurity/trivy-action@v0 # pin-to-sha: OWED
+        with:
+          image-ref: mintvault:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+
+  integration:
+    name: Ephemeral Postgres integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mintvault_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Ephemeral, throwaway DB — NOT a secret. The app's real DSN is a Fly secret.
+      MINTVAULT_DATABASE_URL: postgres://postgres:postgres@localhost:5432/mintvault_test
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # NOTE (Phase 5): the current suite is DB-agnostic (unit-level), so this job
+      # provisions an ephemeral Postgres and runs the suite against it as a
+      # forward-looking harness. A dedicated DB-touching integration suite is an
+      # OWED follow-up — when added, point this step at it.
+      - name: Integration tests (against ephemeral Postgres)
+        run: npm test -- --maxWorkers=1 --no-file-parallelism
