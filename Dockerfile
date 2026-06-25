@@ -52,6 +52,14 @@ RUN npm prune --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 
+# Runtime-read assets that live OUTSIDE dist/ and public/ — read from disk via
+# process.cwd() while serving: content/legal/*.md (legal/privacy pages; the
+# routes 500 without them) and server/brand-logo.png (packing-slip logo).
+# .dockerignore's root-only `*.md` does not match nested content/legal/*.md, so
+# both reach the builder and are copied here. (See tests/docker-runtime-assets.test.ts.)
+COPY --from=builder /app/content ./content
+COPY --from=builder /app/server/brand-logo.png ./server/brand-logo.png
+
 ENV NODE_ENV=production
 ENV PORT=5000
 # Runtime temp output (sharp/canvas/pdfkit scratch) goes to /tmp — writable by the
