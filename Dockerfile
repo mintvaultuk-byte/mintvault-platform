@@ -37,16 +37,30 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy compiled node_modules (includes native canvas binary), built app, and brand assets
+# Copy compiled node_modules (native canvas/sharp binaries) + the app manifest.
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
+
+# Strip devDependencies (vite, esbuild, typescript, vitest, tsx, ...) from the
+# runtime image. The server bundle (dist/index.cjs) requires only production
+# externals at runtime (canvas, sharp, pdfkit, pg, @aws-sdk, resend, helmet) —
+# verified via the bundle's require() graph. Prune removes packages; it does NOT
+# recompile, so the native production binaries are preserved.
+RUN npm prune --omit=dev
+
+# Built app + brand assets.
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 
 ENV NODE_ENV=production
 ENV PORT=5000
+# Runtime temp output (sharp/canvas/pdfkit scratch) goes to /tmp — writable by the
+# node user — never the app source tree, which is not written at runtime.
+ENV TMPDIR=/tmp
 
-# Drop root: run as the built-in unprivileged `node` user. chown so the app
-# keeps read/write access to /app (image processing may write temp files).
+# Drop root: run as the built-in unprivileged `node` user. chown so the app can
+# read /app (node_modules, dist, public). Runtime temp output goes to /tmp (see
+# TMPDIR above), so the source tree is never written at runtime.
 RUN chown -R node:node /app
 USER node
 
