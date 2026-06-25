@@ -24,6 +24,15 @@ import {
 } from "./lib/error-sanitize";
 import { csrfOriginCheck } from "./lib/csrf-origin";
 import { withAdvisoryLock } from "./lib/advisory-lock";
+import {
+  trackInterval,
+  trackTimeout,
+  registerCleanup,
+  beginJob,
+  endJob,
+  isShuttingDown,
+  runGracefulShutdown,
+} from "./lib/lifecycle";
 import pg from "pg";
 import path from "path";
 
@@ -515,34 +524,42 @@ async function runTransferV2Sweep() {
   // advisory lock so only ONE machine runs each tick if we ever scale past one.
   // Non-blocking + fail-closed; on a single machine the lock is always free, so
   // behaviour is unchanged today.
-  const guard = (name: string, fn: () => Promise<void>) => () =>
-    withAdvisoryLock(pool, name, fn).then(
-      (r) => {
-        if (!r.ran) log("skipped — lock held by another instance", name);
-      },
-      (e: any) => log(`error: ${e?.message ?? e}`, name)
-    );
+  // Phase 3: a guarded tick never starts once shutdown begins, and counts as an
+  // active job while it runs so graceful shutdown drains it before closing pools.
+  const guard = (name: string, fn: () => Promise<void>) => () => {
+    if (isShuttingDown()) return Promise.resolve();
+    beginJob();
+    return withAdvisoryLock(pool, name, fn)
+      .then(
+        (r) => {
+          if (!r.ran) log("skipped — lock held by another instance", name);
+        },
+        (e: any) => log(`error: ${e?.message ?? e}`, name)
+      )
+      .finally(() => endJob());
+  };
   const guardedPreGradeCleanup = guard("pre-grade-cleanup", runPreGradeCleanup);
   const guardedVaultClubGraceSweep = guard("vault-club-grace-sweep", runVaultClubGraceSweep);
   const guardedTransferV2Sweep = guard("transfer-v2-sweep", runTransferV2Sweep);
 
   // Run cleanup once on startup, then every 24 hours
   guardedPreGradeCleanup();
-  setInterval(guardedPreGradeCleanup, 24 * 60 * 60 * 1000);
+  trackInterval(guardedPreGradeCleanup, 24 * 60 * 60 * 1000);
 
   // Run Vault Club grace sweep once on startup, then every 24 hours
   guardedVaultClubGraceSweep();
-  setInterval(guardedVaultClubGraceSweep, 24 * 60 * 60 * 1000);
+  trackInterval(guardedVaultClubGraceSweep, 24 * 60 * 60 * 1000);
 
   // Run transfer v2 sweep after 30s delay (let migrations finish), then every hour
-  setTimeout(guardedTransferV2Sweep, 30_000);
-  setInterval(guardedTransferV2Sweep, 60 * 60 * 1000);
+  trackTimeout(guardedTransferV2Sweep, 30_000);
+  trackInterval(guardedTransferV2Sweep, 60 * 60 * 1000);
 
   // RAG Phase 0 — hourly embed-corpus tick. First run after 60s so the
   // server is fully serving before we touch OpenAI; thereafter every
   // hour. Job fail-softs if the migration hasn't run yet, so it's safe
   // to ship the code before approving the migration.
-  setTimeout(async () => {
+  trackTimeout(async () => {
+    if (isShuttingDown()) return;
     try {
       const { runEmbedCorpusJob } = await import("./jobs/embed-corpus");
       // Advisory-locked like the other mutating jobs: only one instance runs the
@@ -552,7 +569,7 @@ async function runTransferV2Sweep() {
         await runEmbedCorpusJob();
       });
       await guardedEmbedCorpus();
-      setInterval(guardedEmbedCorpus, 60 * 60 * 1000);
+      trackInterval(guardedEmbedCorpus, 60 * 60 * 1000);
     } catch (err: any) {
       log(`[embed-corpus] startup error: ${err?.message || err}`, "embed-corpus");
     }
@@ -563,10 +580,11 @@ async function runTransferV2Sweep() {
   // 10:00-11:00 London window. Soft-fails if ig_post_queue is missing
   // (migration not yet applied on this branch). Never publishes unless
   // IG_POST_ENABLED=true AND the ig_settings.post_enabled toggle is on.
-  setTimeout(async () => {
+  trackTimeout(async () => {
+    if (isShuttingDown()) return;
     try {
       const { startIgDailyPostScheduler } = await import("./jobs/ig-daily-post");
-      startIgDailyPostScheduler();
+      registerCleanup(startIgDailyPostScheduler());
       log("scheduler armed", "ig-cron");
     } catch (err: any) {
       log(`startup error: ${err?.message || err}`, "ig-cron");
@@ -577,10 +595,11 @@ async function runTransferV2Sweep() {
   // weekly grade-highlight manifest from consenting submissions; per-card
   // failures are non-fatal. Soft-fails gracefully if SEGMIND_API_KEY is
   // missing in env.
-  setTimeout(async () => {
+  trackTimeout(async () => {
+    if (isShuttingDown()) return;
     try {
       const { startWeeklyReelScheduler } = await import("./jobs/weekly-reel");
-      startWeeklyReelScheduler();
+      registerCleanup(startWeeklyReelScheduler());
       log("scheduler armed (Friday 18:00 UTC)", "weekly-reel");
     } catch (err: any) {
       log(`startup error: ${err?.message || err}`, "weekly-reel");
@@ -608,8 +627,8 @@ async function runTransferV2Sweep() {
     }
   }
   const guardedArchivalSweep = guard("archival-sweep", runArchivalSweep);
-  setTimeout(guardedArchivalSweep, 60_000);
-  setInterval(guardedArchivalSweep, 24 * 60 * 60 * 1000);
+  trackTimeout(guardedArchivalSweep, 60_000);
+  trackInterval(guardedArchivalSweep, 24 * 60 * 60 * 1000);
 
   // Scan reconciler — re-drive failed pipelines from retained R2 raw + surface
   // never-confirmed ingests for scanner re-supply. First run 90s after boot,
@@ -624,8 +643,8 @@ async function runTransferV2Sweep() {
     }
   }
   const guardedScanReconciler = guard("scan-reconciler", runScanReconciler);
-  setTimeout(guardedScanReconciler, 90_000);
-  setInterval(guardedScanReconciler, 5 * 60 * 1000);
+  trackTimeout(guardedScanReconciler, 90_000);
+  trackInterval(guardedScanReconciler, 5 * 60 * 1000);
 
   app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
@@ -695,40 +714,42 @@ async function runTransferV2Sweep() {
       // - Errors are logged and swallowed; this is a best-effort warm-up and
       //   must NEVER take the process down.
       const KEEP_WARM_INTERVAL_MS = 4 * 60 * 1000;
-      const keepWarmTimer = setInterval(() => {
-        pool.query("SELECT 1").catch((err: any) => console.warn("[db-keepwarm] SELECT 1 failed:", err?.message ?? err));
-      }, KEEP_WARM_INTERVAL_MS);
-      keepWarmTimer.unref();
+      trackInterval(
+        () => {
+          pool
+            .query("SELECT 1")
+            .catch((err: any) => console.warn("[db-keepwarm] SELECT 1 failed:", err?.message ?? err));
+        },
+        KEEP_WARM_INTERVAL_MS,
+        { unref: true }
+      );
       console.log(`[db-keepwarm] interval armed (${KEEP_WARM_INTERVAL_MS / 1000}s)`);
     }
   );
 })();
 
-// Graceful shutdown (Phase 4): on Fly SIGTERM during a rolling deploy, stop
-// accepting new connections, let in-flight requests drain, close the DB pools,
-// then exit — instead of being hard-killed mid-request and leaking connections.
-// A hard deadline guarantees we still exit if a request hangs.
-// NOTE: set `kill_timeout` in fly.toml >= SHUTDOWN_DEADLINE_MS so Fly waits for
-// the drain instead of SIGKILLing early (Fly default is ~5s).
-let shuttingDown = false;
+// Graceful shutdown (Phase 3): on SIGTERM/SIGINT — mark shutting-down + cancel
+// every scheduled timer (so no NEW tick starts), stop accepting traffic and
+// drain in-flight requests, wait for active guarded jobs to finish, THEN close
+// the DB pools (never under a live job), and exit. A hard 10s deadline always
+// forces exit. NOTE: set fly.toml kill_timeout >= 15s so Fly waits for the drain
+// instead of SIGKILLing early (Fly default is ~5s).
 function gracefulShutdown(signal: string) {
-  if (shuttingDown) return;
-  shuttingDown = true;
   log(`${signal} received — draining and shutting down`, "shutdown");
-
-  const SHUTDOWN_DEADLINE_MS = 10_000;
-  const force = setTimeout(() => {
-    log("drain deadline reached — forcing exit", "shutdown");
-    process.exit(0);
-  }, SHUTDOWN_DEADLINE_MS);
-  force.unref();
-
-  httpServer.close(() => {
-    log("http server closed to new connections", "shutdown");
-    Promise.allSettled([pool.end(), sessionPool.end()]).then(() => {
+  void runGracefulShutdown({
+    deadlineMs: 10_000,
+    closeServer: () =>
+      new Promise<void>((resolve) => {
+        httpServer.close(() => {
+          log("http server closed to new connections", "shutdown");
+          resolve();
+        });
+      }),
+    closePools: async () => {
+      await Promise.allSettled([pool.end(), sessionPool.end()]);
       log("db pools closed — exiting cleanly", "shutdown");
-      process.exit(0);
-    });
+    },
+    exit: (code) => process.exit(code),
   });
 }
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));

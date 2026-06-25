@@ -22,6 +22,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, pool } from "../db";
 import { withAdvisoryLock } from "../lib/advisory-lock";
+import { isShuttingDown, beginJob, endJob } from "../lib/lifecycle";
 import { igPostQueue, igSettings, IG_POST_TYPES, type IgPostType } from "@shared/schema";
 import { fetchPostData, selectPostType } from "../ig/data-fetcher";
 import { generateIgImage } from "../ig/image-generator";
@@ -273,47 +274,67 @@ let started = false;
 // Stable, unique advisory-lock name for the scheduled IG post tick.
 const IG_DAILY_POST_LOCK = "ig-daily-post";
 
-export function startIgDailyPostScheduler(): void {
+export function startIgDailyPostScheduler(): () => void {
   if (started) {
     console.warn("[ig-cron] Already started");
-    return;
+    return () => {};
   }
   started = true;
 
-  setTimeout(() => {
+  let intervalHandle: ReturnType<typeof setInterval> | null = null;
+  const bootHandle = setTimeout(() => {
     const tick = async () => {
+      if (isShuttingDown()) return; // Phase 3: no new tick once shutdown begins
       const hour = nowInLondonHour();
       if (hour !== POST_WINDOW_HOUR_LONDON) {
         // Outside window — silent. No DB touched, so no lock needed.
         return;
       }
+      // Past the window gate: committed to the locked post. Count this as an active
+      // job (Phase 3) so graceful shutdown drains it before the DB pools close.
       // Advisory lock around the actual scheduled post so two Fly machines can't
       // both post in the same window. Manual/admin force-run (runIgDailyPost
       // called directly elsewhere) is intentionally NOT locked — it's an explicit
       // single human action and the per-day idempotency (hasPostedToday) inside
       // runIgDailyPost already prevents a same-day double-post; locking it would
       // make a force-run silently skip while a tick holds the lock.
-      const outcome = await withAdvisoryLock(pool, IG_DAILY_POST_LOCK, async () => {
-        try {
-          const result = await runIgDailyPost();
-          if (result.status === "skipped") {
-            console.log("[ig-cron] Tick: already-posted-today (skipped)");
-          } else if (result.status === "dry-run") {
-            console.log("[ig-cron] Tick: dry-run completed");
-          } else {
-            console.log(`[ig-cron] Tick: ${result.status} (${result.postType})`);
+      beginJob();
+      try {
+        const outcome = await withAdvisoryLock(pool, IG_DAILY_POST_LOCK, async () => {
+          try {
+            const result = await runIgDailyPost();
+            if (result.status === "skipped") {
+              console.log("[ig-cron] Tick: already-posted-today (skipped)");
+            } else if (result.status === "dry-run") {
+              console.log("[ig-cron] Tick: dry-run completed");
+            } else {
+              console.log(`[ig-cron] Tick: ${result.status} (${result.postType})`);
+            }
+          } catch (err: any) {
+            console.error(`[ig-cron] Tick failed: ${err?.message ?? err}`);
           }
-        } catch (err: any) {
-          console.error(`[ig-cron] Tick failed: ${err?.message ?? err}`);
+        });
+        if (!outcome.ran) {
+          console.log("[ig-cron] Tick: advisory lock held by another instance — skipped");
         }
-      });
-      if (!outcome.ran) {
-        console.log("[ig-cron] Tick: advisory lock held by another instance — skipped");
+      } finally {
+        endJob();
       }
     };
 
     // Run immediately on boot, then every TICK_INTERVAL_MS thereafter.
     void tick();
-    setInterval(tick, TICK_INTERVAL_MS);
+    intervalHandle = setInterval(tick, TICK_INTERVAL_MS);
   }, BOOT_DELAY_MS);
+
+  // Phase 3: idempotent cleanup — cancel the boot timer and the recurring tick.
+  let cleaned = false;
+  return () => {
+    if (cleaned) return;
+    cleaned = true;
+    clearTimeout(bootHandle);
+    if (intervalHandle) clearInterval(intervalHandle);
+    // NOTE: intentionally do NOT reset `started` — cleanup is shutdown-only and the
+    // singleton latch must stay set so the scheduler can't be re-armed mid-shutdown.
+  };
 }

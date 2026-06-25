@@ -29,6 +29,7 @@
 import { sql } from "drizzle-orm";
 import { db, pool } from "../db";
 import { withAdvisoryLock } from "../lib/advisory-lock";
+import { isShuttingDown, beginJob, endJob } from "../lib/lifecycle";
 import { auditLog, reelAnalytics, reelCardApprovals } from "@shared/schema";
 import { getR2SignedUrl, uploadToR2 } from "../r2";
 import { fetchWeeklyReelData, type WeeklyReelCard } from "../ig/weekly-reel-data";
@@ -468,15 +469,17 @@ let started = false;
 // Stable, unique advisory-lock name for the scheduled weekly-reel tick.
 const WEEKLY_REEL_LOCK = "weekly-reel";
 
-export function startWeeklyReelScheduler(): void {
+export function startWeeklyReelScheduler(): () => void {
   if (started) {
     console.warn("[weekly-reel] Already started");
-    return;
+    return () => {};
   }
   started = true;
 
-  setTimeout(() => {
+  let intervalHandle: ReturnType<typeof setInterval> | null = null;
+  const bootHandle = setTimeout(() => {
     const tick = async () => {
+      if (isShuttingDown()) return; // Phase 3: no new tick once shutdown begins
       const settings = await getAllSettings();
       if (settings.pipeline_paused) {
         // Silent on the tick — pause is expected admin state.
@@ -484,30 +487,48 @@ export function startWeeklyReelScheduler(): void {
       }
       const peakHour = settings.smart_schedule ? await getInstagramPeakHour() : null;
       if (!isScheduledMoment(settings, peakHour)) return;
+      // Past the schedule gate: committed to the locked reel build. Count this as an
+      // active job (Phase 3) so graceful shutdown drains it before the DB pools close.
       // Advisory lock around the actual scheduled reel build/publish so two Fly
       // machines can't both run it for the same slot. Manual/admin force-run
       // (runWeeklyReel called directly) is intentionally NOT locked — explicit
       // human action, and the day-key idempotency (hasRunForDate) inside
       // runWeeklyReel already prevents a same-day double-run.
-      const outcome = await withAdvisoryLock(pool, WEEKLY_REEL_LOCK, async () => {
-        try {
-          const result = await runWeeklyReel();
-          if (result.status === "skipped") {
-            console.log(`[weekly-reel] Tick: skipped (${result.reason})`);
-          } else if (result.status === "failed") {
-            console.warn(`[weekly-reel] Tick: failed (${result.reason})`);
-          } else {
-            console.log(`[weekly-reel] Tick: ok (${result.successCount}/${result.cardCount} ok)`);
+      beginJob();
+      try {
+        const outcome = await withAdvisoryLock(pool, WEEKLY_REEL_LOCK, async () => {
+          try {
+            const result = await runWeeklyReel();
+            if (result.status === "skipped") {
+              console.log(`[weekly-reel] Tick: skipped (${result.reason})`);
+            } else if (result.status === "failed") {
+              console.warn(`[weekly-reel] Tick: failed (${result.reason})`);
+            } else {
+              console.log(`[weekly-reel] Tick: ok (${result.successCount}/${result.cardCount} ok)`);
+            }
+          } catch (err: any) {
+            console.error(`[weekly-reel] Tick crash: ${err?.message ?? err}`);
           }
-        } catch (err: any) {
-          console.error(`[weekly-reel] Tick crash: ${err?.message ?? err}`);
+        });
+        if (!outcome.ran) {
+          console.log("[weekly-reel] Tick: advisory lock held by another instance — skipped");
         }
-      });
-      if (!outcome.ran) {
-        console.log("[weekly-reel] Tick: advisory lock held by another instance — skipped");
+      } finally {
+        endJob();
       }
     };
     void tick();
-    setInterval(tick, TICK_INTERVAL_MS);
+    intervalHandle = setInterval(tick, TICK_INTERVAL_MS);
   }, BOOT_DELAY_MS);
+
+  // Phase 3: idempotent cleanup — cancel the boot timer and the recurring tick.
+  let cleaned = false;
+  return () => {
+    if (cleaned) return;
+    cleaned = true;
+    clearTimeout(bootHandle);
+    if (intervalHandle) clearInterval(intervalHandle);
+    // NOTE: intentionally do NOT reset `started` — cleanup is shutdown-only and the
+    // singleton latch must stay set so the scheduler can't be re-armed mid-shutdown.
+  };
 }
