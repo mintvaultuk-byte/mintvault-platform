@@ -299,6 +299,35 @@ body {
   color: var(--muted);
 }
 
+/* SilverFast export path — monospace path + one-click copy */
+.sfpath-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.sfpath-val {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow-x: auto;
+  user-select: text;
+}
+.sfpath-copy {
+  flex: 0 0 auto;
+}
+.sfpath-copy.copied {
+  color: var(--green);
+  border-color: var(--green);
+}
+
 /* Modal */
 .modal {
   position: fixed;

@@ -16,3 +16,15 @@ import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/500.css";
 
 createRoot(document.getElementById("root")!).render(<App />);
+
+// PWA: register the minimal service worker ONLY on portal routes, so the
+// staff/admin portal becomes installable (own window / dock icon). Marketing-only
+// visitors never register a worker, so the public site's behaviour is unchanged.
+// The worker does no caching (see public/sw.js) — the portal can't serve stale code.
+if ("serviceWorker" in navigator && /^\/(staff|grader|admin)(\/|$)/.test(window.location.pathname)) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((err) => {
+      console.warn("[pwa] service worker registration failed:", err);
+    });
+  });
+}

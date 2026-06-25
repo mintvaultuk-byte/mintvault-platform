@@ -32,6 +32,10 @@ const els = {
   lastCertBtn: document.getElementById("lastCertBtn"),
   logsBtn:     document.getElementById("logsBtn"),
 
+  // SilverFast export path
+  sfPathVal:     document.getElementById("sfPathVal"),
+  sfPathCopyBtn: document.getElementById("sfPathCopyBtn"),
+
   // Manual scan modal
   manualModal:  document.getElementById("manualModal"),
   manualMeta:   document.getElementById("manualMeta"),
@@ -423,6 +427,32 @@ els.lastCertBtn.addEventListener("click", async () => {
   if (els.lastCertBtn.disabled) return;
   await window.scanner.openLastCert();
 });
+
+// ── SilverFast export path ───────────────────────────────────────────────
+// Show the absolute inbox the watcher is actually watching (respects
+// MINTVAULT_SCANS_DIR — comes straight from main's INBOX), with one-click
+// copy so the operator can paste it into SilverFast's Path field. This is the
+// fix for scans being exported to the wrong folder after a setup/reset.
+// Pure display + clipboard — no writes, no behaviour change.
+if (els.sfPathVal) {
+  window.scanner.getInboxPath().then((p) => {
+    els.sfPathVal.textContent = p || "—";
+    els.sfPathVal.title = p || "";
+  });
+}
+if (els.sfPathCopyBtn) {
+  els.sfPathCopyBtn.addEventListener("click", async () => {
+    const r = await window.scanner.copyInboxPath();
+    if (!r || !r.ok) return;
+    const original = els.sfPathCopyBtn.textContent;
+    els.sfPathCopyBtn.textContent = "Copied";
+    els.sfPathCopyBtn.classList.add("copied");
+    setTimeout(() => {
+      els.sfPathCopyBtn.textContent = original;
+      els.sfPathCopyBtn.classList.remove("copied");
+    }, 1500);
+  });
+}
 
 // ── Pause toggle ─────────────────────────────────────────────────────────
 

@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
 import GradingPanel from "../components/grading/grading-panel";
+import InstallAppButton from "../components/install-app-button";
 
 /**
  * Unified staff dashboard. Renders ONLY the tabs the logged-in person's
@@ -80,6 +81,7 @@ export default function StaffPage() {
           </nav>
         </div>
         <div className="flex items-center gap-3 text-xs">
+          <InstallAppButton className="border border-[#D4AF37]/30 rounded px-3 py-1 hover:bg-[#D4AF37]/10" />
           <span className="text-[#E8E4DC]/60">{email}</span>
           <button onClick={logout} className="border border-[#D4AF37]/30 rounded px-3 py-1 hover:bg-[#D4AF37]/10">
             Sign out
