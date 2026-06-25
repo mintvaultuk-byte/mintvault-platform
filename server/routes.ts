@@ -3652,12 +3652,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/logbook/:certId/verify", async (req, res) => {
+  // Public signature-verify endpoint (no auth). The signature is an HMAC, so it
+  // can't be brute-forced, but this is a public route doing a DB lookup + crypto
+  // check on every hit — cap per-IP to blunt DoS/scraping. (CodeQL js/missing-rate-limiting.)
+  const logbookVerifyRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many verification requests — please try again shortly." },
+  });
+  app.get("/api/logbook/:certId/verify", logbookVerifyRateLimit, async (req, res) => {
     try {
       const sig = (req.query.sig || req.query.signature) as string | undefined;
       if (!sig) return res.status(400).json({ error: "signature query parameter required" });
       const { verifyLogbookSignature } = await import("./logbook-service");
-      const result = await verifyLogbookSignature(req.params.certId, sig);
+      const result = await verifyLogbookSignature(String(req.params.certId), sig);
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: "Verification failed" });
