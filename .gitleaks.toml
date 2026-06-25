@@ -1,0 +1,19 @@
+# gitleaks config — extend the default ruleset, plus a NARROW allowlist for the
+# intentional NON-secret dummy values used in tests to prove redaction/scrubbing.
+# These are not real credentials (e.g. "DEADBEEF", a localhost DSN, a fixed test
+# token); allowlisting the exact patterns keeps real secrets anywhere still caught.
+title = "MintVault gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Intentional dummy canaries in the test suite (5xx-scrub assertions, fake DSNs/tokens). NOT real secrets."
+regexes = [
+  # 5xx leak-scrub canary in the auth harness + matrix (proves the envelope hides it)
+  '''sk_live_DEADBEEF''',
+  # fake DSNs in the harness / test-env (localhost or obviously-fake creds)
+  '''postgres://(user|u|test):(pw|test)@''',
+  # fixed dummy scanner token used by the authorization matrix
+  '''test-scanner-token-value-1234567890''',
+]

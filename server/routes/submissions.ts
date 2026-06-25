@@ -267,6 +267,18 @@ const paymentRateLimit = rateLimit({
   message: { error: "Too many payment attempts. Please wait a few minutes and try again." },
 });
 
+// Customer document downloads (packing slip / shipping label). Authenticated, but
+// each call renders a PDF — cap per IP so a logged-in customer can't hammer PDF
+// generation. Generous enough never to bite normal use. (Not covered by any global
+// limiter; the app only rate-limits /api/admin + /api/auth.)
+const customerDocRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many document requests. Please wait a minute and try again." },
+});
+
 export function registerSubmissionRoutes(app: Express): void {
   // Authoritative grading quote — the SAME computeGradingQuote() the PaymentIntent
   // uses, so the wizard can display the exact charged total without doing any money
@@ -921,27 +933,32 @@ export function registerSubmissionRoutes(app: Express): void {
   // Session-derived identity (requireCustomer); ownership verified server-side;
   // missing/deleted/wrong-owner all return an indistinguishable 404. No token —
   // the dashboard's authenticated link must not depend on a bearer token.
-  app.get("/api/customer/submissions/:submissionId/packing-slip", requireCustomer, async (req, res) => {
-    try {
-      const submission = await storage.getSubmissionBySubmissionId(String(req.params.submissionId));
-      const auth = authorizeSubmissionDownload(submission, {
-        customerEmail: req.session.customerEmail,
-        userId: req.session.userId,
-      });
-      if (!auth.ok) {
-        return auth.status === 404
-          ? res.status(404).json({ error: "Submission not found" })
-          : res.status(400).json({ error: "Submission is still in draft" });
+  app.get(
+    "/api/customer/submissions/:submissionId/packing-slip",
+    customerDocRateLimit,
+    requireCustomer,
+    async (req, res) => {
+      try {
+        const submission = await storage.getSubmissionBySubmissionId(String(req.params.submissionId));
+        const auth = authorizeSubmissionDownload(submission, {
+          customerEmail: req.session.customerEmail,
+          userId: req.session.userId,
+        });
+        if (!auth.ok) {
+          return auth.status === 404
+            ? res.status(404).json({ error: "Submission not found" })
+            : res.status(400).json({ error: "Submission is still in draft" });
+        }
+        const pdf = await buildPackingSlipPdf(submission);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${submission.submissionId}-packing-slip.pdf"`);
+        res.send(pdf);
+      } catch (error: any) {
+        console.error("Customer packing slip error:", error.message);
+        res.status(500).json({ error: "Failed to generate packing slip" });
       }
-      const pdf = await buildPackingSlipPdf(submission);
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="${submission.submissionId}-packing-slip.pdf"`);
-      res.send(pdf);
-    } catch (error: any) {
-      console.error("Customer packing slip error:", error.message);
-      res.status(500).json({ error: "Failed to generate packing slip" });
     }
-  });
+  );
 
   // ── Public shipping label (token-gated) ───────────────────────────────────
   app.get("/api/submissions/:submissionId/shipping-label", async (req, res) => {
@@ -976,25 +993,30 @@ export function registerSubmissionRoutes(app: Express): void {
   });
 
   // ── Authenticated customer shipping label (Phase 1) ───────────────────────
-  app.get("/api/customer/submissions/:submissionId/shipping-label", requireCustomer, async (req, res) => {
-    try {
-      const submission = await storage.getSubmissionBySubmissionId(String(req.params.submissionId));
-      const auth = authorizeSubmissionDownload(submission, {
-        customerEmail: req.session.customerEmail,
-        userId: req.session.userId,
-      });
-      if (!auth.ok) {
-        return auth.status === 404
-          ? res.status(404).json({ error: "Submission not found" })
-          : res.status(400).json({ error: "Submission is still in draft" });
+  app.get(
+    "/api/customer/submissions/:submissionId/shipping-label",
+    customerDocRateLimit,
+    requireCustomer,
+    async (req, res) => {
+      try {
+        const submission = await storage.getSubmissionBySubmissionId(String(req.params.submissionId));
+        const auth = authorizeSubmissionDownload(submission, {
+          customerEmail: req.session.customerEmail,
+          userId: req.session.userId,
+        });
+        if (!auth.ok) {
+          return auth.status === 404
+            ? res.status(404).json({ error: "Submission not found" })
+            : res.status(400).json({ error: "Submission is still in draft" });
+        }
+        const pdf = await buildShippingLabelPdf(submission);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${submission.submissionId}-shipping-label.pdf"`);
+        res.send(pdf);
+      } catch (error: any) {
+        console.error("Customer shipping label error:", error.message);
+        res.status(500).json({ error: "Failed to generate shipping label" });
       }
-      const pdf = await buildShippingLabelPdf(submission);
-      res.setHeader("Content-Type", "application/pdf");
-      res.setHeader("Content-Disposition", `attachment; filename="${submission.submissionId}-shipping-label.pdf"`);
-      res.send(pdf);
-    } catch (error: any) {
-      console.error("Customer shipping label error:", error.message);
-      res.status(500).json({ error: "Failed to generate shipping label" });
     }
-  });
+  );
 }

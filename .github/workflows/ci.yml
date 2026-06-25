@@ -134,7 +134,11 @@ jobs:
         with:
           fetch-depth: 0 # full history so gitleaks can scan all commits on the ref
       - name: Gitleaks
-        uses: gitleaks/gitleaks-action@v2 # pin-to-sha: OWED
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          # gitleaks-action v2 REQUIRES a token to scan pull requests (it diffs
+          # the PR via the API); without it the job errors before scanning.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   codeql:
     name: CodeQL (SAST)
@@ -153,6 +157,15 @@ jobs:
         uses: github/codeql-action/init@v3 # pin-to-sha: OWED
         with:
           languages: ${{ matrix.language }}
+          # Don't SAST-scan test harnesses or gitignored vendored tools: tests
+          # carry intentional dummy secrets + unguarded fixtures (not production
+          # code), and scripts/cricut-app + server/scripts are vendored/minified.
+          config: |
+            paths-ignore:
+              - tests/**
+              - scripts/cricut-app/**
+              - server/scripts/**
+              - dist/**
       - name: Analyze
         uses: github/codeql-action/analyze@v3 # pin-to-sha: OWED
 
@@ -192,7 +205,7 @@ jobs:
           fi
 
       - name: Trivy image scan (HIGH/CRITICAL, fixed only)
-        uses: aquasecurity/trivy-action@v0 # pin-to-sha: OWED
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
         with:
           image-ref: mintvault:ci
           severity: HIGH,CRITICAL
