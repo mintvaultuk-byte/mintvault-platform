@@ -24,8 +24,12 @@ RUN npm run build
 # ── Production stage ──────────────────────────────────────────────────────────
 FROM node:20-slim AS production
 
-# Runtime libs for canvas (label/PDF generation) and sharp (image processing)
-RUN apt-get update && apt-get install -y \
+# Runtime libs for canvas (label/PDF generation) and sharp (image processing).
+# `apt-get upgrade` pulls current Debian security patches into the FINAL image so
+# the Trivy scan (HIGH/CRITICAL, fixed-only) is clean — e.g. libgnutls30
+# (CVE-2026-33845 CRITICAL) and libcap2 (CVE-2026-4878 HIGH) ship patched.
+RUN apt-get update \
+    && apt-get install -y \
     libcairo2 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
@@ -33,6 +37,7 @@ RUN apt-get update && apt-get install -y \
     libgif7 \
     librsvg2-2 \
     libvips \
+    && apt-get upgrade -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -46,7 +51,13 @@ COPY --from=builder /app/package*.json ./
 # externals at runtime (canvas, sharp, pdfkit, pg, @aws-sdk, resend, helmet) —
 # verified via the bundle's require() graph. Prune removes packages; it does NOT
 # recompile, so the native production binaries are preserved.
-RUN npm prune --omit=dev
+#
+# Then drop the lockfile: it is not read at runtime (CMD is `node dist/index.cjs`),
+# and it still lists DEV-only transitive deps that prune already removed from
+# node_modules (cross-spawn, minimatch, tar, glob — all `npm ls --omit=dev` == 0).
+# Leaving it makes Trivy's image scan report those dev-only CVEs as if shipped;
+# removing it makes the scan reflect the actual pruned runtime tree.
+RUN npm prune --omit=dev && rm -f package-lock.json
 
 # Built app + brand assets.
 COPY --from=builder /app/dist ./dist

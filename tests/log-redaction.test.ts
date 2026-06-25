@@ -42,7 +42,9 @@ describe("sanitizeResponseBodyForLog", () => {
   });
 
   it("redacts a Stripe client secret and signature (by key)", () => {
-    const out = sanitizeResponseBodyForLog({ clientSecret: "pi_123_secret_456", signature: "whsig", amount: 500 });
+    // value is a plain non-secret canary — redaction here is keyed on the FIELD
+    // NAME (clientSecret/signature), not the value shape; keeps gitleaks quiet.
+    const out = sanitizeResponseBodyForLog({ clientSecret: "redact-me-by-key", signature: "whsig", amount: 500 });
     expect(out).toEqual({ clientSecret: REDACTED, signature: REDACTED, amount: 500 });
   });
 
