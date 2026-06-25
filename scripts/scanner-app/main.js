@@ -14,7 +14,7 @@
  * icon reappears or it doesn't — no silent drift.
  */
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell } = require("electron");
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell, clipboard } = require("electron");
 const { spawn } = require("node:child_process");
 const fs    = require("node:fs");
 const path  = require("node:path");
@@ -468,6 +468,17 @@ function setupIpc() {
   ipcMain.handle("hide-popover", () => { if (popover) popover.hide(); return { ok: true }; });
 
   ipcMain.handle("open-inbox", () => { shell.openPath(INBOX); return { ok: true }; });
+
+  // SilverFast export path — the absolute inbox the watcher is ACTUALLY
+  // watching (INBOX from lib/watcher, which respects MINTVAULT_SCANS_DIR), so
+  // the operator can copy it straight into SilverFast's Path field and scans
+  // can't land somewhere the watcher never looks (e.g. ~/Pictures). Pure read.
+  ipcMain.handle("get-inbox-path", () => INBOX);
+
+  ipcMain.handle("copy-inbox-path", () => {
+    clipboard.writeText(INBOX);
+    return { ok: true, path: INBOX };
+  });
 
   ipcMain.handle("open-logs", () => {
     shell.openPath(SCANNER_LOG);

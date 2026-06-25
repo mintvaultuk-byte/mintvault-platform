@@ -1,0 +1,15 @@
+{
+  "id": "/admin",
+  "name": "MintVault Admin",
+  "short_name": "MintVault Admin",
+  "description": "MintVault admin console — operations, certificates and grading insight.",
+  "start_url": "/admin",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0f0f0f",
+  "theme_color": "#D4AF37",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
