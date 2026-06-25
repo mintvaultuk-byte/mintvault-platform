@@ -3721,7 +3721,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.send(pdf);
     } catch (err: any) {
       console.error(
-        `[logbook-pdf] generation failed for ${req.params.certId}:`,
+        "[logbook-pdf] generation failed for %s:",
+        req.params.certId,
         err.message,
         err.stack?.split("\n")[1]?.trim()
       );
@@ -3782,7 +3783,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.send(pdf);
     } catch (err: any) {
       console.error(
-        `[logbook-owner-pdf] generation failed for ${req.params.certId}:`,
+        "[logbook-owner-pdf] generation failed for %s:",
+        req.params.certId,
         err.message,
         err.stack?.split("\n")[1]?.trim()
       );
@@ -3854,7 +3856,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       );
       res.json({ newVersion, issuedAt: new Date().toISOString() });
     } catch (err: any) {
-      console.error(`[logbook-reissue] error for ${req.params.certId}:`, err.message);
+      console.error("[logbook-reissue] error for %s:", req.params.certId, err.message);
       res.status(500).json({ error: "Reissue failed" });
     }
   });
