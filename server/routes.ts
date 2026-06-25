@@ -7,6 +7,7 @@ import type {
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
+import { normalizeCertId, certNumberFromId } from "./lib/cert-id";
 import { registerPublicRoutes } from "./routes/public";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerSubmissionRoutes } from "./routes/submissions";
@@ -351,11 +352,10 @@ const upload = multer({
   },
 });
 
-export function normalizeCertId(raw: string): string {
-  const m = raw.match(/^MV-?0*(\d+)$/i);
-  if (m) return `MV${m[1]}`;
-  return raw;
-}
+// normalizeCertId now lives in the shared, ReDoS-safe helper
+// (server/lib/cert-id.ts); re-exported so existing importers of it from
+// "./routes" keep working.
+export { normalizeCertId };
 
 const ALLOWED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/tiff"]);
 
@@ -377,9 +377,8 @@ export async function findCertByIdFlex(certId: string) {
   let dbCert = await storage.getCertificateByCertId(certId);
   if (dbCert) return dbCert;
 
-  const numMatch = certId.match(/^MV-?0*(\d+)$/i);
-  if (numMatch) {
-    const num = numMatch[1];
+  const num = certNumberFromId(certId);
+  if (num !== null) {
     dbCert = await storage.getCertificateByCertId(`MV${num}`);
     if (dbCert) return dbCert;
     dbCert = await storage.getCertificateByCertId(`MV-${num.padStart(10, "0")}`);
@@ -2440,9 +2439,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     let dbResults = await storage.searchCertificates(q);
     if (dbResults.length === 0) {
-      const numMatch = q.match(/^MV-?0*(\d+)$/i);
-      if (numMatch) {
-        const num = numMatch[1];
+      const num = certNumberFromId(q);
+      if (num !== null) {
         const altNew = await storage.searchCertificates(`MV${num}`);
         const altOld = await storage.searchCertificates(`MV-${num.padStart(10, "0")}`);
         const seen = new Set<number>();

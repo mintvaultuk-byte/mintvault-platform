@@ -6,12 +6,7 @@ import { db } from "../db";
 import { sql, inArray } from "drizzle-orm";
 import { lookupCard, isAllowedLang } from "../services/tcgdex";
 import { getFeatureFlag } from "../config/feature-flags";
-
-function normalizeCertId(raw: string): string {
-  const m = raw.match(/^MV-?0*(\d+)$/i);
-  if (m) return `MV${m[1]}`;
-  return raw;
-}
+import { normalizeCertId } from "../lib/cert-id";
 
 export function registerAdminConfigRoutes(app: Express): void {
   app.get("/api/admin/db-info", requireAdmin, async (_req, res) => {
