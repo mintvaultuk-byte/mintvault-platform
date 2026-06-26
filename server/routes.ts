@@ -3171,7 +3171,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           edges_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(edges)}::numeric,     edges_score)`},
           surface_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(surface)}::numeric,   surface_score)`},
           label_type        = ${computedLabel},
-          grade_approved_by = ${"Cornelius Oliver"},
+          grade_approved_by = ${(req.session as any)?.adminEmail || "admin"},
           grade_approved_at = NOW(),
           status            = 'active',
           grade_strength_score = ${isNonNum ? sql`grade_strength_score` : sql`${mvgsScore}::int`},
@@ -10174,7 +10174,7 @@ Defects (admin-confirmed): ${defectLines}`;
             if (v === "minor" || v === "significant" || v === "major") return sql`${v}`;
             return sql`tear_severity`;
           })()},
-          grade_approved_by   = ${"Cornelius Oliver"},
+          grade_approved_by   = ${(req.session as any)?.adminEmail || "admin"},
           grade_approved_at   = NOW(),
           status              = 'active',
           grading_time_seconds = COALESCE(${clampedTime}::int, grading_time_seconds),
@@ -10191,7 +10191,7 @@ Defects (admin-confirmed): ${defectLines}`;
           VALUES (
             ${cert.certId},
             NOW(),
-            ${"Cornelius Oliver"},
+            ${(req.session as any)?.adminEmail || "admin"},
             ${gradeNum},
             ${b.defects ? JSON.stringify(b.defects) : null}::jsonb,
             ${b.private_notes || null},
