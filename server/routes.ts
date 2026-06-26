@@ -12224,12 +12224,32 @@ Defects (admin-confirmed): ${defectLines}`;
             // job queue (default 1 at a time) so a burst of scans can't saturate
             // the single shared vCPU. Raw is already confirmed above (fast
             // file-move); only the heavy pipeline queues.
-            // skipAi: ALWAYS defer the AI pre-grade off the scan path so the queue
-            // slot frees right after sharp+r2 (~10s sooner — the AI step is API-wait
-            // that used to block the slot). The pre-grade is computed lazily when a
-            // grader opens the cert (ensureAiDraft). The ai_auto_ingest_enabled
-            // master switch still gates that lazy/manual AI compute.
-            enqueueScanJob(() => processScanInBackground(ci, frontBuf, backBuf, { skipAi: true }), ci.certId);
+            // skipAi: keep the AI OFF the serialized scan-job slot so it frees the
+            // moment sharp+r2 finishes (~10s sooner — the AI step is API-wait that
+            // used to block the slot). The card IDENTIFY is then fired DETACHED below,
+            // right after the cropped front lands in R2, so a newly scanned card gets
+            // its name auto-filled within a few seconds — no manual identifier click —
+            // WITHOUT the identify round-trip holding the queue slot or affecting scan
+            // latency (the HTTP response already returned in step 3 above).
+            enqueueScanJob(async () => {
+              await processScanInBackground(ci, frontBuf, backBuf, { skipAi: true });
+              // At-scan auto-identify (identify-only TCGdex prefill). Detached
+              // fire-and-forget: ensureAiDraft is idempotent (no-op once identified,
+              // so a re-scan/replay never double-writes), bounded, never throws, and
+              // fetches the cropped front from R2 itself. If TCGdex is slow / times
+              // out / errors / returns no match, the scan is already complete and
+              // card_name simply stays empty (fillable via manual override or on-open
+              // re-run). Gated by the same ai_auto_ingest_enabled master switch.
+              if (autoAiOn) {
+                void import("./scan-ingest-service")
+                  .then(({ ensureAiDraft }) => ensureAiDraft(ci.id))
+                  .catch((e: any) =>
+                    console.error(
+                      `[scan-ingest] ${ci.certId}: at-scan identify failed (non-fatal, name left empty): ${e?.message ?? e}`
+                    )
+                  );
+              }
+            }, ci.certId);
           })();
         });
 
