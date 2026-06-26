@@ -21,7 +21,7 @@ import { registerPromotionRoutes } from "./routes/admin/promotions";
 import { migratePromotionsSchema } from "./services/promotionService";
 import { migratePaymentIdempotencySchema } from "./webhookHandlers";
 import { registerGraderRoutes } from "./routes/grader";
-import { migrateGraderSchema, migrateGraderCertSchema, isGraderLocked } from "./grader";
+import { migrateGraderSchema, migrateGraderCertSchema, migratePerOperatorSchema, isGraderLocked } from "./grader";
 import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
 import { registerStaffRoutes } from "./routes/staff";
 import {
@@ -374,19 +374,31 @@ export async function rejectInvalidUploads(files: Express.Multer.File[]): Promis
   return null;
 }
 
+// PUBLIC cert lookup — resolves an MV id in its various forms AND enforces the
+// public-visibility gate: a cert is only returned once its grade has been
+// APPROVED (grade_approved_at set on admin approve). Ungraded empty shells and
+// unapproved grades resolve to null, so every public read built on this helper
+// (cert page, vault, report, verify, logbook PDF, ebay-prices, stolen-report)
+// returns not-found for them.
+// ⚠️ PUBLIC-ONLY: every caller of this function is a public route. Internal
+// admin/staff/grader code must use storage.getCertificateByCertId directly
+// (NOT gated) so it can still load unapproved certs to grade/approve them.
+// Do NOT call this from an internal route — it will hide unapproved certs.
 export async function findCertByIdFlex(certId: string) {
   let dbCert = await storage.getCertificateByCertId(certId);
-  if (dbCert) return dbCert;
-
-  const num = certNumberFromId(certId);
-  if (num !== null) {
-    dbCert = await storage.getCertificateByCertId(`MV${num}`);
-    if (dbCert) return dbCert;
-    dbCert = await storage.getCertificateByCertId(`MV-${num.padStart(10, "0")}`);
-    if (dbCert) return dbCert;
+  if (!dbCert) {
+    const num = certNumberFromId(certId);
+    if (num !== null) {
+      dbCert =
+        (await storage.getCertificateByCertId(`MV${num}`)) ||
+        (await storage.getCertificateByCertId(`MV-${num.padStart(10, "0")}`)) ||
+        undefined;
+    }
   }
-
-  return null;
+  if (!dbCert) return null;
+  // Public-visibility gate: hide ungraded/unapproved certs from public reads.
+  if ((dbCert as { gradeApprovedAt?: unknown }).gradeApprovedAt == null) return null;
+  return dbCert;
 }
 
 async function certToPublic(c: any, viewerUserId?: string | null): Promise<PublicCertificate> {
@@ -1283,6 +1295,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   migratePaymentIdempotencySchema().catch((e: any) => console.error("[payment-idempotency-migrate] error:", e.message));
   migrateGraderSchema().catch((e: any) => console.error("[grader-migrate] error:", e.message));
   migrateGraderCertSchema().catch((e: any) => console.error("[grader-cert-migrate] error:", e.message));
+  migratePerOperatorSchema().catch((e: any) => console.error("[per-operator-migrate] error:", e.message));
   migrateStaffCapabilitiesSchema().catch((e: any) => console.error("[staff-caps-migrate] error:", e.message));
   migrateScanSchema().catch((e: any) => console.error("[scan-migrate] error:", e.message));
   migrateAccountSchema()
@@ -4776,7 +4789,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const certId = req.params.certId.toUpperCase();
       const cert = await storage.getCertificateByCertId(certId);
-      if (!cert) {
+      // Public-visibility gate: an unapproved/ungraded cert is not public, so a
+      // chip tap on one resolves to not-found (same as findCertByIdFlex).
+      if (!cert || (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt == null) {
         return res.status(404).json({ error: "Certificate not found" });
       }
       const ip =

@@ -46,10 +46,10 @@ export function registerPublicRoutes(app: Express): void {
       }
       const statsResult = await db.execute(sql`
         SELECT
-          COUNT(*) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL) AS total_graded,
-          COUNT(DISTINCT card_name) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL) AS unique_cards,
-          COUNT(DISTINCT set_name) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL) AS unique_sets,
-          ROUND(AVG(grade::numeric) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL), 1) AS avg_grade,
+          COUNT(*) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL) AS total_graded,
+          COUNT(DISTINCT card_name) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL) AS unique_cards,
+          COUNT(DISTINCT set_name) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL) AS unique_sets,
+          ROUND(AVG(grade::numeric) FILTER (WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL), 1) AS avg_grade,
           COUNT(*) FILTER (WHERE ownership_status = 'claimed') AS claimed_count
         FROM certificates
       `);
@@ -293,6 +293,7 @@ export function registerPublicRoutes(app: Express): void {
           AND deleted_at IS NULL
           AND card_name IS NOT NULL
           AND grade IS NOT NULL
+          AND grade_approved_at IS NOT NULL
           AND front_image_path IS NOT NULL
         ORDER BY issued_at DESC NULLS LAST
         LIMIT 5
@@ -521,7 +522,7 @@ export function registerPublicRoutes(app: Express): void {
           COUNT(CASE WHEN ownership_status = 'claimed' THEN 1 END)::int as claimed_count,
           ROUND(AVG(grade::numeric), 1) as avg_grade
         FROM certificates
-        WHERE deleted_at IS NULL AND grade IS NOT NULL
+        WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL
       `);
       const counters = countersResult.rows[0] as any;
 
@@ -588,7 +589,7 @@ export function registerPublicRoutes(app: Express): void {
       const result = await db.execute(sql`
         SELECT certificate_number, card_name, set_name, card_game, grade, issued_at
         FROM certificates
-        WHERE status = 'active' AND deleted_at IS NULL AND grade_type = 'numeric'${cardCond}${setCond}
+        WHERE status = 'active' AND deleted_at IS NULL AND grade_type = 'numeric' AND grade_approved_at IS NOT NULL${cardCond}${setCond}
         ORDER BY grade DESC NULLS LAST, issued_at DESC
         LIMIT 500
       `);

@@ -2145,7 +2145,12 @@ export class DatabaseStorage implements IStorage {
       gLow: number;
     }[]
   > {
-    const conditions: string[] = [`status = 'active'`, `deleted_at IS NULL`, `grade_type = 'numeric'`];
+    const conditions: string[] = [
+      `status = 'active'`,
+      `deleted_at IS NULL`,
+      `grade_type = 'numeric'`,
+      `grade_approved_at IS NOT NULL`,
+    ];
     if (filters.game) conditions.push(`LOWER(card_game) = LOWER('${filters.game.replace(/'/g, "''")}')`);
     if (filters.set)
       conditions.push(`LOWER(set_name)  LIKE LOWER('%${filters.set.replace(/'/g, "''").replace(/%/g, "\\%")}%')`);

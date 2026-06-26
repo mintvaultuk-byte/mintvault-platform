@@ -103,9 +103,10 @@ export function calcEdgeSubgrade(v: EdgeValues): { grade: number; worstKey: stri
     ["Back Left", v.backLeft],
     ["Back Right", v.backRight],
   ];
-  // Treat 0 as "unset" — see calcCornerSubgrade for rationale.
+  // Full marks by default — see calcCornerSubgrade. 0 = "unset" sentinel; no zone
+  // marked = no recorded deduction = perfect 10; deduct by marking a zone lower.
   const set = entries.filter(([, g]) => g > 0);
-  if (set.length === 0) return { grade: 0, worstKey: "" };
+  if (set.length === 0) return { grade: 10, worstKey: "" };
   const worst = set.reduce((a, b) => (a[1] <= b[1] ? a : b));
   return { grade: worst[1], worstKey: worst[0] };
 }
