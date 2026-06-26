@@ -114,6 +114,13 @@ app.get("/health", (_req, res) => {
 // detail). Intended for a Fly readiness check so traffic isn't routed to a
 // machine that is up but not yet able to serve. Kept separate from /health so a
 // DB blip degrades readiness without killing liveness.
+//
+// NOT rate-limited by design (CodeQL js/missing-rate-limiting, accepted in #113):
+// this is the platform (Fly) readiness probe. It returns a generic status only and
+// its one DB call is a cheap catalog lookup (to_regclass). A limiter here would risk
+// false 429s during normal probing, making Fly route traffic away from healthy
+// machines — i.e. rate-limiting would BREAK platform health checks. Intentional.
+// codeql[js/missing-rate-limiting]
 app.get("/ready", async (_req, res) => {
   try {
     const result = await pool.query("SELECT to_regclass('public.cert_counter') AS cc");
@@ -286,6 +293,16 @@ sessionPool.on("error", (err) => {
   console.error("[session-pool] idle client error (evicted):", err.message);
 });
 app.use(
+  // CSRF for cookie-authenticated, state-changing requests is enforced — just not
+  // with the token pattern CodeQL (js/missing-token-validation) recognizes. Evidence:
+  //   1. csrfOriginCheck (server/lib/csrf-origin.ts), applied below via app.use, rejects
+  //      cross-origin POST/PUT/PATCH/DELETE by comparing Origin/Referer to Host (exempts
+  //      the signature-authed Stripe webhook and custom-header scanner-token requests).
+  //   2. The session cookie below is SameSite=lax, which already blocks cross-site
+  //      cookie attachment on state-changing requests (defense-in-depth).
+  // Same-origin CSRF defense is a recognised alternative to CSRF tokens, so this alert
+  // is a false positive. Accepted in #113.
+  // codeql[js/missing-token-validation]
   session({
     store: new PgStore({
       pool: sessionPool,
