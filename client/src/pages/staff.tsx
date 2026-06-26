@@ -317,6 +317,11 @@ function GradeTab() {
                 <div className="min-w-0">
                   <div className="text-[#D4AF37] font-mono text-xs">{it.submissionRef}</div>
                   <div className="font-semibold truncate">
+                    {/* Lead with the MintVault cert number so the grader can match
+                        the row to the physical cert — especially for unidentified
+                        cards where there's no name to go on. */}
+                    <span className="font-mono text-[#D4AF37]">{card.certIdStr}</span>
+                    <span className="text-[#E8E4DC]/40"> · </span>
                     {card.cardName || "Unidentified card"}{" "}
                     {card.cardNumber && <span className="text-[#E8E4DC]/50">#{card.cardNumber}</span>}
                   </div>
