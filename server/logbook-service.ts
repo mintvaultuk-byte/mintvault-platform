@@ -45,6 +45,9 @@ export async function buildLogbookData(certIdInput: string) {
   }
   if (!cert) return null;
   if (cert.status === "voided") return null;
+  // Public-visibility gate: the logbook is public, so an ungraded/unapproved cert
+  // (no grade_approved_at) resolves to not-found — never surface it publicly.
+  if ((cert as { gradeApprovedAt?: unknown }).gradeApprovedAt == null) return null;
 
   const c = cert as any;
   const certId = normalizeCertId(cert.certId);

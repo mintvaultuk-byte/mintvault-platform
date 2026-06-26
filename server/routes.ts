@@ -373,20 +373,32 @@ export async function rejectInvalidUploads(files: Express.Multer.File[]): Promis
   return null;
 }
 
+// PUBLIC cert lookup — resolves an MV id in its various forms AND enforces the
+// public-visibility gate: a cert is only returned once its grade has been
+// APPROVED (grade_approved_at set on admin approve). Ungraded empty shells and
+// unapproved grades resolve to null, so every public read built on this helper
+// (cert page, vault, report, verify, logbook PDF, ebay-prices, stolen-report)
+// returns not-found for them.
+// ⚠️ PUBLIC-ONLY: every caller of this function is a public route. Internal
+// admin/staff/grader code must use storage.getCertificateByCertId directly
+// (NOT gated) so it can still load unapproved certs to grade/approve them.
+// Do NOT call this from an internal route — it will hide unapproved certs.
 export async function findCertByIdFlex(certId: string) {
   let dbCert = await storage.getCertificateByCertId(certId);
-  if (dbCert) return dbCert;
-
-  const numMatch = certId.match(/^MV-?0*(\d+)$/i);
-  if (numMatch) {
-    const num = numMatch[1];
-    dbCert = await storage.getCertificateByCertId(`MV${num}`);
-    if (dbCert) return dbCert;
-    dbCert = await storage.getCertificateByCertId(`MV-${num.padStart(10, "0")}`);
-    if (dbCert) return dbCert;
+  if (!dbCert) {
+    const numMatch = certId.match(/^MV-?0*(\d+)$/i);
+    if (numMatch) {
+      const num = numMatch[1];
+      dbCert =
+        (await storage.getCertificateByCertId(`MV${num}`)) ||
+        (await storage.getCertificateByCertId(`MV-${num.padStart(10, "0")}`)) ||
+        undefined;
+    }
   }
-
-  return null;
+  if (!dbCert) return null;
+  // Public-visibility gate: hide ungraded/unapproved certs from public reads.
+  if ((dbCert as { gradeApprovedAt?: unknown }).gradeApprovedAt == null) return null;
+  return dbCert;
 }
 
 async function certToPublic(c: any, viewerUserId?: string | null): Promise<PublicCertificate> {
@@ -2039,6 +2051,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           AND deleted_at IS NULL
           AND card_name IS NOT NULL
           AND grade IS NOT NULL
+          AND grade_approved_at IS NOT NULL
           AND front_image_path IS NOT NULL
         ORDER BY issued_at DESC NULLS LAST
         LIMIT 5
@@ -6358,7 +6371,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const certId = req.params.certId.toUpperCase();
       const cert = await storage.getCertificateByCertId(certId);
-      if (!cert) {
+      // Public-visibility gate: an unapproved/ungraded cert is not public, so a
+      // chip tap on one resolves to not-found (same as findCertByIdFlex).
+      if (!cert || (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt == null) {
         return res.status(404).json({ error: "Certificate not found" });
       }
       const ip =
@@ -14155,7 +14170,7 @@ Defects (admin-confirmed): ${defectLines}`;
           COUNT(CASE WHEN ownership_status = 'claimed' THEN 1 END)::int as claimed_count,
           ROUND(AVG(grade::numeric), 1) as avg_grade
         FROM certificates
-        WHERE deleted_at IS NULL AND grade IS NOT NULL
+        WHERE deleted_at IS NULL AND grade IS NOT NULL AND grade_approved_at IS NOT NULL
       `);
       const counters = countersResult.rows[0] as any;
 

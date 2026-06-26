@@ -98,6 +98,7 @@ export async function getRecentGradedItems(limit = 8): Promise<RecentGradedItem[
       WHERE deleted_at IS NULL
         AND status = 'active'
         AND grade IS NOT NULL
+        AND grade_approved_at IS NOT NULL
         AND COALESCE(grading_front_display, grading_front_cropped, front_image_path) IS NOT NULL
       ORDER BY grade_approved_at DESC NULLS LAST, issued_at DESC
       LIMIT ${safe}
@@ -139,6 +140,7 @@ export async function getGradeDistribution(): Promise<GradeDistribution> {
       WHERE deleted_at IS NULL
         AND status = 'active'
         AND grade IS NOT NULL
+        AND grade_approved_at IS NOT NULL
         AND grade_type = 'numeric'
       GROUP BY grade::numeric
     `)
@@ -196,6 +198,7 @@ export async function getCardPopulation(card: string, set?: string): Promise<Car
       WHERE deleted_at IS NULL
         AND status = 'active'
         AND grade IS NOT NULL
+        AND grade_approved_at IS NOT NULL
         AND grade_type = 'numeric'
         AND LOWER(TRIM(card_name)) = LOWER(${cardTrim})
         ${setTrim ? sql`AND LOWER(TRIM(set_name)) = LOWER(${setTrim})` : sql``}
@@ -230,6 +233,7 @@ export async function getSlabShowcaseItems(limit = 8): Promise<SlabShowcaseItem[
       WHERE deleted_at IS NULL
         AND status = 'active'
         AND grade IS NOT NULL
+        AND grade_approved_at IS NOT NULL
         AND front_image_path IS NOT NULL
       ORDER BY grade DESC NULLS LAST, issued_at DESC
       LIMIT ${limit}
