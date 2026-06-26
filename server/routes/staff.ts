@@ -29,6 +29,7 @@ import {
   deleteStaffAccount,
   listStaffWithCounts,
   setStaffCapabilities,
+  setStaffReviewRate,
   updateStaffEmail,
   resetStaffPassword,
   assignScanSubmissions,
@@ -234,6 +235,20 @@ export function registerStaffRoutes(app: Express): void {
     const r = await setStaffCapabilities(String(req.params.id), caps, adminUser);
     if (!r.ok) return res.status(r.status).json({ error: r.error });
     return res.json({ ok: true });
+  });
+
+  // PHASE 4 — set a grader's per-operator review_rate (0..100). 100 = everything
+  // manually reviewed (default for new operators); lower dials in sampling.
+  app.post("/api/admin/staff/:id/review-rate", requireAdmin, async (req: Request, res: Response) => {
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const raw = (req.body || {}).review_rate;
+    const rate = Number(raw);
+    if (raw === undefined || raw === null || raw === "" || !Number.isFinite(rate)) {
+      return res.status(400).json({ error: "review_rate is required (0–100)" });
+    }
+    const r = await setStaffReviewRate(String(req.params.id), rate, adminUser);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json({ ok: true, reviewRate: r.reviewRate });
   });
 
   // Change a staffer's login email. Staff-only (never admin/customer); enforces

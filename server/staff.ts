@@ -123,7 +123,7 @@ export async function authenticateStaff(
 /** All staff (any capability), with their caps + grade/scan workload counts. */
 export async function listStaffWithCounts() {
   const r = await db.execute(sql`
-    SELECT u.id, u.email, u.display_name, u.can_grade, u.can_scan, u.can_print,
+    SELECT u.id, u.email, u.display_name, u.can_grade, u.can_scan, u.can_print, u.review_rate,
       (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'assigned')::int AS grade_assigned,
       (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'pending_review')::int AS grade_pending,
       (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'approved')::int AS grade_approved,
@@ -138,11 +138,31 @@ export async function listStaffWithCounts() {
     email: u.email,
     displayName: u.display_name ?? null,
     caps: { grade: !!u.can_grade, scan: !!u.can_scan, print: !!u.can_print },
+    reviewRate: u.review_rate == null ? 100 : Number(u.review_rate),
     gradeAssigned: Number(u.grade_assigned || 0),
     gradePending: Number(u.grade_pending || 0),
     gradeApproved: Number(u.grade_approved || 0),
     scanAssigned: Number(u.scan_assigned || 0),
   }));
+}
+
+/**
+ * PHASE 4 — set a grader's per-operator review_rate (0..100). Staff-only (never
+ * admin/customer). Audited. The rate decides what fraction of that operator's
+ * submissions get manually reviewed vs auto-approved at submit time.
+ */
+export async function setStaffReviewRate(userId: string, rate: number, adminUser: string) {
+  if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+    return { ok: false as const, status: 400, error: "review_rate must be an integer 0–100" };
+  }
+  const clean = Math.round(rate);
+  const u = await db.execute(sql`SELECT id, role FROM users WHERE id = ${userId} AND deleted_at IS NULL LIMIT 1`);
+  const row = u.rows[0] as any;
+  if (!row) return { ok: false as const, status: 404, error: "User not found" };
+  if (row.role === "admin") return { ok: false as const, status: 400, error: "Admins are never operator-graded" };
+  await db.execute(sql`UPDATE users SET review_rate = ${clean}, updated_at = NOW() WHERE id = ${userId}`);
+  await storage.writeAuditLog("user", userId, "staff_review_rate_set", adminUser, { review_rate: clean });
+  return { ok: true as const, reviewRate: clean };
 }
 
 /**
