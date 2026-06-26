@@ -171,13 +171,31 @@ export async function createCertForScan(
     }
   }
 
+  // Phase 2 — auto-assign: if the scanning operator can grade, the new cert is
+  // assigned to them so it lands straight in their /staff queue. A scan-only
+  // operator (can_grade=false), a non-operator, or a shared-token scan (scannedBy
+  // NULL) leaves it unassigned for the manual /admin/graders pool. The eligibility
+  // check never throws — on failure the scan still ingests, just unassigned.
+  // Runs only for a fresh cert (after the idempotent-replay early return above).
+  let autoAssign = false;
+  if (scannedBy) {
+    try {
+      const g = await db.execute(
+        sql`SELECT can_grade FROM users WHERE id = ${scannedBy} AND deleted_at IS NULL LIMIT 1`
+      );
+      autoAssign = g.rows[0]?.can_grade === true;
+    } catch (err: any) {
+      console.warn(`[scan-ingest] auto-assign eligibility check failed (${err?.message}) → leaving unassigned`);
+    }
+  }
+
   // 2. Allocate + insert, gated by the unique index on ingest_idempotency_key.
   const { generateReferenceNumber } = await import("./reference-number");
   const certNumber = await storage.getNextCertId();
   const refNum = generateReferenceNumber();
   const ins = await db.execute(sql`
-    INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, source, raw_uploaded, scan_status, scanned_by, ingest_idempotency_key)
-    VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin_scan', NOW(), NOW(), ${refNum}, 'admin_scan', false, 'processing', ${scannedBy}, ${idempotencyKey ?? null})
+    INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, source, raw_uploaded, scan_status, scanned_by, assigned_grader_id, grader_status, assigned_at, ingest_idempotency_key)
+    VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin_scan', NOW(), NOW(), ${refNum}, 'admin_scan', false, 'processing', ${scannedBy}, ${autoAssign ? scannedBy : null}, ${autoAssign ? "assigned" : "unassigned"}, ${autoAssign ? sql`NOW()` : sql`NULL`}, ${idempotencyKey ?? null})
     ON CONFLICT (ingest_idempotency_key) DO NOTHING
     RETURNING id, certificate_number, reference_number, raw_uploaded, scan_status
   `);
