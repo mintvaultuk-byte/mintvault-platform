@@ -40,6 +40,7 @@ import {
   setGraderDailyTarget,
   stripGraderPii,
   GRADER_AUTO_PUBLISH,
+  getOperatorReviewRate,
 } from "../grader";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
@@ -286,12 +287,68 @@ export function registerGraderRoutes(app: Express): void {
         return res.json({ ok: true, gradingStatus: "approved" });
       }
 
+      // ── PHASE 4 — per-operator review gate (deterministic sampling) ──────────
+      // Move to pending_review + snapshot the operator's submission (Phase 3).
       await db.execute(sql`
         UPDATE certificates SET grader_status = 'pending_review', graded_at = NOW(),
           ${captureOperatorSubmission}, updated_at = NOW() WHERE id = ${certId}
       `);
-      await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {});
-      return res.json({ ok: true, gradingStatus: "pending_review" });
+
+      // Read back exactly what we just snapshotted + the gate inputs.
+      const gateRow = (
+        await db.execute(sql`SELECT operator_grade, card_name FROM certificates WHERE id = ${certId}`)
+      ).rows[0] as any;
+      const operatorGrade = gateRow?.operator_grade;
+      const cardName = gateRow?.card_name;
+      // Hard overrides — never auto-approve: no grade to promote to final, or an
+      // unidentified card (never push an unnamed card live).
+      const gradeMissing = operatorGrade == null || String(operatorGrade).trim() === "";
+      const nameMissing = !cardName || String(cardName).trim() === "";
+
+      const reviewRate = await getOperatorReviewRate(graderId);
+      // Deterministic sampling — Knuth multiplicative hash of the cert id, mod 100.
+      // Review when bucket < rate, so ~rate% of a grader's cards are reviewed and
+      // the rest auto-approve. Pure function of certId → the SAME cert always
+      // decides the same way (reproducible, NOT random per call / per resubmit).
+      const bucket = (Math.imul(certId, 2654435761) >>> 0) % 100;
+
+      // rate 100 → always review; rate 0 → never review; else sample by bucket.
+      const forceReview = gradeMissing || nameMissing;
+      const reviewRequired = forceReview || reviewRate >= 100 || (reviewRate > 0 && bucket < reviewRate);
+
+      if (reviewRequired) {
+        await db.execute(sql`UPDATE certificates SET review_required = true, updated_at = NOW() WHERE id = ${certId}`);
+        await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
+          review_required: true,
+          review_rate: reviewRate,
+          ...(forceReview
+            ? { forced: gradeMissing ? "operator_grade_null" : "unidentified" }
+            : { sampled_bucket: bucket }),
+        });
+        return res.json({ ok: true, gradingStatus: "pending_review", reviewRequired: true });
+      }
+
+      // AUTO-APPROVE — sampling cleared this card without manual review. Promote
+      // the operator's grade to final and publish. grade_approved_by = 'auto' is a
+      // deliberate system marker, distinguishable from any human approver.
+      await db.execute(sql`
+        UPDATE certificates SET
+          review_required = false,
+          grade = operator_grade,
+          grade_approved_at = NOW(),
+          grade_approved_by = 'auto',
+          grader_status = 'approved',
+          status = 'active',
+          updated_at = NOW()
+        WHERE id = ${certId}
+      `);
+      await storage.writeAuditLog("certificate", String(certId), "auto_approve", "system", {
+        operator_grade: operatorGrade ?? null,
+        graded_by: graderId,
+        review_rate: reviewRate,
+        sampled_bucket: bucket,
+      });
+      return res.json({ ok: true, gradingStatus: "approved", autoApproved: true });
     } catch (e: any) {
       console.error("[grader] submit error:", e.message);
       return res.status(500).json({ error: e.message });

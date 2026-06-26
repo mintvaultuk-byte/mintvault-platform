@@ -13,6 +13,7 @@ type Staff = {
   email: string;
   displayName: string | null;
   caps: { grade: boolean; scan: boolean; print: boolean };
+  reviewRate: number;
   gradeAssigned: number;
   gradePending: number;
   gradeApproved: number;
@@ -232,6 +233,28 @@ export default function AdminStaffPage() {
       const d = await res.json().catch(() => ({}));
       return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to update");
     }
+    load();
+  }
+
+  // PHASE 4 — set a grader's per-operator review rate (0–100). 100 = every card
+  // manually reviewed; lower auto-approves the rest by deterministic sampling.
+  async function saveReviewRate(s: Staff, raw: string) {
+    const rate = Math.round(Number(raw));
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) return setErr("Review % must be 0–100.");
+    if (rate === s.reviewRate) return; // no change
+    setMsg(null);
+    setErr(null);
+    const res = await fetch(`/api/admin/staff/${s.id}/review-rate`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ review_rate: rate }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to set review rate");
+    }
+    setMsg(`${s.displayName || s.email}: review rate set to ${rate}%`);
     load();
   }
 
@@ -816,6 +839,9 @@ export default function AdminStaffPage() {
                   <th>Grade</th>
                   <th>Scan</th>
                   <th>Print</th>
+                  <th title="Percent of this operator's submissions that are manually reviewed (rest auto-approve)">
+                    Review %
+                  </th>
                   <th>Workload</th>
                   <th></th>
                 </tr>
@@ -836,6 +862,26 @@ export default function AdminStaffPage() {
                           />
                         </td>
                       ))}
+                      <td>
+                        {s.caps.grade ? (
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            defaultValue={s.reviewRate}
+                            key={`rr-${s.id}-${s.reviewRate}`}
+                            title="0–100. 100 = every card reviewed; lower auto-approves the rest."
+                            data-testid={`input-review-rate-${s.id}`}
+                            onBlur={(e) => saveReviewRate(s, e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                            }}
+                            className="w-14 bg-black border border-[#D4AF37]/30 rounded px-1.5 py-0.5 text-xs text-[#E8E4DC] focus:border-[#D4AF37] outline-none"
+                          />
+                        ) : (
+                          <span className="text-[#E8E4DC]/30 text-xs">—</span>
+                        )}
+                      </td>
                       <td className="text-xs text-[#E8E4DC]/70">
                         {s.caps.grade && `${s.gradeAssigned}a/${s.gradePending}p/${s.gradeApproved}✓ `}
                         {s.caps.scan && `${s.scanAssigned} box`}
@@ -863,7 +909,7 @@ export default function AdminStaffPage() {
                     </tr>
                     {editingId === s.id && (
                       <tr className="border-t border-[#D4AF37]/10 bg-[#D4AF37]/5">
-                        <td colSpan={6} className="px-2 py-3">
+                        <td colSpan={7} className="px-2 py-3">
                           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
                             <div className="flex items-center gap-2 flex-1 min-w-[220px]">
                               <input

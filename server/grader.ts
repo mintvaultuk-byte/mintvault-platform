@@ -1024,6 +1024,28 @@ export async function getGraderEarnings(graderId: string) {
 }
 
 /** Per-grader counts for the admin graders page. */
+/**
+ * PHASE 4 — a grader's per-operator review rate (0..100). New operators inherit
+ * the users.review_rate column default of 100 (everything manually reviewed).
+ * Returns 100 — the SAFE default (force review) — for a missing/unknown user or
+ * any read error, so a lookup failure can never cause a silent auto-approve.
+ */
+export async function getOperatorReviewRate(userId: string | null): Promise<number> {
+  if (!userId) return 100;
+  try {
+    const r = await db.execute(
+      sql`SELECT review_rate FROM users WHERE id = ${userId} AND deleted_at IS NULL LIMIT 1`
+    );
+    const row = r.rows[0] as any;
+    if (!row || row.review_rate == null) return 100;
+    const n = Number(row.review_rate);
+    if (!Number.isFinite(n)) return 100;
+    return Math.max(0, Math.min(100, Math.round(n)));
+  } catch {
+    return 100;
+  }
+}
+
 export async function getGraderCountsForAdmin() {
   const r = await db.execute(sql`
     SELECT u.id, u.email, u.display_name,
