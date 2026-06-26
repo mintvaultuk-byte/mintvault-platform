@@ -440,7 +440,8 @@ export default function GradingPanel({
     if (gd.cardNumber && !idNumber) setIdNumber(String(gd.cardNumber));
     if (gd.year && !idYear) setIdYear(String(gd.year));
     if (gd.variant && !idVariant) setIdVariant(String(gd.variant));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Intentionally fills only empty fields once on data arrival — id* values are
+    // deliberately not deps (they'd re-fire and could re-fill after a grader edit).
   }, [gradingData, graderMode]);
   // Card autofill — mirrors CertificateForm.handleAutofill: set(+number) → card
   // master → fill name/year/variant. Same /api/cards/autofill endpoint + pattern.
