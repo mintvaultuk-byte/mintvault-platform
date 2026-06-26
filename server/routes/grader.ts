@@ -247,14 +247,29 @@ export function registerGraderRoutes(app: Express): void {
         return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not submittable` });
       }
       const graderEmail = (req.session as any).graderEmail as string;
+      const graderId = (req.session as any).graderId || null;
       // Persist any final edits in the same action, then transition.
       if (req.body && Object.keys(req.body).length) await applyCertGradeDraft(certId, req.body);
+
+      // PHASE 3 — capture the OPERATOR's own submission as an immutable snapshot.
+      // applyCertGradeDraft (above) has just written the operator's overall grade
+      // and four subgrades onto the cert columns; we snapshot them here so a later
+      // admin override of `grade`/subgrades never overwrites what the operator
+      // actually submitted. graded_by records WHO graded (the operator), distinct
+      // from grade_approved_by (WHO approved). Re-submits (redo) re-snapshot the
+      // operator's latest attempt — the one that gets reviewed/approved.
+      const captureOperatorSubmission = sql`
+        graded_by = COALESCE(${graderId}, assigned_grader_id),
+        operator_grade = grade,
+        operator_subgrades = jsonb_build_object(
+          'centering', centering_score, 'corners', corners_score,
+          'edges', edges_score, 'surface', surface_score)`;
 
       if (GRADER_AUTO_PUBLISH) {
         // AUTO-PUBLISH FLIP: publish directly, skip admin review.
         await db.execute(sql`
           UPDATE certificates SET grade_approved_at = NOW(), grade_approved_by = ${graderEmail}, status = 'active',
-            grader_status = 'approved', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
+            grader_status = 'approved', graded_at = NOW(), ${captureOperatorSubmission}, updated_at = NOW() WHERE id = ${certId}
         `);
         await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
           auto_published: true,
@@ -263,7 +278,8 @@ export function registerGraderRoutes(app: Express): void {
       }
 
       await db.execute(sql`
-        UPDATE certificates SET grader_status = 'pending_review', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
+        UPDATE certificates SET grader_status = 'pending_review', graded_at = NOW(),
+          ${captureOperatorSubmission}, updated_at = NOW() WHERE id = ${certId}
       `);
       await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {});
       return res.json({ ok: true, gradingStatus: "pending_review" });
