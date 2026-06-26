@@ -241,15 +241,32 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
   const stale = opts.staleMinutes ?? 10;
   const limit = opts.limit ?? 20;
 
-  // (A) Re-drive pipeline failures from R2 raw.
+  // (A) Re-drive interrupted pipelines from R2 raw — raw is durably in R2 but the
+  // heavy pipeline never finished. Two ways in:
+  //   - scan_status='failed'         → the pipeline threw; re-drive immediately.
+  //   - scan_status='processing' AND stale → the pipeline was INTERRUPTED after
+  //     markRawUploaded but before completion. The commonest cause is a SERVER
+  //     RESTART (a deploy) dropping the in-memory scan-job queue, leaving the cert
+  //     a permanent empty shell — NEITHER case (B) (raw_uploaded=false) nor the old
+  //     failed-only query caught it, so it stranded forever (MV291-297). A staleness
+  //     gate (>${stale}min, well beyond the ~10-30s a real pipeline takes) ensures we
+  //     never yank a cert that's legitimately mid-processing right now.
+  // Re-drive is idempotent: same cert id, deterministic R2 keys overwrite, the
+  // content-keyed ingest resolves to the same cert — safe to run twice.
   let failed: { rows: any[] };
   try {
     failed = (await db.execute(sql`
       SELECT id, certificate_number FROM certificates
-      WHERE scan_status = 'failed' AND raw_uploaded = true
+      WHERE raw_uploaded = true
+        AND deleted_at IS NULL
+        AND (
+          scan_status = 'failed'
+          OR (scan_status = 'processing'
+              AND updated_at < NOW() - ((${stale})::text || ' minutes')::interval)
+        )
       ORDER BY updated_at ASC LIMIT ${limit}`)) as any;
   } catch (e: any) {
-    console.error(`[reconciler] query (failed) error: ${e?.message}${pgErrorDetail(e)}`);
+    console.error(`[reconciler] query (failed/stalled) error: ${e?.message}${pgErrorDetail(e)}`);
     failed = { rows: [] };
   }
   for (const row of failed.rows) {
@@ -261,10 +278,10 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
       const frontBuf = frontKeys.length ? await getR2Buffer(frontKeys[0]) : null;
       const backBuf = backKeys.length ? await getR2Buffer(backKeys[0]) : null;
       if (!frontBuf) {
-        console.warn(`[reconciler] ${certNum}: scan_status=failed but no raw_front in R2 — cannot re-drive`);
+        console.warn(`[reconciler] ${certNum}: interrupted scan but no raw_front in R2 — cannot re-drive`);
         continue;
       }
-      console.log(`[reconciler] re-driving pipeline for ${certNum} from retained R2 raw`);
+      console.log(`[reconciler] re-driving interrupted pipeline for ${certNum} from retained R2 raw`);
       // Serialize re-drive through the SAME scan queue so a reconciler sweep can't
       // pile heavy pipelines onto a concurrent foreground scan burst.
       // skipAi: the AI pre-grade is deferred off the scan path (computed lazily
@@ -933,8 +950,16 @@ export function runAiOnCertIfIdle(
  */
 export async function ensureAiDraft(certId: number, opts: { timeoutMs?: number } = {}): Promise<void> {
   try {
-    const row = (await db.execute(sql`SELECT ai_analysis FROM certificates WHERE id = ${certId}`)).rows[0] as any;
+    const row = (await db.execute(sql`SELECT ai_analysis, scan_status FROM certificates WHERE id = ${certId}`))
+      .rows[0] as any;
     if (!row) return;
+    // Don't fire the heavy (~20s) on-open AI while the scan is still INGESTING.
+    // Phase 2 auto-assign routes a freshly-scanned cert straight into the grader
+    // queue, so it can be opened while processScanInBackground is still running;
+    // letting the AI pile onto the in-flight pipeline contends for the single vCPU
+    // + the max:8 DB pool and can stall the ingest (stuck 'processing'). The AI
+    // runs on the NEXT open, once scan_status has cleared.
+    if (row.scan_status === "processing") return;
     const ai = row.ai_analysis;
     const aiEmpty = !ai || (typeof ai === "object" && Object.keys(ai).length === 0);
     if (!aiEmpty) return; // pre-grade already computed for this cert
