@@ -255,16 +255,39 @@ export default function GradingPanel({
     staleTime: 30_000,
   });
 
-  // Grading data. NOTE: the /grading request BLOCKS ~10s on the first open of a
-  // cert whose AI pre-grade was deferred off the scan path — the server computes
-  // it then and returns it in this payload, so the draft is present on first
-  // paint (not a later refresh). `gradingPending` drives the computing-state
-  // early return below, so the grader sees a loading state for that wait rather
-  // than an all-zero editable form.
+  // Per-device AI card-IDENTIFICATION preference (localStorage; default ON). This
+  // is the identify step ONLY — the AI never grades. ON: opening a not-yet-
+  // identified cert auto-runs the Haiku identify + TCGdex confirm. OFF: no AI call
+  // (saves ~£0.004/scan), the grader enters the identity manually. Per-device so
+  // one person's choice never changes behaviour for anyone else / shop-wide.
+  const [aiIdentify, setAiIdentify] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("mv.aiIdentify") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const toggleAiIdentify = (on: boolean) => {
+    setAiIdentify(on);
+    try {
+      localStorage.setItem("mv.aiIdentify", on ? "1" : "0");
+    } catch {
+      /* storage disabled (private mode) — falls back to in-memory for this session */
+    }
+  };
+
+  // Grading data. NOTE: with AI identify ON, the /grading request BLOCKS ~10s on
+  // the first open of a not-yet-identified cert while the server runs card
+  // identification, then returns it in this payload (present on first paint, not a
+  // later refresh). `gradingPending` drives the computing-state early return below.
+  // With AI identify OFF we pass ?aiIdentify=0 so the server SKIPS the identify
+  // call and returns immediately (no block); `aiIdentify` is in the queryKey so
+  // flipping the toggle refetches with the new behaviour.
   const { data: gradingData, isPending: gradingPending } = useQuery<any>({
-    queryKey: [`${apiBase}/certificates/${certId}/grading`],
+    queryKey: [`${apiBase}/certificates/${certId}/grading`, aiIdentify],
     queryFn: async () => {
-      const res = await fetch(`${apiBase}/certificates/${certId}/grading`, { credentials: "include" });
+      const url = `${apiBase}/certificates/${certId}/grading${aiIdentify ? "" : "?aiIdentify=0"}`;
+      const res = await fetch(url, { credentials: "include" });
       if (!res.ok) return null;
       return res.json();
     },
@@ -1694,9 +1717,10 @@ export default function GradingPanel({
   // card IDENTIFICATION (no grading — humans grade everything). Show a clean
   // computing state for that wait instead of the all-zero editable form (which
   // looks like a real grade and whose fields would be clobbered when the data
-  // lands). adminReview hits a different, non-blocking endpoint so it's excluded;
-  // fast loads flash only a brief spinner.
-  if (gradingPending && !adminReview) {
+  // lands). adminReview hits a different, non-blocking endpoint so it's excluded,
+  // and AI-identify-OFF is excluded too (no block — it returns instantly and the
+  // light shows "Manual entry"). Fast loads flash only a brief spinner.
+  if (gradingPending && !adminReview && aiIdentify) {
     return (
       <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4">
         <div className="flex items-center gap-3 px-2 py-8 text-sm text-amber-300">
@@ -1712,27 +1736,63 @@ export default function GradingPanel({
     );
   }
 
-  // TCGdex identity-confirmation light (DISPLAY ONLY — reads the ai_analysis flags
-  // the ID-only work already writes; no new state, no AI calls, no writes). THREE
-  // states so a card still identifying never looks like a failure:
-  //   green   → dbSource "pokemon-tcg-api" (name/set/number from a verified match)
-  //   red     → needs_identification_review (no TCG match — grader must verify)
-  //   pending → neither yet (identify in progress / not run / timed out)
+  // Card-identity status light (DISPLAY ONLY — reads existing ai_analysis flags +
+  // the per-device AI-identify toggle; no AI calls, no writes). FOUR states so a
+  // card still identifying — or one in manual mode — never looks like a failure:
+  //   green   → dbSource "pokemon-tcg-api" (name/set/number from a verified TCGdex match)
+  //   red     → needs_identification_review (AI ran, no TCG match — grader verifies)
+  //   pending → AI identify ON but not done yet (in progress / not run / timed out)
+  //   manual  → AI identify OFF + not identified — grader enters identity manually
   // NOT gated on graderMode, so it renders on the admin panel AND every staff
   // grader's panel (shared component).
   const aiMeta = gradingData?.aiAnalysis;
-  const tcgState: "green" | "red" | "pending" =
+  const tcgState: "green" | "red" | "pending" | "manual" =
     aiMeta?.identification?.dbSource === "pokemon-tcg-api"
       ? "green"
       : aiMeta?.needs_identification_review === true
         ? "red"
-        : "pending";
+        : aiIdentify
+          ? "pending"
+          : "manual";
   const tcgGuess: string | null = tcgState === "red" ? (aiMeta?.suggested_name ?? null) : null;
 
   return (
     <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4 space-y-5">
-      {/* TCGdex confirmation light — green=verified match · red=no match (verify) ·
-          pending=still identifying. Folds in the old amber "verify" note (red state). */}
+      {/* AI card-IDENTIFICATION toggle (per-device, localStorage). Identify step
+          ONLY — the AI never grades. ON = auto-identify on open + TCGdex confirm;
+          OFF = no AI call, enter identity manually. NOT graderMode-gated → the
+          admin panel AND every staff grader sees + controls it. */}
+      <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--admin-line)] bg-[var(--admin-panel2)] px-3 py-2">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-[var(--admin-ink)]">AI card identification</div>
+          <div className="text-[10px] text-[var(--admin-ink-faint)]">
+            Identifies card + set only — never grades.{" "}
+            {aiIdentify ? "On — auto-identifies on open, TCGdex confirms." : "Off — enter the card identity manually."}
+          </div>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={aiIdentify}
+          onClick={() => toggleAiIdentify(!aiIdentify)}
+          data-testid="ai-identify-toggle"
+          title="AI card identification (per-device). Identify only — never grades."
+          className={
+            "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors " +
+            (aiIdentify ? "bg-emerald-500/70" : "bg-[var(--admin-line)]")
+          }
+        >
+          <span
+            className={
+              "inline-block h-4 w-4 rounded-full bg-white shadow transition-transform " +
+              (aiIdentify ? "translate-x-[18px]" : "translate-x-0.5")
+            }
+          />
+        </button>
+      </div>
+
+      {/* Card-identity status light — see tcgState above. Folds in the old amber
+          "verify" note (red state). */}
       <div
         className={
           "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px] " +
@@ -1740,18 +1800,32 @@ export default function GradingPanel({
             ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
             : tcgState === "red"
               ? "border-red-500/40 bg-red-500/10 text-red-300"
-              : "border-amber-500/40 bg-amber-500/10 text-amber-300")
+              : tcgState === "pending"
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                : "border-[var(--admin-line)] bg-[var(--admin-panel2)] text-[var(--admin-ink-faint)]")
         }
         data-testid="tcgdex-status"
       >
         <span
           className={
             "inline-block h-2 w-2 rounded-full shrink-0 " +
-            (tcgState === "green" ? "bg-emerald-400" : tcgState === "red" ? "bg-red-400" : "bg-amber-400 animate-pulse")
+            (tcgState === "green"
+              ? "bg-emerald-400"
+              : tcgState === "red"
+                ? "bg-red-400"
+                : tcgState === "pending"
+                  ? "bg-amber-400 animate-pulse"
+                  : "bg-[var(--admin-ink-faint)]")
           }
         />
         <span className="font-semibold uppercase tracking-wider">
-          {tcgState === "green" ? "TCGdex confirmed" : tcgState === "red" ? "Not confirmed — verify" : "Identifying…"}
+          {tcgState === "green"
+            ? "TCGdex confirmed"
+            : tcgState === "red"
+              ? "Not confirmed — verify"
+              : tcgState === "pending"
+                ? "Identifying…"
+                : "Manual entry"}
         </span>
         {tcgState === "red" && (
           <span className="text-[var(--admin-ink-faint)]">
@@ -1760,6 +1834,7 @@ export default function GradingPanel({
               : "Enter the card identity before grading."}
           </span>
         )}
+        {tcgState === "manual" && <span>AI identify off — enter the card identity manually.</span>}
       </div>
 
       {/* Card identity — EDITABLE for graders (they hold the card and may correct

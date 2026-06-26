@@ -24,6 +24,7 @@ import {
   Users,
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
+import InstallAppButton from "../install-app-button";
 
 /** Canonical admin tab contract — owned by the shell, imported by the dashboard. */
 export type AdminTab =
@@ -247,6 +248,7 @@ export default function AdminShell({
                   />
                 </label>
               )}
+              <InstallAppButton className="admin-btn" label="Install app" />
               <button
                 type="button"
                 onClick={onLogout}

@@ -24,13 +24,8 @@ import { certificates, igPostQueue, serviceTiers, type IgPostType } from "@share
 // warning log) so the cron / Post Now never silently 404s.
 const HIGH_GRADE_FLOOR = "8.0";
 import type { IgPostData } from "./types";
+import { normalizeCertId } from "../lib/cert-id";
 
-// Cert IDs are stored "MV-0000000001" but display as "MV42" — strip the
-// padding zeroes then drop the "MV" prefix to match the slab front render.
-function normalizeCertId(raw: string): string {
-  const m = raw.match(/^MV-?0*(\d+)$/i);
-  return m ? `MV${m[1]}` : raw;
-}
 function stripMvPrefix(raw: string): string {
   return raw.replace(/^MV/, "");
 }
@@ -41,8 +36,8 @@ function stripMvPrefix(raw: string): string {
 const TIER_DISPLAY_NAMES: Record<string, string> = {
   standard: "Vault Queue",
   priority: "Standard",
-  express:  "Express",
-  gold:     "Black Label Review",
+  express: "Express",
+  gold: "Black Label Review",
 };
 
 export async function fetchCardRevealData(): Promise<IgPostData> {
@@ -51,11 +46,7 @@ export async function fetchCardRevealData(): Promise<IgPostData> {
   const postedSubquery = db
     .select({ id: igPostQueue.certId })
     .from(igPostQueue)
-    .where(and(
-      isNotNull(igPostQueue.certId),
-      eq(igPostQueue.status, "posted"),
-      isNull(igPostQueue.deletedAt),
-    ));
+    .where(and(isNotNull(igPostQueue.certId), eq(igPostQueue.status, "posted"), isNull(igPostQueue.deletedAt)));
 
   let cert: any = null;
 
@@ -64,28 +55,34 @@ export async function fetchCardRevealData(): Promise<IgPostData> {
     const rows = await db
       .select()
       .from(certificates)
-      .where(and(
-        isNull(certificates.deletedAt),
-        isNotNull(certificates.gradeApprovedAt),
-        gte(certificates.gradeOverall, HIGH_GRADE_FLOOR),
-        notInArray(certificates.id, postedSubquery),
-      ))
+      .where(
+        and(
+          isNull(certificates.deletedAt),
+          isNotNull(certificates.gradeApprovedAt),
+          gte(certificates.gradeOverall, HIGH_GRADE_FLOOR),
+          notInArray(certificates.id, postedSubquery)
+        )
+      )
       .orderBy(desc(certificates.gradeOverall), desc(certificates.gradeApprovedAt))
       .limit(1);
     cert = rows[0] ?? null;
   } catch (err: any) {
     // Likely "relation ig_post_queue does not exist" — migration not applied.
     // Skip the unposted-filter, keep the grade filter.
-    console.warn(`[ig-data] card_reveal: ig_post_queue lookup failed (${err?.message ?? err}). Falling back to grade-only filter.`);
+    console.warn(
+      `[ig-data] card_reveal: ig_post_queue lookup failed (${err?.message ?? err}). Falling back to grade-only filter.`
+    );
     try {
       const rows = await db
         .select()
         .from(certificates)
-        .where(and(
-          isNull(certificates.deletedAt),
-          isNotNull(certificates.gradeApprovedAt),
-          gte(certificates.gradeOverall, HIGH_GRADE_FLOOR),
-        ))
+        .where(
+          and(
+            isNull(certificates.deletedAt),
+            isNotNull(certificates.gradeApprovedAt),
+            gte(certificates.gradeOverall, HIGH_GRADE_FLOOR)
+          )
+        )
         .orderBy(desc(certificates.gradeOverall), desc(certificates.gradeApprovedAt))
         .limit(1);
       cert = rows[0] ?? null;
@@ -97,14 +94,13 @@ export async function fetchCardRevealData(): Promise<IgPostData> {
   // Final fallback: no grade ≥ 8 available. Drop the grade floor and pick
   // any recent approved cert. Logged so the operator notices a quiet pool.
   if (!cert) {
-    console.warn(`[ig-data] card_reveal: no certs found at grade ≥ ${HIGH_GRADE_FLOOR}. Falling back to any recent approved cert.`);
+    console.warn(
+      `[ig-data] card_reveal: no certs found at grade ≥ ${HIGH_GRADE_FLOOR}. Falling back to any recent approved cert.`
+    );
     const rows = await db
       .select()
       .from(certificates)
-      .where(and(
-        isNull(certificates.deletedAt),
-        isNotNull(certificates.gradeApprovedAt),
-      ))
+      .where(and(isNull(certificates.deletedAt), isNotNull(certificates.gradeApprovedAt)))
       .orderBy(desc(certificates.gradeApprovedAt))
       .limit(1);
     cert = rows[0] ?? null;
@@ -122,29 +118,29 @@ export async function fetchCardRevealData(): Promise<IgPostData> {
 // same field projection when pulling a specific cert by PK.
 export function certRowToCardRevealData(cert: any): IgPostData {
   const tierLabel =
-    (cert.serviceTierId && TIER_DISPLAY_NAMES[cert.serviceTierId])
-    ?? (cert.labelType === "black" ? "Black Label" : "Standard");
+    (cert.serviceTierId && TIER_DISPLAY_NAMES[cert.serviceTierId]) ??
+    (cert.labelType === "black" ? "Black Label" : "Standard");
 
   return {
-    postType:         "card_reveal",
-    certId:           stripMvPrefix(normalizeCertId(String(cert.certId))),
-    cardName:         cert.cardName ?? undefined,
-    setName:          cert.setName ?? undefined,
-    cardNumber:       cert.cardNumber ?? undefined,
-    year:             cert.year ?? undefined,
-    variant:          cert.variant ?? undefined,
-    rarity:           cert.rarity ?? undefined,
-    cardGame:         cert.cardGame ?? undefined,
-    language:         cert.language ?? undefined,
-    gradeOverall:     cert.gradeOverall ? String(cert.gradeOverall).replace(/\.0$/, "") : undefined,
-    gradeType:        cert.gradeType ?? undefined,
-    gradeCentering:   cert.gradeCentering ? String(cert.gradeCentering) : undefined,
-    gradeCorners:     cert.gradeCorners   ? String(cert.gradeCorners)   : undefined,
-    gradeEdges:       cert.gradeEdges     ? String(cert.gradeEdges)     : undefined,
-    gradeSurface:     cert.gradeSurface   ? String(cert.gradeSurface)   : undefined,
-    labelType:        cert.labelType ?? undefined,
+    postType: "card_reveal",
+    certId: stripMvPrefix(normalizeCertId(String(cert.certId))),
+    cardName: cert.cardName ?? undefined,
+    setName: cert.setName ?? undefined,
+    cardNumber: cert.cardNumber ?? undefined,
+    year: cert.year ?? undefined,
+    variant: cert.variant ?? undefined,
+    rarity: cert.rarity ?? undefined,
+    cardGame: cert.cardGame ?? undefined,
+    language: cert.language ?? undefined,
+    gradeOverall: cert.gradeOverall ? String(cert.gradeOverall).replace(/\.0$/, "") : undefined,
+    gradeType: cert.gradeType ?? undefined,
+    gradeCentering: cert.gradeCentering ? String(cert.gradeCentering) : undefined,
+    gradeCorners: cert.gradeCorners ? String(cert.gradeCorners) : undefined,
+    gradeEdges: cert.gradeEdges ? String(cert.gradeEdges) : undefined,
+    gradeSurface: cert.gradeSurface ? String(cert.gradeSurface) : undefined,
+    labelType: cert.labelType ?? undefined,
     serviceTierLabel: tierLabel,
-    insight:          cert.gradingReport?.overall ?? undefined,
+    insight: cert.gradingReport?.overall ?? undefined,
     ...({ _certPk: cert.id } as any),
   };
 }
@@ -156,10 +152,7 @@ export async function fetchCardRevealDataForCertPk(certPk: number): Promise<IgPo
   const rows = await db
     .select()
     .from(certificates)
-    .where(and(
-      eq(certificates.id, certPk),
-      isNull(certificates.deletedAt),
-    ))
+    .where(and(eq(certificates.id, certPk), isNull(certificates.deletedAt)))
     .limit(1);
   const cert = rows[0];
   if (!cert) return null;
@@ -173,22 +166,19 @@ export async function fetchGradeBreakdownDataForCertPk(certPk: number): Promise<
   const rows = await db
     .select()
     .from(certificates)
-    .where(and(
-      eq(certificates.id, certPk),
-      isNull(certificates.deletedAt),
-    ))
+    .where(and(eq(certificates.id, certPk), isNull(certificates.deletedAt)))
     .limit(1);
   const cert = rows[0];
   if (!cert) return null;
   return {
-    postType:       "grade_breakdown",
-    cardName:       cert.cardName ?? "—",
-    gradeOverall:   cert.gradeOverall ? String(cert.gradeOverall).replace(/\.0$/, "") : "—",
+    postType: "grade_breakdown",
+    cardName: cert.cardName ?? "—",
+    gradeOverall: cert.gradeOverall ? String(cert.gradeOverall).replace(/\.0$/, "") : "—",
     gradeCentering: cert.gradeCentering ? String(cert.gradeCentering) : "0",
-    gradeCorners:   cert.gradeCorners   ? String(cert.gradeCorners)   : "0",
-    gradeEdges:     cert.gradeEdges     ? String(cert.gradeEdges)     : "0",
-    gradeSurface:   cert.gradeSurface   ? String(cert.gradeSurface)   : "0",
-    insight:        (cert.gradingReport as any)?.overall ?? "",
+    gradeCorners: cert.gradeCorners ? String(cert.gradeCorners) : "0",
+    gradeEdges: cert.gradeEdges ? String(cert.gradeEdges) : "0",
+    gradeSurface: cert.gradeSurface ? String(cert.gradeSurface) : "0",
+    insight: (cert.gradingReport as any)?.overall ?? "",
     ...({ _certPk: cert.id } as any),
   };
 }
@@ -201,15 +191,17 @@ export async function fetchGradeBreakdownData(): Promise<IgPostData> {
     const rows = await db
       .select()
       .from(certificates)
-      .where(and(
-        isNull(certificates.deletedAt),
-        isNotNull(certificates.gradeApprovedAt),
-        isNotNull(certificates.gradeCentering),
-        isNotNull(certificates.gradeCorners),
-        isNotNull(certificates.gradeEdges),
-        isNotNull(certificates.gradeSurface),
-        gte(certificates.gradeOverall, HIGH_GRADE_FLOOR),
-      ))
+      .where(
+        and(
+          isNull(certificates.deletedAt),
+          isNotNull(certificates.gradeApprovedAt),
+          isNotNull(certificates.gradeCentering),
+          isNotNull(certificates.gradeCorners),
+          isNotNull(certificates.gradeEdges),
+          isNotNull(certificates.gradeSurface),
+          gte(certificates.gradeOverall, HIGH_GRADE_FLOOR)
+        )
+      )
       .orderBy(desc(certificates.gradeOverall), desc(certificates.gradeApprovedAt))
       .limit(1);
     cert = rows[0] ?? null;
@@ -219,19 +211,23 @@ export async function fetchGradeBreakdownData(): Promise<IgPostData> {
 
   // Final fallback: no grade ≥ 8 with subgrades. Drop the grade floor.
   if (!cert) {
-    console.warn(`[ig-data] grade_breakdown: no subgraded certs at grade ≥ ${HIGH_GRADE_FLOOR}. Falling back to any subgraded cert.`);
+    console.warn(
+      `[ig-data] grade_breakdown: no subgraded certs at grade ≥ ${HIGH_GRADE_FLOOR}. Falling back to any subgraded cert.`
+    );
     try {
       const rows = await db
         .select()
         .from(certificates)
-        .where(and(
-          isNull(certificates.deletedAt),
-          isNotNull(certificates.gradeApprovedAt),
-          isNotNull(certificates.gradeCentering),
-          isNotNull(certificates.gradeCorners),
-          isNotNull(certificates.gradeEdges),
-          isNotNull(certificates.gradeSurface),
-        ))
+        .where(
+          and(
+            isNull(certificates.deletedAt),
+            isNotNull(certificates.gradeApprovedAt),
+            isNotNull(certificates.gradeCentering),
+            isNotNull(certificates.gradeCorners),
+            isNotNull(certificates.gradeEdges),
+            isNotNull(certificates.gradeSurface)
+          )
+        )
         .orderBy(desc(certificates.gradeApprovedAt))
         .limit(1);
       cert = rows[0] ?? null;
@@ -242,26 +238,26 @@ export async function fetchGradeBreakdownData(): Promise<IgPostData> {
 
   if (!cert) {
     return {
-      postType:       "grade_breakdown",
-      cardName:       "—",
-      gradeOverall:   "—",
+      postType: "grade_breakdown",
+      cardName: "—",
+      gradeOverall: "—",
       gradeCentering: "0",
-      gradeCorners:   "0",
-      gradeEdges:     "0",
-      gradeSurface:   "0",
-      insight:        "Approved certs with subgrades will appear here.",
+      gradeCorners: "0",
+      gradeEdges: "0",
+      gradeSurface: "0",
+      insight: "Approved certs with subgrades will appear here.",
     };
   }
 
   return {
-    postType:       "grade_breakdown",
-    cardName:       cert.cardName ?? "—",
-    gradeOverall:   cert.gradeOverall ? String(cert.gradeOverall).replace(/\.0$/, "") : "—",
+    postType: "grade_breakdown",
+    cardName: cert.cardName ?? "—",
+    gradeOverall: cert.gradeOverall ? String(cert.gradeOverall).replace(/\.0$/, "") : "—",
     gradeCentering: String(cert.gradeCentering),
-    gradeCorners:   String(cert.gradeCorners),
-    gradeEdges:     String(cert.gradeEdges),
-    gradeSurface:   String(cert.gradeSurface),
-    insight:        cert.gradingReport?.overall ?? "",
+    gradeCorners: String(cert.gradeCorners),
+    gradeEdges: String(cert.gradeEdges),
+    gradeSurface: String(cert.gradeSurface),
+    insight: cert.gradingReport?.overall ?? "",
     ...({ _certPk: cert.id } as any),
   };
 }
@@ -269,24 +265,20 @@ export async function fetchGradeBreakdownData(): Promise<IgPostData> {
 export async function fetchServiceExplainerData(tierId: string = "standard"): Promise<IgPostData> {
   let tierRow: any = null;
   try {
-    const rows = await db
-      .select()
-      .from(serviceTiers)
-      .where(eq(serviceTiers.tierId, tierId))
-      .limit(1);
+    const rows = await db.select().from(serviceTiers).where(eq(serviceTiers.tierId, tierId)).limit(1);
     tierRow = rows[0] ?? null;
   } catch (err: any) {
     console.warn(`[ig-data] service_explainer: service_tiers lookup failed: ${err?.message ?? err}`);
   }
 
   return {
-    postType:             "service_explainer",
-    tierId:               tierId,                // raw id ("standard" / "priority" / "express" / "gold") for TIER_BENEFIT lookup
-    tierName:             TIER_DISPLAY_NAMES[tierId] ?? tierRow?.name ?? "—",
-    tierTagline:          tierRow?.turnaroundLabel ?? "",
-    tierPricePence:       tierRow?.pricePerCard ?? undefined,
-    tierTurnaroundDays:   tierRow?.turnaroundDays ?? undefined,
-    tierTurnaroundLabel:  tierRow?.turnaroundLabel ?? undefined,
+    postType: "service_explainer",
+    tierId: tierId, // raw id ("standard" / "priority" / "express" / "gold") for TIER_BENEFIT lookup
+    tierName: TIER_DISPLAY_NAMES[tierId] ?? tierRow?.name ?? "—",
+    tierTagline: tierRow?.turnaroundLabel ?? "",
+    tierPricePence: tierRow?.pricePerCard ?? undefined,
+    tierTurnaroundDays: tierRow?.turnaroundDays ?? undefined,
+    tierTurnaroundLabel: tierRow?.turnaroundLabel ?? undefined,
   };
 }
 
@@ -295,14 +287,10 @@ export function fetchVaultClubData(): IgPostData {
   // Benefits curated for the social context; not pulled from DB since
   // marketing copy lives in pricing-v2.tsx and isn't normalised yet.
   return {
-    postType:           "vault_club",
-    vaultClubMonthly:   "£9.99 / mo",
-    vaultClubAnnual:    "£99 / yr",
-    vaultClubBenefits:  [
-      "Priority grading queue",
-      "10% off every submission",
-      "Member-only collector reports",
-    ],
+    postType: "vault_club",
+    vaultClubMonthly: "£9.99 / mo",
+    vaultClubAnnual: "£99 / yr",
+    vaultClubBenefits: ["Priority grading queue", "10% off every submission", "Member-only collector reports"],
   };
 }
 
@@ -329,7 +317,9 @@ export async function fetchMarketInsightData(): Promise<IgPostData | null> {
   }
 
   if (weeklyCount < MARKET_INSIGHT_MIN_COUNT) {
-    console.warn(`[ig-data] market_insight: weekly count ${weeklyCount} < ${MARKET_INSIGHT_MIN_COUNT} — skipping post type, caller should fall through.`);
+    console.warn(
+      `[ig-data] market_insight: weekly count ${weeklyCount} < ${MARKET_INSIGHT_MIN_COUNT} — skipping post type, caller should fall through.`
+    );
     return null;
   }
 
@@ -338,8 +328,8 @@ export async function fetchMarketInsightData(): Promise<IgPostData | null> {
   // full phrase reads as one continuous "N cards graded this week" visually
   // without trying to cram all of it into the 110px line.
   return {
-    postType:       "market_insight",
-    insightStat:    String(weeklyCount),
+    postType: "market_insight",
+    insightStat: String(weeklyCount),
     insightContext: "cards graded this week",
   };
 }
@@ -351,11 +341,16 @@ export async function fetchMarketInsightData(): Promise<IgPostData | null> {
 // are expected to skip the post type and fall through; see runIgDailyPost().
 export async function fetchPostData(postType: IgPostType, opts: { tierId?: string } = {}): Promise<IgPostData | null> {
   switch (postType) {
-    case "card_reveal":        return fetchCardRevealData();
-    case "grade_breakdown":    return fetchGradeBreakdownData();
-    case "service_explainer":  return fetchServiceExplainerData(opts.tierId ?? "standard");
-    case "vault_club":         return fetchVaultClubData();
-    case "market_insight":     return fetchMarketInsightData();
+    case "card_reveal":
+      return fetchCardRevealData();
+    case "grade_breakdown":
+      return fetchGradeBreakdownData();
+    case "service_explainer":
+      return fetchServiceExplainerData(opts.tierId ?? "standard");
+    case "vault_club":
+      return fetchVaultClubData();
+    case "market_insight":
+      return fetchMarketInsightData();
   }
 }
 
@@ -369,17 +364,15 @@ export async function fetchPostData(postType: IgPostType, opts: { tierId?: strin
  * Sat → vault_club or market_insight, alternating week-by-week
  */
 export function selectPostType(now: Date = new Date()): { postType: IgPostType; tierId?: string } {
-  const day = now.getDay();                                // 0=Sun ... 6=Sat
+  const day = now.getDay(); // 0=Sun ... 6=Sat
   const weekNumber = Math.floor(now.getTime() / (7 * 24 * 60 * 60 * 1000));
 
   if ([1, 3, 5, 0].includes(day)) return { postType: "card_reveal" };
-  if (day === 2)                  return { postType: "grade_breakdown" };
+  if (day === 2) return { postType: "grade_breakdown" };
   if (day === 4) {
     const tiers = ["standard", "priority", "express", "gold"];
     return { postType: "service_explainer", tierId: tiers[weekNumber % 4] };
   }
   // Saturday
-  return weekNumber % 2 === 0
-    ? { postType: "vault_club" }
-    : { postType: "market_insight" };
+  return weekNumber % 2 === 0 ? { postType: "vault_club" } : { postType: "market_insight" };
 }

@@ -37,6 +37,10 @@ contextBridge.exposeInMainWorld("scanner", {
   openLogs:          ()            => ipcRenderer.invoke("open-logs"),
   openLastCert:      ()            => ipcRenderer.invoke("open-last-cert"),
 
+  // SilverFast export path — read the watched inbox + copy it to the clipboard.
+  getInboxPath:      ()            => ipcRenderer.invoke("get-inbox-path"),
+  copyInboxPath:     ()            => ipcRenderer.invoke("copy-inbox-path"),
+
   // ── QoL toggles (added in scanner toggles pack) ────────────────────────
   setPaused:         (paused)      => ipcRenderer.invoke("set-paused", paused),
   setSetting:        (key, value)  => ipcRenderer.invoke("set-setting", { key, value }),

@@ -68,6 +68,29 @@ scanner-app/
 
 ## Operator runbook
 
+### New scanning station (e.g. a second Mac) → use `setup-new-mac.sh`
+
+> ⚠️ **Label divergence — read this before running `install.sh`.** `install.sh`
+> below bootstraps the LaunchAgent under the label **`com.mintvault.scanner-app`**.
+> But the app's single source of truth (`lib/agent-plist.js`) and its own
+> self-repair tiers (`reset-agent.sh`, `main.js`) manage **`com.mintvault.scanner`**.
+> If you install with `install.sh`, the bootstrapped agent and the app's
+> restart/repair buttons target _different_ labels and can drift into two
+> competing agents. For a fresh station, prefer:
+>
+> ```
+> cd ~/mintvault-platform/scripts/scanner-app
+> ./setup-new-mac.sh
+> ```
+>
+> It renders + loads the plist from `lib/agent-plist.js` (same label the app
+> self-manages), creates the scan folders, prompts for `SCANNER_API_TOKEN`
+> without leaking it to shell history, runs `npm install` only if needed, and
+> bootstraps `com.mintvault.scanner`. Leaves `MINTVAULT_API_BASE` unset → PROD
+> (`https://mintvaultuk.com`). Per-machine only; it cannot touch another station.
+> Prereqs (Homebrew, Node 22 LTS, git) are not installed by it — see the repo
+> root setup. Verify after: `launchctl print gui/$(id -u)/com.mintvault.scanner | grep state`.
+
 ### First install
 
 ```
@@ -77,6 +100,7 @@ git pull
 ```
 
 The installer:
+
 1. Creates `~/mintvault-scans/{inbox,processed,failed,discarded}` if missing.
 2. Creates `~/Library/Application Support/MintVaultScanner/`.
 3. Creates `~/.mintvault-scanner.env` template if missing (won't overwrite existing).

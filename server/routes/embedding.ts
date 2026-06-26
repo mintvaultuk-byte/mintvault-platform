@@ -119,7 +119,7 @@ export function registerEmbeddingRoutes(app: Express): void {
       });
       return res.json({ ok: result.status !== "no-data", ...result });
     } catch (err: any) {
-      console.error(`[embed-corpus/cert] ${req.params.certId} failed:`, err);
+      console.error("[embed-corpus/cert] %s failed:", req.params.certId, err);
       return res.status(500).json({ error: err.message });
     }
   });

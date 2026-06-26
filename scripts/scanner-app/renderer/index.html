@@ -49,6 +49,17 @@
     <button class="btn ghost" id="logsBtn">Show logs</button>
   </section>
 
+  <!-- SilverFast export path — the absolute inbox the watcher is watching.
+       Copy it into SilverFast's Path field so scans land where the app looks
+       (not ~/Pictures etc.). Pure display + clipboard — no behaviour change. -->
+  <section class="row sfpath" id="sfPathRow">
+    <div class="row-header">SilverFast export path — point SilverFast here</div>
+    <div class="sfpath-box">
+      <code class="sfpath-val" id="sfPathVal">—</code>
+      <button class="btn ghost sfpath-copy" id="sfPathCopyBtn">Copy</button>
+    </div>
+  </section>
+
   <!-- Settings — collapsible, footer-style. Local prefs only, no server sync. -->
   <section class="row settings" id="settingsRow">
     <button class="settings-toggle" id="settingsToggle">Settings ⌄</button>

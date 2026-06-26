@@ -15,6 +15,52 @@
     <meta name="twitter:description" content="The only UK grading service with full sub-grade analysis, defect mapping, NFC verification, and a registered ownership logbook. From £19." />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="manifest" href="/manifest.json" />
+    <script>
+      // PWA scoping: on the staff/admin portal routes, swap to a portal-specific
+      // manifest so installing there creates the STAFF PORTAL app (opens /staff in
+      // its own window), not the public site. Runs before the app boots so the
+      // browser's install prompt evaluates the right manifest. Public pages keep
+      // the customer manifest untouched.
+      (function () {
+        try {
+          var p = location.pathname;
+          var link = document.querySelector('link[rel="manifest"]');
+          if (!link) return;
+          if (/^\/admin(\/|$)/.test(p)) link.setAttribute("href", "/manifest-admin.json");
+          else if (/^\/(staff|grader)(\/|$)/.test(p)) link.setAttribute("href", "/manifest-portal.json");
+        } catch (e) {
+          /* leave the default manifest in place */
+        }
+      })();
+    </script>
+    <script>
+      // PWA install early-capture: Chrome can fire `beforeinstallprompt` before
+      // the React install button mounts — the portal pages are lazy-loaded AND
+      // auth-gated, so the button's own listener attaches late and would MISS the
+      // event (button only appeared after a hard refresh). Capture it here, at the
+      // top of the document, stash it on window, and emit a CustomEvent so the
+      // button can pick it up whenever it eventually mounts. Gated to portal routes
+      // so the public site's behaviour (and Chrome's default mini-infobar) is
+      // untouched.
+      (function () {
+        try {
+          if (!/^\/(staff|grader|admin)(\/|$)/.test(location.pathname)) return;
+          window.__deferredInstallPrompt = window.__deferredInstallPrompt || null;
+          window.addEventListener("beforeinstallprompt", function (e) {
+            e.preventDefault();
+            window.__deferredInstallPrompt = e;
+            window.dispatchEvent(new CustomEvent("pwa-install-available"));
+          });
+          window.addEventListener("appinstalled", function () {
+            window.__deferredInstallPrompt = null;
+            window.__pwaInstalled = true;
+            window.dispatchEvent(new CustomEvent("pwa-installed"));
+          });
+        } catch (e) {
+          /* no early capture — the button's own listener still covers slow loads */
+        }
+      })();
+    </script>
     <meta name="theme-color" content="#D4AF37" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

@@ -7,6 +7,7 @@ import type {
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
+import { normalizeCertId, certNumberFromId } from "./lib/cert-id";
 import { registerPublicRoutes } from "./routes/public";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerSubmissionRoutes } from "./routes/submissions";
@@ -352,11 +353,10 @@ const upload = multer({
   },
 });
 
-export function normalizeCertId(raw: string): string {
-  const m = raw.match(/^MV-?0*(\d+)$/i);
-  if (m) return `MV${m[1]}`;
-  return raw;
-}
+// normalizeCertId now lives in the shared, ReDoS-safe helper
+// (server/lib/cert-id.ts); re-exported so existing importers of it from
+// "./routes" keep working.
+export { normalizeCertId };
 
 const ALLOWED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/tiff"]);
 
@@ -378,9 +378,8 @@ export async function findCertByIdFlex(certId: string) {
   let dbCert = await storage.getCertificateByCertId(certId);
   if (dbCert) return dbCert;
 
-  const numMatch = certId.match(/^MV-?0*(\d+)$/i);
-  if (numMatch) {
-    const num = numMatch[1];
+  const num = certNumberFromId(certId);
+  if (num !== null) {
     dbCert = await storage.getCertificateByCertId(`MV${num}`);
     if (dbCert) return dbCert;
     dbCert = await storage.getCertificateByCertId(`MV-${num.padStart(10, "0")}`);
@@ -1856,7 +1855,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.setHeader("Content-Length", String(image.length));
       res.end(image);
     } catch (err: any) {
-      console.error(`[share-image] ${format} failed for ${req.params.certNumber}: ${err?.message || err}`);
+      console.error("[share-image] %s failed for %s: %s", format, req.params.certNumber, err?.message || err);
       res.status(500).json({ error: "Share image generation failed" });
     }
   };
@@ -1904,7 +1903,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.setHeader("Content-Length", String(buf.length));
       res.end(buf);
     } catch (err: any) {
-      console.error(`[share-bg] failed for ${req.params.variant}: ${err?.message || err}`);
+      console.error("[share-bg] failed for %s: %s", req.params.variant, err?.message || err);
       res.status(500).json({ error: "Background generation failed" });
     }
   });
@@ -2040,9 +2039,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     let dbResults = await storage.searchCertificates(q);
     if (dbResults.length === 0) {
-      const numMatch = q.match(/^MV-?0*(\d+)$/i);
-      if (numMatch) {
-        const num = numMatch[1];
+      const num = certNumberFromId(q);
+      if (num !== null) {
         const altNew = await storage.searchCertificates(`MV${num}`);
         const altOld = await storage.searchCertificates(`MV-${num.padStart(10, "0")}`);
         const seen = new Set<number>();
@@ -2838,12 +2836,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/logbook/:certId/verify", async (req, res) => {
+  // Public signature-verify endpoint (no auth). The signature is an HMAC, so it
+  // can't be brute-forced, but this is a public route doing a DB lookup + crypto
+  // check on every hit — cap per-IP to blunt DoS/scraping. (CodeQL js/missing-rate-limiting.)
+  const logbookVerifyRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many verification requests — please try again shortly." },
+  });
+  app.get("/api/logbook/:certId/verify", logbookVerifyRateLimit, async (req, res) => {
     try {
       const sig = (req.query.sig || req.query.signature) as string | undefined;
       if (!sig) return res.status(400).json({ error: "signature query parameter required" });
       const { verifyLogbookSignature } = await import("./logbook-service");
-      const result = await verifyLogbookSignature(req.params.certId, sig);
+      const result = await verifyLogbookSignature(String(req.params.certId), sig);
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: "Verification failed" });
@@ -2907,7 +2915,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.send(pdf);
     } catch (err: any) {
       console.error(
-        `[logbook-pdf] generation failed for ${req.params.certId}:`,
+        "[logbook-pdf] generation failed for %s:",
+        req.params.certId,
         err.message,
         err.stack?.split("\n")[1]?.trim()
       );
@@ -2968,7 +2977,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.send(pdf);
     } catch (err: any) {
       console.error(
-        `[logbook-owner-pdf] generation failed for ${req.params.certId}:`,
+        "[logbook-owner-pdf] generation failed for %s:",
+        req.params.certId,
         err.message,
         err.stack?.split("\n")[1]?.trim()
       );
@@ -3040,7 +3050,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       );
       res.json({ newVersion, issuedAt: new Date().toISOString() });
     } catch (err: any) {
-      console.error(`[logbook-reissue] error for ${req.params.certId}:`, err.message);
+      console.error("[logbook-reissue] error for %s:", req.params.certId, err.message);
       res.status(500).json({ error: "Reissue failed" });
     }
   });
@@ -6458,11 +6468,14 @@ Defects (admin-confirmed): ${defectLines}`;
       const id = parseInt(String(req.params.id), 10);
       let cert = await storage.getCertificate(id);
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
-      // AI pre-grade is deferred off the scan path. If it hasn't run for this cert,
-      // compute it NOW (bounded ~20s) and re-read so the draft is present on first
-      // paint — never silently absent until refresh. Fails gracefully.
+      // Card IDENTIFICATION is deferred off the scan path. If it hasn't run, compute
+      // it NOW (bounded ~20s) and re-read so it's present on first paint — never
+      // silently absent until refresh. Fails gracefully.
+      // Per-device AI-identify toggle: the client sends ?aiIdentify=0 when OFF, which
+      // SKIPS the identify call entirely (grader/admin enters the identity manually).
+      const aiIdentifyOff = req.query.aiIdentify === "0";
       const existingAi = (cert as any).aiAnalysis;
-      if (!existingAi || (typeof existingAi === "object" && Object.keys(existingAi).length === 0)) {
+      if (!aiIdentifyOff && (!existingAi || (typeof existingAi === "object" && Object.keys(existingAi).length === 0))) {
         const { ensureAiDraft } = await import("./scan-ingest-service");
         await ensureAiDraft(id);
         cert = (await storage.getCertificate(id)) ?? cert;
