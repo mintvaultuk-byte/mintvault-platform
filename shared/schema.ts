@@ -106,6 +106,10 @@ export const users = pgTable("users", {
   canGrade: boolean("can_grade").notNull().default(false),
   canScan: boolean("can_scan").notNull().default(false),
   canPrint: boolean("can_print").notNull().default(false),
+  // ── Per-operator review rate (migratePerOperatorSchema) — Phase 0 ──────────
+  // % of this operator's grades requiring manual review. Starts 100 (every card
+  // reviewed) and is dialled DOWN as the operator earns trust (Phase 4 reads it).
+  reviewRate: integer("review_rate").notNull().default(100),
 });
 
 export type User = typeof users.$inferSelect;
@@ -511,6 +515,20 @@ export const certificates = pgTable("certificates", {
   gradedAt: timestamp("graded_at", { withTimezone: true }),
   rejectionReason: text("rejection_reason"),
   redoCount: integer("redo_count").notNull().default(0),
+  // ── Per-operator grading pipeline (migratePerOperatorSchema) — Phase 0 ─────
+  // All nullable + UN-backfillable: captured at action-time (scan / submit) from
+  // Phase 1/3 onward; existing inventory stays NULL (forward-only). Phase 0 adds
+  // the columns ONLY — nothing reads or writes them yet.
+  scannedBy: varchar("scanned_by"), // operator user id who scanned the card
+  gradedBy: varchar("graded_by"), // operator who graded (distinct from grade_approved_by = reviewer)
+  operatorGrade: decimal("operator_grade"), // operator's submitted overall grade, snapshot at submit
+  operatorSubgrades: jsonb("operator_subgrades").$type<{
+    centering?: number;
+    corners?: number;
+    edges?: number;
+    surface?: number;
+  }>(), // operator's submitted subgrade snapshot at submit
+  reviewRequired: boolean("review_required"), // set by sampling at submit (Phase 4)
   // Admin-controlled marketing-pool flag. Distinct from
   // submissions.marketing_feature_consent (user opt-in, legal record) —
   // this column gates the weekly-reel pool regardless of consent state.
