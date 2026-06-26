@@ -649,8 +649,14 @@ export async function uploadImagesToCert(
 export async function runAiOnCert(
   certId: number,
   frontCropped: Buffer,
-  backCropped: Buffer | null
+  backCropped: Buffer | null,
+  opts: { dryRun?: boolean } = {}
 ): Promise<{ cardName: string | null; grade: number | string | null; strengthScore: number | null }> {
+  // dryRun (sweep preview ONLY): run the full identify + TCGdex resolution and
+  // RETURN the would-be card name, but persist NOTHING (no cert UPDATE, no audit,
+  // no centering write). Lets the blank-card sweep show resolved names without
+  // writing, reusing this exact resolution path rather than forking it.
+  const dryRun = opts.dryRun === true;
   // Master kill-switch (admin-facing) — DB-backed pipeline setting that
   // admins flip from /admin/weekly-reel. Defaults to true so default
   // deploy behaviour is "auto-AI on", matching the pre-flag era. Setting
@@ -789,6 +795,10 @@ export async function runAiOnCert(
 
   // ai_defect_candidates intentionally NOT written here — the manual
   // "Detect Defects" endpoint owns that column on first user trigger.
+  if (dryRun) {
+    console.log(`[ai] cert=${certId}: DRY-RUN — resolved card="${cardName}" set="${setName}" (no write)`);
+    return { cardName, grade: null, strengthScore: null };
+  }
   await db.execute(sql`
     UPDATE certificates SET
       ai_analysis = ${JSON.stringify(aiAnalysisPayload)}::jsonb,
