@@ -46,6 +46,10 @@ else
 # MintVault scanner-app — same env file as the old watcher.
 # SCANNER_API_TOKEN must match the server's Fly secret.
 SCANNER_API_TOKEN=
+# Phase 1 — per-operator identity. Set to THIS Mac's operator login email so the
+# server attributes scans to them (certificates.scanned_by). Leave unset to scan
+# anonymously (scanned_by NULL). e.g. SCANNER_OPERATOR=ashleybarnes@example.com
+# SCANNER_OPERATOR=
 # Optional override (defaults to https://mintvaultuk.com)
 # MINTVAULT_API_BASE=https://mintvault-v2.fly.dev
 EOF_ENV

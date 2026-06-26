@@ -97,7 +97,44 @@ export async function ensureCertDurabilitySchema(): Promise<void> {
  * A null key (interactive admin_ui ingest) skips the gate and always allocates —
  * NULLs don't collide in the unique index.
  */
-export async function createCertForScan(idempotencyKey?: string | null): Promise<{
+/**
+ * Phase 1 — resolve the scanning operator from the X-Scanner-Operator header.
+ * The header carries the operator's EMAIL (configured per-Mac in the scanner env).
+ * We validate it server-side against the users table and return the operator's
+ * user id ONLY if they are a known, non-deleted operator (admin, or a staffer who
+ * can scan/grade).
+ *
+ * SECURITY: never trust a client-supplied id. An absent / unknown / ineligible
+ * header resolves to null (legacy fallback) — scanned_by stays NULL and the scan
+ * ingests normally; we never write an unvalidated value and never throw. The email
+ * (PII) is NOT logged — only the resolved user id (a UUID) on success.
+ */
+export async function resolveScanOperatorId(operatorHeader?: string | null): Promise<string | null> {
+  const email = (operatorHeader || "").trim().toLowerCase();
+  if (!email) return null; // legacy shared-token scan — no operator identity
+  try {
+    const user = await storage.getUserByEmail(email);
+    if (!user || (user as { deletedAt?: unknown }).deletedAt) {
+      console.log("[scan-ingest] operator header did not resolve to an active user → scanned_by NULL");
+      return null;
+    }
+    const eligible = user.role === "admin" || user.canScan === true || user.canGrade === true;
+    if (!eligible) {
+      console.log("[scan-ingest] operator resolved but lacks scan/grade capability → scanned_by NULL");
+      return null;
+    }
+    console.log(`[scan-ingest] operator resolved → scanned_by=${user.id}`);
+    return user.id;
+  } catch (err: any) {
+    console.warn(`[scan-ingest] operator resolution failed (${err?.message}) → scanned_by NULL`);
+    return null;
+  }
+}
+
+export async function createCertForScan(
+  idempotencyKey?: string | null,
+  scannedBy?: string | null
+): Promise<{
   id: number;
   certId: string;
   referenceNumber: string;
@@ -108,6 +145,10 @@ export async function createCertForScan(idempotencyKey?: string | null): Promise
   // Normalise: empty / whitespace-only → no key (null), so a blank never lands
   // in the unique index (where a 2nd blank would 500 on a duplicate-key clash).
   idempotencyKey = typeof idempotencyKey === "string" && idempotencyKey.trim() ? idempotencyKey.trim() : null;
+  // Phase 1: operator id is pre-validated by resolveScanOperatorId (a real user id
+  // or null). Normalise blanks to null. Written only on first creation — an
+  // idempotent replay returns the existing row without overwriting scanned_by.
+  scannedBy = typeof scannedBy === "string" && scannedBy.trim() ? scannedBy.trim() : null;
   const norm = (n: string) => String(n).replace(/^MV-?0+/, "MV");
   const mapRow = (r: any, reused: boolean) => ({
     id: r.id as number,
@@ -135,8 +176,8 @@ export async function createCertForScan(idempotencyKey?: string | null): Promise
   const certNumber = await storage.getNextCertId();
   const refNum = generateReferenceNumber();
   const ins = await db.execute(sql`
-    INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, source, raw_uploaded, scan_status, ingest_idempotency_key)
-    VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin_scan', NOW(), NOW(), ${refNum}, 'admin_scan', false, 'processing', ${idempotencyKey ?? null})
+    INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, source, raw_uploaded, scan_status, scanned_by, ingest_idempotency_key)
+    VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin_scan', NOW(), NOW(), ${refNum}, 'admin_scan', false, 'processing', ${scannedBy}, ${idempotencyKey ?? null})
     ON CONFLICT (ingest_idempotency_key) DO NOTHING
     RETURNING id, certificate_number, reference_number, raw_uploaded, scan_status
   `);

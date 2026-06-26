@@ -12041,8 +12041,14 @@ Defects (admin-confirmed): ${defectLines}`;
       { name: "back", maxCount: 1 },
     ]),
     async (req, res) => {
-      const { createCertForScan, uploadRawScansToR2, processScanInBackground, markRawUploaded, pgErrorDetail } =
-        await import("./scan-ingest-service");
+      const {
+        createCertForScan,
+        resolveScanOperatorId,
+        uploadRawScansToR2,
+        processScanInBackground,
+        markRawUploaded,
+        pgErrorDetail,
+      } = await import("./scan-ingest-service");
       const { getSetting } = await import("./lib/pipeline-settings");
       const elapsedMs = (start: bigint) => Number(process.hrtime.bigint() - start) / 1e6;
       const tHandler = process.hrtime.bigint();
@@ -12084,8 +12090,13 @@ Defects (admin-confirmed): ${defectLines}`;
           `[scan-ingest] starting: front=${(frontBuf.length / 1024).toFixed(0)}KB back=${backBuf ? (backBuf.length / 1024).toFixed(0) + "KB" : "none"} source=${clientSource} multer=${multerMs != null ? multerMs.toFixed(0) + "ms" : "?"} key=${idempotencyKey ? idempotencyKey.slice(0, 12) + "…" : "none"}`
         );
 
+        // Phase 1: resolve the scanning operator from the X-Scanner-Operator header
+        // (operator email, validated server-side → user id, or NULL for a legacy
+        // shared-token scan). Never fails the scan; an unknown/absent operator → NULL.
+        const scannedBy = await resolveScanOperatorId(req.header("x-scanner-operator"));
+
         // Step 1 (sync): idempotent cert allocation — same key → same cert.
-        const ci = await createCertForScan(idempotencyKey);
+        const ci = await createCertForScan(idempotencyKey, scannedBy);
         certInfo = { id: ci.id, certId: ci.certId };
 
         // Idempotent replay of an already-COMPLETE cert (raw confirmed in R2):
