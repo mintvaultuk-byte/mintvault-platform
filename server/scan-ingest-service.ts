@@ -982,3 +982,57 @@ export async function ensureAiDraft(certId: number, opts: { timeoutMs?: number }
     console.error(`[ensure-ai] cert=${certId} failed: ${e?.message ?? e}`);
   }
 }
+
+/**
+ * Self-heal: restore an EMPTY/"" card_name (+ set_name) from a cert's own
+ * CONFIRMED identification snapshot. The on-open identify already wrote the real
+ * name to ai_analysis.identification (dbSource "pokemon-tcg-api"); a downstream
+ * clobber could have left the card_name COLUMN empty while the snapshot stayed
+ * intact. This repairs the column from that snapshot WITHOUT re-running the
+ * ~20s AI — deterministic and free. Only fires when:
+ *   - the column is genuinely empty (NULL or ""), and
+ *   - the snapshot is a CONFIRMED TCG match with a non-empty official name.
+ * Never overwrites a non-empty name (MV45-era cards untouched). Never throws.
+ * Returns true if it wrote a repair.
+ */
+export async function repairEmptyIdentityFromSnapshot(certId: number): Promise<boolean> {
+  try {
+    const row = (
+      await db.execute(sql`SELECT card_name, set_name, ai_analysis FROM certificates WHERE id = ${certId}`)
+    ).rows[0] as any;
+    if (!row) return false;
+    const nameEmpty = row.card_name == null || String(row.card_name).trim() === "";
+    if (!nameEmpty) return false; // only repair a genuinely missing name
+
+    const ident = row.ai_analysis?.identification;
+    if (!ident || ident.dbSource !== "pokemon-tcg-api") return false; // CONFIRMED snapshots only
+    const snapName = typeof ident.officialName === "string" ? ident.officialName.trim() : "";
+    if (!snapName) return false;
+    const snapSet =
+      (typeof ident.officialSet === "string" && ident.officialSet.trim()) ||
+      (typeof ident.detected_set === "string" && ident.detected_set.trim()) ||
+      null;
+
+    const res = await db.execute(sql`
+      UPDATE certificates SET
+        card_name = CASE WHEN card_name IS NULL OR card_name = '' THEN ${snapName} ELSE card_name END,
+        set_name  = CASE WHEN (set_name IS NULL OR set_name = '') AND ${snapSet}::text IS NOT NULL
+                         THEN ${snapSet} ELSE set_name END,
+        updated_at = NOW()
+      WHERE id = ${certId} AND (card_name IS NULL OR card_name = '')
+    `);
+    const repaired = (res.rowCount ?? 0) > 0;
+    if (repaired) {
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+        VALUES ('certificate', ${String(certId)}, 'identity_repair_from_snapshot', 'system',
+          ${JSON.stringify({ card_name: snapName, set_name: snapSet, source: ident.dbSource })}::jsonb, NOW())
+      `);
+      console.log(`[identity-repair] cert=${certId}: restored card_name="${snapName}" from confirmed snapshot`);
+    }
+    return repaired;
+  } catch (e: any) {
+    console.warn(`[identity-repair] cert=${certId} failed: ${e?.message ?? e}`);
+    return false;
+  }
+}

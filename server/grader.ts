@@ -488,6 +488,15 @@ export async function buildCertGradingPayload(certId: number): Promise<any | nul
   if (!cert) return null;
   const c = cert as any;
   return {
+    // Resolved card identity — the grader panel re-syncs its editable idName/idSet
+    // fields from these once the on-open identify has run (the panel mounts before
+    // identify completes, so its props are stale). Without this the grader's
+    // empty-seeded fields would persist "" over the freshly-resolved name.
+    cardName: c.cardName ?? null,
+    setName: c.setName ?? null,
+    cardNumber: c.cardNumber ?? null,
+    year: c.year ?? null,
+    variant: c.variant ?? null,
     centeringFrontLr: c.centeringFrontLr || null,
     centeringFrontTb: c.centeringFrontTb || null,
     centeringBackLr: c.centeringBackLr || null,
@@ -541,6 +550,15 @@ export async function buildCertGradingPayload(certId: number): Promise<any | nul
 
 const pick = (a: any, b: any) => (a === undefined ? (b ?? null) : a);
 
+// Identity strings (card_name / set_name / number / year): an omitted OR blank
+// payload value must NEVER overwrite a resolved value. The grader panel always
+// sends these trimmed in graderMode, so a card whose name was resolved by the
+// on-open identify AFTER the panel mounted (its idName seeded empty) would
+// otherwise have its real name clobbered to "" on the next auto-save. A grader
+// who genuinely wants to blank a name uses the admin Manual Override instead.
+const keepStr = (a: any, b: any) =>
+  a === undefined || a === null || (typeof a === "string" && a.trim() === "") ? (b ?? null) : a;
+
 /**
  * Persist a grader's grade as a DRAFT on the certificate (grade_approved_at
  * stays NULL — only the admin approval publishes). Mirrors the column set the
@@ -566,10 +584,10 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<vo
     UPDATE certificates SET
       grade = ${gradeNum},
       grade_type = ${gradeType},
-      card_name           = ${pick(body.card_name, cert.cardName)},
-      set_name            = ${pick(body.set_name, cert.setName)},
-      card_number_display = ${pick(body.card_number_display, cert.cardNumber)},
-      year_text           = ${pick(body.year_text, cert.year)},
+      card_name           = ${keepStr(body.card_name, cert.cardName)},
+      set_name            = ${keepStr(body.set_name, cert.setName)},
+      card_number_display = ${keepStr(body.card_number_display, cert.cardNumber)},
+      year_text           = ${keepStr(body.year_text, cert.year)},
       variant             = ${pick(body.variant, cert.variant)},
       centering_score = ${num(body.grade_centering, cert.gradeCentering)},
       corners_score   = ${num(body.grade_corners, cert.gradeCorners)},

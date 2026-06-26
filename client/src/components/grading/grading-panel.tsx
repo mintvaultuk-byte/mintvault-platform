@@ -425,6 +425,24 @@ export default function GradingPanel({
   // free-typed set names fall back to the name itself, same as the admin form.
   const [idSetCode, setIdSetCode] = useState("");
   const [idAutofilling, setIdAutofilling] = useState(false);
+  // Re-sync the editable identity fields from the server payload once the on-open
+  // identify has resolved them. The panel mounts BEFORE identify finishes, so the
+  // seed-from-props above runs with stale/empty values; when the resolved name
+  // arrives in gradingData we fill ONLY the fields the grader has left empty (so
+  // their own edits are never stomped). graderMode-only — these fields don't
+  // exist otherwise. This is what makes a freshly-scanned card show its real name
+  // (and stops the empty field from persisting "" back over it on auto-save).
+  useEffect(() => {
+    if (!graderMode || !gradingData) return;
+    const gd: any = gradingData;
+    if (gd.cardName && !idName) setIdName(String(gd.cardName).toUpperCase());
+    if (gd.setName && !idSet) setIdSet(String(gd.setName));
+    if (gd.cardNumber && !idNumber) setIdNumber(String(gd.cardNumber));
+    if (gd.year && !idYear) setIdYear(String(gd.year));
+    if (gd.variant && !idVariant) setIdVariant(String(gd.variant));
+    // Intentionally fills only empty fields once on data arrival — id* values are
+    // deliberately not deps (they'd re-fire and could re-fill after a grader edit).
+  }, [gradingData, graderMode]);
   // Card autofill — mirrors CertificateForm.handleAutofill: set(+number) → card
   // master → fill name/year/variant. Same /api/cards/autofill endpoint + pattern.
   async function graderAutofill() {
