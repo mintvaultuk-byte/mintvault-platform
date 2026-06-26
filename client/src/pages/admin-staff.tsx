@@ -398,6 +398,55 @@ export default function AdminStaffPage() {
     }
   }
 
+  // Manual card-identity override — for cards that never auto-identify, or whose
+  // auto-ID came back wrong/empty. Seeded from the cert when the overlay opens.
+  const [idoOpen, setIdoOpen] = useState(false);
+  const [idoName, setIdoName] = useState("");
+  const [idoSet, setIdoSet] = useState("");
+  const [idoYear, setIdoYear] = useState("");
+  const [idoBusy, setIdoBusy] = useState(false);
+  useEffect(() => {
+    if (!reviewCert) return;
+    setIdoName(reviewCert.cardName || "");
+    setIdoSet(reviewCert.setName || "");
+    setIdoYear(reviewCert.year || "");
+    setIdoOpen(false);
+  }, [reviewCert]);
+  async function saveIdentityOverride() {
+    if (!reviewCert) return;
+    if (!idoName.trim()) return setErr("Enter a card name.");
+    setMsg(null);
+    setErr(null);
+    setIdoBusy(true);
+    try {
+      const res = await fetch(`/api/admin/certificates/${reviewCert.certId}/identity-override`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          card_name: idoName.trim(),
+          set_name: idoSet.trim() || null,
+          year_text: idoYear.trim() || null,
+        }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Save failed");
+      setMsg(`Identity saved for ${reviewCert.certIdStr} — ${idoName.trim()}`);
+      // Reflect the change in the open overlay header immediately.
+      setReviewCert({
+        ...reviewCert,
+        cardName: idoName.trim(),
+        setName: idoSet.trim() || reviewCert.setName,
+        year: idoYear.trim() || reviewCert.year,
+      });
+      setIdoOpen(false);
+      await loadQueue(qFilter);
+      void load();
+    } finally {
+      setIdoBusy(false);
+    }
+  }
+
   // SCAN assignment (submission-level)
   const [sIds, setSIds] = useState("");
   const [sStaff, setSStaff] = useState("");
@@ -914,6 +963,71 @@ export default function AdminStaffPage() {
                     ×
                   </button>
                 </div>
+              </div>
+              {/* Manual card-identity override — admin sets the real name/set/year
+                  for cards that never auto-ID'd (or auto-ID'd empty/wrong). */}
+              <div className="px-4 py-2.5 border-b border-[#D4AF37]/15 bg-[#D4AF37]/[0.03]">
+                {!idoOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => setIdoOpen(true)}
+                    data-testid="button-edit-identity"
+                    className="text-[#D4AF37]/80 hover:text-[#D4AF37] text-xs underline underline-offset-2"
+                  >
+                    Edit card identity…
+                  </button>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="text-[11px] uppercase tracking-wide text-[#E8E4DC]/50 font-bold">
+                      Manual card identity override
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <input
+                        className="ss-input"
+                        placeholder="Card name (required)"
+                        value={idoName}
+                        onChange={(e) => setIdoName(e.target.value)}
+                        data-testid="input-override-name"
+                      />
+                      <input
+                        className="ss-input"
+                        placeholder="Set name"
+                        value={idoSet}
+                        onChange={(e) => setIdoSet(e.target.value)}
+                        data-testid="input-override-set"
+                      />
+                      <input
+                        className="ss-input"
+                        placeholder="Year"
+                        value={idoYear}
+                        onChange={(e) => setIdoYear(e.target.value)}
+                        data-testid="input-override-year"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={saveIdentityOverride}
+                        disabled={idoBusy}
+                        data-testid="button-save-identity"
+                        className="bg-[#D4AF37] text-black font-bold px-4 py-1.5 rounded text-xs hover:bg-[#e5c14e] disabled:opacity-50"
+                      >
+                        {idoBusy ? "Saving…" : "Save identity"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIdoOpen(false)}
+                        disabled={idoBusy}
+                        className="border border-[#D4AF37]/40 px-4 py-1.5 rounded text-xs hover:bg-[#D4AF37]/10"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <div className="text-[10px] text-[#E8E4DC]/40">
+                      Overwrites the card name/set/year. Shows on the operator's queue + public cert page. Logged.
+                    </div>
+                  </div>
+                )}
               </div>
               {showReject && (
                 <div className="px-4 py-3 border-b border-red-900/40 bg-red-950/20 space-y-2">

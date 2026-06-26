@@ -9700,6 +9700,14 @@ Defects (admin-confirmed): ${defectLines}`;
         await ensureAiDraft(id);
         cert = (await storage.getCertificate(id)) ?? cert;
       }
+      // Self-heal a card_name clobbered to "" from the confirmed identify snapshot
+      // (deterministic, no AI re-run). Re-read so first paint shows the real name.
+      if (!aiIdentifyOff && (!(cert as any).cardName || String((cert as any).cardName).trim() === "")) {
+        const { repairEmptyIdentityFromSnapshot } = await import("./scan-ingest-service");
+        if (await repairEmptyIdentityFromSnapshot(id)) {
+          cert = (await storage.getCertificate(id)) ?? cert;
+        }
+      }
       const c = cert as any;
       res.json({
         centeringFrontLr: c.centeringFrontLr || null,
@@ -9767,6 +9775,69 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // POST manual card-identity override — admin/review context. For cards that
+  // never auto-identify (no TCG match) OR whose auto-ID was wrong/empty, an admin
+  // sets the real name/set/year by hand. Authoritative: OVERWRITES the columns,
+  // stamps ai_analysis.manual_override (who/when), clears the "needs review" flag,
+  // and writes an audit row. The corrected name then flows to the operator's
+  // /staff view and the public cert page (both read card_name directly).
+  app.post("/api/admin/certificates/:id/identity-override", requireAdmin, async (req, res) => {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      if (Number.isNaN(id)) return res.status(400).json({ error: "Invalid certificate id" });
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      const b = req.body || {};
+      const cardName = typeof b.card_name === "string" ? b.card_name.trim() : "";
+      if (!cardName) return res.status(400).json({ error: "card_name is required" });
+      const setName = typeof b.set_name === "string" ? b.set_name.trim() : null;
+      const yearText = typeof b.year_text === "string" ? b.year_text.trim() : null;
+      const cardNumber = typeof b.card_number_display === "string" ? b.card_number_display.trim() : null;
+
+      const adminEmail = (req.session as any)?.adminEmail || "admin";
+      const c = cert as any;
+      const before = {
+        card_name: c.cardName ?? null,
+        set_name: c.setName ?? null,
+        year_text: c.year ?? null,
+        card_number_display: c.cardNumber ?? null,
+      };
+      const after = {
+        card_name: cardName,
+        set_name: setName,
+        year_text: yearText,
+        card_number_display: cardNumber,
+      };
+      // Only overwrite optional fields when the admin actually supplied them
+      // (empty input → keep the existing column value, never wipe).
+      const overrideMeta = JSON.stringify({ by: adminEmail, at: new Date().toISOString() });
+      await db.execute(sql`
+        UPDATE certificates SET
+          card_name           = ${cardName},
+          set_name            = ${setName == null ? sql`set_name` : sql`${setName}`},
+          year_text           = ${yearText == null ? sql`year_text` : sql`${yearText}`},
+          card_number_display = ${cardNumber == null ? sql`card_number_display` : sql`${cardNumber}`},
+          ai_analysis = jsonb_set(
+            jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{manual_override}', ${overrideMeta}::jsonb, true),
+            '{needs_identification_review}', 'false'::jsonb, true
+          ),
+          updated_at = NOW()
+        WHERE id = ${id}
+      `);
+      await db.execute(sql`
+        INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+        VALUES ('certificate', ${String(id)}, 'identity_manual_override', ${adminEmail},
+          ${JSON.stringify({ before, after })}::jsonb, NOW())
+      `);
+      console.log(`[identity-override] cert=${id} by ${adminEmail}: card_name="${cardName}"`);
+      return res.json({ ok: true, card_name: cardName, set_name: setName });
+    } catch (error: any) {
+      console.error("[identity-override] error:", error.message);
+      return res.status(500).json({ error: error.message });
     }
   });
 

@@ -216,6 +216,15 @@ export function registerGraderRoutes(app: Express): void {
       await ensureAiDraft(certId);
       payload = (await buildCertGradingPayload(certId)) ?? payload;
     }
+    // Self-heal a card_name that was clobbered to "" (the on-open identify wrote
+    // the real name to the snapshot, but a downstream save emptied the column).
+    // Cheap, deterministic, no AI re-run. Re-read so the grader sees the fix now.
+    if (!aiIdentifyOff && (!(payload as any).cardName || String((payload as any).cardName).trim() === "")) {
+      const { repairEmptyIdentityFromSnapshot } = await import("../scan-ingest-service");
+      if (await repairEmptyIdentityFromSnapshot(certId)) {
+        payload = (await buildCertGradingPayload(certId)) ?? payload;
+      }
+    }
     return res.json(payload);
   });
 
@@ -404,8 +413,15 @@ export function registerGraderRoutes(app: Express): void {
     if (!a) return res.status(404).json({ error: "Certificate not found" });
     if (a.gradingStatus !== "pending_review")
       return res.status(409).json({ error: `Card is '${a.gradingStatus}', not pending review` });
-    const grading = await buildCertGradingPayload(certId);
+    let grading = await buildCertGradingPayload(certId);
     if (!grading) return res.status(404).json({ error: "Certificate not found" });
+    // Self-heal an empty card_name from the confirmed snapshot (see grader GET).
+    if (!(grading as any).cardName || String((grading as any).cardName).trim() === "") {
+      const { repairEmptyIdentityFromSnapshot } = await import("../scan-ingest-service");
+      if (await repairEmptyIdentityFromSnapshot(certId)) {
+        grading = (await buildCertGradingPayload(certId)) ?? grading;
+      }
+    }
     return res.json(grading);
   });
   app.get("/api/admin/grade-review/certificates/:id/images", requireAdmin, async (req: Request, res: Response) => {
