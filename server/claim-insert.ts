@@ -2,6 +2,7 @@ import QRCode from "qrcode";
 import PDFDocument from "pdfkit";
 import path from "path";
 import { APP_BASE_URL } from "./app-url";
+import { normalizeCertId } from "./lib/cert-id";
 
 const DPI = 360;
 const MM = DPI / 25.4;
@@ -36,12 +37,6 @@ function formatClaimCode(code: string): string {
   const c = code.toUpperCase();
   if (c.length === 12) return `${c.slice(0, 4)}-${c.slice(4, 8)}-${c.slice(8, 12)}`;
   return c;
-}
-
-function normalizeCertId(raw: string): string {
-  const m = raw.match(/^MV-?0*(\d+)$/i);
-  if (m) return `MV${m[1]}`;
-  return raw;
 }
 
 async function generateQR(url: string, size: number): Promise<Buffer> {

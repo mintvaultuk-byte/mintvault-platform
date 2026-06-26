@@ -24,7 +24,10 @@ const CACHE_TTL_MS = 1000 * 60 * 60; // 1 hour
 function fromCache(key: string): CardLookupResult[] | null {
   const entry = cache.get(key);
   if (!entry) return null;
-  if (Date.now() - entry.ts > CACHE_TTL_MS) { cache.delete(key); return null; }
+  if (Date.now() - entry.ts > CACHE_TTL_MS) {
+    cache.delete(key);
+    return null;
+  }
   return entry.results;
 }
 
@@ -39,27 +42,27 @@ async function lookupPokemon(query: string, mode: "exact" | "wildcard" = "exact"
   if (apiKey) headers["X-Api-Key"] = apiKey;
 
   const clean = query.trim().replace(/"/g, "");
-  const q = mode === "wildcard"
-    ? `name:${encodeURIComponent(clean)}*`
-    : `name:"${encodeURIComponent(clean)}"`;
+  const q = mode === "wildcard" ? `name:${encodeURIComponent(clean)}*` : `name:"${encodeURIComponent(clean)}"`;
   const url = `https://api.pokemontcg.io/v2/cards?q=${q}&pageSize=10`;
   console.log(`[lookup-pokemon] query="${query}" mode=${mode} final_url=${url}`);
   const res = await fetch(url, { headers });
   if (!res.ok) throw new Error(`Pokémon TCG API error: ${res.status}`);
   const json = await res.json();
 
-  return (json.data || []).map((card: any): CardLookupResult => ({
-    id: card.id,
-    name: card.name,
-    setName: card.set?.name || "",
-    setCode: card.set?.id || null,
-    number: card.number || null,
-    rarity: card.rarity || null,
-    year: card.set?.releaseDate ? card.set.releaseDate.slice(0, 4) : null,
-    game: "pokemon",
-    imageUrl: card.images?.large || card.images?.small || null,
-    source: "pokemontcg.io",
-  }));
+  return (json.data || []).map(
+    (card: any): CardLookupResult => ({
+      id: card.id,
+      name: card.name,
+      setName: card.set?.name || "",
+      setCode: card.set?.id || null,
+      number: card.number || null,
+      rarity: card.rarity || null,
+      year: card.set?.releaseDate ? card.set.releaseDate.slice(0, 4) : null,
+      game: "pokemon",
+      imageUrl: card.images?.large || card.images?.small || null,
+      source: "pokemontcg.io",
+    })
+  );
 }
 
 /** Scryfall API — MTG, no key required. Respect 100ms delay between calls. */
@@ -67,7 +70,7 @@ let lastScryfallCall = 0;
 async function lookupMtg(query: string): Promise<CardLookupResult[]> {
   const now = Date.now();
   const wait = 100 - (now - lastScryfallCall);
-  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastScryfallCall = Date.now();
 
   const url = `https://api.scryfall.com/cards/search?q=${encodeURIComponent(query)}&order=released&dir=asc&unique=prints`;
@@ -76,18 +79,20 @@ async function lookupMtg(query: string): Promise<CardLookupResult[]> {
   if (!res.ok) throw new Error(`Scryfall API error: ${res.status}`);
   const json = await res.json();
 
-  return (json.data || []).slice(0, 10).map((card: any): CardLookupResult => ({
-    id: card.id,
-    name: card.name,
-    setName: card.set_name || "",
-    setCode: card.set || null,
-    number: card.collector_number || null,
-    rarity: card.rarity || null,
-    year: card.released_at ? card.released_at.slice(0, 4) : null,
-    game: "mtg",
-    imageUrl: card.image_uris?.normal || card.image_uris?.small || null,
-    source: "scryfall.com",
-  }));
+  return (json.data || []).slice(0, 10).map(
+    (card: any): CardLookupResult => ({
+      id: card.id,
+      name: card.name,
+      setName: card.set_name || "",
+      setCode: card.set || null,
+      number: card.collector_number || null,
+      rarity: card.rarity || null,
+      year: card.released_at ? card.released_at.slice(0, 4) : null,
+      game: "mtg",
+      imageUrl: card.image_uris?.normal || card.image_uris?.small || null,
+      source: "scryfall.com",
+    })
+  );
 }
 
 /** YGOPRODeck API — Yu-Gi-Oh!, no key required */
@@ -121,10 +126,17 @@ async function lookupYugioh(query: string): Promise<CardLookupResult[]> {
  * @param game  "pokemon" | "mtg" | "yugioh" | "other"
  * @param query Card name or search string
  */
-export async function lookupCard(game: string, query: string, mode: "exact" | "wildcard" = "exact"): Promise<CardLookupResult[]> {
+export async function lookupCard(
+  game: string,
+  query: string,
+  mode: "exact" | "wildcard" = "exact"
+): Promise<CardLookupResult[]> {
   if (!query || query.trim().length < 2) return [];
   // Normalise display names → canonical keys: "Pokémon" → "pokemon", "Yu-Gi-Oh!" → "yugioh"
-  const canonical = game.toLowerCase().replace(/[éè]/g, "e").replace(/[^a-z0-9]/g, "");
+  const canonical = game
+    .toLowerCase()
+    .replace(/[éè]/g, "e")
+    .replace(/[^a-z0-9]/g, "");
   const key = `${canonical}:${mode}:${query.toLowerCase().trim()}`;
   const cached = fromCache(key);
   if (cached) return cached;
@@ -149,7 +161,7 @@ export async function lookupCard(game: string, query: string, mode: "exact" | "w
         return [];
     }
   } catch (err) {
-    console.error(`[card-database] lookup failed for ${game}:`, err);
+    console.error("[card-database] lookup failed for %s:", game, err);
     return [];
   }
 
