@@ -136,9 +136,16 @@ function loadEnv() {
 const env = loadEnv();
 const API_BASE = process.env.MINTVAULT_API_BASE || env.MINTVAULT_API_BASE || "https://mintvaultuk.com";
 const TOKEN    = process.env.SCANNER_API_TOKEN  || env.SCANNER_API_TOKEN  || "";
+// Phase 1 — per-operator identity. Set per-Mac in ~/.mintvault-scanner.env as
+// SCANNER_OPERATOR=<this operator's login email>. Sent as x-scanner-operator so
+// the server attributes scanned_by to this operator. Optional: if unset, the
+// server leaves scanned_by NULL (legacy shared-token behaviour) — scans still work.
+const OPERATOR = process.env.SCANNER_OPERATOR   || env.SCANNER_OPERATOR   || "";
 
 function authHeaders() {
-  return TOKEN ? { "x-scanner-token": TOKEN } : {};
+  const headers = TOKEN ? { "x-scanner-token": TOKEN } : {};
+  if (OPERATOR) headers["x-scanner-operator"] = OPERATOR;
+  return headers;
 }
 
 async function getJson(urlPath) {
