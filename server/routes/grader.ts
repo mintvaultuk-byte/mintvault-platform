@@ -34,6 +34,7 @@ import {
   rejectCertGrade,
   getGraderEarnings,
   getGraderCountsForAdmin,
+  getOperatorStats,
   getGraderRate,
   setGraderRate,
   getGraderDailyTarget,
@@ -379,6 +380,16 @@ export function registerGraderRoutes(app: Express): void {
   // ── Admin: grader accounts (+ per-grader counts) ────────────────────────────
   app.get("/api/admin/graders", requireAdmin, async (_req: Request, res: Response) => {
     return res.json({ graders: await getGraderCountsForAdmin() });
+  });
+
+  // ── Admin: Phase 5 per-operator grading stats (read-only dashboard) ─────────
+  app.get("/api/admin/operator-stats", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      return res.json({ operators: await getOperatorStats() });
+    } catch (e: any) {
+      console.error("[operator-stats] error:", e.message);
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   app.post("/api/admin/graders", requireAdmin, async (req: Request, res: Response) => {
