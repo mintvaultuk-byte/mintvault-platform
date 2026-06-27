@@ -155,7 +155,7 @@ type Step =
   | "error";
 
 const STEP_LABELS: Record<Step, string> = {
-  idle: "Analyze with AI",
+  idle: "Idle",
   identifying: "Identifying card...",
   analyzing_centering: "Analyzing centering...",
   analyzing_corners: "Examining corners and edges...",
@@ -688,67 +688,17 @@ export default function AiPanel({
 
   const isLoading = !["idle", "complete", "error"].includes(step);
 
+  // AI grading triggers are hidden, so the panel has nothing to show until the
+  // server pre-grade / identification arrives — avoid rendering an empty box.
+  if (step === "idle" && !identification && !result) return null;
+
   return (
     <div className="bg-[var(--admin-panel)] border border-[var(--admin-gold)]/20 rounded-xl p-4 space-y-4">
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <Bot size={16} className="text-[var(--admin-gold)]" />
-        <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">AI Grading Assistant</p>
-      </div>
-
-      {/* Four individual action buttons */}
-      <div className="grid grid-cols-2 gap-2">
-        <ActionButton
-          label="Measure Centering"
-          status={centeringStatus}
-          error={centeringError}
-          onClick={runCentering}
-          cost="~£0.03"
-        />
-        <ActionButton
-          label="Detect Defects"
-          status={defectsStatus}
-          error={defectsError}
-          onClick={runDefects}
-          cost="~£0.04"
-        />
-        <ActionButton
-          label="Grade Card"
-          status={gradeStatus}
-          error={gradeError}
-          onClick={runGrade}
-          cost={
-            centeringStatus === "done" && defectsStatus === "done"
-              ? "~£0.03"
-              : centeringStatus === "done" || defectsStatus === "done"
-                ? "~£0.07"
-                : "~£0.10"
-          }
-        />
-        <button
-          type="button"
-          onClick={runAllThree}
-          disabled={
-            centeringStatus === "loading" || defectsStatus === "loading" || gradeStatus === "loading" || isLoading
-          }
-          className="flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-3 py-2.5 rounded-lg disabled:opacity-50 hover:opacity-90 transition-all"
-          title="Centering + Defects + Grade (does not re-identify)"
-        >
-          <Bot size={13} />
-          Run All
-        </button>
-      </div>
-
-      {/* Legacy full analyze button (smaller, below) */}
-      <button
-        type="button"
-        onClick={runAnalysis}
-        disabled={isLoading}
-        className="w-full flex items-center justify-center gap-2 border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/40 text-[10px] font-bold uppercase px-4 py-2 rounded-lg disabled:opacity-60 transition-all"
-      >
-        {isLoading ? <Loader2 size={13} className="animate-spin" /> : <Bot size={13} />}
-        {isLoading ? STEP_LABELS[step] : step === "complete" ? "Re-Analyze (Full)" : "Analyze with AI (Full)"}
-      </button>
+      {/* AI grading trigger buttons removed — paid AI grading is disabled in the UI
+          for all users (graders + admin). The externalAnalysis consumer (useEffect
+          above) still feeds the server-computed pre-grade into the manual panel
+          (pins, sub-grades, identity), so downstream AI data paths stay intact —
+          only the click-to-pay buttons are gone. */}
 
       {/* Confidence indicator */}
       {step === "complete" && idConfidence && (

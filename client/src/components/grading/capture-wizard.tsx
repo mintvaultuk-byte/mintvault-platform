@@ -179,14 +179,14 @@ export default function CaptureWizard({ certId, onComplete }: Props) {
         <div className="mt-5 flex items-center gap-2 bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)] rounded-lg px-4 py-3">
           <CheckCircle2 size={16} className="text-[var(--admin-green)] flex-shrink-0" />
           <p className="text-[var(--admin-green)] text-sm">
-            Both images uploaded and processed. Scroll down to click <strong>ANALYZE WITH AI</strong>.
+            Both images uploaded and processed. Scroll down to grade the card.
           </p>
         </div>
       )}
 
       {processed.front && !files.back && (
         <p className="mt-4 text-[var(--admin-ink-dim)] text-xs text-center">
-          Front image processed. Upload back image to continue, or scroll down to analyze front only.
+          Front image processed. Upload back image to continue, or scroll down to grade front only.
         </p>
       )}
     </div>
