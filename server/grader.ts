@@ -1069,3 +1069,111 @@ export async function getGraderCountsForAdmin() {
     flagged: Number(x.flagged || 0),
   }));
 }
+
+// ── Phase 5 — per-operator grading stats (admin dashboard) ──────────────────
+export interface OperatorStat {
+  id: string;
+  email: string;
+  displayName: string | null;
+  reviewRate: number;
+  graded: number;
+  scanned: number;
+  pending: number;
+  reviewFlagged: number;
+  redos: number;
+  avgOperatorGrade: number | null;
+  avgFinalGrade: number | null;
+  gradeDistribution: Record<string, number>;
+}
+
+/**
+ * Per-operator grading stats for the admin dashboard. Returns ONE row per
+ * operator with can_grade=true (even with zero activity), so the dashboard lists
+ * every operator with real zeros rather than a blank page. All SQL uses constant
+ * literals only — no user input is interpolated.
+ *
+ * Built from a few grouped queries (graded / scanned / pending / distribution)
+ * merged in JS rather than one multi-LEFT-JOIN query, which would fan out and
+ * double-count across the independent attribution columns.
+ */
+export async function getOperatorStats(): Promise<OperatorStat[]> {
+  const ops = (
+    await db.execute(sql`
+      SELECT id, email, display_name, review_rate
+      FROM users
+      WHERE can_grade = true AND deleted_at IS NULL
+      ORDER BY created_at DESC
+    `)
+  ).rows as any[];
+
+  // Graded aggregates by graded_by (active, non-deleted). operator_grade vs
+  // grade (final) surfaces operator-vs-approved drift; AVG ignores NULLs.
+  const graded = (
+    await db.execute(sql`
+      SELECT graded_by,
+             COUNT(*)::int                                         AS graded,
+             AVG(operator_grade)::float                            AS avg_operator,
+             AVG(grade)::float                                     AS avg_final,
+             SUM(CASE WHEN review_required THEN 1 ELSE 0 END)::int AS review_flagged,
+             COALESCE(SUM(redo_count), 0)::int                     AS redos
+      FROM certificates
+      WHERE graded_by IS NOT NULL AND deleted_at IS NULL AND status = 'active'
+      GROUP BY graded_by
+    `)
+  ).rows as any[];
+
+  const scanned = (
+    await db.execute(sql`
+      SELECT scanned_by, COUNT(*)::int AS scanned
+      FROM certificates
+      WHERE scanned_by IS NOT NULL AND deleted_at IS NULL
+      GROUP BY scanned_by
+    `)
+  ).rows as any[];
+
+  const pending = (
+    await db.execute(sql`
+      SELECT assigned_grader_id, COUNT(*)::int AS pending
+      FROM certificates
+      WHERE assigned_grader_id IS NOT NULL AND grader_status = 'assigned' AND deleted_at IS NULL
+      GROUP BY assigned_grader_id
+    `)
+  ).rows as any[];
+
+  const dist = (
+    await db.execute(sql`
+      SELECT graded_by, grade::text AS grade, COUNT(*)::int AS n
+      FROM certificates
+      WHERE graded_by IS NOT NULL AND deleted_at IS NULL AND status = 'active' AND grade IS NOT NULL
+      GROUP BY graded_by, grade
+    `)
+  ).rows as any[];
+
+  const gradedMap = new Map(graded.map((r) => [r.graded_by, r]));
+  const scannedMap = new Map(scanned.map((r) => [r.scanned_by, Number(r.scanned)]));
+  const pendingMap = new Map(pending.map((r) => [r.assigned_grader_id, Number(r.pending)]));
+  const distMap = new Map<string, Record<string, number>>();
+  for (const r of dist) {
+    const d = distMap.get(r.graded_by) ?? {};
+    d[String(r.grade)] = Number(r.n);
+    distMap.set(r.graded_by, d);
+  }
+
+  return ops.map((u) => {
+    const g = gradedMap.get(u.id) as any;
+    return {
+      id: u.id,
+      email: u.email,
+      displayName: u.display_name ?? null,
+      reviewRate: u.review_rate == null ? 100 : Number(u.review_rate),
+      graded: g ? Number(g.graded) : 0,
+      scanned: scannedMap.get(u.id) ?? 0,
+      pending: pendingMap.get(u.id) ?? 0,
+      reviewFlagged: g ? Number(g.review_flagged) : 0,
+      redos: g ? Number(g.redos) : 0,
+      avgOperatorGrade: g && g.avg_operator != null ? Number(g.avg_operator) : null,
+      avgFinalGrade: g && g.avg_final != null ? Number(g.avg_final) : null,
+      gradeDistribution: distMap.get(u.id) ?? {},
+    };
+  });
+}

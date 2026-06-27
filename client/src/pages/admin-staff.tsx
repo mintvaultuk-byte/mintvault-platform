@@ -531,12 +531,20 @@ export default function AdminStaffPage() {
       <div className="max-w-3xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-[#D4AF37] text-xl font-extrabold">Staff</h1>
-          <button
-            onClick={() => navigate("/admin")}
-            className="text-xs border border-[#D4AF37]/30 rounded px-3 py-1 hover:bg-[#D4AF37]/10"
-          >
-            ← Admin
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate("/admin/operator-stats")}
+              className="text-xs border border-[#D4AF37]/30 rounded px-3 py-1 hover:bg-[#D4AF37]/10"
+            >
+              Operator stats →
+            </button>
+            <button
+              onClick={() => navigate("/admin")}
+              className="text-xs border border-[#D4AF37]/30 rounded px-3 py-1 hover:bg-[#D4AF37]/10"
+            >
+              ← Admin
+            </button>
+          </div>
         </div>
         {msg && (
           <div className="text-emerald-400 text-xs bg-emerald-950/40 border border-emerald-900 rounded px-3 py-2">
