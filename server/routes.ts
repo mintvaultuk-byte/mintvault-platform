@@ -383,7 +383,14 @@ export async function rejectInvalidUploads(files: Express.Multer.File[]): Promis
 // admin/staff/grader code must use storage.getCertificateByCertId directly
 // (NOT gated) so it can still load unapproved certs to grade/approve them.
 // Do NOT call this from an internal route — it will hide unapproved certs.
-export async function findCertByIdFlex(certId: string) {
+/**
+ * UNGATED by-number cert resolver. Resolves a cert by its certificate_number
+ * (MV303 / MV-0000000303 / 303) REGARDLESS of grade/publish state. For
+ * admin/internal callers that must see a cert even before it's graded — e.g. the
+ * scanner's scan-status poll on a freshly created, still-ungraded cert. PUBLIC
+ * reads must use findCertByIdFlex, which adds the publish gate on top of this.
+ */
+export async function findCertByNumberUngated(certId: string) {
   let dbCert = await storage.getCertificateByCertId(certId);
   if (!dbCert) {
     const numMatch = certId.match(/^MV-?0*(\d+)$/i);
@@ -395,6 +402,11 @@ export async function findCertByIdFlex(certId: string) {
         undefined;
     }
   }
+  return dbCert ?? null;
+}
+
+export async function findCertByIdFlex(certId: string) {
+  const dbCert = await findCertByNumberUngated(certId);
   if (!dbCert) return null;
   // Public-visibility gate: hide ungraded/unapproved certs from public reads.
   if ((dbCert as { gradeApprovedAt?: unknown }).gradeApprovedAt == null) return null;
@@ -12270,7 +12282,12 @@ Defects (admin-confirmed): ${defectLines}`;
   // probe used by requeuePending after a crash. Lightweight: two columns only. ──
   app.get("/api/admin/scan-status/:certId", requireScannerOrAdmin, async (req, res) => {
     try {
-      const cert = await findCertByIdFlex(String(req.params.certId));
+      // UNGATED lookup: the scanner polls this on a freshly created cert that is
+      // not yet graded. The publish-gated findCertByIdFlex would return null for
+      // an ungraded cert → a spurious 404 loop until the cert is approved. This
+      // endpoint is scanner-token/admin authed, so resolving by number regardless
+      // of grade state is correct (and never exposes anything to the public).
+      const cert = await findCertByNumberUngated(String(req.params.certId));
       if (!cert) return res.status(404).json({ error: "cert not found", certId: String(req.params.certId) });
       const r = await db.execute(
         sql`SELECT raw_uploaded, scan_status FROM certificates WHERE id = ${(cert as any).id} LIMIT 1`
