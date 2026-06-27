@@ -454,6 +454,20 @@ export async function uploadImagesToCert(
     .rows[0] as any;
   const certNumber: string = (certRow?.certificate_number as string | undefined) ?? `MV${certId}`;
 
+  // WORKING resolution for the variant pipeline. The raw scanner output is a
+  // 900dpi TIFF (a card ≈ 2250×3150 px, the whole bed far more); the client
+  // uploads it full-res. We downscale to this working size ONCE here, then EVERY
+  // downstream step (deskew, card-detect, re-centre, the 5 analysis variants, the
+  // display PNG/JPEG) runs at this size. The raw full-res is preserved separately
+  // in R2 (images/grading/{id}/raw_front.*) — nothing is lost.
+  //
+  // 2000px (long edge) ≈ 570dpi for a 3.5" card — preserves centering lines and
+  // surface defects for grading, and gives zoom headroom over the 1600px grading
+  // viewer (makeDisplayDerivative). The previous 3000px did ~2.25× the pixel +
+  // encode work per card with no grading benefit; on the shared-1x Fly CPU that
+  // was a big chunk of the ~13-min-per-card sharp time under sustained scanning.
+  const WORKING_MAX_PX = 2000;
+
   // Resize raw scans (scanner output can be very large). Front + back run in
   // parallel — Sharp releases the JS thread during the native encode so a
   // single-core Fly box still benefits despite both calls being CPU-bound.
@@ -465,7 +479,7 @@ export async function uploadImagesToCert(
   const resizeBuf = async (buf: Buffer) =>
     sharp(buf)
       .rotate()
-      .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
+      .resize(WORKING_MAX_PX, WORKING_MAX_PX, { fit: "inside", withoutEnlargement: true })
       .jpeg({ quality: 85 })
       .toBuffer();
 

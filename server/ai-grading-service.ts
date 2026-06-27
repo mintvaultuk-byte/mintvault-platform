@@ -250,7 +250,12 @@ export async function generateImageVariants(
   // Step 4: encode the un-padded centred buffer as JPEG. Surfaced as
   // `centredUnpadded` so the caller can mask rounded corners on the actual
   // card (not on the bitmap corners after padding).
-  const centredUnpadded = await sharp(centred).jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer();
+  // Baseline libjpeg-turbo (NOT mozjpeg). centredUnpadded is an intermediate
+  // buffer — it's re-decoded for tightenForDisplay and the masked display
+  // re-encode, so mozjpeg's trellis pass (5-10× slower) is pure wasted CPU here.
+  // On the shared-1x Fly box that wasted encode was a real slice of the per-card
+  // sharp time. (Display output is re-encoded downstream where quality matters.)
+  const centredUnpadded = await sharp(centred).jpeg({ quality: 85 }).toBuffer();
 
   // Step 5: extend with mat-coloured padding so the final cropped output has
   // a passport-style frame around the card (CARD_MAT_PADDING_PCT). The AI
@@ -261,17 +266,22 @@ export async function generateImageVariants(
   // uploadImagesToCert: maskRoundedCorners(centredUnpadded) → padWithMat.
   const cropped = await padWithMat(centredUnpadded, matRgb);
 
-  // Step 6: derive the four analysis variants from the padded flat image
+  // Step 6: derive the four analysis variants from the padded flat image.
+  // Baseline libjpeg-turbo (NOT mozjpeg): these are AI/admin-tool consumption
+  // images, never the public display, so mozjpeg's trellis optimisation (5-10×
+  // slower per encode) buys nothing here. Four mozjpeg encodes per card on the
+  // shared-1x Fly CPU were a large part of the per-card sharp time — baseline is
+  // visually identical for these and far cheaper.
   const [greyscale, highcontrast, edgeenhanced, inverted] = await Promise.all([
-    sharp(cropped).grayscale().jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer(),
-    sharp(cropped).linear(1.5, -30).jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer(),
+    sharp(cropped).grayscale().jpeg({ quality: 85 }).toBuffer(),
+    sharp(cropped).linear(1.5, -30).jpeg({ quality: 85 }).toBuffer(),
     sharp(cropped)
       .greyscale()
       .convolve({ width: 3, height: 3, kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1] })
       .normalize()
-      .jpeg({ quality: 85, progressive: true, mozjpeg: true })
+      .jpeg({ quality: 85 })
       .toBuffer(),
-    sharp(cropped).negate().jpeg({ quality: 85, progressive: true, mozjpeg: true }).toBuffer(),
+    sharp(cropped).negate().jpeg({ quality: 85 }).toBuffer(),
   ]);
 
   console.log(
