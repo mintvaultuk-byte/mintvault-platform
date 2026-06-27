@@ -21,14 +21,15 @@ primary_region = "lhr"  # London — closest to your UK users
     timeout = "5s"
 
 [[vm]]
-  # Dedicated 2-vCPU performance tier. The scan-ingest image pipeline (sharp) is
+  # Dedicated 1-vCPU performance tier. The scan-ingest image pipeline (sharp) is
   # CPU-bound; a shared-1x CPU throttles to baseline under sustained scanning,
   # which is what blew per-card processing out to ~13 min and backed the queue up.
-  # Dedicated vCPUs do not throttle. 4gb is the performance-2x minimum and gives
-  # the parallel front+back sharp buffers headroom.
-  memory = "4gb"
+  # Dedicated (performance) vCPUs do not throttle. Applied to BOTH machines, so
+  # the two in-process scan queues run on un-throttled cores. 2gb is ample for the
+  # 2000px working buffers (PR #128) — raise to 4gb only if the working res grows.
+  memory = "2gb"
   cpu_kind = "performance"
-  cpus = 2
+  cpus = 1
 
 [deploy]
   strategy = "rolling"
