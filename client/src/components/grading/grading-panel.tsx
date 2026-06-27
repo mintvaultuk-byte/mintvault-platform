@@ -1884,8 +1884,9 @@ export default function GradingPanel({
               </div>
 
               {/* Set name — identical combobox to the admin CertificateForm
-                  (free text + suggestions from /api/pokemon-sets). Admin-only
-                  "add custom set" is hidden for graders. */}
+                  (free text + suggestions from /api/pokemon-sets). Graders CAN now
+                  add a set inline (via the staff endpoint with dedup) so a card
+                  whose set isn't in the list doesn't block grading. */}
               <div className={idLocked ? "pointer-events-none opacity-60" : ""}>
                 <PokemonSetPicker
                   value={idSet}
@@ -1893,7 +1894,9 @@ export default function GradingPanel({
                     setIdSet(name);
                     setIdSetCode(id || "");
                   }}
-                  allowAddSet={false}
+                  allowAddSet
+                  createEndpoint="/api/staff/custom-sets"
+                  prefill={{ setName: idSet, setCode: idSetCode }}
                   testId="input-identity-set"
                 />
               </div>

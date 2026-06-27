@@ -2429,13 +2429,22 @@ export function PokemonSetPicker({
   onChange,
   testId,
   allowAddSet = true,
+  createEndpoint = "/api/admin/custom-sets",
+  prefill,
 }: {
   value: string;
   onChange: (name: string, id?: string) => void;
   testId?: string;
-  /** Show the admin-only "Add custom set" affordance (POSTs /api/admin/custom-sets).
-   *  Graders pass false — they can still pick existing sets or type free text. */
+  /** Show the "Add custom set" affordance. Admin defaults to the admin endpoint;
+   *  graders pass allowAddSet + createEndpoint="/api/staff/custom-sets" so they can
+   *  add a set whose name isn't in the picker rather than being blocked. */
   allowAddSet?: boolean;
+  /** Where the add-set form POSTs. Default admin; graders override to the
+   *  staff endpoint (admin-or-grade auth + dedup). */
+  createEndpoint?: string;
+  /** Seed the add-set form (e.g. from the AI identification) so the operator just
+   *  confirms. setCode → Set Code, setName → Set Name. */
+  prefill?: { setName?: string; setCode?: string };
 }) {
   const { toast } = useToast();
   const [query, setQuery] = useState(value);
@@ -2490,12 +2499,13 @@ export function PokemonSetPicker({
     if (!addForm.setId || !addForm.setName) return;
     setAddSaving(true);
     try {
-      const r = await fetch("/api/admin/custom-sets", {
+      const normId = addForm.setId.replace(/\s+/g, "").toLowerCase();
+      const r = await fetch(createEndpoint, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          setId: addForm.setId.replace(/\s+/g, "").toLowerCase(),
+          setId: normId,
           setName: addForm.setName,
           series: addForm.series || null,
           releaseDate: addForm.releaseYear ? `${addForm.releaseYear}-01-01` : null,
@@ -2504,10 +2514,16 @@ export function PokemonSetPicker({
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error);
-      toast({ title: `Custom set added: ${addForm.setId}` });
+      // Dedup: the server matched an existing set (by code or name) and returned
+      // it instead of creating a duplicate — select that one.
+      if (d.duplicate) {
+        toast({ title: "Existing set selected", description: d.message || `Using "${d.setName}".` });
+      } else {
+        toast({ title: `Custom set added: ${d.setId || normId}` });
+      }
       fetchSets();
-      onChange(addForm.setName, addForm.setId.replace(/\s+/g, "").toLowerCase());
-      setQuery(addForm.setName);
+      onChange(d.setName || addForm.setName, d.setId || normId);
+      setQuery(d.setName || addForm.setName);
       setShowAddForm(false);
       setOpen(false);
     } catch (e: any) {
@@ -2564,7 +2580,14 @@ export function PokemonSetPicker({
               type="button"
               onClick={() => {
                 setShowAddForm(true);
-                setAddForm((f) => ({ ...f, setId: query, setName: "" }));
+                // Prefill from the AI identification where available, else from
+                // what the operator typed, so they just confirm: the typed text is
+                // the SET NAME field; the code comes from AI if known.
+                setAddForm((f) => ({
+                  ...f,
+                  setName: prefill?.setName || query || f.setName,
+                  setId: prefill?.setCode || f.setId,
+                }));
               }}
               className="w-full text-left px-3 py-2.5 text-xs text-[var(--admin-gold)] font-bold hover:bg-[var(--admin-gold)]/5 border-t border-[var(--admin-line)] flex items-center gap-1"
             >
