@@ -22,6 +22,10 @@ primary_region = "lhr"
     timeout = "5s"
 
 [[vm]]
+  # Match prod (fly.toml) — dedicated 1-vCPU performance tier so the staging
+  # scan-test timing is representative of prod (a shared-1x CPU throttles under
+  # sustained scanning and would understate the post-PR-#128 speedup). 2gb is
+  # ample for the 2000px working buffers.
   memory = "2gb"
-  cpu_kind = "shared"
+  cpu_kind = "performance"
   cpus = 1
