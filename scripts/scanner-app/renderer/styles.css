@@ -497,7 +497,10 @@ body {
   align-items: center;
   text-align: center;
   gap: 8px;
-  max-width: 340px;
+  /* Wider than the other modals so the two portrait card thumbnails (Front +
+     Back) render large enough to read. Paired with the wider popover window in
+     main.js; the click-to-enlarge overlay still gives a full-size view. */
+  max-width: 520px;
 }
 /* Front + back shown side by side so the operator confirms BOTH sides scanned. */
 .confirm-imgs {
@@ -523,7 +526,9 @@ body {
 }
 .confirm-img {
   width: 100%;
-  max-height: 200px;
+  /* Taller cap: portrait cards are height-bound, so this (with the wider window)
+     is what makes each side legible at a glance. */
+  max-height: 340px;
   object-fit: contain;
   border-radius: 8px;
   border: 1px solid var(--border);

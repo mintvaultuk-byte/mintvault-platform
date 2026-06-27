@@ -268,8 +268,11 @@ function setupTray() {
 
 function createPopover() {
   popover = new BrowserWindow({
-    width: 420,
-    height: 600,
+    // Wider/taller so the scan-confirm popup can render the Front + Back card
+    // thumbnails large enough to read at a glance (two portrait cards side by
+    // side). Still comfortably fits top-right over the scanner UI on a Mac.
+    width: 560,
+    height: 660,
     show: false,
     frame: false,
     transparent: false,
