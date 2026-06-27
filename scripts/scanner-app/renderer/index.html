@@ -192,8 +192,18 @@
        — never the global "Next cert" forecast. -->
   <div class="modal confirm-modal" id="confirmModal">
     <div class="modal-card confirm-card">
-      <img id="confirmImg" class="confirm-img" alt="captured front" />
-      <div class="confirm-img-ph" id="confirmImgPlaceholder" style="display:none">front preview unavailable</div>
+      <div class="confirm-imgs">
+        <figure class="confirm-side">
+          <img id="confirmImg" class="confirm-img" alt="captured front" />
+          <div class="confirm-img-ph" id="confirmImgPlaceholder" style="display:none">front unavailable</div>
+          <figcaption class="confirm-side-label">Front</figcaption>
+        </figure>
+        <figure class="confirm-side">
+          <img id="confirmImgBack" class="confirm-img" alt="captured back" />
+          <div class="confirm-img-ph" id="confirmImgBackPlaceholder" style="display:none">back unavailable</div>
+          <figcaption class="confirm-side-label">Back</figcaption>
+        </figure>
+      </div>
       <div class="confirm-label" id="confirmLabel">This card is</div>
       <div class="confirm-cert" id="confirmCert">—</div>
       <div class="confirm-note" id="confirmNote"></div>
@@ -201,6 +211,11 @@
         <button class="btn primary confirm-ok" id="confirmOk">OK — number written, next card</button>
       </div>
     </div>
+  </div>
+
+  <!-- Click-to-enlarge overlay for the confirm front/back thumbnails. -->
+  <div class="confirm-zoom" id="confirmZoom" style="display:none">
+    <img id="confirmZoomImg" alt="enlarged scan" />
   </div>
 
   <script src="app.js"></script>

@@ -499,6 +499,28 @@ body {
   gap: 8px;
   max-width: 340px;
 }
+/* Front + back shown side by side so the operator confirms BOTH sides scanned. */
+.confirm-imgs {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  justify-content: center;
+}
+.confirm-side {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.confirm-side-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--muted);
+}
 .confirm-img {
   width: 100%;
   max-height: 200px;
@@ -506,6 +528,25 @@ body {
   border-radius: 8px;
   border: 1px solid var(--border);
   background: #000;
+  cursor: zoom-in;
+}
+/* Click-to-enlarge overlay. */
+.confirm-zoom {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  z-index: 1000;
+  cursor: zoom-out;
+}
+.confirm-zoom img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
 }
 .confirm-img-ph {
   width: 100%;
