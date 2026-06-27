@@ -60,6 +60,10 @@ const els = {
   confirmModal: document.getElementById("confirmModal"),
   confirmImg:   document.getElementById("confirmImg"),
   confirmImgPlaceholder: document.getElementById("confirmImgPlaceholder"),
+  confirmImgBack: document.getElementById("confirmImgBack"),
+  confirmImgBackPlaceholder: document.getElementById("confirmImgBackPlaceholder"),
+  confirmZoom:    document.getElementById("confirmZoom"),
+  confirmZoomImg: document.getElementById("confirmZoomImg"),
   confirmLabel: document.getElementById("confirmLabel"),
   confirmCert:  document.getElementById("confirmCert"),
   confirmNote:  document.getElementById("confirmNote"),
@@ -86,6 +90,40 @@ const els = {
 
 function openModal(m) { m.classList.add("visible"); }
 function closeModal(m) { m.classList.remove("visible"); }
+
+// Set one side's thumbnail (or show its placeholder when the data-URL is absent —
+// e.g. a single-sided scan has no back, or a side's thumb failed to render).
+function setConfirmThumb(imgEl, phEl, dataUrl) {
+  if (!imgEl) return;
+  if (dataUrl) {
+    imgEl.src = dataUrl;
+    imgEl.style.display = "";
+    if (phEl) phEl.style.display = "none";
+  } else {
+    imgEl.removeAttribute("src");
+    imgEl.style.display = "none";
+    if (phEl) phEl.style.display = "";
+  }
+}
+
+// Click-to-enlarge: tapping either confirm thumbnail opens it full-size in the
+// zoom overlay so the operator can read the card; clicking the overlay closes it.
+function wireConfirmZoom() {
+  const open = (el) => {
+    if (!el || !el.getAttribute("src") || !els.confirmZoom) return;
+    els.confirmZoomImg.src = el.getAttribute("src");
+    els.confirmZoom.style.display = "flex";
+  };
+  if (els.confirmImg) els.confirmImg.addEventListener("click", () => open(els.confirmImg));
+  if (els.confirmImgBack) els.confirmImgBack.addEventListener("click", () => open(els.confirmImgBack));
+  if (els.confirmZoom) {
+    els.confirmZoom.addEventListener("click", () => {
+      els.confirmZoom.style.display = "none";
+      els.confirmZoomImg.removeAttribute("src");
+    });
+  }
+}
+wireConfirmZoom();
 
 // ── State rendering ──────────────────────────────────────────────────────
 
@@ -180,15 +218,10 @@ function renderState(s) {
   if (els.confirmModal) {
     const c = s.confirmCard;
     if (c) {
-      if (c.thumb) {
-        els.confirmImg.src = c.thumb;
-        els.confirmImg.style.display = "";
-        if (els.confirmImgPlaceholder) els.confirmImgPlaceholder.style.display = "none";
-      } else {
-        els.confirmImg.removeAttribute("src");
-        els.confirmImg.style.display = "none";
-        if (els.confirmImgPlaceholder) els.confirmImgPlaceholder.style.display = "";
-      }
+      // Render front AND back so the operator can confirm both sides scanned.
+      // Each is clickable to enlarge (see the confirm-zoom handler below).
+      setConfirmThumb(els.confirmImg, els.confirmImgPlaceholder, c.thumb);
+      setConfirmThumb(els.confirmImgBack, els.confirmImgBackPlaceholder, c.backThumb);
       const incomplete = c.status === "incomplete" || !c.certId;
       els.confirmLabel.textContent = incomplete ? "" : "This card is";
       els.confirmCert.textContent = incomplete ? "SCAN INCOMPLETE" : c.certId;
@@ -203,6 +236,8 @@ function renderState(s) {
       openModal(els.confirmModal);
     } else {
       closeModal(els.confirmModal);
+      // Drop any open enlarge overlay when the card is dismissed.
+      if (els.confirmZoom) els.confirmZoom.style.display = "none";
     }
   }
 }

@@ -204,20 +204,21 @@ class Watcher extends EventEmitter {
     return `mvscan:${crypto.createHash("sha256").update(basis).digest("hex")}`;
   }
 
-  /** Small JPEG data-URL of the captured front, for the confirmation popup.
-   *  Generated from the on-disk file (sharp decodes TIFF). Returns null on
-   *  failure — the popup still shows the number, just without the image. */
-  async makeFrontThumb(frontPath) {
+  /** Small JPEG data-URL of a captured side (front or back), for the confirmation
+   *  popup. Generated from the on-disk file (sharp decodes TIFF). Returns null on
+   *  failure / no path — the popup still shows the number, just without that image. */
+  async makeThumb(imgPath) {
+    if (!imgPath) return null;
     try {
       const sharp = require("sharp");
-      const buf = await sharp(frontPath, { limitInputPixels: false })
+      const buf = await sharp(imgPath, { limitInputPixels: false })
         .rotate()
         .resize(460, null, { fit: "inside" })
         .jpeg({ quality: 68 })
         .toBuffer();
       return `data:image/jpeg;base64,${buf.toString("base64")}`;
     } catch (err) {
-      this.log(`confirm thumb failed for ${path.basename(frontPath)}: ${err.message}`, "warn");
+      this.log(`confirm thumb failed for ${path.basename(imgPath)}: ${err.message}`, "warn");
       return null;
     }
   }
@@ -675,12 +676,18 @@ class Watcher extends EventEmitter {
       if (hashes.back) this.recordUpload(hashes.back, certId, "back");
     }
 
-    // Capture the front thumbnail NOW — confirmAndMove relocates the file on
-    // success, so grab it from frontPath first. Used by the blocking popup.
-    const frontThumb = await this.makeFrontThumb(frontPath);
+    // Capture BOTH thumbnails NOW — confirmAndMove relocates the files on
+    // success, so grab them from frontPath/backPath first. The blocking popup
+    // shows front AND back so the operator can confirm both sides scanned before
+    // labelling. backThumb is null when there's no back (single-sided scan).
+    const [frontThumb, backThumb] = await Promise.all([
+      this.makeThumb(frontPath),
+      this.makeThumb(backPath),
+    ]);
     const incompleteCard = {
       certId: null,
       thumb: frontThumb,
+      backThumb,
       status: "incomplete",
       note: "Scan incomplete — no number assigned. Do NOT label. Rescan this card.",
       ts: Date.now(),
@@ -705,6 +712,7 @@ class Watcher extends EventEmitter {
           ? {
               certId,
               thumb: frontThumb,
+              backThumb,
               status: "raw_pending",
               note: orientationUnconfirmed
                 ? "Image still finalizing — number IS assigned. ⚠ Front/back not auto-confirmed: verify before labelling."
@@ -725,9 +733,9 @@ class Watcher extends EventEmitter {
       sessionPaired: stateMod.get().sessionPaired + 1,
       lastError: null,
       confirmCard: certId
-        ? { certId, thumb: frontThumb, status: "confirmed",
+        ? { certId, thumb: frontThumb, backThumb, status: "confirmed",
             note: orientationUnconfirmed
-              ? "⚠ Front/back not auto-confirmed — check the image above is the FRONT before labelling."
+              ? "⚠ Front/back not auto-confirmed — check the Front and Back above match the card before labelling."
               : null,
             warn: orientationUnconfirmed,
             ts: Date.now() }
