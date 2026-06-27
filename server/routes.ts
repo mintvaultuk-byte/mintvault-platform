@@ -9808,7 +9808,12 @@ Defects (admin-confirmed): ${defectLines}`;
       if (!cardName) return res.status(400).json({ error: "card_name is required" });
       const setName = typeof b.set_name === "string" ? b.set_name.trim() : null;
       const yearText = typeof b.year_text === "string" ? b.year_text.trim() : null;
+      // card_number_display is text (Pokémon numbers are strings: "037",
+      // "037/091", "TG12/TG30", "SV001") — never an integer.
       const cardNumber = typeof b.card_number_display === "string" ? b.card_number_display.trim() : null;
+      // variant/finish — stored as the canonical label text (e.g. "Holo"), same as
+      // the grader identity editor and the admin form.
+      const variant = typeof b.variant === "string" ? b.variant.trim() : null;
 
       const adminEmail = (req.session as any)?.adminEmail || "admin";
       const c = cert as any;
@@ -9817,12 +9822,14 @@ Defects (admin-confirmed): ${defectLines}`;
         set_name: c.setName ?? null,
         year_text: c.year ?? null,
         card_number_display: c.cardNumber ?? null,
+        variant: c.variant ?? null,
       };
       const after = {
         card_name: cardName,
         set_name: setName,
         year_text: yearText,
         card_number_display: cardNumber,
+        variant,
       };
       // Only overwrite optional fields when the admin actually supplied them
       // (empty input → keep the existing column value, never wipe).
@@ -9833,6 +9840,7 @@ Defects (admin-confirmed): ${defectLines}`;
           set_name            = ${setName == null ? sql`set_name` : sql`${setName}`},
           year_text           = ${yearText == null ? sql`year_text` : sql`${yearText}`},
           card_number_display = ${cardNumber == null ? sql`card_number_display` : sql`${cardNumber}`},
+          variant             = ${variant == null ? sql`variant` : sql`${variant}`},
           ai_analysis = jsonb_set(
             jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{manual_override}', ${overrideMeta}::jsonb, true),
             '{needs_identification_review}', 'false'::jsonb, true
@@ -9840,13 +9848,24 @@ Defects (admin-confirmed): ${defectLines}`;
           updated_at = NOW()
         WHERE id = ${id}
       `);
+      // CRITICAL — make the corrected identity reach the SLAB. The label render
+      // (applyLabelOverrides) prefers a per-cert label_overrides row's
+      // cardName/set/variant over the cert columns; a stale one would silently
+      // hide this correction on the slab/PDF. An authoritative identity override
+      // supersedes any display override, so clear it. (card_number_display has no
+      // label-override layer — it always renders from the column.) Best-effort.
+      try {
+        await storage.clearLabelOverride(String(c.certId));
+      } catch (e: any) {
+        console.warn(`[identity-override] clearLabelOverride failed for ${c.certId}: ${e?.message}`);
+      }
       await db.execute(sql`
         INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
         VALUES ('certificate', ${String(id)}, 'identity_manual_override', ${adminEmail},
           ${JSON.stringify({ before, after })}::jsonb, NOW())
       `);
-      console.log(`[identity-override] cert=${id} by ${adminEmail}: card_name="${cardName}"`);
-      return res.json({ ok: true, card_name: cardName, set_name: setName });
+      console.log(`[identity-override] cert=${id} by ${adminEmail}: card_name="${cardName}" #${cardNumber ?? "—"} variant="${variant ?? "—"}"`);
+      return res.json({ ok: true, card_name: cardName, set_name: setName, card_number_display: cardNumber, variant });
     } catch (error: any) {
       console.error("[identity-override] error:", error.message);
       return res.status(500).json({ error: error.message });
