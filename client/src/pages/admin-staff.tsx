@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
 import { Pencil, Trash2 } from "lucide-react";
 import GradingPanel from "../components/grading/grading-panel";
+import { VARIANT_OPTIONS } from "@/lib/variantOptions";
 
 /**
  * Admin staff hub (evolves admin-graders). One staff account list with per-person
@@ -426,13 +427,17 @@ export default function AdminStaffPage() {
   const [idoOpen, setIdoOpen] = useState(false);
   const [idoName, setIdoName] = useState("");
   const [idoSet, setIdoSet] = useState("");
+  const [idoNumber, setIdoNumber] = useState("");
   const [idoYear, setIdoYear] = useState("");
+  const [idoVariant, setIdoVariant] = useState("");
   const [idoBusy, setIdoBusy] = useState(false);
   useEffect(() => {
     if (!reviewCert) return;
     setIdoName(reviewCert.cardName || "");
     setIdoSet(reviewCert.setName || "");
+    setIdoNumber(reviewCert.cardNumber || "");
     setIdoYear(reviewCert.year || "");
+    setIdoVariant(reviewCert.variant || "");
     setIdoOpen(false);
   }, [reviewCert]);
   async function saveIdentityOverride() {
@@ -449,7 +454,9 @@ export default function AdminStaffPage() {
         body: JSON.stringify({
           card_name: idoName.trim(),
           set_name: idoSet.trim() || null,
+          card_number_display: idoNumber.trim() || null,
           year_text: idoYear.trim() || null,
+          variant: idoVariant.trim() || null,
         }),
       });
       const d = await res.json().catch(() => ({}));
@@ -460,7 +467,9 @@ export default function AdminStaffPage() {
         ...reviewCert,
         cardName: idoName.trim(),
         setName: idoSet.trim() || reviewCert.setName,
+        cardNumber: idoNumber.trim() || reviewCert.cardNumber,
         year: idoYear.trim() || reviewCert.year,
+        variant: idoVariant.trim() || reviewCert.variant,
       });
       setIdoOpen(false);
       await loadQueue(qFilter);
@@ -1052,11 +1061,38 @@ export default function AdminStaffPage() {
                       />
                       <input
                         className="ss-input"
+                        placeholder="Card number (e.g. 037 or 037/091)"
+                        value={idoNumber}
+                        onChange={(e) => setIdoNumber(e.target.value)}
+                        data-testid="input-override-number"
+                      />
+                      <input
+                        className="ss-input"
                         placeholder="Year"
                         value={idoYear}
                         onChange={(e) => setIdoYear(e.target.value)}
                         data-testid="input-override-year"
                       />
+                      {/* Variant/finish — datalist combobox: canonical labels as
+                          suggestions (prints on the slab, so keep it canonical) but
+                          free-text still allowed, matching the grader/admin form. */}
+                      <input
+                        className="ss-input"
+                        placeholder="Variant / finish (e.g. Holo)"
+                        value={idoVariant}
+                        list="override-variant-options"
+                        onChange={(e) => setIdoVariant(e.target.value)}
+                        data-testid="input-override-variant"
+                      />
+                      <datalist id="override-variant-options">
+                        {VARIANT_OPTIONS.filter((v) => v.code !== "NONE" && v.code !== "OTHER").map((v) => (
+                          <option
+                            key={v.code}
+                            value={v.label}
+                            label={v.abbreviation ? `${v.label} (${v.abbreviation})` : undefined}
+                          />
+                        ))}
+                      </datalist>
                     </div>
                     <div className="flex gap-2">
                       <button
@@ -1078,7 +1114,8 @@ export default function AdminStaffPage() {
                       </button>
                     </div>
                     <div className="text-[10px] text-[#E8E4DC]/40">
-                      Overwrites the card name/set/year. Shows on the operator's queue + public cert page. Logged.
+                      Overwrites card name / set / number / year / variant. Flows to the operator queue, the
+                      public cert page, and the slab/PDF. Logged.
                     </div>
                   </div>
                 )}
