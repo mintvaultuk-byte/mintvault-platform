@@ -1884,8 +1884,9 @@ export default function GradingPanel({
               </div>
 
               {/* Set name — identical combobox to the admin CertificateForm
-                  (free text + suggestions from /api/pokemon-sets). Admin-only
-                  "add custom set" is hidden for graders. */}
+                  (free text + suggestions from /api/pokemon-sets). Graders CAN now
+                  add a set inline (via the staff endpoint with dedup) so a card
+                  whose set isn't in the list doesn't block grading. */}
               <div className={idLocked ? "pointer-events-none opacity-60" : ""}>
                 <PokemonSetPicker
                   value={idSet}
@@ -1893,7 +1894,9 @@ export default function GradingPanel({
                     setIdSet(name);
                     setIdSetCode(id || "");
                   }}
-                  allowAddSet={false}
+                  allowAddSet
+                  createEndpoint="/api/staff/custom-sets"
+                  prefill={{ setName: idSet, setCode: idSetCode }}
                   testId="input-identity-set"
                 />
               </div>
@@ -2089,10 +2092,15 @@ export default function GradingPanel({
         />
       )}
 
-      {/* AI Panel + Reprocess — HIDDEN in admin-review: every AI/CV action here
-          hits /api/admin (hardcoded) and would burn credits + overwrite the
-          grader's work. Review is read/charge-safe. */}
-      {!adminReview && (
+      {/* AI Panel + Reprocess — HIDDEN in admin-review (every AI/CV action hits
+          /api/admin, would burn credits + overwrite the grader's work) AND HIDDEN
+          for graders. Graders do MANUAL grading: the AI grade tools (Measure
+          Centering, Detect Defects, Grade Card, Run All, Analyze with AI Full)
+          must not be available to them, or operator_grade would be AI-vs-final,
+          corrupting the per-operator drift stats. The identify banner + AI-identify
+          toggle are SEPARATE (rendered above, ungated) so graders keep the
+          identification help that fills the set — they just can't AI-grade. */}
+      {!adminReview && !graderMode && (
         <div className="flex items-start gap-3">
           <div className="flex-1">
             <AiPanel

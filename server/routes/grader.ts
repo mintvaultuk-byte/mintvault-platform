@@ -392,6 +392,78 @@ export function registerGraderRoutes(app: Express): void {
     }
   });
 
+  // ── Create a custom set inline from the grading set picker ──────────────────
+  // Auth: admin OR staff WITH the grade capability (NOT admin-only) — a grader
+  // must be able to add a set whose name isn't in the picker so they aren't
+  // blocked from grading (e.g. MV307). Writes to custom_sets, which feeds the
+  // picker via /api/pokemon-sets. DEDUP is required: sets print on certs/slabs,
+  // so a duplicate is permanent — match an existing set by normalised code OR
+  // name (case-insensitive, trimmed) and return it instead of inserting a dupe.
+  app.post("/api/staff/custom-sets", async (req: Request, res: Response) => {
+    const s = req.session as any;
+    const isAdmin = !!s?.isAdmin;
+    const isGrader = !!(s?.isStaff && s?.staffId && s?.capGrade);
+    if (!isAdmin && !isGrader) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      // Normalise the code the same way the picker does (no spaces, lowercase),
+      // so dedup + the UNIQUE index on set_id see a stable key.
+      const setId = (typeof req.body?.setId === "string" ? req.body.setId : "").replace(/\s+/g, "").toLowerCase().trim();
+      const setName = (typeof req.body?.setName === "string" ? req.body.setName : "").trim();
+      if (!setId || !setName) return res.status(400).json({ error: "Set code and set name are both required" });
+      if (setId.length > 64 || setName.length > 200) return res.status(400).json({ error: "Set code/name too long" });
+
+      const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+      const series = str(req.body?.series);
+      const releaseDate = str(req.body?.releaseDate);
+      const ptcgoCode = str(req.body?.ptcgoCode);
+      const totalCardsN = Number(req.body?.totalCards);
+      const totalCards = Number.isFinite(totalCardsN) && totalCardsN > 0 ? Math.trunc(totalCardsN) : null;
+      const creator = isAdmin ? s?.adminEmail || "admin" : s?.staffEmail || s?.graderEmail || "staff";
+
+      // Dedup against existing custom sets (custom_sets has no soft-delete column —
+      // rows are hard-deleted — so every present row is live).
+      const dup = (
+        await db.execute(sql`
+          SELECT set_id, set_name FROM custom_sets
+          WHERE LOWER(TRIM(set_id)) = ${setId} OR LOWER(TRIM(set_name)) = LOWER(${setName})
+          LIMIT 1
+        `)
+      ).rows[0] as any;
+      if (dup) {
+        return res.json({
+          ok: true,
+          duplicate: true,
+          setId: dup.set_id,
+          setName: dup.set_name,
+          message: `A set already exists: "${dup.set_name}" (${dup.set_id}) — selected it instead of creating a duplicate.`,
+        });
+      }
+
+      try {
+        await db.execute(sql`
+          INSERT INTO custom_sets (set_id, set_name, series, ptcgo_code, release_date, total_cards, created_by)
+          VALUES (${setId}, ${setName}, ${series}, ${ptcgoCode}, ${releaseDate}, ${totalCards}, ${creator})
+        `);
+      } catch (e: any) {
+        // UNIQUE(set_id) race — another request inserted the same code first.
+        if ((e.code || e.cause?.code) === "23505") {
+          return res.json({ ok: true, duplicate: true, setId, setName, message: `Set "${setId}" already exists — selected it.` });
+        }
+        throw e;
+      }
+      await storage.writeAuditLog("custom_set", setId, "staff_custom_set_create", creator, {
+        setName,
+        series,
+        via: isAdmin ? "admin" : "grader",
+      });
+      console.log(`[custom-set] ${isAdmin ? "admin" : "grader"} ${creator} added "${setId}" — ${setName}`);
+      return res.json({ ok: true, setId, setName });
+    } catch (err: any) {
+      console.error("[staff custom-set] insert failed:", err.message);
+      return res.status(500).json({ error: "Couldn't add set — please try again" });
+    }
+  });
+
   app.post("/api/admin/graders", requireAdmin, async (req: Request, res: Response) => {
     const { email, password, display_name } = req.body || {};
     const adminUser = (req.session as any).adminEmail || "admin";
