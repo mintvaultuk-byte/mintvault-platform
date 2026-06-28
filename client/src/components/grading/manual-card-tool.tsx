@@ -517,6 +517,27 @@ export default function ManualCardTool({
     return p ? { x: clamp(p.x), y: clamp(p.y) } : null;
   }
 
+  // FORWARD-rotate an image-% point to its on-screen % position within the
+  // (un-rotated) stage box — the EXACT inverse of screenToImagePct's −rotation
+  // map (R(+rotation) in px about the centre, so non-square aspect is handled).
+  // Used to anchor the LEVEL guide overlay: the card image + dots live in the
+  // rotated stage, but the alignment guides render screen-level, so a guide that
+  // must pass through a card-space point (a placed dot, the centroid, the cursor)
+  // is drawn through this forward-rotated screen position instead. Identity when
+  // there's no capture rotation (rotation 0 / defects / size not yet known), so
+  // the guides render byte-identically to before in those cases.
+  function imagePctToScreenPct(p: Point): Point {
+    if (rotation === 0 || phase !== "capture" || !renderW || !renderH) return p;
+    const W = renderW;
+    const H = renderH;
+    const ux = (p.x / 100 - 0.5) * W;
+    const uy = (p.y / 100 - 0.5) * H;
+    const rad = (rotation * Math.PI) / 180;
+    const sx = ux * Math.cos(rad) - uy * Math.sin(rad); // R(+rotation) · (ux,uy)
+    const sy = ux * Math.sin(rad) + uy * Math.cos(rad);
+    return { x: (sx / W + 0.5) * 100, y: (sy / H + 0.5) * 100 };
+  }
+
   function placePoint(pt: Point) {
     // Axis-lock the INNER point to its outer partner (placed first this side) so
     // the pair differs only on the measurement axis. No-op for the centering
@@ -1408,6 +1429,13 @@ export default function ManualCardTool({
             className="min-w-full min-h-full flex"
             style={{ justifyContent: "safe center", alignItems: "safe center" }}
           >
+            {/* Stage wrapper — NOT rotated. Shrink-wraps the capture container so
+                the screen-level guide overlay (a sibling, below) shares the exact
+                same box + centre as the rotated stage without inheriting its
+                rotation. The alignment guide must stay level to the viewport while
+                the card rotates under it (Cornelius: "stay straight and centred
+                with the panel, not the card"). */}
+            <div className="relative flex-shrink-0">
             {/* Capture container — shrink-wraps the (scaled) image, so its box
                 == the visible card. Dots are absolute children (same box). */}
             <div
@@ -1555,134 +1583,15 @@ export default function ManualCardTool({
                       opacity="0.9"
                     />
                   )}
-                  {/* Crosshair at outer centroid */}
-                  {outerCentroid && (
-                    <g stroke="#D4AF37" strokeWidth="0.3" opacity="0.6">
-                      <line x1={0} y1={outerCentroid.y} x2={100} y2={outerCentroid.y} />
-                      <line x1={outerCentroid.x} y1={0} x2={outerCentroid.x} y2={100} />
-                    </g>
-                  )}
-                  {/* Full-length guides through each placed point in the ACTIVE
-                  pass — line the next dot up exactly above/below/beside a
-                  committed corner. Faint pass-coloured over a dark underlay,
-                  true 1px dashes via non-scaling-stroke. The brighter white
-                  cursor guides below paint over these. */}
-                  {placing &&
-                    activeArr.map((p, i) => (
-                      <g key={`pguide-${activePass}-${i}`} strokeDasharray="4,4">
-                        <g stroke="rgba(0,0,0,0.3)">
-                          <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                          <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                        </g>
-                        <g stroke={activeColor} opacity={0.4}>
-                          <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
-                          <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
-                        </g>
-                      </g>
-                    ))}
-                  {/* Locked-axis rail — during INNER placement the dot is
-                  constrained to the outer partner's measurement axis. Draw that
-                  axis through the outer point (SOLID, so it reads distinctly
-                  from the dashed cursor/placed guides) — the rail the inner can
-                  only slide along. Vertical for TOP/BOTTOM, horizontal for
-                  LEFT/RIGHT (parity of the side index). */}
-                  {innerLockOuter &&
-                    (innerPts.length % 2 === 0 ? (
-                      <g>
-                        <line
-                          x1={innerLockOuter.x}
-                          y1={0}
-                          x2={innerLockOuter.x}
-                          y2={100}
-                          stroke="rgba(0,0,0,0.4)"
-                          strokeWidth={1.6}
-                          vectorEffect="non-scaling-stroke"
-                        />
-                        <line
-                          x1={innerLockOuter.x}
-                          y1={0}
-                          x2={innerLockOuter.x}
-                          y2={100}
-                          stroke={palette.inner}
-                          strokeWidth={0.8}
-                          vectorEffect="non-scaling-stroke"
-                        />
-                      </g>
-                    ) : (
-                      <g>
-                        <line
-                          x1={0}
-                          y1={innerLockOuter.y}
-                          x2={100}
-                          y2={innerLockOuter.y}
-                          stroke="rgba(0,0,0,0.4)"
-                          strokeWidth={1.6}
-                          vectorEffect="non-scaling-stroke"
-                        />
-                        <line
-                          x1={0}
-                          y1={innerLockOuter.y}
-                          x2={100}
-                          y2={innerLockOuter.y}
-                          stroke={palette.inner}
-                          strokeWidth={0.8}
-                          vectorEffect="non-scaling-stroke"
-                        />
-                      </g>
-                    ))}
-                  {/* Live cursor guide lines (placement mode) — full-span sniper-
-                  scope crosshairs through the cursor for edge alignment. White
-                  ~0.6 alpha over a thin dark underlay so they read on light and
-                  dark cards. non-scaling-stroke → true 1px + uniform dashes on
-                  screen despite the preserveAspectRatio="none" stretch. The
-                  reticle + these guides follow lockedHover so they snap onto the
-                  rail during inner placement (free hover otherwise). */}
-                  {placing && lockedHover && !drag && (
-                    <g strokeDasharray="5,4">
-                      {/* Dark underlay so the white guides read on light borders */}
-                      <g stroke="rgba(0,0,0,0.4)">
-                        <line
-                          x1={0}
-                          y1={lockedHover.y}
-                          x2={100}
-                          y2={lockedHover.y}
-                          strokeWidth={1}
-                          vectorEffect="non-scaling-stroke"
-                        />
-                        <line
-                          x1={lockedHover.x}
-                          y1={0}
-                          x2={lockedHover.x}
-                          y2={100}
-                          strokeWidth={1}
-                          vectorEffect="non-scaling-stroke"
-                        />
-                      </g>
-                      {/* Coloured full-length guides — track the chosen palette
-                        so the sniper guides match the crosshair on whatever
-                        background hue the operator is fighting. Dark halo
-                        above (rgba(0,0,0,0.4)) keeps them visible against
-                        the same-hue card areas. */}
-                      <g stroke={activeColor} opacity={0.7}>
-                        <line
-                          x1={0}
-                          y1={lockedHover.y}
-                          x2={100}
-                          y2={lockedHover.y}
-                          strokeWidth={0.5}
-                          vectorEffect="non-scaling-stroke"
-                        />
-                        <line
-                          x1={lockedHover.x}
-                          y1={0}
-                          x2={lockedHover.x}
-                          y2={100}
-                          strokeWidth={0.5}
-                          vectorEffect="non-scaling-stroke"
-                        />
-                      </g>
-                    </g>
-                  )}
+                  {/* The alignment GUIDES (outer-centroid crosshair, per-placed-
+                      point rails, inner locked-axis rail and the live cursor
+                      sniper guides) used to live HERE, inside the rotated stage,
+                      which tilted them with the card. They now render screen-level
+                      in the sibling overlay below (see "LEVEL guide overlay"),
+                      anchored via imagePctToScreenPct so they still pass through
+                      the same card points while staying horizontal/vertical. The
+                      crop box + edge rectangles stay here: they trace the card and
+                      must rotate with it. */}
                 </svg>
               )}
 
@@ -1886,21 +1795,112 @@ export default function ManualCardTool({
                 </>
               )}
 
-              {/* Live targeting reticle — follows the cursor in BOTH placement
-                mode AND the defects phase, so the operator gets a precise
-                crosshair when dropping defect pins too. pointer-events:none so
-                clicks fall through to the capture container below. */}
-              {((placing && phase === "capture") || phase === "defects") && lockedHover && !drag && (
-                <div
-                  className="absolute pointer-events-none"
-                  style={{ left: `${lockedHover.x}%`, top: `${lockedHover.y}%`, zIndex: 25 }}
-                  aria-hidden="true"
-                >
-                  <div style={{ position: "relative", width: 44, height: 44, transform: "translate(-50%, -50%)" }}>
-                    <Crosshair color={phase === "defects" ? palette.outer : activeColor} />
+            </div>
+
+            {/* ── LEVEL guide overlay — sibling of the rotated stage ───────────
+                Renders the alignment guides in screen/viewport space so they stay
+                horizontal/vertical while the card rotates underneath. Each guide
+                is anchored through a card-space point forward-rotated to screen
+                via imagePctToScreenPct, so it still passes through the right
+                dot / centroid / cursor but never tilts. Same viewBox +
+                preserveAspectRatio + non-scaling strokes as the in-stage overlay,
+                so at rotation 0 (imagePctToScreenPct = identity) it's visually
+                identical to before. Capture phase only. */}
+            {phase === "capture" && (
+              <svg
+                className="absolute inset-0 w-full h-full"
+                viewBox="0 0 100 100"
+                preserveAspectRatio="none"
+                style={{ pointerEvents: "none", zIndex: 20 }}
+              >
+                {/* Crosshair at outer centroid */}
+                {outerCentroid &&
+                  (() => {
+                    const c = imagePctToScreenPct(outerCentroid);
+                    return (
+                      <g stroke="#D4AF37" strokeWidth="0.3" opacity="0.6">
+                        <line x1={0} y1={c.y} x2={100} y2={c.y} />
+                        <line x1={c.x} y1={0} x2={c.x} y2={100} />
+                      </g>
+                    );
+                  })()}
+                {/* Full-length guides through each placed point in the ACTIVE pass. */}
+                {placing &&
+                  activeArr.map((p0, i) => {
+                    const p = imagePctToScreenPct(p0);
+                    return (
+                      <g key={`pguide-${activePass}-${i}`} strokeDasharray="4,4">
+                        <g stroke="rgba(0,0,0,0.3)">
+                          <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                          <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                        </g>
+                        <g stroke={activeColor} opacity={0.4}>
+                          <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+                          <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+                        </g>
+                      </g>
+                    );
+                  })}
+                {/* Locked-axis rail through the outer point (inner placement). */}
+                {innerLockOuter &&
+                  (() => {
+                    const o = imagePctToScreenPct(innerLockOuter);
+                    return innerPts.length % 2 === 0 ? (
+                      <g>
+                        <line x1={o.x} y1={0} x2={o.x} y2={100} stroke="rgba(0,0,0,0.4)" strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
+                        <line x1={o.x} y1={0} x2={o.x} y2={100} stroke={palette.inner} strokeWidth={0.8} vectorEffect="non-scaling-stroke" />
+                      </g>
+                    ) : (
+                      <g>
+                        <line x1={0} y1={o.y} x2={100} y2={o.y} stroke="rgba(0,0,0,0.4)" strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
+                        <line x1={0} y1={o.y} x2={100} y2={o.y} stroke={palette.inner} strokeWidth={0.8} vectorEffect="non-scaling-stroke" />
+                      </g>
+                    );
+                  })()}
+                {/* Live cursor sniper guides through the (snapped) cursor. */}
+                {placing &&
+                  lockedHover &&
+                  !drag &&
+                  (() => {
+                    const h = imagePctToScreenPct(lockedHover);
+                    return (
+                      <g strokeDasharray="5,4">
+                        <g stroke="rgba(0,0,0,0.4)">
+                          <line x1={0} y1={h.y} x2={100} y2={h.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                          <line x1={h.x} y1={0} x2={h.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                        </g>
+                        <g stroke={activeColor} opacity={0.7}>
+                          <line x1={0} y1={h.y} x2={100} y2={h.y} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+                          <line x1={h.x} y1={0} x2={h.x} y2={100} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+                        </g>
+                      </g>
+                    );
+                  })()}
+              </svg>
+            )}
+
+            {/* Live targeting reticle — SCREEN-LEVEL (sibling of the stage), so the
+                crosshair stays upright while the card rotates. Follows the cursor
+                in placement AND defects; anchored via imagePctToScreenPct (identity
+                at rotation 0 / defects). pointer-events:none so clicks fall through
+                to the capture container. */}
+            {((placing && phase === "capture") || phase === "defects") &&
+              lockedHover &&
+              !drag &&
+              (() => {
+                const h = imagePctToScreenPct(lockedHover);
+                return (
+                  <div
+                    className="absolute pointer-events-none"
+                    style={{ left: `${h.x}%`, top: `${h.y}%`, zIndex: 25 }}
+                    aria-hidden="true"
+                  >
+                    <div style={{ position: "relative", width: 44, height: 44, transform: "translate(-50%, -50%)" }}>
+                      <Crosshair color={phase === "defects" ? palette.outer : activeColor} />
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
           </div>
         </div>
