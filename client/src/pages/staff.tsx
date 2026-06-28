@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
 import GradingPanel from "../components/grading/grading-panel";
 import InstallAppButton from "../components/install-app-button";
-import { StaffEditSubmission } from "../components/staff-edit-submission";
 
 /**
  * Unified staff dashboard. Renders ONLY the tabs the logged-in person's
@@ -242,7 +241,6 @@ function GradeAnalytics({ a, loading }: { a: Analytics | null; loading: boolean 
 function GradeTab() {
   const [queue, setQueue] = useState<GItem[]>([]);
   const [active, setActive] = useState<{ ref: string; card: GCard } | null>(null);
-  const [editingCertId, setEditingCertId] = useState<number | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [aLoading, setALoading] = useState(true);
   const load = useCallback(async () => {
@@ -272,6 +270,11 @@ function GradeTab() {
             ← Back
           </button>
           <span className="text-[#D4AF37] font-mono text-xs">{active.ref}</span>
+          {c.gradingStatus === "pending_review" && (
+            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300">
+              Submitted · editing (stays pending review)
+            </span>
+          )}
         </div>
         {c.rejectionReason && (
           <div className="mx-auto max-w-3xl mt-3 px-4">
@@ -284,6 +287,10 @@ function GradeTab() {
         <GradingPanel
           apiBase="/api/grader"
           graderMode
+          // Reopening an already-submitted card = EDIT mode: the full workstation,
+          // but the primary action saves via the gated /edit-submission (stays
+          // pending review, never publishes).
+          graderEdit={c.gradingStatus === "pending_review"}
           certId={c.certId}
           certIdStr={c.certIdStr}
           cardName={c.cardName || ""}
@@ -311,70 +318,57 @@ function GradeTab() {
       ) : (
         <ul className="space-y-3">
           {queue.flatMap((it) =>
-            it.cards.map((card) =>
-              editingCertId === card.certId ? (
-                <li key={card.certId} className="border border-[#D4AF37]/20 rounded-lg p-3">
-                  <StaffEditSubmission
-                    certId={card.certId}
-                    certIdStr={card.certIdStr}
-                    onSaved={async () => {
-                      setEditingCertId(null);
-                      await load();
-                    }}
-                    onCancel={() => setEditingCertId(null)}
-                  />
-                </li>
-              ) : (
-                <li
-                  key={card.certId}
-                  className="border border-[#D4AF37]/20 rounded-lg p-4 flex items-center justify-between gap-4"
-                >
-                  <div className="min-w-0">
-                    <div className="text-[#D4AF37] font-mono text-xs">{it.submissionRef}</div>
-                    <div className="font-semibold truncate">
-                      {/* Lead with the MintVault cert number so the grader can match
-                          the row to the physical cert — especially for unidentified
-                          cards where there's no name to go on. */}
-                      <span className="font-mono text-[#D4AF37]">{card.certIdStr}</span>
-                      <span className="text-[#E8E4DC]/40"> · </span>
-                      {card.cardName || "Unidentified card"}{" "}
-                      {card.cardNumber && <span className="text-[#E8E4DC]/50">#{card.cardNumber}</span>}
-                    </div>
-                    <div className="text-[#E8E4DC]/50 text-xs">
-                      {[card.setName, card.year, card.variant].filter(Boolean).join(" · ")}
-                    </div>
+            it.cards.map((card) => (
+              <li
+                key={card.certId}
+                className="border border-[#D4AF37]/20 rounded-lg p-4 flex items-center justify-between gap-4"
+              >
+                <div className="min-w-0">
+                  <div className="text-[#D4AF37] font-mono text-xs">{it.submissionRef}</div>
+                  <div className="font-semibold truncate">
+                    {/* Lead with the MintVault cert number so the grader can match
+                        the row to the physical cert — especially for unidentified
+                        cards where there's no name to go on. */}
+                    <span className="font-mono text-[#D4AF37]">{card.certIdStr}</span>
+                    <span className="text-[#E8E4DC]/40"> · </span>
+                    {card.cardName || "Unidentified card"}{" "}
+                    {card.cardNumber && <span className="text-[#E8E4DC]/50">#{card.cardNumber}</span>}
                   </div>
-                  {card.gradingStatus === "assigned" ? (
+                  <div className="text-[#E8E4DC]/50 text-xs">
+                    {[card.setName, card.year, card.variant].filter(Boolean).join(" · ")}
+                  </div>
+                </div>
+                {card.gradingStatus === "assigned" ? (
+                  <button
+                    onClick={() => setActive({ ref: it.submissionRef, card })}
+                    className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#B8960C]"
+                  >
+                    Grade
+                  </button>
+                ) : card.gradingStatus === "pending_review" ? (
+                  // Submitted but not yet approved — the grader can reopen the FULL
+                  // grading workstation to correct it. It stays pending_review and
+                  // never auto-publishes (saves via the gated /edit-submission).
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className="text-[10px] uppercase tracking-wider text-amber-300">Submitted</span>
                     <button
                       onClick={() => setActive({ ref: it.submissionRef, card })}
-                      className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#B8960C]"
+                      data-testid={`btn-edit-submission-${card.certId}`}
+                      className="border border-[#D4AF37]/50 text-[#D4AF37] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#D4AF37]/10"
                     >
-                      Grade
+                      Edit
                     </button>
-                  ) : card.gradingStatus === "pending_review" ? (
-                    // Submitted but not yet approved — the grader can still correct
-                    // identity/grade; it stays pending_review (never auto-publishes).
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      <span className="text-[10px] uppercase tracking-wider text-amber-300">Submitted</span>
-                      <button
-                        onClick={() => setEditingCertId(card.certId)}
-                        data-testid={`btn-edit-submission-${card.certId}`}
-                        className="border border-[#D4AF37]/50 text-[#D4AF37] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#D4AF37]/10"
-                      >
-                        Edit
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      disabled
-                      className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded opacity-40"
-                    >
-                      {card.gradingStatus}
-                    </button>
-                  )}
-                </li>
-              )
-            )
+                  </div>
+                ) : (
+                  <button
+                    disabled
+                    className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded opacity-40"
+                  >
+                    {card.gradingStatus}
+                  </button>
+                )}
+              </li>
+            ))
           )}
         </ul>
       )}
