@@ -203,6 +203,17 @@ export function registerStaffRoutes(app: Express): void {
     requireCapability("print"),
     printProxy(() => "/api/admin/print-batch")
   );
+  // Download a generated batch artefact (pdf/png/print-png/cricut-cut.svg). The
+  // batch POST above returns admin URLs the print-capability staff can't open;
+  // this proxy lets them fetch the same artefact by batchId.
+  app.get(
+    "/api/staff/print/batch/:batchId/:filename",
+    requireCapability("print"),
+    printProxy(
+      (req) =>
+        `/api/admin/print-batch/${encodeURIComponent(String(req.params.batchId))}/${encodeURIComponent(String(req.params.filename))}`
+    )
+  );
 
   // ── Admin: staff accounts + capability toggles + scan assignment ────────────
   app.get("/api/admin/staff", requireAdmin, async (_req: Request, res: Response) => {

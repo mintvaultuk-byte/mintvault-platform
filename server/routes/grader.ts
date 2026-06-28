@@ -356,6 +356,81 @@ export function registerGraderRoutes(app: Express): void {
     }
   });
 
+  // ── Edit an OWN submitted (pending_review) card — identity + grade ──────────
+  // A grader can correct a card they already submitted while it's awaiting review.
+  // INTEGRITY: this NEVER publishes — the card stays pending_review and still
+  // faces the review gate. We only re-assert review state + re-snapshot the
+  // operator's submission so the reviewer sees the corrected values. Registered
+  // BEFORE the :action catch-all below so it isn't swallowed by the proxy.
+  app.post("/api/grader/certificates/:id/edit-submission", requireCapability("grade"), async (req: Request, res: Response) => {
+    try {
+      const certId = parseInt(String(req.params.id), 10);
+      const auth = await authorizeGraderCert(req, certId);
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      if (auth.gradingStatus !== "pending_review") {
+        return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not an editable submission` });
+      }
+      const graderId = (req.session as any).graderId as string;
+      const graderEmail = (req.session as any).graderEmail as string;
+
+      // Ownership: only the grader who actually graded it (graded_by) may edit —
+      // keeps graded_by attribution honest if the cert was later reassigned.
+      const before = (
+        await db.execute(sql`
+          SELECT graded_by, card_name, set_name, card_number_display, year_text, variant,
+                 grade, centering_score, corners_score, edges_score, surface_score
+          FROM certificates WHERE id = ${certId}`)
+      ).rows[0] as any;
+      if (!before) return res.status(404).json({ error: "Certificate not found" });
+      if (before.graded_by && String(before.graded_by) !== String(graderId)) {
+        return res.status(403).json({ error: "Only the grader who submitted this card can edit it" });
+      }
+
+      // Persist identity + grade as a DRAFT (grade_approved_at stays NULL).
+      if (req.body && Object.keys(req.body).length) await applyCertGradeDraft(certId, req.body);
+
+      // Re-assert the review gate + re-snapshot the operator's submission from the
+      // freshly-written grade columns, so the reviewer sees the corrected grade.
+      // NEVER set grade_approved_at/by, status, grader_status='approved', or graded_by.
+      await db.execute(sql`
+        UPDATE certificates SET
+          grader_status = 'pending_review',
+          review_required = true,
+          operator_grade = grade,
+          operator_subgrades = jsonb_build_object(
+            'centering', centering_score, 'corners', corners_score,
+            'edges', edges_score, 'surface', surface_score),
+          updated_at = NOW()
+        WHERE id = ${certId}
+      `);
+
+      // Audit — record what changed (before → after) for the locked schema.
+      const after = (
+        await db.execute(sql`
+          SELECT card_name, set_name, card_number_display, year_text, variant,
+                 grade, centering_score, corners_score, edges_score, surface_score
+          FROM certificates WHERE id = ${certId}`)
+      ).rows[0] as any;
+      const fields = [
+        "card_name", "set_name", "card_number_display", "year_text", "variant",
+        "grade", "centering_score", "corners_score", "edges_score", "surface_score",
+      ];
+      const changed: Record<string, { from: unknown; to: unknown }> = {};
+      for (const f of fields) {
+        if (String(before[f] ?? "") !== String(after[f] ?? "")) changed[f] = { from: before[f] ?? null, to: after[f] ?? null };
+      }
+      await storage.writeAuditLog("certificate", String(certId), "grader_edit_submission", graderEmail, {
+        graded_by: before.graded_by ?? null,
+        changed,
+      });
+
+      return res.json({ ok: true, gradingStatus: "pending_review", changed: Object.keys(changed) });
+    } catch (e: any) {
+      console.error("[grader] edit-submission error:", e.message);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── Grader panel-action DELEGATION PROXY ────────────────────────────────────
   // Verify grader OWNERSHIP, then re-dispatch to the unchanged admin handler
   // (PII-free, cert-scoped). __graderProxy lets requireAdmin pass for this one
