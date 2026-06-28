@@ -110,6 +110,10 @@ type GCard = {
   gradingStatus: string;
   rejectionReason: string | null;
   redoCount: number;
+  assignedToMe: boolean;
+  scannedByMe: boolean;
+  gradedByMe: boolean;
+  gradeApprovedAt: string | null;
 };
 type GItem = { submissionRef: string; cards: GCard[] };
 
@@ -309,68 +313,97 @@ function GradeTab() {
       </div>
     );
   }
-  const count = queue.reduce((n, it) => n + it.cards.length, 0);
+  // Flatten the grader's own cards (every state) and segment by workflow stage so
+  // both outstanding and finished work are visible. A card the grader only SCANNED
+  // (assigned to someone else / not yet assigned) is read-only here.
+  const all = queue.flatMap((it) => it.cards.map((card) => ({ card, ref: it.submissionRef })));
+  const toGrade = all.filter((x) => x.card.gradingStatus === "assigned" || x.card.gradingStatus === "unassigned");
+  const inReview = all.filter((x) => x.card.gradingStatus === "pending_review");
+  const done = all.filter((x) => x.card.gradingStatus === "approved");
+  const other = all.filter(
+    (x) => !["assigned", "unassigned", "pending_review", "approved"].includes(x.card.gradingStatus)
+  );
+
+  const renderRow = ({ card, ref }: { card: GCard; ref: string }) => (
+    <li
+      key={card.certId}
+      className="border border-[#D4AF37]/20 rounded-lg p-4 flex items-center justify-between gap-4"
+    >
+      <div className="min-w-0">
+        <div className="text-[#D4AF37] font-mono text-xs">{ref || "—"}</div>
+        <div className="font-semibold truncate">
+          {/* Lead with the MintVault cert number so the grader can match the row to
+              the physical cert — especially for unidentified cards with no name. */}
+          <span className="font-mono text-[#D4AF37]">{card.certIdStr}</span>
+          <span className="text-[#E8E4DC]/40"> · </span>
+          {card.cardName || "Unidentified card"}{" "}
+          {card.cardNumber && <span className="text-[#E8E4DC]/50">#{card.cardNumber}</span>}
+        </div>
+        <div className="text-[#E8E4DC]/50 text-xs">
+          {[card.setName, card.year, card.variant].filter(Boolean).join(" · ")}
+        </div>
+      </div>
+      {card.gradingStatus === "assigned" && card.assignedToMe ? (
+        <button
+          onClick={() => setActive({ ref, card })}
+          className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#B8960C] shrink-0"
+        >
+          Grade
+        </button>
+      ) : card.gradingStatus === "pending_review" && card.gradedByMe ? (
+        // Submitted but not yet approved — reopen the FULL workstation to correct
+        // it. Stays pending_review, never auto-publishes (gated /edit-submission).
+        <div className="flex flex-col items-end gap-1 shrink-0">
+          <span className="text-[10px] uppercase tracking-wider text-amber-300">Submitted</span>
+          <button
+            onClick={() => setActive({ ref, card })}
+            data-testid={`btn-edit-submission-${card.certId}`}
+            className="border border-[#D4AF37]/50 text-[#D4AF37] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#D4AF37]/10"
+          >
+            Edit
+          </button>
+        </div>
+      ) : card.gradingStatus === "approved" ? (
+        <div className="flex flex-col items-end gap-0.5 shrink-0">
+          <span className="text-[10px] uppercase tracking-wider text-emerald-400">Approved</span>
+          {card.grade && <span className="text-[#D4AF37] text-sm font-bold leading-none">{card.grade}</span>}
+        </div>
+      ) : card.gradingStatus === "unassigned" ? (
+        <span className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/50 shrink-0">
+          Scanned · awaiting assignment
+        </span>
+      ) : (
+        <span className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/50 shrink-0">{card.gradingStatus}</span>
+      )}
+    </li>
+  );
+
+  const section = (title: string, items: { card: GCard; ref: string }[]) =>
+    items.length === 0 ? null : (
+      <section
+        key={title}
+        className="mb-5"
+        data-testid={`grade-section-${title.toLowerCase().replace(/\s+/g, "-")}`}
+      >
+        <h2 className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/50 font-bold mb-2">
+          {title} · {items.length}
+        </h2>
+        <ul className="space-y-2">{items.map(renderRow)}</ul>
+      </section>
+    );
+
   return (
     <main className="max-w-3xl mx-auto px-4 py-5">
       <GradeAnalytics a={analytics} loading={aLoading} />
-      {count === 0 ? (
-        <p className="text-[#E8E4DC]/60 text-sm text-center py-12">No cards assigned to you.</p>
+      {all.length === 0 ? (
+        <p className="text-[#E8E4DC]/60 text-sm text-center py-12">No cards yet — scan or get assigned a card to begin.</p>
       ) : (
-        <ul className="space-y-3">
-          {queue.flatMap((it) =>
-            it.cards.map((card) => (
-              <li
-                key={card.certId}
-                className="border border-[#D4AF37]/20 rounded-lg p-4 flex items-center justify-between gap-4"
-              >
-                <div className="min-w-0">
-                  <div className="text-[#D4AF37] font-mono text-xs">{it.submissionRef}</div>
-                  <div className="font-semibold truncate">
-                    {/* Lead with the MintVault cert number so the grader can match
-                        the row to the physical cert — especially for unidentified
-                        cards where there's no name to go on. */}
-                    <span className="font-mono text-[#D4AF37]">{card.certIdStr}</span>
-                    <span className="text-[#E8E4DC]/40"> · </span>
-                    {card.cardName || "Unidentified card"}{" "}
-                    {card.cardNumber && <span className="text-[#E8E4DC]/50">#{card.cardNumber}</span>}
-                  </div>
-                  <div className="text-[#E8E4DC]/50 text-xs">
-                    {[card.setName, card.year, card.variant].filter(Boolean).join(" · ")}
-                  </div>
-                </div>
-                {card.gradingStatus === "assigned" ? (
-                  <button
-                    onClick={() => setActive({ ref: it.submissionRef, card })}
-                    className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#B8960C]"
-                  >
-                    Grade
-                  </button>
-                ) : card.gradingStatus === "pending_review" ? (
-                  // Submitted but not yet approved — the grader can reopen the FULL
-                  // grading workstation to correct it. It stays pending_review and
-                  // never auto-publishes (saves via the gated /edit-submission).
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className="text-[10px] uppercase tracking-wider text-amber-300">Submitted</span>
-                    <button
-                      onClick={() => setActive({ ref: it.submissionRef, card })}
-                      data-testid={`btn-edit-submission-${card.certId}`}
-                      className="border border-[#D4AF37]/50 text-[#D4AF37] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#D4AF37]/10"
-                    >
-                      Edit
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    disabled
-                    className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded opacity-40"
-                  >
-                    {card.gradingStatus}
-                  </button>
-                )}
-              </li>
-            ))
-          )}
-        </ul>
+        <>
+          {section("To grade", toGrade)}
+          {section("In review", inReview)}
+          {section("Other", other)}
+          {section("Done", done)}
+        </>
       )}
     </main>
   );
