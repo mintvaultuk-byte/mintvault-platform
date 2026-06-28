@@ -5,6 +5,7 @@ import { uploadToR2 } from "../r2";
 import { db } from "../db";
 import { sql, inArray } from "drizzle-orm";
 import { lookupCard, isAllowedLang } from "../services/tcgdex";
+import { importTcgdexSets, isTcgdexImportRunning } from "../services/tcgdex-sets-import";
 import { getFeatureFlag } from "../config/feature-flags";
 
 function normalizeCertId(raw: string): string {
@@ -301,6 +302,40 @@ export function registerAdminConfigRoutes(app: Express): void {
     } catch (err: any) {
       console.error("[custom-set] delete failed:", err);
       res.status(500).json({ error: "Couldn't delete set — check server logs" });
+    }
+  });
+
+  // ── TCGdex set-catalogue import (admin-triggered, runs in the background) ─────
+  // The import is ~209 rate-limited TCGdex calls (~3.5 min) — too long for a sync
+  // request (fly proxy would time out) — so kick it off and return 202. Idempotent
+  // UPSERT (safe to re-run, no deletes). Poll GET …/status for the row count.
+  app.post("/api/admin/tcgdex-sets/import", requireAdmin, async (req, res) => {
+    if (isTcgdexImportRunning()) return res.status(409).json({ error: "A TCGdex set import is already running" });
+    const adminUser = (req.session as any)?.adminEmail || "admin";
+    void importTcgdexSets()
+      .then((s) => console.log(`[tcgdex-import] (admin ${adminUser}) ${JSON.stringify(s)}`))
+      .catch((e) => console.error(`[tcgdex-import] (admin ${adminUser}) failed: ${e.message}`));
+    await storage.writeAuditLog("tcgdex_sets", "import", "tcgdex_sets_import_started", adminUser, {});
+    return res
+      .status(202)
+      .json({
+        ok: true,
+        started: true,
+        message: "TCGdex set import started (~2–4 min). Poll /api/admin/tcgdex-sets/status.",
+      });
+  });
+
+  app.get("/api/admin/tcgdex-sets/status", requireAdmin, async (_req, res) => {
+    try {
+      const r = await db.execute(sql`SELECT COUNT(*)::int AS n, MAX(synced_at) AS last FROM tcgdex_sets`);
+      const row = r.rows[0] as any;
+      return res.json({
+        running: isTcgdexImportRunning(),
+        count: Number(row?.n || 0),
+        lastSyncedAt: row?.last || null,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
     }
   });
 

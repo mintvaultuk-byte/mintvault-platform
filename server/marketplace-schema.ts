@@ -8,6 +8,7 @@
 
 import { db } from "./db";
 import { sql } from "drizzle-orm";
+import { ensureTcgdexSetsTable } from "./services/tcgdex-sets-import";
 
 export async function migrateMarketplaceSchema(): Promise<void> {
   // ── Seller columns on users ───────────────────────────────────────────────
@@ -377,6 +378,11 @@ export async function migrateMarketplaceSchema(): Promise<void> {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
+
+  // ── TCGdex canonical Pokémon set catalogue (separate from hand-added customs) ──
+  // Populated by importTcgdexSets() (scripts/import-tcgdex-sets.ts or the admin
+  // /api/admin/tcgdex-sets/import endpoint), NOT at startup. DDL is idempotent.
+  await ensureTcgdexSetsTable();
 
   // ── Manual centering columns on certificates ─────────────────────────────
   await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_points_front JSONB`);
