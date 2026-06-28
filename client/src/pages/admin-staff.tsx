@@ -2,7 +2,8 @@ import { Fragment, useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
 import { Pencil, Trash2 } from "lucide-react";
 import GradingPanel from "../components/grading/grading-panel";
-import { VARIANT_OPTIONS } from "@/lib/variantOptions";
+import { PokemonSetPicker } from "@/components/certificate-form";
+import { VariantPicker, TcgCardSearch, type TcgCardPick } from "@/components/identity-tools";
 
 /**
  * Admin staff hub (evolves admin-graders). One staff account list with per-person
@@ -427,19 +428,62 @@ export default function AdminStaffPage() {
   const [idoOpen, setIdoOpen] = useState(false);
   const [idoName, setIdoName] = useState("");
   const [idoSet, setIdoSet] = useState("");
+  const [idoSetCode, setIdoSetCode] = useState("");
   const [idoNumber, setIdoNumber] = useState("");
   const [idoYear, setIdoYear] = useState("");
   const [idoVariant, setIdoVariant] = useState("");
   const [idoBusy, setIdoBusy] = useState(false);
+  const [idoRerunBusy, setIdoRerunBusy] = useState(false);
   useEffect(() => {
     if (!reviewCert) return;
     setIdoName(reviewCert.cardName || "");
     setIdoSet(reviewCert.setName || "");
+    setIdoSetCode("");
     setIdoNumber(reviewCert.cardNumber || "");
     setIdoYear(reviewCert.year || "");
     setIdoVariant(reviewCert.variant || "");
     setIdoOpen(false);
   }, [reviewCert]);
+
+  // Re-run the server identify path (identify only — never grades) and prefill
+  // any EMPTY field from the result, mirroring the grader panel's re-run button.
+  async function rerunIdentityOverride() {
+    if (!reviewCert) return;
+    setMsg(null);
+    setErr(null);
+    setIdoRerunBusy(true);
+    try {
+      const res = await fetch(`/api/admin/certificates/${reviewCert.certId}/identify`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) return setErr(d.error || "Re-identify failed");
+      const ident = d.identification || {};
+      // EnrichedCardData shape: prefer verified official* fields, else detected_*.
+      const name = ident.officialName || ident.detected_name || "";
+      const setName = ident.officialSet || ident.detected_set || "";
+      const number = ident.officialNumber || ident.detected_number || "";
+      const year = ident.detected_year || ident.copyright_year || "";
+      if (name && !idoName.trim()) setIdoName(String(name));
+      if (setName && !idoSet.trim()) setIdoSet(String(setName));
+      if (ident.set_code && !idoSetCode.trim()) setIdoSetCode(String(ident.set_code));
+      if (number && !idoNumber.trim()) setIdoNumber(String(number));
+      if (year && !idoYear.trim()) setIdoYear(String(year));
+      setMsg(name ? `Re-ran identification — TCGdex: ${name}` : "Re-ran identification.");
+    } finally {
+      setIdoRerunBusy(false);
+    }
+  }
+
+  function applyIdoCardPick(c: TcgCardPick) {
+    if (c.name) setIdoName(c.name);
+    if (c.setName) setIdoSet(c.setName);
+    if (c.setCode) setIdoSetCode(c.setCode);
+    if (c.number) setIdoNumber(c.number);
+    if (c.year) setIdoYear(c.year);
+    setMsg(`Filled identity from ${c.name}${c.setName ? ` · ${c.setName}` : ""}`);
+  }
   async function saveIdentityOverride() {
     if (!reviewCert) return;
     if (!idoName.trim()) return setErr("Enter a card name.");
@@ -1044,6 +1088,38 @@ export default function AdminStaffPage() {
                     <div className="text-[11px] uppercase tracking-wide text-[#E8E4DC]/50 font-bold">
                       Manual card identity override
                     </div>
+                    {/* TCGdex re-run + card-search by name — parity with the grader
+                        identity editor. Both call the shared /api/staff/* endpoints. */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/40">Identify tools</span>
+                        <button
+                          type="button"
+                          onClick={rerunIdentityOverride}
+                          disabled={idoRerunBusy}
+                          title="Re-run TCGdex identification on this card (identify only — never grades)"
+                          data-testid="button-override-rerun"
+                          className="border border-[#D4AF37]/40 text-[#D4AF37] text-[10px] font-bold uppercase px-2 py-1 rounded hover:bg-[#D4AF37]/10 disabled:opacity-40"
+                        >
+                          {idoRerunBusy ? "Re-running…" : "Re-run TCGdex"}
+                        </button>
+                      </div>
+                      <TcgCardSearch onPick={applyIdoCardPick} initialQuery={idoName} testId="input-override-card-search" />
+                    </div>
+
+                    {/* Set name — same searchable picker (with inline add) the grader uses. */}
+                    <PokemonSetPicker
+                      value={idoSet}
+                      onChange={(name, id) => {
+                        setIdoSet(name);
+                        setIdoSetCode(id || "");
+                      }}
+                      allowAddSet
+                      createEndpoint="/api/staff/custom-sets"
+                      prefill={{ setName: idoSet, setCode: idoSetCode }}
+                      testId="input-override-set"
+                    />
+
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                       <input
                         className="ss-input"
@@ -1051,13 +1127,6 @@ export default function AdminStaffPage() {
                         value={idoName}
                         onChange={(e) => setIdoName(e.target.value)}
                         data-testid="input-override-name"
-                      />
-                      <input
-                        className="ss-input"
-                        placeholder="Set name"
-                        value={idoSet}
-                        onChange={(e) => setIdoSet(e.target.value)}
-                        data-testid="input-override-set"
                       />
                       <input
                         className="ss-input"
@@ -1073,26 +1142,15 @@ export default function AdminStaffPage() {
                         onChange={(e) => setIdoYear(e.target.value)}
                         data-testid="input-override-year"
                       />
-                      {/* Variant/finish — datalist combobox: canonical labels as
-                          suggestions (prints on the slab, so keep it canonical) but
-                          free-text still allowed, matching the grader/admin form. */}
-                      <input
-                        className="ss-input"
-                        placeholder="Variant / finish (e.g. Holo)"
+                      {/* Variant/finish — managed picker: full canonical list +
+                          custom_variants, inline add (dedup + audit server-side).
+                          Prints on the slab, so a proper picker not free-text. */}
+                      <VariantPicker
                         value={idoVariant}
-                        list="override-variant-options"
-                        onChange={(e) => setIdoVariant(e.target.value)}
-                        data-testid="input-override-variant"
+                        onChange={setIdoVariant}
+                        testId="input-override-variant"
+                        inputClassName="ss-input w-full"
                       />
-                      <datalist id="override-variant-options">
-                        {VARIANT_OPTIONS.filter((v) => v.code !== "NONE" && v.code !== "OTHER").map((v) => (
-                          <option
-                            key={v.code}
-                            value={v.label}
-                            label={v.abbreviation ? `${v.label} (${v.abbreviation})` : undefined}
-                          />
-                        ))}
-                      </datalist>
                     </div>
                     <div className="flex gap-2">
                       <button

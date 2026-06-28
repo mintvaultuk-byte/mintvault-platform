@@ -24,10 +24,8 @@ import CrossGradeDisplay from "./cross-grade-display";
 // editor feels identical to the admin CertificateForm. Both back-end endpoints
 // (/api/pokemon-sets, /api/cards/autofill) are public — no auth change needed.
 import { PokemonSetPicker } from "@/components/certificate-form";
+import { VariantPicker, TcgCardSearch, type TcgCardPick } from "@/components/identity-tools";
 import { autofillCard } from "@/lib/api";
-// Same canonical variant list the admin CertificateForm uses (client-side
-// constant — no auth needed, unlike the admin-only /api/admin/variant-options).
-import { VARIANT_OPTIONS } from "@/lib/variantOptions";
 
 // Shared calculation imports (client-side re-implementations)
 import { calculateOverallGrade, getGradeLabel, isBlackLabel as checkBlackLabel } from "./grade-logic";
@@ -425,6 +423,7 @@ export default function GradingPanel({
   // free-typed set names fall back to the name itself, same as the admin form.
   const [idSetCode, setIdSetCode] = useState("");
   const [idAutofilling, setIdAutofilling] = useState(false);
+  const [idRerunBusy, setIdRerunBusy] = useState(false);
   // Re-sync the editable identity fields from the server payload once the on-open
   // identify has resolved them. The panel mounts BEFORE identify finishes, so the
   // seed-from-props above runs with stale/empty values; when the resolved name
@@ -1168,8 +1167,10 @@ export default function GradingPanel({
     const lang = langMap[(language || "english").toLowerCase()] || "en";
 
     try {
+      // Staff endpoint (admin OR grader) so this works on the grader panel too —
+      // the admin-only /api/admin/tcgdex-lookup silently 401'd for graders before.
       const res = await fetch(
-        `/api/admin/tcgdex-lookup?code=${encodeURIComponent(setCode)}&number=${encodeURIComponent(cardNumber)}&lang=${encodeURIComponent(lang)}&certId=${encodeURIComponent(String(certId))}`,
+        `/api/staff/tcgdex-lookup?code=${encodeURIComponent(setCode)}&number=${encodeURIComponent(cardNumber)}&lang=${encodeURIComponent(lang)}`,
         { credentials: "include" }
       );
       if (!res.ok) return;
@@ -1192,6 +1193,51 @@ export default function GradingPanel({
     } catch {
       // Silent fail — TCGdex lookup is best-effort, form stays editable
     }
+  }
+
+  /** Re-run the server identify path on demand (re-fires Haiku identify + TCG
+   *  verify and refreshes the status light above). Identify ONLY — never grades,
+   *  so it's safe to press at any time. Works for graders (proxied) and admins. */
+  async function rerunIdentify() {
+    setIdRerunBusy(true);
+    try {
+      const res = await fetch(`${apiBase}/certificates/${certId}/identify`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Re-identify failed");
+      const ident = data.identification || {};
+      // EnrichedCardData shape: prefer the verified official* fields, fall back to
+      // the AI detected_* ones. Prefill ONLY empty fields so a grader's own edits
+      // aren't stomped.
+      const name = ident.officialName || ident.detected_name || "";
+      const setName = ident.officialSet || ident.detected_set || "";
+      const number = ident.officialNumber || ident.detected_number || "";
+      const year = ident.detected_year || ident.copyright_year || "";
+      if (name && !idName.trim()) setIdName(String(name).toUpperCase());
+      if (setName && !idSet.trim()) setIdSet(String(setName));
+      if (ident.set_code && !idSetCode.trim()) setIdSetCode(String(ident.set_code));
+      if (number && !idNumber.trim()) setIdNumber(String(number));
+      if (year && !idYear.trim()) setIdYear(String(year));
+      // Refresh the grading payload so the TCGdex status light re-derives.
+      queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/grading`] });
+      toast({ title: "Re-ran identification", description: name ? `TCGdex: ${name}` : "Status updated." });
+    } catch (e: any) {
+      toast({ title: "Re-identify failed", description: e.message, variant: "destructive" });
+    } finally {
+      setIdRerunBusy(false);
+    }
+  }
+
+  /** Fill the identity fields from a card picked in the TCG card-search pop-down. */
+  function applyCardPick(c: TcgCardPick) {
+    if (c.name) setIdName(c.name.toUpperCase());
+    if (c.setName) setIdSet(c.setName);
+    if (c.setCode) setIdSetCode(c.setCode);
+    if (c.number) setIdNumber(c.number);
+    if (c.year) setIdYear(c.year);
+    toast({ title: `Filled from ${c.name}`, description: c.setName || undefined });
   }
 
   /**
@@ -1952,31 +1998,38 @@ export default function GradingPanel({
                 </label>
                 <label className="flex flex-col gap-0.5 col-span-2">
                   <span className={lbl}>Variant</span>
-                  {/* Datalist combobox: suggests the canonical variant labels but
-                      still saves any free-typed value (matches the admin form). */}
-                  <input
-                    type="text"
+                  {/* Managed picker: full canonical list + custom_variants, with
+                      inline "add new variant" (dedup + audit server-side). */}
+                  <VariantPicker
                     value={idVariant}
-                    placeholder="Holo"
+                    onChange={setIdVariant}
                     disabled={idLocked}
-                    list="grader-variant-options"
-                    onChange={(e) => setIdVariant(e.target.value)}
-                    data-testid="input-identity-variant"
-                    className={inputCls}
+                    testId="input-identity-variant"
+                    inputClassName={inputCls}
                   />
-                  <datalist id="grader-variant-options">
-                    {VARIANT_OPTIONS.filter((v) => v.code !== "NONE" && v.code !== "OTHER").map((v) => (
-                      // value stays the bare label (saved value unchanged); the abbreviation is
-                      // display-only via the option label, e.g. "Double Rare (RR)".
-                      <option
-                        key={v.code}
-                        value={v.label}
-                        label={v.abbreviation ? `${v.label} (${v.abbreviation})` : undefined}
-                      />
-                    ))}
-                  </datalist>
                 </label>
               </div>
+
+              {/* TCGdex re-run + card search by name — parity with the admin
+                  review editor. Both call the shared /api/staff/* endpoints. */}
+              {!idLocked && (
+                <div className="space-y-2 pt-1 border-t border-[var(--admin-line)]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={lbl}>Identify tools</span>
+                    <button
+                      type="button"
+                      onClick={rerunIdentify}
+                      disabled={idRerunBusy}
+                      title="Re-run TCGdex identification on this card (identify only — never grades)"
+                      data-testid="button-rerun-identify"
+                      className="border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] text-[10px] font-bold uppercase px-2 py-1 rounded hover:bg-[var(--admin-gold)]/10 disabled:opacity-40"
+                    >
+                      {idRerunBusy ? "Re-running…" : "Re-run TCGdex"}
+                    </button>
+                  </div>
+                  <TcgCardSearch onPick={applyCardPick} initialQuery={idName} testId="input-card-search" />
+                </div>
+              )}
             </div>
           );
         })()}
