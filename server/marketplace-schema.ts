@@ -363,6 +363,21 @@ export async function migrateMarketplaceSchema(): Promise<void> {
     )
   `);
 
+  // ── Custom variants/finishes (printed on slabs — managed list) ───────────
+  // Mirrors custom_sets exactly: a small managed table the grader/admin can
+  // extend inline when a card's finish isn't in the canonical VARIANT_OPTIONS
+  // list. normalized_key (LOWER(TRIM(label))) is UNIQUE so duplicates can't be
+  // created. No soft-delete (rows are hard-deleted), same as custom_sets.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS custom_variants (
+      id SERIAL PRIMARY KEY,
+      label TEXT NOT NULL,
+      normalized_key TEXT NOT NULL UNIQUE,
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
   // ── Manual centering columns on certificates ─────────────────────────────
   await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_points_front JSONB`);
   await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_points_back JSONB`);

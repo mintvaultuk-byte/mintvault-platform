@@ -464,6 +464,128 @@ export function registerGraderRoutes(app: Express): void {
     }
   });
 
+  // ── Shared admin+grader auth helper for the identity-editor endpoints below ──
+  // requireCapability("grade") deliberately EXCLUDES admins, and requireAdmin
+  // excludes graders, so these shared endpoints inline the union check instead.
+  function staffOrAdmin(req: Request): { ok: boolean; isAdmin: boolean; who: string } {
+    const s = req.session as any;
+    const isAdmin = !!s?.isAdmin;
+    const isGrader = !!(s?.isStaff && s?.staffId && s?.capGrade);
+    if (!isAdmin && !isGrader) return { ok: false, isAdmin: false, who: "" };
+    return { ok: true, isAdmin, who: isAdmin ? s?.adminEmail || "admin" : s?.staffEmail || s?.graderEmail || "staff" };
+  }
+
+  // ── Custom variants/finishes — managed list, parity with custom_sets ────────
+  // Variants PRINT ON THE SLAB, so a dupe is permanent: dedup on the normalized
+  // label (LOWER(TRIM(...))) which the UNIQUE index also enforces. Admin OR a
+  // staff grader may add one (so a grader isn't blocked when a finish is missing).
+  app.get("/api/staff/custom-variants", async (req: Request, res: Response) => {
+    if (!staffOrAdmin(req).ok) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const rows = (await db.execute(sql`SELECT label FROM custom_variants ORDER BY LOWER(label) ASC`)).rows as any[];
+      return res.json({ variants: rows.map((r) => String(r.label)) });
+    } catch (err: any) {
+      console.error("[staff custom-variants] list failed:", err.message);
+      return res.status(500).json({ error: "Couldn't load variants" });
+    }
+  });
+
+  app.post("/api/staff/custom-variants", async (req: Request, res: Response) => {
+    const auth = staffOrAdmin(req);
+    if (!auth.ok) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const label = (typeof req.body?.label === "string" ? req.body.label : "").trim();
+      if (!label) return res.status(400).json({ error: "Variant name is required" });
+      if (label.length > 80) return res.status(400).json({ error: "Variant name too long" });
+      const normalizedKey = label.toLowerCase().replace(/\s+/g, " ").trim();
+
+      // Dedup against the canonical list first (don't shadow a built-in variant)
+      // and then against existing custom rows (case-insensitive, whitespace-folded).
+      const dup = (
+        await db.execute(sql`SELECT label FROM custom_variants WHERE normalized_key = ${normalizedKey} LIMIT 1`)
+      ).rows[0] as any;
+      if (dup) {
+        return res.json({ ok: true, duplicate: true, label: dup.label, message: `"${dup.label}" already exists — selected it.` });
+      }
+
+      try {
+        await db.execute(sql`INSERT INTO custom_variants (label, normalized_key, created_by) VALUES (${label}, ${normalizedKey}, ${auth.who})`);
+      } catch (e: any) {
+        if ((e.code || e.cause?.code) === "23505") {
+          return res.json({ ok: true, duplicate: true, label, message: `"${label}" already exists — selected it.` });
+        }
+        throw e;
+      }
+      await storage.writeAuditLog("custom_variant", normalizedKey, "staff_custom_variant_create", auth.who, {
+        label,
+        via: auth.isAdmin ? "admin" : "grader",
+      });
+      console.log(`[custom-variant] ${auth.isAdmin ? "admin" : "grader"} ${auth.who} added "${label}"`);
+      return res.json({ ok: true, label });
+    } catch (err: any) {
+      console.error("[staff custom-variant] insert failed:", err.message);
+      return res.status(500).json({ error: "Couldn't add variant — please try again" });
+    }
+  });
+
+  // ── Shared, rate-limited proxies to PUBLIC card data (no API key required) ───
+  // Both the grader panel and the admin review screen call these so the identity
+  // editor has the same TCGdex re-run + card-search on every screen. Read-only;
+  // the upstream services need no key, so nothing can leak. Rate-limited per IP.
+  const cardDataLimiter = rateLimit({
+    windowMs: 60_000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many lookups — slow down a moment." },
+  });
+
+  const STAFF_CODE_RE = /^[A-Za-z0-9._-]{1,20}$/;
+  const STAFF_NUMBER_RE = /^[A-Za-z0-9/_-]{1,10}$/;
+
+  // GET /api/staff/tcgdex-lookup?code=SV5K&number=075&lang=ja — canonical card
+  // metadata by set code + number. Read-only (does NOT auto-seed custom_sets;
+  // that admin-only side effect stays on /api/admin/tcgdex-lookup).
+  app.get("/api/staff/tcgdex-lookup", cardDataLimiter, async (req: Request, res: Response) => {
+    if (!staffOrAdmin(req).ok) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const code = String(req.query.code || "").trim();
+      const number = String(req.query.number || "").trim();
+      const lang = String(req.query.lang || "en").trim().toLowerCase();
+      if (!code || !number) return res.status(400).json({ error: "code and number are required" });
+      if (!STAFF_CODE_RE.test(code)) return res.status(400).json({ error: "Invalid set code format" });
+      if (!STAFF_NUMBER_RE.test(number)) return res.status(400).json({ error: "Invalid card number format" });
+      const { isAllowedLang, lookupCard } = await import("../services/tcgdex");
+      if (!isAllowedLang(lang)) return res.status(400).json({ error: `Unsupported language: ${lang}` });
+      const result = await lookupCard(code, number, lang);
+      if (!result) return res.json({ found: false, message: "Card not found in TCGdex" });
+      return res.json({ found: true, ...result });
+    } catch (err: any) {
+      console.error("[staff tcgdex-lookup] failed:", err.message);
+      return res.status(500).json({ error: "TCGdex lookup failed" });
+    }
+  });
+
+  // GET /api/staff/card-search?game=pokemon&query=charizard&mode=wildcard —
+  // card search BY NAME returning matches WITH large image URLs (pokemontcg.io /
+  // Scryfall / YGOPRODeck). Same engine as the admin /api/admin/card-lookup,
+  // exposed to graders too so the card-search pop-down works on both screens.
+  app.get("/api/staff/card-search", cardDataLimiter, async (req: Request, res: Response) => {
+    if (!staffOrAdmin(req).ok) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const game = typeof req.query.game === "string" ? req.query.game.trim() : "pokemon";
+      const query = typeof req.query.query === "string" ? req.query.query.trim() : "";
+      const mode = req.query.mode === "exact" ? ("exact" as const) : ("wildcard" as const);
+      if (!query || query.length < 2) return res.json([]);
+      const { lookupCard } = await import("../card-database");
+      const results = await lookupCard(game, query, mode);
+      return res.json(results);
+    } catch (err: any) {
+      console.error("[staff card-search] failed:", err.message);
+      return res.status(500).json({ error: "Card search failed" });
+    }
+  });
+
   app.post("/api/admin/graders", requireAdmin, async (req: Request, res: Response) => {
     const { email, password, display_name } = req.body || {};
     const adminUser = (req.session as any).adminEmail || "admin";
