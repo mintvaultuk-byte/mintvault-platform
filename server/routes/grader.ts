@@ -508,7 +508,10 @@ export function registerGraderRoutes(app: Express): void {
   app.post("/api/staff/custom-sets", async (req: Request, res: Response) => {
     const s = req.session as any;
     const isAdmin = !!s?.isAdmin;
-    const isGrader = !!(s?.isStaff && s?.staffId && s?.capGrade);
+    // Grade OR print capability: both surfaces add custom sets/variants — graders
+    // from the grading identity editor, print operators from the "Edit Label Data"
+    // modal. Low-risk, deduped + audited either way.
+    const isGrader = !!(s?.isStaff && s?.staffId && (s?.capGrade || s?.capPrint));
     if (!isAdmin && !isGrader) return res.status(401).json({ error: "Unauthorized" });
     try {
       // Normalise the code the same way the picker does (no spaces, lowercase),
@@ -576,7 +579,10 @@ export function registerGraderRoutes(app: Express): void {
   function staffOrAdmin(req: Request): { ok: boolean; isAdmin: boolean; who: string } {
     const s = req.session as any;
     const isAdmin = !!s?.isAdmin;
-    const isGrader = !!(s?.isStaff && s?.staffId && s?.capGrade);
+    // Grade OR print capability: both surfaces add custom sets/variants — graders
+    // from the grading identity editor, print operators from the "Edit Label Data"
+    // modal. Low-risk, deduped + audited either way.
+    const isGrader = !!(s?.isStaff && s?.staffId && (s?.capGrade || s?.capPrint));
     if (!isAdmin && !isGrader) return { ok: false, isAdmin: false, who: "" };
     return { ok: true, isAdmin, who: isAdmin ? s?.adminEmail || "admin" : s?.staffEmail || s?.graderEmail || "staff" };
   }
