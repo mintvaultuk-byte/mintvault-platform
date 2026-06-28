@@ -2611,7 +2611,7 @@ export function PokemonSetPicker({
                 value={addForm.setId}
                 onChange={(e) => setAddForm((f) => ({ ...f, setId: e.target.value }))}
                 placeholder="e.g. M24 EN"
-                className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs"
+                className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
               />
             </div>
             <div>
@@ -2620,7 +2620,7 @@ export function PokemonSetPicker({
                 value={addForm.setName}
                 onChange={(e) => setAddForm((f) => ({ ...f, setName: e.target.value }))}
                 placeholder="e.g. McDonald's Match Battle 2024"
-                className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs"
+                className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
               />
             </div>
             <div className="grid grid-cols-3 gap-2">
@@ -2630,7 +2630,7 @@ export function PokemonSetPicker({
                   value={addForm.series}
                   onChange={(e) => setAddForm((f) => ({ ...f, series: e.target.value }))}
                   placeholder="Promo"
-                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs"
+                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
                 />
               </div>
               <div>
@@ -2640,7 +2640,7 @@ export function PokemonSetPicker({
                   value={addForm.releaseYear}
                   onChange={(e) => setAddForm((f) => ({ ...f, releaseYear: e.target.value }))}
                   placeholder="2024"
-                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs"
+                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
                 />
               </div>
               <div>
@@ -2650,7 +2650,7 @@ export function PokemonSetPicker({
                   value={addForm.totalCards}
                   onChange={(e) => setAddForm((f) => ({ ...f, totalCards: e.target.value }))}
                   placeholder="15"
-                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs"
+                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
                 />
               </div>
             </div>
