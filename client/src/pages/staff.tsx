@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
 import GradingPanel from "../components/grading/grading-panel";
 import InstallAppButton from "../components/install-app-button";
+import { StaffEditSubmission } from "../components/staff-edit-submission";
 
 /**
  * Unified staff dashboard. Renders ONLY the tabs the logged-in person's
@@ -241,6 +242,7 @@ function GradeAnalytics({ a, loading }: { a: Analytics | null; loading: boolean 
 function GradeTab() {
   const [queue, setQueue] = useState<GItem[]>([]);
   const [active, setActive] = useState<{ ref: string; card: GCard } | null>(null);
+  const [editingCertId, setEditingCertId] = useState<number | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [aLoading, setALoading] = useState(true);
   const load = useCallback(async () => {
@@ -309,35 +311,70 @@ function GradeTab() {
       ) : (
         <ul className="space-y-3">
           {queue.flatMap((it) =>
-            it.cards.map((card) => (
-              <li
-                key={card.certId}
-                className="border border-[#D4AF37]/20 rounded-lg p-4 flex items-center justify-between gap-4"
-              >
-                <div className="min-w-0">
-                  <div className="text-[#D4AF37] font-mono text-xs">{it.submissionRef}</div>
-                  <div className="font-semibold truncate">
-                    {/* Lead with the MintVault cert number so the grader can match
-                        the row to the physical cert — especially for unidentified
-                        cards where there's no name to go on. */}
-                    <span className="font-mono text-[#D4AF37]">{card.certIdStr}</span>
-                    <span className="text-[#E8E4DC]/40"> · </span>
-                    {card.cardName || "Unidentified card"}{" "}
-                    {card.cardNumber && <span className="text-[#E8E4DC]/50">#{card.cardNumber}</span>}
-                  </div>
-                  <div className="text-[#E8E4DC]/50 text-xs">
-                    {[card.setName, card.year, card.variant].filter(Boolean).join(" · ")}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setActive({ ref: it.submissionRef, card })}
-                  disabled={card.gradingStatus !== "assigned"}
-                  className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#B8960C] disabled:opacity-40"
+            it.cards.map((card) =>
+              editingCertId === card.certId ? (
+                <li key={card.certId} className="border border-[#D4AF37]/20 rounded-lg p-3">
+                  <StaffEditSubmission
+                    certId={card.certId}
+                    certIdStr={card.certIdStr}
+                    onSaved={async () => {
+                      setEditingCertId(null);
+                      await load();
+                    }}
+                    onCancel={() => setEditingCertId(null)}
+                  />
+                </li>
+              ) : (
+                <li
+                  key={card.certId}
+                  className="border border-[#D4AF37]/20 rounded-lg p-4 flex items-center justify-between gap-4"
                 >
-                  {card.gradingStatus === "assigned" ? "Grade" : "Submitted"}
-                </button>
-              </li>
-            ))
+                  <div className="min-w-0">
+                    <div className="text-[#D4AF37] font-mono text-xs">{it.submissionRef}</div>
+                    <div className="font-semibold truncate">
+                      {/* Lead with the MintVault cert number so the grader can match
+                          the row to the physical cert — especially for unidentified
+                          cards where there's no name to go on. */}
+                      <span className="font-mono text-[#D4AF37]">{card.certIdStr}</span>
+                      <span className="text-[#E8E4DC]/40"> · </span>
+                      {card.cardName || "Unidentified card"}{" "}
+                      {card.cardNumber && <span className="text-[#E8E4DC]/50">#{card.cardNumber}</span>}
+                    </div>
+                    <div className="text-[#E8E4DC]/50 text-xs">
+                      {[card.setName, card.year, card.variant].filter(Boolean).join(" · ")}
+                    </div>
+                  </div>
+                  {card.gradingStatus === "assigned" ? (
+                    <button
+                      onClick={() => setActive({ ref: it.submissionRef, card })}
+                      className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#B8960C]"
+                    >
+                      Grade
+                    </button>
+                  ) : card.gradingStatus === "pending_review" ? (
+                    // Submitted but not yet approved — the grader can still correct
+                    // identity/grade; it stays pending_review (never auto-publishes).
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className="text-[10px] uppercase tracking-wider text-amber-300">Submitted</span>
+                      <button
+                        onClick={() => setEditingCertId(card.certId)}
+                        data-testid={`btn-edit-submission-${card.certId}`}
+                        className="border border-[#D4AF37]/50 text-[#D4AF37] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#D4AF37]/10"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      disabled
+                      className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded opacity-40"
+                    >
+                      {card.gradingStatus}
+                    </button>
+                  )}
+                </li>
+              )
+            )
           )}
         </ul>
       )}
@@ -450,8 +487,17 @@ function ScanTab() {
 }
 
 // ── PRINT tab — slab labels for printable certs (PII-FREE) ────────────────────
+// Max sets on the locked 8-up guillotine sheet — mirrors server/print-batch.ts
+// MAX_CERTS_PER_BATCH. Selecting more than this is blocked client-side.
+const MAX_BATCH = 8;
+
 function PrintTab() {
   const [certs, setCerts] = useState<any[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
   useEffect(() => {
     (async () => {
       const r = await fetch("/api/staff/print/browser", { credentials: "include" });
@@ -461,48 +507,144 @@ function PrintTab() {
       }
     })();
   }, []);
+
+  function toggle(id: string) {
+    setErr(null);
+    setSelected((cur) => {
+      if (cur.includes(id)) return cur.filter((x) => x !== id);
+      if (cur.length >= MAX_BATCH) {
+        setErr(`A sheet holds at most ${MAX_BATCH} cards. Deselect one first.`);
+        return cur;
+      }
+      return [...cur, id];
+    });
+  }
+
+  async function printBatch() {
+    if (!selected.length) return;
+    setBatchBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      const r = await fetch("/api/staff/print/batch", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ certIds: selected }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        // Claimed certs can't be batched from here (admin reprint flow only).
+        throw new Error(d.error || "Couldn't build the print sheet");
+      }
+      if (!d.batchId) throw new Error("No batch was produced");
+      // Open the 8-up guillotine PDF via the staff artefact proxy.
+      window.open(`/api/staff/print/batch/${encodeURIComponent(d.batchId)}/pdf`, "_blank", "noreferrer");
+      setMsg(`Sheet ready — ${selected.length} card${selected.length === 1 ? "" : "s"}. Opened in a new tab.`);
+      setSelected([]);
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBatchBusy(false);
+    }
+  }
+
   return (
     <main className="max-w-3xl mx-auto px-4 py-5">
       {certs.length === 0 ? (
         <p className="text-[#E8E4DC]/60 text-sm text-center py-12">No certificates ready for printing.</p>
       ) : (
-        <ul className="space-y-2">
-          {certs.map((c: any) => {
-            const id = c.certId || c.cert_id || c.id;
-            return (
-              <li
-                key={id}
-                className="border border-[#D4AF37]/20 rounded-lg p-3 flex items-center justify-between gap-3"
+        <>
+          {/* Batch action bar — renders the locked 8-up guillotine sheet for the
+              selected certs (reuses the existing renderer; layout unchanged). */}
+          <div className="sticky top-0 z-10 bg-[#1A1400]/95 backdrop-blur border border-[#D4AF37]/20 rounded-lg p-3 mb-3 flex items-center justify-between gap-3">
+            <div className="text-xs text-[#E8E4DC]/70">
+              <span className="text-[#D4AF37] font-bold">{selected.length}</span> / {MAX_BATCH} selected for the 8-up sheet
+            </div>
+            <div className="flex items-center gap-2">
+              {selected.length > 0 && (
+                <button
+                  onClick={() => setSelected([])}
+                  className="text-xs text-[#E8E4DC]/60 hover:text-[#E8E4DC] px-2 py-1"
+                >
+                  Clear
+                </button>
+              )}
+              <button
+                onClick={printBatch}
+                disabled={batchBusy || selected.length === 0}
+                data-testid="btn-print-batch"
+                className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#B8960C] disabled:opacity-40"
               >
-                <div className="min-w-0">
-                  <div className="text-xs text-[#D4AF37] font-mono">{c.certId || c.cert_id || id}</div>
-                  <div className="font-semibold truncate text-sm">
-                    {c.cardName || c.card_name || "—"}{" "}
-                    {c.grade && <span className="text-[#E8E4DC]/60">· {c.grade}</span>}
+                {batchBusy ? "Building…" : "Print 8-up sheet"}
+              </button>
+            </div>
+          </div>
+          {msg && (
+            <div className="text-emerald-300 text-xs bg-emerald-950/30 border border-emerald-900/50 rounded px-3 py-2 mb-3">
+              {msg}
+            </div>
+          )}
+          {err && (
+            <div className="text-red-400 text-xs bg-red-950/40 border border-red-900 rounded px-3 py-2 mb-3">{err}</div>
+          )}
+          <ul className="space-y-2">
+            {certs.map((c: any) => {
+              const id = c.certId || c.cert_id || c.id;
+              const claim = c.referenceNumber || c.reference_number || null;
+              const isSel = selected.includes(id);
+              return (
+                <li
+                  key={id}
+                  className={`border rounded-lg p-3 flex items-center gap-3 ${
+                    isSel ? "border-[#D4AF37] bg-[#D4AF37]/5" : "border-[#D4AF37]/20"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isSel}
+                    onChange={() => toggle(id)}
+                    data-testid={`print-select-${id}`}
+                    className="h-4 w-4 shrink-0 accent-[#D4AF37]"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs text-[#D4AF37] font-mono flex items-center gap-2 flex-wrap">
+                      <span>{id}</span>
+                      {/* Claim / document reference number (certificates.reference_number). */}
+                      {claim ? (
+                        <span className="text-[#E8E4DC]/60">claim {claim}</span>
+                      ) : (
+                        <span className="text-[#E8E4DC]/30">no claim #</span>
+                      )}
+                    </div>
+                    <div className="font-semibold truncate text-sm">
+                      {c.cardName || c.card_name || "—"}{" "}
+                      {c.grade && <span className="text-[#E8E4DC]/60">· {c.grade}</span>}
+                    </div>
                   </div>
-                </div>
-                <div className="flex gap-2 text-xs">
-                  <a
-                    href={`/api/staff/print/label/${id}/front.pdf`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="border border-[#D4AF37]/40 rounded px-2 py-1 hover:bg-[#D4AF37]/10"
-                  >
-                    Front PDF
-                  </a>
-                  <a
-                    href={`/api/staff/print/label/${id}/back.pdf`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="border border-[#D4AF37]/40 rounded px-2 py-1 hover:bg-[#D4AF37]/10"
-                  >
-                    Back PDF
-                  </a>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                  <div className="flex gap-2 text-xs shrink-0">
+                    <a
+                      href={`/api/staff/print/label/${id}/front.pdf`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="border border-[#D4AF37]/40 rounded px-2 py-1 hover:bg-[#D4AF37]/10"
+                    >
+                      Front PDF
+                    </a>
+                    <a
+                      href={`/api/staff/print/label/${id}/back.pdf`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="border border-[#D4AF37]/40 rounded px-2 py-1 hover:bg-[#D4AF37]/10"
+                    >
+                      Back PDF
+                    </a>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
     </main>
   );
