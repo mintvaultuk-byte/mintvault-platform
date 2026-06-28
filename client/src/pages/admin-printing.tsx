@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, createContext, useContext } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { apiRequest } from "@/lib/queryClient";
@@ -40,6 +40,21 @@ import AdminCertBrowser from "./admin-cert-browser";
 // Mirrors server/print-batch.ts MAX_CERTS_PER_BATCH (currently 8).
 const MAX_CERTS_PER_BATCH = 8;
 
+// API base for every printing endpoint this console calls. Admin renders with the
+// default ("/api/admin"), so its requests + react-query keys are byte-identical to
+// before. A print-capable staff user mounts <PrintingConsole apiBase="/api/staff/print" />,
+// which points the SAME component at the staff-authed print proxies (server/routes/staff.ts)
+// — same logic, capability-gated, no admin rights. Read via useContext in each
+// component so there's no prop-drilling through the rows/modals.
+const PrintApiBase = createContext<string>("/api/admin");
+
+// Server batch/reprint responses return ADMIN artefact URLs (/api/admin/print-batch/:id/...).
+// On staff, rewrite them to the staff proxy base so the browser can fetch them
+// without admin rights. No-op for admin (base === "/api/admin").
+function rebaseUrl(url: string, base: string): string {
+  return base === "/api/admin" ? url : url.replace(/^\/api\/admin/, base);
+}
+
 type CertForPrinting = CertificateRecord & { lastPrintedAt: string | null };
 type FilterMode = "all" | "unprinted" | "printed";
 type SheetSummary = {
@@ -73,6 +88,7 @@ function EditLabelModal({
 }) {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const base = useContext(PrintApiBase);
 
   const { data: existing, isLoading } = useQuery<{
     cardNameOverride?: string | null;
@@ -81,8 +97,8 @@ function EditLabelModal({
     languageOverride?: string | null;
     yearOverride?: string | null;
   } | null>({
-    queryKey: ["/api/admin/printing/override", certId],
-    queryFn: () => apiRequest("GET", `/api/admin/printing/override/${certId}`).then((r) => r.json()),
+    queryKey: [`${base}/printing/override`, certId],
+    queryFn: () => apiRequest("GET", `${base}/printing/override/${certId}`).then((r) => r.json()),
   });
 
   const form = useForm<{ cardName: string; setName: string; variant: string; language: string; year: string }>({
@@ -103,7 +119,7 @@ function EditLabelModal({
       language: string;
       year: string;
     }) => {
-      const res = await apiRequest("POST", `/api/admin/printing/override/${certId}`, {
+      const res = await apiRequest("POST", `${base}/printing/override/${certId}`, {
         cardNameOverride: data.cardName || null,
         setOverride: data.setName || null,
         variantOverride: data.variant || null,
@@ -114,7 +130,7 @@ function EditLabelModal({
     },
     onSuccess: () => {
       toast({ title: "Label data updated", description: `${certId} overrides saved` });
-      qc.invalidateQueries({ queryKey: ["/api/admin/printing/override", certId] });
+      qc.invalidateQueries({ queryKey: [`${base}/printing/override`, certId] });
       onClose();
     },
     onError: (err: any) => toast({ title: "Save failed", description: err.message, variant: "destructive" }),
@@ -318,7 +334,8 @@ function CertRow({
   reprintPending: boolean;
 }) {
   const [showPreview, setShowPreview] = useState(false);
-  const imgUrl = `/api/admin/certificates/label/${cert.certId}/front.png`;
+  const base = useContext(PrintApiBase);
+  const imgUrl = `${base}/certificates/label/${cert.certId}/front.png`;
 
   return (
     <div
@@ -437,7 +454,7 @@ function CertRow({
 
           {/* Certificate PDF download */}
           <a
-            href={`/api/admin/certificates/${cert.certId}/certificate-document`}
+            href={`${base}/certificates/${cert.certId}/certificate-document`}
             onClick={(e) => e.stopPropagation()}
             download={`MintVault-Certificate-${cert.certId}.pdf`}
             className="inline-flex items-center gap-1 h-7 px-2 text-[10px] text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold-hi)] rounded-md hover:bg-[var(--admin-panel2)] transition-colors whitespace-nowrap"
@@ -450,7 +467,7 @@ function CertRow({
 
           {/* Claim Insert — most important, gold-highlighted */}
           <a
-            href={`/api/admin/certificates/${cert.certId}/claim-insert`}
+            href={`${base}/certificates/${cert.certId}/claim-insert`}
             onClick={(e) => e.stopPropagation()}
             download={`MintVault-ClaimInsert-${cert.certId}.pdf`}
             className="inline-flex items-center gap-1 h-7 px-2.5 text-[10px] font-bold text-[#1c1607] rounded-md transition-colors whitespace-nowrap"
@@ -516,9 +533,10 @@ function LatestSheetSection({
   const [detailOpen, setDetailOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [reprintingRef, setReprintingRef] = useState<string | null>(null);
+  const base = useContext(PrintApiBase);
 
   const { data: sheets = [], isLoading } = useQuery<SheetSummary[]>({
-    queryKey: ["/api/admin/printing/sheets"],
+    queryKey: [`${base}/printing/sheets`],
   });
 
   const latest = sheets[0] ?? null;
@@ -527,14 +545,14 @@ function LatestSheetSection({
   const { data: detailItems = [], isLoading: detailLoading } = useQuery<
     { certId: string; cert: CertificateRecord | null }[]
   >({
-    queryKey: ["/api/admin/printing/sheets", latest?.sheetRef],
+    queryKey: [`${base}/printing/sheets`, latest?.sheetRef],
     enabled: !!latest && detailOpen,
   });
 
   const handleReprint = async (sheetRef: string) => {
     setReprintingRef(sheetRef);
     try {
-      const res = await apiRequest("GET", `/api/admin/printing/sheets/${encodeURIComponent(sheetRef)}`);
+      const res = await apiRequest("GET", `${base}/printing/sheets/${encodeURIComponent(sheetRef)}`);
       const items: { certId: string }[] = await res.json();
       const ids = items.map((i) => i.certId).filter(Boolean);
       if (ids.length) await onReprintSheet(ids);
@@ -603,7 +621,7 @@ function LatestSheetSection({
                 disabled={downloadingPng}
                 onClick={(e) => {
                   e.stopPropagation();
-                  onDownloadPng(`/api/admin/print-batch/${latestBatchId}/png`, `mintvault-batch-${latestBatchId}.png`);
+                  onDownloadPng(`${base}/print-batch/${latestBatchId}/png`, `mintvault-batch-${latestBatchId}.png`);
                 }}
                 className="h-7 text-[10px] px-2 border-[var(--admin-gold)]/60 text-[var(--admin-gold-hi)] hover:bg-[var(--admin-gold)]/10"
                 data-testid="btn-download-latest-png"
@@ -627,7 +645,7 @@ function LatestSheetSection({
                 onClick={(e) => {
                   e.stopPropagation();
                   onDownloadPng(
-                    `/api/admin/print-batch/${latestBatchId}/cricut-cut.svg`,
+                    `${base}/print-batch/${latestBatchId}/cricut-cut.svg`,
                     `mintvault-batch-${latestBatchId}-cut.svg`
                   );
                 }}
@@ -799,10 +817,23 @@ export default function AdminPrinting() {
   );
 }
 
+// Mountable Label Sheet Printing console for non-admin surfaces (e.g. the /staff
+// Printing tab). Same component, same locked sheet renderer — only the API base
+// changes, so a print-capable staff user gets full parity via the staff-authed
+// print proxies. apiBase defaults to "/api/admin" so this is safe to reuse anywhere.
+export function PrintingConsole({ apiBase = "/api/admin" }: { apiBase?: string }) {
+  return (
+    <PrintApiBase.Provider value={apiBase}>
+      <SheetPrintingPanel />
+    </PrintApiBase.Provider>
+  );
+}
+
 // ── Sheet Printing Panel ──────────────────────────────────────────────────────
 function SheetPrintingPanel() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const base = useContext(PrintApiBase);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pendingSheetRef, setPending] = useState<string | null>(null);
@@ -824,7 +855,7 @@ function SheetPrintingPanel() {
     data: allCerts = [],
     isLoading: certsLoading,
     refetch: refetchCerts,
-  } = useQuery<CertForPrinting[]>({ queryKey: ["/api/admin/printing/queue"] });
+  } = useQuery<CertForPrinting[]>({ queryKey: [`${base}/printing/queue`] });
 
   const visibleCerts = useMemo(() => {
     let list = allCerts;
@@ -874,9 +905,9 @@ function SheetPrintingPanel() {
 
   const invalidate = useCallback(() => {
     refetchCerts();
-    qc.invalidateQueries({ queryKey: ["/api/admin/printing/queue"] });
-    qc.invalidateQueries({ queryKey: ["/api/admin/printing/sheets"] });
-  }, [refetchCerts, qc]);
+    qc.invalidateQueries({ queryKey: [`${base}/printing/queue`] });
+    qc.invalidateQueries({ queryKey: [`${base}/printing/sheets`] });
+  }, [refetchCerts, qc, base]);
 
   // v525 — shared helper for saving the 3-file batch output. PDF + PNG are
   // streamed from R2 via the server endpoints (no expiring blob URLs); SVG
@@ -914,8 +945,8 @@ function SheetPrintingPanel() {
     // Batch flow downloads its PNG inline.
     // ?download=1 flips the PDF endpoint to Content-Disposition: attachment
     // so this drops it to Downloads rather than opening inline in a tab.
-    saveServerUrl(`${data.pdfUrl}?download=1`, `mintvault-batch-${data.batchId}.pdf`);
-  }, []);
+    saveServerUrl(`${rebaseUrl(data.pdfUrl, base)}?download=1`, `mintvault-batch-${data.batchId}.pdf`);
+  }, [base]);
 
   // v525 — single-cert reprint routes through the same /api/admin/print-batch
   // endpoint as multi-cert batches. Produces a 1-row sheet (front + claim
@@ -929,7 +960,7 @@ function SheetPrintingPanel() {
     async (certId: string) => {
       setReprintingId(certId);
       try {
-        const res = await apiRequest("POST", "/api/admin/print-batch", { certIds: [certId] });
+        const res = await apiRequest("POST", `${base}/print-batch`, { certIds: [certId] });
         const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
         saveBatchFiles(data);
         toast({ title: "Single-cert reprint generated", description: `${certId} — batch ${data.batchId.slice(0, 8)}` });
@@ -956,7 +987,7 @@ function SheetPrintingPanel() {
     async (certIds: string[]) => {
       setDownloadingInserts(true);
       try {
-        const res = await apiRequest("POST", "/api/admin/claim-insert-sheet", { certIds });
+        const res = await apiRequest("POST", `${base}/claim-insert-sheet`, { certIds });
         if (!res.ok) {
           const { error } = await res.json().catch(() => ({ error: "Failed" }));
           throw new Error(error);
@@ -986,7 +1017,7 @@ function SheetPrintingPanel() {
   const reprintFromHistory = useCallback(
     async (certIds: string[]) => {
       try {
-        const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
+        const res = await apiRequest("POST", `${base}/print-batch`, { certIds });
         const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
         saveBatchFiles(data);
         toast({
@@ -1078,7 +1109,7 @@ function SheetPrintingPanel() {
         }
       }
       try {
-        const res = await apiRequest("POST", "/api/admin/print-batch", { certIds });
+        const res = await apiRequest("POST", `${base}/print-batch`, { certIds });
         const data = (await res.json()) as {
           pdfUrl: string;
           svg: string;
@@ -1095,7 +1126,7 @@ function SheetPrintingPanel() {
         // attachment so the browser saves rather than navigates.
         {
           const a = document.createElement("a");
-          a.href = data.pngUrl;
+          a.href = rebaseUrl(data.pngUrl, base);
           a.download = `mintvault-batch-${data.batchId}.png`;
           document.body.appendChild(a);
           a.click();
@@ -1106,7 +1137,7 @@ function SheetPrintingPanel() {
         // open was hard-blocked, surface the URL as a clickable link in the
         // toast so the operator can still get to it.
         if (pdfWindow) {
-          pdfWindow.location.href = data.pdfUrl;
+          pdfWindow.location.href = rebaseUrl(data.pdfUrl, base);
         } else {
           toast({
             title: "Popup blocked — PNG downloaded",
@@ -1114,7 +1145,7 @@ function SheetPrintingPanel() {
               <span>
                 Allow popups for this site, or{" "}
                 <a
-                  href={data.pdfUrl}
+                  href={rebaseUrl(data.pdfUrl, base)}
                   target="_blank"
                   rel="noopener noreferrer"
                   style={{ color: "#D4AF37", textDecoration: "underline" }}
@@ -1170,7 +1201,7 @@ function SheetPrintingPanel() {
       const certIds = reprintModal.allCertIds;
       setReprintSubmitting(true);
       try {
-        const res = await apiRequest("POST", "/api/admin/print-batch/reprint", { certIds, reason });
+        const res = await apiRequest("POST", `${base}/print-batch/reprint`, { certIds, reason });
         const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
         saveBatchFiles(data);
         toast({
@@ -1190,7 +1221,7 @@ function SheetPrintingPanel() {
 
   // Mark printed
   const markPrintedMutation = useMutation({
-    mutationFn: (sheetRef: string) => apiRequest("POST", "/api/admin/printing/mark-printed", { sheetRef }),
+    mutationFn: (sheetRef: string) => apiRequest("POST", `${base}/printing/mark-printed`, { sheetRef }),
     onSuccess: () => {
       toast({ title: "Sheet marked as printed" });
       setPending(null);

@@ -185,35 +185,41 @@ export function registerStaffRoutes(app: Express): void {
       return (req.app as any).handle(req, res);
     };
   }
-  app.get(
-    "/api/staff/print/browser",
-    requireCapability("print"),
-    printProxy(() => "/api/admin/printing/browser")
-  );
-  app.get(
-    "/api/staff/print/label/:certId/:filename",
-    requireCapability("print"),
-    printProxy(
-      (req) =>
-        `/api/admin/certificates/label/${encodeURIComponent(String(req.params.certId))}/${encodeURIComponent(String(req.params.filename))}`
-    )
-  );
-  app.post(
-    "/api/staff/print/batch",
-    requireCapability("print"),
-    printProxy(() => "/api/admin/print-batch")
-  );
-  // Download a generated batch artefact (pdf/png/print-png/cricut-cut.svg). The
-  // batch POST above returns admin URLs the print-capability staff can't open;
-  // this proxy lets them fetch the same artefact by batchId.
-  app.get(
-    "/api/staff/print/batch/:batchId/:filename",
-    requireCapability("print"),
-    printProxy(
-      (req) =>
-        `/api/admin/print-batch/${encodeURIComponent(String(req.params.batchId))}/${encodeURIComponent(String(req.params.filename))}`
-    )
-  );
+  // ── Print console — staff-authed proxies for the FULL admin Label Sheet
+  // Printing dashboard. The client mounts <PrintingConsole apiBase="/api/staff/print">
+  // (the SAME admin component), so a print-capable staff user gets full parity.
+  // Each route below is EXPLICITLY whitelisted and maps 1:1 to its admin
+  // counterpart by swapping the `/api/staff/print` prefix → `/api/admin` — there is
+  // NO wildcard, so no other admin endpoint is reachable (no privilege escalation).
+  // requireAdmin on the target passes only via the internal __graderProxy flag that
+  // printProxy sets AFTER the capability check. Printing is a fulfilment step over
+  // ALL printable certs (parity with admin) — it is NOT scoped per-grader, matching
+  // the previous /api/staff/print/browser behaviour.
+  const swapToAdmin = (req: Request) => req.path.replace(/^\/api\/staff\/print/, "/api/admin");
+  const printConsole = (sub: string) => `/api/staff/print${sub}`;
+  // GET routes
+  for (const sub of [
+    "/printing/queue",
+    "/printing/sheets",
+    "/printing/sheets/:sheetRef",
+    "/printing/override/:certId",
+    "/print-batch/:batchId/:filename",
+    "/certificates/label/:certId/:filename",
+    "/certificates/:certId/certificate-document",
+    "/certificates/:certId/claim-insert",
+  ]) {
+    app.get(printConsole(sub), requireCapability("print"), printProxy(swapToAdmin));
+  }
+  // POST routes
+  for (const sub of [
+    "/printing/override/:certId",
+    "/printing/mark-printed",
+    "/print-batch",
+    "/print-batch/reprint",
+    "/claim-insert-sheet",
+  ]) {
+    app.post(printConsole(sub), requireCapability("print"), printProxy(swapToAdmin));
+  }
 
   // ── Admin: staff accounts + capability toggles + scan assignment ────────────
   app.get("/api/admin/staff", requireAdmin, async (_req: Request, res: Response) => {
