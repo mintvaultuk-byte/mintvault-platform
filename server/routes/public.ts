@@ -461,8 +461,49 @@ export function registerPublicRoutes(app: Express): void {
   let tcgCacheTime = 0;
 
   app.get("/api/pokemon-sets", async (_req, res) => {
+    // Normalized key — matches custom_sets / tcgdex_sets storage + the inline-add flow.
+    const norm = (id: string) =>
+      String(id || "")
+        .replace(/\s+/g, "")
+        .toLowerCase()
+        .trim();
     try {
-      // Fetch TCG API sets (cached 24h)
+      // Hand-added custom sets (always included).
+      const customRows = await db.execute(sql`SELECT * FROM custom_sets ORDER BY created_at DESC`);
+      const customSets = (customRows.rows as any[]).map((s) => ({
+        id: s.set_id,
+        name: s.set_name,
+        series: s.series || "Custom",
+        ptcgoCode: s.ptcgo_code || null,
+        releaseDate: s.release_date ? new Date(s.release_date).toISOString().split("T")[0] : null,
+        total: s.total_cards || 0,
+        source: "custom",
+      }));
+
+      // Canonical TCGdex catalogue (DB-backed, imported). Preferred on collisions.
+      const tcgdexRows = await db.execute(
+        sql`SELECT * FROM tcgdex_sets ORDER BY release_date DESC NULLS LAST, set_name ASC`
+      );
+      const tcgdexSets = (tcgdexRows.rows as any[]).map((s) => ({
+        id: s.set_id,
+        name: s.set_name,
+        series: s.series || "",
+        ptcgoCode: s.ptcgo_code || null,
+        releaseDate: s.release_date ? new Date(s.release_date).toISOString().split("T")[0] : null,
+        total: s.total_cards || 0,
+        source: "tcgdex",
+      }));
+
+      if (tcgdexSets.length > 0) {
+        // Union: TCGdex first (canonical), then any custom NOT already present
+        // (deduped by normalized key — one row per set, TCGdex row wins).
+        const tcgdexKeys = new Set(tcgdexSets.map((s) => norm(s.id)));
+        const merged = [...tcgdexSets, ...customSets.filter((s) => !tcgdexKeys.has(norm(s.id)))];
+        return res.json(merged);
+      }
+
+      // FALLBACK — tcgdex_sets not yet imported: keep the legacy pokemontcg.io
+      // live source so the picker never goes blank before the import has run.
       if (!cachedTcgSets || Date.now() - tcgCacheTime > 24 * 60 * 60 * 1000) {
         const apiKey = process.env.POKEMON_TCG_API_KEY;
         const headers: Record<string, string> = {};
@@ -482,25 +523,10 @@ export function registerPublicRoutes(app: Express): void {
           tcgCacheTime = Date.now();
         }
       }
-
-      // Fetch custom sets from DB
-      const customRows = await db.execute(sql`SELECT * FROM custom_sets ORDER BY created_at DESC`);
-      const customSets = (customRows.rows as any[]).map((s) => ({
-        id: s.set_id,
-        name: s.set_name,
-        series: s.series || "Custom",
-        ptcgoCode: s.ptcgo_code || null,
-        releaseDate: s.release_date ? new Date(s.release_date).toISOString().split("T")[0] : null,
-        total: s.total_cards || 0,
-        source: "custom",
-      }));
-
-      // Merge: custom sets first, then TCG API sets (dedup by id)
       const tcg = cachedTcgSets || [];
-      const customIds = new Set(customSets.map((s) => s.id));
-      const merged = [...customSets, ...tcg.filter((s) => !customIds.has(s.id))];
-
-      res.json(merged);
+      const customIds = new Set(customSets.map((s) => norm(s.id)));
+      const merged = [...customSets, ...tcg.filter((s: any) => !customIds.has(norm(s.id)))];
+      return res.json(merged);
     } catch (err: any) {
       console.error("[pokemon-sets] error:", err.message);
       res.json(cachedTcgSets || []);

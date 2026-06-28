@@ -193,6 +193,13 @@ export function isAllowedLang(lang: string): boolean {
   return ALLOWED_LANGS.has(lang);
 }
 
+/** Every Pokémon set summary ({ id, name }) for a language (24h-cached). Used by
+ *  the set-catalogue import (tcgdex-sets-import.ts) to enumerate all sets. */
+export async function listAllSets(lang = "en"): Promise<TcgdexSetSummary[]> {
+  const cache = await getSetList(lang);
+  return cache.sets;
+}
+
 /**
  * Resolve a printed set code (e.g. "sv5K") to the TCGdex set ID.
  * Tries the given language first, then falls back to "en".
