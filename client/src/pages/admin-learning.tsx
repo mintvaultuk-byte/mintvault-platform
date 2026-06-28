@@ -258,6 +258,64 @@ export default function AdminLearningPage() {
   const [submittingFlag, setSubmittingFlag] = useState<string | null>(null);
   const [forceEmbedding, setForceEmbedding] = useState(false);
 
+  // ── TCGdex Pokémon set sync ───────────────────────────────────────────────
+  // Triggers the deployed background import (POST …/import → 202) and polls
+  // …/status every 5s until it stops running. Status exposes {running, count,
+  // lastSyncedAt} — the per-run fetched/inserted breakdown lives only in server
+  // logs, so we surface the resulting total set count + last-synced time.
+  const [syncStarting, setSyncStarting] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<{
+    running: boolean;
+    count: number;
+    lastSyncedAt: string | null;
+  } | null>(null);
+
+  async function pollSyncStatus() {
+    try {
+      const res = await fetch("/api/admin/tcgdex-sets/status", { credentials: "include" });
+      if (!res.ok) return;
+      setSyncStatus((await res.json()) as { running: boolean; count: number; lastSyncedAt: string | null });
+    } catch {
+      /* transient — next poll retries */
+    }
+  }
+
+  // Load current status once on mount (shows the existing count + catches an
+  // already-running import so polling resumes).
+  useEffect(() => {
+    void pollSyncStatus();
+  }, []);
+
+  // While an import is running, poll every 5s until it stops.
+  useEffect(() => {
+    if (!syncStatus?.running) return;
+    const id = setInterval(() => void pollSyncStatus(), 5000);
+    return () => clearInterval(id);
+  }, [syncStatus?.running]);
+
+  async function startSetSync() {
+    setSyncStarting(true);
+    try {
+      const res = await fetch("/api/admin/tcgdex-sets/import", { method: "POST", credentials: "include" });
+      const d = await res.json().catch(() => ({}));
+      if (res.status === 409) {
+        toast({ title: "Import already running", description: "Watching progress…" });
+      } else if (!res.ok) {
+        throw new Error(d.error || `HTTP ${res.status}`);
+      } else {
+        toast({ title: "Import started…", description: "Syncing Pokémon sets from TCGdex (~2–4 min)." });
+      }
+      // Optimistically mark running so the button disables + polling kicks in;
+      // the next poll corrects it if the import already finished.
+      setSyncStatus((s) => ({ running: true, count: s?.count ?? 0, lastSyncedAt: s?.lastSyncedAt ?? null }));
+      void pollSyncStatus();
+    } catch (e: any) {
+      toast({ title: "Couldn't start import", description: e.message, variant: "destructive" });
+    } finally {
+      setSyncStarting(false);
+    }
+  }
+
   // Last-run timestamp for the Force embed button countdown. Polled on
   // mount and refetched after every click so the countdown stays in sync
   // with the server's closure variable (which is the source of truth for
@@ -674,6 +732,51 @@ export default function AdminLearningPage() {
               </div>
             </Panel>
           )}
+
+          {/* Pokémon set sync (TCGdex) — triggers the deployed background import
+              and polls status. One click ≈ 209 sets fetched/upserted; the grading
+              set picker then shows source 'tcgdex'. */}
+          <Panel bodyClassName="space-y-3">
+            <div className="flex items-center gap-2">
+              <Database size={16} className="text-[var(--admin-gold-hi)]" />
+              <h2 className="text-[var(--admin-ink)] font-bold">Pokémon Sets (TCGdex)</h2>
+            </div>
+            <p className="text-[var(--admin-ink-dim)] text-xs">
+              Import the full Pokémon set list from TCGdex into the set database (idempotent upsert — safe to re-run).
+              Runs in the background (~2–4 min); this panel polls progress every 5s.
+            </p>
+            <div className="flex items-center gap-3 flex-wrap">
+              <AdminButton
+                type="button"
+                variant="gold"
+                size="sm"
+                onClick={startSetSync}
+                disabled={syncStarting || !!syncStatus?.running}
+                className="uppercase tracking-widest"
+                data-testid="button-sync-tcgdex-sets"
+              >
+                {syncStatus?.running
+                  ? "Importing…"
+                  : syncStarting
+                    ? "Starting…"
+                    : "Sync Pokémon Sets from TCGdex"}
+              </AdminButton>
+              {syncStatus?.running && (
+                <span className="text-[var(--admin-gold-hi)] text-xs flex items-center gap-1.5">
+                  <Clock size={12} className="animate-pulse" /> Import running — polling every 5s…
+                </span>
+              )}
+            </div>
+            {syncStatus && !syncStatus.running && (
+              <p className="text-[var(--admin-ink)] text-sm" data-testid="tcgdex-sets-status">
+                <strong>{syncStatus.count}</strong> set{syncStatus.count === 1 ? "" : "s"} in the database
+                {syncStatus.lastSyncedAt
+                  ? ` · last synced ${new Date(syncStatus.lastSyncedAt).toLocaleString()}`
+                  : ""}
+                .
+              </p>
+            )}
+          </Panel>
 
           {/* RAG Phase 0 — corpus status. Passive panel showing how many
               approved cards have been embedded into pgvector for the
