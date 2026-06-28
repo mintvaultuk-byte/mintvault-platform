@@ -151,6 +151,13 @@ interface Props {
    *  delete-image; the primary action saves the (possibly corrected) draft then
    *  publishes via approve-grader-grade. Mount with apiBase="/api/admin/grade-review". */
   adminReview?: boolean;
+  /** Grader EDIT mode: the grader reopened their OWN already-submitted
+   *  (pending_review) card in the full workstation to correct it. Same tools as
+   *  grading, but the primary action routes through the gated POST
+   *  /edit-submission (re-asserts pending_review, re-snapshots operator_grade,
+   *  audits) instead of /submit — so an edit can NEVER publish or auto-approve.
+   *  Only meaningful with graderMode. */
+  graderEdit?: boolean;
 }
 
 // Zone arrays default to 0 = "not yet marked" — keeps buildPayload's hasContent
@@ -242,6 +249,7 @@ export default function GradingPanel({
   apiBase = "/api/admin",
   graderMode = false,
   adminReview = false,
+  graderEdit = false,
 }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -1740,6 +1748,18 @@ export default function GradingPanel({
           method: "POST",
           credentials: "include",
         });
+      } else if (graderMode && graderEdit) {
+        // GRADER EDIT: re-grading an already-submitted card. Route through the
+        // GATED edit endpoint — it persists the re-measured grade as a draft,
+        // re-asserts pending_review + review_required, re-snapshots operator_grade
+        // and audits. It NEVER approves/publishes, so this path cannot leave
+        // pending_review. (Distinct from /submit, which can auto-approve.)
+        res = await fetch(`${apiBase}/certificates/${certId}/edit-submission`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(buildPayload()),
+        });
       } else if (graderMode) {
         res = await fetch(`${apiBase}/certificates/${certId}/submit`, {
           method: "POST",
@@ -1766,9 +1786,12 @@ export default function GradingPanel({
         setGradeApprovedBy("Cornelius Oliver");
       }
       toast({
-        title: graderMode
-          ? `${certIdStr || "Certificate"} submitted for approval`
-          : `${certIdStr || "Certificate"} approved & published — ${finalGradeOverall} ${label}`,
+        title:
+          graderMode && graderEdit
+            ? `${certIdStr || "Certificate"} edits saved — still pending review`
+            : graderMode
+              ? `${certIdStr || "Certificate"} submitted for approval`
+              : `${certIdStr || "Certificate"} approved & published — ${finalGradeOverall} ${label}`,
       });
       onGradeApproved?.(certIdStr, finalGradeOverall);
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
@@ -1828,6 +1851,21 @@ export default function GradingPanel({
 
   return (
     <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4 space-y-5">
+      {/* Edit-mode banner — a grader re-opened their OWN submitted card. Make it
+          unmistakable that saving does NOT publish: the card stays pending review
+          and still needs admin approval. */}
+      {graderMode && graderEdit && (
+        <div
+          className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-amber-300"
+          data-testid="grader-edit-banner"
+        >
+          <div className="text-[11px] font-bold uppercase tracking-wider">Submitted · editing (stays pending review)</div>
+          <div className="text-[11px] text-amber-200/80">
+            You&apos;re correcting an already-submitted card with the full tools. Saving keeps it pending review —
+            it never publishes; an admin still approves it.
+          </div>
+        </div>
+      )}
       {/* AI card-IDENTIFICATION toggle (per-device, localStorage). Identify step
           ONLY — the AI never grades. ON = auto-identify on open + TCGdex confirm;
           OFF = no AI call, enter identity manually. NOT graderMode-gated → the
@@ -3270,9 +3308,11 @@ export default function GradingPanel({
                         ? "Crop failed — retry"
                         : cropPendingSides.length > 0
                           ? "Crop syncing…"
-                          : graderMode
-                            ? "Submit for approval"
-                            : "Approve & Publish"}
+                          : graderMode && graderEdit
+                            ? "Save edits (stays pending review)"
+                            : graderMode
+                              ? "Submit for approval"
+                              : "Approve & Publish"}
                 </button>
               ) : (
                 <div className="w-full flex items-center justify-center gap-2 bg-[var(--admin-green)]/10 border border-[var(--admin-green)]/40 text-[var(--admin-green)] text-xs font-bold uppercase px-4 py-2.5 rounded">
@@ -3420,10 +3460,10 @@ export default function GradingPanel({
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
           <div className="bg-[var(--admin-panel)] border border-[var(--admin-line-hard)] rounded-xl p-6 max-w-sm w-full space-y-4">
             <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">
-              Approve &amp; Publish
+              {graderMode && graderEdit ? "Save edits — stays pending review" : "Approve & Publish"}
             </p>
             <p className="text-[var(--admin-ink-dim)] text-sm">
-              Publish grade of{" "}
+              {graderMode && graderEdit ? "Save grade of " : "Publish grade of "}
               <strong className="text-white">
                 {finalGradeOverall} —{" "}
                 {isNonNumeric ? (authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL") : label}
@@ -3431,8 +3471,9 @@ export default function GradingPanel({
               for <strong className="text-white">{cardName}</strong> ({cardSet})?
             </p>
             <p className="text-[var(--admin-ink-dim)] text-xs">
-              The cert goes live, the Digital Grading Report becomes publicly accessible, and any future edits to
-              subgrades or notes will be live immediately (recorded in the audit log).
+              {graderMode && graderEdit
+                ? "This card STAYS pending review — it does NOT publish. An admin still approves it. Your re-measured grade replaces the submitted one and is recorded in the audit log."
+                : "The cert goes live, the Digital Grading Report becomes publicly accessible, and any future edits to subgrades or notes will be live immediately (recorded in the audit log)."}
             </p>
             {isBlack && (
               <div className="flex items-center gap-2 text-[var(--admin-gold)] text-xs">
@@ -3456,11 +3497,13 @@ export default function GradingPanel({
               >
                 {approving
                   ? graderMode
-                    ? "Submitting…"
+                    ? "Saving…"
                     : "Publishing…"
-                  : graderMode
-                    ? "Submit for approval"
-                    : "Approve & Publish"}
+                  : graderMode && graderEdit
+                    ? "Save edits"
+                    : graderMode
+                      ? "Submit for approval"
+                      : "Approve & Publish"}
               </button>
             </div>
           </div>

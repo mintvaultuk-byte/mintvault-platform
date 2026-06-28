@@ -236,11 +236,25 @@ export function registerGraderRoutes(app: Express): void {
       const certId = parseInt(String(req.params.id), 10);
       const auth = await authorizeGraderCert(req, certId);
       if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      // Drafts are allowed on an ASSIGNED card (normal grading) AND on the
+      // grader's OWN pending_review card (the edit-submission flow — re-grading an
+      // already-submitted card in the full workstation). Draft-only in BOTH cases:
+      // applyCertGradeDraft never approves and never changes grader_status. The
+      // final, gated commit still goes through POST /edit-submission (which
+      // re-asserts pending_review, re-snapshots operator_grade + audits).
       if (auth.gradingStatus !== "assigned") {
-        return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not editable` });
+        if (auth.gradingStatus === "pending_review") {
+          const graderId = (req.session as any).graderId as string;
+          const row = (await db.execute(sql`SELECT graded_by FROM certificates WHERE id = ${certId}`)).rows[0] as any;
+          if (row?.graded_by && String(row.graded_by) !== String(graderId)) {
+            return res.status(403).json({ error: "Only the grader who submitted this card can edit it" });
+          }
+        } else {
+          return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not editable` });
+        }
       }
       await applyCertGradeDraft(certId, req.body || {});
-      return res.json({ ok: true, gradingStatus: "assigned" });
+      return res.json({ ok: true, gradingStatus: auth.gradingStatus });
     } catch (e: any) {
       console.error("[grader] draft save error:", e.message);
       return res.status(500).json({ error: e.message });
