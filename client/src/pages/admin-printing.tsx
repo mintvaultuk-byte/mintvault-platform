@@ -32,6 +32,22 @@ import {
   ChevronUp,
 } from "lucide-react";
 import AdminCertBrowser from "./admin-cert-browser";
+import { PokemonSetPicker } from "@/components/certificate-form";
+import { VariantPicker } from "@/components/identity-tools";
+
+// Label "Language" display options — the display strings stored on the cert
+// (cert.language defaults to "English"), deduped from the supported TCGdex langs.
+const LABEL_LANGUAGES = [
+  "English",
+  "Japanese",
+  "Chinese",
+  "Korean",
+  "French",
+  "German",
+  "Spanish",
+  "Italian",
+  "Portuguese",
+];
 
 // Guillotine PDF — 9 certs per sheet, 3 columns x 3 rows, front + back label +
 // claim insert stacked per cell. PRINT_BATCH_MAX is defined inside
@@ -159,25 +175,80 @@ function EditLabelModal({
               Label display only — grade, cert number, QR code and schema are not changed.
             </div>
 
-            {[
-              { id: "cardName", label: "Card Name" },
-              { id: "setName", label: "Set Name" },
-              { id: "variant", label: "Variant" },
-              { id: "language", label: "Language" },
-              { id: "year", label: "Year" },
-            ].map(({ id, label }) => (
-              <div key={id} className="space-y-1">
-                <Label htmlFor={`edit-${id}`} className="text-xs text-[var(--admin-ink-dim)]">
-                  {label}
-                </Label>
-                <Input
-                  id={`edit-${id}`}
-                  {...form.register(id as any)}
-                  className="h-8 text-sm bg-[var(--admin-bg2)] border-[var(--admin-line-hard)] text-[var(--admin-ink)]"
-                  data-testid={`input-edit-${id}`}
-                />
-              </div>
-            ))}
+            {/* Card Name — free text */}
+            <div className="space-y-1">
+              <Label htmlFor="edit-cardName" className="text-xs text-[var(--admin-ink-dim)]">
+                Card Name
+              </Label>
+              <Input
+                id="edit-cardName"
+                {...form.register("cardName")}
+                className="h-8 text-sm bg-[var(--admin-bg2)] border-[var(--admin-line-hard)] text-[var(--admin-ink)]"
+                data-testid="input-edit-cardName"
+              />
+            </div>
+
+            {/* Set Name — the SAME searchable set picker (+ inline add → custom_sets)
+                the grading identity editor uses. Saves the display set name only. */}
+            <div className="space-y-1">
+              <PokemonSetPicker
+                value={form.watch("setName") || ""}
+                onChange={(name) => form.setValue("setName", name, { shouldDirty: true })}
+                allowAddSet
+                createEndpoint="/api/staff/custom-sets"
+                prefill={{ setName: form.watch("setName") || "" }}
+                testId="input-edit-setName"
+              />
+            </div>
+
+            {/* Variant — the SAME picker (canonical list + inline add → custom_variants). */}
+            <div className="space-y-1">
+              <Label className="text-xs text-[var(--admin-ink-dim)]">Variant</Label>
+              <VariantPicker
+                value={form.watch("variant") || ""}
+                onChange={(v) => form.setValue("variant", v, { shouldDirty: true })}
+                testId="input-edit-variant"
+                inputClassName="w-full h-8 text-sm bg-[var(--admin-bg2)] border border-[var(--admin-line-hard)] rounded-md px-3 text-[var(--admin-ink)] outline-none focus:border-[var(--admin-gold)]"
+              />
+            </div>
+
+            {/* Language — proper dropdown of supported languages (not free text). */}
+            <div className="space-y-1">
+              <Label htmlFor="edit-language" className="text-xs text-[var(--admin-ink-dim)]">
+                Language
+              </Label>
+              <select
+                id="edit-language"
+                value={form.watch("language") || ""}
+                onChange={(e) => form.setValue("language", e.target.value, { shouldDirty: true })}
+                className="w-full h-8 text-sm bg-[var(--admin-bg2)] border border-[var(--admin-line-hard)] rounded-md px-2 text-[var(--admin-ink)] outline-none focus:border-[var(--admin-gold)]"
+                data-testid="input-edit-language"
+              >
+                <option value="">—</option>
+                {/* Preserve any non-standard stored value so it isn't silently lost. */}
+                {form.watch("language") && !LABEL_LANGUAGES.includes(form.watch("language")) && (
+                  <option value={form.watch("language")}>{form.watch("language")}</option>
+                )}
+                {LABEL_LANGUAGES.map((lang) => (
+                  <option key={lang} value={lang}>
+                    {lang}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Year — free text */}
+            <div className="space-y-1">
+              <Label htmlFor="edit-year" className="text-xs text-[var(--admin-ink-dim)]">
+                Year
+              </Label>
+              <Input
+                id="edit-year"
+                {...form.register("year")}
+                className="h-8 text-sm bg-[var(--admin-bg2)] border-[var(--admin-line-hard)] text-[var(--admin-ink)]"
+                data-testid="input-edit-year"
+              />
+            </div>
 
             <DialogFooter>
               <Button
