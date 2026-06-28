@@ -133,10 +133,17 @@ export function registerGraderRoutes(app: Express): void {
   app.get("/api/grader/queue", requireCapability("grade"), async (req: Request, res: Response) => {
     try {
       const graderId = (req.session as any).graderId as string;
+      // A grader's dashboard shows ALL of THEIR OWN cards, in every state:
+      // anything they SCANNED (scanned_by), are assigned to GRADE (assigned_grader_id),
+      // or DID grade (graded_by) — so freshly-scanned work shows immediately and a
+      // card stays visible through scanned → assigned → pending_review → approved.
+      // Still strictly per-grader (the OR only ever matches THIS grader's id), so no
+      // other grader's cards leak in. All three columns are indexed (Phase 0).
       const rows = await db.execute(sql`
         SELECT cert.id AS cert_id, cert.certificate_number AS cert_id_str, cert.grader_status, cert.assigned_at,
                cert.rejection_reason, cert.redo_count, cert.card_game, cert.set_name, cert.card_name,
                cert.card_number_display AS card_number, cert.year_text AS year, cert.variant, cert.grade,
+               cert.assigned_grader_id, cert.scanned_by, cert.graded_by, cert.grade_approved_at,
                c.submission_id, s.tracking_number AS submission_ref, s.service_tier
         FROM certificates cert
         -- LEFT JOIN: a cert assigned at the cert level can have a NULL card_id (no
@@ -146,10 +153,13 @@ export function registerGraderRoutes(app: Express): void {
         -- come from cert.* columns regardless; only submission grouping goes null.
         LEFT JOIN cards c ON cert.card_id = c.id
         LEFT JOIN submissions s ON s.id = c.submission_id
-        WHERE cert.assigned_grader_id = ${graderId}
-          AND cert.grader_status IN ('assigned', 'pending_review')
+        WHERE (
+                cert.scanned_by = ${graderId}
+                OR cert.assigned_grader_id = ${graderId}
+                OR cert.graded_by = ${graderId}
+              )
           AND cert.deleted_at IS NULL
-        ORDER BY cert.assigned_at DESC NULLS LAST, cert.id DESC
+        ORDER BY cert.grade_approved_at DESC NULLS LAST, cert.assigned_at DESC NULLS LAST, cert.id DESC
       `);
       // Group certs by submission for the UI (one card row per cert).
       const bySub = new Map<string, any>();
@@ -176,6 +186,13 @@ export function registerGraderRoutes(app: Express): void {
           gradingStatus: r.grader_status,
           rejectionReason: r.rejection_reason ?? null,
           redoCount: Number(r.redo_count ?? 0),
+          // Per-card relationship to THIS grader, so the UI can gate the Grade/Edit
+          // actions (only the assigned/grading grader acts; scanned-only cards are
+          // read-only) without leaking another grader's id.
+          assignedToMe: String(r.assigned_grader_id ?? "") === String(graderId),
+          scannedByMe: String(r.scanned_by ?? "") === String(graderId),
+          gradedByMe: String(r.graded_by ?? "") === String(graderId),
+          gradeApprovedAt: r.grade_approved_at ?? null,
         });
       }
       return res.json({ items: Array.from(bySub.values()) });
