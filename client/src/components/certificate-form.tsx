@@ -1192,10 +1192,10 @@ export default function CertificateForm({
                     className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--admin-gold)]/5 transition-colors border-b border-[var(--admin-line)] last:border-0"
                   >
                     {card.imageUrl ? (
-                      <img src={card.imageUrl} alt="" className="w-10 h-14 object-contain rounded shrink-0" />
+                      <img src={card.imageUrl} alt="" className="w-[100px] h-[140px] object-contain rounded shrink-0" />
                     ) : (
-                      <div className="w-10 h-14 bg-[var(--admin-panel2)] rounded shrink-0 flex items-center justify-center">
-                        <Search size={12} className="text-[var(--admin-ink-faint)]" />
+                      <div className="w-[100px] h-[140px] bg-[var(--admin-panel2)] rounded shrink-0 flex items-center justify-center">
+                        <Search size={30} className="text-[var(--admin-ink-faint)]" />
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
