@@ -11067,18 +11067,20 @@ Defects (admin-confirmed): ${defectLines}`;
         await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_inner_back JSONB`);
       } catch {}
 
-      await db.execute(
-        sql.raw(`
+      // Parameterized — outer/inner/lr/tb/id are BOUND params (never interpolated
+      // into SQL text); column names come from the fixed front/back allowlist via
+      // sql.identifier. Same columns, values, and WHERE as before — behaviour is
+      // identical, injection-class breakout eliminated (cf. H2/H2b).
+      await db.execute(sql`
         UPDATE certificates SET
-          ${outerCol} = '${JSON.stringify(outer)}'::jsonb,
-          ${innerCol} = '${JSON.stringify(inner)}'::jsonb,
-          ${lrCol} = '${lr}',
-          ${tbCol} = '${tb}',
+          ${sql.identifier(outerCol)} = ${JSON.stringify(outer)}::jsonb,
+          ${sql.identifier(innerCol)} = ${JSON.stringify(inner)}::jsonb,
+          ${sql.identifier(lrCol)} = ${lr},
+          ${sql.identifier(tbCol)} = ${tb},
           centering_method = 'manual',
           updated_at = NOW()
         WHERE id = ${id}
-      `)
-      );
+      `);
 
       console.log(`[manual-centering] cert=${id} ${side}: L/R=${lr} T/B=${tb} subgrade=${subgrade}`);
       res.json({ lr, tb, subgrade, outer, inner });
