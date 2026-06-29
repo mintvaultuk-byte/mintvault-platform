@@ -316,6 +316,43 @@ export default function AdminStaffPage() {
     if (authed) loadQueue(qFilter);
   }, [authed, qFilter, loadQueue]);
 
+  // ── Needs re-scan — cards a grader flagged as a bad scan, awaiting reopen ────
+  type RescanRow = {
+    certId: number;
+    certIdStr: string;
+    cardName: string | null;
+    submissionId: number | null;
+    submissionRef: string | null;
+    clearedBy: string | null;
+    clearedAt: string | null;
+  };
+  const [rescan, setRescan] = useState<RescanRow[]>([]);
+  const [rescanBusy, setRescanBusy] = useState<number | null>(null);
+  const loadRescan = useCallback(async () => {
+    const res = await fetch("/api/admin/certificates/needs-rescan", { credentials: "include" });
+    if (res.ok) setRescan((await res.json()).items || []);
+  }, []);
+  useEffect(() => {
+    if (authed) loadRescan();
+  }, [authed, loadRescan]);
+  async function reopenRescan(certId: number) {
+    setRescanBusy(certId);
+    setMsg(null);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/admin/certificates/${certId}/reopen-rescan`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) return setErr(d.error || "Reopen failed");
+      setMsg(d.message || "Submission reopened for re-scan.");
+      await loadRescan();
+    } finally {
+      setRescanBusy(null);
+    }
+  }
+
   async function assignGrade(action: "assign" | "reassign" | "unassign") {
     setMsg(null);
     setErr(null);
@@ -851,6 +888,52 @@ export default function AdminStaffPage() {
                 </div>
               )}
             </>
+          )}
+        </section>
+
+        {/* Bad scans a grader cleared — reopen the submission to send them back to
+            the scanner. Reopening re-lists the submission's sibling cards too. */}
+        <section className="border border-amber-500/30 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-amber-300 font-semibold text-sm">Needs re-scan ({rescan.length})</h2>
+            <button onClick={loadRescan} className="text-[#E8E4DC]/50 hover:text-[#D4AF37] text-xs">
+              Refresh
+            </button>
+          </div>
+          {rescan.length === 0 ? (
+            <p className="text-[#E8E4DC]/50 text-sm">No cards flagged for re-scan.</p>
+          ) : (
+            <ul className="space-y-2">
+              {rescan.map((r) => (
+                <li
+                  key={r.certId}
+                  className="border border-amber-500/20 rounded-lg p-3 flex items-center justify-between gap-4"
+                  data-testid={`rescan-row-${r.certId}`}
+                >
+                  <div className="min-w-0">
+                    <div className="font-semibold truncate">
+                      <span className="font-mono text-[#D4AF37]">{r.certIdStr}</span>
+                      <span className="text-[#E8E4DC]/40"> · </span>
+                      {r.cardName || "Unidentified card"}
+                    </div>
+                    <div className="text-[#E8E4DC]/50 text-xs">
+                      {r.submissionRef ? `Box ${r.submissionRef}` : "No submission"}
+                      {r.clearedBy ? ` · cleared by ${r.clearedBy}` : ""}
+                      {r.clearedAt ? ` · ${new Date(r.clearedAt).toLocaleString()}` : ""}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => reopenRescan(r.certId)}
+                    disabled={rescanBusy === r.certId || r.submissionId == null}
+                    data-testid={`btn-reopen-rescan-${r.certId}`}
+                    title={r.submissionId == null ? "No parent submission to reopen" : "Reopen submission for re-scan"}
+                    className="bg-amber-500 text-[#1A1400] font-bold text-xs px-3 py-1.5 rounded hover:bg-amber-400 disabled:opacity-50 shrink-0"
+                  >
+                    {rescanBusy === r.certId ? "Reopening…" : "Reopen for re-scan"}
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
 
