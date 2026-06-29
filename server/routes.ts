@@ -2554,11 +2554,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/submissions/:submissionId", async (req, res) => {
+  // NOTE: this is the DEAD duplicate of GET /api/submissions/:submissionId — the
+  // LIVE handler is in server/routes/submissions.ts (registered earlier, at
+  // registerSubmissionRoutes ~line 1337, so it shadows this one). Gated identically
+  // anyway (H3 defense-in-depth) so a future registration-order change can't
+  // re-expose the unauthenticated IDOR. Safe to delete in a later cleanup pass.
+  app.get("/api/submissions/:submissionId", lookupRateLimit, async (req, res) => {
     try {
-      const submission = await storage.getSubmissionBySubmissionId(req.params.submissionId);
+      const sess = req.session as any;
+      const provided = (
+        (typeof req.query.email === "string" && req.query.email) ||
+        sess?.customerEmail ||
+        sess?.userEmail ||
+        ""
+      )
+        .toLowerCase()
+        .trim();
+      if (!provided) {
+        return res.status(401).json({ error: "Email required" });
+      }
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.submissionId));
       if (!submission) {
         return res.status(404).json({ error: "Submission not found" });
+      }
+      const storedEmail = (submission.customerEmail || "").toLowerCase().trim();
+      if (!storedEmail || storedEmail !== provided) {
+        return res.status(403).json({ error: "Email does not match" });
       }
       res.json({
         submissionId: submission.submissionId,
@@ -9864,7 +9885,9 @@ Defects (admin-confirmed): ${defectLines}`;
         VALUES ('certificate', ${String(id)}, 'identity_manual_override', ${adminEmail},
           ${JSON.stringify({ before, after })}::jsonb, NOW())
       `);
-      console.log(`[identity-override] cert=${id} by ${adminEmail}: card_name="${cardName}" #${cardNumber ?? "—"} variant="${variant ?? "—"}"`);
+      console.log(
+        `[identity-override] cert=${id} by ${adminEmail}: card_name="${cardName}" #${cardNumber ?? "—"} variant="${variant ?? "—"}"`
+      );
       return res.json({ ok: true, card_name: cardName, set_name: setName, card_number_display: cardNumber, variant });
     } catch (error: any) {
       console.error("[identity-override] error:", error.message);
@@ -10669,15 +10692,22 @@ Defects (admin-confirmed): ${defectLines}`;
 
   app.post("/api/admin/hot-folder-upload", hotFolderUpload.single("front"), async (req, res) => {
     try {
-      // Auth: Bearer token or session
+      // Auth: a valid Bearer token (scanner / hot-folder ingest) OR an active admin session.
       const authHeader = req.headers.authorization || "";
       const bearerToken = authHeader.replace(/^Bearer\s+/i, "").trim();
       const validToken = process.env.MINTVAULT_ADMIN_TOKEN;
 
-      // Accept either a valid Bearer token or an active admin session
-      const isSession = (req.session as any)?.adminAuthenticated === true;
+      // H3 — use the REAL admin session flag. Was `adminAuthenticated`, which is
+      // never set anywhere, so a logged-in admin silently fell through to token-only.
+      const isSession = (req.session as any)?.isAdmin === true;
       if (!isSession && (!validToken || bearerToken !== validToken)) {
         return res.status(401).json({ error: "Unauthorized" });
+      }
+
+      // H3 — magic-byte validation: reject non-image payloads before the image
+      // pipeline touches them (the 50 MB size cap stays on the multer config above).
+      if (!req.file || !(await validateImageMagicBytes(req.file))) {
+        return res.status(400).json({ error: "Invalid or missing image file" });
       }
 
       const side = (req.body.side || "front") as "front" | "back";
@@ -11839,7 +11869,12 @@ Defects (admin-confirmed): ${defectLines}`;
   const toolsUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
   // GET /api/tools/estimate/credits?email=
-  app.get("/api/tools/estimate/credits", async (req, res) => {
+  // H3 — strict per-IP rate limit. The estimate tool is anonymous (no session to
+  // own an email against), so ownership isn't viable without breaking the flow;
+  // the limiter caps balance-enumeration by email. (no-account and a zero-balance
+  // account already both return {credits:0}, so only a positive balance is an
+  // oracle — and that has to be shown to the tool's legitimate user.)
+  app.get("/api/tools/estimate/credits", lookupRateLimit, async (req, res) => {
     const email = ((req.query.email as string) || "").trim().toLowerCase();
     if (!email) return res.status(400).json({ error: "Email required" });
     try {

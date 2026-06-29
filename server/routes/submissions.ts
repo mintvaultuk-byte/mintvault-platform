@@ -209,6 +209,17 @@ const paymentRateLimit = rateLimit({
   message: { error: "Too many payment attempts. Please wait a few minutes and try again." },
 });
 
+// Public-lookup limiter for the submission GET (H3): submission ids are sequential
+// (MV-SUB-NNNNNN), so even behind the email gate we cap per-IP request volume to
+// stop enumeration sweeps. Mirrors the lookupRateLimit used by other public lookups.
+const submissionLookupRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests. Limit: 60 per minute per IP." },
+});
+
 export function registerSubmissionRoutes(app: Express): void {
   // Authoritative grading quote — the SAME computeGradingQuote() the PaymentIntent
   // uses, so the wizard can display the exact charged total without doing any money
@@ -762,12 +773,35 @@ export function registerSubmissionRoutes(app: Express): void {
     }
   });
 
-  app.get("/api/submissions/:submissionId", async (req, res) => {
+  app.get("/api/submissions/:submissionId", submissionLookupRateLimit, async (req, res) => {
     try {
-      const submission = await storage.getSubmissionBySubmissionId(req.params.submissionId);
+      // H3 — OWNERSHIP GATE. Submission ids are sequential, so an unauthenticated
+      // caller could previously enumerate every order (tier/count/PRICE). Require
+      // proof of ownership via an email match (same gate as POST .../track), or a
+      // logged-in session whose email matches. No email → 401; wrong email → 403.
+      const sess = req.session as any;
+      const provided = (
+        (typeof req.query.email === "string" && req.query.email) ||
+        sess?.customerEmail ||
+        sess?.userEmail ||
+        ""
+      )
+        .toLowerCase()
+        .trim();
+      if (!provided) {
+        return res.status(401).json({ error: "Email required" });
+      }
+
+      const submission = await storage.getSubmissionBySubmissionId(String(req.params.submissionId));
       if (!submission) {
         return res.status(404).json({ error: "Submission not found" });
       }
+
+      const storedEmail = (submission.customerEmail || "").toLowerCase().trim();
+      if (!storedEmail || storedEmail !== provided) {
+        return res.status(403).json({ error: "Email does not match" });
+      }
+
       res.json({
         submissionId: submission.submissionId,
         status: submission.status,
