@@ -75,35 +75,11 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
-app.get("/api/db-check", async (_req, res) => {
-  const dbUrl = process.env.MINTVAULT_DATABASE_URL;
-  if (!dbUrl) {
-    return res.json({
-      error: "MINTVAULT_DATABASE_URL is not set",
-      database_url_present: !!process.env.DATABASE_URL,
-      pghost_present: !!process.env.PGHOST,
-    });
-  }
-  try {
-    const parsed = new URL(dbUrl);
-    // Reuse the shared app pool instead of minting a new pool per request —
-    // a per-request pool meant a fresh Neon pooler auth handshake on every
-    // health-check hit, which was amplifying the 08P01 auth-timeout churn.
-    const result = await pool.query(
-      "SELECT to_regclass('public.cert_counter') AS cert_counter_exists, current_database() AS db_name"
-    );
-    res.json({
-      env: process.env.NODE_ENV || "development",
-      host: parsed.hostname,
-      database: parsed.pathname.slice(1),
-      source: "MINTVAULT_DATABASE_URL",
-      cert_counter_exists: result.rows[0]?.cert_counter_exists,
-      connected_db: result.rows[0]?.db_name,
-    });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// H-c — /api/db-check removed: it was an unauthenticated debug probe that leaked
+// DB host, database name, current_database(), schema/table existence, NODE_ENV,
+// env-var presence, and raw DB error messages to any caller. Nothing depended on
+// it (Fly health probes hit /health; see fly.toml). Liveness/readiness remain at
+// /health and /api/healthz.
 
 app.use(
   helmet({
