@@ -6,6 +6,7 @@ import { db } from "../db";
 import { sql, inArray } from "drizzle-orm";
 import { lookupCard, isAllowedLang } from "../services/tcgdex";
 import { importTcgdexSets, isTcgdexImportRunning } from "../services/tcgdex-sets-import";
+import { resolveEnglishSetByNameAndNumber } from "../services/tcgdex-set-resolve";
 import { getFeatureFlag } from "../config/feature-flags";
 
 function normalizeCertId(raw: string): string {
@@ -316,13 +317,11 @@ export function registerAdminConfigRoutes(app: Express): void {
       .then((s) => console.log(`[tcgdex-import] (admin ${adminUser}) ${JSON.stringify(s)}`))
       .catch((e) => console.error(`[tcgdex-import] (admin ${adminUser}) failed: ${e.message}`));
     await storage.writeAuditLog("tcgdex_sets", "import", "tcgdex_sets_import_started", adminUser, {});
-    return res
-      .status(202)
-      .json({
-        ok: true,
-        started: true,
-        message: "TCGdex set import started (~2–4 min). Poll /api/admin/tcgdex-sets/status.",
-      });
+    return res.status(202).json({
+      ok: true,
+      started: true,
+      message: "TCGdex set import started (~2–4 min). Poll /api/admin/tcgdex-sets/status.",
+    });
   });
 
   app.get("/api/admin/tcgdex-sets/status", requireAdmin, async (_req, res) => {
@@ -945,6 +944,37 @@ export function registerAdminConfigRoutes(app: Express): void {
 
   const CODE_RE = /^[A-Za-z0-9._-]{1,20}$/;
   const NUMBER_RE = /^[A-Za-z0-9/_-]{1,10}$/;
+
+  // GET /api/admin/tcgdex-resolve-set?name=Charizard&number=4/102
+  // English-only set resolution from card NAME + NUMBER — the fallback for when
+  // the AI couldn't read the printed set code (set_code null). Returns a set ONLY
+  // on a CONFIRMED UNIQUE match in the imported tcgdex_sets catalogue (the print
+  // total disambiguates when present); ambiguous/no-match → { found: false } so the
+  // form leaves the Set field blank. Never guesses a set.
+  app.get("/api/admin/tcgdex-resolve-set", requireAdmin, async (req, res) => {
+    try {
+      const lookupEnabled = await getFeatureFlag("AI_CARD_LOOKUP_PREFILL_ENABLED");
+      if (!lookupEnabled) return res.status(503).json({ error: "Card lookup is disabled" });
+
+      const name = String(req.query.name || "").trim();
+      const number = String(req.query.number || "").trim();
+      if (!name || !number) return res.status(400).json({ error: "name and number are required" });
+      if (name.length > 60) return res.status(400).json({ error: "Invalid card name" });
+      if (!NUMBER_RE.test(number)) return res.status(400).json({ error: "Invalid card number format" });
+
+      const resolved = await resolveEnglishSetByNameAndNumber(name, number);
+      if (!resolved) return res.json({ found: false });
+      return res.json({
+        found: true,
+        set_id: resolved.set_id,
+        set_name: resolved.set_name,
+        release_date: resolved.release_date,
+      });
+    } catch (e: any) {
+      console.error("[tcgdex-resolve-set] error:", e.message);
+      return res.status(500).json({ error: e.message });
+    }
+  });
 
   app.get("/api/admin/tcgdex-lookup", requireAdmin, async (req, res) => {
     try {
