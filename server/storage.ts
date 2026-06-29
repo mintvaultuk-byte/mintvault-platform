@@ -2145,16 +2145,17 @@ export class DatabaseStorage implements IStorage {
       gLow: number;
     }[]
   > {
-    const conditions: string[] = [`status = 'active'`, `deleted_at IS NULL`, `grade_type = 'numeric'`, `grade_approved_at IS NOT NULL`];
-    if (filters.game) conditions.push(`LOWER(card_game) = LOWER('${filters.game.replace(/'/g, "''")}')`);
-    if (filters.set)
-      conditions.push(`LOWER(set_name)  LIKE LOWER('%${filters.set.replace(/'/g, "''").replace(/%/g, "\\%")}%')`);
-    if (filters.card)
-      conditions.push(`LOWER(card_name) LIKE LOWER('%${filters.card.replace(/'/g, "''").replace(/%/g, "\\%")}%')`);
+    // H2b — parameterize. User filters (game/set/card) are BOUND params, never
+    // interpolated; likeEscape (\ % _) matches the H2 /api/population/certs fix.
+    // The aggregation, GROUP BY, ORDER BY, LIMIT and response shape are unchanged —
+    // a safety refactor; the numbers returned do not change.
+    const likeEscape = (s: string) => s.replace(/[\\%_]/g, "\\$&");
+    const gameCond = filters.game ? sql` AND LOWER(card_game) = LOWER(${filters.game})` : sql``;
+    const setCond = filters.set ? sql` AND LOWER(set_name)  LIKE LOWER(${`%${likeEscape(filters.set)}%`})` : sql``;
+    const cardCond = filters.card ? sql` AND LOWER(card_name) LIKE LOWER(${`%${likeEscape(filters.card)}%`})` : sql``;
 
-    const where = conditions.join(" AND ");
     const result = await db.execute(
-      sql.raw(`
+      sql`
       SELECT
         card_game,
         set_name,
@@ -2177,11 +2178,11 @@ export class DatabaseStorage implements IStorage {
         COUNT(CASE WHEN grade::numeric = 7 THEN 1 END)::int AS g7,
         COUNT(CASE WHEN grade::numeric <= 6 THEN 1 END)::int AS gLow
       FROM certificates
-      WHERE ${where}
+      WHERE status = 'active' AND deleted_at IS NULL AND grade_type = 'numeric' AND grade_approved_at IS NOT NULL${gameCond}${setCond}${cardCond}
       GROUP BY card_game, set_name, card_name
       ORDER BY total DESC
       LIMIT 200
-    `)
+    `
     );
 
     return (result.rows as any[]).map((r) => ({
