@@ -21,6 +21,10 @@ dist
 coverage
 .nyc_output
 
+# ─── Tests + CI config (not imported by the build, not needed at runtime) ──
+tests
+.github
+
 # ─── Standalone local tooling NOT part of the web build ───────────────
 # scripts/scanner-app + scripts/scanner-watcher are macOS native scanner
 # integrations (LaunchAgents + Electron-style guide window). They talk

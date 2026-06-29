@@ -30,6 +30,23 @@ export default tseslint.config(
     },
   },
   {
-    ignores: ["dist/", "node_modules/", "migrations/", "*.cjs"],
+    // Build output, deps, generated migrations and bundled .cjs are not linted.
+    //
+    // scripts/cricut-app/ and server/scripts/ are gitignored (.gitignore:50,54),
+    // standalone LOCAL tools — a vendored/minified Cricut helper and one-off
+    // server scripts — NOT Release Train application source and not part of the
+    // Vite/esbuild build. They carry ~1.6k errors from minified/generated code;
+    // linting them is pure noise that app workflow would never fix. Excluded at
+    // the boundary here rather than by editing the vendored/minified files.
+    // Tracked application code (client/src, server, shared) is NOT excluded — its
+    // remaining findings are warnings, which stay visible.
+    ignores: [
+      "dist/",
+      "node_modules/",
+      "migrations/",
+      "*.cjs",
+      "scripts/cricut-app/**",
+      "server/scripts/**",
+    ],
   },
 );

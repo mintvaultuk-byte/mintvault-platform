@@ -1,0 +1,34 @@
+# Trivy ignore — NARROW, dev-tooling only. Each CVE below is a HIGH in a transitive
+# dependency of ESLint (dev/build tooling), NOT reachable in the production runtime.
+#
+# Why these are safe to ignore (and ONLY these):
+#  - `npm why <pkg> --omit=dev` shows NO production dependency path — they are
+#    pulled solely by eslint / @eslint/config-array, which are devDependencies of
+#    the root project (e.g. cross-spawn ← eslint; minimatch ← @eslint/config-array).
+#  - The production runtime entrypoint is `node dist/index.cjs` (an esbuild bundle
+#    of prod externals: canvas, sharp, pdfkit, pg, @aws-sdk, resend, helmet). None
+#    of these packages are on that path.
+#  - Scope is exactly these CVE IDs. OS/base-image CVEs (e.g. libgnutls30,
+#    libcap2) are NOT ignored — those are patched via `apt-get upgrade` in the
+#    Dockerfile. No broad package/severity class is ignored.
+#
+# Revisit if any of these packages ever enters the production dependency tree.
+
+# cross-spawn (← eslint) — regular-expression DoS
+CVE-2024-21538
+
+# glob (← eslint tooling)
+CVE-2025-64756
+
+# minimatch (← @eslint/config-array)
+CVE-2026-26996
+CVE-2026-27903
+CVE-2026-27904
+
+# tar (← dev/build tooling)
+CVE-2026-23745
+CVE-2026-23950
+CVE-2026-24842
+CVE-2026-26960
+CVE-2026-29786
+CVE-2026-31802

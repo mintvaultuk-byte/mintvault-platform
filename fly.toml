@@ -1,6 +1,12 @@
 app = "mintvault"
 primary_region = "lhr"  # London — closest to your UK users
 
+# Graceful shutdown (Phase 4): on deploy/restart Fly sends SIGTERM (handled in
+# server/index.ts → runGracefulShutdown) and waits up to 15s for the drain before
+# SIGKILL. Must exceed the app's internal 10s shutdown deadline.
+kill_signal = "SIGTERM"
+kill_timeout = "15s"
+
 [build]
 
 [env]
@@ -32,5 +38,28 @@ primary_region = "lhr"  # London — closest to your UK users
   cpus = 1
 
 [deploy]
-  strategy = "rolling"
-  wait_timeout = "5m"
+  # Canary: boot one new machine, wait for its checks (incl. /ready below) to pass
+  # before replacing the rest — so a machine that can't reach the DB never takes
+  # traffic. wait_timeout covers the canary boot + the in-flight drain window.
+  strategy = "canary"
+  wait_timeout = "10m"
+
+# Readiness gate (Phase 4). /health (http_service.checks above) is liveness —
+# cheap, no DB. /ready additionally confirms the DB + cert_counter allocator are
+# reachable; the canary deploy waits for it so a fresh machine that can't serve
+# never takes traffic. Fly probes this itself (no in-image curl; the Docker
+# HEALTHCHECK uses node).
+#
+# ⚠️ Single-machine caveat: with min_machines_running=1 a *failing* /ready also
+# pulls the machine from the proxy backend pool, so a SUSTAINED DB outage (not a
+# brief blip — interval is 60s) degrades serving, not just deploys. Liveness stays
+# on /health. For zero-downtime under DB outages, run >= 2 machines.
+[checks]
+  [checks.ready]
+    type = "http"
+    port = 5000
+    method = "GET"
+    path = "/ready"
+    grace_period = "45s"
+    interval = "60s"
+    timeout = "5s"

@@ -6,6 +6,7 @@ import { isNonNumericGrade, gradeLabelFull } from "@shared/schema";
 import { mvgsTierName } from "@shared/mvgs-scoring";
 import { APP_BASE_URL } from "./app-url";
 import { certIsPristine } from "./lib/cert-pristine";
+import { normalizeCertId } from "./lib/cert-id";
 
 // ── Page geometry ────────────────────────────────────────────────────────────
 const PAGE_W = 595.28;
@@ -23,12 +24,6 @@ const GRAY_LIGHT = "#888888";
 const GRAY_BG = "#f5f0e8";
 
 const LOGO_PATH = path.join(process.cwd(), "public", "brand", "logo.png");
-
-function normalizeCertId(raw: string): string {
-  const m = raw.match(/^MV-?0*(\d+)$/i);
-  if (m) return `MV${m[1]}`;
-  return raw;
-}
 
 async function generateQR(url: string, size: number): Promise<Buffer> {
   return QRCode.toBuffer(url, {

@@ -14,6 +14,25 @@ import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
+import { sanitizeResponseBodyForLog } from "./lib/log-redaction";
+import {
+  clientErrorMessage,
+  newRequestId,
+  errorEnvelope,
+  errorDetailsAllowed,
+  safeErrorSummary,
+} from "./lib/error-sanitize";
+import { csrfOriginCheck } from "./lib/csrf-origin";
+import { withAdvisoryLock } from "./lib/advisory-lock";
+import {
+  trackInterval,
+  trackTimeout,
+  registerCleanup,
+  beginJob,
+  endJob,
+  isShuttingDown,
+  runGracefulShutdown,
+} from "./lib/lifecycle";
 import pg from "pg";
 import path from "path";
 
@@ -23,6 +42,7 @@ const httpServer = createServer(app);
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
+    requestId?: string;
   }
 }
 
@@ -38,6 +58,17 @@ export function log(message: string, source = "express") {
 }
 
 app.set("trust proxy", 1);
+
+// Phase 2 (security): assign a correlation id to EVERY request — before any
+// route, redirect, body parsing, or the Stripe webhook — and echo it as
+// X-Request-ID. Generic 5xx responses carry this id so support can correlate a
+// client error with the safe server-side log summary without any detail leaking.
+app.use((req, res, next) => {
+  const id = newRequestId();
+  req.requestId = id;
+  res.setHeader("X-Request-ID", id);
+  next();
+});
 
 // 301-redirect any *.fly.dev request to the canonical mintvaultuk.com.
 // First in the chain so it short-circuits before session, body-parsing, etc.
@@ -65,19 +96,51 @@ app.use((req, res, next) => {
   })();
   if (appUrlHost && host === appUrlHost) return next();
   if (host === "mintvault.fly.dev" || host.endsWith(".fly.dev")) {
-    console.log(`[canonical-redirect] ${req.method} ${req.originalUrl} from host=${host}`);
+    // Log the PATH only — req.originalUrl can carry tokens in the query string.
+    console.log(`[canonical-redirect] ${req.method} ${req.originalUrl.split("?")[0]} from host=${host}`);
     return res.redirect(301, `https://mintvaultuk.com${req.originalUrl}`);
   }
   next();
 });
 
+// Liveness: process is up. No DB, no shared state — must stay cheap and always
+// answer 200 so Fly never cycles a machine over a transient DB blip.
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
+// Readiness (Phase 4): the machine can actually serve — DB reachable AND the
+// cert_counter allocator table exists. Returns a generic status only (no infra
+// detail). Intended for a Fly readiness check so traffic isn't routed to a
+// machine that is up but not yet able to serve. Kept separate from /health so a
+// DB blip degrades readiness without killing liveness.
+//
+// NOT rate-limited by design (CodeQL js/missing-rate-limiting, accepted in #113):
+// this is the platform (Fly) readiness probe. It returns a generic status only and
+// its one DB call is a cheap catalog lookup (to_regclass). A limiter here would risk
+// false 429s during normal probing, making Fly route traffic away from healthy
+// machines — i.e. rate-limiting would BREAK platform health checks. Intentional.
+// codeql[js/missing-rate-limiting]
+app.get("/ready", async (_req, res) => {
+  try {
+    const result = await pool.query("SELECT to_regclass('public.cert_counter') AS cc");
+    const schemaReady = result.rows[0]?.cc != null;
+    if (!schemaReady) return res.status(503).json({ status: "not-ready" });
+    return res.status(200).json({ status: "ready" });
+  } catch {
+    return res.status(503).json({ status: "not-ready" });
+  }
+});
+
 app.get("/api/db-check", async (_req, res) => {
+  // Phase 1 (security): in production this returns ONLY a generic liveness
+  // status — never the Neon hostname, database name, NODE_ENV, schema detail,
+  // or raw driver errors (all of which this previously leaked to any
+  // unauthenticated caller). Full diagnostics remain available in development.
+  const isProd = process.env.NODE_ENV === "production";
   const dbUrl = process.env.MINTVAULT_DATABASE_URL;
   if (!dbUrl) {
+    if (isProd) return res.status(503).json({ status: "error" });
     return res.json({
       error: "MINTVAULT_DATABASE_URL is not set",
       database_url_present: !!process.env.DATABASE_URL,
@@ -85,13 +148,16 @@ app.get("/api/db-check", async (_req, res) => {
     });
   }
   try {
-    const parsed = new URL(dbUrl);
     // Reuse the shared app pool instead of minting a new pool per request —
     // a per-request pool meant a fresh Neon pooler auth handshake on every
     // health-check hit, which was amplifying the 08P01 auth-timeout churn.
     const result = await pool.query(
       "SELECT to_regclass('public.cert_counter') AS cert_counter_exists, current_database() AS db_name"
     );
+    if (isProd) {
+      return res.json({ status: "ok" });
+    }
+    const parsed = new URL(dbUrl);
     res.json({
       env: process.env.NODE_ENV || "development",
       host: parsed.hostname,
@@ -101,6 +167,7 @@ app.get("/api/db-check", async (_req, res) => {
       connected_db: result.rows[0]?.db_name,
     });
   } catch (err: any) {
+    if (isProd) return res.status(503).json({ status: "error" });
     res.status(500).json({ error: err.message });
   }
 });
@@ -226,6 +293,16 @@ sessionPool.on("error", (err) => {
   console.error("[session-pool] idle client error (evicted):", err.message);
 });
 app.use(
+  // CSRF for cookie-authenticated, state-changing requests is enforced — just not
+  // with the token pattern CodeQL (js/missing-token-validation) recognizes. Evidence:
+  //   1. csrfOriginCheck (server/lib/csrf-origin.ts), applied below via app.use, rejects
+  //      cross-origin POST/PUT/PATCH/DELETE by comparing Origin/Referer to Host (exempts
+  //      the signature-authed Stripe webhook and custom-header scanner-token requests).
+  //   2. The session cookie below is SameSite=lax, which already blocks cross-site
+  //      cookie attachment on state-changing requests (defense-in-depth).
+  // Same-origin CSRF defense is a recognised alternative to CSRF tokens, so this alert
+  // is a false positive. Accepted in #113.
+  // codeql[js/missing-token-validation]
   session({
     store: new PgStore({
       pool: sessionPool,
@@ -275,10 +352,40 @@ app.use((req, res, next) => {
   const reqPath = req.path;
   let capturedJsonResponse: Record<string, any> | undefined = undefined;
 
+  // Phase 2: detail is shown only for explicit local debugging; otherwise
+  // EVERY 5xx (any key, via res.json OR res.send) collapses to a strict
+  // { error, requestId } envelope correlated by the request id. The interceptor
+  // logs only safe correlation metadata — never the original body.
+  const allowDetails = errorDetailsAllowed();
+  let enveloped = false;
+
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
+    const env = errorEnvelope(res.statusCode, bodyJson, { allowDetails, requestId: req.requestId });
+    let outgoing = bodyJson;
+    if (env.scrubbed) {
+      enveloped = true;
+      outgoing = env.body as typeof bodyJson;
+      console.error(`[server-error] reqId=${env.requestId} status=${res.statusCode} ${req.method} ${req.path}`);
+    }
+    capturedJsonResponse = outgoing;
+    return originalResJson.apply(res, [outgoing, ...args]);
+  };
+
+  // Cover the rare non-JSON 5xx (res.status(5xx).send("...")). res.json calls
+  // res.send internally but sets `enveloped` first, so a json 5xx is never
+  // double-processed here.
+  const originalResSend = res.send;
+  res.send = function (this: typeof res, body?: any) {
+    if (!enveloped && !allowDetails && res.statusCode >= 500) {
+      enveloped = true;
+      const env = errorEnvelope(res.statusCode, body, { allowDetails, requestId: req.requestId });
+      console.error(`[server-error] reqId=${env.requestId} status=${res.statusCode} ${req.method} ${req.path}`);
+      capturedJsonResponse = env.body as Record<string, any>;
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      return originalResJson.apply(res, [env.body]);
+    }
+    return originalResSend.call(res, body);
   };
 
   res.on("finish", () => {
@@ -286,8 +393,7 @@ app.use((req, res, next) => {
     if (reqPath.startsWith("/api")) {
       let logLine = `${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        const safeBody = { ...capturedJsonResponse };
-        delete safeBody.password;
+        const safeBody = sanitizeResponseBodyForLog(capturedJsonResponse);
         logLine += ` :: ${JSON.stringify(safeBody)}`;
       }
 
@@ -297,6 +403,12 @@ app.use((req, res, next) => {
 
   next();
 });
+
+// Phase 2 (security): same-origin CSRF defense for cookie-authenticated,
+// state-changing requests. Runs after session/body parsing and before the route
+// handlers. Exempts the Stripe webhook (signature-authed) and scanner-token
+// requests; allows requests with no Origin/Referer (non-browser API clients).
+app.use(csrfOriginCheck);
 
 log(`ADMIN_PASSWORD env var: ${process.env.ADMIN_PASSWORD ? "SET" : "NOT SET"}`, "auth");
 // ADMIN_PIN env-var log removed 2026-05-04 — PIN is now per-user bcrypt on users.pin_hash.
@@ -425,32 +537,56 @@ async function runTransferV2Sweep() {
 (async () => {
   await registerRoutes(httpServer, app);
 
+  // Phase 5: wrap recurring jobs that mutate state or send email in a Postgres
+  // advisory lock so only ONE machine runs each tick if we ever scale past one.
+  // Non-blocking + fail-closed; on a single machine the lock is always free, so
+  // behaviour is unchanged today.
+  // Phase 3: a guarded tick never starts once shutdown begins, and counts as an
+  // active job while it runs so graceful shutdown drains it before closing pools.
+  const guard = (name: string, fn: () => Promise<void>) => () => {
+    if (isShuttingDown()) return Promise.resolve();
+    beginJob();
+    return withAdvisoryLock(pool, name, fn)
+      .then(
+        (r) => {
+          if (!r.ran) log("skipped — lock held by another instance", name);
+        },
+        (e: any) => log(`error: ${e?.message ?? e}`, name)
+      )
+      .finally(() => endJob());
+  };
+  const guardedPreGradeCleanup = guard("pre-grade-cleanup", runPreGradeCleanup);
+  const guardedVaultClubGraceSweep = guard("vault-club-grace-sweep", runVaultClubGraceSweep);
+  const guardedTransferV2Sweep = guard("transfer-v2-sweep", runTransferV2Sweep);
+
   // Run cleanup once on startup, then every 24 hours
-  runPreGradeCleanup();
-  setInterval(runPreGradeCleanup, 24 * 60 * 60 * 1000);
+  guardedPreGradeCleanup();
+  trackInterval(guardedPreGradeCleanup, 24 * 60 * 60 * 1000);
 
   // Run Vault Club grace sweep once on startup, then every 24 hours
-  runVaultClubGraceSweep();
-  setInterval(runVaultClubGraceSweep, 24 * 60 * 60 * 1000);
+  guardedVaultClubGraceSweep();
+  trackInterval(guardedVaultClubGraceSweep, 24 * 60 * 60 * 1000);
 
   // Run transfer v2 sweep after 30s delay (let migrations finish), then every hour
-  setTimeout(runTransferV2Sweep, 30_000);
-  setInterval(runTransferV2Sweep, 60 * 60 * 1000);
+  trackTimeout(guardedTransferV2Sweep, 30_000);
+  trackInterval(guardedTransferV2Sweep, 60 * 60 * 1000);
 
   // RAG Phase 0 — hourly embed-corpus tick. First run after 60s so the
   // server is fully serving before we touch OpenAI; thereafter every
   // hour. Job fail-softs if the migration hasn't run yet, so it's safe
   // to ship the code before approving the migration.
-  setTimeout(async () => {
+  trackTimeout(async () => {
+    if (isShuttingDown()) return;
     try {
       const { runEmbedCorpusJob } = await import("./jobs/embed-corpus");
-      await runEmbedCorpusJob();
-      setInterval(
-        () => {
-          runEmbedCorpusJob().catch((e) => log(`[embed-corpus] unhandled: ${e.message}`, "embed-corpus"));
-        },
-        60 * 60 * 1000
-      );
+      // Advisory-locked like the other mutating jobs: only one instance runs the
+      // tick if MintVault ever scales past one Fly machine. (void-thunk because
+      // runEmbedCorpusJob returns stats, while the guard expects () => Promise<void>.)
+      const guardedEmbedCorpus = guard("embed-corpus", async () => {
+        await runEmbedCorpusJob();
+      });
+      await guardedEmbedCorpus();
+      trackInterval(guardedEmbedCorpus, 60 * 60 * 1000);
     } catch (err: any) {
       log(`[embed-corpus] startup error: ${err?.message || err}`, "embed-corpus");
     }
@@ -461,10 +597,11 @@ async function runTransferV2Sweep() {
   // 10:00-11:00 London window. Soft-fails if ig_post_queue is missing
   // (migration not yet applied on this branch). Never publishes unless
   // IG_POST_ENABLED=true AND the ig_settings.post_enabled toggle is on.
-  setTimeout(async () => {
+  trackTimeout(async () => {
+    if (isShuttingDown()) return;
     try {
       const { startIgDailyPostScheduler } = await import("./jobs/ig-daily-post");
-      startIgDailyPostScheduler();
+      registerCleanup(startIgDailyPostScheduler());
       log("scheduler armed", "ig-cron");
     } catch (err: any) {
       log(`startup error: ${err?.message || err}`, "ig-cron");
@@ -475,10 +612,11 @@ async function runTransferV2Sweep() {
   // weekly grade-highlight manifest from consenting submissions; per-card
   // failures are non-fatal. Soft-fails gracefully if SEGMIND_API_KEY is
   // missing in env.
-  setTimeout(async () => {
+  trackTimeout(async () => {
+    if (isShuttingDown()) return;
     try {
       const { startWeeklyReelScheduler } = await import("./jobs/weekly-reel");
-      startWeeklyReelScheduler();
+      registerCleanup(startWeeklyReelScheduler());
       log("scheduler armed (Friday 18:00 UTC)", "weekly-reel");
     } catch (err: any) {
       log(`startup error: ${err?.message || err}`, "weekly-reel");
@@ -505,8 +643,9 @@ async function runTransferV2Sweep() {
       log(`sweep error: ${err?.message || err}`, "archival-b2");
     }
   }
-  setTimeout(runArchivalSweep, 60_000);
-  setInterval(runArchivalSweep, 24 * 60 * 60 * 1000);
+  const guardedArchivalSweep = guard("archival-sweep", runArchivalSweep);
+  trackTimeout(guardedArchivalSweep, 60_000);
+  trackInterval(guardedArchivalSweep, 24 * 60 * 60 * 1000);
 
   // Scan reconciler — re-drive failed pipelines from retained R2 raw + surface
   // never-confirmed ingests for scanner re-supply. First run 90s after boot,
@@ -520,20 +659,29 @@ async function runTransferV2Sweep() {
       log(`reconcile error: ${err?.message || err}`, "scan-reconciler");
     }
   }
-  setTimeout(runScanReconciler, 90_000);
-  setInterval(runScanReconciler, 5 * 60 * 1000);
+  const guardedScanReconciler = guard("scan-reconciler", runScanReconciler);
+  trackTimeout(guardedScanReconciler, 90_000);
+  trackInterval(guardedScanReconciler, 5 * 60 * 1000);
 
-  app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
+    const requestId = req.requestId ?? newRequestId();
 
-    console.error("Internal Server Error:", err);
+    // Phase 2 (security): log a SAFE summary only (error class + code + the
+    // request id + operation) — never the raw message/stack/connection string.
+    // The response interceptor enforces the generic 5xx envelope; intentional
+    // 4xx messages pass through.
+    console.error("[unhandled-error]", safeErrorSummary(err, { requestId, operation: `${req.method} ${req.path}` }));
 
     if (res.headersSent) {
       return next(err);
     }
 
-    return res.status(status).json({ message });
+    const isProd = process.env.NODE_ENV === "production";
+    const body: Record<string, unknown> = { message: clientErrorMessage(status, message, isProd) };
+    if (status >= 500) body.requestId = requestId;
+    return res.status(status).json(body);
   });
 
   if (process.env.NODE_ENV === "production") {
@@ -583,11 +731,43 @@ async function runTransferV2Sweep() {
       // - Errors are logged and swallowed; this is a best-effort warm-up and
       //   must NEVER take the process down.
       const KEEP_WARM_INTERVAL_MS = 4 * 60 * 1000;
-      const keepWarmTimer = setInterval(() => {
-        pool.query("SELECT 1").catch((err: any) => console.warn("[db-keepwarm] SELECT 1 failed:", err?.message ?? err));
-      }, KEEP_WARM_INTERVAL_MS);
-      keepWarmTimer.unref();
+      trackInterval(
+        () => {
+          pool
+            .query("SELECT 1")
+            .catch((err: any) => console.warn("[db-keepwarm] SELECT 1 failed:", err?.message ?? err));
+        },
+        KEEP_WARM_INTERVAL_MS,
+        { unref: true }
+      );
       console.log(`[db-keepwarm] interval armed (${KEEP_WARM_INTERVAL_MS / 1000}s)`);
     }
   );
 })();
+
+// Graceful shutdown (Phase 3): on SIGTERM/SIGINT — mark shutting-down + cancel
+// every scheduled timer (so no NEW tick starts), stop accepting traffic and
+// drain in-flight requests, wait for active guarded jobs to finish, THEN close
+// the DB pools (never under a live job), and exit. A hard 10s deadline always
+// forces exit. NOTE: set fly.toml kill_timeout >= 15s so Fly waits for the drain
+// instead of SIGKILLing early (Fly default is ~5s).
+function gracefulShutdown(signal: string) {
+  log(`${signal} received — draining and shutting down`, "shutdown");
+  void runGracefulShutdown({
+    deadlineMs: 10_000,
+    closeServer: () =>
+      new Promise<void>((resolve) => {
+        httpServer.close(() => {
+          log("http server closed to new connections", "shutdown");
+          resolve();
+        });
+      }),
+    closePools: async () => {
+      await Promise.allSettled([pool.end(), sessionPool.end()]);
+      log("db pools closed — exiting cleanly", "shutdown");
+    },
+    exit: (code) => process.exit(code),
+  });
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));

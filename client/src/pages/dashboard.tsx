@@ -69,8 +69,6 @@ interface CustomerSubmission {
   onReceiptPhotoUrls: string | null;
   statusHistory: Array<{ status: string; timestamp: string; note?: string }> | null;
   customerFirstName: string | null;
-  packingSlipToken: string;
-  shippingLabelToken: string;
 }
 
 interface CustomerCert {
@@ -319,26 +317,22 @@ function SubmissionCard({ sub }: { sub: CustomerSubmission }) {
         {preReceived && (
           <div className="mt-4 space-y-3">
             <div className="flex items-center gap-3 flex-wrap">
-              {sub.packingSlipToken && (
-                <a
-                  href={`/api/customer/submissions/${sub.submissionId}/packing-slip?token=${sub.packingSlipToken}`}
-                  download
-                  className="flex items-center gap-1.5 text-xs text-[#666666] border border-[#E8E4DC] rounded-lg px-3 py-1.5 hover:border-[#D4AF37]/40 hover:text-[#B8960C] transition-colors"
-                >
-                  <Download size={11} />
-                  Packing Slip
-                </a>
-              )}
-              {sub.shippingLabelToken && (
-                <a
-                  href={`/api/customer/submissions/${sub.submissionId}/shipping-label?token=${sub.shippingLabelToken}`}
-                  download
-                  className="flex items-center gap-1.5 text-xs text-[#666666] border border-[#E8E4DC] rounded-lg px-3 py-1.5 hover:border-[#D4AF37]/40 hover:text-[#B8960C] transition-colors"
-                >
-                  <Download size={11} />
-                  Shipping Label
-                </a>
-              )}
+              <a
+                href={`/api/customer/submissions/${sub.submissionId}/packing-slip`}
+                download
+                className="flex items-center gap-1.5 text-xs text-[#666666] border border-[#E8E4DC] rounded-lg px-3 py-1.5 hover:border-[#D4AF37]/40 hover:text-[#B8960C] transition-colors"
+              >
+                <Download size={11} />
+                Packing Slip
+              </a>
+              <a
+                href={`/api/customer/submissions/${sub.submissionId}/shipping-label`}
+                download
+                className="flex items-center gap-1.5 text-xs text-[#666666] border border-[#E8E4DC] rounded-lg px-3 py-1.5 hover:border-[#D4AF37]/40 hover:text-[#B8960C] transition-colors"
+              >
+                <Download size={11} />
+                Shipping Label
+              </a>
             </div>
 
             <div>

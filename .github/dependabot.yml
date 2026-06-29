@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # npm dependencies — weekly, grouped so non-major bumps land in one PR.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Keep the GitHub Actions (pinned by SHA in ci.yml) up to date — Dependabot
+  # bumps the SHA and the version comment together.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

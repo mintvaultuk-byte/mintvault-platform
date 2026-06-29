@@ -9,6 +9,8 @@ import { computeGradingQuote } from "../services/gradingQuote";
 import { redeemPromoCode } from "../services/promoCodeService";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { requireCustomer } from "../customer-auth";
+import { authorizeSubmissionDownload } from "../lib/customer-documents";
 
 /** Consume a single credit of the given type. Returns true if consumed. */
 async function consumeCredit(userId: string, creditType: string, submissionId: number): Promise<boolean> {
@@ -23,6 +25,62 @@ async function consumeCredit(userId: string, creditType: string, submissionId: n
     ) RETURNING id
   `);
   return result.rows.length > 0;
+}
+
+// ── Shared document PDF builders ──────────────────────────────────────────────
+// Single source of the field mapping + generator call, reused by the public
+// token-gated routes (emailed links) AND the authenticated customer routes, so
+// the two can never drift.
+async function buildPackingSlipPdf(submission: any): Promise<Buffer> {
+  const numId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
+  const items = await storage.getSubmissionItems(numId);
+  const { generatePackingSlipPDF } = await import("../packingSlip");
+  return generatePackingSlipPDF({
+    submissionId: submission.submissionId,
+    customerFirstName: submission.customerFirstName || submission.customer_first_name || "",
+    customerLastName: submission.customerLastName || submission.customer_last_name || "",
+    customerEmail: submission.customerEmail || submission.customer_email || "",
+    phone: submission.phone,
+    returnAddressLine1: submission.returnAddressLine1 || submission.return_address_line1 || "",
+    returnAddressLine2: submission.returnAddressLine2 || submission.return_address_line2 || "",
+    returnCity: submission.returnCity || submission.return_city || "",
+    returnCounty: submission.returnCounty || submission.return_county || "",
+    returnPostcode: submission.returnPostcode || submission.return_postcode || "",
+    serviceType: submission.serviceType || submission.service_type || "",
+    serviceTier: submission.serviceTier || submission.service_tier || "",
+    turnaroundDays: submission.turnaroundDays || submission.turnaround_days,
+    cardCount: submission.cardCount || submission.card_count || 0,
+    totalDeclaredValue: parseInt(submission.totalDeclaredValue || submission.total_declared_value || "0", 10),
+    totalPrice: submission.totalPrice || submission.total_price || "0",
+    shippingCost: parseInt(submission.shippingCost || submission.shipping_cost || "0", 10),
+    shippingInsuranceTier: submission.shippingInsuranceTier || submission.shipping_insurance_tier || "",
+    gradingCost: parseInt(submission.gradingCost || submission.grading_cost || "0", 10),
+    insuranceFee: parseInt(submission.insuranceFee || submission.insurance_fee || "0", 10),
+    items: items.map((item: any) => ({
+      cardIndex: item.cardIndex || item.card_index || 0,
+      game: item.game,
+      cardSet: item.cardSet || item.card_set,
+      cardName: item.cardName || item.card_name,
+      cardNumber: item.cardNumber || item.card_number,
+      year: item.year,
+      declaredValue: item.declaredValue || item.declared_value,
+    })),
+  });
+}
+
+async function buildShippingLabelPdf(submission: any): Promise<Buffer> {
+  const { generateShippingLabelPDF } = await import("../shipping-label");
+  return generateShippingLabelPDF({
+    submissionId: submission.submissionId,
+    customerFirstName: submission.customerFirstName || submission.customer_first_name || "",
+    customerLastName: submission.customerLastName || submission.customer_last_name || "",
+    returnAddressLine1: submission.returnAddressLine1 || submission.return_address_line1 || "",
+    returnAddressLine2: submission.returnAddressLine2 || submission.return_address_line2 || undefined,
+    returnCity: submission.returnCity || submission.return_city || "",
+    returnCounty: submission.returnCounty || submission.return_county || undefined,
+    returnPostcode: submission.returnPostcode || submission.return_postcode || "",
+    cardCount: submission.cardCount || submission.card_count || 0,
+  });
 }
 
 function getSignedUrlSecret(): string {
@@ -207,6 +265,18 @@ const paymentRateLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many payment attempts. Please wait a few minutes and try again." },
+});
+
+// Customer document downloads (packing slip / shipping label). Authenticated, but
+// each call renders a PDF — cap per IP so a logged-in customer can't hammer PDF
+// generation. Generous enough never to bite normal use. (Not covered by any global
+// limiter; the app only rate-limits /api/admin + /api/auth.)
+const customerDocRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many document requests. Please wait a minute and try again." },
 });
 
 export function registerSubmissionRoutes(app: Express): void {
@@ -849,42 +919,7 @@ export function registerSubmissionRoutes(app: Express): void {
         return res.status(400).json({ error: "Submission is still in draft" });
       }
 
-      const numId = typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id;
-      const items = await storage.getSubmissionItems(numId);
-
-      const { generatePackingSlipPDF } = await import("../packingSlip");
-      const pdf = await generatePackingSlipPDF({
-        submissionId: submission.submissionId,
-        customerFirstName: submission.customerFirstName || submission.customer_first_name || "",
-        customerLastName: submission.customerLastName || submission.customer_last_name || "",
-        customerEmail: submission.customerEmail || submission.customer_email || "",
-        phone: submission.phone,
-        returnAddressLine1: submission.returnAddressLine1 || submission.return_address_line1 || "",
-        returnAddressLine2: submission.returnAddressLine2 || submission.return_address_line2 || "",
-        returnCity: submission.returnCity || submission.return_city || "",
-        returnCounty: submission.returnCounty || submission.return_county || "",
-        returnPostcode: submission.returnPostcode || submission.return_postcode || "",
-        serviceType: submission.serviceType || submission.service_type || "",
-        serviceTier: submission.serviceTier || submission.service_tier || "",
-        turnaroundDays: submission.turnaroundDays || submission.turnaround_days,
-        cardCount: submission.cardCount || submission.card_count || 0,
-        totalDeclaredValue: parseInt(submission.totalDeclaredValue || submission.total_declared_value || "0", 10),
-        totalPrice: submission.totalPrice || submission.total_price || "0",
-        shippingCost: parseInt(submission.shippingCost || submission.shipping_cost || "0", 10),
-        shippingInsuranceTier: submission.shippingInsuranceTier || submission.shipping_insurance_tier || "",
-        gradingCost: parseInt(submission.gradingCost || submission.grading_cost || "0", 10),
-        insuranceFee: parseInt(submission.insuranceFee || submission.insurance_fee || "0", 10),
-        items: items.map((item: any) => ({
-          cardIndex: item.cardIndex || item.card_index || 0,
-          game: item.game,
-          cardSet: item.cardSet || item.card_set,
-          cardName: item.cardName || item.card_name,
-          cardNumber: item.cardNumber || item.card_number,
-          year: item.year,
-          declaredValue: item.declaredValue || item.declared_value,
-        })),
-      });
-
+      const pdf = await buildPackingSlipPdf(submission);
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${submission.submissionId}-packing-slip.pdf"`);
       res.send(pdf);
@@ -893,6 +928,37 @@ export function registerSubmissionRoutes(app: Express): void {
       res.status(500).json({ error: "Failed to generate packing slip" });
     }
   });
+
+  // ── Authenticated customer packing slip (Phase 1) ─────────────────────────
+  // Session-derived identity (requireCustomer); ownership verified server-side;
+  // missing/deleted/wrong-owner all return an indistinguishable 404. No token —
+  // the dashboard's authenticated link must not depend on a bearer token.
+  app.get(
+    "/api/customer/submissions/:submissionId/packing-slip",
+    customerDocRateLimit,
+    requireCustomer,
+    async (req, res) => {
+      try {
+        const submission = await storage.getSubmissionBySubmissionId(String(req.params.submissionId));
+        const auth = authorizeSubmissionDownload(submission, {
+          customerEmail: req.session.customerEmail,
+          userId: req.session.userId,
+        });
+        if (!auth.ok) {
+          return auth.status === 404
+            ? res.status(404).json({ error: "Submission not found" })
+            : res.status(400).json({ error: "Submission is still in draft" });
+        }
+        const pdf = await buildPackingSlipPdf(submission);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${submission.submissionId}-packing-slip.pdf"`);
+        res.send(pdf);
+      } catch (error: any) {
+        console.error("Customer packing slip error:", error.message);
+        res.status(500).json({ error: "Failed to generate packing slip" });
+      }
+    }
+  );
 
   // ── Public shipping label (token-gated) ───────────────────────────────────
   app.get("/api/submissions/:submissionId/shipping-label", async (req, res) => {
@@ -916,19 +982,7 @@ export function registerSubmissionRoutes(app: Express): void {
         return res.status(400).json({ error: "Submission is still in draft" });
       }
 
-      const { generateShippingLabelPDF } = await import("../shipping-label");
-      const pdf = await generateShippingLabelPDF({
-        submissionId: submission.submissionId,
-        customerFirstName: submission.customerFirstName || submission.customer_first_name || "",
-        customerLastName: submission.customerLastName || submission.customer_last_name || "",
-        returnAddressLine1: submission.returnAddressLine1 || submission.return_address_line1 || "",
-        returnAddressLine2: submission.returnAddressLine2 || submission.return_address_line2 || undefined,
-        returnCity: submission.returnCity || submission.return_city || "",
-        returnCounty: submission.returnCounty || submission.return_county || undefined,
-        returnPostcode: submission.returnPostcode || submission.return_postcode || "",
-        cardCount: submission.cardCount || submission.card_count || 0,
-      });
-
+      const pdf = await buildShippingLabelPdf(submission);
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `attachment; filename="${submission.submissionId}-shipping-label.pdf"`);
       res.send(pdf);
@@ -937,4 +991,32 @@ export function registerSubmissionRoutes(app: Express): void {
       res.status(500).json({ error: "Failed to generate shipping label" });
     }
   });
+
+  // ── Authenticated customer shipping label (Phase 1) ───────────────────────
+  app.get(
+    "/api/customer/submissions/:submissionId/shipping-label",
+    customerDocRateLimit,
+    requireCustomer,
+    async (req, res) => {
+      try {
+        const submission = await storage.getSubmissionBySubmissionId(String(req.params.submissionId));
+        const auth = authorizeSubmissionDownload(submission, {
+          customerEmail: req.session.customerEmail,
+          userId: req.session.userId,
+        });
+        if (!auth.ok) {
+          return auth.status === 404
+            ? res.status(404).json({ error: "Submission not found" })
+            : res.status(400).json({ error: "Submission is still in draft" });
+        }
+        const pdf = await buildShippingLabelPdf(submission);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `attachment; filename="${submission.submissionId}-shipping-label.pdf"`);
+        res.send(pdf);
+      } catch (error: any) {
+        console.error("Customer shipping label error:", error.message);
+        res.status(500).json({ error: "Failed to generate shipping label" });
+      }
+    }
+  );
 }

@@ -33,13 +33,7 @@ declare global {
   }
 }
 
-export default function InstallAppButton({
-  className,
-  label = "Install app",
-}: {
-  className?: string;
-  label?: string;
-}) {
+export default function InstallAppButton({ className, label = "Install app" }: { className?: string; label?: string }) {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
   const [hidden, setHidden] = useState(false);
 
