@@ -66,6 +66,7 @@ import { fileTypeFromBuffer } from "file-type";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
+import { generatePdfToken, verifyPdfToken } from "./lib/pdf-token";
 import { uploadToR2, getR2SignedUrl, deleteFromR2, headR2, r2KeyForImage, r2KeyForLabel } from "./r2";
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
@@ -4953,14 +4954,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(404).json({ error: "Submission not found" });
       }
 
-      const token = req.query.token as string;
-      if (!token) {
-        return res.status(403).json({ error: "Access denied" });
-      }
-      const secret = getSignedUrlSecret();
-      const expected = crypto.createHmac("sha256", secret).update(req.params.submissionId).digest("hex").slice(0, 16);
-      if (token !== expected) {
-        return res.status(403).json({ error: "Invalid token" });
+      const token = req.query.token;
+      if (!verifyPdfToken(req.params.submissionId, token)) {
+        return res.status(403).json({ error: "Invalid or expired token" });
       }
 
       if (submission.status === "draft") {
@@ -5019,14 +5015,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(404).json({ error: "Submission not found" });
       }
 
-      const token = req.query.token as string;
-      if (!token) {
-        return res.status(403).json({ error: "Access denied" });
-      }
-      const secret = getSignedUrlSecret();
-      const expected = crypto.createHmac("sha256", secret).update(req.params.submissionId).digest("hex").slice(0, 16);
-      if (token !== expected) {
-        return res.status(403).json({ error: "Invalid token" });
+      const token = req.query.token;
+      if (!verifyPdfToken(req.params.submissionId, token)) {
+        return res.status(403).json({ error: "Invalid or expired token" });
       }
 
       if (submission.status === "draft") {
@@ -8465,10 +8456,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const email = req.session.customerEmail!;
       const submissions = await storage.getSubmissionsByEmail(email);
-      const secret = getSignedUrlSecret();
       const result = submissions.map((sub: any) => {
         const sid = sub.submissionId || sub.submission_id || "";
-        const token = sid ? crypto.createHmac("sha256", secret).update(sid).digest("hex").slice(0, 16) : "";
+        const token = sid ? generatePdfToken(sid) : ""; // H-a hardened token
         return { ...sub, packingSlipToken: token, shippingLabelToken: token };
       });
       res.json(result);

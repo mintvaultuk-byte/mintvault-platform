@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import rateLimit from "express-rate-limit";
-import crypto from "crypto";
+import { generatePdfToken, verifyPdfToken } from "../lib/pdf-token";
 import { serviceTierToPricingTier, auditLog } from "@shared/schema";
 import { storage } from "../storage";
 import { getUncachableStripeClient } from "../stripeClient";
@@ -23,12 +23,6 @@ async function consumeCredit(userId: string, creditType: string, submissionId: n
     ) RETURNING id
   `);
   return result.rows.length > 0;
-}
-
-function getSignedUrlSecret(): string {
-  const s = process.env.SIGNED_URL_SECRET;
-  if (!s) throw new Error("SIGNED_URL_SECRET environment secret is required");
-  return s;
 }
 
 type CapacityEntry = { active: number; max: number; full: boolean; forceOpen: boolean; ts: number };
@@ -165,7 +159,7 @@ export async function fulfilPaidSubmission(
   // Confirmation email (V2 with legal terms when the flag is live, else legacy
   // with crossover fields). Fire-and-forget — logged, never blocks.
   try {
-    const packingSlipToken = crypto.createHmac("sha256", getSignedUrlSecret()).update(sid).digest("hex").slice(0, 16);
+    const packingSlipToken = generatePdfToken(sid); // H-a hardened token (timing-safe, 256-bit, TTL, owner-bound)
     const { FEATURE_FLAGS: FF2 } = await import("../config/feature-flags");
     const { TERMS_VERSION: TV2 } = await import("../config/legal");
     const emailData = {
@@ -750,11 +744,7 @@ export function registerSubmissionRoutes(app: Express): void {
         // transition). A duplicate/raced confirm is a safe no-op.
         await fulfilPaidSubmission(submission, paymentIntent.metadata || {}, paymentIntent.amount || 0);
 
-        const packingSlipToken = crypto
-          .createHmac("sha256", getSignedUrlSecret())
-          .update(submission.submissionId)
-          .digest("hex")
-          .slice(0, 16);
+        const packingSlipToken = generatePdfToken(submission.submissionId); // H-a hardened token
         return res.json({
           success: true,
           submissionId: submission.submissionId,
@@ -869,14 +859,9 @@ export function registerSubmissionRoutes(app: Express): void {
         return res.status(404).json({ error: "Submission not found" });
       }
 
-      const token = req.query.token as string;
-      if (!token) {
-        return res.status(403).json({ error: "Access denied" });
-      }
-      const secret = getSignedUrlSecret();
-      const expected = crypto.createHmac("sha256", secret).update(req.params.submissionId).digest("hex").slice(0, 16);
-      if (token !== expected) {
-        return res.status(403).json({ error: "Invalid token" });
+      const token = req.query.token;
+      if (!verifyPdfToken(req.params.submissionId, token)) {
+        return res.status(403).json({ error: "Invalid or expired token" });
       }
 
       if (submission.status === "draft") {
@@ -936,14 +921,9 @@ export function registerSubmissionRoutes(app: Express): void {
         return res.status(404).json({ error: "Submission not found" });
       }
 
-      const token = req.query.token as string;
-      if (!token) {
-        return res.status(403).json({ error: "Access denied" });
-      }
-      const secret = getSignedUrlSecret();
-      const expected = crypto.createHmac("sha256", secret).update(req.params.submissionId).digest("hex").slice(0, 16);
-      if (token !== expected) {
-        return res.status(403).json({ error: "Invalid token" });
+      const token = req.query.token;
+      if (!verifyPdfToken(req.params.submissionId, token)) {
+        return res.status(403).json({ error: "Invalid or expired token" });
       }
 
       if (submission.status === "draft") {
