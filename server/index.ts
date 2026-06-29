@@ -90,10 +90,17 @@ app.use(
           process.env.NODE_ENV === "production"
             ? ["'self'", "https://js.stripe.com"]
             : ["'self'", "'unsafe-inline'", "https://js.stripe.com"],
+        // H-e — styleSrc keeps 'unsafe-inline': the React SPA relies on inline
+        // style attributes (style={{…}}) and runtime-injected <style> tags
+        // (Vite/Tailwind) that can't carry a per-request nonce without a build-
+        // pipeline change; removing it white-screens dynamic styling. scriptSrc
+        // is ALREADY nonce-free and unsafe-inline-free in production (above).
+        // Residual unsafe-inline is style-only — tracked for a future nonce/hash step.
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         imgSrc: ["'self'", "data:", "blob:", "https:", "https://*.r2.cloudflarestorage.com", "https://i.ebayimg.com"],
         connectSrc: ["'self'", "https://api.stripe.com", "wss:"],
         frameSrc: ["https://js.stripe.com"],
+        frameAncestors: ["'none'"], // H-e — clickjacking defence (CSP equivalent of X-Frame-Options: DENY)
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
@@ -499,9 +506,22 @@ async function runTransferV2Sweep() {
   setTimeout(runScanReconciler, 90_000);
   setInterval(runScanReconciler, 5 * 60 * 1000);
 
+  // A05 — unmatched /api/* returns a clean 404 JSON instead of falling through
+  // to the SPA index.html. Sits AFTER all real API routes (registerRoutes above)
+  // and BEFORE the SPA catch-all (serveStatic/setupVite below), so no real
+  // endpoint 404s and client-side routing for non-/api paths is unaffected.
+  app.use("/api", (_req: Request, res: Response) => {
+    res.status(404).json({ error: "Not found" });
+  });
+
+  // H-d — single generic error response path. Log the FULL error (message +
+  // stack) server-side; NEVER leak internal exception detail to clients.
+  // Intentional client errors created via http-errors (status < 500 with
+  // expose=true) keep their safe, user-facing message; everything else returns a
+  // generic body. Inline route validation (res.status(4xx).json(...)) responds
+  // before reaching here, so helpful 4xx messages are untouched.
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
 
     console.error("Internal Server Error:", err);
 
@@ -509,7 +529,10 @@ async function runTransferV2Sweep() {
       return next(err);
     }
 
-    return res.status(status).json({ message });
+    if (status < 500 && err.expose === true && typeof err.message === "string") {
+      return res.status(status).json({ error: err.message });
+    }
+    return res.status(status).json({ error: "Internal server error" });
   });
 
   if (process.env.NODE_ENV === "production") {

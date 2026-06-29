@@ -110,7 +110,7 @@ export function registerPreGradeRoutes(app: Express): void {
         res.json({ success: true, grading });
       } catch (err: any) {
         console.error("[pre-grade] failed:", err.message);
-        res.status(500).json({ error: err.message || "Pre-grade failed." });
+        res.status(500).json({ error: "Pre-grade failed." }); // H-d — no raw err.message to client (logged above)
       }
     }
   );
@@ -138,7 +138,7 @@ export function registerPreGradeRoutes(app: Express): void {
       res.send(jpeg);
     } catch (err: any) {
       console.error("[pre-grade/preview] failed:", err.message);
-      res.status(500).json({ error: err.message || "Preview generation failed." });
+      res.status(500).json({ error: "Preview generation failed." }); // H-d — no raw err.message to client (logged above)
     }
   });
 }
