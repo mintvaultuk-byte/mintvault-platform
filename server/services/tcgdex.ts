@@ -200,6 +200,26 @@ export async function listAllSets(lang = "en"): Promise<TcgdexSetSummary[]> {
   return cache.sets;
 }
 
+/** Brief card shape from a name search: id is "{setId}-{localId}". */
+export interface TcgdexCardBrief {
+  id: string;
+  localId: string;
+  name: string;
+}
+
+/** Search cards by NAME (language-scoped, rate-limited). Returns the brief shape
+ *  ({ id, localId, name }); the card id encodes the set ("{setId}-{localId}"), so
+ *  the set is derivable. Used to resolve a set from card name+number when the AI
+ *  couldn't read the printed set code. Returns [] on any non-OK response. */
+export async function searchCardsByName(name: string, lang = "en"): Promise<TcgdexCardBrief[]> {
+  const clean = String(name || "").trim();
+  if (clean.length < 2) return [];
+  const res = await rateLimitedFetch(`${BASE_URL}/${lang}/cards?name=${encodeURIComponent(clean)}`, lang);
+  if (!res.ok) return [];
+  const cards = await res.json();
+  return Array.isArray(cards) ? (cards as TcgdexCardBrief[]) : [];
+}
+
 /**
  * Resolve a printed set code (e.g. "sv5K") to the TCGdex set ID.
  * Tries the given language first, then falls back to "en".

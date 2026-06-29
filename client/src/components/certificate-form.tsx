@@ -450,6 +450,16 @@ export default function CertificateForm({
             lang: id.detected_language,
           });
           runTcgdexPrefill(id.set_code, id.detected_number, id.detected_language || "English", certificate?.id);
+        } else if (id.detected_name && id.detected_number) {
+          // No set code (the AI couldn't read it): resolve the set from name+number
+          // against the imported English TCGdex catalogue. Still TCGdex-sourced, so
+          // the "set is never the AI's guess" rule holds — fills only on a confirmed
+          // unique match, else leaves Set blank.
+          console.info("[tcgdex-prefill] no set_code — trying name+number resolution", {
+            name: id.detected_name,
+            number: id.detected_number,
+          });
+          runTcgdexPrefillByName(id.detected_name, id.detected_number, id.detected_language || "English");
         } else {
           console.info("[tcgdex-prefill] skipped — no set_code/number from identify", {
             set_code: id.set_code,
@@ -522,6 +532,31 @@ export default function CertificateForm({
       toast({ title: `TCGdex enriched${badge}`, description: `${td.card_name} — ${td.set_name}` });
     } catch {
       // Silent — TCGdex enrichment is best-effort
+    }
+  }
+
+  /** English-only fallback: resolve the SET from card name + number when the AI
+   *  couldn't read the set code. Still TCGdex-sourced (server confirms a UNIQUE
+   *  match in the imported catalogue), so the "set is never the AI's guess" rule
+   *  holds — fills Set only on a confirmed match, otherwise leaves it blank. */
+  async function runTcgdexPrefillByName(name: string, cardNumber: string, language: string) {
+    if (language && language.toLowerCase() !== "english") return; // English only this phase
+    try {
+      const r = await fetch(
+        `/api/admin/tcgdex-resolve-set?name=${encodeURIComponent(name)}&number=${encodeURIComponent(cardNumber)}`,
+        { credentials: "include" }
+      );
+      if (!r.ok) return;
+      const td = await r.json();
+      if (!td.found) return;
+      setForm((prev) => ({
+        ...prev,
+        setName: td.set_name || prev.setName,
+        year: td.release_date ? td.release_date.split("-")[0] : prev.year,
+      }));
+      toast({ title: "TCGdex set resolved", description: `${name} → ${td.set_name}` });
+    } catch {
+      // Best-effort — leave Set blank on any failure.
     }
   }
 
