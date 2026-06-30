@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { Image as ImageIcon } from "lucide-react";
 import { useLocation } from "wouter";
 import GradingPanel from "../components/grading/grading-panel";
 import InstallAppButton from "../components/install-app-button";
@@ -115,6 +116,8 @@ type GCard = {
   scannedByMe: boolean;
   gradedByMe: boolean;
   gradeApprovedAt: string | null;
+  frontUrl: string | null;
+  backUrl: string | null;
 };
 type GItem = { submissionRef: string; cards: GCard[] };
 
@@ -330,18 +333,50 @@ function GradeTab() {
       key={card.certId}
       className="border border-[#D4AF37]/20 rounded-lg p-4 flex items-center justify-between gap-4"
     >
-      <div className="min-w-0">
-        <div className="text-[#D4AF37] font-mono text-xs">{ref || "—"}</div>
-        <div className="font-semibold truncate">
-          {/* Lead with the MintVault cert number so the grader can match the row to
-              the physical cert — especially for unidentified cards with no name. */}
-          <span className="font-mono text-[#D4AF37]">{card.certIdStr}</span>
-          <span className="text-[#E8E4DC]/40"> · </span>
-          {card.cardName || "Unidentified card"}{" "}
-          {card.cardNumber && <span className="text-[#E8E4DC]/50">#{card.cardNumber}</span>}
-        </div>
-        <div className="text-[#E8E4DC]/50 text-xs">
-          {[card.setName, card.year, card.variant].filter(Boolean).join(" · ")}
+      <div className="flex items-center gap-3 min-w-0">
+        {/* Front/back card thumbnails — reuses the grader image source (signed R2
+            URLs now returned by /api/grader/queue) and mirrors the admin card-thumb
+            approach. Clear "No images yet" placeholder when the card hasn't been
+            scanned, so it reads as needs-scanning, not a broken image. */}
+        {card.frontUrl || card.backUrl ? (
+          <div className="flex items-center gap-1.5 shrink-0">
+            {([["Front", card.frontUrl], ["Back", card.backUrl]] as const).map(([label, url]) => (
+              <div
+                key={label}
+                title={label}
+                className="w-[54px] h-[76px] rounded-md shrink-0 border border-[#D4AF37]/15 bg-[#1a1711] grid place-items-center overflow-hidden"
+              >
+                {url ? (
+                  <img src={url} alt={label} className="w-full h-full object-cover" />
+                ) : (
+                  <ImageIcon className="w-4 h-4 text-[#E8E4DC]/30" />
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 shrink-0" title="No images — card needs scanning">
+            <div className="w-[54px] h-[76px] rounded-md shrink-0 border border-dashed border-[#D4AF37]/20 bg-[#1a1711] grid place-items-center">
+              <ImageIcon className="w-4 h-4 text-[#E8E4DC]/25" />
+            </div>
+            <span className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/40 whitespace-nowrap">
+              No images yet
+            </span>
+          </div>
+        )}
+        <div className="min-w-0">
+          <div className="text-[#D4AF37] font-mono text-xs">{ref || "—"}</div>
+          <div className="font-semibold truncate">
+            {/* Lead with the MintVault cert number so the grader can match the row to
+                the physical cert — especially for unidentified cards with no name. */}
+            <span className="font-mono text-[#D4AF37]">{card.certIdStr}</span>
+            <span className="text-[#E8E4DC]/40"> · </span>
+            {card.cardName || "Unidentified card"}{" "}
+            {card.cardNumber && <span className="text-[#E8E4DC]/50">#{card.cardNumber}</span>}
+          </div>
+          <div className="text-[#E8E4DC]/50 text-xs">
+            {[card.setName, card.year, card.variant].filter(Boolean).join(" · ")}
+          </div>
         </div>
       </div>
       {card.gradingStatus === "assigned" && card.assignedToMe ? (
