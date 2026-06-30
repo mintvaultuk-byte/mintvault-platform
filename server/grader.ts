@@ -138,12 +138,36 @@ export async function migrateGraderSchema(): Promise<void> {
  * as a grader OR an admin, never both, regardless of any stale field — so this
  * is robust even if a login handler forgot to clear the other role's fields.
  */
-export function requireGrader(req: Request, res: Response, next: NextFunction) {
+// Phase 2 — re-validate the grader account is still live + still can_grade per
+// request, cached 60s (same stale-session defense as staff.ts requireStaff;
+// separate cache here to avoid a staff↔grader import cycle).
+const graderSessionCache = new Map<string, { ok: boolean; expiry: number }>();
+export function invalidateGraderSessionCache(graderId: string): void {
+  graderSessionCache.delete(String(graderId));
+}
+async function validateGraderSession(graderId: string): Promise<boolean> {
+  const c = graderSessionCache.get(graderId);
+  if (c && Date.now() < c.expiry) return c.ok;
+  const r = await db.execute(sql`SELECT deleted_at, can_grade FROM users WHERE id = ${graderId} LIMIT 1`);
+  const row = r.rows[0] as any;
+  const ok = !!row && !row.deleted_at && !!row.can_grade;
+  graderSessionCache.set(graderId, { ok, expiry: Date.now() + 60_000 });
+  return ok;
+}
+
+export async function requireGrader(req: Request, res: Response, next: NextFunction) {
   const s = req.session as any;
-  if (s && s.isGrader && s.graderId && !s.isAdmin) {
-    return next();
+  if (!(s && s.isGrader && s.graderId && !s.isAdmin)) {
+    return res.status(401).json({ error: "Unauthorized" });
   }
-  return res.status(401).json({ error: "Unauthorized" });
+  try {
+    if (!(await validateGraderSession(String(s.graderId)))) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+    return next();
+  } catch {
+    return res.status(500).json({ error: "Internal server error" }); // fail-closed
+  }
 }
 
 // ── cert ↔ submission resolution ──────────────────────────────────────────────

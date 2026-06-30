@@ -18,6 +18,7 @@ import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
 import { uploadToR2 } from "./r2";
+import { invalidateGraderSessionCache } from "./grader";
 
 export type Capability = "grade" | "scan" | "print";
 export interface Caps {
@@ -74,22 +75,76 @@ export async function migrateScanSchema(): Promise<void> {
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 
-/** Authenticated staff only (mutually exclusive with admin). 401 otherwise. */
-export function requireStaff(req: Request, res: Response, next: NextFunction) {
-  const s = req.session as any;
-  if (s && s.isStaff && s.staffId && !s.isAdmin) return next();
-  return res.status(401).json({ error: "Unauthorized" });
+// ── Live-account re-validation (Phase 2 — stale-session defense) ──────────────
+// Session fields (isStaff/capGrade/…) are stamped at login; without a re-check a
+// soft-deleted OR capability-revoked staffer keeps full access until the cookie
+// expires (hours/days). We re-validate against the DB per request — cached 60 s
+// per user so it stays cheap (one PK lookup, ~zero on a cache hit) and shrinks
+// the stale window from "cookie lifetime" to ≤60 s. Fails CLOSED on DB error.
+interface CachedStaff {
+  exists: boolean;
+  capGrade: boolean;
+  capScan: boolean;
+  capPrint: boolean;
+  expiry: number;
+}
+const staffSessionCache = new Map<string, CachedStaff>();
+
+export function invalidateStaffSessionCache(staffId: string): void {
+  staffSessionCache.delete(String(staffId));
 }
 
-/** Staff session that holds a specific capability. 401 if not staff, 403 if the
- *  capability is missing. Put on EVERY tool endpoint — a missed gate is a hole. */
+async function validateStaffSession(staffId: string): Promise<CachedStaff> {
+  const cached = staffSessionCache.get(staffId);
+  if (cached && Date.now() < cached.expiry) return cached;
+  const r = await db.execute(sql`
+    SELECT deleted_at, can_grade, can_scan, can_print FROM users WHERE id = ${staffId} LIMIT 1
+  `);
+  const row = r.rows[0] as any;
+  const live = !!row && !row.deleted_at;
+  const v: CachedStaff = {
+    exists: live,
+    capGrade: live && !!row.can_grade,
+    capScan: live && !!row.can_scan,
+    capPrint: live && !!row.can_print,
+    expiry: Date.now() + 60_000,
+  };
+  staffSessionCache.set(staffId, v);
+  return v;
+}
+
+/** Authenticated staff only (mutually exclusive with admin). 401 otherwise.
+ *  Now also re-validates the account is still live (not soft-deleted) per request. */
+export async function requireStaff(req: Request, res: Response, next: NextFunction) {
+  const s = req.session as any;
+  if (!(s && s.isStaff && s.staffId && !s.isAdmin)) return res.status(401).json({ error: "Unauthorized" });
+  try {
+    const live = await validateStaffSession(String(s.staffId));
+    if (!live.exists) return res.status(401).json({ error: "Unauthorized" });
+    return next();
+  } catch {
+    return res.status(500).json({ error: "Internal server error" }); // fail-closed
+  }
+}
+
+/** Staff session that holds a specific capability. 401 if not staff/gone, 403 if
+ *  the capability is missing. Re-checks BOTH liveness and the capability against
+ *  the DB per request. Put on EVERY tool endpoint — a missed gate is a hole. */
 export function requireCapability(cap: Capability) {
   const key = cap === "grade" ? "capGrade" : cap === "scan" ? "capScan" : "capPrint";
-  return (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
     const s = req.session as any;
     if (!(s && s.isStaff && s.staffId && !s.isAdmin)) return res.status(401).json({ error: "Unauthorized" });
     if (!s[key]) return res.status(403).json({ error: `Forbidden: missing '${cap}' capability` });
-    return next();
+    try {
+      const live = await validateStaffSession(String(s.staffId));
+      if (!live.exists) return res.status(401).json({ error: "Unauthorized" });
+      const liveCap = cap === "grade" ? live.capGrade : cap === "scan" ? live.capScan : live.capPrint;
+      if (!liveCap) return res.status(403).json({ error: `Forbidden: missing '${cap}' capability` });
+      return next();
+    } catch {
+      return res.status(500).json({ error: "Internal server error" }); // fail-closed
+    }
   };
 }
 
@@ -254,6 +309,10 @@ export async function setStaffCapabilities(userId: string, caps: Partial<Caps>, 
     WHERE id = ${userId}
   `);
   await storage.writeAuditLog("user", userId, "staff_capabilities_set", adminUser, caps as Record<string, unknown>);
+  // Phase 2 — invalidate the session caches NOW so the capability change takes
+  // effect immediately rather than waiting out the 60s validation TTL.
+  invalidateStaffSessionCache(userId);
+  invalidateGraderSessionCache(userId);
   return { ok: true as const };
 }
 
@@ -392,6 +451,10 @@ export async function deleteStaffAccount(staffId: string, adminUser: string) {
     role: row.role,
     caps: { grade: !!row.can_grade, scan: !!row.can_scan, print: !!row.can_print },
   });
+  // Phase 2 — kill the session caches NOW so the deleted account can't keep acting
+  // for up to 60s on a stale cache entry.
+  invalidateStaffSessionCache(staffId);
+  invalidateGraderSessionCache(staffId);
   return { ok: true as const };
 }
 

@@ -15,6 +15,7 @@
  */
 import type { Express, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
+import { sendServerError } from "../lib/error-response";
 import { requireAdmin } from "../auth";
 import { getR2SignedUrl } from "../r2";
 import { storage } from "../storage";
@@ -218,7 +219,7 @@ export function registerGraderRoutes(app: Express): void {
       );
       return res.json({ items });
     } catch (e: any) {
-      return res.status(500).json({ error: e.message });
+      return sendServerError(res, e);
     }
   });
 
@@ -298,7 +299,7 @@ export function registerGraderRoutes(app: Express): void {
       return res.json({ ok: true, gradingStatus: auth.gradingStatus });
     } catch (e: any) {
       console.error("[grader] draft save error:", e.message);
-      return res.status(500).json({ error: e.message });
+      return sendServerError(res, e);
     }
   });
 
@@ -424,7 +425,7 @@ export function registerGraderRoutes(app: Express): void {
       return res.json({ ok: true, gradingStatus: "approved", autoApproved: true });
     } catch (e: any) {
       console.error("[grader] submit error:", e.message);
-      return res.status(500).json({ error: e.message });
+      return sendServerError(res, e);
     }
   });
 
@@ -503,7 +504,7 @@ export function registerGraderRoutes(app: Express): void {
       return res.json({ ok: true, gradingStatus: "pending_review", changed: Object.keys(changed) });
     } catch (e: any) {
       console.error("[grader] edit-submission error:", e.message);
-      return res.status(500).json({ error: e.message });
+      return sendServerError(res, e);
     }
   });
 
@@ -539,7 +540,7 @@ export function registerGraderRoutes(app: Express): void {
       return res.json({ operators: await getOperatorStats() });
     } catch (e: any) {
       console.error("[operator-stats] error:", e.message);
-      return res.status(500).json({ error: e.message });
+      return sendServerError(res, e);
     }
   });
 
@@ -861,7 +862,7 @@ export function registerGraderRoutes(app: Express): void {
       return res.json({ ok: true });
     } catch (e: any) {
       console.error("[admin grade-review save] error:", e.message);
-      return res.status(500).json({ error: e.message });
+      return sendServerError(res, e);
     }
   });
 

@@ -565,8 +565,13 @@ export async function uploadImagesToCert(
   const uploadKeys: Record<string, string> = {};
   const uploads: Promise<void>[] = [];
 
-  // Flat JPG variants (including cropped — kept .jpg for AI compatibility with the old key shape)
-  const jpgVariants = ["original", "cropped", "greyscale", "highcontrast", "edgeenhanced", "inverted"] as const;
+  // Flat JPG variants. Phase 2 — "cropped" REMOVED from this loop: it wrote the
+  // SAME R2 key (front_cropped.jpg / back_cropped.jpg) as the canonical display
+  // JPEG below, racing it in Promise.all with a different buffer. The display JPEG
+  // is the intended owner of that key (grading_front_cropped resolves to
+  // front_cropped_display FIRST), so the loop's cropped write was a dead fallback
+  // AND the collision source. Dropping it makes the key deterministic.
+  const jpgVariants = ["original", "greyscale", "highcontrast", "edgeenhanced", "inverted"] as const;
   for (const vName of jpgVariants) {
     const buf = (frontVariants as any)[vName] as Buffer | undefined;
     if (!buf) continue;

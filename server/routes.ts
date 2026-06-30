@@ -12192,6 +12192,14 @@ Defects (admin-confirmed): ${defectLines}`;
 
         const frontFile = files.front[0];
         const backFile = files.back?.[0] || null;
+        // Phase 2 — magic-byte content-type validation (mirrors the H3 hot-folder
+        // fix): reject anything that isn't a real image before it enters the pipeline.
+        if (!(await validateImageMagicBytes(frontFile))) {
+          return res.status(400).json({ error: "Front image failed content-type validation (not a valid image)" });
+        }
+        if (backFile && !(await validateImageMagicBytes(backFile))) {
+          return res.status(400).json({ error: "Back image failed content-type validation (not a valid image)" });
+        }
         const frontBuf = frontFile.buffer;
         const backBuf = backFile?.buffer || null;
         const notes = (req.body?.notes || "").trim();
