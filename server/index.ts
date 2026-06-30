@@ -4,6 +4,7 @@ import connectPgSimple from "connect-pg-simple";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
+import { csrfOriginCheck } from "./lib/csrf-origin";
 import { serveStatic } from "./static";
 import { cleanupStalePreGradeImages } from "./r2";
 import { db, pool } from "./db";
@@ -406,6 +407,14 @@ async function runTransferV2Sweep() {
 }
 
 (async () => {
+  // Phase 2 (forward-port from remediation-release) — same-origin CSRF defense for
+  // cookie-authenticated, state-changing requests. Registered after the module-level
+  // middleware (raw-body Stripe webhook, express.json, session) and before the route
+  // handlers. Exempts the signature-authed webhook + custom-header scanner-token
+  // requests; requests with no Origin/Referer (non-browser clients) pass. Layered on
+  // top of the SameSite=lax session cookie.
+  app.use(csrfOriginCheck);
+
   await registerRoutes(httpServer, app);
 
   // Run cleanup once on startup, then every 24 hours

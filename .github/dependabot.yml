@@ -1,0 +1,69 @@
+version: 2
+# Forward-port from security/remediation-release, extended to cover all five npm
+# manifests in the repo (root web service + the four local desktop-tooling apps).
+# Weekly cadence; minor+patch bumps grouped into one PR per manifest to silence
+# the dev-only / local-tooling noise that drives most of the Dependabot alerts.
+updates:
+  # ── Root: the deployed MintVault web service (server + SPA → Fly) ──
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+
+  # ── Local desktop tooling (scanner station + cricut prep) — not prod runtime ──
+  - package-ecosystem: npm
+    directory: "/scripts/scanner-app"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      all-deps:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: "/scripts/scanner-watcher"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      all-deps:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: "/scripts/scanner-watcher/guide-window"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      all-deps:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: "/scripts/cricut-app"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      all-deps:
+        update-types:
+          - minor
+          - patch
+
+  # ── GitHub Actions (SHA-pinned in workflows) — bump SHA + version comment together ──
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
