@@ -121,6 +121,11 @@ const SIDE_NAMES = ["TOP", "RIGHT", "BOTTOM", "LEFT"] as const;
 // adjacent placement (e.g. top-outer + top-inner on the same vertical line)
 // never gets diverted into a drag.
 const GRAB_PX = 40;
+// Touch tap-vs-scroll discrimination (iPad). A finger that moves more than this
+// many SCREEN px between touchstart and touchend was a scroll/pan, not a tap, so
+// it must NOT drop a centering dot or a defect pin. Matches image-viewer.tsx's
+// 8px pin threshold. Touch only — mouse/trackpad placement is unaffected.
+const TAP_MOVE_PX = 8;
 // Zoom — 1× = fit-to-area (whole card visible). Max raised well past native
 // pixel density so the operator can place crosshairs precisely on the border
 // line. Viewport-center anchored so the user keeps looking at the same content
@@ -385,6 +390,18 @@ export default function ManualCardTool({
   const [fitBox, setFitBox] = useState<{ w: number; h: number } | null>(null);
   const [zoom, setZoom] = useState(1);
   const lastTouchAtRef = useRef<number>(0);
+  // Pending single-finger touch gesture (iPad). Set on a one-finger touchstart
+  // over a placement target; the mark is only committed on touchend IF the finger
+  // stayed within TAP_MOVE_PX and no second finger ever landed. A second finger
+  // (multi) or movement past the threshold (moved) turns it into a pan/zoom/scroll
+  // that places nothing. `kind` selects which placement to commit on a clean tap.
+  const touchTapRef = useRef<{
+    x: number;
+    y: number;
+    kind: "defect" | "place";
+    multi: boolean;
+    moved: boolean;
+  } | null>(null);
   const { toast } = useToast();
 
   // Zoom anchored at viewport centre — keep the content under the centre of
@@ -699,39 +716,73 @@ export default function ManualCardTool({
     if (hover) setHover(null);
   }
 
+  // iPad touch entry. Two distinct gestures share this canvas:
+  //   • TWO+ fingers  → pan / pinch-zoom the scroll viewport. Place NOTHING, and
+  //     cancel any pending tap or in-progress dot drag so the gesture pans freely.
+  //   • ONE finger    → a *candidate* tap. We do NOT place on touchstart; we record
+  //     the start point and decide on touchend (see onContainerTouchEnd) whether it
+  //     was a genuine tap (stayed within TAP_MOVE_PX, single finger throughout) or a
+  //     scroll/drag (place nothing). This kills the "every touch drops a mark" bug
+  //     for BOTH the centering dots and the defect pins.
+  // Direct presses on an already-placed dot's 44px hit area (onDotTouchStart) still
+  // start a deliberate fine-tune drag — that path is unchanged for a single finger.
   function onContainerTouchStart(e: React.TouchEvent) {
     lastTouchAtRef.current = Date.now();
+    if (e.touches.length >= 2) {
+      // Multi-finger → navigation gesture. Abandon any pending tap and release a
+      // live dot drag so native pan / pinch-zoom takes over.
+      touchTapRef.current = null;
+      if (drag) setDrag(null);
+      return;
+    }
     const t = e.touches[0];
     if (!t) return;
     if (phase === "defects") {
-      const el = containerRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const now = Date.now();
-      const isDouble = now - lastDefectClickAtRef.current < 280;
-      lastDefectClickAtRef.current = now;
-      if (isDouble && defectBatch.length > 0) {
-        openDefectPicker();
-        return;
-      }
-      setDefectBatch((prev) => [
-        ...prev,
-        {
-          x: clamp(((t.clientX - r.left) / r.width) * 100),
-          y: clamp(((t.clientY - r.top) / r.height) * 100),
-          pxX: t.clientX,
-          pxY: t.clientY,
-        },
-      ]);
+      touchTapRef.current = { x: t.clientX, y: t.clientY, kind: "defect", multi: false, moved: false };
       return;
     }
     if (activeArr.length < 4) {
-      const pt = toPct({ clientX: t.clientX, clientY: t.clientY } as MouseEvent);
-      if (pt) placePoint(pt);
+      touchTapRef.current = { x: t.clientX, y: t.clientY, kind: "place", multi: false, moved: false };
       return;
     }
+    // All four dots of the active pass are down → near-dot grab is a deliberate
+    // single-finger fine-tune drag (unchanged).
     const hit = nearestDot(t.clientX, t.clientY);
     if (hit) startDotDrag(hit.pass, hit.index, t.clientX, t.clientY);
+  }
+
+  // Track the candidate tap. A second finger, or movement past the threshold,
+  // disqualifies it (it's a pan/zoom/scroll, not a tap). We never preventDefault
+  // here, so the native scroll viewport keeps panning/zooming as normal.
+  function onContainerTouchMove(e: React.TouchEvent) {
+    const tap = touchTapRef.current;
+    if (!tap) return;
+    if (e.touches.length >= 2) {
+      tap.multi = true;
+      return;
+    }
+    const t = e.touches[0];
+    if (!t) return;
+    if (Math.hypot(t.clientX - tap.x, t.clientY - tap.y) > TAP_MOVE_PX) tap.moved = true;
+  }
+
+  // Commit the mark only for a clean single-finger tap. Anything else — a second
+  // finger ever landed, the finger moved past TAP_MOVE_PX, or a finger is still
+  // down — was navigation, so place nothing.
+  function onContainerTouchEnd(e: React.TouchEvent) {
+    const tap = touchTapRef.current;
+    touchTapRef.current = null;
+    lastTouchAtRef.current = Date.now(); // keep the synthetic-mouse guard window warm
+    if (!tap) return;
+    if (tap.multi || tap.moved) return;
+    if (e.touches.length > 0) return; // another finger still down → not a clean tap
+    if (tap.kind === "defect") {
+      commitDefectTap(tap.x, tap.y);
+      return;
+    }
+    // kind === "place" → next centering dot
+    const pt = toPct({ clientX: tap.x, clientY: tap.y } as MouseEvent);
+    if (pt) placePoint(pt);
   }
 
   // Direct press on a dot's hit area — always a drag (stopPropagation so the
@@ -744,6 +795,9 @@ export default function ManualCardTool({
   }
 
   function onDotTouchStart(pass: DotPass, index: number, e: React.TouchEvent) {
+    // Two fingers → let the event bubble to the container so native pan/pinch-zoom
+    // takes over instead of grabbing this dot for a drag.
+    if (e.touches.length >= 2) return;
     e.stopPropagation();
     lastTouchAtRef.current = Date.now();
     const t = e.touches[0];
@@ -1106,7 +1160,11 @@ export default function ManualCardTool({
     const horiz = x < 33 ? "left" : x > 66 ? "right" : "centre";
     return `${vert} ${horiz}`;
   }
-  function onDefectAreaClick(e: React.MouseEvent) {
+  // Shared defect-commit for a single screen point. Used by the desktop mouse
+  // click (onDefectAreaClick) AND the iPad single-finger tap (onContainerTouchEnd)
+  // so both surfaces get identical double-tap-opens-picker / single-tap-pins
+  // behaviour. Coordinates are raw screen px (clientX/clientY).
+  function commitDefectTap(clientX: number, clientY: number) {
     if (phase !== "defects") return;
     const now = Date.now();
     const isDouble = now - lastDefectClickAtRef.current < 280;
@@ -1118,9 +1176,12 @@ export default function ManualCardTool({
     const el = containerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const x = clamp(((e.clientX - r.left) / r.width) * 100);
-    const y = clamp(((e.clientY - r.top) / r.height) * 100);
-    setDefectBatch((prev) => [...prev, { x, y, pxX: e.clientX, pxY: e.clientY }]);
+    const x = clamp(((clientX - r.left) / r.width) * 100);
+    const y = clamp(((clientY - r.top) / r.height) * 100);
+    setDefectBatch((prev) => [...prev, { x, y, pxX: clientX, pxY: clientY }]);
+  }
+  function onDefectAreaClick(e: React.MouseEvent) {
+    commitDefectTap(e.clientX, e.clientY);
   }
   function openDefectPicker() {
     const last = defectBatch[defectBatch.length - 1];
@@ -1461,6 +1522,12 @@ export default function ManualCardTool({
               }}
               onMouseUp={onContainerMouseUp}
               onTouchStart={onContainerTouchStart}
+              onTouchMove={onContainerTouchMove}
+              onTouchEnd={onContainerTouchEnd}
+              onTouchCancel={() => {
+                // OS took the gesture (scroll/zoom) → abandon the candidate tap.
+                touchTapRef.current = null;
+              }}
             >
               {phase === "defects" && localPreview && !croppedDisplayUrl ? (
                 // ── Optimistic local crop preview ──────────────────────────

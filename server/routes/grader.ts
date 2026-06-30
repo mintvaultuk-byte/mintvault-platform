@@ -16,6 +16,7 @@
 import type { Express, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { requireAdmin } from "../auth";
+import { getR2SignedUrl } from "../r2";
 import { storage } from "../storage";
 import { requireCapability, authenticateStaff } from "../staff";
 import {
@@ -144,6 +145,8 @@ export function registerGraderRoutes(app: Express): void {
                cert.rejection_reason, cert.redo_count, cert.card_game, cert.set_name, cert.card_name,
                cert.card_number_display AS card_number, cert.year_text AS year, cert.variant, cert.grade,
                cert.assigned_grader_id, cert.scanned_by, cert.graded_by, cert.grade_approved_at,
+               cert.grading_front_display, cert.grading_front_cropped, cert.front_image_path,
+               cert.grading_back_display, cert.grading_back_cropped, cert.back_image_path,
                c.submission_id, s.tracking_number AS submission_ref, s.service_tier
         FROM certificates cert
         -- LEFT JOIN: a cert assigned at the cert level can have a NULL card_id (no
@@ -193,9 +196,27 @@ export function registerGraderRoutes(app: Express): void {
           scannedByMe: String(r.scanned_by ?? "") === String(graderId),
           gradedByMe: String(r.graded_by ?? "") === String(graderId),
           gradeApprovedAt: r.grade_approved_at ?? null,
+          // Front/back display thumbnail keys — same fallback chain as
+          // buildCertImagesPayload's front_display/back_display. Signed below.
+          _frontKey: r.grading_front_display || r.grading_front_cropped || r.front_image_path || null,
+          _backKey: r.grading_back_display || r.grading_back_cropped || r.back_image_path || null,
+          frontUrl: null,
+          backUrl: null,
         });
       }
-      return res.json({ items: Array.from(bySub.values()) });
+      // Sign the front/back thumbnails for the grader's OWN cards (reuses the
+      // admin image source: getR2SignedUrl, 1h TTL). Scoped by the WHERE above —
+      // these are only this grader's cards, so no cross-grader image leak.
+      const items = Array.from(bySub.values());
+      await Promise.all(
+        items.flatMap((sub: any) => sub.cards).map(async (card: any) => {
+          card.frontUrl = card._frontKey ? await getR2SignedUrl(card._frontKey, 3600).catch(() => null) : null;
+          card.backUrl = card._backKey ? await getR2SignedUrl(card._backKey, 3600).catch(() => null) : null;
+          delete card._frontKey;
+          delete card._backKey;
+        })
+      );
+      return res.json({ items });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
