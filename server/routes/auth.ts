@@ -209,6 +209,18 @@ export function registerAuthRoutes(app: Express): void {
     message: { error: "Too many login requests. Please wait 15 minutes." },
   });
 
+  // Phase 3 — rate-limit sensitive auth mutations (password/email/account changes
+  // + reset/verification email sends) to blunt brute-force of current-password,
+  // token guessing, and email-bombing. 10 / 15 min / IP is well clear of any
+  // legitimate use (nobody changes their password ten times in a quarter hour).
+  const sensitiveAuthRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many attempts. Please wait 15 minutes and try again." },
+  });
+
   // POST /api/customer/magic-link — send login link to email
   app.post("/api/customer/magic-link", magicLinkRateLimit, async (req, res) => {
     try {
@@ -998,7 +1010,7 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // POST /api/auth/forgot-password
-  app.post("/api/auth/forgot-password", async (req, res) => {
+  app.post("/api/auth/forgot-password", sensitiveAuthRateLimit, async (req, res) => {
     try {
       const { email } = req.body;
       if (email) {
@@ -1018,23 +1030,32 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // POST /api/auth/reset-password
-  app.post("/api/auth/reset-password", async (req, res) => {
+  app.post("/api/auth/reset-password", sensitiveAuthRateLimit, async (req, res) => {
     try {
       const { token, new_password } = req.body;
       if (!token || !new_password) return res.status(400).json({ error: "Token and new password are required" });
       const pwCheck = validatePassword(new_password);
       if (!pwCheck.valid) return res.status(400).json({ error: pwCheck.message });
 
-      const rows = await db.execute(sql`SELECT * FROM password_reset_tokens WHERE token = ${token} LIMIT 1`);
-      if (!rows.rows.length) return res.status(400).json({ error: "Invalid or expired reset link" });
-      const rec = rows.rows[0] as any;
-      if (rec.consumed_at || new Date(rec.expires_at) < new Date()) {
+      // Hash first — the slow / throw-prone step — so a hashing failure can't burn
+      // an otherwise-valid reset link (the token is only spent once we're committed
+      // to writing the new password).
+      const hash = await hashPassword(new_password);
+      // Phase 3 — atomic single-use consume: the conditional UPDATE is the
+      // single-winner gate (flips consumed_at NULL→NOW() exactly once even under
+      // concurrent requests with the same token); only the winner gets user_id back
+      // and may reset the password. Replaces the prior SELECT→check→UPDATE (TOCTOU).
+      const consumed = await db.execute(
+        sql`UPDATE password_reset_tokens SET consumed_at = NOW()
+            WHERE token = ${token} AND consumed_at IS NULL AND expires_at > NOW()
+            RETURNING user_id`
+      );
+      if (!consumed.rows.length) {
         return res.status(400).json({ error: "Reset link has expired. Please request a new one." });
       }
-      const hash = await hashPassword(new_password);
-      await db.execute(sql`UPDATE users SET password_hash = ${hash}, updated_at = NOW() WHERE id = ${rec.user_id}`);
-      await db.execute(sql`UPDATE password_reset_tokens SET consumed_at = NOW() WHERE token = ${token}`);
-      const user = await findUserById(rec.user_id);
+      const resetUserId = (consumed.rows[0] as any).user_id as string;
+      await db.execute(sql`UPDATE users SET password_hash = ${hash}, updated_at = NOW() WHERE id = ${resetUserId}`);
+      const user = await findUserById(resetUserId);
       if (user) {
         await sendPasswordChangedEmail(user.email as string);
         await writeAuthAudit("auth.password_reset", user.id as string, getClientIpForAuth(req), { email: user.email });
@@ -1051,15 +1072,18 @@ export function registerAuthRoutes(app: Express): void {
     try {
       const { token } = req.query;
       if (!token || typeof token !== "string") return res.redirect("/dashboard?verified=error");
-      const rows = await db.execute(sql`SELECT * FROM email_verification_tokens WHERE token = ${token} LIMIT 1`);
-      if (!rows.rows.length) return res.redirect("/dashboard?verified=error");
-      const rec = rows.rows[0] as any;
-      if (rec.consumed_at || new Date(rec.expires_at) < new Date()) return res.redirect("/verify-email?error=expired");
-      await db.execute(
-        sql`UPDATE users SET email_verified = true, email_verified_at = NOW(), updated_at = NOW() WHERE id = ${rec.user_id}`
+      // Phase 3 — atomic single-use consume (same single-winner gate as reset-password).
+      const consumed = await db.execute(
+        sql`UPDATE email_verification_tokens SET consumed_at = NOW()
+            WHERE token = ${token} AND consumed_at IS NULL AND expires_at > NOW()
+            RETURNING user_id`
       );
-      await db.execute(sql`UPDATE email_verification_tokens SET consumed_at = NOW() WHERE token = ${token}`);
-      await writeAuthAudit("auth.email.verified", rec.user_id, getClientIpForAuth(req), {});
+      if (!consumed.rows.length) return res.redirect("/verify-email?error=expired");
+      const verifyUserId = (consumed.rows[0] as any).user_id as string;
+      await db.execute(
+        sql`UPDATE users SET email_verified = true, email_verified_at = NOW(), updated_at = NOW() WHERE id = ${verifyUserId}`
+      );
+      await writeAuthAudit("auth.email.verified", verifyUserId, getClientIpForAuth(req), {});
       return res.redirect("/dashboard?verified=true");
     } catch (err: any) {
       console.error("[auth] verify-email error:", err.message);
@@ -1068,7 +1092,7 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // POST /api/auth/resend-verification
-  app.post("/api/auth/resend-verification", requireAuth, async (req, res) => {
+  app.post("/api/auth/resend-verification", requireAuth, sensitiveAuthRateLimit, async (req, res) => {
     try {
       const userId = (req.session as any).userId as string;
       const user = await findUserById(userId);
@@ -1112,7 +1136,7 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // PUT /api/auth/change-password
-  app.put("/api/auth/change-password", requireAuth, async (req, res) => {
+  app.put("/api/auth/change-password", requireAuth, sensitiveAuthRateLimit, async (req, res) => {
     try {
       const userId = (req.session as any).userId as string;
       const { current_password, new_password } = req.body;
@@ -1136,7 +1160,7 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // PUT /api/auth/change-email
-  app.put("/api/auth/change-email", requireAuth, async (req, res) => {
+  app.put("/api/auth/change-email", requireAuth, sensitiveAuthRateLimit, async (req, res) => {
     try {
       const userId = (req.session as any).userId as string;
       const { new_email, password } = req.body;
@@ -1222,7 +1246,7 @@ export function registerAuthRoutes(app: Express): void {
   });
 
   // DELETE /api/auth/delete-account
-  app.delete("/api/auth/delete-account", requireAuth, async (req, res) => {
+  app.delete("/api/auth/delete-account", requireAuth, sensitiveAuthRateLimit, async (req, res) => {
     try {
       const userId = (req.session as any).userId as string;
       const { password, confirmation } = req.body;

@@ -12,6 +12,11 @@ import { sql } from "drizzle-orm";
 
 /** Consume a single credit of the given type. Returns true if consumed. */
 async function consumeCredit(userId: string, creditType: string, submissionId: number): Promise<boolean> {
+  // Phase 3 — prevent credit double-spend under concurrency. FOR UPDATE SKIP LOCKED
+  // makes two simultaneous callers lock + claim DIFFERENT unused credits (rather than
+  // both picking the same row), and the outer `AND used_at IS NULL` is a belt-and-
+  // braces guard so a re-selected row can never be consumed twice. Single statement,
+  // so it's atomic; behaviour for the normal (uncontended) path is unchanged.
   const result = await db.execute(sql`
     UPDATE member_credits
     SET used_at = NOW(), used_for_submission_id = ${submissionId}
@@ -20,7 +25,9 @@ async function consumeCredit(userId: string, creditType: string, submissionId: n
       WHERE user_id = ${userId} AND credit_type = ${creditType}
         AND used_at IS NULL AND expires_at > NOW()
       ORDER BY expires_at ASC LIMIT 1
-    ) RETURNING id
+      FOR UPDATE SKIP LOCKED
+    ) AND used_at IS NULL
+    RETURNING id
   `);
   return result.rows.length > 0;
 }
