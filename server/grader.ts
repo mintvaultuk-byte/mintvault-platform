@@ -566,7 +566,7 @@ const keepStr = (a: any, b: any) =>
  * the incoming payload over the cert's current values so an omitted field is
  * never wiped.
  */
-export async function applyCertGradeDraft(certId: number, body: any): Promise<void> {
+export async function applyCertGradeDraft(certId: number, body: any): Promise<boolean> {
   const cert = (await storage.getCertificate(certId)) as any;
   if (!cert) throw new Error("Certificate not found");
 
@@ -580,7 +580,7 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<vo
   const num = (v: any, cur: any) => (v === undefined || v === null || v === "" ? (cur ?? null) : v);
   const jb = (v: any, cur: any) => JSON.stringify(v === undefined ? (cur ?? null) : v);
 
-  await db.execute(sql`
+  const r = await db.execute(sql`
     UPDATE certificates SET
       grade = ${gradeNum},
       grade_type = ${gradeType},
@@ -613,17 +613,25 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<vo
       wrinkle_severity = ${pick(body.wrinkle_severity, cert.wrinkleSeverity)},
       tear_severity    = ${pick(body.tear_severity, cert.tearSeverity)},
       updated_at = NOW()
-    WHERE id = ${certId}
+    WHERE id = ${certId} AND grade_approved_at IS NULL
+    RETURNING id
   `);
+  return r.rows.length > 0;
 }
 
 /** Publish a certificate's grade (admin approval): set approved_at + live status. */
-export async function approveCertGrade(certId: number, adminUser: string): Promise<void> {
-  await db.execute(sql`
+export async function approveCertGrade(certId: number, adminUser: string): Promise<boolean> {
+  // Phase 2 — atomic CAS publish: only publishes while still pending_review (its
+  // sole caller, approveGraderCert, requires that). 0 rows ⇒ state changed
+  // concurrently (e.g. a racing reject) → caller returns 409 instead of double-publishing.
+  const r = await db.execute(sql`
     UPDATE certificates
-    SET grade_approved_at = NOW(), grade_approved_by = ${adminUser}, status = 'active', updated_at = NOW()
-    WHERE id = ${certId}
+    SET grade_approved_at = NOW(), grade_approved_by = ${adminUser}, status = 'active',
+        grader_status = 'approved', graded_at = NOW(), updated_at = NOW()
+    WHERE id = ${certId} AND grader_status = 'pending_review'
+    RETURNING id
   `);
+  return r.rows.length > 0;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -828,12 +836,18 @@ export async function rejectCertGrade(certId: number, reason: string | null, adm
   if (a.gradingStatus !== "pending_review") {
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   }
-  await db.execute(sql`
+  // Phase 2 — atomic CAS: only reject while still pending_review; 0 rows ⇒ a
+  // concurrent transition won, return 409 instead of clobbering the new state.
+  const r = await db.execute(sql`
     UPDATE certificates
     SET grader_status = 'assigned', rejection_reason = ${reason || null}, redo_count = redo_count + 1,
         graded_at = NULL, updated_at = NOW()
-    WHERE id = ${certId}
+    WHERE id = ${certId} AND grader_status = 'pending_review'
+    RETURNING id
   `);
+  if (r.rows.length === 0) {
+    return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
+  }
   await storage.writeAuditLog("certificate", String(certId), "grade_reject", adminUser, { reason: reason || null });
   return { ok: true as const };
 }
@@ -850,10 +864,15 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   if (a.gradingStatus !== "pending_review") {
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   }
-  await approveCertGrade(certId, adminUser);
-  await db.execute(sql`
-    UPDATE certificates SET grader_status = 'approved', graded_at = NOW(), updated_at = NOW() WHERE id = ${certId}
-  `);
+  // Phase 2 — the publish is an atomic CAS (pending_review→active); if it matched
+  // 0 rows the state changed under us (e.g. a racing reject), so bail with 409
+  // rather than flip grader_status on an unpublished grade.
+  // The publish + grader_status flip is ONE atomic CAS UPDATE inside approveCertGrade
+  // now, so there's no window for a racing reject to negate it. 0 rows ⇒ 409.
+  const published = await approveCertGrade(certId, adminUser);
+  if (!published) {
+    return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
+  }
   // Snapshot the published grade into the approval audit row.
   const c = (await storage.getCertificate(certId)) as any;
   await storage.writeAuditLog("certificate", String(certId), "grade_approve", adminUser, {
@@ -896,7 +915,10 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
   if (a.gradingStatus !== "pending_review")
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   const before = await gradeSnapshot(certId);
-  await applyCertGradeDraft(certId, body);
+  const saved = await applyCertGradeDraft(certId, body);
+  if (!saved) {
+    return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
+  }
   const after = await gradeSnapshot(certId);
   await storage.writeAuditLog("certificate", String(certId), "admin_grade_edit", adminUser, { before, after });
   return { ok: true as const };

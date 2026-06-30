@@ -291,7 +291,10 @@ export function registerGraderRoutes(app: Express): void {
           return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not editable` });
         }
       }
-      await applyCertGradeDraft(certId, req.body || {});
+      const saved = await applyCertGradeDraft(certId, req.body || {});
+      if (!saved) {
+        return res.status(409).json({ error: "Card status changed; refresh and try again" });
+      }
       return res.json({ ok: true, gradingStatus: auth.gradingStatus });
     } catch (e: any) {
       console.error("[grader] draft save error:", e.message);
@@ -330,10 +333,15 @@ export function registerGraderRoutes(app: Express): void {
 
       if (GRADER_AUTO_PUBLISH) {
         // AUTO-PUBLISH FLIP: publish directly, skip admin review.
-        await db.execute(sql`
+        const pub = await db.execute(sql`
           UPDATE certificates SET grade_approved_at = NOW(), grade_approved_by = ${graderEmail}, status = 'active',
-            grader_status = 'approved', graded_at = NOW(), ${captureOperatorSubmission}, updated_at = NOW() WHERE id = ${certId}
+            grader_status = 'approved', graded_at = NOW(), ${captureOperatorSubmission}, updated_at = NOW()
+          WHERE id = ${certId} AND grader_status = 'assigned'
+          RETURNING id
         `);
+        if (pub.rows.length === 0) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
         await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
           auto_published: true,
         });
@@ -342,10 +350,15 @@ export function registerGraderRoutes(app: Express): void {
 
       // ── PHASE 4 — per-operator review gate (deterministic sampling) ──────────
       // Move to pending_review + snapshot the operator's submission (Phase 3).
-      await db.execute(sql`
+      const toReview = await db.execute(sql`
         UPDATE certificates SET grader_status = 'pending_review', graded_at = NOW(),
-          ${captureOperatorSubmission}, updated_at = NOW() WHERE id = ${certId}
+          ${captureOperatorSubmission}, updated_at = NOW()
+        WHERE id = ${certId} AND grader_status = 'assigned'
+        RETURNING id
       `);
+      if (toReview.rows.length === 0) {
+        return res.status(409).json({ error: "Card status changed; refresh and try again" });
+      }
 
       // Read back exactly what we just snapshotted + the gate inputs.
       const gateRow = (
@@ -384,7 +397,10 @@ export function registerGraderRoutes(app: Express): void {
       // AUTO-APPROVE — sampling cleared this card without manual review. Promote
       // the operator's grade to final and publish. grade_approved_by = 'auto' is a
       // deliberate system marker, distinguishable from any human approver.
-      await db.execute(sql`
+      // Phase 2 — CAS guard: only auto-approve while still pending_review (set just
+      // above). If a concurrent admin approve/reject changed it, this matches 0 rows
+      // and their action stands (no clobber).
+      const autoApp = await db.execute(sql`
         UPDATE certificates SET
           review_required = false,
           grade = operator_grade,
@@ -393,8 +409,12 @@ export function registerGraderRoutes(app: Express): void {
           grader_status = 'approved',
           status = 'active',
           updated_at = NOW()
-        WHERE id = ${certId}
+        WHERE id = ${certId} AND grader_status = 'pending_review'
+        RETURNING id
       `);
+      if (autoApp.rows.length === 0) {
+        return res.status(409).json({ error: "Card status changed; refresh and try again" });
+      }
       await storage.writeAuditLog("certificate", String(certId), "auto_approve", "system", {
         operator_grade: operatorGrade ?? null,
         graded_by: graderId,
@@ -444,7 +464,7 @@ export function registerGraderRoutes(app: Express): void {
       // Re-assert the review gate + re-snapshot the operator's submission from the
       // freshly-written grade columns, so the reviewer sees the corrected grade.
       // NEVER set grade_approved_at/by, status, grader_status='approved', or graded_by.
-      await db.execute(sql`
+      const reSnapshot = await db.execute(sql`
         UPDATE certificates SET
           grader_status = 'pending_review',
           review_required = true,
@@ -453,8 +473,12 @@ export function registerGraderRoutes(app: Express): void {
             'centering', centering_score, 'corners', corners_score,
             'edges', edges_score, 'surface', surface_score),
           updated_at = NOW()
-        WHERE id = ${certId}
+        WHERE id = ${certId} AND grader_status = 'pending_review' AND graded_by = ${graderId}
+        RETURNING id
       `);
+      if (reSnapshot.rows.length === 0) {
+        return res.status(409).json({ error: "Card status changed; refresh and try again" });
+      }
 
       // Audit — record what changed (before → after) for the locked schema.
       const after = (
