@@ -7,6 +7,7 @@
  * Extracted from server/routes.ts for maintainability.
  */
 
+import { sendServerError } from "../lib/error-response";
 import type {
   Express,
   Request as ExpressRequest,
@@ -1287,7 +1288,7 @@ export function registerTransferRoutes(app: Express): void {
       `);
       res.json(rows.rows);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -1307,7 +1308,7 @@ export function registerTransferRoutes(app: Express): void {
       `);
       res.json({ cards: rows.rows });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 }

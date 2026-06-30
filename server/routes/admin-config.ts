@@ -1,3 +1,4 @@
+import { sendServerError } from "../lib/error-response";
 import type { Express } from "express";
 import { storage } from "../storage";
 import { requireAdmin } from "../auth";
@@ -117,7 +118,7 @@ export function registerAdminConfigRoutes(app: Express): void {
       res.json(stats);
     } catch (error: any) {
       console.error("Stats error:", error.message, error.stack);
-      res.status(500).json({ error: `Failed to get stats: ${error.message}` });
+      res.status(500).json({ error: "Failed to get stats" });
     }
   });
 
@@ -192,7 +193,7 @@ export function registerAdminConfigRoutes(app: Express): void {
       `);
       res.json(result.rows);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -222,7 +223,7 @@ export function registerAdminConfigRoutes(app: Express): void {
       );
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -240,7 +241,7 @@ export function registerAdminConfigRoutes(app: Express): void {
       console.log(`[capacity] ALL TIERS PAUSED by ${(req.session as any)?.adminEmail || "admin"}`);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -252,7 +253,7 @@ export function registerAdminConfigRoutes(app: Express): void {
       console.log(`[capacity] ALL TIERS RESUMED by ${(req.session as any)?.adminEmail || "admin"}`);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -334,7 +335,7 @@ export function registerAdminConfigRoutes(app: Express): void {
         lastSyncedAt: row?.last || null,
       });
     } catch (e: any) {
-      return res.status(500).json({ error: e.message });
+      return sendServerError(res, e);
     }
   });
 
@@ -368,7 +369,7 @@ export function registerAdminConfigRoutes(app: Express): void {
       });
     } catch (err: any) {
       console.error("[ai-feature-flags] GET failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -400,7 +401,7 @@ export function registerAdminConfigRoutes(app: Express): void {
       res.json({ ok: true });
     } catch (err: any) {
       console.error("[ai-feature-flags] POST failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -418,7 +419,7 @@ export function registerAdminConfigRoutes(app: Express): void {
       res.json({ ok: true });
     } catch (err: any) {
       console.error("[ai-feature-flags] DELETE failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -516,7 +517,7 @@ export function registerAdminConfigRoutes(app: Express): void {
       });
     } catch (err: any) {
       console.error("[ai-dashboard-stats] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -705,7 +706,7 @@ export function registerAdminConfigRoutes(app: Express): void {
       });
     } catch (err: any) {
       console.error("[ai-divergence] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -931,7 +932,7 @@ export function registerAdminConfigRoutes(app: Express): void {
       res.json({ generated_at: new Date().toISOString(), summary, certs: filtered });
     } catch (err: any) {
       console.error("[ai-capture-health] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -972,7 +973,7 @@ export function registerAdminConfigRoutes(app: Express): void {
       });
     } catch (e: any) {
       console.error("[tcgdex-resolve-set] error:", e.message);
-      return res.status(500).json({ error: e.message });
+      return sendServerError(res, e);
     }
   });
 

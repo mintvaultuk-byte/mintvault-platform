@@ -146,7 +146,7 @@ export function registerSellerRoutes(app: Express): void {
     } catch (err: any) {
       console.error("[marketplace-seller] onboard error:", err.message);
       if (err.type === "StripeError" || err.raw) {
-        return res.status(500).json({ error: "stripe_error", message: err.message });
+        return res.status(500).json({ error: "stripe_error" });
       }
       return res.status(500).json({ error: "database_error", message: "Failed to start seller onboarding." });
     }
@@ -206,7 +206,7 @@ export function registerSellerRoutes(app: Express): void {
       return res.json({ url: accountLink.url });
     } catch (err: any) {
       console.error("[marketplace-seller] refresh-link error:", err.message);
-      return res.status(500).json({ error: "stripe_error", message: err.message });
+      return res.status(500).json({ error: "stripe_error" });
     }
   });
 }

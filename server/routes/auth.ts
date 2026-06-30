@@ -824,7 +824,7 @@ export function registerAuthRoutes(app: Express): void {
       return res.json({ ok: true, destroyed: beforeCount });
     } catch (err: any) {
       console.error("[logout-everywhere] error:", err.message);
-      return res.status(500).json({ error: "Failed to truncate sessions: " + err.message });
+      return res.status(500).json({ error: "Failed to truncate sessions" });
     }
   });
 

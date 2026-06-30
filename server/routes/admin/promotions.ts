@@ -11,6 +11,7 @@
  * admin auth flow). All numeric/string inputs are validated server-side —
  * client-supplied percentages are never trusted.
  */
+import { sendServerError } from "../../lib/error-response";
 import type { Express, Request } from "express";
 import { requireAdmin } from "../../auth";
 import {
@@ -115,7 +116,7 @@ export function registerPromotionRoutes(app: Express): void {
       res.json({ promotion: promo });
     } catch (err: any) {
       console.error("[promotions] create error:", err?.message || err);
-      res.status(500).json({ error: err?.message || "Failed to save promotion" });
+      sendServerError(res, err);
     }
   });
 
@@ -129,7 +130,7 @@ export function registerPromotionRoutes(app: Express): void {
       res.json({ promotion: promo });
     } catch (err: any) {
       console.error("[promotions] update error:", err?.message || err);
-      res.status(500).json({ error: err?.message || "Failed to save promotion" });
+      sendServerError(res, err);
     }
   });
 
@@ -154,7 +155,7 @@ export function registerPromotionRoutes(app: Express): void {
       res.json({ ok: true });
     } catch (err: any) {
       console.error("[promotions] delete error:", err?.message || err);
-      res.status(500).json({ error: err?.message || "Failed to delete promotion" });
+      sendServerError(res, err);
     }
   });
 
@@ -180,7 +181,7 @@ export function registerPromotionRoutes(app: Express): void {
         return res.status(409).json({ error: "That code already exists" });
       }
       console.error("[promo-codes] create error:", err?.message || err);
-      res.status(500).json({ error: err?.message || "Failed to create promo code" });
+      sendServerError(res, err);
     }
   });
 
@@ -192,7 +193,7 @@ export function registerPromotionRoutes(app: Express): void {
       res.json({ ok: true });
     } catch (err: any) {
       console.error("[promo-codes] delete error:", err?.message || err);
-      res.status(500).json({ error: err?.message || "Failed to delete promo code" });
+      sendServerError(res, err);
     }
   });
 }

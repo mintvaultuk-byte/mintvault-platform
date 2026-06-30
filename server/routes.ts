@@ -1,3 +1,4 @@
+import { sendServerError } from "./lib/error-response";
 import type {
   Express,
   Request as ExpressRequest,
@@ -1528,7 +1529,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         await db.execute(sql`
           UPDATE contact_inquiries SET email_sent_at = NOW() WHERE id = ${inquiryId}
         `);
-        console.log(`[contact] inquiry ${inquiryId} sent to inbox (topic=${topic}, from=${email})`);
+        console.log(`[contact] inquiry ${inquiryId} sent to inbox (topic=${topic}, from=${String(email).replace(/^(.).*@/, "$1***@")})`);
       } catch (sendErr: any) {
         const errMsg = (sendErr?.message || String(sendErr)).slice(0, 1000);
         console.error(`[contact] inquiry ${inquiryId} Resend send failed: ${errMsg}`);
@@ -3080,7 +3081,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({ analysis });
     } catch (error: any) {
       console.error("AI analyze error:", error.message, error.stack);
-      res.status(500).json({ error: `Analysis failed: ${error.message}` });
+      res.status(500).json({ error: "Analysis failed" });
     }
   });
 
@@ -3238,7 +3239,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : {});
     } catch (error: any) {
       console.error("Approve grade error:", error.message);
-      res.status(500).json({ error: `Failed to approve grade: ${error.message}` });
+      res.status(500).json({ error: "Failed to approve grade" });
     }
   });
 
@@ -3421,7 +3422,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json(report);
     } catch (error: any) {
       console.error("[report] error:", error.message);
-      res.status(500).json({ error: error.message });
+      sendServerError(res, error);
     }
   });
 
@@ -3684,7 +3685,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       doc.end();
     } catch (error: any) {
       console.error("[report/pdf] error:", error.message, error.stack);
-      if (!res.headersSent) res.status(500).json({ error: `PDF generation failed: ${error.message}` });
+      if (!res.headersSent) res.status(500).json({ error: "PDF generation failed" });
     }
   });
 
@@ -3925,7 +3926,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await uploadToR2(cacheKey, pdf, "application/pdf");
       res.json({ ok: true, key: cacheKey });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -4132,7 +4133,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
     } catch (error: any) {
       console.error("[dig] error:", error.message);
-      res.status(500).json({ error: error.message });
+      sendServerError(res, error);
     }
   });
 
@@ -4523,7 +4524,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json(stats);
     } catch (error: any) {
       console.error("Stats error:", error.message, error.stack);
-      res.status(500).json({ error: `Failed to get stats: ${error.message}` });
+      res.status(500).json({ error: "Failed to get stats" });
     }
   });
 
@@ -5236,7 +5237,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json(certsWithUrls);
     } catch (error: any) {
       console.error("List certs error:", error.message, error.stack);
-      res.status(500).json({ error: `Failed to list certificates: ${error.message}` });
+      res.status(500).json({ error: "Failed to list certificates" });
     }
   });
 
@@ -5426,7 +5427,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : updated);
       } catch (error: any) {
         console.error("Create cert error:", error.message, error.stack);
-        res.status(500).json({ error: `Failed to create certificate: ${error.message}` });
+        res.status(500).json({ error: "Failed to create certificate" });
       }
     }
   );
@@ -5562,7 +5563,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         res.json(cert ? { ...cert, certId: normalizeCertId(cert.certId) } : cert);
       } catch (error: any) {
         console.error("Update cert error:", error.message, error.stack);
-        res.status(500).json({ error: `Failed to update certificate: ${error.message}` });
+        res.status(500).json({ error: "Failed to update certificate" });
       }
     }
   );
@@ -5617,7 +5618,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
     } catch (error: any) {
       console.error("Void cert error:", error.message, error.stack);
-      res.status(500).json({ error: `Failed to void certificate: ${error.message}` });
+      res.status(500).json({ error: "Failed to void certificate" });
     }
   });
 
@@ -5670,7 +5671,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json(certs);
     } catch (err: any) {
       console.error("[printing/queue] ERROR:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -5679,7 +5680,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const sheets = await storage.getLabelSheets();
       res.json(sheets);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -5688,7 +5689,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const detail = await storage.getSheetDetail(String(req.params.sheetRef));
       res.json(detail);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -5934,7 +5935,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
     } catch (err: any) {
       console.error("[print-batch] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -5945,7 +5946,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await storage.markSheetPrinted(sheetRef);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -6121,7 +6122,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
     } catch (err: any) {
       console.error("[reprint] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -6266,7 +6267,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.setHeader("Content-Disposition", `attachment; filename="${cert.certId}-${side}.pdf"`);
       res.send(pdf);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -6276,7 +6277,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const certs = await storage.listCertificatesBrowser();
       res.json(certs.map((c) => ({ ...c, certId: normalizeCertId(c.certId) })));
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -6286,7 +6287,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const override = await storage.getLabelOverride(String(req.params.certId));
       res.json(override ?? null);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -6302,7 +6303,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
       res.json(override);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -6311,7 +6312,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await storage.clearLabelOverride(String(req.params.certId));
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -7475,7 +7476,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.json(result);
       } catch (err: any) {
         console.error("[staging-harness] seed error:", err.message, err.stack?.split("\n")[1]?.trim());
-        return res.status(500).json({ error: "Seed failed.", detail: err.message });
+        return res.status(500).json({ error: "Seed failed." });
       }
     });
 
@@ -7491,7 +7492,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           return res.status(400).json({ error: err.message, totalCount: err.totalCount, limit: err.limit });
         }
         console.error("[staging-harness] reset error:", err.message, err.stack?.split("\n")[1]?.trim());
-        return res.status(500).json({ error: "Reset failed.", detail: err.message });
+        return res.status(500).json({ error: "Reset failed." });
       }
     });
   }
@@ -8430,7 +8431,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.json({ ok: true, destroyed: beforeCount });
     } catch (err: any) {
       console.error("[logout-everywhere] error:", err.message);
-      return res.status(500).json({ error: "Failed to truncate sessions: " + err.message });
+      return res.status(500).json({ error: "Failed to truncate sessions" });
     }
   });
 
@@ -8517,7 +8518,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({ ok: true, changed: true, consent });
     } catch (err: any) {
       console.error("[marketing-consent] toggle error:", err);
-      res.status(500).json({ error: err?.message ?? "Failed to update consent." });
+      sendServerError(res, err);
     }
   });
 
@@ -8562,7 +8563,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({ ok: true, withdrew: ids.length });
     } catch (err: any) {
       console.error("[marketing-consent] withdraw-all error:", err);
-      res.status(500).json({ error: err?.message ?? "Failed to withdraw consent." });
+      sendServerError(res, err);
     }
   });
 
@@ -9039,7 +9040,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         res.json({ success: true, urls: responseUrls, quality: qualityResults });
       } catch (error: any) {
         console.error("[upload-images] error:", error.message, error.stack);
-        res.status(500).json({ error: `Upload failed: ${error.message}` });
+        res.status(500).json({ error: "Upload failed" });
       }
     }
   );
@@ -9105,7 +9106,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         res.json({ ok: true, certId: cert.certId, aiTriggered: !!aiPromise });
       } catch (err: any) {
         console.error(`[attach-images] cert=${id} failed:`, err?.message || err, err?.stack || "");
-        res.status(500).json({ error: err?.message || "Attach failed" });
+        sendServerError(res, err);
       }
     }
   );
@@ -9209,7 +9210,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({ success: true, results });
     } catch (err: any) {
       console.error("[reprocess] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -9242,7 +9243,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         const resp = await fetch(url);
         origBuf = Buffer.from(await resp.arrayBuffer());
       } catch (err: any) {
-        return res.status(500).json({ error: `Failed to fetch original: ${err.message}` });
+        return res.status(500).json({ error: "Failed to fetch original" });
       }
 
       // Apply rotation first if specified, then crop from rotated dimensions
@@ -9362,7 +9363,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({ success: true, side, width: w, height: h, displayUrl });
     } catch (err: any) {
       console.error("[recrop] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -9450,11 +9451,12 @@ Defects (admin-confirmed): ${defectLines}`;
       try {
         anthRes = await anthropicFetch(body, { apiKey, timeoutMs: 60_000 });
       } catch (err: any) {
-        return res.status(502).json({ error: `Claude API call failed: ${err.message}` });
+        return res.status(502).json({ error: "Claude API call failed" });
       }
       if (!anthRes.ok) {
         const errText = await anthRes.text();
-        return res.status(502).json({ error: `Claude API error ${anthRes.status}: ${errText.slice(0, 200)}` });
+        console.error("[claude] upstream error", anthRes.status, errText.slice(0, 500));
+        return res.status(502).json({ error: "AI service error" });
       }
       const data = (await anthRes.json()) as Record<string, unknown>;
       const content = data.content as Array<{ type: string; text?: string }> | undefined;
@@ -9501,7 +9503,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ description, costEstimate: Number(costGbp.toFixed(4)) });
     } catch (err: any) {
       console.error("[generate-description] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -9561,7 +9563,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[detect-card-bounds] error:", err.message);
-      res.json({ ok: false, message: err.message });
+      res.json({ ok: false, message: "Detection failed" });
     }
   });
 
@@ -9645,7 +9647,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ ok: true, cert: updated ? { ...updated, certId: normalizeCertId(updated.certId) } : null });
     } catch (err: any) {
       console.error("[image-delete] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -9699,7 +9701,7 @@ Defects (admin-confirmed): ${defectLines}`;
       const quality = c.imageQualityChecks || {};
       res.json({ urls, quality });
     } catch (error: any) {
-      res.status(500).json({ error: `Failed to get images: ${error.message}` });
+      res.status(500).json({ error: "Failed to get images" });
     }
   });
 
@@ -9797,7 +9799,7 @@ Defects (admin-confirmed): ${defectLines}`;
         aiDefectCandidates: c.aiDefectCandidates ?? (c as any).ai_defect_candidates ?? [],
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      sendServerError(res, error);
     }
   });
 
@@ -9881,7 +9883,7 @@ Defects (admin-confirmed): ${defectLines}`;
       return res.json({ ok: true, card_name: cardName, set_name: setName, card_number_display: cardNumber, variant });
     } catch (error: any) {
       console.error("[identity-override] error:", error.message);
-      return res.status(500).json({ error: error.message });
+      return sendServerError(res, error);
     }
   });
 
@@ -10094,7 +10096,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ ok: true, wasApproved });
     } catch (error: any) {
       console.error("[grade] save error:", error.message);
-      res.status(500).json({ error: error.message });
+      sendServerError(res, error);
     }
   });
 
@@ -10389,7 +10391,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : {});
     } catch (error: any) {
       console.error("[approve] error:", error.message);
-      res.status(500).json({ error: error.message });
+      sendServerError(res, error);
     }
   });
 
@@ -10461,7 +10463,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json(result.rows);
     } catch (err: any) {
       console.error("[override-audit] query error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -10478,7 +10480,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json(results);
     } catch (error: any) {
       console.error("[card-lookup] error:", error.message);
-      res.status(500).json({ error: `Card lookup failed: ${error.message}` });
+      res.status(500).json({ error: "Card lookup failed" });
     }
   });
 
@@ -10545,7 +10547,7 @@ Defects (admin-confirmed): ${defectLines}`;
         }));
         return res.json({ queue, status: f, cap: CAP, total, capped: total > CAP });
       } catch (err: any) {
-        return res.status(500).json({ error: err.message });
+        return sendServerError(res, err);
       }
     }
 
@@ -10572,7 +10574,7 @@ Defects (admin-confirmed): ${defectLines}`;
       }));
       res.json(queue);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -10589,7 +10591,7 @@ Defects (admin-confirmed): ${defectLines}`;
       const first = rows.rows?.[0] as any;
       res.json({ certId: first ? normalizeCertId(first.certificate_number) : null });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -10672,7 +10674,7 @@ Defects (admin-confirmed): ${defectLines}`;
 
       res.json({ ok: true, imageUrl: signedUrl, quality });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -10743,7 +10745,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ ok: true, certId: normId, side, imageUrl: signedUrl });
     } catch (err: any) {
       console.error("[hot-folder] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -10784,7 +10786,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ identification: enriched });
     } catch (err: any) {
       console.error("[ai/identify] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -10918,7 +10920,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[identify-only] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -11002,7 +11004,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ centering });
     } catch (err: any) {
       console.error("[measure-centering] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -11076,7 +11078,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ lr, tb, subgrade, outer, inner });
     } catch (err: any) {
       console.error("[manual-centering] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -11183,7 +11185,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ defects: filtered });
     } catch (err: any) {
       console.error("[detect-defects] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -11288,7 +11290,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ grade: gradeResult });
     } catch (err: any) {
       console.error("[grade-card] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -11318,7 +11320,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ analysis });
     } catch (err: any) {
       console.error("[ai/analyze] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -11693,7 +11695,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[ai/identify-and-analyze] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -11813,7 +11815,7 @@ Defects (admin-confirmed): ${defectLines}`;
         });
       } catch (err: any) {
         console.error("[grade-with-ai] error:", err.message);
-        res.status(500).json({ error: "Grading failed", details: err.message });
+        res.status(500).json({ error: "Grading failed" });
       }
     }
   );
@@ -11829,7 +11831,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json(result);
     } catch (err: any) {
       console.error("[ai/identify-image] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12148,7 +12150,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ ...estimate, ...compat, credits_remaining: creditsLeft });
     } catch (err: any) {
       console.error("[tools/estimate] error:", err.message);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12318,7 +12320,7 @@ Defects (admin-confirmed): ${defectLines}`;
         console.error(
           `[scan-ingest] error${certInfo ? ` (cert=${certInfo.certId})` : ""}: ${err.message}${pgErrorDetail(err)}`
         );
-        res.status(500).json({ error: `Scan ingest failed: ${err.message}`, certId: certInfo?.certId || null });
+        res.status(500).json({ error: "Scan ingest failed", certId: certInfo?.certId || null });
       }
     }
   );
@@ -12345,7 +12347,7 @@ Defects (admin-confirmed): ${defectLines}`;
         scan_status: row?.scan_status ?? null,
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12375,7 +12377,7 @@ Defects (admin-confirmed): ${defectLines}`;
         })),
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12493,7 +12495,7 @@ Defects (admin-confirmed): ${defectLines}`;
         activity_last_30_days: activityRows.rows,
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12520,7 +12522,7 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
       res.json(rows.rows[0] || {});
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12562,7 +12564,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[ai-feature-flags] GET failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12594,7 +12596,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ ok: true });
     } catch (err: any) {
       console.error("[ai-feature-flags] POST failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12612,7 +12614,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ ok: true });
     } catch (err: any) {
       console.error("[ai-feature-flags] DELETE failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12719,7 +12721,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[ai-dashboard-stats] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12758,7 +12760,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ next: `MV${n}`, next_numeric: n });
     } catch (err: any) {
       console.error("[next-cert-id] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12794,7 +12796,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[orphan-certs] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12832,7 +12834,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[cert-preview] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -12927,7 +12929,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[pop-report] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -13019,7 +13021,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ success: true, front_url, back_url });
     } catch (err: any) {
       console.error("[reprocess-images] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -13163,7 +13165,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[bulk-reprocess] fatal:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -13221,7 +13223,7 @@ Defects (admin-confirmed): ${defectLines}`;
           .jpeg({ quality: 85, progressive: true, mozjpeg: true })
           .toBuffer();
       } catch (err: any) {
-        return res.status(400).json({ error: `image decode failed: ${err.message}` });
+        return res.status(400).json({ error: "image decode failed" });
       }
 
       const newKey = `images/grading/${cert.id}/${side}_original.jpg`;
@@ -13320,7 +13322,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[cert-image-attach] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -13356,7 +13358,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ ok: true, cert_id: certId });
     } catch (err: any) {
       console.error("[cert-soft-delete] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -13567,7 +13569,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[ai-divergence] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -13811,7 +13813,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ generated_at: new Date().toISOString(), summary, certs: filtered });
     } catch (err: any) {
       console.error("[ai-capture-health] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -14033,7 +14035,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ dryRun, results, summary });
     } catch (err: any) {
       console.error("[backfill-cert-metadata] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -14139,7 +14141,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[embed-corpus/run] failed:", err);
-      return res.status(500).json({ error: err.message });
+      return sendServerError(res, err);
     }
   });
 
@@ -14156,7 +14158,7 @@ Defects (admin-confirmed): ${defectLines}`;
       return res.json({ ok: result.status !== "no-data", ...result });
     } catch (err: any) {
       console.error(`[embed-corpus/cert] ${req.params.certId} failed:`, err);
-      return res.status(500).json({ error: err.message });
+      return sendServerError(res, err);
     }
   });
 
@@ -14180,7 +14182,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json(summary);
     } catch (err: any) {
       console.error("[archival-b2] manual run error:", err?.message || err);
-      res.status(500).json({ error: err?.message || "archival run failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -14224,7 +14226,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[archival-b2] status error:", err?.message || err);
-      res.status(500).json({ error: err?.message || "archival status query failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -14256,7 +14258,7 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -14279,7 +14281,7 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
       res.json(rows.rows);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -14299,7 +14301,7 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
       res.json({ cards: rows.rows });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -14853,7 +14855,7 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
       res.json(result.rows);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -14884,7 +14886,7 @@ Defects (admin-confirmed): ${defectLines}`;
       );
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -14903,7 +14905,7 @@ Defects (admin-confirmed): ${defectLines}`;
       console.log(`[capacity] ALL TIERS PAUSED by ${(req.session as any)?.adminEmail || "admin"}`);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -14916,7 +14918,7 @@ Defects (admin-confirmed): ${defectLines}`;
       console.log(`[capacity] ALL TIERS RESUMED by ${(req.session as any)?.adminEmail || "admin"}`);
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -14930,7 +14932,7 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
       res.json(result.rows);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -14984,7 +14986,7 @@ Defects (admin-confirmed): ${defectLines}`;
         nextPost,
       });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -15009,7 +15011,7 @@ Defects (admin-confirmed): ${defectLines}`;
       } catch {}
       res.json({ ok: true, postEnabled: enabled });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -15076,7 +15078,7 @@ Defects (admin-confirmed): ${defectLines}`;
 
       res.json({ rows: enriched, page, limit, total });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -15103,7 +15105,7 @@ Defects (admin-confirmed): ${defectLines}`;
       } catch {}
       res.json(result);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -15126,7 +15128,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json(result);
     } catch (err: any) {
       console.error("[weekly-reel] manual trigger crashed:", err);
-      res.status(500).json({ error: err?.message ?? "weekly-reel failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15200,7 +15202,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ history });
     } catch (err: any) {
       console.error("[weekly-reel] status fetch failed:", err);
-      res.status(500).json({ error: err?.message ?? "status fetch failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15240,7 +15242,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ cards });
     } catch (err: any) {
       console.error("[weekly-reel] consenting-cards fetch failed:", err);
-      res.status(500).json({ error: err?.message ?? "consenting-cards fetch failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15282,7 +15284,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ cards });
     } catch (err: any) {
       console.error("[weekly-reel] all-graded-cards fetch failed:", err);
-      res.status(500).json({ error: err?.message ?? "all-graded-cards fetch failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15340,7 +15342,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ ok: true, changed: true, consent, submissionId });
     } catch (err: any) {
       console.error("[weekly-reel] consent override failed:", err);
-      res.status(500).json({ error: err?.message ?? "consent update failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15385,7 +15387,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ cards });
     } catch (err: any) {
       console.error("[weekly-reel] featured-cards fetch failed:", err);
-      res.status(500).json({ error: err?.message ?? "featured-cards fetch failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15438,7 +15440,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ ok: true, changed: true, featured, certId });
     } catch (err: any) {
       console.error("[weekly-reel] featured override failed:", err);
-      res.status(500).json({ error: err?.message ?? "featured update failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15464,7 +15466,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ calibration, defaults: defaultCalibration(), ranges: FIELD_RANGES });
     } catch (err: any) {
       console.error("[mvgs-calibration] load failed:", err);
-      res.status(500).json({ error: err?.message ?? "calibration load failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15503,7 +15505,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ calibration: next });
     } catch (err: any) {
       console.error("[mvgs-calibration] patch failed:", err);
-      res.status(500).json({ error: err?.message ?? "calibration patch failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15519,7 +15521,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ calibration: await loadMvgsCalibration() });
     } catch (err: any) {
       console.error("[mvgs-calibration] lock failed:", err);
-      res.status(500).json({ error: err?.message ?? "calibration lock failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15538,7 +15540,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ calibration: await loadMvgsCalibration() });
     } catch (err: any) {
       console.error("[mvgs-calibration] unlock failed:", err);
-      res.status(500).json({ error: err?.message ?? "calibration unlock failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15551,7 +15553,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ settings });
     } catch (err: any) {
       console.error("[weekly-reel] settings fetch failed:", err);
-      res.status(500).json({ error: err?.message ?? "settings fetch failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15651,7 +15653,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ ok: true, key, value });
     } catch (err: any) {
       console.error("[weekly-reel] settings update failed:", err);
-      res.status(500).json({ error: err?.message ?? "settings update failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15694,7 +15696,7 @@ Defects (admin-confirmed): ${defectLines}`;
         res.json({ ok: true, changed: true, [opts.bodyField]: nextVal, certId });
       } catch (err: any) {
         console.error(`[${opts.logTag}] update failed:`, err);
-        res.status(500).json({ error: err?.message ?? "update failed" });
+        sendServerError(res, err);
       }
     };
   }
@@ -15741,7 +15743,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message ?? "webhook test failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15754,7 +15756,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json(result);
     } catch (err: any) {
       console.error("[weekly-reel] rerun crashed:", err);
-      res.status(500).json({ error: err?.message ?? "rerun failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15803,7 +15805,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
     } catch (err: any) {
       console.error("[weekly-reel] analytics fetch failed:", err);
-      res.status(500).json({ error: err?.message ?? "analytics fetch failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15842,7 +15844,7 @@ Defects (admin-confirmed): ${defectLines}`;
       const { getMetaTokenStatus } = await import("./lib/meta-publisher");
       res.json(await getMetaTokenStatus());
     } catch (err: any) {
-      res.status(500).json({ error: err?.message ?? "meta-status failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15851,7 +15853,7 @@ Defects (admin-confirmed): ${defectLines}`;
       const { getTikTokTokenStatus } = await import("./lib/tiktok-publisher");
       res.json(await getTikTokTokenStatus());
     } catch (err: any) {
-      res.status(500).json({ error: err?.message ?? "tiktok-status failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -15988,7 +15990,7 @@ Defects (admin-confirmed): ${defectLines}`;
         })),
       });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message ?? "approvals fetch failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -16008,7 +16010,7 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
       res.json({ ok: true, date, certNumber, approved });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message ?? "approval update failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -16023,7 +16025,7 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
       res.json({ ok: true, date });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message ?? "approve-all failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -16073,12 +16075,12 @@ Defects (admin-confirmed): ${defectLines}`;
       try {
         await uploadToR2(manifestKey, Buffer.from(JSON.stringify(manifest, null, 2), "utf-8"), "application/json");
       } catch (err: any) {
-        return res.status(500).json({ error: `manifest re-upload failed: ${err?.message ?? err}` });
+        return res.status(500).json({ error: "manifest re-upload failed" });
       }
 
       res.json({ ok: true, videoUrl, error });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message ?? "regenerate failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -16106,7 +16108,7 @@ Defects (admin-confirmed): ${defectLines}`;
         res.json({ ok: true, r2Key: opts.r2Key, size: file.buffer.length });
       } catch (err: any) {
         console.error(`[${opts.logTag}] upload failed:`, err);
-        res.status(500).json({ error: err?.message ?? "upload failed" });
+        sendServerError(res, err);
       }
     };
   }
@@ -16201,7 +16203,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.json({ reels });
     } catch (err: any) {
       console.error("[public-reels] fetch failed:", err);
-      res.status(500).json({ error: err?.message ?? "reels fetch failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -16224,7 +16226,7 @@ Defects (admin-confirmed): ${defectLines}`;
         caption: manifest.caption ?? "",
       });
     } catch (err: any) {
-      res.status(500).json({ error: err?.message ?? "share-reel fetch failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -16241,7 +16243,7 @@ Defects (admin-confirmed): ${defectLines}`;
       } catch {}
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -16258,7 +16260,7 @@ Defects (admin-confirmed): ${defectLines}`;
       } catch {}
       res.json({ ok: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -16276,7 +16278,7 @@ Defects (admin-confirmed): ${defectLines}`;
       const url = await getR2SignedUrl(row.imageR2Key, 60);
       res.json({ url });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -16343,7 +16345,7 @@ Defects (admin-confirmed): ${defectLines}`;
       } catch {}
       res.json({ ok: true, fieldsChanged });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -16469,7 +16471,7 @@ Defects (admin-confirmed): ${defectLines}`;
       } catch {}
       res.json({ ok: true, caption, hashtags, fromFallback });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -16521,7 +16523,7 @@ Defects (admin-confirmed): ${defectLines}`;
       } catch {}
       res.json({ ok: true, r2Key: newKey });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -16534,7 +16536,7 @@ Defects (admin-confirmed): ${defectLines}`;
       const { IG_HASHTAG_PRESETS } = await import("@shared/ig-hashtag-presets");
       res.json(IG_HASHTAG_PRESETS);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -16577,7 +16579,7 @@ Defects (admin-confirmed): ${defectLines}`;
       } catch {}
       res.status(204).end();
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -16666,7 +16668,7 @@ Defects (admin-confirmed): ${defectLines}`;
       res.status(201).json({ ok: true, row: inserted, fromFallback });
     } catch (err: any) {
       console.error("[ig/queue/from-cert] failed:", err);
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 

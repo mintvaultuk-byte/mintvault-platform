@@ -695,7 +695,7 @@ export function registerAdminSubmissionRoutes(app: Express): void {
       res.json({ success: true, fromStatus: current, toStatus: prev, cleared });
     } catch (error: any) {
       console.error("Step-back error:", error.message);
-      res.status(500).json({ error: "Failed to step back status", detail: error.message });
+      res.status(500).json({ error: "Failed to step back status" });
     }
   });
 

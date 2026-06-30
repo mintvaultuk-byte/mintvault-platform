@@ -5,6 +5,7 @@
  * Extracted from server/routes.ts for maintainability.
  */
 
+import { sendServerError } from "../lib/error-response";
 import type { Express } from "express";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
@@ -103,7 +104,7 @@ export function registerEmbeddingRoutes(app: Express): void {
       });
     } catch (err: any) {
       console.error("[embed-corpus/run] failed:", err);
-      return res.status(500).json({ error: err.message });
+      return sendServerError(res, err);
     }
   });
 
@@ -120,7 +121,7 @@ export function registerEmbeddingRoutes(app: Express): void {
       return res.json({ ok: result.status !== "no-data", ...result });
     } catch (err: any) {
       console.error(`[embed-corpus/cert] ${req.params.certId} failed:`, err);
-      return res.status(500).json({ error: err.message });
+      return sendServerError(res, err);
     }
   });
 
@@ -140,7 +141,7 @@ export function registerEmbeddingRoutes(app: Express): void {
       res.json(summary);
     } catch (err: any) {
       console.error("[archival-b2] manual run error:", err?.message || err);
-      res.status(500).json({ error: err?.message || "archival run failed" });
+      sendServerError(res, err);
     }
   });
 
@@ -184,7 +185,7 @@ export function registerEmbeddingRoutes(app: Express): void {
       });
     } catch (err: any) {
       console.error("[archival-b2] status error:", err?.message || err);
-      res.status(500).json({ error: err?.message || "archival status query failed" });
+      sendServerError(res, err);
     }
   });
 }

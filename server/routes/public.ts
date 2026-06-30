@@ -1,3 +1,4 @@
+import { sendServerError } from "../lib/error-response";
 import type { Express } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
@@ -452,7 +453,7 @@ export function registerPublicRoutes(app: Express): void {
       `);
       res.json(result.rows);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 

@@ -15,6 +15,7 @@
  * requireCapability('grade'); the grade session aliases graderId=staffId so that
  * machinery (proxy, ownership, sanitizer) is reused unchanged.
  */
+import { sendServerError } from "../lib/error-response";
 import type { Express, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import multer from "multer";
@@ -110,7 +111,7 @@ export function registerStaffRoutes(app: Express): void {
     try {
       return res.json(await getGraderAnalytics((req.session as any).staffId));
     } catch (e: any) {
-      return res.status(500).json({ error: e.message });
+      return sendServerError(res, e);
     }
   });
 
@@ -119,7 +120,7 @@ export function registerStaffRoutes(app: Express): void {
     try {
       return res.json({ items: await getScanQueue((req.session as any).staffId) });
     } catch (e: any) {
-      return res.status(500).json({ error: e.message });
+      return sendServerError(res, e);
     }
   });
 
@@ -166,7 +167,7 @@ export function registerStaffRoutes(app: Express): void {
         return res.json({ ok: true, submissionScanned: scanned });
       } catch (e: any) {
         console.error("[staff] scan upload error:", e.message);
-        return res.status(500).json({ error: e.message });
+        return sendServerError(res, e);
       }
     }
   );
