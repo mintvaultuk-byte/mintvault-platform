@@ -1839,8 +1839,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!file) {
         return res.status(400).json({ error: "Image required (multipart field: 'image')." });
       }
-      const uploadErr = await rejectInvalidUploads([file]);
-      if (uploadErr) return res.status(400).json({ error: uploadErr });
+      if (!(await validateImageMagicBytes(file))) {
+        return res.status(400).json({ error: `File "${file.originalname}" is not a valid image.` });
+      }
       const sharp = (await import("sharp")).default;
       const jpeg = await sharp(file.buffer)
         .rotate()
@@ -8639,8 +8640,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // Upload photos to R2 — validate real image content (magic bytes), not
         // just the filename extension, before trusting the client-supplied type.
         const files = (req.files as Express.Multer.File[]) ?? [];
-        const badUpload = await rejectInvalidUploads(files);
-        if (badUpload) return res.status(400).json({ error: badUpload });
+        for (const f of files) {
+          if (!(await validateImageMagicBytes(f))) {
+            return res.status(400).json({ error: `File "${f.originalname}" is not a valid image.` });
+          }
+        }
         const photoUrls: string[] = [];
         for (const file of files) {
           const key = `receipt/${sub.submissionId}/${Date.now()}-${file.originalname}`;
