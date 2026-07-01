@@ -36,3 +36,63 @@ jobs:
       - name: Audit (high severity)
         run: npm audit --audit-level=high
         continue-on-error: true
+
+  # ── Security scanning (forward-ported from security/remediation-release) ──
+  # Additive to the check job above; these run independently and surface SAST /
+  # secret / dependency findings on every push + PR to main. They do NOT gate the
+  # Fly deploy (deploys are manual) — they are a signal, not a blocker.
+  dependency-review:
+    name: PR dependency review
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Dependency review (block HIGH on the PR diff)
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0 # full history so gitleaks can scan all commits on the ref
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  codeql:
+    name: CodeQL (SAST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write # CodeQL uploads its SARIF results
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          config: |
+            paths-ignore:
+              - tests/**
+              - scripts/cricut-app/**
+              - server/scripts/**
+              - dist/**
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3

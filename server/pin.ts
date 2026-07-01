@@ -176,7 +176,8 @@ export type PinAttemptReason =
   | "weak_pin"
   | "pin_set"
   | "pin_reset"
-  | "reset_link_sent";
+  | "reset_link_sent"
+  | "admin_blocked";
 
 /** Single insert into pin_attempts plus a conditional audit_log row for
  *  security-relevant events (failures, lockouts, resets). Successful
@@ -203,6 +204,7 @@ export async function logPinEvent(
     "pin_reset",
     "reset_link_sent",
     "weak_pin",
+    "admin_blocked",
   ];
   if (!auditWorthy.includes(reason)) return;
   try {

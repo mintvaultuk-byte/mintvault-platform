@@ -745,6 +745,13 @@ export function registerAuthRoutes(app: Express): void {
       // Generic response either way
       const genericMsg = { ok: true, message: "If an account exists, a reset link has been sent." };
 
+      // B10 — defense-in-depth: never mint a public PIN-reset token for the admin
+      // account. Same generic response (no account enumeration); logged for audit.
+      if (rawEmail === ADMIN_EMAIL.toLowerCase()) {
+        await logPinEvent(rawEmail, false, "admin_blocked", ipH);
+        return res.json(genericMsg);
+      }
+
       if (!user) {
         await logPinEvent(rawEmail, false, "no_user", ipH);
         return res.json(genericMsg);
@@ -981,15 +988,17 @@ export function registerAuthRoutes(app: Express): void {
     try {
       const { token } = req.query;
       if (!token || typeof token !== "string") return res.redirect("/login?error=expired_link");
-      const rows = await db.execute(sql`
-        SELECT * FROM account_magic_link_tokens WHERE token = ${token} LIMIT 1
+      // S2 — atomic single-use consume: only the FIRST concurrent request wins
+      // the row (WHERE consumed_at IS NULL … RETURNING). Closes the TOCTOU race
+      // where two concurrent requests could both consume the same token. Matches
+      // the pattern used for password_reset / email_verification / pin_reset.
+      const consumed = await db.execute(sql`
+        UPDATE account_magic_link_tokens SET consumed_at = NOW()
+        WHERE token = ${token} AND consumed_at IS NULL AND expires_at > NOW()
+        RETURNING user_id
       `);
-      if (!rows.rows.length) return res.redirect("/login?error=expired_link");
-      const rec = rows.rows[0] as any;
-      if (rec.consumed_at || new Date(rec.expires_at) < new Date()) {
-        return res.redirect("/login?error=expired_link");
-      }
-      await db.execute(sql`UPDATE account_magic_link_tokens SET consumed_at = NOW() WHERE token = ${token}`);
+      if (!consumed.rows.length) return res.redirect("/login?error=expired_link");
+      const rec = consumed.rows[0] as any;
       const user = await findUserById(rec.user_id);
       if (!user || user.deleted_at) return res.redirect("/login?error=expired_link");
 
