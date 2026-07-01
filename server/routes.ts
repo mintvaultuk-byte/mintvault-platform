@@ -1839,6 +1839,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!file) {
         return res.status(400).json({ error: "Image required (multipart field: 'image')." });
       }
+      const uploadErr = await rejectInvalidUploads([file]);
+      if (uploadErr) return res.status(400).json({ error: uploadErr });
       const sharp = (await import("sharp")).default;
       const jpeg = await sharp(file.buffer)
         .rotate()
@@ -2390,6 +2392,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/admin/community", requireAdmin, upload.single("imageFile"), async (req, res) => {
     try {
       if (!req.file) return res.status(400).json({ error: "imageFile is required" });
+      const uploadErr = await rejectInvalidUploads([req.file]);
+      if (uploadErr) return res.status(400).json({ error: uploadErr });
       const gradeRaw = req.body.grade != null && req.body.grade !== "" ? parseFloat(String(req.body.grade)) : null;
       const { createPostManual } = await import("./community");
       const post = await createPostManual(
@@ -11740,6 +11744,8 @@ Defects (admin-confirmed): ${defectLines}`;
         const frontFile = files.front_image?.[0];
         if (!frontFile) return res.status(400).json({ error: "front_image is required" });
         const backFile = files.back_image?.[0];
+        const uploadErr = await rejectInvalidUploads([frontFile, ...(backFile ? [backFile] : [])]);
+        if (uploadErr) return res.status(400).json({ error: uploadErr });
         const certId = req.body.cert_id ? parseInt(req.body.cert_id, 10) : null;
         if (certId !== null && !Number.isFinite(certId)) {
           return res.status(400).json({ error: "Invalid certificate ID" });
@@ -11847,6 +11853,8 @@ Defects (admin-confirmed): ${defectLines}`;
 
   app.post("/api/admin/identify-image", requireAdmin, identifyUpload.single("image"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No image file provided" });
+    const uploadErr = await rejectInvalidUploads([req.file]);
+    if (uploadErr) return res.status(400).json({ error: uploadErr });
     try {
       const result = await identifyCardFromBuffer(req.file.buffer, req.file.mimetype || "image/jpeg");
       res.json(result);
@@ -11962,6 +11970,8 @@ Defects (admin-confirmed): ${defectLines}`;
         return res.status(503).json({ error: "AI Pre-Grade tool is temporarily paused. Please try again later." });
       }
       if (!req.file) return res.status(400).json({ error: "No image uploaded" });
+      const uploadErr = await rejectInvalidUploads([req.file]);
+      if (uploadErr) return res.status(400).json({ error: uploadErr });
       const apiKey = process.env.ANTHROPIC_API_KEY;
       console.log("[tools/estimate] ANTHROPIC_API_KEY present:", !!apiKey, "| length:", apiKey?.length ?? 0);
       if (!apiKey) {
@@ -13214,6 +13224,8 @@ Defects (admin-confirmed): ${defectLines}`;
       }
       const file = req.file;
       if (!file) return res.status(400).json({ error: "image file required (multipart 'image')" });
+      const uploadErr = await rejectInvalidUploads([file]);
+      if (uploadErr) return res.status(400).json({ error: uploadErr });
 
       const certRow = await db.execute(sql`
           SELECT id, certificate_number, grading_front_original, grading_back_original, deleted_at
@@ -16406,6 +16418,8 @@ Defects (admin-confirmed): ${defectLines}`;
       const id = parseInt(String(req.params.id), 10);
       if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
       if (!req.file) return res.status(400).json({ error: "No file provided (form field 'image')" });
+      const uploadErr = await rejectInvalidUploads([req.file]);
+      if (uploadErr) return res.status(400).json({ error: uploadErr });
       const adminEmail = (req.session as any)?.adminEmail ?? null;
 
       const { igPostQueue } = await import("@shared/schema");
