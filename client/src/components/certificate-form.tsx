@@ -762,20 +762,27 @@ export default function CertificateForm({
     return "#DC2626";
   }
 
+  // Shared FormData assembly — used by both the explicit create/approved-edit
+  // save (mutation, below) and the silent auto-save (autoSaveNow, below) so
+  // the two payload-builders can never drift apart.
+  function buildCertFormData(): FormData {
+    const formData = new FormData();
+    const UI_ONLY_KEYS = ["unifiedSelect", "otherText"];
+    Object.entries(form).forEach(([key, value]) => {
+      if (UI_ONLY_KEYS.includes(key)) return;
+      if (value !== null && value !== undefined) {
+        formData.append(key, String(value));
+      }
+    });
+    formData.append("designations", JSON.stringify(designations));
+    if (frontImage) formData.append("frontImage", frontImage);
+    if (backImage) formData.append("backImage", backImage);
+    return formData;
+  }
+
   const mutation = useMutation({
     mutationFn: async () => {
-      const formData = new FormData();
-      const UI_ONLY_KEYS = ["unifiedSelect", "otherText"];
-      Object.entries(form).forEach(([key, value]) => {
-        if (UI_ONLY_KEYS.includes(key)) return;
-        if (value !== null && value !== undefined) {
-          formData.append(key, String(value));
-        }
-      });
-      formData.append("designations", JSON.stringify(designations));
-      if (frontImage) formData.append("frontImage", frontImage);
-      if (backImage) formData.append("backImage", backImage);
-
+      const formData = buildCertFormData();
       const url = isEdit ? `/api/admin/certificates/${certificate.id}` : "/api/admin/certificates";
       const method = isEdit ? "PUT" : "POST";
 
@@ -796,9 +803,80 @@ export default function CertificateForm({
     onError: (err: any) => setError(err.message),
   });
 
+  // ── Silent auto-save for an EXISTING, NOT-YET-APPROVED certificate ─────────
+  // Owner directive (2026-07-01): editing a card's identity (name/set/game/
+  // etc.) should behave like the grading workstation below it — no manual
+  // "Update Certificate" click. Gated to pre-approval only, mirroring the
+  // exact same protection grading-panel.tsx already uses for its own
+  // auto-save ("kills the previous 'edits save automatically to the live
+  // record' silent-write behaviour") — the server route this posts to has
+  // no approval lock of its own, so an already-approved/published cert must
+  // keep requiring an explicit save (see the "Save Changes" button below).
+  const autoSaveEligible = isEdit && !!certificate?.id && !certificate?.gradeApprovedAt;
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveSeqRef = useRef(0);
+  const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hydratedOnceRef = useRef(false);
+
+  async function autoSaveNow() {
+    if (!certificate?.id) return;
+    const seq = ++autoSaveSeqRef.current;
+    setAutoSaveStatus("saving");
+    try {
+      const res = await fetch(`/api/admin/certificates/${certificate.id}`, {
+        method: "PUT",
+        body: buildCertFormData(),
+        credentials: "include",
+      });
+      if (seq !== autoSaveSeqRef.current) return;
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      setAutoSaveStatus("saved");
+      if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
+      autoSavedClearTimerRef.current = setTimeout(() => {
+        if (autoSaveSeqRef.current === seq) setAutoSaveStatus("idle");
+      }, 2500);
+    } catch (e: any) {
+      if (seq !== autoSaveSeqRef.current) return;
+      setAutoSaveStatus("error");
+      toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
+    }
+  }
+
+  // Debounced auto-save whenever an identity field changes. Skips the first
+  // render (hydratedOnceRef) so we don't immediately re-PUT what was just
+  // loaded from the certificate. Required-field validation is intentionally
+  // NOT enforced here — an existing certificate already has them filled in;
+  // this only fires for edits to an already-valid record.
+  useEffect(() => {
+    if (!autoSaveEligible) return;
+    if (!hydratedOnceRef.current) {
+      hydratedOnceRef.current = true;
+      return;
+    }
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveNow();
+    }, 600);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+    // eslint-disable-next-line
+  }, [autoSaveEligible, form, designations, frontImage, backImage]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    // Auto-save already persists every change for an existing, not-yet-approved
+    // certificate (no button is rendered in that case) — an Enter keypress
+    // submitting the form should not ALSO fire the explicit mutation, which
+    // navigates away via onSuccess. Only the create flow and the
+    // already-approved "Save Changes" flow use this explicit submit path.
+    if (autoSaveEligible) return;
 
     if (!form.cardGame || !form.setName || !form.cardName || !form.cardNumber || !form.year) {
       setError("Please fill in all required fields: Game, Set, Card Name, Card Number, Year");
@@ -2214,17 +2292,48 @@ export default function CertificateForm({
           </p>
         )}
 
-        <GradientButton
-          as="button"
-          type="submit"
-          disabled={mutation.isPending}
-          height="48px"
-          className="w-full"
-          data-testid="button-save-cert"
-        >
-          <Save size={16} />
-          {mutation.isPending ? "Saving..." : isEdit ? "Update Certificate" : "Save Certificate"}
-        </GradientButton>
+        {/* Owner directive (2026-07-01): an existing, not-yet-approved
+            certificate auto-saves silently (see autoSaveNow above) — no
+            manual button, matching the grading workstation below it. Create
+            flow (no certificate yet) and an already-approved/published
+            certificate (server has no approval lock of its own — see
+            autoSaveEligible) both keep an explicit save action. */}
+        {autoSaveEligible ? (
+          <div
+            className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-6"
+            data-testid="text-autosave-status"
+          >
+            {autoSaveStatus === "saving" && (
+              <span className="flex items-center gap-1.5">
+                <Loader2 size={10} className="animate-spin" /> Saving…
+              </span>
+            )}
+            {autoSaveStatus === "saved" && (
+              <span className="flex items-center gap-1.5 text-[var(--admin-green)]">
+                <CheckCircle2 size={10} /> Saved
+              </span>
+            )}
+            {autoSaveStatus === "error" && (
+              <span className="text-[var(--admin-red)]">Save failed — retrying on next change</span>
+            )}
+          </div>
+        ) : (
+          <GradientButton
+            as="button"
+            type="submit"
+            disabled={mutation.isPending}
+            height="48px"
+            className="w-full"
+            data-testid="button-save-cert"
+          >
+            <Save size={16} />
+            {mutation.isPending
+              ? "Saving..."
+              : isEdit
+                ? "Save Changes to Published Certificate"
+                : "Save Certificate"}
+          </GradientButton>
+        )}
       </form>
     </div>
   );
