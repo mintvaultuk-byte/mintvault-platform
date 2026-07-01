@@ -743,7 +743,9 @@ export default function GradingPanel({
     if (gradingData.cornersScore != null) setCornersOverride(Number(gradingData.cornersScore));
     if (gradingData.edgesScore != null) setEdgesOverride(Number(gradingData.edgesScore));
     if (gradingData.surfaceScore != null) setSurfaceOverride(Number(gradingData.surfaceScore));
-    if (gradingData.grade != null) setOverallOverride(Number(gradingData.grade));
+    // Manual overall-override removed (owner directive 2026-07-01): the overall
+    // grade is 100% MVGS auto, so we no longer seed a manual override from the
+    // saved grade on open. Overall always recomputes from the sub-grades / MVGS.
     // Centering: prefer letting centeringCalc derive from L/R + T/B ratios.
     // Fallback: if ratios are missing but a centering_score was saved, use it
     // as an override so the Overall formula still has a value to weight.
@@ -1444,7 +1446,10 @@ export default function GradingPanel({
   }, [defects]);
 
   const mvgsGrade = hasMvgsPins && mvgsForOverall.score != null ? gradeFromMvgsScore(mvgsForOverall.score) : null;
-  const overall = overallOverride ?? mvgsGrade ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
+  // 100% MVGS auto (owner directive 2026-07-01): manual overallOverride removed
+  // from the precedence, so the overall is always the MVGS engine result
+  // (half-grades and all) or the weighted-formula fallback — never a hand-set value.
+  const overall = mvgsGrade ?? calculateOverallGrade(sub, surface.hasCrease, surface.hasTear);
 
   // Generate Description gate: every subgrade must have a real value (>0).
   // Mirrors the server-side 422 check so the button stays disabled until ready.
@@ -2667,9 +2672,9 @@ export default function GradingPanel({
                 sub={sub}
                 hasCrease={surface.hasCrease}
                 hasTear={surface.hasTear}
-                manualOverride={hasMvgsPins ? null : overallOverride}
-                onOverride={hasMvgsPins ? () => {} : setOverallOverride}
-                lockedByMvgs={hasMvgsPins}
+                manualOverride={null}
+                onOverride={() => {}}
+                lockedByMvgs={true}
                 gradeLabel={label}
                 isBlack={isBlack}
                 strengthScore={
