@@ -1150,7 +1150,8 @@ export class DatabaseStorage implements IStorage {
           )
         )
       )
-      .orderBy(desc(certificates.createdAt));
+      .orderBy(desc(certificates.createdAt))
+      .limit(100);
   }
 
   /**

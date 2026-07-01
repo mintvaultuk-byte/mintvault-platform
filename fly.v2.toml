@@ -1,6 +1,10 @@
 app = "mintvault-v2"
 primary_region = "lhr"
 
+# Match prod: wait up to 15s after SIGTERM before SIGKILL so the app's graceful
+# shutdown (drain requests + active cron jobs, then close DB pools) completes.
+kill_timeout = "15s"
+
 [build]
 
 [env]

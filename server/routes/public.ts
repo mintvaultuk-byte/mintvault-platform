@@ -13,13 +13,7 @@ import { APP_BASE_URL } from "../app-url";
 import { FEATURE_FLAGS } from "../config/feature-flags";
 import fs from "fs";
 import path from "path";
-
-/** Normalise cert IDs: MV-0000000001 → MV1 */
-function normalizeCertId(raw: string): string {
-  const m = raw.match(/^MV-?0*(\d+)$/i);
-  if (m) return `MV${m[1]}`;
-  return raw;
-}
+import { normalizeCertId } from "../lib/cert-id";
 
 export function registerPublicRoutes(app: Express): void {
   // ── Health check — no auth, no DB, no shared state ──────────────────────

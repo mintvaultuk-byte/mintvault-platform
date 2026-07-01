@@ -24,13 +24,10 @@ import { certificates, igPostQueue, serviceTiers, type IgPostType } from "@share
 // warning log) so the cron / Post Now never silently 404s.
 const HIGH_GRADE_FLOOR = "8.0";
 import type { IgPostData } from "./types";
+import { normalizeCertId } from "../lib/cert-id";
 
 // Cert IDs are stored "MV-0000000001" but display as "MV42" — strip the
 // padding zeroes then drop the "MV" prefix to match the slab front render.
-function normalizeCertId(raw: string): string {
-  const m = raw.match(/^MV-?0*(\d+)$/i);
-  return m ? `MV${m[1]}` : raw;
-}
 function stripMvPrefix(raw: string): string {
   return raw.replace(/^MV/, "");
 }

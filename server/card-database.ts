@@ -149,7 +149,7 @@ export async function lookupCard(game: string, query: string, mode: "exact" | "w
         return [];
     }
   } catch (err) {
-    console.error(`[card-database] lookup failed for ${game}:`, err);
+    console.error("[card-database] lookup failed for %s:", game, err);
     return [];
   }
 

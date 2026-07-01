@@ -27,7 +27,9 @@
  */
 
 import { sql } from "drizzle-orm";
-import { db } from "../db";
+import { db, pool } from "../db";
+import { withAdvisoryLock } from "../lib/advisory-lock";
+import { isShuttingDown } from "../lib/lifecycle";
 import { auditLog, reelAnalytics, reelCardApprovals } from "@shared/schema";
 import { getR2SignedUrl, uploadToR2 } from "../r2";
 import { fetchWeeklyReelData, type WeeklyReelCard } from "../ig/weekly-reel-data";
@@ -463,6 +465,7 @@ export function startWeeklyReelScheduler(): void {
 
   setTimeout(() => {
     const tick = async () => {
+      if (isShuttingDown()) return;
       const settings = await getAllSettings();
       if (settings.pipeline_paused) {
         // Silent on the tick — pause is expected admin state.
@@ -471,13 +474,24 @@ export function startWeeklyReelScheduler(): void {
       const peakHour = settings.smart_schedule ? await getInstagramPeakHour() : null;
       if (!isScheduledMoment(settings, peakHour)) return;
       try {
-        const result = await runWeeklyReel();
-        if (result.status === "skipped") {
-          console.log(`[weekly-reel] Tick: skipped (${result.reason})`);
-        } else if (result.status === "failed") {
-          console.warn(`[weekly-reel] Tick: failed (${result.reason})`);
-        } else {
-          console.log(`[weekly-reel] Tick: ok (${result.successCount}/${result.cardCount} ok)`);
+        // Only ONE machine may build/publish the weekly reel. runWeeklyReel()
+        // guards with hasRunForDate(), but two Fly machines can both pass that
+        // check before either writes — the advisory lock closes that race.
+        const box: { r: Awaited<ReturnType<typeof runWeeklyReel>> | null } = { r: null };
+        const outcome = await withAdvisoryLock(pool, "weekly-reel", async () => {
+          box.r = await runWeeklyReel();
+        });
+        if (!outcome.ran) {
+          console.log("[weekly-reel] Tick: lock held by another instance — skipped");
+        } else if (box.r) {
+          const result = box.r;
+          if (result.status === "skipped") {
+            console.log(`[weekly-reel] Tick: skipped (${result.reason})`);
+          } else if (result.status === "failed") {
+            console.warn(`[weekly-reel] Tick: failed (${result.reason})`);
+          } else {
+            console.log(`[weekly-reel] Tick: ok (${result.successCount}/${result.cardCount} ok)`);
+          }
         }
       } catch (err: any) {
         console.error(`[weekly-reel] Tick crash: ${err?.message ?? err}`);

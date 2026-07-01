@@ -1,6 +1,12 @@
 app = "mintvault"
 primary_region = "lhr"  # London — closest to your UK users
 
+# Wait up to 15s after SIGTERM before SIGKILL so the app's graceful shutdown
+# (server/index.ts: drain in-flight requests + active cron jobs, then close the
+# DB pools — 10s internal deadline) finishes cleanly on rolling deploys. Fly's
+# default is ~5s, which would cut the drain short.
+kill_timeout = "15s"
+
 [build]
 
 [env]

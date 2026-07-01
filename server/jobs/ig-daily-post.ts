@@ -20,7 +20,9 @@
  * IG_POST_ENABLED === "true" — see meta-poster.ts for the actual gate.
  */
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import { db } from "../db";
+import { db, pool } from "../db";
+import { withAdvisoryLock } from "../lib/advisory-lock";
+import { isShuttingDown } from "../lib/lifecycle";
 import { igPostQueue, igSettings, IG_POST_TYPES, type IgPostType } from "@shared/schema";
 import { fetchPostData, selectPostType } from "../ig/data-fetcher";
 import { generateIgImage } from "../ig/image-generator";
@@ -250,19 +252,32 @@ export function startIgDailyPostScheduler(): void {
 
   setTimeout(() => {
     const tick = async () => {
+      if (isShuttingDown()) return;
       const hour = nowInLondonHour();
       if (hour !== POST_WINDOW_HOUR_LONDON) {
         // Outside window — silent.
         return;
       }
       try {
-        const result = await runIgDailyPost();
-        if (result.status === "skipped") {
-          console.log("[ig-cron] Tick: already-posted-today (skipped)");
-        } else if (result.status === "dry-run") {
-          console.log("[ig-cron] Tick: dry-run completed");
-        } else {
-          console.log(`[ig-cron] Tick: ${result.status} (${result.postType})`);
+        // Only ONE machine may run the daily post. runIgDailyPost() already
+        // guards with hasPostedToday(), but two Fly machines can both pass that
+        // check before either inserts — the advisory lock closes that race so we
+        // never double-publish to Instagram.
+        const box: { r: Awaited<ReturnType<typeof runIgDailyPost>> | null } = { r: null };
+        const outcome = await withAdvisoryLock(pool, "ig-daily-post", async () => {
+          box.r = await runIgDailyPost();
+        });
+        if (!outcome.ran) {
+          console.log("[ig-cron] Tick: lock held by another instance — skipped");
+        } else if (box.r) {
+          const result = box.r;
+          if (result.status === "skipped") {
+            console.log("[ig-cron] Tick: already-posted-today (skipped)");
+          } else if (result.status === "dry-run") {
+            console.log("[ig-cron] Tick: dry-run completed");
+          } else {
+            console.log(`[ig-cron] Tick: ${result.status} (${result.postType})`);
+          }
         }
       } catch (err: any) {
         console.error(`[ig-cron] Tick failed: ${err?.message ?? err}`);

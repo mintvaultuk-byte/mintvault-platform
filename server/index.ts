@@ -5,6 +5,15 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { csrfOriginCheck } from "./lib/csrf-origin";
+import { withAdvisoryLock } from "./lib/advisory-lock";
+import {
+  trackInterval,
+  trackTimeout,
+  beginJob,
+  endJob,
+  isShuttingDown,
+  runGracefulShutdown,
+} from "./lib/lifecycle";
 import { serveStatic } from "./static";
 import { cleanupStalePreGradeImages } from "./r2";
 import { db, pool } from "./db";
@@ -74,6 +83,25 @@ app.use((req, res, next) => {
 
 app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok" });
+});
+
+// Readiness probe (Phase 5): unlike /health (pure liveness), /ready also verifies
+// the DB is reachable AND the schema is migrated — the core `certificates` table
+// exists — so a rolling deploy only routes traffic to a machine that can actually
+// serve. Returns a generic status only (no host/schema/error detail).
+// NOT rate-limited by design: it is the platform (Fly) readiness probe with one
+// cheap catalog lookup; a limiter here could cause false 429s that make Fly route
+// traffic away from healthy machines — i.e. it would BREAK health checks. Intentional.
+// codeql[js/missing-rate-limiting]
+app.get("/ready", async (_req, res) => {
+  try {
+    const result = await pool.query("SELECT to_regclass('public.certificates') AS t");
+    const schemaReady = result.rows[0]?.t != null;
+    if (!schemaReady) return res.status(503).json({ status: "not-ready" });
+    return res.status(200).json({ status: "ready" });
+  } catch {
+    return res.status(503).json({ status: "not-ready" });
+  }
 });
 
 // H-c — /api/db-check removed: it was an unauthenticated debug probe that leaked
@@ -417,32 +445,53 @@ async function runTransferV2Sweep() {
 
   await registerRoutes(httpServer, app);
 
+  // Phase 5: wrap each recurring job that mutates state or sends email/publishes
+  // in a Postgres advisory lock so only ONE machine runs a given tick (prod runs
+  // 2 machines). Non-blocking + fail-closed; on a single machine the lock is
+  // always free, so behaviour is unchanged. Also (graceful shutdown): a guarded
+  // tick never starts once shutdown begins, and counts as an active job while it
+  // runs so shutdown drains it before the DB pools are closed. Timers use
+  // trackInterval/trackTimeout so shutdown can cancel them (no new tick starts).
+  const guard = (name: string, fn: () => Promise<void>) => () => {
+    if (isShuttingDown()) return Promise.resolve();
+    beginJob();
+    return withAdvisoryLock(pool, name, fn)
+      .then(
+        (r) => {
+          if (!r.ran) log("skipped — lock held by another instance", name);
+        },
+        (e: any) => log(`error: ${e?.message ?? e}`, name)
+      )
+      .finally(() => endJob());
+  };
+
   // Run cleanup once on startup, then every 24 hours
-  runPreGradeCleanup();
-  setInterval(runPreGradeCleanup, 24 * 60 * 60 * 1000);
+  const guardedPreGradeCleanup = guard("pre-grade-cleanup", runPreGradeCleanup);
+  guardedPreGradeCleanup();
+  trackInterval(guardedPreGradeCleanup, 24 * 60 * 60 * 1000);
 
-  // Run Vault Club grace sweep once on startup, then every 24 hours
-  runVaultClubGraceSweep();
-  setInterval(runVaultClubGraceSweep, 24 * 60 * 60 * 1000);
+  // Run Vault Club grace sweep once on startup, then every 24 hours (sends email)
+  const guardedVaultClubGraceSweep = guard("vault-club-grace-sweep", runVaultClubGraceSweep);
+  guardedVaultClubGraceSweep();
+  trackInterval(guardedVaultClubGraceSweep, 24 * 60 * 60 * 1000);
 
-  // Run transfer v2 sweep after 30s delay (let migrations finish), then every hour
-  setTimeout(runTransferV2Sweep, 30_000);
-  setInterval(runTransferV2Sweep, 60 * 60 * 1000);
+  // Run transfer v2 sweep after 30s delay (let migrations finish), then every hour (sends email)
+  const guardedTransferV2Sweep = guard("transfer-v2-sweep", runTransferV2Sweep);
+  trackTimeout(guardedTransferV2Sweep, 30_000);
+  trackInterval(guardedTransferV2Sweep, 60 * 60 * 1000);
 
   // RAG Phase 0 — hourly embed-corpus tick. First run after 60s so the
   // server is fully serving before we touch OpenAI; thereafter every
   // hour. Job fail-softs if the migration hasn't run yet, so it's safe
   // to ship the code before approving the migration.
-  setTimeout(async () => {
+  trackTimeout(async () => {
     try {
       const { runEmbedCorpusJob } = await import("./jobs/embed-corpus");
-      await runEmbedCorpusJob();
-      setInterval(
-        () => {
-          runEmbedCorpusJob().catch((e) => log(`[embed-corpus] unhandled: ${e.message}`, "embed-corpus"));
-        },
-        60 * 60 * 1000
-      );
+      const guardedEmbedCorpus = guard("embed-corpus", async () => {
+        await runEmbedCorpusJob();
+      });
+      await guardedEmbedCorpus();
+      trackInterval(guardedEmbedCorpus, 60 * 60 * 1000);
     } catch (err: any) {
       log(`[embed-corpus] startup error: ${err?.message || err}`, "embed-corpus");
     }
@@ -497,8 +546,9 @@ async function runTransferV2Sweep() {
       log(`sweep error: ${err?.message || err}`, "archival-b2");
     }
   }
-  setTimeout(runArchivalSweep, 60_000);
-  setInterval(runArchivalSweep, 24 * 60 * 60 * 1000);
+  const guardedArchivalSweep = guard("archival-sweep", runArchivalSweep);
+  trackTimeout(guardedArchivalSweep, 60_000);
+  trackInterval(guardedArchivalSweep, 24 * 60 * 60 * 1000);
 
   // Scan reconciler — re-drive failed pipelines from retained R2 raw + surface
   // never-confirmed ingests for scanner re-supply. First run 90s after boot,
@@ -512,8 +562,9 @@ async function runTransferV2Sweep() {
       log(`reconcile error: ${err?.message || err}`, "scan-reconciler");
     }
   }
-  setTimeout(runScanReconciler, 90_000);
-  setInterval(runScanReconciler, 5 * 60 * 1000);
+  const guardedScanReconciler = guard("scan-reconciler", runScanReconciler);
+  trackTimeout(guardedScanReconciler, 90_000);
+  trackInterval(guardedScanReconciler, 5 * 60 * 1000);
 
   // A05 — unmatched /api/* returns a clean 404 JSON instead of falling through
   // to the SPA index.html. Sits AFTER all real API routes (registerRoutes above)
@@ -591,11 +642,43 @@ async function runTransferV2Sweep() {
       // - Errors are logged and swallowed; this is a best-effort warm-up and
       //   must NEVER take the process down.
       const KEEP_WARM_INTERVAL_MS = 4 * 60 * 1000;
-      const keepWarmTimer = setInterval(() => {
-        pool.query("SELECT 1").catch((err: any) => console.warn("[db-keepwarm] SELECT 1 failed:", err?.message ?? err));
-      }, KEEP_WARM_INTERVAL_MS);
-      keepWarmTimer.unref();
+      trackInterval(
+        () => {
+          pool
+            .query("SELECT 1")
+            .catch((err: any) => console.warn("[db-keepwarm] SELECT 1 failed:", err?.message ?? err));
+        },
+        KEEP_WARM_INTERVAL_MS,
+        { unref: true }
+      );
       console.log(`[db-keepwarm] interval armed (${KEEP_WARM_INTERVAL_MS / 1000}s)`);
     }
   );
 })();
+
+// Graceful shutdown (Phase 5): on SIGTERM/SIGINT — mark shutting-down + cancel
+// every scheduled timer (so no NEW cron tick starts), stop accepting traffic and
+// drain in-flight requests, wait for any active guarded job to finish, THEN close
+// the DB pools (never under a live job), and exit. A hard 10s deadline always
+// forces exit. fly.toml kill_timeout is set to 15s so Fly waits for the drain
+// instead of SIGKILLing early (Fly default is ~5s).
+function gracefulShutdown(signal: string) {
+  log(`${signal} received — draining and shutting down`, "shutdown");
+  void runGracefulShutdown({
+    deadlineMs: 10_000,
+    closeServer: () =>
+      new Promise<void>((resolve) => {
+        httpServer.close(() => {
+          log("http server closed to new connections", "shutdown");
+          resolve();
+        });
+      }),
+    closePools: async () => {
+      await Promise.allSettled([pool.end(), sessionPool.end()]);
+      log("db pools closed — exiting cleanly", "shutdown");
+    },
+    exit: (code) => process.exit(code),
+  });
+}
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));

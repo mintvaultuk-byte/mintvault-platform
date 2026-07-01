@@ -1,4 +1,5 @@
 import { sendServerError } from "./lib/error-response";
+import { normalizeCertId, certNumberFromId } from "./lib/cert-id";
 import type {
   Express,
   Request as ExpressRequest,
@@ -353,11 +354,10 @@ const upload = multer({
   },
 });
 
-export function normalizeCertId(raw: string): string {
-  const m = raw.match(/^MV-?0*(\d+)$/i);
-  if (m) return `MV${m[1]}`;
-  return raw;
-}
+// normalizeCertId + certNumberFromId now live in the shared, ReDoS-safe helper
+// (server/lib/cert-id.ts, fixes #113). Re-exported here so existing callers that
+// do `import { normalizeCertId } from "../routes"` keep working unchanged.
+export { normalizeCertId };
 
 const ALLOWED_IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/tiff"]);
 
@@ -395,9 +395,8 @@ export async function rejectInvalidUploads(files: Express.Multer.File[]): Promis
 export async function findCertByNumberUngated(certId: string) {
   let dbCert = await storage.getCertificateByCertId(certId);
   if (!dbCert) {
-    const numMatch = certId.match(/^MV-?0*(\d+)$/i);
-    if (numMatch) {
-      const num = numMatch[1];
+    const num = certNumberFromId(certId);
+    if (num !== null) {
       dbCert =
         (await storage.getCertificateByCertId(`MV${num}`)) ||
         (await storage.getCertificateByCertId(`MV-${num.padStart(10, "0")}`)) ||
@@ -2460,7 +2459,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/certs/search", async (req, res) => {
+  app.get("/api/certs/search", lookupRateLimit, async (req, res) => {
     const q = ((req.query.q as string) || "").trim();
     if (!q) {
       return res.json([]);
@@ -2468,9 +2467,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     let dbResults = await storage.searchCertificates(q);
     if (dbResults.length === 0) {
-      const numMatch = q.match(/^MV-?0*(\d+)$/i);
-      if (numMatch) {
-        const num = numMatch[1];
+      const num = certNumberFromId(q);
+      if (num !== null) {
         const altNew = await storage.searchCertificates(`MV${num}`);
         const altOld = await storage.searchCertificates(`MV-${num.padStart(10, "0")}`);
         const seen = new Set<number>();
@@ -2813,7 +2811,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const certResult = await db.execute(sql`SELECT COUNT(*) AS cnt FROM certificates WHERE deleted_at IS NULL`);
       const certificatesCount = parseInt((certResult.rows[0]?.cnt as string) || "0", 10);
 
-      const voidedResult = await db.execute(sql`SELECT COUNT(*) AS cnt FROM certificates WHERE status = 'voided'`);
+      const voidedResult = await db.execute(
+        sql`SELECT COUNT(*) AS cnt FROM certificates WHERE status = 'voided' AND deleted_at IS NULL`
+      );
       const voidedCount = parseInt((voidedResult.rows[0]?.cnt as string) || "0", 10);
 
       const lastIssued = await storage.getLastIssuedMvNumber();
@@ -3703,12 +3703,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/logbook/:certId/verify", async (req, res) => {
+  app.get("/api/logbook/:certId/verify", lookupRateLimit, async (req, res) => {
     try {
       const sig = (req.query.sig || req.query.signature) as string | undefined;
       if (!sig) return res.status(400).json({ error: "signature query parameter required" });
       const { verifyLogbookSignature } = await import("./logbook-service");
-      const result = await verifyLogbookSignature(req.params.certId, sig);
+      const result = await verifyLogbookSignature(String(req.params.certId), sig);
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: "Verification failed" });
@@ -3772,7 +3772,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.send(pdf);
     } catch (err: any) {
       console.error(
-        `[logbook-pdf] generation failed for ${req.params.certId}:`,
+        "[logbook-pdf] generation failed for %s:",
+        req.params.certId,
         err.message,
         err.stack?.split("\n")[1]?.trim()
       );
@@ -3833,7 +3834,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.send(pdf);
     } catch (err: any) {
       console.error(
-        `[logbook-owner-pdf] generation failed for ${req.params.certId}:`,
+        "[logbook-owner-pdf] generation failed for %s:",
+        req.params.certId,
         err.message,
         err.stack?.split("\n")[1]?.trim()
       );
@@ -3905,7 +3907,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       );
       res.json({ newVersion, issuedAt: new Date().toISOString() });
     } catch (err: any) {
-      console.error(`[logbook-reissue] error for ${req.params.certId}:`, err.message);
+      console.error("[logbook-reissue] error for %s:", req.params.certId, err.message);
       res.status(500).json({ error: "Reissue failed" });
     }
   });
@@ -8630,8 +8632,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (!sub) return res.status(404).json({ error: "Submission not found" });
         const numId = typeof sub.id === "string" ? parseInt(sub.id, 10) : sub.id;
 
-        // Upload photos to R2
+        // Upload photos to R2 — validate real image content (magic bytes), not
+        // just the filename extension, before trusting the client-supplied type.
         const files = (req.files as Express.Multer.File[]) ?? [];
+        const badUpload = await rejectInvalidUploads(files);
+        if (badUpload) return res.status(400).json({ error: badUpload });
         const photoUrls: string[] = [];
         for (const file of files) {
           const key = `receipt/${sub.submissionId}/${Date.now()}-${file.originalname}`;
@@ -9628,7 +9633,14 @@ Defects (admin-confirmed): ${defectLines}`;
         );
       }
 
-      // Delete from R2
+      // Clear DB columns FIRST — the database is the source of truth. Only once
+      // the record no longer references these keys do we delete the R2 objects,
+      // so a failed R2 cleanup leaves harmless orphans rather than the DB
+      // pointing at keys that no longer exist.
+      const setClauses = colsToClear.map((col) => `${col} = NULL`).join(", ");
+      await db.execute(sql.raw(`UPDATE certificates SET ${setClauses}, updated_at = NOW() WHERE id = ${id}`));
+
+      // Best-effort R2 cleanup (non-fatal — an orphaned object is harmless).
       for (const key of keysToDelete) {
         try {
           await deleteFromR2(key);
@@ -9636,10 +9648,6 @@ Defects (admin-confirmed): ${defectLines}`;
           /* ignore missing keys */
         }
       }
-
-      // Clear DB columns
-      const setClauses = colsToClear.map((col) => `${col} = NULL`).join(", ");
-      await db.execute(sql.raw(`UPDATE certificates SET ${setClauses}, updated_at = NOW() WHERE id = ${id}`));
 
       console.log(`[image-delete] cert ${certIdStr} removed ${side} (${keysToDelete.length} R2 keys)`);
 
@@ -11722,7 +11730,10 @@ Defects (admin-confirmed): ${defectLines}`;
         const frontFile = files.front_image?.[0];
         if (!frontFile) return res.status(400).json({ error: "front_image is required" });
         const backFile = files.back_image?.[0];
-        const certId = req.body.cert_id ? parseInt(req.body.cert_id) : null;
+        const certId = req.body.cert_id ? parseInt(req.body.cert_id, 10) : null;
+        if (certId !== null && !Number.isFinite(certId)) {
+          return res.status(400).json({ error: "Invalid certificate ID" });
+        }
 
         console.log("[grade-with-ai] starting workflow", {
           certId,
@@ -14165,7 +14176,7 @@ Defects (admin-confirmed): ${defectLines}`;
       });
       return res.json({ ok: result.status !== "no-data", ...result });
     } catch (err: any) {
-      console.error(`[embed-corpus/cert] ${req.params.certId} failed:`, err);
+      console.error("[embed-corpus/cert] %s failed:", req.params.certId, err);
       return sendServerError(res, err);
     }
   });
