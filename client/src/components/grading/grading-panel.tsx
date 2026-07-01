@@ -13,7 +13,6 @@ import Authentication, { type AuthStatus } from "./authentication";
 import GradingNotes from "./grading-notes";
 import CaptureWizard from "./capture-wizard";
 import AiPanel, { type AiAnalysisResult, type AiIdentification } from "./ai-panel";
-import ManualCentering, { type CenteringResult } from "./manual-centering";
 import ManualCardTool from "./manual-card-tool";
 // MeasurementTool retired in v2.1 — line drawing now lives inside image-viewer
 // mark-mode and manual-card-tool defects phase as a tool palette, alongside
@@ -302,8 +301,9 @@ export default function GradingPanel({
     },
   });
 
-  // Manual centering state
-  const [manualCenteringSide, setManualCenteringSide] = useState<"front" | "back" | null>(null);
+  // Legacy "Manual Centering" two-rect picker REMOVED (owner directive
+  // 2026-07-01): no longer used — the 8-dot Card Tool below is the only
+  // centering measurement path.
   // 8-dot manual card tool (crop + deskew + centering in one pass)
   const [manualCardToolSide, setManualCardToolSide] = useState<"front" | "back" | null>(null);
   // MVGS v2 — measurement tool overlay (fullscreen). Opens from the surface
@@ -2725,22 +2725,11 @@ export default function GradingPanel({
               )}
             </div>
 
-            {/* Centering — manual measurement buttons (legacy two-rect picker) */}
+            {/* Legacy "Manual Centering (Front/Back)" trigger buttons removed
+                (owner directive 2026-07-01) — centering is measured via the
+                8-dot Card Tool only. Badge below still reflects centeringMethod
+                (set by the Card Tool) so the source stays visible. */}
             <div className="flex gap-2 mb-2">
-              <button
-                type="button"
-                onClick={() => setManualCenteringSide("front")}
-                className="flex-1 flex items-center justify-center gap-1.5 border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
-              >
-                Manual Centering (Front)
-              </button>
-              <button
-                type="button"
-                onClick={() => setManualCenteringSide("back")}
-                className="flex-1 flex items-center justify-center gap-1.5 border border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/40 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
-              >
-                Manual Centering (Back)
-              </button>
               {centeringMethod && (
                 <span
                   className={`self-center text-[9px] font-bold uppercase px-1.5 py-0.5 rounded ${centeringMethod === "manual" ? "bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] text-[var(--admin-green)] border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)]" : "bg-[var(--admin-gold)]/10 text-[var(--admin-gold)]/70 border border-[var(--admin-gold)]/20"}`}
@@ -3190,56 +3179,6 @@ export default function GradingPanel({
           </fieldset>
         </div>
       </div>
-
-      {/* Manual centering picker */}
-      {manualCenteringSide && (
-        <ManualCentering
-          certId={certId}
-          side={manualCenteringSide}
-          imageUrl={
-            manualCenteringSide === "front"
-              ? urls.front_cropped || urls.front_original || ""
-              : urls.back_cropped || urls.back_original || ""
-          }
-          existingOuter={
-            manualCenteringSide === "front"
-              ? manualOuterFront || (gradingData as any)?.centeringOuterFront || null
-              : manualOuterBack || (gradingData as any)?.centeringOuterBack || null
-          }
-          existingInner={
-            manualCenteringSide === "front"
-              ? manualInnerFront || (gradingData as any)?.centeringInnerFront || null
-              : manualInnerBack || (gradingData as any)?.centeringInnerBack || null
-          }
-          aiRatios={
-            manualCenteringSide === "front"
-              ? {
-                  lr: (gradingData as any)?.centeringFrontLr ?? null,
-                  tb: (gradingData as any)?.centeringFrontTb ?? null,
-                }
-              : { lr: (gradingData as any)?.centeringBackLr ?? null, tb: (gradingData as any)?.centeringBackTb ?? null }
-          }
-          onSave={(result) => {
-            if (result.side === "front") {
-              setFrontLR(result.leftRight);
-              setFrontTB(result.topBottom);
-              setManualOuterFront(result.outer);
-              setManualInnerFront(result.inner);
-            } else {
-              setBackLR(result.leftRight);
-              setBackTB(result.topBottom);
-              setManualOuterBack(result.outer);
-              setManualInnerBack(result.inner);
-            }
-            // Clear override so centeringCalc (using all 4 values) becomes authoritative
-            setCenteringOverride(null);
-            setCenteringMethod("manual");
-            setManualCenteringSide(null);
-            clearOverallOverrideIfSet();
-          }}
-          onCancel={() => setManualCenteringSide(null)}
-        />
-      )}
 
       {/* 8-dot Card Tool — crop + deskew + centering on the RAW original.
           After Compute the tool stays open in the defects phase against the
