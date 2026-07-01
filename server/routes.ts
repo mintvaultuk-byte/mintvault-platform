@@ -5462,6 +5462,34 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           return res.status(404).json({ error: "Certificate not found" });
         }
 
+        // Approval lock (2026-07-01): this metadata editor has no other guard
+        // against overwriting an already-approved/published certificate — the
+        // client's auto-save intentionally stops calling this route once a
+        // cert is approved, but a request already in flight when approval
+        // lands isn't cancelled client-side, so the server must be the real
+        // gate. Only the explicit "Save Changes to Published Certificate" UI
+        // path sends confirmPublishedEdit — auto-save never does.
+        if (existing.gradeApprovedAt && req.body.confirmPublishedEdit !== "true") {
+          return res.status(409).json({
+            error: "Certificate already approved and published — reload and use explicit save to edit it",
+          });
+        }
+
+        // Required-identity fields (matches the client's create/edit validation)
+        // — enforced here too since auto-save posts directly to this route and
+        // must never persist a blank identity field.
+        const requiredFields: Array<[string, unknown]> = [
+          ["cardGame", req.body.cardGame],
+          ["setName", req.body.setName],
+          ["cardName", req.body.cardName],
+          ["cardNumber", req.body.cardNumber],
+          ["year", req.body.year],
+        ];
+        const blankField = requiredFields.find(([, v]) => typeof v !== "string" || !v.trim());
+        if (blankField) {
+          return res.status(400).json({ error: `${blankField[0]} is required and cannot be blank` });
+        }
+
         const files = req.files as { [fieldname: string]: Express.Multer.File[] };
         const frontImage = files?.frontImage?.[0];
         const backImage = files?.backImage?.[0];

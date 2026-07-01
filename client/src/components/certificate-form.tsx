@@ -764,8 +764,11 @@ export default function CertificateForm({
 
   // Shared FormData assembly — used by both the explicit create/approved-edit
   // save (mutation, below) and the silent auto-save (autoSaveNow, below) so
-  // the two payload-builders can never drift apart.
-  function buildCertFormData(): FormData {
+  // the two payload-builders can never drift apart. `confirmPublishedEdit`
+  // is ONLY set true by the explicit "Save Changes to Published Certificate"
+  // path — auto-save must never send it (see the server-side approval lock
+  // in the PUT /api/admin/certificates/:id route).
+  function buildCertFormData(confirmPublishedEdit = false): FormData {
     const formData = new FormData();
     const UI_ONLY_KEYS = ["unifiedSelect", "otherText"];
     Object.entries(form).forEach(([key, value]) => {
@@ -777,12 +780,16 @@ export default function CertificateForm({
     formData.append("designations", JSON.stringify(designations));
     if (frontImage) formData.append("frontImage", frontImage);
     if (backImage) formData.append("backImage", backImage);
+    if (confirmPublishedEdit) formData.append("confirmPublishedEdit", "true");
     return formData;
   }
 
   const mutation = useMutation({
     mutationFn: async () => {
-      const formData = buildCertFormData();
+      // Only the "edit an already-approved certificate" path needs to confirm
+      // the override — create has nothing to approve yet, and the auto-save
+      // path below never reaches this mutation at all.
+      const formData = buildCertFormData(isEdit && !!certificate?.gradeApprovedAt);
       const url = isEdit ? `/api/admin/certificates/${certificate.id}` : "/api/admin/certificates";
       const method = isEdit ? "PUT" : "POST";
 
@@ -799,7 +806,13 @@ export default function CertificateForm({
 
       return res.json();
     },
-    onSuccess: (data: any) => onSuccess(isEdit ? undefined : data),
+    onSuccess: (data: any) => {
+      // Clear picked files so a subsequent save (auto-save or explicit) never
+      // re-submits/re-uploads the same File object once it's already persisted.
+      setFrontImage(null);
+      setBackImage(null);
+      onSuccess(isEdit ? undefined : data);
+    },
     onError: (err: any) => setError(err.message),
   });
 
@@ -824,6 +837,10 @@ export default function CertificateForm({
     const seq = ++autoSaveSeqRef.current;
     setAutoSaveStatus("saving");
     try {
+      // NEVER pass confirmPublishedEdit=true here — if the certificate was
+      // approved in the moment between this call being scheduled and firing,
+      // the server-side approval lock (added 2026-07-01) rejects the write
+      // with a 409 rather than silently overwriting a live/published cert.
       const res = await fetch(`/api/admin/certificates/${certificate.id}`, {
         method: "PUT",
         body: buildCertFormData(),
@@ -834,6 +851,10 @@ export default function CertificateForm({
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);
       }
+      // Clear picked files so an unrelated field edit moments later doesn't
+      // re-submit (and the server re-upload+delete-old) the same image.
+      setFrontImage(null);
+      setBackImage(null);
       setAutoSaveStatus("saved");
       if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
       autoSavedClearTimerRef.current = setTimeout(() => {
@@ -848,11 +869,14 @@ export default function CertificateForm({
 
   // Debounced auto-save whenever an identity field changes. Skips the first
   // render (hydratedOnceRef) so we don't immediately re-PUT what was just
-  // loaded from the certificate. Required-field validation is intentionally
-  // NOT enforced here — an existing certificate already has them filled in;
-  // this only fires for edits to an already-valid record.
+  // loaded from the certificate. Required fields are checked here (mirrors
+  // handleSubmit's own check) so a transiently-blank field — e.g. mid-retype
+  // of the card name — is never silently persisted; the save is simply
+  // deferred until the field is filled in again.
+  const hasRequiredFields =
+    !!form.cardGame && !!form.setName && !!form.cardName && !!form.cardNumber && !!form.year;
   useEffect(() => {
-    if (!autoSaveEligible) return;
+    if (!autoSaveEligible || !hasRequiredFields) return;
     if (!hydratedOnceRef.current) {
       hydratedOnceRef.current = true;
       return;
@@ -865,7 +889,7 @@ export default function CertificateForm({
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
     // eslint-disable-next-line
-  }, [autoSaveEligible, form, designations, frontImage, backImage]);
+  }, [autoSaveEligible, hasRequiredFields, form, designations, frontImage, backImage]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
