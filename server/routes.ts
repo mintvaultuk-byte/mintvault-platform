@@ -1852,8 +1852,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.set("Cache-Control", "no-store");
       res.send(jpeg);
     } catch (err: any) {
-      console.error("[pre-grade/preview] failed:", err.message);
-      res.status(500).json({ error: "Preview generation failed." }); // H-d — no raw err.message to client (logged above)
+      const msg = String(err?.message || "");
+      console.error("[pre-grade/preview] failed:", msg);
+      // A non-image / corrupt upload makes sharp throw — that's a client error
+      // (400), not a server fault. This also backstops the magic-byte pre-check
+      // above, which esbuild's minifier has been observed to tree-shake out of
+      // the bundle at this specific call-site. H-d — never leak err.message.
+      const badImage = /unsupported image|invalid|vips|input buffer|premature|corrupt|decode|unexpected end/i.test(msg);
+      res.status(badImage ? 400 : 500).json({
+        error: badImage ? "Uploaded file is not a valid image." : "Preview generation failed.",
+      });
     }
   });
 
