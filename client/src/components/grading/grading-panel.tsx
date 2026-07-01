@@ -12,7 +12,6 @@ import GradeDisplay from "./grade-display";
 import Authentication, { type AuthStatus } from "./authentication";
 import GradingNotes from "./grading-notes";
 import CaptureWizard from "./capture-wizard";
-import QuickGrade from "./quick-grade";
 import AiPanel, { type AiAnalysisResult, type AiIdentification } from "./ai-panel";
 import ManualCentering, { type CenteringResult } from "./manual-centering";
 import ManualCardTool from "./manual-card-tool";
@@ -622,15 +621,9 @@ export default function GradingPanel({
     });
   }
 
-  // Quick-grade mode
-  const [quickGrade, setQuickGrade] = useState(() => {
-    try {
-      return localStorage.getItem("mv_quick_grade") === "1";
-    } catch {
-      return false;
-    }
-  });
-  const [quickFocusField, setQuickFocusField] = useState<"centering" | "corners" | "edges" | "surface" | null>(null);
+  // Quick-grade mode REMOVED (owner directive 2026-07-01): manual sub-grade
+  // typing bypassed the card-tool + defect-marking pipeline. Grading is now
+  // 100% MVGS — the card tool (centering) and defect pins drive every sub-grade.
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -654,15 +647,6 @@ export default function GradingPanel({
           return;
         }
         setShowConfirm(true);
-      } else if ((e.key === "q" || e.key === "Q") && !graderMode) {
-        // Quick Grade is admin-only — graders use the full MVGS panel.
-        setQuickGrade((v) => {
-          const next = !v;
-          try {
-            localStorage.setItem("mv_quick_grade", next ? "1" : "0");
-          } catch {}
-          return next;
-        });
       }
     }
     document.addEventListener("keydown", onKey);
@@ -2098,26 +2082,6 @@ export default function GradingPanel({
           >
             Revert to AI
           </button>
-          {/* Quick Grade is admin-only — graders use the full MVGS panel. */}
-          {!graderMode && (
-            <button
-              type="button"
-              onClick={() =>
-                setQuickGrade((v) => {
-                  const next = !v;
-                  try {
-                    localStorage.setItem("mv_quick_grade", next ? "1" : "0");
-                  } catch {}
-                  return next;
-                })
-              }
-              className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${quickGrade ? "bg-[var(--admin-gold)]/20 text-[var(--admin-gold)] border border-[var(--admin-gold)]/40" : "text-[var(--admin-ink-dim)] border border-[var(--admin-line)] hover:text-[var(--admin-ink-dim)]"}`}
-              title="Toggle quick-grade mode (Q)"
-            >
-              <Zap size={10} />
-              Quick
-            </button>
-          )}
           {approved && (
             <span className="flex items-center gap-1.5 text-[var(--admin-green)] text-xs">
               <CheckCircle2 size={13} />
@@ -2153,40 +2117,6 @@ export default function GradingPanel({
         </label>
       )}
 
-      {!graderMode && quickGrade && (
-        <QuickGrade
-          subgrades={{ centering, corners: sub.corners, edges: sub.edges, surface: sub.surface }}
-          onChange={(s) => {
-            setCenteringOverride(s.centering);
-            setCornersOverride(s.corners);
-            setEdgesOverride(s.edges);
-            setSurfaceOverride(s.surface);
-            clearOverallOverrideIfSet();
-          }}
-          onApprove={() => {
-            // Mirror the main Approve button's deionization gate so the
-            // QuickGrade panel can't bypass it.
-            if (!deionizationComplete) {
-              toast({
-                title: "Confirm deionization first",
-                description: "Tick 'Deionization complete' before approving.",
-              });
-              return;
-            }
-            const cropBlock = cropGateBlockToast();
-            if (cropBlock) {
-              toast(cropBlock);
-              return;
-            }
-            setShowConfirm(true);
-          }}
-          onSave={saveDraft}
-          approving={approving}
-          saving={saving}
-          focusField={quickFocusField}
-          onFocusField={setQuickFocusField}
-        />
-      )}
 
       {/* AI Panel + Reprocess — HIDDEN in admin-review (every AI/CV action hits
           /api/admin, would burn credits + overwrite the grader's work) AND HIDDEN
@@ -2686,13 +2616,6 @@ export default function GradingPanel({
                 edgesWorstKey=""
                 aiSubgrades={aiSubgrades}
                 aiConfidence={aiConfidenceMap}
-                onSubgradeChange={(key, val) => {
-                  if (key === "centering") setCenteringOverride(val);
-                  else if (key === "corners") setCornersOverride(val);
-                  else if (key === "edges") setEdgesOverride(val);
-                  else if (key === "surface") setSurfaceOverride(val);
-                  clearOverallOverrideIfSet();
-                }}
               />
             )}
 
@@ -2978,24 +2901,9 @@ export default function GradingPanel({
                 <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Corners</p>
                 <div className="flex items-center gap-2">
                   <span className="text-lg font-bold text-[var(--admin-ink)]">{sub.corners || "—"}</span>
-                  {hasMvgsPins ? (
-                    <span className="w-20 text-xs text-center text-[var(--admin-ink-faint)] italic">MVGS auto</span>
-                  ) : (
-                    <input
-                      type="number"
-                      min={1}
-                      max={10}
-                      step={0.5}
-                      value={cornersOverride ?? ""}
-                      onChange={(e) => {
-                        const v = e.target.value === "" ? null : Number(e.target.value);
-                        setCornersOverride(v);
-                        clearOverallOverrideIfSet();
-                      }}
-                      placeholder="Override"
-                      className="w-20 text-xs border border-[var(--admin-line)] rounded px-2 py-1 text-center bg-[var(--admin-panel)]"
-                    />
-                  )}
+                  {/* Locked: corners is 100% MVGS auto (from defect pins) —
+                      manual override removed per owner directive 2026-07-01. */}
+                  <span className="w-20 text-xs text-center text-[var(--admin-ink-faint)] italic">MVGS auto</span>
                 </div>
               </div>
             </div>
@@ -3006,24 +2914,9 @@ export default function GradingPanel({
                 <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Edges</p>
                 <div className="flex items-center gap-2">
                   <span className="text-lg font-bold text-[var(--admin-ink)]">{sub.edges || "—"}</span>
-                  {hasMvgsPins ? (
-                    <span className="w-20 text-xs text-center text-[var(--admin-ink-faint)] italic">MVGS auto</span>
-                  ) : (
-                    <input
-                      type="number"
-                      min={1}
-                      max={10}
-                      step={0.5}
-                      value={edgesOverride ?? ""}
-                      onChange={(e) => {
-                        const v = e.target.value === "" ? null : Number(e.target.value);
-                        setEdgesOverride(v);
-                        clearOverallOverrideIfSet();
-                      }}
-                      placeholder="Override"
-                      className="w-20 text-xs border border-[var(--admin-line)] rounded px-2 py-1 text-center bg-[var(--admin-panel)]"
-                    />
-                  )}
+                  {/* Locked: edges is 100% MVGS auto (from defect pins) —
+                      manual override removed per owner directive 2026-07-01. */}
+                  <span className="w-20 text-xs text-center text-[var(--admin-ink-faint)] italic">MVGS auto</span>
                 </div>
               </div>
             </div>
@@ -3146,41 +3039,9 @@ export default function GradingPanel({
                   {surfaceOverride !== null && <span className="text-[var(--admin-ink-dim)]"> (manual)</span>}
                 </p>
                 <div className="flex items-center gap-2 mt-1">
-                  {hasMvgsPins ? (
-                    <span className="text-xs text-[var(--admin-ink-faint)] italic">MVGS auto</span>
-                  ) : (
-                    <>
-                      <select
-                        value={surfaceOverride ?? ""}
-                        onChange={(e) => {
-                          const v = e.target.value === "" ? null : parseFloat(e.target.value);
-                          setSurfaceOverride(v);
-                          clearOverallOverrideIfSet();
-                        }}
-                        data-testid="select-surface-override"
-                        className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1"
-                      >
-                        <option value="">Override (auto)</option>
-                        {[10, 9.5, 9, 8.5, 8, 7.5, 7, 6.5, 6, 5.5, 5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1].map((g) => (
-                          <option key={g} value={g}>
-                            {g}
-                          </option>
-                        ))}
-                      </select>
-                      {surfaceOverride !== null && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSurfaceOverride(null);
-                            clearOverallOverrideIfSet();
-                          }}
-                          className="text-[var(--admin-ink-dim)] text-[10px] hover:text-[var(--admin-ink-dim)]"
-                        >
-                          clear
-                        </button>
-                      )}
-                    </>
-                  )}
+                  {/* Locked: surface is 100% MVGS auto (from defect pins) —
+                      manual override removed per owner directive 2026-07-01. */}
+                  <span className="text-xs text-[var(--admin-ink-faint)] italic">MVGS auto</span>
                 </div>
               </div>
             </div>

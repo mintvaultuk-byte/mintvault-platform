@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
-import { NUMERIC_GRADES, NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
+import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
 import {
   Save,
   Upload,
@@ -1782,33 +1782,22 @@ export default function CertificateForm({
             <>
               <div>
                 <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
-                  Overall Grade *
+                  Overall Grade
                 </label>
-                <select
-                  value={form.gradeOverall === "10" && form.labelType === "black" ? "black_label" : form.gradeOverall}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === "black_label") {
-                      setForm((f) => ({ ...f, gradeOverall: "10", labelType: "black" }));
-                    } else {
-                      setForm((f) => ({ ...f, gradeOverall: v, labelType: "standard" }));
-                    }
-                  }}
-                  className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
-                  data-testid="select-grade-overall"
+                {/* Read-only (owner directive 2026-07-01): the grade is set 100%
+                    automatically by the MVGS grading workstation (card tool +
+                    defect pins). No manual grade entry on the certificate form. */}
+                <div
+                  className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm"
+                  data-testid="display-grade-overall"
                 >
-                  <option value="" className="bg-[var(--admin-panel)]">
-                    Select grade...
-                  </option>
-                  <option value="black_label" className="bg-[var(--admin-panel)]">
-                    ★ 10 — BLACK LABEL (Gem Mint)
-                  </option>
-                  {NUMERIC_GRADES.map((g) => (
-                    <option key={g.value} value={String(g.value)} className="bg-[var(--admin-panel)]">
-                      {g.value} – {g.label} ({g.description})
-                    </option>
-                  ))}
-                </select>
+                  {form.gradeOverall
+                    ? form.gradeOverall === "10" && form.labelType === "black"
+                      ? "★ 10 — Black Label (Gem Mint)"
+                      : form.gradeOverall
+                    : "Not yet graded"}
+                  <span className="text-[var(--admin-ink-dim)] text-xs ml-2">— set automatically by MVGS grading</span>
+                </div>
               </div>
 
               <div>
