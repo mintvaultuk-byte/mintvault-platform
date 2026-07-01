@@ -219,29 +219,10 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
           >
             &larr; Back to list
           </button>
-          <CertificateForm
-            certificate={editingCert}
-            onSuccess={handleFormClose}
-            externalIdentification={externalIdentification}
-            onExternalIdentificationConsumed={() => setExternalIdentification(null)}
-            onIdentifyAndGrade={(result) => {
-              // Push analysis to GradingPanel so it populates subgrades, defects, etc.
-              setPendingAnalysis(result);
-              // Also refetch cert for list updates
-              if (editingCert) {
-                fetch(`/api/admin/certificates?includeId=${editingCert.id}`, { credentials: "include" })
-                  .then((r) => r.json())
-                  .then((certs) => {
-                    const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
-                    if (updated) setEditingCert(updated);
-                  })
-                  .catch(() => {});
-              }
-              queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-            }}
-          />
+          {/* Owner directive (2026-07-01): grading workstation moved above the
+              identity form — the card/name/set fields sit underneath it now. */}
           {editingCert && editingCert.id && (
-            <div className="mt-6 space-y-6">
+            <div className="space-y-6">
               <GradingPanel
                 certId={editingCert.id}
                 cardName={editingCert.cardName || ""}
@@ -279,6 +260,29 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
               <NfcSection cert={editingCert} onUpdated={(updated) => setEditingCert(updated)} />
             </div>
           )}
+          <div className="mt-6">
+            <CertificateForm
+              certificate={editingCert}
+              onSuccess={handleFormClose}
+              externalIdentification={externalIdentification}
+              onExternalIdentificationConsumed={() => setExternalIdentification(null)}
+              onIdentifyAndGrade={(result) => {
+                // Push analysis to GradingPanel so it populates subgrades, defects, etc.
+                setPendingAnalysis(result);
+                // Also refetch cert for list updates
+                if (editingCert) {
+                  fetch(`/api/admin/certificates?includeId=${editingCert.id}`, { credentials: "include" })
+                    .then((r) => r.json())
+                    .then((certs) => {
+                      const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
+                      if (updated) setEditingCert(updated);
+                    })
+                    .catch(() => {});
+                }
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+              }}
+            />
+          </div>
         </div>
       </AdminShell>
     );
