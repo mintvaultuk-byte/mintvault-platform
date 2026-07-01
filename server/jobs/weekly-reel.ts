@@ -29,7 +29,7 @@
 import { sql } from "drizzle-orm";
 import { db, pool } from "../db";
 import { withAdvisoryLock } from "../lib/advisory-lock";
-import { isShuttingDown } from "../lib/lifecycle";
+import { isShuttingDown, trackInterval, trackTimeout } from "../lib/lifecycle";
 import { auditLog, reelAnalytics, reelCardApprovals } from "@shared/schema";
 import { getR2SignedUrl, uploadToR2 } from "../r2";
 import { fetchWeeklyReelData, type WeeklyReelCard } from "../ig/weekly-reel-data";
@@ -463,7 +463,7 @@ export function startWeeklyReelScheduler(): void {
   }
   started = true;
 
-  setTimeout(() => {
+  trackTimeout(() => {
     const tick = async () => {
       if (isShuttingDown()) return;
       const settings = await getAllSettings();
@@ -498,6 +498,6 @@ export function startWeeklyReelScheduler(): void {
       }
     };
     void tick();
-    setInterval(tick, TICK_INTERVAL_MS);
+    trackInterval(tick, TICK_INTERVAL_MS);
   }, BOOT_DELAY_MS);
 }

@@ -22,7 +22,7 @@
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db, pool } from "../db";
 import { withAdvisoryLock } from "../lib/advisory-lock";
-import { isShuttingDown } from "../lib/lifecycle";
+import { isShuttingDown, trackInterval, trackTimeout } from "../lib/lifecycle";
 import { igPostQueue, igSettings, IG_POST_TYPES, type IgPostType } from "@shared/schema";
 import { fetchPostData, selectPostType } from "../ig/data-fetcher";
 import { generateIgImage } from "../ig/image-generator";
@@ -250,7 +250,7 @@ export function startIgDailyPostScheduler(): void {
   }
   started = true;
 
-  setTimeout(() => {
+  trackTimeout(() => {
     const tick = async () => {
       if (isShuttingDown()) return;
       const hour = nowInLondonHour();
@@ -286,6 +286,6 @@ export function startIgDailyPostScheduler(): void {
 
     // Run immediately on boot, then every TICK_INTERVAL_MS thereafter.
     void tick();
-    setInterval(tick, TICK_INTERVAL_MS);
+    trackInterval(tick, TICK_INTERVAL_MS);
   }, BOOT_DELAY_MS);
 }

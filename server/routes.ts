@@ -8767,6 +8767,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           return res.status(400).json({ error: "No images provided" });
         }
 
+        // Validate real image content (magic bytes), not just the multer
+        // filename-extension filter, before processing/uploading. See B9.
+        const badUpload = await rejectInvalidUploads(Object.values(files).flat());
+        if (badUpload) return res.status(400).json({ error: badUpload });
+
         const certId = normalizeCertId(cert.certId);
         const updates: Record<string, string> = {};
         const qualityResults: Record<string, any> = {};
@@ -9081,6 +9086,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const frontFile = files?.front?.[0];
       const backFile = files?.back?.[0];
       if (!frontFile) return res.status(400).json({ error: "Front image is required" });
+
+      // Validate real image content (magic bytes), not just the multer
+      // filename-extension filter, before processing/uploading. See B9.
+      const badUpload = await rejectInvalidUploads([frontFile, ...(backFile ? [backFile] : [])]);
+      if (badUpload) return res.status(400).json({ error: badUpload });
 
       try {
         const { uploadImagesToCert, runAiOnCertIfIdle } = await import("./scan-ingest-service");

@@ -176,7 +176,10 @@ export async function computeGradingQuote(input: GradingQuoteInput): Promise<Gra
     const ct = creditType === "reholder" ? "reholder" : "standard_grade";
     const hasCredit = await countCreditsRemaining(userId, ct);
     if (hasCredit > 0) {
-      creditAmountPence = pricePerCard;
+      // Cap the credit at the discounted grading subtotal so it can only zero out
+      // the grading cost — never subsidise shipping/insurance (which would let a
+      // credit + discount drop the charge below shipping+insurance). See B2.
+      creditAmountPence = Math.min(pricePerCard, discountedSubtotal);
       creditApplied = true;
       creditTypeApplied = ct;
     }
