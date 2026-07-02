@@ -1843,7 +1843,24 @@ export default function CertificateForm({
             AI Identify → Card Details → grade the card → Grade section. Rendered
             inside the <form> but every workstation button is type="button" and
             handleSubmit no-ops pre-approval, so it can never submit the form. */}
-        {workstationSlot && <div>{workstationSlot}</div>}
+        {workstationSlot && (
+          <div
+            onKeyDown={(e) => {
+              // Workstation now lives inside the <form>. On an already-approved
+              // cert the explicit "Save Changes to Published Certificate" submit
+              // button exists, so Enter in a workstation text/number input would
+              // otherwise submit the form (save + close the editor, discarding
+              // the in-progress workstation edit). Swallow Enter's default for
+              // INPUT elements only — textareas keep newlines, selects/buttons
+              // are unaffected, and no grading input relies on Enter.
+              if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
+                e.preventDefault();
+              }
+            }}
+          >
+            {workstationSlot}
+          </div>
+        )}
 
         <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
           <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2">Grade</legend>
