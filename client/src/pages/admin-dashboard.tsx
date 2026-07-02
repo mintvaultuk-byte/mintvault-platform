@@ -199,14 +199,24 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     setActiveTab("certs");
   };
 
-  const filtered = searchQuery
-    ? certs.filter(
-        (c) =>
-          c.certId.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (c.cardName ?? "").toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (c.setName ?? "").toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : certs;
+  // A pure cert-number search (e.g. "16", "MV16", "mv-0000000016") resolves to
+  // the EXACT cert number — typing 16 returns MV16 only, never MV160/MV416.
+  // Free-text searches keep the substring match on certId / card / set name.
+  const trimmedSearch = searchQuery.trim();
+  const certNumMatch = trimmedSearch.match(/^(?:mv[-\s]?)?0*(\d+)$/i);
+  const filtered = !trimmedSearch
+    ? certs
+    : certNumMatch
+      ? certs.filter((c) => {
+          const n = (c.certId.match(/\d+/) || [])[0];
+          return n != null && parseInt(n, 10) === parseInt(certNumMatch[1], 10);
+        })
+      : certs.filter(
+          (c) =>
+            c.certId.toLowerCase().includes(trimmedSearch.toLowerCase()) ||
+            (c.cardName ?? "").toLowerCase().includes(trimmedSearch.toLowerCase()) ||
+            (c.setName ?? "").toLowerCase().includes(trimmedSearch.toLowerCase())
+        );
 
   if (showForm) {
     return (
