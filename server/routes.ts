@@ -1,6 +1,5 @@
 import { sendServerError } from "./lib/error-response";
 import { normalizeCertId, certNumberFromId } from "./lib/cert-id";
-import { ensurePerfIndexes } from "./lib/perf-indexes";
 import type {
   Express,
   Request as ExpressRequest,
@@ -1304,7 +1303,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   migratePerOperatorSchema().catch((e: any) => console.error("[per-operator-migrate] error:", e.message));
   migrateStaffCapabilitiesSchema().catch((e: any) => console.error("[staff-caps-migrate] error:", e.message));
   migrateScanSchema().catch((e: any) => console.error("[scan-migrate] error:", e.message));
-  ensurePerfIndexes().catch((e: any) => console.error("[perf-indexes-migrate] error:", e.message));
   migrateAccountSchema()
     .then(() => migrateMarketplaceSchema())
     .catch((e: any) => console.error("[startup-migration] error:", e.message));
