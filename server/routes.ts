@@ -35,6 +35,23 @@ import {
   estimateRateLimit,
   ADMIN_FREE_EMAIL,
 } from "./lib/rate-limiters";
+import {
+  ACCEPTED_UPLOAD_MIMES,
+  upload,
+  preGradeUpload,
+  receiptUpload,
+  gradingUpload,
+  attachImagesUpload,
+  phoneUpload,
+  hotFolderUpload,
+  gradeWithAiUpload,
+  identifyUpload,
+  toolsUpload,
+  scanUpload,
+  certImgUpload,
+  reelAssetUpload,
+  igImageUpload,
+} from "./lib/multer-configs";
 import { z } from "zod";
 import { registerPublicRoutes } from "./routes/public";
 import { registerAuthRoutes } from "./routes/auth";
@@ -90,7 +107,6 @@ import {
   FAILED_LOGIN_DELAY_MS,
 } from "./auth";
 import { generateLabelPNG, generateLabelPDF, applyLabelOverrides } from "./labels";
-import multer from "multer";
 import { fileTypeFromBuffer } from "file-type";
 import path from "path";
 import fs from "fs";
@@ -368,18 +384,6 @@ function parseDesignations(raw: unknown, fallback: string[] = []): string[] {
   return fallback;
 }
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    const allowed = /\.(jpg|jpeg|png|webp)$/i;
-    if (allowed.test(path.extname(file.originalname))) {
-      cb(null, true);
-    } else {
-      cb(new Error("Only image files are allowed"));
-    }
-  },
-});
 
 // normalizeCertId + certNumberFromId now live in the shared, ReDoS-safe helper
 // (server/lib/cert-id.ts, fixes #113). Re-exported here so existing callers that
@@ -1699,16 +1703,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // Multer config for /api/pre-grade. In-memory storage (per spec — no
   // data stored on disk or R2), 20 MB per file, accepts JPEG/PNG/TIFF.
-  const preGradeUpload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 20 * 1024 * 1024, files: 2 },
-    fileFilter: (_req, file, cb) => {
-      const ok = ["image/jpeg", "image/png", "image/tiff", "image/tif", "image/x-tiff"].includes(
-        (file.mimetype || "").toLowerCase()
-      );
-      cb(null, ok);
-    },
-  });
 
   // POST /api/pre-grade — public AI pre-grade. No auth. Rate-limited.
   // Runs the uploaded front (+ optional back) through the standard
@@ -8499,14 +8493,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // POST /api/admin/submissions/:id/mark-received — admin marks received + uploads photos
-  const receiptUpload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 10 * 1024 * 1024, files: 6 },
-    fileFilter: (_req, file, cb) => {
-      if (/\.(jpg|jpeg|png|webp)$/i.test(path.extname(file.originalname))) cb(null, true);
-      else cb(new Error("Images only"));
-    },
-  });
 
   app.post(
     "/api/admin/submissions/:id/mark-received",
@@ -8612,17 +8598,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── Build 1: Grading image upload ─────────────────────────────────────────
-  const gradingUpload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 30 * 1024 * 1024 }, // 30 MB for high-res scans
-    fileFilter: (_req, file, cb) => {
-      if (/\.(jpg|jpeg|png|webp|tiff?)$/i.test(path.extname(file.originalname))) {
-        cb(null, true);
-      } else {
-        cb(new Error("Only image files are allowed"));
-      }
-    },
-  });
 
   app.post(
     "/api/admin/certificates/:id/upload-images",
@@ -8948,14 +8923,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // scan-ingest pipeline (uploadImagesToCert) so attached images go through
   // the same deskew → safety-pad → mask → 10px-trim → PNG path as a
   // natively-scanned cert. Front required, back optional. AI fires async.
-  const attachImagesUpload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB, matches scan-ingest
-    fileFilter: (_req, file, cb) => {
-      if (/\.(jpg|jpeg|png|webp|tiff?)$/i.test(path.extname(file.originalname))) cb(null, true);
-      else cb(new Error("Unsupported image format"));
-    },
-  });
 
   app.put(
     "/api/admin/certificates/:id/attach-images",
@@ -10528,15 +10495,6 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Build 4: Public phone upload endpoint ─────────────────────────────────
 
-  const phoneUpload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 30 * 1024 * 1024 },
-    fileFilter: (_req, file, cb) => {
-      if (/\.(jpg|jpeg|png|webp|heic)$/i.test(path.extname(file.originalname)) || file.mimetype.startsWith("image/"))
-        cb(null, true);
-      else cb(new Error("Images only"));
-    },
-  });
 
   app.post("/api/upload/:certId/:imageType", phoneUpload.single("image"), async (req, res) => {
     try {
@@ -10587,7 +10545,6 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Build 4: Hot folder upload ─────────────────────────────────────────────
 
-  const hotFolderUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
   app.post("/api/admin/hot-folder-upload", hotFolderUpload.single("front"), async (req, res) => {
     try {
@@ -11608,10 +11565,6 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Unified "Grade with AI" endpoint — auto-crop, identify, grade in one call ──
 
-  const gradeWithAiUpload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 100 * 1024 * 1024 },
-  });
 
   app.post(
     "/api/admin/certificates/grade-with-ai",
@@ -11734,7 +11687,6 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Build 6+: Identify card from uploaded image (no cert required) ─────────
 
-  const identifyUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
   app.post("/api/admin/identify-image", requireAdmin, identifyUpload.single("image"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No image file provided" });
@@ -11756,7 +11708,6 @@ Defects (admin-confirmed): ${defectLines}`;
   // without the header will share the 5/hour bucket; power use should curl with
   // the header set.
 
-  const toolsUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
   // GET /api/tools/estimate/credits?email=
   // H3 — strict per-IP rate limit. The estimate tool is anonymous (no session to
@@ -12054,7 +12005,6 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Admin scan-ingest: scanner → cert → AI pipeline in one call ────────────
 
-  const scanUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
   app.post(
     "/api/admin/scan-ingest",
@@ -12643,7 +12593,6 @@ Defects (admin-confirmed): ${defectLines}`;
   // attach path writes only `grading_{side}_original`. Run /reprocess-images
   // afterward if variants are needed.
 
-  const certImgUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
   // GET /preview — light metadata used by Manual Mode UI to confirm cert
   // exists and which side(s) are populated before uploading.
@@ -15994,10 +15943,6 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Content enhancement uploads (intro / outro / music) ────────────────
 
-  const reelAssetUpload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB cap
-  });
 
   function makeAssetUploadHandler(opts: {
     r2Key: string;
@@ -16264,22 +16209,6 @@ Defects (admin-confirmed): ${defectLines}`;
   // posts — uniform output format means the publish path doesn't have to
   // branch by source type. R2 object is always .jpg with image/jpeg
   // content-type regardless of what the admin uploaded.
-  const ACCEPTED_UPLOAD_MIMES = new Set([
-    "image/jpeg",
-    "image/jpg", // less standard but seen from some clients
-    "image/png",
-    "image/tiff",
-    "image/x-tiff", // alternate TIFF mime
-    "image/webp",
-  ]);
-  const igImageUpload = multer({
-    storage: multer.memoryStorage(),
-    limits: { fileSize: 50 * 1024 * 1024 },
-    fileFilter(_req, file, cb) {
-      if (ACCEPTED_UPLOAD_MIMES.has(file.mimetype)) return cb(null, true);
-      cb(new Error(`Unsupported format ${file.mimetype} — accepted: JPEG, PNG, TIFF, WebP`));
-    },
-  });
   app.post("/api/admin/ig/queue/:id/replace-image", requireAdmin, igImageUpload.single("image"), async (req, res) => {
     try {
       const id = parseInt(String(req.params.id), 10);
