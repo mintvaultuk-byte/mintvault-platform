@@ -115,14 +115,34 @@ export async function fulfilPaidSubmission(
       if (creditUser) {
         const consumed = await consumeCredit(creditUser.id, piMeta.creditType, numId);
         if (!consumed) {
+          // Charged the discounted price but no credit was available to burn
+          // (the credit was consumed by a concurrent order between quote and
+          // fulfilment). Charge already succeeded — never fail/refund here.
+          // Record an audit row so finance can reconcile the leak; mirrors the
+          // over_cap audit that redeemPromoCode already writes for promos.
           console.error(
             `[fulfil] submission ${sid} credit NOT consumed (none available for ${piMeta.creditType}) — reconcile`
           );
+          await storage
+            .writeAuditLog("submission", String(numId), "CREDIT_CONSUME_FAILED", null, {
+              reason: "no_credit_available",
+              creditType: piMeta.creditType,
+              creditAmountPence: piMeta.creditAmountPence ?? null,
+              userId: creditUser.id,
+            })
+            .catch((e: any) => console.error(`[fulfil] submission ${sid} credit-fail audit error:`, e?.message || e));
         } else {
           console.log(`[fulfil] submission ${sid} consumed 1 ${piMeta.creditType} credit`);
         }
       } else {
         console.error(`[fulfil] submission ${sid} creditApplied but no user for ${submission.email} — reconcile`);
+        await storage
+          .writeAuditLog("submission", String(numId), "CREDIT_CONSUME_FAILED", null, {
+            reason: "no_user_for_email",
+            creditType: piMeta.creditType,
+            creditAmountPence: piMeta.creditAmountPence ?? null,
+          })
+          .catch((e: any) => console.error(`[fulfil] submission ${sid} credit-fail audit error:`, e?.message || e));
       }
     } catch (e: any) {
       console.error(`[fulfil] submission ${sid} credit consume error:`, e?.message || e);
