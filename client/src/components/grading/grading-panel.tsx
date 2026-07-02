@@ -17,7 +17,8 @@ import ManualCardTool from "./manual-card-tool";
 // MeasurementTool retired in v2.1 — line drawing now lives inside image-viewer
 // mark-mode and manual-card-tool defects phase as a tool palette, alongside
 // the pin tool. The launcher button + overlay mount are gone from this panel.
-import CrossGradeDisplay from "./cross-grade-display";
+// CrossGradeDisplay import removed (owner directive 2026-07-02) — the
+// cross-grade estimate section was removed from this panel.
 // Reuse the EXACT admin set-name combobox + card autofill so the grader identity
 // editor feels identical to the admin CertificateForm. Both back-end endpoints
 // (/api/pokemon-sets, /api/cards/autofill) are public — no auth change needed.
@@ -2622,16 +2623,8 @@ export default function GradingPanel({
               />
             )}
 
-            {/* Cross-grade estimate */}
-            {!isNonNumeric && overall > 0 && (
-              <CrossGradeDisplay
-                mvGrade={overall}
-                subgrades={sub}
-                strengthScore={
-                  (aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null
-                }
-              />
-            )}
+            {/* Cross-grade estimate REMOVED (owner directive 2026-07-02):
+                the MintVault/PSA/BGS/TAG cross-grade estimate is not needed. */}
 
             {isNonNumeric && (
               <div className="rounded-xl p-4 bg-[color-mix(in_srgb,var(--admin-amber)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-amber)_40%,transparent)] text-center">
