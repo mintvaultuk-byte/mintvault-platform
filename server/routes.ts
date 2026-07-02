@@ -9,6 +9,32 @@ import type {
 } from "express";
 import { createServer, type Server } from "http";
 import rateLimit from "express-rate-limit";
+import {
+  waitlistRateLimit,
+  contactRateLimit,
+  mvgsInterestRateLimit,
+  cookieAckRateLimit,
+  paymentRateLimit,
+  stolenReportRateLimit,
+  transferActionRateLimit,
+  reissueRateLimit,
+  preGradeRateLimit,
+  preGradePreviewRateLimit,
+  lookupRateLimit,
+  verifyRateLimit,
+  showcaseRateLimit,
+  aiRateLimit,
+  claimRateLimit,
+  transferRateLimit,
+  transferV2RateLimit,
+  refNumberRateLimit,
+  magicLinkRateLimit,
+  accountSwitchRateLimit,
+  pinLoginRateLimit,
+  toolsRateLimit,
+  estimateRateLimit,
+  ADMIN_FREE_EMAIL,
+} from "./lib/rate-limiters";
 import { z } from "zod";
 import { registerPublicRoutes } from "./routes/public";
 import { registerAuthRoutes } from "./routes/auth";
@@ -1142,8 +1168,8 @@ async function createEstimateFreeUsesTable() {
   `);
 }
 
-// Admin email gets unlimited free access to all tools
-const ADMIN_FREE_EMAIL = "neilsophieoliver@gmail.com";
+// ADMIN_FREE_EMAIL is imported from ./lib/rate-limiters (relocated so the shared
+// rate-limiters' skip() can use it without a circular import).
 
 async function seedAdminCredits() {
   await db.execute(sql`
@@ -1400,13 +1426,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // submissions of the same email return the same success message without
   // revealing whether the address was already on the list. Audit logged
   // only on first insert (entity_type='waitlist_signup').
-  const waitlistRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many attempts from this device. Please try again later." },
-  });
 
   app.post("/api/v2/waitlist", waitlistRateLimit, async (req, res) => {
     try {
@@ -1470,13 +1489,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Resend send (so messages survive email failures), then attempts Resend
   // and records the outcome on the same row. Returns 200 even if Resend
   // throws — the message is in the DB, operator can read from there.
-  const contactRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many contact-form submissions from this device. Please wait 15 minutes." },
-  });
 
   const contactSchema = z.object({
     name: z.string().trim().min(1, "Name is required").max(100, "Name too long"),
@@ -1546,13 +1558,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── MVGS compliance interest (public, rate-limited) ──────────────────────
   // POST /api/mvgs/interest — captures the /mvgs/join form. Append-only into
   // mvgs_interest table; no read endpoint, no public listing.
-  const mvgsInterestRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 3,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many submissions from this device. Please wait an hour." },
-  });
 
   const mvgsInterestSchema = z.object({
     company: z.string().trim().min(1, "Company name is required").max(200, "Company name too long"),
@@ -1674,76 +1679,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/legal/guarantee", (_req, res) => res.redirect(301, "/legal/guarantee-and-correction-policy"));
 
   // ── Cookie consent acknowledgment (strictly-necessary-only model) ─────────
-  const cookieAckRateLimit = rateLimit({
-    windowMs: 5 * 60 * 1000,
-    max: 1,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many requests." },
-  });
   // Payment endpoints — generous for legit users retrying declined cards
-  const paymentRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many payment attempts. Please wait a few minutes and try again." },
-  });
 
   // Stolen-report — high-friction abuse surface. Generous enough for dealer batch-reports.
-  const stolenReportRateLimit = rateLimit({
-    windowMs: 24 * 60 * 60 * 1000,
-    max: 20,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Daily report limit reached. Contact support@mintvaultuk.com if you need to file more." },
-  });
 
   // Transfer dispute/cancel — same pattern as existing transferV2RateLimit
-  const transferActionRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many transfer actions — please try again later." },
-  });
 
   // Rate limit for owner-triggered logbook reissue — belt-and-braces behind
   // owner auth. Admin bypass via x-mv-admin-email header (for support cases).
-  const reissueRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many reissue requests — please try again later." },
-    skip: (req) => {
-      const adminEmail = (req.header("x-mv-admin-email") || "").trim().toLowerCase();
-      return adminEmail === ADMIN_FREE_EMAIL;
-    },
-  });
 
   // Public AI pre-grade — 3/hour per IP. Each call invokes Claude Haiku
   // (paid). Tight cap is deliberate; expect VPN abuse to bypass over
   // time and add captcha / signed-token gating if it materialises.
-  const preGradeRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 3,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "AI pre-grade is limited to 3 requests per hour per IP. Try again later." },
-  });
 
   // TIFF preview transcoding (/api/pre-grade/preview) — sharp resize +
   // JPEG encode only, no AI cost. Higher cap so users uploading scanner
   // TIFFs for front + back can preview both sides without spending
   // grading quota. Still capped to deter abuse of the public endpoint.
-  const preGradePreviewRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 20,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many preview requests. Try again later." },
-  });
 
   // Multer config for /api/pre-grade. In-memory storage (per spec — no
   // data stored on disk or R2), 20 MB per file, accepts JPEG/PNG/TIFF.
@@ -1868,13 +1820,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // enumeration scrapers (cert IDs are sequential MV1, MV2, ...).
   // Applied to /api/cert/:id, /api/cert/:id/population, /api/logbook/:certId,
   // and (via parallel definition in server/showroom.ts) the showroom GETs.
-  const lookupRateLimit = rateLimit({
-    windowMs: 60 * 1000,
-    max: 60,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many requests. Limit: 60 per minute per IP." },
-  });
 
   // ── Health check — tests DB connectivity for Fly/monitoring ───────────────
   // No auth, no rate limit. Returns 503 if DB unreachable.
@@ -1983,13 +1928,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── PUBLIC VERIFICATION API (v1) ──────────────────────────────────────────
-  const verifyRateLimit = rateLimit({
-    windowMs: 60 * 1000,
-    max: 100,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many requests. Limit: 100 per minute per IP." },
-  });
 
   app.get("/api/v1/verify/:certId", verifyRateLimit, async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -2112,13 +2050,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── Slab showcase — homepage 3D hero data ─────────────────────────────────
   // Public, no auth. Top graded certs with real label PNGs (generated +
   // cached in R2 by server/slab-showcase.ts). Never 500s a page load.
-  const showcaseRateLimit = rateLimit({
-    windowMs: 60 * 1000,
-    max: 30,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many requests. Limit: 30 per minute per IP." },
-  });
   app.get("/api/public/slab-showcase", showcaseRateLimit, async (_req, res) => {
     try {
       const { getSlabShowcaseItems } = await import("./slab-showcase");
@@ -2953,14 +2884,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── AI-ASSISTED GRADING (Build 3 placeholder — superseded by Build 5) ───────
 
   // Rate limit — 1 AI call per 5 seconds per IP
-  const aiRateLimit = rateLimit({
-    windowMs: 5 * 1000,
-    max: 1,
-    standardHeaders: true,
-    legacyHeaders: false,
-    skip: () => false,
-    message: { error: "Please wait 5 seconds between AI analysis requests." },
-  });
 
   // OLD endpoint stub — kept to avoid 404 on any lingering clients; real impl in Build 5 below
   app.post("/api/admin/certificates/:id/analyze-v1-legacy", requireAdmin, aiRateLimit, async (req, res) => {
@@ -6453,13 +6376,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── PUBLIC CLAIM FLOW ──────────────────────────────────────────────────────
   // Rate limiter: max 5 attempts per IP per 15 minutes to prevent brute-forcing claim codes
-  const claimRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many claim attempts from this device. Please wait 15 minutes before trying again." },
-  });
 
   app.post("/api/claim/request", claimRateLimit, async (req, res) => {
     try {
@@ -6585,13 +6501,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── PUBLIC TRANSFER FLOW ───────────────────────────────────────────────────
   // Rate limiter: max 5 attempts per IP per 15 minutes
-  const transferRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many transfer attempts from this device. Please wait 15 minutes before trying again." },
-  });
 
   // Step 1: initiate — current owner enters cert ID + their email + new owner email
   app.post("/api/transfer/request", transferRateLimit, async (req, res) => {
@@ -6734,22 +6643,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   };
 
   // Rate limiter: max 5 attempts per IP per 15 minutes (shared concept, separate instance)
-  const transferV2RateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many transfer attempts. Please wait 15 minutes before trying again." },
-  });
 
   // Stricter rate limit for ref number verification — 3 attempts per hour per IP
-  const refNumberRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 3,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many verification attempts. Please wait before trying again." },
-  });
 
   // Step 1: outgoing keeper initiates transfer
   app.post("/api/v2/transfers/initiate", requireTransferFlowLive, transferV2RateLimit, async (req, res) => {
@@ -7794,13 +7689,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ── CUSTOMER DASHBOARD API ─────────────────────────────────────────────────
-  const magicLinkRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many login requests. Please wait 15 minutes." },
-  });
 
   // POST /api/customer/magic-link — send login link to email
   app.post("/api/customer/magic-link", magicLinkRateLimit, async (req, res) => {
@@ -7906,13 +7794,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // in as a different customer. /account/switch renders an HTML confirm page;
   // the user explicitly confirms or cancels. See server/account-switch.ts.
 
-  const accountSwitchRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many switch attempts. Please wait 15 minutes." },
-  });
 
   app.get("/account/switch", async (req, res) => {
     const { readSwitchCookie, verifyPendingSwitchCookie, clearPendingSwitchCookie } = await import("./account-switch");
@@ -8154,13 +8035,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Magic-link demoted to first-time enrollment (/api/customer/verify routes
   // to /auth/pin/setup if no pin_hash) and forgot-PIN reset.
 
-  const pinLoginRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many login attempts. Please wait 15 minutes." },
-  });
 
   // POST /api/auth/pin/setup — set the PIN on the user's row.
   // Authorisation: must have one of these session contexts (in priority order):
@@ -11877,28 +11751,10 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Build 6: Public tools ──────────────────────────────────────────────────
 
-  const toolsRateLimit = rateLimit({
-    windowMs: 60 * 1000,
-    max: 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many requests — please wait a minute." },
-  });
   // Admin bypass uses the `x-mv-admin-email` request header — body isn't parsed
   // yet when `skip` runs (multer is downstream). Admins hitting the web UI form
   // without the header will share the 5/hour bucket; power use should curl with
   // the header set.
-  const estimateRateLimit = rateLimit({
-    windowMs: 60 * 60 * 1000,
-    max: 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many estimate requests — you can request up to 5 estimates per hour." },
-    skip: (req) => {
-      const headerEmail = ((req.headers["x-mv-admin-email"] as string) || "").trim().toLowerCase();
-      return headerEmail === ADMIN_FREE_EMAIL;
-    },
-  });
 
   const toolsUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
