@@ -1137,11 +1137,13 @@ export default function CertificateForm({
           : "Fill in card details and click Save. A cert number will be assigned automatically."}
       </p>
 
-      {/* Workflow order (owner directive 2026-07-01): 1. AI Identify →
-          2. grading workstation (card tool + defects, via workstationSlot) →
-          3. Card Details → 4. Grade. The AI-actions block and the workstation
-          sit OUTSIDE the <form> element so none of their buttons can ever
-          trigger a form submit. */}
+      {/* Workflow order (owner directive, Option A 2026-07-02): 1. AI Identify →
+          2. Card Details (AI Identify fills these fields, so confirm them next) →
+          3. grading workstation (card tool + defects, via workstationSlot) →
+          4. Grade. The AI-actions block sits OUTSIDE the <form>; the workstation
+          renders INSIDE the form after Card Details — safe because every
+          workstation button is type="button" and handleSubmit no-ops
+          pre-approval, so it can never trigger a form submit. */}
       {isEdit && certificate?.id && (
         <div className="border border-[var(--admin-gold)]/30 rounded-lg p-4 bg-[var(--admin-gold)]/5 space-y-3 mb-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1216,9 +1218,6 @@ export default function CertificateForm({
           )}
         </div>
       )}
-
-      {/* Grading workstation — card tool front/back + defect marking. */}
-      {workstationSlot && <div className="mb-6">{workstationSlot}</div>}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {!isEdit && (
@@ -1838,6 +1837,13 @@ export default function CertificateForm({
             </div>
           </div>
         </fieldset>
+
+        {/* Grading workstation — card tool front/back + defect marking. Placed
+            right after Card Details (owner directive, Option A 2026-07-02):
+            AI Identify → Card Details → grade the card → Grade section. Rendered
+            inside the <form> but every workstation button is type="button" and
+            handleSubmit no-ops pre-approval, so it can never submit the form. */}
+        {workstationSlot && <div>{workstationSlot}</div>}
 
         <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
           <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2">Grade</legend>
