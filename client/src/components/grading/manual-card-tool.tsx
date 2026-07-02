@@ -1292,7 +1292,7 @@ export default function ManualCardTool({
   return (
     <div className="fixed inset-0 z-[100] bg-[var(--admin-panel2)] flex flex-col select-none">
       {/* Top bar */}
-      <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 flex items-center justify-between border-b border-[var(--admin-line)]">
+      <div className="flex-shrink-0 px-2 py-1 sm:px-4 sm:py-1.5 flex items-center justify-between border-b border-[var(--admin-line)]">
         <div>
           <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest flex items-center gap-2">
             <Crop size={14} /> Card Tool — {side}
@@ -1344,7 +1344,7 @@ export default function ManualCardTool({
           Defects phase swaps the side diagram for a target icon, the chip
           + step prompt for defect-marking guidance, and the per-point undo
           for a cancel-batch button. */}
-      <div className="flex-shrink-0 px-2 py-2 sm:px-4 sm:py-2.5 border-b border-[var(--admin-line)] bg-[var(--admin-panel)] flex items-center gap-2 sm:gap-3">
+      <div className="flex-shrink-0 px-2 py-1 sm:px-4 sm:py-1.5 border-b border-[var(--admin-line)] bg-[var(--admin-panel)] flex items-center gap-2 sm:gap-3">
         {phase === "capture" ? (
           <SideDiagram
             activeSide={canCompute ? -1 : activeSide}
@@ -1355,10 +1355,10 @@ export default function ManualCardTool({
           />
         ) : (
           <div
-            className="flex-shrink-0 w-10 h-10 rounded-full bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] flex items-center justify-center text-[var(--admin-red)]"
+            className="flex-shrink-0 w-8 h-8 rounded-full bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] flex items-center justify-center text-[var(--admin-red)]"
             aria-hidden="true"
           >
-            <Target size={20} />
+            <Target size={16} />
           </div>
         )}
         <div className="flex-1 min-w-0">
@@ -1371,7 +1371,7 @@ export default function ManualCardTool({
                 {activePass === "outer" ? "Outer" : "Inner"}
               </span>
             )}
-            <p className="text-[var(--admin-ink)] text-sm sm:text-lg font-extrabold leading-tight">{bannerText}</p>
+            <p className="text-[var(--admin-ink)] text-xs sm:text-sm font-extrabold leading-tight">{bannerText}</p>
             {phase === "defects" && cropSyncStatus !== "idle" && (
               <span className="flex items-center gap-1.5 text-[10px] sm:text-xs font-bold uppercase tracking-wide">
                 {cropSyncStatus === "pending" && (
@@ -1977,7 +1977,7 @@ export default function ManualCardTool({
             stay accurate at any zoom; the visual crosshair stays 44px on
             screen and gets relatively smaller on the bigger image — exactly
             what's needed to drop a dot on a single border pixel. */}
-        <div className="absolute top-2 right-2 sm:top-6 sm:right-6 z-40 flex flex-col items-stretch gap-1 bg-[var(--admin-panel)]/95 backdrop-blur-sm rounded-lg border border-[var(--admin-line)] shadow-md p-1">
+        <div className="absolute top-2 right-2 sm:top-2 sm:right-2 z-40 flex flex-col items-stretch gap-1 bg-[var(--admin-panel)]/95 backdrop-blur-sm rounded-lg border border-[var(--admin-line)] shadow-md p-1">
           <button
             type="button"
             onClick={zoomInBtn}
@@ -2027,7 +2027,7 @@ export default function ManualCardTool({
                   title={p.label}
                   aria-label={p.label}
                   aria-pressed={selected}
-                  className={`w-7 h-7 rounded-full mx-auto transition-shadow ${
+                  className={`w-6 h-6 rounded-full mx-auto transition-shadow ${
                     selected
                       ? "ring-2 ring-[var(--admin-gold)] ring-offset-2 ring-offset-[var(--admin-panel)]"
                       : "ring-1 ring-[var(--admin-line-hard)] hover:ring-[var(--admin-ink-faint)]"
@@ -2041,7 +2041,7 @@ export default function ManualCardTool({
       </div>
 
       {/* Controls */}
-      <div className="flex-shrink-0 px-2 py-1.5 sm:px-4 sm:py-3 border-t border-[var(--admin-line)] space-y-1.5 sm:space-y-3">
+      <div className="flex-shrink-0 px-2 py-1 sm:px-4 sm:py-1.5 border-t border-[var(--admin-line)] space-y-1.5 sm:space-y-2">
         {phase === "capture" ? (
           <>
             {/* Row 0: quick actions — Auto-Detect + full Reset (parity with Manual Crop) */}
