@@ -602,15 +602,16 @@ function drawImageRotated90CW(
 }
 
 // Guillotine cut lines for the portrait layout. Verticals split the front/back/
-// insert within each unit + the unit edges (x = 19,40,61,105,126,147,191),
-// running the height of the grid; horizontals split the 4 rows full-page-width.
+// insert within each unit + the unit edges (x = 19,40,61,105,126,147,191) and
+// run the FULL page height (top edge → bottom edge) so a guillotine blade can
+// line up straight through the sheet from corner to corner. Horizontals split
+// the rows the full page width, at every row boundary (top edge → bottom edge).
 function drawPortraitGuillotineLines(doc: InstanceType<typeof PDFDocument>): void {
-  const gridTop = PDF9P_TOP_MARGIN_MM; // 9.5
-  const gridBot = PDF9P_TOP_MARGIN_MM + PDF9P_ROWS * PDF9P_UNIT_H_MM; // 287.5
   doc.save();
   doc.lineWidth(GUILLOTINE_STROKE_PT).strokeColor(GUILLOTINE_HEX);
   // Vertical splits — for each column: unit left, front|back, back|insert, unit
-  // right. The shared edge between adjacent columns dedupes naturally.
+  // right. The shared edge between adjacent columns dedupes naturally. Each runs
+  // the full page height (0 → PDF_PAGE_H_MM) so it reaches both paper edges.
   const xs = new Set<number>();
   for (let c = 0; c < PDF9P_COLS; c++) {
     const left = PDF9P_LEFT_MARGIN_MM + c * PDF9P_UNIT_W_MM;
@@ -620,10 +621,11 @@ function drawPortraitGuillotineLines(doc: InstanceType<typeof PDFDocument>): voi
     xs.add(left + PDF9P_UNIT_W_MM);
   }
   for (const x of xs) {
-    doc.moveTo(mm(x), mm(gridTop)).lineTo(mm(x), mm(gridBot)).stroke();
+    doc.moveTo(mm(x), mm(0)).lineTo(mm(x), mm(PDF_PAGE_H_MM)).stroke();
   }
-  // Horizontal row splits — full page width, at each row bottom (r = 1..ROWS).
-  for (let r = 1; r <= PDF9P_ROWS; r++) {
+  // Horizontal splits — full page width, at every row boundary (r = 0..ROWS)
+  // including the grid's top and bottom edges, so each reaches both paper edges.
+  for (let r = 0; r <= PDF9P_ROWS; r++) {
     const y = PDF9P_TOP_MARGIN_MM + r * PDF9P_UNIT_H_MM;
     doc.moveTo(mm(0), mm(y)).lineTo(mm(PDF_PAGE_W_MM), mm(y)).stroke();
   }
