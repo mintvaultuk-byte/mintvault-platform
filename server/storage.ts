@@ -1989,6 +1989,16 @@ export class DatabaseStorage implements IStorage {
 
     const cert = await this.getCertificateByCertId(verification.certId);
     if (!cert) return { success: false, error: "Certificate not found." };
+    // Same stolen-gate every other transfer path enforces (v2 initiate,
+    // buyer-init, claim). Without it a stolen-flagged cert could still change
+    // owner via a legacy confirmation link issued before the flag landed.
+    if ((cert as any).stolenStatus === "reported_stolen") {
+      return {
+        success: false,
+        error:
+          "This certificate has been reported stolen and cannot be transferred. Contact support@mintvaultuk.com to verify.",
+      };
+    }
 
     let newOwner = await this.getUserByEmail(verification.toEmail);
     if (!newOwner) {
@@ -2037,6 +2047,7 @@ export class DatabaseStorage implements IStorage {
     const result = await db.execute(sql`
       SELECT * FROM submissions
       WHERE LOWER(customer_email) = ${normalEmail}
+        AND deleted_at IS NULL
       ORDER BY created_at DESC
     `);
     return result.rows.map((row: any) => ({
@@ -2076,6 +2087,7 @@ export class DatabaseStorage implements IStorage {
       JOIN submissions s ON si.submission_id = s.id
       WHERE LOWER(s.customer_email) = ${normalEmail}
         AND c.status != 'voided'
+        AND c.deleted_at IS NULL
       ORDER BY c.issued_at DESC
     `);
     // Certs owned by this email (claimed via registry)
@@ -2085,6 +2097,7 @@ export class DatabaseStorage implements IStorage {
       WHERE LOWER(c.owner_email) = ${normalEmail}
         AND c.ownership_status = 'claimed'
         AND c.status != 'voided'
+        AND c.deleted_at IS NULL
       ORDER BY c.issued_at DESC
     `);
     // Merge, dedup by id

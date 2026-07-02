@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useParams, useSearch } from "wouter";
 import { Camera, Upload, CheckCircle2, Loader2, AlertTriangle } from "lucide-react";
 
@@ -24,6 +24,15 @@ export default function MobileUploadPage() {
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Revoke the previous object URL whenever the preview changes (retake /
+  // new photo) and on unmount — object URLs hold the blob in memory until
+  // explicitly revoked.
+  useEffect(() => {
+    return () => {
+      if (preview) URL.revokeObjectURL(preview);
+    };
+  }, [preview]);
 
   function handleFile(f: File) {
     setFile(f);

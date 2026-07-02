@@ -560,8 +560,10 @@ export function registerTransferRoutes(app: Express): void {
         certId: transfer.certId,
         status: transfer.status,
         flowVersion: transfer.flowVersion,
-        fromEmail: transfer.fromEmail.replace(/(.{2}).*(@.*)/, "$1***$2"), // mask email
-        toEmail: transfer.toEmail.replace(/(.{2}).*(@.*)/, "$1***$2"),
+        // maskEmailForAudit handles 1-char local parts; the old inline regex
+        // /(.{2}).*(@.*)/ returned e.g. x@example.com UNMASKED.
+        fromEmail: maskEmailForAudit(transfer.fromEmail),
+        toEmail: maskEmailForAudit(transfer.toEmail),
         ownerConfirmed: !!transfer.ownerConfirmedAt,
         incomingConfirmed: transfer.status === "pending_dispute" || transfer.status === "completed",
         disputeDeadline: transfer.disputeDeadline,

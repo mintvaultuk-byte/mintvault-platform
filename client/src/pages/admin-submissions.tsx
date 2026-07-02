@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { SUBMISSION_STATUS_LABELS, SUBMISSION_STATUS_TRANSITIONS, pricingTiers, submissionTypes } from "@shared/schema";
@@ -327,6 +327,15 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
   const [notesSaved, setNotesSaved] = useState(false);
   const [showMarkReceived, setShowMarkReceived] = useState(false);
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
+  // Stable object URLs for the receipt previews. Creating them inline in the
+  // render loop minted a new URL every render with no revoke — a memory leak
+  // that grew each time the modal re-rendered. Revoked on change/unmount.
+  const receiptPreviews = useMemo(() => receiptFiles.map((f) => URL.createObjectURL(f)), [receiptFiles]);
+  useEffect(() => {
+    return () => {
+      receiptPreviews.forEach((u) => URL.revokeObjectURL(u));
+    };
+  }, [receiptPreviews]);
 
   // Edit-shipping panel. Separate state from the Create Return Label form
   // so the auto-suggest doesn't overwrite the operator's current stored
@@ -923,7 +932,7 @@ function SubmissionDetail({ submissionId, onBack }: { submissionId: string; onBa
               {receiptFiles.map((f, i) => (
                 <div key={i} className="relative group">
                   <img
-                    src={URL.createObjectURL(f)}
+                    src={receiptPreviews[i]}
                     alt={f.name}
                     className="w-16 h-16 object-cover rounded border border-[var(--admin-line)]"
                   />

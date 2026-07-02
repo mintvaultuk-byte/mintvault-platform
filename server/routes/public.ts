@@ -14,6 +14,7 @@ import { FEATURE_FLAGS } from "../config/feature-flags";
 import fs from "fs";
 import path from "path";
 import { normalizeCertId } from "../lib/cert-id";
+import { requireAdmin } from "../auth";
 
 export function registerPublicRoutes(app: Express): void {
   // ── Health check — no auth, no DB, no shared state ──────────────────────
@@ -278,6 +279,26 @@ export function registerPublicRoutes(app: Express): void {
         version: versionMatch?.[1] || "unknown",
         content: body,
       });
+    } catch {
+      res.status(404).json({ error: "Document not found" });
+    }
+  });
+
+  // Admin preview — always available regardless of flag. Moved here from the
+  // dead inline duplicate block in routes.ts (routes-split increment 4b).
+  app.get("/api/admin/legal/:slug", requireAdmin, async (req, res) => {
+    const { LEGAL_SLUGS, LEGAL_ALIASES } = await import("../config/legal");
+    const slug = String(req.params.slug);
+    if (!(LEGAL_SLUGS as readonly string[]).includes(slug)) return res.status(404).json({ error: "Not found" });
+
+    try {
+      const fileSlug = LEGAL_ALIASES[slug] || slug;
+      const filePath = path.join(process.cwd(), "content", "legal", `${fileSlug}.md`);
+      const content = fs.readFileSync(filePath, "utf-8");
+      const titleMatch = content.match(/^title:\s*"?([^"\n]+)"?\s*$/m);
+      const versionMatch = content.match(/^version:\s*"?([^"\n]+)"?\s*$/m);
+      const body = content.replace(/^---[\s\S]*?---\s*/m, "");
+      res.json({ slug, title: titleMatch?.[1] || slug, version: versionMatch?.[1] || "unknown", content: body });
     } catch {
       res.status(404).json({ error: "Document not found" });
     }

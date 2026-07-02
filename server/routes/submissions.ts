@@ -101,7 +101,10 @@ export async function fulfilPaidSubmission(
   }
   console.log(`[fulfil] submission ${sid} — first paid transition, fulfilling`);
 
-  storage
+  // Awaited (was fire-and-forget) so a failed UPDATE surfaces in this
+  // request's logs before fulfilment reports success. Still non-fatal:
+  // a missing estimate date must not fail a paid fulfilment.
+  await storage
     .setEstimatedCompletionDate(numId)
     .catch((e: any) => console.error(`[fulfil] submission ${sid} setEstimatedCompletionDate error:`, e?.message || e));
 
