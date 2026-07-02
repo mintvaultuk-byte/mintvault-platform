@@ -939,7 +939,18 @@ function SheetPrintingPanel() {
     data: allCerts = [],
     isLoading: certsLoading,
     refetch: refetchCerts,
-  } = useQuery<CertForPrinting[]>({ queryKey: [`${base}/printing/queue`] });
+  } = useQuery<CertForPrinting[]>({
+    queryKey: [`${base}/printing/queue`],
+    // Fetch EVERY active cert, not the server's default 200-cert window, so all
+    // certificates — including older ones and ones printed long ago — are
+    // searchable, selectable and reprintable here. The queryKey stays stable so
+    // the existing invalidateQueries([...'/printing/queue']) calls still refresh
+    // this list after prints/reprints.
+    queryFn: async () => {
+      const res = await apiRequest("GET", `${base}/printing/queue?limit=100000`);
+      return (await res.json()) as CertForPrinting[];
+    },
+  });
 
   const visibleCerts = useMemo(() => {
     let list = allCerts;
