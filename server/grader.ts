@@ -888,6 +888,25 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   if (a.gradingStatus !== "pending_review") {
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   }
+  // B3 completeness gate (owner-approved 2026-07-02): a numeric grade (grade
+  // NOT NULL — non-numeric NO/AA certs store grade=NULL so they're exempt)
+  // must never publish with any of the four sub-grades blank, because the
+  // MVGS overall is computed from them. Pure pre-publish check — the atomic
+  // CAS publish below and all scoring logic are untouched.
+  const subgradeGate = await db.execute(sql`
+    SELECT 1 FROM certificates
+    WHERE id = ${certId} AND grade IS NOT NULL
+      AND (centering_score IS NULL OR corners_score IS NULL
+        OR edges_score IS NULL OR surface_score IS NULL)
+  `);
+  if (subgradeGate.rows.length > 0) {
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        "Cannot publish a numeric grade without all four sub-grades (centering, corners, edges, surface). Re-run the MVGS workstation so the sub-grades populate, then approve.",
+    };
+  }
   // Phase 2 — the publish is an atomic CAS (pending_review→active); if it matched
   // 0 rows the state changed under us (e.g. a racing reject), so bail with 409
   // rather than flip grader_status on an unpublished grade.

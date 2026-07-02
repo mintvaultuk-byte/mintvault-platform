@@ -3680,6 +3680,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           return res.status(400).json({ error: "Collection 'Other (manual)' requires a manual entry value" });
         }
 
+        // Front-label line 3 shows EITHER variant OR rarity — held by convention
+        // only until now. Enforce at write time so both can never be set (the
+        // label renderer would silently drop one → wrong physical product).
+        if (data.variant && data.rarity) {
+          return res.status(400).json({
+            error: "Set either Variant or Rarity, not both — the front label shows only one on line 3.",
+          });
+        }
+
         const cert = await storage.createCertificate(data, req.session.adminEmail || "admin");
 
         await storage.writeAuditLog("certificate", cert.certId, "create", req.session.adminEmail || "admin", {
@@ -3837,6 +3846,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
         if (data.collectionCode === "OTHER" && !data.collectionOther) {
           return res.status(400).json({ error: "Collection 'Other (manual)' requires a manual entry value" });
+        }
+
+        // Front-label line 3 shows EITHER variant OR rarity — enforce at write
+        // time. Only reject when this edit actually CHANGES variant/rarity, so
+        // legacy both-set certs can still receive unrelated metadata edits
+        // (this editor always posts full state).
+        const touchesVariantRarity =
+          (data.variant ?? null) !== (existing.variant ?? null) || (data.rarity ?? null) !== (existing.rarity ?? null);
+        if (data.variant && data.rarity && touchesVariantRarity) {
+          return res.status(400).json({
+            error: "Set either Variant or Rarity, not both — the front label shows only one on line 3.",
+          });
         }
 
         if (frontImage) {
@@ -6831,6 +6852,19 @@ Defects (admin-confirmed): ${defectLines}`;
       const finalCorners = sentCorners ?? num(cert.gradeCorners);
       const finalEdges = sentEdges ?? num(cert.gradeEdges);
       const finalSurface = sentSurface ?? num(cert.gradeSurface);
+
+      // B3 completeness gate (owner-approved 2026-07-02): the MVGS overall
+      // grade is COMPUTED FROM the four sub-grades, so a numeric grade must
+      // never publish with any of them blank — sub-grades come automatically
+      // from the MVGS workstation and must all be present here. Non-numeric
+      // grades (NO/AA) are exempt (their sub-grades are NULL by design).
+      // Gate only — no scoring, weights, or formula logic is touched.
+      if (!isNonNum && (finalCentering == null || finalCorners == null || finalEdges == null || finalSurface == null)) {
+        return res.status(400).json({
+          error:
+            "Cannot publish a numeric grade without all four sub-grades (centering, corners, edges, surface). Re-run the MVGS workstation so the sub-grades populate, then approve.",
+        });
+      }
 
       // Strength score is calibrated to the AI's overall grade. If the admin
       // changes the grade manually here, the AI-derived score is stale and
