@@ -160,6 +160,7 @@ const LINE_PALETTES: LinePalette[] = [
   { id: "cyan", label: "Cyan — high contrast on yellow holos", outer: "#00CCFF", inner: "#66E5FF" },
   { id: "lime", label: "Lime — high contrast on dark / red cards", outer: "#00FF66", inner: "#CCFF66" },
   { id: "red", label: "Red — high contrast on cyan / blue / silver", outer: "#FF2A2A", inner: "#FF8888" },
+  { id: "white", label: "White — high contrast on dark / holo art", outer: "#FFFFFF", inner: "#AEB4BC" },
 ];
 
 type DotPass = "outer" | "inner";
