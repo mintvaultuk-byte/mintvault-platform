@@ -404,7 +404,10 @@ export default function GradingPanel({
   // Pre-grade checklist — session-only state, deliberately NOT persisted to
   // the cert. It's an operational reminder that the grader deionized the
   // card before scanning, not a data field on the certificate.
-  const [deionizationComplete, setDeionizationComplete] = useState(false);
+  // Defaults to TICKED (owner directive 2026-07-02): deionization is a standard
+  // step every card goes through, so the box is pre-checked to save a click —
+  // the grader can still untick it if a card wasn't deionized.
+  const [deionizationComplete, setDeionizationComplete] = useState(true);
   const [authStatus, setAuthStatus] = useState<AuthStatus>("genuine");
   const [authNotes, setAuthNotes] = useState("");
   const [privateNotes, setPrivateNotes] = useState("");
