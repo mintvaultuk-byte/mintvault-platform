@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
@@ -45,6 +45,13 @@ interface Props {
   /** External identification pushed from AI panel's "Change card" button */
   externalIdentification?: Record<string, unknown> | null;
   onExternalIdentificationConsumed?: () => void;
+  /** Owner directive (2026-07-01): the grading workstation renders INSIDE this
+      form's flow — after AI Identify, before Card Details — so the whole page
+      reads as one block: identify → grade with the card tool → fill details →
+      grade section. Passed as a slot so the workstation stays a separate
+      component (and outside the <form> element — its buttons must never
+      trigger a form submit). */
+  workstationSlot?: ReactNode;
 }
 
 /**
@@ -138,6 +145,7 @@ export default function CertificateForm({
   onIdentifyAndGrade,
   externalIdentification,
   onExternalIdentificationConsumed,
+  workstationSlot,
 }: Props) {
   const isEdit = !!certificate;
   const { toast } = useToast();
@@ -1129,6 +1137,89 @@ export default function CertificateForm({
           : "Fill in card details and click Save. A cert number will be assigned automatically."}
       </p>
 
+      {/* Workflow order (owner directive 2026-07-01): 1. AI Identify →
+          2. grading workstation (card tool + defects, via workstationSlot) →
+          3. Card Details → 4. Grade. The AI-actions block and the workstation
+          sit OUTSIDE the <form> element so none of their buttons can ever
+          trigger a form submit. */}
+      {isEdit && certificate?.id && (
+        <div className="border border-[var(--admin-gold)]/30 rounded-lg p-4 bg-[var(--admin-gold)]/5 space-y-3 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Identify */}
+            <button
+              type="button"
+              onClick={runIdentify}
+              disabled={!identifyEnabled || identifyLoading}
+              title={!identifyEnabled ? "Enabled in /admin → AI Learning" : "Card name, set, number, year"}
+              className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
+            >
+              <span className="flex items-center gap-2">
+                {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                <span>{identifyLoading ? "Identifying…" : "AI Identify"}</span>
+              </span>
+              <span className="text-[9px] font-normal normal-case opacity-70">name · set · number · year</span>
+            </button>
+
+            {/* Grade */}
+            <button
+              type="button"
+              onClick={runGrade}
+              disabled={!fullGradeEnabled || gradeLoading}
+              title={!fullGradeEnabled ? "Enabled in /admin → AI Learning" : "4 subgrades + overall (Opus)"}
+              className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-[var(--admin-panel2)] text-[var(--admin-gold)] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--admin-panel3)] transition-all"
+            >
+              <span className="flex items-center gap-2">
+                {gradeLoading ? <Loader2 size={13} className="animate-spin" /> : <Cpu size={13} />}
+                <span>{gradeLoading ? "Grading…" : "AI Grade"}</span>
+              </span>
+              <span className="text-[9px] font-normal normal-case opacity-60">4 subgrades + overall</span>
+            </button>
+          </div>
+
+          {(!identifyEnabled || !fullGradeEnabled) && (
+            <p className="text-[10px] text-[var(--admin-ink-faint)]">
+              {!identifyEnabled && !fullGradeEnabled
+                ? "Both AI actions disabled — toggle in /admin → AI Learning."
+                : !identifyEnabled
+                  ? "AI Identify disabled — toggle in /admin → AI Learning."
+                  : "AI Grade disabled — toggle in /admin → AI Learning."}
+            </p>
+          )}
+
+          {identifyConfidence && (
+            <div className="flex items-center gap-2 text-xs">
+              <span
+                className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
+              />
+              <span
+                className={
+                  identifyConfidence === "high"
+                    ? "text-[var(--admin-green)]"
+                    : identifyConfidence === "medium"
+                      ? "text-[var(--admin-amber)]"
+                      : "text-[var(--admin-red)]"
+                }
+              >
+                {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
+              </span>
+              {identifyConfidence !== "high" && !identifyVerified && identifyEnabled && (
+                <button
+                  type="button"
+                  onClick={runIdentify}
+                  disabled={identifyLoading}
+                  className="text-[var(--admin-gold)] text-[10px] hover:underline"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Grading workstation — card tool front/back + defect marking. */}
+      {workstationSlot && <div className="mb-6">{workstationSlot}</div>}
+
       <form onSubmit={handleSubmit} className="space-y-6">
         {!isEdit && (
           <SubmissionItemLink
@@ -1854,85 +1945,7 @@ export default function CertificateForm({
           )}
         </fieldset>
 
-        {/* AI actions — Identify and Grade are independent and gated separately.
-            Owner directive (2026-07-01): moved below Card Details + Grade so
-            the identity/grade fields read first, top to bottom. */}
-        {isEdit && certificate?.id && (
-          <div className="border border-[var(--admin-gold)]/30 rounded-lg p-4 bg-[var(--admin-gold)]/5 space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Identify */}
-              <button
-                type="button"
-                onClick={runIdentify}
-                disabled={!identifyEnabled || identifyLoading}
-                title={!identifyEnabled ? "Enabled in /admin → AI Learning" : "Card name, set, number, year"}
-                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
-              >
-                <span className="flex items-center gap-2">
-                  {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-                  <span>{identifyLoading ? "Identifying…" : "AI Identify"}</span>
-                </span>
-                <span className="text-[9px] font-normal normal-case opacity-70">name · set · number · year</span>
-              </button>
-
-              {/* Grade */}
-              <button
-                type="button"
-                onClick={runGrade}
-                disabled={!fullGradeEnabled || gradeLoading}
-                title={!fullGradeEnabled ? "Enabled in /admin → AI Learning" : "4 subgrades + overall (Opus)"}
-                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-[var(--admin-panel2)] text-[var(--admin-gold)] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--admin-panel3)] transition-all"
-              >
-                <span className="flex items-center gap-2">
-                  {gradeLoading ? <Loader2 size={13} className="animate-spin" /> : <Cpu size={13} />}
-                  <span>{gradeLoading ? "Grading…" : "AI Grade"}</span>
-                </span>
-                <span className="text-[9px] font-normal normal-case opacity-60">4 subgrades + overall</span>
-              </button>
-            </div>
-
-            {(!identifyEnabled || !fullGradeEnabled) && (
-              <p className="text-[10px] text-[var(--admin-ink-faint)]">
-                {!identifyEnabled && !fullGradeEnabled
-                  ? "Both AI actions disabled — toggle in /admin → AI Learning."
-                  : !identifyEnabled
-                    ? "AI Identify disabled — toggle in /admin → AI Learning."
-                    : "AI Grade disabled — toggle in /admin → AI Learning."}
-              </p>
-            )}
-
-            {identifyConfidence && (
-              <div className="flex items-center gap-2 text-xs">
-                <span
-                  className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
-                />
-                <span
-                  className={
-                    identifyConfidence === "high"
-                      ? "text-[var(--admin-green)]"
-                      : identifyConfidence === "medium"
-                        ? "text-[var(--admin-amber)]"
-                        : "text-[var(--admin-red)]"
-                  }
-                >
-                  {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
-                </span>
-                {identifyConfidence !== "high" && !identifyVerified && identifyEnabled && (
-                  <button
-                    type="button"
-                    onClick={runIdentify}
-                    disabled={identifyLoading}
-                    className="text-[var(--admin-gold)] text-[10px] hover:underline"
-                  >
-                    Retry
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Card images and AI grading are handled by the GradingPanel workstation below ── */}
+        {/* ── Card images and AI grading are handled by the GradingPanel workstation above ── */}
 
         {/* ── Legacy Grading Images section (hidden — use Capture Wizard in workstation instead) ── */}
         {false && isEdit && (
