@@ -49,12 +49,21 @@ const LABEL_LANGUAGES = [
   "Portuguese",
 ];
 
-// Guillotine PDF — 9 certs per sheet, 3 columns x 3 rows, front + back label +
-// claim insert stacked per cell. PRINT_BATCH_MAX is defined inside
-// SheetPrintingPanel (kept close to its only consumer); we expose the same
-// number here for "select first N" UI.
-// Mirrors server/print-batch.ts MAX_CERTS_PER_BATCH (currently 8).
-const MAX_CERTS_PER_BATCH = 8;
+// Guillotine PDF — 8 certs per A4 page, 2 columns x 4 rows, front + back label +
+// claim insert stacked per (rotated) cell.
+// CERTS_PER_PAGE mirrors server/print-batch.ts CERTS_PER_PAGE (8): how many
+// certs fit one sheet. Batches at or below this get the Cricut PNG/cut-SVG set;
+// above it, the PDF spans multiple pages (8 per page) and is guillotine-only.
+const CERTS_PER_PAGE = 8;
+// PRINT_BATCH_MAX_SELECT mirrors server MAX_CERTS_PER_MULTI_BATCH (48): the most
+// certs the operator can select for one multi-page batch (6 pages of 8).
+const PRINT_BATCH_MAX_SELECT = 48;
+// Claimed-cert reprints go through the single-sheet /print-batch/reprint route,
+// which the server caps at 8 (its zod schema). A selection larger than this that
+// contains claimed certs can't use that flow, so the UI steers the operator to
+// deselect the claimed certs (the unclaimed remainder still prints as a
+// multi-page batch) rather than dead-ending on a 400. Mirrors the server cap.
+const REPRINT_MAX_CERTS = 8;
 
 // API base for every printing endpoint this console calls. Admin renders with the
 // default ("/api/admin"), so its requests + react-query keys are byte-identical to
@@ -652,6 +661,10 @@ function LatestSheetSection({
   // recover the batchId for the PNG endpoint. Legacy `SHEET-{timestamp}` refs
   // don't have a corresponding R2 artefact; the PNG button is hidden for them.
   const latestBatchId = latest.sheetRef.startsWith("print_batch_") ? latest.sheetRef.replace("print_batch_", "") : null;
+  // Cricut PNG + cut SVG only exist for single-page batches. Multi-page
+  // (> CERTS_PER_PAGE) batches are guillotine-only, so those artefacts 404 —
+  // hide their download buttons for such sheets.
+  const latestHasCricutArtefacts = !!latestBatchId && latest.total <= CERTS_PER_PAGE;
 
   return (
     <div className="space-y-1" data-testid="latest-sheet-section">
@@ -685,7 +698,7 @@ function LatestSheetSection({
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            {latestBatchId && (
+            {latestHasCricutArtefacts && (
               <Button
                 size="sm"
                 variant="outline"
@@ -708,7 +721,7 @@ function LatestSheetSection({
                 )}
               </Button>
             )}
-            {latestBatchId && (
+            {latestHasCricutArtefacts && (
               <Button
                 size="sm"
                 variant="outline"
@@ -969,7 +982,7 @@ function SheetPrintingPanel() {
   }, [visibleCerts, selected]);
 
   const selectFirstBatch = useCallback(
-    () => setSelected(new Set(visibleCerts.slice(0, MAX_CERTS_PER_BATCH).map((c) => c.certId))),
+    () => setSelected(new Set(visibleCerts.slice(0, PRINT_BATCH_MAX_SELECT).map((c) => c.certId))),
     [visibleCerts]
   );
   const clearSelection = useCallback(() => setSelected(new Set()), []);
@@ -984,7 +997,7 @@ function SheetPrintingPanel() {
   // streamed from R2 via the server endpoints (no expiring blob URLs); SVG
   // still arrives as base64 in the POST response and uses a blob URL.
   // All three filenames share the batchId so the operator can pair them.
-  const saveBatchFiles = useCallback((data: { pdfUrl: string; svg: string; pngUrl: string; batchId: string }) => {
+  const saveBatchFiles = useCallback((data: { pdfUrl: string; svg?: string; pngUrl?: string; batchId: string }) => {
     const decode = (b64: string, mime: string) => {
       const bin = atob(b64);
       const buf = new Uint8Array(bin.length);
@@ -1009,7 +1022,9 @@ function SheetPrintingPanel() {
       a.click();
       a.remove();
     };
-    saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
+    // Multi-sheet (multi-page) batches are guillotine-only — no cut SVG. Only
+    // save the SVG when the server returned one (single-sheet batches).
+    if (data.svg) saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
     // PNG is intentionally NOT auto-downloaded here — Chrome's multi-download
     // gate silently blocks the 2nd/3rd file from a single gesture. Reprint
     // flows (this helper's only callers) skip the PNG; the primary Generate
@@ -1083,13 +1098,39 @@ function SheetPrintingPanel() {
     [toast]
   );
 
+  // Shared handler for a CLAIMED_CERTS_PRESENT (409) from /print-batch. The
+  // reprint-with-reason flow it opens is single-sheet (server caps /reprint at
+  // REPRINT_MAX_CERTS). For a larger selection that would over-run that cap, we
+  // don't open a modal that can only 400 — we tell the operator which certs are
+  // claimed and to deselect them so the unclaimed remainder prints normally.
+  const handleClaimedConflict = useCallback(
+    (allCertIds: string[], claimedCertIds: string[]) => {
+      if (allCertIds.length > REPRINT_MAX_CERTS) {
+        const shown = claimedCertIds.slice(0, 6).join(", ");
+        const more = claimedCertIds.length > 6 ? `, +${claimedCertIds.length - 6} more` : "";
+        toast({
+          title: "Deselect claimed certificates",
+          description: `${claimedCertIds.length} of your ${allCertIds.length} selected certificate${
+            claimedCertIds.length !== 1 ? "s are" : " is"
+          } already claimed (${shown}${more}). Claimed certificates can only be reprinted ${REPRINT_MAX_CERTS} at a time — deselect them to print the rest, or reprint claimed ones in a smaller batch.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      setReprintModal({ claimedCertIds, allCertIds });
+    },
+    [toast]
+  );
+
   // LatestSheetSection's "reprint sheet" button hits this. If any cert in
   // the historical sheet has since been claimed, 409 surfaces the modal.
   const reprintFromHistory = useCallback(
     async (certIds: string[]) => {
       try {
         const res = await apiRequest("POST", `${base}/print-batch`, { certIds });
-        const data = (await res.json()) as { pdfUrl: string; svg: string; pngUrl: string; batchId: string };
+        // A historical sheet with > CERTS_PER_PAGE certs reprints as a multi-page
+        // guillotine PDF (no svg/png) — saveBatchFiles handles the missing files.
+        const data = (await res.json()) as { pdfUrl: string; svg?: string; pngUrl?: string; batchId: string };
         saveBatchFiles(data);
         toast({
           title: "Sheet reprinted",
@@ -1098,23 +1139,19 @@ function SheetPrintingPanel() {
         invalidate();
       } catch (err: any) {
         if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
-          setReprintModal({
-            claimedCertIds: err.body.claimedCertIds || [],
-            allCertIds: certIds,
-          });
+          handleClaimedConflict(certIds, err.body.claimedCertIds || []);
         } else {
           toast({ title: "Reprint failed", description: err.message, variant: "destructive" });
         }
       }
     },
-    [toast, invalidate, saveBatchFiles]
+    [toast, invalidate, saveBatchFiles, handleClaimedConflict]
   );
 
-  // v525 — single-sheet print-and-cut batch (front + claim insert per row,
-  // up to 4 cards per sheet). Returns a JSON envelope with PDF / SVG / PNG
-  // as base64 blobs; saveBatchFiles drops all three to Downloads with a
-  // shared batchId in the filename.
-  const PRINT_BATCH_MAX = MAX_CERTS_PER_BATCH; // single source of truth (line 40)
+  // Print-batch cap. Single-page batches (≤ CERTS_PER_PAGE) return a JSON
+  // envelope with PDF / SVG / PNG; multi-page batches (up to
+  // PRINT_BATCH_MAX_SELECT) return a PDF-only envelope (guillotine, no Cricut).
+  const PRINT_BATCH_MAX = PRINT_BATCH_MAX_SELECT; // multi-sheet cap (48)
   const [downloadingBatch, setDownloadingBatch] = useState(false);
   // Loading state for the Latest Sheet row's PNG button (re-downloading
   // a historical batch). The primary Generate Batch flow auto-downloads
@@ -1183,19 +1220,22 @@ function SheetPrintingPanel() {
         const res = await apiRequest("POST", `${base}/print-batch`, { certIds });
         const data = (await res.json()) as {
           pdfUrl: string;
-          svg: string;
-          pngUrl: string;
+          svg?: string;
+          pngUrl?: string;
           batchId: string;
           certIds: string[];
           mintedFor?: string[];
           isRecentDuplicate?: boolean;
+          isMultiSheet?: boolean;
+          pageCount?: number;
         };
 
-        // PNG download — hidden <a download> appended/clicked/removed. Anchor
-        // click is not gated by the post-await popup rule (it's a navigation
-        // intent, not a popup). PNG endpoint serves Content-Disposition:
-        // attachment so the browser saves rather than navigates.
-        {
+        // Multi-sheet (multi-page) batches are guillotine-only — there is no
+        // Cricut PNG to download. Single-sheet batches download the PNG (the
+        // critical Cricut artefact) via a hidden <a download>. The anchor click
+        // is not gated by the post-await popup rule (it's a navigation intent,
+        // not a popup); the PNG endpoint serves Content-Disposition: attachment.
+        if (!data.isMultiSheet && data.pngUrl) {
           const a = document.createElement("a");
           a.href = rebaseUrl(data.pngUrl, base);
           a.download = `mintvault-batch-${data.batchId}.png`;
@@ -1211,7 +1251,7 @@ function SheetPrintingPanel() {
           pdfWindow.location.href = rebaseUrl(data.pdfUrl, base);
         } else {
           toast({
-            title: "Popup blocked — PNG downloaded",
+            title: data.isMultiSheet ? "Popup blocked" : "Popup blocked — PNG downloaded",
             description: (
               <span>
                 Allow popups for this site, or{" "}
@@ -1236,7 +1276,9 @@ function SheetPrintingPanel() {
           mintedCount > 0 ? ` — codes generated for ${mintedCount} cert${mintedCount !== 1 ? "s" : ""}` : "";
         toast({
           title: "Batch generated",
-          description: `PNG downloading, PDF opening in new tab${mintedNote}${idempotentNote}.`,
+          description: data.isMultiSheet
+            ? `${data.pageCount ?? Math.ceil(certIds.length / CERTS_PER_PAGE)}-page PDF opening in new tab${mintedNote}${idempotentNote}.`
+            : `PNG downloading, PDF opening in new tab${mintedNote}${idempotentNote}.`,
         });
         invalidate();
       } catch (err: any) {
@@ -1250,10 +1292,7 @@ function SheetPrintingPanel() {
           }
         }
         if (err?.status === 409 && err?.body?.code === "CLAIMED_CERTS_PRESENT") {
-          setReprintModal({
-            claimedCertIds: err.body.claimedCertIds || [],
-            allCertIds: certIds,
-          });
+          handleClaimedConflict(certIds, err.body.claimedCertIds || []);
         } else {
           toast({ title: "Batch failed", description: err.message || String(err), variant: "destructive" });
         }
@@ -1261,7 +1300,7 @@ function SheetPrintingPanel() {
         setDownloadingBatch(false);
       }
     },
-    [toast, invalidate]
+    [toast, invalidate, handleClaimedConflict]
   );
 
   // v525 — submitted from the ReprintReasonModal. Reposts the original
@@ -1270,6 +1309,17 @@ function SheetPrintingPanel() {
     async (reason: string) => {
       if (!reprintModal) return;
       const certIds = reprintModal.allCertIds;
+      // Safety net — the reprint route caps at REPRINT_MAX_CERTS. The 409 handler
+      // already steers >8 selections away from this modal, but guard here too so
+      // a large reprint can never dead-end on a raw 400.
+      if (certIds.length > REPRINT_MAX_CERTS) {
+        toast({
+          title: "Too many to reprint at once",
+          description: `Reprints are limited to ${REPRINT_MAX_CERTS} certificates. Close this and deselect some, then try again.`,
+          variant: "destructive",
+        });
+        return;
+      }
       setReprintSubmitting(true);
       try {
         const res = await apiRequest("POST", `${base}/print-batch/reprint`, { certIds, reason });
@@ -1312,7 +1362,8 @@ function SheetPrintingPanel() {
             <LayoutGrid className="h-5 w-5" /> Label Sheet Printing
           </h2>
           <p className="text-xs text-[var(--admin-ink-faint)] mt-0.5">
-            A4 · {MAX_CERTS_PER_BATCH} certs per sheet · 70 × 21 mm slab labels + claim insert · guillotine-cut
+            A4 · {CERTS_PER_PAGE} certs per page · up to {PRINT_BATCH_MAX_SELECT} per batch · 70 × 21 mm slab labels +
+            claim insert · guillotine-cut
           </p>
         </div>
         <Button
@@ -1402,13 +1453,13 @@ function SheetPrintingPanel() {
               {allVisible ? "Deselect all" : "Select all"}
             </button>
           )}
-          {visibleCerts.length > MAX_CERTS_PER_BATCH && (
+          {visibleCerts.length > PRINT_BATCH_MAX_SELECT && (
             <button
               onClick={selectFirstBatch}
               className="text-[11px] text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold-hi)] transition-colors"
               data-testid="btn-select-first-batch"
             >
-              First {MAX_CERTS_PER_BATCH}
+              First {PRINT_BATCH_MAX_SELECT}
             </button>
           )}
         </div>
@@ -1467,7 +1518,9 @@ function SheetPrintingPanel() {
               ? `Select up to ${PRINT_BATCH_MAX} unclaimed certs`
               : selected.size > PRINT_BATCH_MAX
                 ? `Maximum ${PRINT_BATCH_MAX} certs per batch`
-                : "Generates a batch, downloads the Cricut PNG, and opens the print dialog for the PDF"
+                : selected.size > CERTS_PER_PAGE
+                  ? `Generates a ${Math.ceil(selected.size / CERTS_PER_PAGE)}-page PDF (${CERTS_PER_PAGE} per page) and opens it to print`
+                  : "Generates a batch, downloads the Cricut PNG, and opens the print dialog for the PDF"
           }
           className="text-white font-bold"
           style={{

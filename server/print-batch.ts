@@ -218,10 +218,19 @@ const PDF9P_FRONT_W_MM = 21.8;
 const PDF9P_BACK_W_MM = 21.8;
 const PDF9P_INSERT_W_MM_P = 44; // suffix _P to avoid clash with existing PDF9_INSERT_W_MM
 
-// Public cap — the route validator + UI use this. Bumped 4 → 5 for the new
-// PDF row count. The Cricut PNG/SVG path keeps its own internal cap (4) below
-// so the Cricut sheet stays untouched even if a caller passes 5.
+// Certs per PDF page — one portrait sheet holds this many sets (2 cols × 4
+// rows). Also the single-sheet cap: at or below this count the batch produces
+// the full Cricut PNG/SVG cut-file set as before. Above it, the PDF spills onto
+// extra pages (see generatePrintBatchPDF) and the Cricut path is skipped.
+export const CERTS_PER_PAGE = PDF9P_SETS; // 8
+// Single-sheet public cap — the reprint route + the Cricut PNG/SVG path use
+// this. Kept at one page's worth (8) so the Cricut sheet + reprint flow stay
+// byte-stable. renderItemBuffers defaults to this too.
 export const MAX_CERTS_PER_BATCH = 8;
+// Multi-sheet public cap — the main /api/admin/print-batch route + the printing
+// UI use this. 48 = 6 full pages of 8. Above CERTS_PER_PAGE the batch is a
+// guillotine-only multi-page PDF (no Cricut PNG/SVG — those stay single-sheet).
+export const MAX_CERTS_PER_MULTI_BATCH = 48;
 const MAX_CERTS_PER_CRICUT_SHEET = 4;
 export const SHEET_LAYOUT_VERSION = "v32"; // v32: restored variant line to front label (buildVariantLine wiring) — busts cached print-batch sheets
 
@@ -621,16 +630,30 @@ function drawPortraitGuillotineLines(doc: InstanceType<typeof PDFDocument>): voi
   doc.restore();
 }
 
-// ── PDF generator (full A4, portrait-rotation sheet) ─────────────────────────
-
+// ── PDF generator (full A4, portrait-rotation sheet, MULTI-PAGE) ─────────────
+//
+// Up to CERTS_PER_PAGE (8) sets per A4 page, in the identical portrait layout +
+// guillotine lines. More than 8 certs spill onto extra pages — page 2 holds
+// sets 9–16, page 3 holds 17–24, and so on, up to MAX_CERTS_PER_MULTI_BATCH
+// (48 = 6 pages). Every page is laid out and cut-lined exactly like a single
+// sheet; only the page count changes.
+//
+// ≤8 certs produce a byte-identical single-page PDF to the pre-multipage code
+// (one chunk, no addPage, same draw order). Backward-compatible for the reprint
+// route and every historical single-sheet batch.
+//
+// Per-page rendering (renderItemBuffers is called inside the loop, one chunk at
+// a time) keeps peak memory bounded: only the current page's 24 label/insert
+// PNGs are held, not all 144 for a full 48-cert batch.
 export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Buffer> {
-  const layout = buildPortraitLayout(items.length);
-  const { fronts, backs, inserts } = await renderItemBuffers(items, PDF9P_SETS);
+  const pageOpts = {
+    size: [mm(PDF_PAGE_W_MM), mm(PDF_PAGE_H_MM)] as [number, number],
+    margin: 0,
+  };
 
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({
-      size: [mm(PDF_PAGE_W_MM), mm(PDF_PAGE_H_MM)],
-      margin: 0,
+      ...pageOpts,
       info: {
         Title: `MintVault Print Batch (${SHEET_LAYOUT_VERSION})`,
         Author: "MintVault Trading Card Grading",
@@ -642,23 +665,37 @@ export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Bu
     doc.on("end", () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    try {
-      doc.rect(0, 0, mm(PDF_PAGE_W_MM), mm(PDF_PAGE_H_MM)).fill("#FFFFFF");
-      for (const cell of layout) {
-        const buf =
-          cell.kind === "label"
-            ? fronts[cell.itemIndex]
-            : cell.kind === "back"
-              ? backs[cell.itemIndex]
-              : inserts[cell.itemIndex];
-        // Each set is rotated 90° CW so the labels/insert run tall down the page.
-        drawImageRotated90CW(doc, buf, cell.xMm, cell.yMm, cell.wMm, cell.hMm);
+    (async () => {
+      try {
+        // Defensive cap — the route already validates this, but a direct caller
+        // passing thousands of certs would otherwise emit a runaway PDF.
+        const total = Math.min(items.length, MAX_CERTS_PER_MULTI_BATCH);
+        for (let start = 0; start < total; start += CERTS_PER_PAGE) {
+          const pageItems = items.slice(start, start + CERTS_PER_PAGE);
+          const layout = buildPortraitLayout(pageItems.length);
+          // Render only this page's buffers — bounded memory across large batches.
+          const { fronts, backs, inserts } = await renderItemBuffers(pageItems, CERTS_PER_PAGE);
+          // Page 1 is the document's auto-created first page; every later chunk
+          // adds a fresh A4 page with the same dimensions.
+          if (start > 0) doc.addPage(pageOpts);
+          doc.rect(0, 0, mm(PDF_PAGE_W_MM), mm(PDF_PAGE_H_MM)).fill("#FFFFFF");
+          for (const cell of layout) {
+            const buf =
+              cell.kind === "label"
+                ? fronts[cell.itemIndex]
+                : cell.kind === "back"
+                  ? backs[cell.itemIndex]
+                  : inserts[cell.itemIndex];
+            // Each set is rotated 90° CW so the labels/insert run tall down the page.
+            drawImageRotated90CW(doc, buf, cell.xMm, cell.yMm, cell.wMm, cell.hMm);
+          }
+          drawPortraitGuillotineLines(doc);
+        }
+        doc.end();
+      } catch (err) {
+        reject(err);
       }
-      drawPortraitGuillotineLines(doc);
-      doc.end();
-    } catch (err) {
-      reject(err);
-    }
+    })();
   });
 }
 
@@ -821,6 +858,14 @@ export async function uploadPrintBatchArtifacts(
     // 400-DPI print variant — only when the caller supplies it (main handler).
     ...(printPngBuf ? [uploadToR2(r2KeyForPrintBatch(batchId, "print-png"), printPngBuf, "image/png")] : []),
   ]);
+}
+
+// PDF-only upload — used by multi-sheet batches (> CERTS_PER_PAGE), which are
+// guillotine-only and never emit a Cricut PNG/SVG. Writes just the PDF object
+// so the /pdf download endpoint resolves; the /png + /cricut endpoints stay 404
+// for these batches (the UI hides those buttons for multi-sheet sheets).
+export async function uploadPrintBatchPDF(batchId: string, pdfBuf: Buffer): Promise<void> {
+  await uploadToR2(r2KeyForPrintBatch(batchId, "pdf"), pdfBuf, "application/pdf");
 }
 
 // Cricut cut-guide SVG R2 key — separate key/suffix from the pdf/png artefacts,

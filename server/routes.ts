@@ -5688,7 +5688,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         return res.status(400).json({ error: "Provide certIds array with at least 1 entry" });
       }
       const {
-        MAX_CERTS_PER_BATCH,
+        MAX_CERTS_PER_MULTI_BATCH,
+        CERTS_PER_PAGE,
         SHEET_LAYOUT_VERSION,
         generatePrintBatchPDF,
         generatePrintBatchCutSVG,
@@ -5697,11 +5698,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         generateCricutSVG,
         deriveBatchId,
         uploadPrintBatchArtifacts,
+        uploadPrintBatchPDF,
         uploadCricutSvg,
         r2KeyForPrintBatch,
       } = await import("./print-batch");
-      if (certIds.length > MAX_CERTS_PER_BATCH) {
-        return res.status(400).json({ error: `Maximum ${MAX_CERTS_PER_BATCH} certs per batch` });
+      if (certIds.length > MAX_CERTS_PER_MULTI_BATCH) {
+        return res.status(400).json({ error: `Maximum ${MAX_CERTS_PER_MULTI_BATCH} certs per batch` });
       }
       const ids = certIds.map(String);
 
@@ -5742,6 +5744,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const batchId = deriveBatchId(ids, adminUser);
       const generatedAt = new Date().toISOString();
 
+      // Multi-sheet batches (> one page of certs) are guillotine-only: a
+      // multi-page PDF, no Cricut PNG/SVG cut files. Single-sheet batches keep
+      // the full artefact set (PDF + Cricut PNG + print PNG + cut SVG).
+      const isMultiSheet = items.length > CERTS_PER_PAGE;
+      const pageCount = Math.ceil(items.length / CERTS_PER_PAGE);
+
       // Idempotency check — same batchId from same admin within 5 minutes?
       let isRecentDuplicate = false;
       try {
@@ -5767,6 +5775,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (isRecentDuplicate) {
         const pdfKey = r2KeyForPrintBatch(batchId, "pdf");
         const head = await headR2(pdfKey).catch(() => null);
+        if (head && isMultiSheet) {
+          // Multi-sheet fast-path — only the PDF exists (no Cricut artefacts).
+          console.log(`[print-batch] idempotent fast-path (multi-sheet, ${pageCount}pg) for batch ${batchId}`);
+          return res.json({
+            pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
+            batchId,
+            certIds: ids,
+            mintedFor,
+            generatedAt,
+            isRecentDuplicate: true,
+            isMultiSheet: true,
+            pageCount,
+            sheetLayoutVersion: SHEET_LAYOUT_VERSION,
+          });
+        }
         if (head) {
           const svgStr = generatePrintBatchCutSVG(items.length);
           // Cricut cut SVG is a cheap static string — (re)upload it so its
@@ -5793,27 +5816,44 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         console.log(`[print-batch] duplicate batchId ${batchId} but R2 artefact missing — regenerating`);
       }
 
-      const [pdfBuf, svgStr, pngBuf, printPngBuf] = await Promise.all([
-        generatePrintBatchPDF(items),
-        Promise.resolve(generatePrintBatchCutSVG(items.length)),
-        generatePrintBatchPNG(items),
-        generatePrintBatchPrintPNG(items),
-      ]);
+      // Multi-sheet → guillotine-only multi-page PDF (no Cricut artefacts).
+      // Single-sheet → PDF + Cricut PNG + 400-DPI print PNG + cut SVG, as before.
+      let pdfBuf: Buffer;
+      let svgStr = "";
+      let pngBuf: Buffer | null = null;
+      let printPngBuf: Buffer | null = null;
 
-      // Persist PDF + PNG (+ 400-DPI print PNG) to R2 so the client can retrieve
-      // them via stable server URLs instead of expiring blob URLs. SVG inline.
-      try {
-        await uploadPrintBatchArtifacts(batchId, pdfBuf, pngBuf, printPngBuf);
-      } catch (uploadErr: any) {
-        console.error("[print-batch] R2 upload failed:", uploadErr.message);
-        return res.status(500).json({ error: "Failed to store print batch artefacts" });
+      if (isMultiSheet) {
+        pdfBuf = await generatePrintBatchPDF(items);
+        try {
+          await uploadPrintBatchPDF(batchId, pdfBuf);
+        } catch (uploadErr: any) {
+          console.error("[print-batch] R2 upload failed:", uploadErr.message);
+          return res.status(500).json({ error: "Failed to store print batch artefacts" });
+        }
+      } else {
+        [pdfBuf, svgStr, pngBuf, printPngBuf] = await Promise.all([
+          generatePrintBatchPDF(items),
+          Promise.resolve(generatePrintBatchCutSVG(items.length)),
+          generatePrintBatchPNG(items),
+          generatePrintBatchPrintPNG(items),
+        ]);
+
+        // Persist PDF + PNG (+ 400-DPI print PNG) to R2 so the client can retrieve
+        // them via stable server URLs instead of expiring blob URLs. SVG inline.
+        try {
+          await uploadPrintBatchArtifacts(batchId, pdfBuf, pngBuf, printPngBuf);
+        } catch (uploadErr: any) {
+          console.error("[print-batch] R2 upload failed:", uploadErr.message);
+          return res.status(500).json({ error: "Failed to store print batch artefacts" });
+        }
+
+        // Cricut cut-guide SVG (matches the PNG layout). Non-fatal if it fails —
+        // the PDF/PNG are the critical artefacts; the cut SVG is a convenience.
+        await uploadCricutSvg(batchId, generateCricutSVG(items)).catch((e: any) =>
+          console.warn("[print-batch] cricut SVG upload failed:", e?.message || e)
+        );
       }
-
-      // Cricut cut-guide SVG (matches the PNG layout). Non-fatal if it fails —
-      // the PDF/PNG are the critical artefacts; the cut SVG is a convenience.
-      await uploadCricutSvg(batchId, generateCricutSVG(items)).catch((e: any) =>
-        console.warn("[print-batch] cricut SVG upload failed:", e?.message || e)
-      );
 
       if (!isRecentDuplicate) {
         // Audit row — one per batch generated.
@@ -5829,12 +5869,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                 batch_id: batchId,
                 cert_ids: ids,
                 cert_count: items.length,
+                page_count: pageCount,
+                multi_sheet: isMultiSheet,
                 pdf_size_bytes: pdfBuf.length,
                 svg_size_bytes: Buffer.byteLength(svgStr, "utf8"),
-                png_size_bytes: pngBuf.length,
+                png_size_bytes: pngBuf?.length ?? 0,
                 auto_generated_codes_for: mintedFor,
                 sheet_layout_version: SHEET_LAYOUT_VERSION,
-                layout: "front_plus_insert",
+                layout: isMultiSheet ? "multi_page_guillotine" : "front_plus_insert",
               })}::jsonb,
               NOW()
             )
@@ -5879,19 +5921,36 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // audit log writes above were skipped (gated on !isRecentDuplicate) so
       // we don't double-record the batch.
 
-      res.json({
-        pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
-        pngUrl: `/api/admin/print-batch/${batchId}/png`,
-        printPngUrl: `/api/admin/print-batch/${batchId}/print-png`,
-        cricutSvgUrl: `/api/admin/print-batch/${batchId}/cricut-cut.svg`,
-        svg: Buffer.from(svgStr, "utf8").toString("base64"),
-        batchId,
-        certIds: ids,
-        mintedFor,
-        generatedAt,
-        isRecentDuplicate,
-        sheetLayoutVersion: SHEET_LAYOUT_VERSION,
-      });
+      if (isMultiSheet) {
+        // Guillotine-only multi-page PDF — no PNG/SVG artefacts to return.
+        res.json({
+          pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
+          batchId,
+          certIds: ids,
+          mintedFor,
+          generatedAt,
+          isRecentDuplicate,
+          isMultiSheet: true,
+          pageCount,
+          sheetLayoutVersion: SHEET_LAYOUT_VERSION,
+        });
+      } else {
+        res.json({
+          pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
+          pngUrl: `/api/admin/print-batch/${batchId}/png`,
+          printPngUrl: `/api/admin/print-batch/${batchId}/print-png`,
+          cricutSvgUrl: `/api/admin/print-batch/${batchId}/cricut-cut.svg`,
+          svg: Buffer.from(svgStr, "utf8").toString("base64"),
+          batchId,
+          certIds: ids,
+          mintedFor,
+          generatedAt,
+          isRecentDuplicate,
+          isMultiSheet: false,
+          pageCount,
+          sheetLayoutVersion: SHEET_LAYOUT_VERSION,
+        });
+      }
     } catch (err: any) {
       console.error("[print-batch] error:", err.message);
       sendServerError(res, err);
