@@ -1,5 +1,6 @@
 import { sendServerError } from "./lib/error-response";
 import { normalizeCertId, certNumberFromId } from "./lib/cert-id";
+import { ensurePerfIndexes } from "./lib/perf-indexes";
 import type {
   Express,
   Request as ExpressRequest,
@@ -393,16 +394,11 @@ export async function rejectInvalidUploads(files: Express.Multer.File[]): Promis
  * reads must use findCertByIdFlex, which adds the publish gate on top of this.
  */
 export async function findCertByNumberUngated(certId: string) {
-  let dbCert = await storage.getCertificateByCertId(certId);
-  if (!dbCert) {
-    const num = certNumberFromId(certId);
-    if (num !== null) {
-      dbCert =
-        (await storage.getCertificateByCertId(`MV${num}`)) ||
-        (await storage.getCertificateByCertId(`MV-${num.padStart(10, "0")}`)) ||
-        undefined;
-    }
-  }
+  // One query for all id forms (raw + MV<n> + zero-padded). certificate_number is
+  // unique so at most one matches — order is irrelevant. Was 2–3 sequential reads.
+  const num = certNumberFromId(certId);
+  const candidates = num !== null ? [certId, `MV${num}`, `MV-${num.padStart(10, "0")}`] : [certId];
+  const dbCert = await storage.getCertificateByAnyCertId([...new Set(candidates)]);
   return dbCert ?? null;
 }
 
@@ -419,24 +415,21 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
   const isNonNum = isNonNumericGrade(gradeType);
   const grade = isNonNum ? 0 : parseFloat(c.gradeOverall || "0");
 
-  let frontUrl: string | null = null;
-  let backUrl: string | null = null;
-  if (c.frontImagePath) {
+  // Sign front + back presigned URLs in PARALLEL (one round-trip instead of two
+  // on every cert lookup). Same behaviour: null on missing key or sign error.
+  const signImg = async (key: string | null | undefined, side: string): Promise<string | null> => {
+    if (!key) return null;
     try {
-      frontUrl = await getR2SignedUrl(c.frontImagePath, 3600);
+      return await getR2SignedUrl(key, 3600);
     } catch (e) {
-      console.error("R2 sign failed (front):", c.frontImagePath, e);
-      frontUrl = null;
+      console.error(`R2 sign failed (${side}):`, key, e);
+      return null;
     }
-  }
-  if (c.backImagePath) {
-    try {
-      backUrl = await getR2SignedUrl(c.backImagePath, 3600);
-    } catch (e) {
-      console.error("R2 sign failed (back):", c.backImagePath, e);
-      backUrl = null;
-    }
-  }
+  };
+  const [frontUrl, backUrl] = await Promise.all([
+    signImg(c.frontImagePath, "front"),
+    signImg(c.backImagePath, "back"),
+  ]);
 
   return {
     certId: normalizeCertId(c.certId),
@@ -1311,6 +1304,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   migratePerOperatorSchema().catch((e: any) => console.error("[per-operator-migrate] error:", e.message));
   migrateStaffCapabilitiesSchema().catch((e: any) => console.error("[staff-caps-migrate] error:", e.message));
   migrateScanSchema().catch((e: any) => console.error("[scan-migrate] error:", e.message));
+  // Perf indexes run 20s after boot (CONCURRENTLY, no blocking lock) so the
+  // schema ALTER migrations above have settled first — avoids the boot-time lock
+  // contention that failed the earlier attempt. Fire-and-forget; non-fatal.
+  setTimeout(() => {
+    ensurePerfIndexes().catch((e: any) => console.error("[perf-indexes] error:", e?.message));
+  }, 20_000);
   migrateAccountSchema()
     .then(() => migrateMarketplaceSchema())
     .catch((e: any) => console.error("[startup-migration] error:", e.message));

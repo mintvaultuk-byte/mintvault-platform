@@ -230,6 +230,22 @@ export function buildCardKey(
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1_000; // 24 hours
 
+/** Safely parse the cached listings blob. Never throws — a malformed cache row
+ *  returns [] instead of crashing the handler (the JSON column can be a JS array
+ *  when the driver already parsed jsonb, or a string on legacy rows). */
+function parseListingsJson(value: unknown): EbayListing[] {
+  if (Array.isArray(value)) return value as EbayListing[];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? (parsed as EbayListing[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 export async function getCachedOrFreshEbayPrices(
   cardKey: string,
   cardName: string,
@@ -264,9 +280,7 @@ export async function getCachedOrFreshEbayPrices(
 
   // 2. Cache is fresh — return it
   if (cached && cacheAge < CACHE_TTL_MS) {
-    const listings: EbayListing[] = Array.isArray(cached.listings_json)
-      ? cached.listings_json
-      : (typeof cached.listings_json === "string" ? JSON.parse(cached.listings_json) : []);
+    const listings: EbayListing[] = parseListingsJson(cached.listings_json);
     return {
       averagePence: cached.average_price_pence ?? 0,
       gradeAverages: computeGradeAverages(listings),
@@ -288,9 +302,7 @@ export async function getCachedOrFreshEbayPrices(
   // 4. Fetch failed but stale cache exists — return stale with warning
   if (fetchError && cached) {
     console.warn("[eBay] Returning stale cache (API unavailable) for:", cardKey);
-    const listings: EbayListing[] = Array.isArray(cached.listings_json)
-      ? cached.listings_json
-      : (typeof cached.listings_json === "string" ? JSON.parse(cached.listings_json) : []);
+    const listings: EbayListing[] = parseListingsJson(cached.listings_json);
     return {
       averagePence: cached.average_price_pence ?? 0,
       gradeAverages: computeGradeAverages(listings),

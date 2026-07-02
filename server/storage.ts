@@ -141,6 +141,7 @@ export interface IStorage {
   createCertificate(data: InsertCertificate, adminUser?: string): Promise<CertificateRecord>;
   getCertificate(id: number): Promise<CertificateRecord | undefined>;
   getCertificateByCertId(certId: string): Promise<CertificateRecord | undefined>;
+  getCertificateByAnyCertId(certIds: string[]): Promise<CertificateRecord | undefined>;
   updateCertificate(id: number, data: Partial<CertificateRecord>): Promise<CertificateRecord | undefined>;
   listCertificates(filters?: CertificateFilters): Promise<CertificateRecord[]>;
   searchCertificates(query: string): Promise<CertificateRecord[]>;
@@ -893,6 +894,19 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(certificates)
       .where(sql`${certificates.certId} = ${certId} AND ${certificates.deletedAt} IS NULL`);
+    return cert;
+  }
+
+  // Resolve a cert by ANY of its id forms in ONE query (certificate_number is
+  // unique, so at most one row matches). Replaces the old 2–3 sequential lookups
+  // in findCertByNumberUngated on the hot public path.
+  async getCertificateByAnyCertId(certIds: string[]): Promise<CertificateRecord | undefined> {
+    if (certIds.length === 0) return undefined;
+    const [cert] = await db
+      .select()
+      .from(certificates)
+      .where(and(inArray(certificates.certId, certIds), isNull(certificates.deletedAt)))
+      .limit(1);
     return cert;
   }
 
