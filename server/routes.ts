@@ -4068,7 +4068,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (certIds.length > MAX_CERTS_PER_MULTI_BATCH) {
         return res.status(400).json({ error: `Maximum ${MAX_CERTS_PER_MULTI_BATCH} certs per batch` });
       }
-      const ids = certIds.map(String);
+      // Normalize input IDs so "MV-0000000042" and "MV42" both resolve —
+      // allCerts store certId in canonical form, and find() below is exact.
+      const ids = certIds.map((c: unknown) => normalizeCertId(String(c)));
 
       // Resolve each cert. Reject claimed certs at this endpoint (security
       // boundary kept intact — admins can still reprint claimed certs via
@@ -4369,7 +4371,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (certIds.length > MAX_CERTS_PER_BATCH) {
         return res.status(400).json({ error: `Maximum ${MAX_CERTS_PER_BATCH} certs per batch` });
       }
-      const ids = certIds.map(String);
+      // Normalize input IDs so "MV-0000000042" and "MV42" both resolve —
+      // allCerts store certId in canonical form, and find() below is exact.
+      const ids = certIds.map((c: unknown) => normalizeCertId(String(c)));
 
       // Resolve certs. Skip the "unclaimed only" check — that's the whole
       // point of this endpoint. Still reject not-found / soft-deleted /
