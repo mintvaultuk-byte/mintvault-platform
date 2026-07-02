@@ -17,9 +17,11 @@ export async function ensurePerfIndexes(): Promise<void> {
       // created_at DESC" filter (public lists, population, cert browser, dashboard):
       // a PARTIAL index over only the non-deleted rows lets Postgres seek to a
       // status and read rows already in created_at order — no table scan + sort.
+      // NB: the Drizzle field certificates.createdAt maps to the DB column
+      // "issued_at" (not "created_at") — verified against the live schema.
       name: "idx_certificates_active_scan",
       ddl: `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_certificates_active_scan
-            ON certificates (status, created_at DESC) WHERE deleted_at IS NULL`,
+            ON certificates (status, issued_at DESC) WHERE deleted_at IS NULL`,
     },
   ];
   for (const idx of indexes) {
