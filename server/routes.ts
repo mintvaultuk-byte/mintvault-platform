@@ -1,5 +1,6 @@
 import { sendServerError } from "./lib/error-response";
 import { normalizeCertId, certNumberFromId } from "./lib/cert-id";
+import { ensurePerfIndexes } from "./lib/perf-indexes";
 import type {
   Express,
   Request as ExpressRequest,
@@ -1303,6 +1304,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   migratePerOperatorSchema().catch((e: any) => console.error("[per-operator-migrate] error:", e.message));
   migrateStaffCapabilitiesSchema().catch((e: any) => console.error("[staff-caps-migrate] error:", e.message));
   migrateScanSchema().catch((e: any) => console.error("[scan-migrate] error:", e.message));
+  // Perf indexes run 20s after boot (CONCURRENTLY, no blocking lock) so the
+  // schema ALTER migrations above have settled first — avoids the boot-time lock
+  // contention that failed the earlier attempt. Fire-and-forget; non-fatal.
+  setTimeout(() => {
+    ensurePerfIndexes().catch((e: any) => console.error("[perf-indexes] error:", e?.message));
+  }, 20_000);
   migrateAccountSchema()
     .then(() => migrateMarketplaceSchema())
     .catch((e: any) => console.error("[startup-migration] error:", e.message));
