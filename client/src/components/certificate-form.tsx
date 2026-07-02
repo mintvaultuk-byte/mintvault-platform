@@ -1,7 +1,7 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
-import { NUMERIC_GRADES, NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
+import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
 import {
   Save,
   Upload,
@@ -45,6 +45,13 @@ interface Props {
   /** External identification pushed from AI panel's "Change card" button */
   externalIdentification?: Record<string, unknown> | null;
   onExternalIdentificationConsumed?: () => void;
+  /** Owner directive (2026-07-01): the grading workstation renders INSIDE this
+      form's flow — after AI Identify, before Card Details — so the whole page
+      reads as one block: identify → grade with the card tool → fill details →
+      grade section. Passed as a slot so the workstation stays a separate
+      component (and outside the <form> element — its buttons must never
+      trigger a form submit). */
+  workstationSlot?: ReactNode;
 }
 
 /**
@@ -138,6 +145,7 @@ export default function CertificateForm({
   onIdentifyAndGrade,
   externalIdentification,
   onExternalIdentificationConsumed,
+  workstationSlot,
 }: Props) {
   const isEdit = !!certificate;
   const { toast } = useToast();
@@ -762,20 +770,34 @@ export default function CertificateForm({
     return "#DC2626";
   }
 
+  // Shared FormData assembly — used by both the explicit create/approved-edit
+  // save (mutation, below) and the silent auto-save (autoSaveNow, below) so
+  // the two payload-builders can never drift apart. `confirmPublishedEdit`
+  // is ONLY set true by the explicit "Save Changes to Published Certificate"
+  // path — auto-save must never send it (see the server-side approval lock
+  // in the PUT /api/admin/certificates/:id route).
+  function buildCertFormData(confirmPublishedEdit = false): FormData {
+    const formData = new FormData();
+    const UI_ONLY_KEYS = ["unifiedSelect", "otherText"];
+    Object.entries(form).forEach(([key, value]) => {
+      if (UI_ONLY_KEYS.includes(key)) return;
+      if (value !== null && value !== undefined) {
+        formData.append(key, String(value));
+      }
+    });
+    formData.append("designations", JSON.stringify(designations));
+    if (frontImage) formData.append("frontImage", frontImage);
+    if (backImage) formData.append("backImage", backImage);
+    if (confirmPublishedEdit) formData.append("confirmPublishedEdit", "true");
+    return formData;
+  }
+
   const mutation = useMutation({
     mutationFn: async () => {
-      const formData = new FormData();
-      const UI_ONLY_KEYS = ["unifiedSelect", "otherText"];
-      Object.entries(form).forEach(([key, value]) => {
-        if (UI_ONLY_KEYS.includes(key)) return;
-        if (value !== null && value !== undefined) {
-          formData.append(key, String(value));
-        }
-      });
-      formData.append("designations", JSON.stringify(designations));
-      if (frontImage) formData.append("frontImage", frontImage);
-      if (backImage) formData.append("backImage", backImage);
-
+      // Only the "edit an already-approved certificate" path needs to confirm
+      // the override — create has nothing to approve yet, and the auto-save
+      // path below never reaches this mutation at all.
+      const formData = buildCertFormData(isEdit && !!certificate?.gradeApprovedAt);
       const url = isEdit ? `/api/admin/certificates/${certificate.id}` : "/api/admin/certificates";
       const method = isEdit ? "PUT" : "POST";
 
@@ -792,13 +814,101 @@ export default function CertificateForm({
 
       return res.json();
     },
-    onSuccess: (data: any) => onSuccess(isEdit ? undefined : data),
+    onSuccess: (data: any) => {
+      // Clear picked files so a subsequent save (auto-save or explicit) never
+      // re-submits/re-uploads the same File object once it's already persisted.
+      setFrontImage(null);
+      setBackImage(null);
+      onSuccess(isEdit ? undefined : data);
+    },
     onError: (err: any) => setError(err.message),
   });
+
+  // ── Silent auto-save for an EXISTING, NOT-YET-APPROVED certificate ─────────
+  // Owner directive (2026-07-01): editing a card's identity (name/set/game/
+  // etc.) should behave like the grading workstation below it — no manual
+  // "Update Certificate" click. Gated to pre-approval only, mirroring the
+  // exact same protection grading-panel.tsx already uses for its own
+  // auto-save ("kills the previous 'edits save automatically to the live
+  // record' silent-write behaviour") — the server route this posts to has
+  // no approval lock of its own, so an already-approved/published cert must
+  // keep requiring an explicit save (see the "Save Changes" button below).
+  const autoSaveEligible = isEdit && !!certificate?.id && !certificate?.gradeApprovedAt;
+  const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoSaveSeqRef = useRef(0);
+  const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hydratedOnceRef = useRef(false);
+
+  async function autoSaveNow() {
+    if (!certificate?.id) return;
+    const seq = ++autoSaveSeqRef.current;
+    setAutoSaveStatus("saving");
+    try {
+      // NEVER pass confirmPublishedEdit=true here — if the certificate was
+      // approved in the moment between this call being scheduled and firing,
+      // the server-side approval lock (added 2026-07-01) rejects the write
+      // with a 409 rather than silently overwriting a live/published cert.
+      const res = await fetch(`/api/admin/certificates/${certificate.id}`, {
+        method: "PUT",
+        body: buildCertFormData(),
+        credentials: "include",
+      });
+      if (seq !== autoSaveSeqRef.current) return;
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      // Clear picked files so an unrelated field edit moments later doesn't
+      // re-submit (and the server re-upload+delete-old) the same image.
+      setFrontImage(null);
+      setBackImage(null);
+      setAutoSaveStatus("saved");
+      if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
+      autoSavedClearTimerRef.current = setTimeout(() => {
+        if (autoSaveSeqRef.current === seq) setAutoSaveStatus("idle");
+      }, 2500);
+    } catch (e: any) {
+      if (seq !== autoSaveSeqRef.current) return;
+      setAutoSaveStatus("error");
+      toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
+    }
+  }
+
+  // Debounced auto-save whenever an identity field changes. Skips the first
+  // render (hydratedOnceRef) so we don't immediately re-PUT what was just
+  // loaded from the certificate. Required fields are checked here (mirrors
+  // handleSubmit's own check) so a transiently-blank field — e.g. mid-retype
+  // of the card name — is never silently persisted; the save is simply
+  // deferred until the field is filled in again.
+  const hasRequiredFields =
+    !!form.cardGame && !!form.setName && !!form.cardName && !!form.cardNumber && !!form.year;
+  useEffect(() => {
+    if (!autoSaveEligible || !hasRequiredFields) return;
+    if (!hydratedOnceRef.current) {
+      hydratedOnceRef.current = true;
+      return;
+    }
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      autoSaveNow();
+    }, 600);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+    // eslint-disable-next-line
+  }, [autoSaveEligible, hasRequiredFields, form, designations, frontImage, backImage]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    // Auto-save already persists every change for an existing, not-yet-approved
+    // certificate (no button is rendered in that case) — an Enter keypress
+    // submitting the form should not ALSO fire the explicit mutation, which
+    // navigates away via onSuccess. Only the create flow and the
+    // already-approved "Save Changes" flow use this explicit submit path.
+    if (autoSaveEligible) return;
 
     if (!form.cardGame || !form.setName || !form.cardName || !form.cardNumber || !form.year) {
       setError("Please fill in all required fields: Game, Set, Card Name, Card Number, Year");
@@ -1027,6 +1137,88 @@ export default function CertificateForm({
           : "Fill in card details and click Save. A cert number will be assigned automatically."}
       </p>
 
+      {/* Workflow order (owner directive, Option A 2026-07-02): 1. AI Identify →
+          2. Card Details (AI Identify fills these fields, so confirm them next) →
+          3. grading workstation (card tool + defects, via workstationSlot) →
+          4. Grade. The AI-actions block sits OUTSIDE the <form>; the workstation
+          renders INSIDE the form after Card Details — safe because every
+          workstation button is type="button" and handleSubmit no-ops
+          pre-approval, so it can never trigger a form submit. */}
+      {isEdit && certificate?.id && (
+        <div className="border border-[var(--admin-gold)]/30 rounded-lg p-4 bg-[var(--admin-gold)]/5 space-y-3 mb-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Identify */}
+            <button
+              type="button"
+              onClick={runIdentify}
+              disabled={!identifyEnabled || identifyLoading}
+              title={!identifyEnabled ? "Enabled in /admin → AI Learning" : "Card name, set, number, year"}
+              className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
+            >
+              <span className="flex items-center gap-2">
+                {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                <span>{identifyLoading ? "Identifying…" : "AI Identify"}</span>
+              </span>
+              <span className="text-[9px] font-normal normal-case opacity-70">name · set · number · year</span>
+            </button>
+
+            {/* Grade */}
+            <button
+              type="button"
+              onClick={runGrade}
+              disabled={!fullGradeEnabled || gradeLoading}
+              title={!fullGradeEnabled ? "Enabled in /admin → AI Learning" : "4 subgrades + overall (Opus)"}
+              className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-[var(--admin-panel2)] text-[var(--admin-gold)] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--admin-panel3)] transition-all"
+            >
+              <span className="flex items-center gap-2">
+                {gradeLoading ? <Loader2 size={13} className="animate-spin" /> : <Cpu size={13} />}
+                <span>{gradeLoading ? "Grading…" : "AI Grade"}</span>
+              </span>
+              <span className="text-[9px] font-normal normal-case opacity-60">4 subgrades + overall</span>
+            </button>
+          </div>
+
+          {(!identifyEnabled || !fullGradeEnabled) && (
+            <p className="text-[10px] text-[var(--admin-ink-faint)]">
+              {!identifyEnabled && !fullGradeEnabled
+                ? "Both AI actions disabled — toggle in /admin → AI Learning."
+                : !identifyEnabled
+                  ? "AI Identify disabled — toggle in /admin → AI Learning."
+                  : "AI Grade disabled — toggle in /admin → AI Learning."}
+            </p>
+          )}
+
+          {identifyConfidence && (
+            <div className="flex items-center gap-2 text-xs">
+              <span
+                className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
+              />
+              <span
+                className={
+                  identifyConfidence === "high"
+                    ? "text-[var(--admin-green)]"
+                    : identifyConfidence === "medium"
+                      ? "text-[var(--admin-amber)]"
+                      : "text-[var(--admin-red)]"
+                }
+              >
+                {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
+              </span>
+              {identifyConfidence !== "high" && !identifyVerified && identifyEnabled && (
+                <button
+                  type="button"
+                  onClick={runIdentify}
+                  disabled={identifyLoading}
+                  className="text-[var(--admin-gold)] text-[10px] hover:underline"
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-6">
         {!isEdit && (
           <SubmissionItemLink
@@ -1048,82 +1240,6 @@ export default function CertificateForm({
             }}
           />
         )}
-        {/* AI actions — Identify and Grade are independent and gated separately */}
-        {isEdit && certificate?.id && (
-          <div className="border border-[var(--admin-gold)]/30 rounded-lg p-4 bg-[var(--admin-gold)]/5 space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Identify */}
-              <button
-                type="button"
-                onClick={runIdentify}
-                disabled={!identifyEnabled || identifyLoading}
-                title={!identifyEnabled ? "Enabled in /admin → AI Learning" : "Card name, set, number, year"}
-                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
-              >
-                <span className="flex items-center gap-2">
-                  {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-                  <span>{identifyLoading ? "Identifying…" : "AI Identify"}</span>
-                </span>
-                <span className="text-[9px] font-normal normal-case opacity-70">name · set · number · year</span>
-              </button>
-
-              {/* Grade */}
-              <button
-                type="button"
-                onClick={runGrade}
-                disabled={!fullGradeEnabled || gradeLoading}
-                title={!fullGradeEnabled ? "Enabled in /admin → AI Learning" : "4 subgrades + overall (Opus)"}
-                className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-[var(--admin-panel2)] text-[var(--admin-gold)] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--admin-panel3)] transition-all"
-              >
-                <span className="flex items-center gap-2">
-                  {gradeLoading ? <Loader2 size={13} className="animate-spin" /> : <Cpu size={13} />}
-                  <span>{gradeLoading ? "Grading…" : "AI Grade"}</span>
-                </span>
-                <span className="text-[9px] font-normal normal-case opacity-60">4 subgrades + overall</span>
-              </button>
-            </div>
-
-            {(!identifyEnabled || !fullGradeEnabled) && (
-              <p className="text-[10px] text-[var(--admin-ink-faint)]">
-                {!identifyEnabled && !fullGradeEnabled
-                  ? "Both AI actions disabled — toggle in /admin → AI Learning."
-                  : !identifyEnabled
-                    ? "AI Identify disabled — toggle in /admin → AI Learning."
-                    : "AI Grade disabled — toggle in /admin → AI Learning."}
-              </p>
-            )}
-
-            {identifyConfidence && (
-              <div className="flex items-center gap-2 text-xs">
-                <span
-                  className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
-                />
-                <span
-                  className={
-                    identifyConfidence === "high"
-                      ? "text-[var(--admin-green)]"
-                      : identifyConfidence === "medium"
-                        ? "text-[var(--admin-amber)]"
-                        : "text-[var(--admin-red)]"
-                  }
-                >
-                  {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
-                </span>
-                {identifyConfidence !== "high" && !identifyVerified && identifyEnabled && (
-                  <button
-                    type="button"
-                    onClick={runIdentify}
-                    disabled={identifyLoading}
-                    className="text-[var(--admin-gold)] text-[10px] hover:underline"
-                  >
-                    Retry
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
         <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
           <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2">Card Details</legend>
 
@@ -1722,6 +1838,30 @@ export default function CertificateForm({
           </div>
         </fieldset>
 
+        {/* Grading workstation — card tool front/back + defect marking. Placed
+            right after Card Details (owner directive, Option A 2026-07-02):
+            AI Identify → Card Details → grade the card → Grade section. Rendered
+            inside the <form> but every workstation button is type="button" and
+            handleSubmit no-ops pre-approval, so it can never submit the form. */}
+        {workstationSlot && (
+          <div
+            onKeyDown={(e) => {
+              // Workstation now lives inside the <form>. On an already-approved
+              // cert the explicit "Save Changes to Published Certificate" submit
+              // button exists, so Enter in a workstation text/number input would
+              // otherwise submit the form (save + close the editor, discarding
+              // the in-progress workstation edit). Swallow Enter's default for
+              // INPUT elements only — textareas keep newlines, selects/buttons
+              // are unaffected, and no grading input relies on Enter.
+              if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
+                e.preventDefault();
+              }
+            }}
+          >
+            {workstationSlot}
+          </div>
+        )}
+
         <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
           <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2">Grade</legend>
 
@@ -1782,33 +1922,22 @@ export default function CertificateForm({
             <>
               <div>
                 <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
-                  Overall Grade *
+                  Overall Grade
                 </label>
-                <select
-                  value={form.gradeOverall === "10" && form.labelType === "black" ? "black_label" : form.gradeOverall}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === "black_label") {
-                      setForm((f) => ({ ...f, gradeOverall: "10", labelType: "black" }));
-                    } else {
-                      setForm((f) => ({ ...f, gradeOverall: v, labelType: "standard" }));
-                    }
-                  }}
-                  className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
-                  data-testid="select-grade-overall"
+                {/* Read-only (owner directive 2026-07-01): the grade is set 100%
+                    automatically by the MVGS grading workstation (card tool +
+                    defect pins). No manual grade entry on the certificate form. */}
+                <div
+                  className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm"
+                  data-testid="display-grade-overall"
                 >
-                  <option value="" className="bg-[var(--admin-panel)]">
-                    Select grade...
-                  </option>
-                  <option value="black_label" className="bg-[var(--admin-panel)]">
-                    ★ 10 — BLACK LABEL (Gem Mint)
-                  </option>
-                  {NUMERIC_GRADES.map((g) => (
-                    <option key={g.value} value={String(g.value)} className="bg-[var(--admin-panel)]">
-                      {g.value} – {g.label} ({g.description})
-                    </option>
-                  ))}
-                </select>
+                  {form.gradeOverall
+                    ? form.gradeOverall === "10" && form.labelType === "black"
+                      ? "★ 10 — Black Label (Gem Mint)"
+                      : form.gradeOverall
+                    : "Not yet graded"}
+                  <span className="text-[var(--admin-ink-dim)] text-xs ml-2">— set automatically by MVGS grading</span>
+                </div>
               </div>
 
               <div>
@@ -1839,7 +1968,7 @@ export default function CertificateForm({
           )}
         </fieldset>
 
-        {/* ── Card images and AI grading are handled by the GradingPanel workstation below ── */}
+        {/* ── Card images and AI grading are handled by the GradingPanel workstation above ── */}
 
         {/* ── Legacy Grading Images section (hidden — use Capture Wizard in workstation instead) ── */}
         {false && isEdit && (
@@ -2225,17 +2354,48 @@ export default function CertificateForm({
           </p>
         )}
 
-        <GradientButton
-          as="button"
-          type="submit"
-          disabled={mutation.isPending}
-          height="48px"
-          className="w-full"
-          data-testid="button-save-cert"
-        >
-          <Save size={16} />
-          {mutation.isPending ? "Saving..." : isEdit ? "Update Certificate" : "Save Certificate"}
-        </GradientButton>
+        {/* Owner directive (2026-07-01): an existing, not-yet-approved
+            certificate auto-saves silently (see autoSaveNow above) — no
+            manual button, matching the grading workstation below it. Create
+            flow (no certificate yet) and an already-approved/published
+            certificate (server has no approval lock of its own — see
+            autoSaveEligible) both keep an explicit save action. */}
+        {autoSaveEligible ? (
+          <div
+            className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-6"
+            data-testid="text-autosave-status"
+          >
+            {autoSaveStatus === "saving" && (
+              <span className="flex items-center gap-1.5">
+                <Loader2 size={10} className="animate-spin" /> Saving…
+              </span>
+            )}
+            {autoSaveStatus === "saved" && (
+              <span className="flex items-center gap-1.5 text-[var(--admin-green)]">
+                <CheckCircle2 size={10} /> Saved
+              </span>
+            )}
+            {autoSaveStatus === "error" && (
+              <span className="text-[var(--admin-red)]">Save failed — retrying on next change</span>
+            )}
+          </div>
+        ) : (
+          <GradientButton
+            as="button"
+            type="submit"
+            disabled={mutation.isPending}
+            height="48px"
+            className="w-full"
+            data-testid="button-save-cert"
+          >
+            <Save size={16} />
+            {mutation.isPending
+              ? "Saving..."
+              : isEdit
+                ? "Save Changes to Published Certificate"
+                : "Save Certificate"}
+          </GradientButton>
+        )}
       </form>
     </div>
   );

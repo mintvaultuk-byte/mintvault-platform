@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Crosshair } from "lucide-react";
 
 interface Props {
@@ -11,8 +10,6 @@ interface Props {
   overrideGrade: number | null;
   onOverride: (val: number | null) => void;
 }
-
-const GRADE_OPTIONS = [10, 9.5, 9, 8.5, 8, 7.5, 7, 6.5, 6, 5.5, 5, 4.5, 4, 3.5, 3, 2.5, 2, 1.5, 1];
 
 function gradeColor(g: number | null): string {
   if (g === null) return "#888888";
@@ -28,11 +25,6 @@ function parseRatio(ratio: string): [number, number] | null {
     return [parts[0], parts[1]];
   }
   return null;
-}
-
-function validateRatio(val: string): boolean {
-  const p = parseRatio(val);
-  return p !== null;
 }
 
 function CenteringDiagram({ frontLR, frontTB }: { frontLR: string; frontTB: string }) {
@@ -98,11 +90,8 @@ export default function CenteringInput({
   backLR,
   backTB,
   subgrade,
-  onChange,
   overrideGrade,
-  onOverride,
 }: Props) {
-  const [showOverride, setShowOverride] = useState(false);
   const displayGrade = overrideGrade ?? subgrade;
 
   const fields: { key: "frontLR" | "frontTB" | "backLR" | "backTB"; label: string; value: string }[] = [
@@ -123,15 +112,15 @@ export default function CenteringInput({
         {fields.map((f) => (
           <div key={f.key}>
             <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-1">{f.label}</label>
-            <input
-              type="text"
-              value={f.value}
-              onChange={(e) => onChange(f.key, e.target.value)}
-              placeholder="—"
-              className={`w-full bg-[var(--admin-panel2)] border rounded px-2 py-1.5 text-xs font-mono text-[var(--admin-ink)] ${
-                f.value && !validateRatio(f.value) ? "border-[var(--admin-red)]" : "border-[var(--admin-line)]"
-              }`}
-            />
+            {/* Read-only (owner directive 2026-07-02): centering ratios come
+                ONLY from the Card Tool measurement — 100% MVGS auto, no manual
+                entry. */}
+            <div
+              className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs font-mono text-[var(--admin-ink)]"
+              data-testid={`centering-${f.key}`}
+            >
+              {f.value || "—"}
+            </div>
           </div>
         ))}
       </div>
@@ -143,42 +132,10 @@ export default function CenteringInput({
           <p className="text-3xl font-black" style={{ color: gradeColor(displayGrade) }}>
             {displayGrade !== null ? displayGrade : "—"}
           </p>
-          {overrideGrade !== null && <span className="text-[9px] text-[var(--admin-ink-dim)]">(manual)</span>}
-          {!showOverride && (
-            <button
-              type="button"
-              onClick={() => setShowOverride(true)}
-              className="text-[var(--admin-gold)]/50 text-[10px] hover:text-[var(--admin-gold)] mt-1 block"
-            >
-              Override
-            </button>
-          )}
-          {showOverride && (
-            <div className="flex items-center gap-2 mt-1">
-              <select
-                value={overrideGrade ?? ""}
-                onChange={(e) => onOverride(e.target.value === "" ? null : parseFloat(e.target.value))}
-                className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1"
-              >
-                <option value="">Auto</option>
-                {GRADE_OPTIONS.map((g) => (
-                  <option key={g} value={g}>
-                    {g}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowOverride(false);
-                  onOverride(null);
-                }}
-                className="text-[var(--admin-ink-dim)] text-[10px] hover:text-[var(--admin-ink-dim)]"
-              >
-                clear
-              </button>
-            </div>
-          )}
+          {/* Override removed (owner directive 2026-07-02): the centering
+              subgrade is 100% MVGS auto (from the Card Tool ratios) — no manual
+              override, matching corners/edges/surface. */}
+          <span className="text-[9px] text-[var(--admin-ink-faint)] italic mt-1 block">MVGS auto</span>
         </div>
       </div>
     </div>

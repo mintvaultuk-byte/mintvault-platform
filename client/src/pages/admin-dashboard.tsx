@@ -219,6 +219,11 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
           >
             &larr; Back to list
           </button>
+          {/* Owner directive (2026-07-01): one continuous block, in workflow
+              order — EDIT MV#### header → AI Identify → grading workstation
+              (card tool + defects, passed into the form as workstationSlot) →
+              Card Details → Grade — with Ownership + NFC at the very bottom
+              of the page. */}
           <CertificateForm
             certificate={editingCert}
             onSuccess={handleFormClose}
@@ -239,42 +244,46 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
               }
               queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
             }}
+            workstationSlot={
+              editingCert && editingCert.id ? (
+                <GradingPanel
+                  certId={editingCert.id}
+                  cardName={editingCert.cardName || ""}
+                  cardSet={editingCert.setName || ""}
+                  cardGame={editingCert.cardGame || ""}
+                  existingGrade={editingCert.gradeOverall}
+                  pendingAnalysis={pendingAnalysis}
+                  onPendingAnalysisConsumed={() => setPendingAnalysis(null)}
+                  onManualIdentification={(id) => {
+                    // Sync AI panel's manual identification to the cert form
+                    setExternalIdentification(id);
+                  }}
+                  onGradeApproved={() => {
+                    queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                    // Return to cert list
+                    setShowForm(false);
+                    setEditingCert(null);
+                  }}
+                  onCertUpdated={async () => {
+                    // Refetch the cert to get AI-autofilled fields (card name, set, number, etc.)
+                    try {
+                      const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, {
+                        credentials: "include",
+                      });
+                      const certs = await r.json();
+                      const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
+                      if (updated) setEditingCert(updated);
+                    } catch {
+                      /* ignore */
+                    }
+                    queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                  }}
+                />
+              ) : null
+            }
           />
           {editingCert && editingCert.id && (
             <div className="mt-6 space-y-6">
-              <GradingPanel
-                certId={editingCert.id}
-                cardName={editingCert.cardName || ""}
-                cardSet={editingCert.setName || ""}
-                cardGame={editingCert.cardGame || ""}
-                existingGrade={editingCert.gradeOverall}
-                pendingAnalysis={pendingAnalysis}
-                onPendingAnalysisConsumed={() => setPendingAnalysis(null)}
-                onManualIdentification={(id) => {
-                  // Sync AI panel's manual identification to the cert form
-                  setExternalIdentification(id);
-                }}
-                onGradeApproved={() => {
-                  queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-                  // Return to cert list
-                  setShowForm(false);
-                  setEditingCert(null);
-                }}
-                onCertUpdated={async () => {
-                  // Refetch the cert to get AI-autofilled fields (card name, set, number, etc.)
-                  try {
-                    const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, {
-                      credentials: "include",
-                    });
-                    const certs = await r.json();
-                    const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
-                    if (updated) setEditingCert(updated);
-                  } catch {
-                    /* ignore */
-                  }
-                  queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-                }}
-              />
               <OwnershipSection cert={editingCert} />
               <NfcSection cert={editingCert} onUpdated={(updated) => setEditingCert(updated)} />
             </div>
