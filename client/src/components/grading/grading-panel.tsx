@@ -2232,6 +2232,7 @@ export default function GradingPanel({
                 referenceImageUrl={aiIdentification?.referenceImageUrl}
                 side={viewerSide as "front" | "back"}
                 omitSideTabs
+                onOpenCardTool={setManualCardToolSide}
                 // MVGS v2.1 measurement state — flows back through the
                 // callbacks below when the operator draws a whitening or
                 // crease line inside mark mode (no separate tool overlay).
@@ -2637,26 +2638,13 @@ export default function GradingPanel({
               </div>
             )}
 
-            {/* 8-dot Card Tool — crop + deskew + centering in one click-capture pass */}
-            <div className="flex gap-2 mb-2">
-              <button
-                type="button"
-                onClick={() => setManualCardToolSide("front")}
-                className="flex-1 flex items-center justify-center gap-1.5 border border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5 text-[var(--admin-gold-deep)] hover:bg-[var(--admin-gold)]/15 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
-              >
-                Card Tool (Front)
-              </button>
-              <button
-                type="button"
-                onClick={() => setManualCardToolSide("back")}
-                className="flex-1 flex items-center justify-center gap-1.5 border border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5 text-[var(--admin-gold-deep)] hover:bg-[var(--admin-gold)]/15 text-[10px] font-bold uppercase px-2 py-1.5 rounded transition-all"
-              >
-                Card Tool (Back)
-              </button>
-            </div>
+            {/* 8-dot Card Tool launchers moved to the ImageViewer controls row
+                (under the card image, beside Mark Defects / Manual Crop) —
+                owner-requested workflow, 2026-07-03. The ManualCardTool modal +
+                its state stay here; only the trigger buttons relocated. */}
 
             {/* MVGS v2 — Whitening / Crease / Tear. Hoisted here (high in the
-                sidebar, right after the Card Tool row) so the measurement-tool
+                sidebar) so the measurement-tool
                 launcher + severity selectors sit in the operator's eye line.
                 This is the ONE canonical home for these controls — the Surface
                 block below no longer carries duplicates. All identifiers are

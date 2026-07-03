@@ -66,6 +66,12 @@ interface Props {
   urls: ImageUrls;
   defects: Defect[];
   onDefectAdded: (defect: Defect) => void;
+  /** Opens the 8-dot Card Tool for a side. When provided, "Card Tool (Front)"
+   *  and "Card Tool (Back)" render at the start of the controls row under the
+   *  image (owner-requested workflow: the tool launchers live with the image,
+   *  next to Mark Defects / Manual Crop). Display-only relocation — the modal
+   *  itself stays with the parent's state. */
+  onOpenCardTool?: (side: "front" | "back") => void;
   /** Required for the click-marker-to-edit popover. Receives the full new
    *  defects array (after edit or delete). Optional for backward compat —
    *  marker clicks become no-ops if absent. */
@@ -243,6 +249,7 @@ export default function ImageViewer({
   readOnly,
   side: controlledSide,
   omitSideTabs,
+  onOpenCardTool,
   whiteningLines = [],
   creaseLines = [],
   onWhiteningLinesChange,
@@ -1609,6 +1616,26 @@ export default function ImageViewer({
 
       {/* Controls row */}
       <div className="flex items-center gap-2 flex-wrap">
+        {/* Gated on !readOnly to match the old sidebar behaviour: the card
+            tool must not open on an approved (locked) cert outside edit mode. */}
+        {onOpenCardTool && !readOnly && (
+          <>
+            <button
+              type="button"
+              onClick={() => onOpenCardTool("front")}
+              className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5 text-[var(--admin-gold-deep)] hover:border-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/15"
+            >
+              Card Tool (Front)
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenCardTool("back")}
+              className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5 text-[var(--admin-gold-deep)] hover:border-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/15"
+            >
+              Card Tool (Back)
+            </button>
+          </>
+        )}
         <button
           type="button"
           onClick={enterMarkMode}
