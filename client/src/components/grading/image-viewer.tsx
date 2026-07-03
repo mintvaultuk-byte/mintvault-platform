@@ -1623,14 +1623,14 @@ export default function ImageViewer({
             <button
               type="button"
               onClick={() => onOpenCardTool("front")}
-              className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5 text-[var(--admin-gold-deep)] hover:border-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/15"
+              className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide px-3.5 py-1.5 rounded border border-[#B8960C] text-[#1A1400] [background:linear-gradient(135deg,#D4AF37_0%,#B8960C_100%)] shadow-[0_2px_8px_rgba(212,175,55,0.35)] transition-all hover:brightness-110 hover:shadow-[0_3px_12px_rgba(212,175,55,0.5)] hover:-translate-y-px active:translate-y-0"
             >
               Card Tool (Front)
             </button>
             <button
               type="button"
               onClick={() => onOpenCardTool("back")}
-              className="flex items-center gap-1.5 text-[10px] font-bold uppercase px-3 py-1.5 rounded border transition-all border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5 text-[var(--admin-gold-deep)] hover:border-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/15"
+              className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide px-3.5 py-1.5 rounded border border-[#B8960C] text-[#1A1400] [background:linear-gradient(135deg,#D4AF37_0%,#B8960C_100%)] shadow-[0_2px_8px_rgba(212,175,55,0.35)] transition-all hover:brightness-110 hover:shadow-[0_3px_12px_rgba(212,175,55,0.5)] hover:-translate-y-px active:translate-y-0"
             >
               Card Tool (Back)
             </button>
