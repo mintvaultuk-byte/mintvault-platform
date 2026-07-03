@@ -1,6 +1,19 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile } from "fs/promises";
+import { execSync } from "child_process";
+
+// The exact commit this artifact was built from — embedded so /api/version can
+// PROVE which code is actually running. A stale-checkout deploy silently wiped
+// newer prod code twice this cycle; this is the machine-checkable guard against
+// it. Falls back to a Fly/env value or "unknown" when git isn't in the context.
+const GIT_SHA = (() => {
+  try {
+    return execSync("git rev-parse --short HEAD", { encoding: "utf-8" }).trim();
+  } catch {
+    return (process.env.GIT_SHA || process.env.FLY_IMAGE_REF || "unknown").slice(0, 40);
+  }
+})();
 
 // server deps to bundle to reduce openat(2) syscalls
 // which helps cold start times
@@ -53,6 +66,7 @@ async function buildAll() {
     outfile: "dist/index.cjs",
     define: {
       "process.env.NODE_ENV": '"production"',
+      "process.env.GIT_SHA": JSON.stringify(GIT_SHA),
     },
     minify: true,
     external: externals,

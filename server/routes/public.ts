@@ -35,6 +35,10 @@ export function registerPublicRoutes(app: Express): void {
   app.get("/api/version", (_req, res) => {
     res.json({
       build: BUILD_STAMP,
+      // The commit this running server was built from — set at build time via
+      // esbuild define (script/build.ts). Lets a deploy PROVE the live artifact
+      // is the code it just shipped, not a stale-checkout clobber.
+      commit: process.env.GIT_SHA || "unknown",
       timestamp: new Date().toISOString(),
     });
   });

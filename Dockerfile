@@ -19,6 +19,12 @@ COPY package*.json ./
 RUN npm ci
 
 COPY . .
+# GIT_SHA passed by the deploy (fly deploy --build-arg GIT_SHA=$(git rev-parse
+# --short HEAD)). .git is dockerignored, so the build can't read it directly —
+# this hands the committed SHA to script/build.ts, which embeds it so
+# /api/version can prove which commit is live. Defaults to "unknown".
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
 RUN npm run build
 
 # ── Production stage ──────────────────────────────────────────────────────────
