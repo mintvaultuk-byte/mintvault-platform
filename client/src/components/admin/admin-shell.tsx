@@ -65,17 +65,15 @@ type NavLink = {
 type NavItem = NavLeaf | NavLink;
 type NavSection = { heading: string; items: NavItem[] };
 
+// Nav order is the OWNER'S WORKFLOW order (set 2026-07-03) — the flattened
+// sequence across sections is deliberate; don't re-sort alphabetically or
+// regroup without asking. Sections only feed the heading + topbar crumb.
 const NAV: NavSection[] = [
   {
     heading: "Operations",
     items: [
       { key: "dashboard", label: "Overview", icon: LayoutDashboard },
       { key: "certs", label: "Certificates", icon: List },
-      { key: "submissions", label: "Submissions", icon: Package },
-      { key: "intake", label: "Intake", icon: ScanLine },
-      { key: "pricing", label: "Pricing", icon: DollarSign },
-      { key: "promotions", label: "Promotions", icon: Tag },
-      { key: "capacity", label: "Capacity", icon: Database },
       { key: "printing", label: "Printing", icon: Printer },
       { href: "/admin/staff", label: "Staff", icon: Users },
     ],
@@ -83,19 +81,24 @@ const NAV: NavSection[] = [
   {
     heading: "Insight",
     items: [
-      { href: "/admin/weekly-reel", label: "Weekly Reel", icon: Film },
-      { href: "/admin/mvgs-calibration", label: "MVGS Calibration", icon: SlidersHorizontal },
-      { key: "grading", label: "Grading", icon: BarChart3 },
       { key: "learning", label: "AI Learning", icon: Brain },
-      { key: "capture-health", label: "Capture Health", icon: Activity },
       { key: "divergence", label: "AI Divergence", icon: TrendingUp },
+      { key: "grading", label: "Grading", icon: BarChart3 },
+      { key: "capture-health", label: "Capture Health", icon: Activity },
     ],
   },
   {
     heading: "Records",
     items: [
+      { key: "promotions", label: "Promotions", icon: Tag },
+      { href: "/admin/mvgs-calibration", label: "MVGS Calibration", icon: SlidersHorizontal },
       { key: "transfers", label: "Transfers", icon: ArrowRightLeft },
       { key: "scans", label: "Scans", icon: History },
+      { key: "capacity", label: "Capacity", icon: Database },
+      { href: "/admin/weekly-reel", label: "Weekly Reel", icon: Film },
+      { key: "pricing", label: "Pricing", icon: DollarSign },
+      { key: "intake", label: "Intake", icon: ScanLine },
+      { key: "submissions", label: "Submissions", icon: Package },
     ],
   },
 ];
