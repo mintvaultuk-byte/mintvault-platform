@@ -557,7 +557,12 @@ async function runTransferV2Sweep() {
   async function runScanReconciler() {
     try {
       const { reconcileStuckScans } = await import("./scan-ingest-service");
-      await reconcileStuckScans({ staleMinutes: 10 });
+      // 30 min (was 10): with 3-4 scanners the per-machine queue legitimately
+      // holds cards >10 min at peak; 10 min re-drove QUEUED certs and doubled
+      // the backlog (re-drive storm). The job-start heartbeat in
+      // processScanInBackground means genuinely dead pipelines still surface;
+      // restart-stranded certs recover within ~30-35 min instead of ~10-15.
+      await reconcileStuckScans({ staleMinutes: 30 });
     } catch (err: any) {
       log(`reconcile error: ${err?.message || err}`, "scan-reconciler");
     }

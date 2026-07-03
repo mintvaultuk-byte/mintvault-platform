@@ -5,7 +5,8 @@
  * and the new scan-ingest endpoint can reuse the same code paths.
  */
 
-import { db } from "./db";
+import { db, pool } from "./db";
+import { hashLockKey } from "./lib/advisory-lock";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { uploadToR2, getR2Buffer, listR2Keys } from "./r2";
@@ -223,7 +224,11 @@ export async function createCertForScan(
  * This flag is the scanner's precondition for moving the inbox file to processed/.
  */
 export async function markRawUploaded(certId: number): Promise<void> {
-  await db.execute(sql`UPDATE certificates SET raw_uploaded = true, updated_at = NOW() WHERE id = ${certId}`);
+  // deleted_at guard (two-scanner safety): a concurrent DELETE from the other
+  // scanner must not have this in-flight ingest confirm raws onto a dead cert.
+  await db.execute(
+    sql`UPDATE certificates SET raw_uploaded = true, updated_at = NOW() WHERE id = ${certId} AND deleted_at IS NULL`
+  );
 }
 
 /**
@@ -273,6 +278,29 @@ export async function reconcileStuckScans(opts: { staleMinutes?: number; limit?:
     const certId = row.id as number;
     const certNum = String(row.certificate_number);
     try {
+      // Skip-if-running probe (multi-scanner safety): if this cert's image
+      // pipeline advisory lock is HELD, the pipeline is actively running on
+      // some machine right now — re-driving would only duplicate the work.
+      // Advisory locks are PER-CONNECTION, so probe + release MUST happen on
+      // one dedicated client (via the shared pool the unlock could land on a
+      // different connection and leak the lock into the pool).
+      const probeKey = hashLockKey(`img-pipeline:${certId}`);
+      const probeClient = await pool.connect();
+      let running = false;
+      try {
+        const r = await probeClient.query("SELECT pg_try_advisory_lock($1) AS locked", [probeKey]);
+        if (r.rows[0]?.locked === true) {
+          await probeClient.query("SELECT pg_advisory_unlock($1)", [probeKey]).catch(() => {});
+        } else {
+          running = true;
+        }
+      } finally {
+        probeClient.release();
+      }
+      if (running) {
+        console.log(`[reconciler] ${certNum}: pipeline actively running elsewhere — skipping re-drive`);
+        continue;
+      }
       const frontKeys = await listR2Keys(`images/grading/${certId}/raw_front`);
       const backKeys = await listR2Keys(`images/grading/${certId}/raw_back`);
       const frontBuf = frontKeys.length ? await getR2Buffer(frontKeys[0]) : null;
@@ -371,6 +399,23 @@ export async function processScanInBackground(
   const t0 = process.hrtime.bigint();
   try {
     console.log(`[process-scan] start cert=${certInfo.certId} (id=${certInfo.id})`);
+    // Two-scanner safety: the other scanner may have deleted this cert between
+    // ingest and this background job. Skip the whole pipeline — the UPDATE
+    // guards downstream would no-op anyway, this just avoids the wasted work.
+    const live = await db.execute(
+      sql`SELECT 1 FROM certificates WHERE id = ${certInfo.id} AND deleted_at IS NULL`
+    );
+    if (live.rows.length === 0) {
+      console.log(`[process-scan] cert=${certInfo.certId} soft-deleted mid-ingest — skipping pipeline`);
+      return;
+    }
+    // Heartbeat (multi-scanner safety): updated_at is the reconciler's
+    // staleness marker. Bumping it when the job actually STARTS means
+    // "stale processing" measures started-but-died pipelines, not certs
+    // that merely sat in a busy queue behind 3-4 scanners' worth of cards.
+    await db.execute(
+      sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${certInfo.id} AND deleted_at IS NULL`
+    );
     const { frontVariants, backVariants, timing } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
     console.log(`[process-scan] images processed cert=${certInfo.certId}`);
 
@@ -439,6 +484,42 @@ export async function processScanInBackground(
  *   images/{certId}/{side}.jpg           — canonical display key (front_image_path)
  */
 export async function uploadImagesToCert(
+  certId: number,
+  frontBuffer: Buffer,
+  backBuffer: Buffer | null
+): Promise<{ frontVariants: any; backVariants: any | null; timing: { sharpMs: number; r2Ms: number } }> {
+  // Per-cert cross-machine serialization (two-scanner safety): the scan
+  // background job and the manual image-attach endpoint can both regenerate
+  // this cert's variants at the same instant from DIFFERENT Fly machines —
+  // R2 is last-write-wins, so unserialized runs can leave the DB pointing at
+  // one run's keys while R2 holds the other's pixels. A Postgres advisory
+  // lock (waiting, max 60s) makes runs take turns; on timeout we throw, the
+  // caller's existing failure path marks scan_status='failed' and the
+  // reconciler re-drives — visible failure over silent corruption.
+  const lockKey = hashLockKey(`img-pipeline:${certId}`);
+  const client = await pool.connect();
+  let acquired = false;
+  try {
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      const r = await client.query("SELECT pg_try_advisory_lock($1) AS locked", [lockKey]);
+      if (r.rows[0]?.locked === true) {
+        acquired = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    if (!acquired) {
+      throw new Error(`image pipeline for cert ${certId} is locked by another run (waited 60s)`);
+    }
+    return await uploadImagesToCertUnlocked(certId, frontBuffer, backBuffer);
+  } finally {
+    if (acquired) await client.query("SELECT pg_advisory_unlock($1)", [lockKey]).catch(() => {});
+    client.release();
+  }
+}
+
+async function uploadImagesToCertUnlocked(
   certId: number,
   frontBuffer: Buffer,
   backBuffer: Buffer | null
@@ -662,7 +743,7 @@ export async function uploadImagesToCert(
       back_image_path           = ${uploadKeys.back_display || uploadKeys.back_cropped_display || uploadKeys.back_cropped_png || uploadKeys.back_cropped || uploadKeys.back_original || null},
       crop_geometry             = ${JSON.stringify(cropGeometry)}::jsonb,
       updated_at                = NOW()
-    WHERE id = ${certId}
+    WHERE id = ${certId} AND deleted_at IS NULL
   `);
 
   return { frontVariants, backVariants, timing: { sharpMs, r2Ms } };

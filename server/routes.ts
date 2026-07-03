@@ -9747,17 +9747,36 @@ Defects (admin-confirmed): ${defectLines}`;
         return res.status(400).json({ error: "image decode failed" });
       }
 
-      const newKey = `images/grading/${cert.id}/${side}_original.jpg`;
+      // Unique key per upload (two-scanner safety): with the old deterministic
+      // key, two devices racing the same cert/side wrote the SAME R2 object —
+      // last write silently won and the losing card's image was lost while the
+      // DB looked correct. Each upload now writes its own object; the atomic
+      // CAS below decides the single winner. Downstream always reads the
+      // column, never reconstructs this path by convention.
+      const newKey = `images/grading/${cert.id}/${side}_original_${Date.now().toString(36)}.jpg`;
       await uploadToR2(newKey, jpegBuf, "image/jpeg");
 
-      if (side === "front") {
-        await db.execute(
-          sql`UPDATE certificates SET grading_front_original = ${newKey}, updated_at = NOW() WHERE id = ${cert.id}`
-        );
-      } else {
-        await db.execute(
-          sql`UPDATE certificates SET grading_back_original  = ${newKey}, updated_at = NOW() WHERE id = ${cert.id}`
-        );
+      // Atomic claim-the-slot: only update if the cert is still live AND the
+      // side still holds exactly what we read above (IS NOT DISTINCT FROM
+      // handles NULL). A concurrent device that attached in between makes this
+      // match 0 rows → we clean up our orphan object and 409 instead of
+      // silently cross-wiring two different physical cards.
+      const sideColSql = side === "front" ? sql`grading_front_original` : sql`grading_back_original`;
+      const claimed = await db.execute(sql`
+        UPDATE certificates
+        SET ${sideColSql} = ${newKey}, updated_at = NOW()
+        WHERE id = ${cert.id}
+          AND deleted_at IS NULL
+          AND (${replaceExisting} OR ${sideColSql} IS NOT DISTINCT FROM ${previousKey})
+        RETURNING id
+      `);
+      if (claimed.rows.length === 0) {
+        try {
+          await deleteFromR2(newKey);
+        } catch {}
+        return res.status(409).json({
+          error: `${side} image for ${certId} changed under this upload (another scanner attached it, or the cert was deleted) — refresh and retry`,
+        });
       }
 
       const adminUser =
