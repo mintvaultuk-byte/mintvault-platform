@@ -10,7 +10,10 @@
 set -eu
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LABEL="com.mintvault.scanner-app"
+# Label UNIFIED with lib/agent-plist.js (the app's single source of truth) —
+# previously this installed com.mintvault.scanner-app while the app's own
+# self-repair managed com.mintvault.scanner, leaving two competing agents.
+LABEL="com.mintvault.scanner"
 PLIST_NAME="$LABEL.plist"
 PLIST_SOURCE="$SCRIPT_DIR/$PLIST_NAME"
 WRAPPER="$SCRIPT_DIR/launchd-wrapper.sh"
@@ -25,11 +28,10 @@ echo "[install]   App dir:  $SCRIPT_DIR"
 echo "[install]   Service:  $LABEL"
 
 # Sanity
-[ -f "$PLIST_SOURCE" ] || { echo "[install] FATAL: plist missing at $PLIST_SOURCE" >&2; exit 1; }
 [ -f "$WRAPPER"      ] || { echo "[install] FATAL: wrapper missing at $WRAPPER" >&2; exit 1; }
 
 # 1) Scan folders (matches watcher.mjs convention)
-for sub in inbox processed failed discarded; do
+for sub in inbox processed failed rejected discarded; do
   mkdir -p "$BASE/$sub"
 done
 echo "[install] ✓ Ensured $BASE/{inbox,processed,failed,discarded}"
@@ -66,12 +68,16 @@ echo "[install] ✓ Deps installed"
 chmod +x "$WRAPPER"
 echo "[install] ✓ Wrapper marked executable"
 
-# 6) Render plist with absolute paths
+# 6) Render plist from the SINGLE source of truth (lib/agent-plist.js) — the
+# same renderer the app's self-repair uses, so install and repair can never
+# drift onto different labels/paths again.
 mkdir -p "$LAUNCHAGENTS"
-sed -e "s|__WRAPPER_PATH__|$WRAPPER|g" \
-    -e "s|__HOME__|$HOME|g" \
-    "$PLIST_SOURCE" > "$PLIST_TARGET"
-echo "[install] ✓ Rendered plist → $PLIST_TARGET"
+if command -v node >/dev/null 2>&1; then
+  node "$SCRIPT_DIR/lib/agent-plist.js" --write >/dev/null
+else
+  ELECTRON_RUN_AS_NODE=1 "$SCRIPT_DIR/node_modules/.bin/electron" "$SCRIPT_DIR/lib/agent-plist.js" --write >/dev/null
+fi
+echo "[install] ✓ Rendered plist → $PLIST_TARGET (via lib/agent-plist.js)"
 
 # 7) Bootstrap or kickstart
 if launchctl print "gui/$UID_VAL/$LABEL" >/dev/null 2>&1; then

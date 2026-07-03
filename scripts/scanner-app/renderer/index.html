@@ -9,6 +9,8 @@
   <header class="hdr" id="hdr">
     <span class="hdr-title">MintVault Scanner</span>
     <div class="hdr-spacer"></div>
+    <span class="hdr-version" id="appVersion" title="Scanner app version"></span>
+    <button class="hdr-btn" id="updateBtn" title="Update app to latest &amp; restart">⤓</button>
     <button class="hdr-btn" id="restartBtn" title="Restart watcher">↻</button>
     <button class="hdr-btn" id="hideBtn" title="Hide">×</button>
   </header>
@@ -209,6 +211,7 @@
       <div class="confirm-note" id="confirmNote"></div>
       <div class="modal-actions">
         <button class="btn danger" id="confirmReject">Reject &amp; rescan</button>
+        <button class="btn" id="confirmGrade">Grade ↗</button>
         <button class="btn primary confirm-ok" id="confirmOk">OK — number written, next card</button>
       </div>
     </div>

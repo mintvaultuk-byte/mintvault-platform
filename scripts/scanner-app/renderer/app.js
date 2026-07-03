@@ -69,6 +69,9 @@ const els = {
   confirmNote:  document.getElementById("confirmNote"),
   confirmOk:    document.getElementById("confirmOk"),
   confirmReject: document.getElementById("confirmReject"),
+  confirmGrade: document.getElementById("confirmGrade"),
+  appVersion:   document.getElementById("appVersion"),
+  updateBtn:    document.getElementById("updateBtn"),
 
   // Soft-delete confirm
   deleteModal:   document.getElementById("deleteModal"),
@@ -242,6 +245,8 @@ function renderState(s) {
         els.confirmReject.style.display = incomplete ? "none" : "";
         resetRejectArm();
       }
+      // Grade needs a real cert number; hidden for incomplete scans.
+      if (els.confirmGrade) els.confirmGrade.style.display = incomplete ? "none" : "";
       openModal(els.confirmModal);
     } else {
       closeModal(els.confirmModal);
@@ -311,6 +316,35 @@ if (els.confirmReject) {
       alert(`Reject failed — the cert still exists: ${r?.error || "unknown error"}`);
     }
     // On success the popup closes via the state update (confirmCard: null).
+  });
+}
+
+// Grade ↗ — open the admin panel in the browser with this cert pre-searched.
+// Non-destructive: the popup stays up; the operator still OKs (or rejects).
+if (els.confirmGrade) {
+  els.confirmGrade.addEventListener("click", async () => {
+    const certId = lastState?.confirmCard?.certId;
+    if (!certId) return;
+    const r = await window.scanner.openGradeCert(certId);
+    if (!r?.ok) alert(`Couldn't open the grading page: ${r?.error || "unknown error"}`);
+  });
+}
+
+// Version display + one-click update.
+if (els.appVersion) {
+  window.scanner.getVersion?.().then((r) => {
+    if (r?.ok) els.appVersion.textContent = `v${r.version}`;
+  }).catch(() => {});
+}
+if (els.updateBtn) {
+  els.updateBtn.addEventListener("click", async () => {
+    if (!confirm("Update the scanner app to the latest version and restart it?\nScanning pauses for ~1 minute.")) return;
+    const r = await window.scanner.updateApp();
+    if (r?.ok) {
+      alert("Updating — the app will restart itself shortly. The tray icon will reappear when done.");
+    } else {
+      alert(`Update failed to start: ${r?.error || "unknown error"}`);
+    }
   });
 }
 

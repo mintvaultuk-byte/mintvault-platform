@@ -44,7 +44,12 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (authenticated === false) {
-      navigate(`/admin/login?next=${encodeURIComponent(location || "/admin")}`, { replace: true });
+      // Preserve the full path + query (e.g. /admin?search=MV430 from the
+      // scanner "Grade" deep link) through the login round-trip — wouter's
+      // `location` is the pathname only, so append the live query string.
+      const search = typeof window !== "undefined" ? window.location.search : "";
+      const target = (location || "/admin") + search;
+      navigate(`/admin/login?next=${encodeURIComponent(target)}`, { replace: true });
     }
   }, [authenticated, navigate, location]);
 

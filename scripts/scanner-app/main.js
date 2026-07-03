@@ -14,7 +14,7 @@
  * icon reappears or it doesn't — no silent drift.
  */
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell, clipboard } = require("electron");
+const { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, screen, shell, clipboard, powerMonitor } = require("electron");
 const { spawn } = require("node:child_process");
 const fs    = require("node:fs");
 const path  = require("node:path");
@@ -78,6 +78,7 @@ const RESET_HELPER = path.join(__dirname, "reset-agent.sh");
 // plist (don't run "Reset scanner" on a test instance; it targets the prod agent).
 const SCANS_BASE   = process.env.MINTVAULT_SCANS_DIR || path.join(os.homedir(), "mintvault-scans");
 const SCANNER_LOG  = path.join(SCANS_BASE, "scanner-app.log");
+const APP_VERSION  = (() => { try { return require("./package.json").version; } catch { return "?"; } })();
 const LAST_RESET   = path.join(SCANS_BASE, "last-reset.json");
 
 // Append a timestamped line to the operator log (tray "Show logs" target).
@@ -440,6 +441,38 @@ function setupIpc() {
     return r;
   });
 
+  // "Grade ↗" on the confirmation popup — open the admin panel in the
+  // default browser with the cert pre-searched (exact-number match lands on
+  // exactly this card). Non-destructive; the popup stays up for OK/Reject.
+  ipcMain.handle("open-grade-cert", async (_e, certId) => {
+    if (!certId || !/^MV\d+$/i.test(String(certId))) return { ok: false, error: "format MV###" };
+    const base = server.API_BASE.replace(/\/$/, "");
+    const url = `${base}/admin?search=${encodeURIComponent(String(certId).toUpperCase())}`;
+    shell.openExternal(url);
+    return { ok: true, url };
+  });
+
+  ipcMain.handle("get-version", () => ({ ok: true, version: APP_VERSION }));
+
+  // "Update app" — run update.sh DETACHED (git pull + npm install + launchctl
+  // kickstart). Detached because kickstart kills THIS process; the script must
+  // outlive us. Output goes to the scanner log.
+  ipcMain.handle("update-app", async () => {
+    const script = path.join(__dirname, "update.sh");
+    if (!fs.existsSync(script)) return { ok: false, error: "update.sh missing — update via git pull manually" };
+    try {
+      const child = require("node:child_process").spawn("/bin/bash", [script], {
+        detached: true,
+        stdio: "ignore",
+      });
+      child.unref();
+      console.log("[main] update.sh launched detached — app will be restarted by the script");
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err?.message || String(err) };
+    }
+  });
+
   ipcMain.handle("restart-watcher", async () => {
     await watcher.stop();
     await watcher.start();
@@ -570,6 +603,73 @@ app.whenReady().then(async () => {
   setupIpc();
 
   await watcher.start();
+
+  // ── Maintenance (scanner ops pack) ────────────────────────────────────
+  // Log rotation: launchd holds the log fd, so rotate copy-truncate style.
+  const rotateLogIfNeeded = () => {
+    try {
+      const st = fs.statSync(SCANNER_LOG);
+      if (st.size < 50 * 1024 * 1024) return;
+      const dir = path.join(SCANS_BASE, "logs-archive");
+      fs.mkdirSync(dir, { recursive: true });
+      const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
+      fs.copyFileSync(SCANNER_LOG, path.join(dir, `scanner-app-${stamp}.log`));
+      fs.truncateSync(SCANNER_LOG, 0);
+      const archives = fs.readdirSync(dir).filter((f) => f.startsWith("scanner-app-")).sort();
+      for (const f of archives.slice(0, Math.max(0, archives.length - 10))) {
+        fs.unlinkSync(path.join(dir, f));
+      }
+      console.log(`[maintenance] rotated scanner-app.log (${Math.round(st.size / 1e6)}MB) → logs-archive/`);
+    } catch (err) {
+      console.error(`[maintenance] log rotation failed: ${err?.message}`);
+    }
+  };
+  // Folder hygiene: purge processed/ date-folders older than 90 days; warn
+  // when failed/ + rejected/ together exceed 500MB (operator should review).
+  const cleanupScanFolders = () => {
+    try {
+      const cutoff = new Date(Date.now() - 90 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+      const processed = path.join(SCANS_BASE, "processed");
+      if (fs.existsSync(processed)) {
+        for (const d of fs.readdirSync(processed)) {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(d) && d < cutoff) {
+            fs.rmSync(path.join(processed, d), { recursive: true, force: true });
+            console.log(`[maintenance] purged processed/${d} (>90 days)`);
+          }
+        }
+      }
+      const duDir = (dir) => {
+        let total = 0;
+        if (!fs.existsSync(dir)) return 0;
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const fp = path.join(dir, entry.name);
+          try { total += entry.isDirectory() ? duDir(fp) : fs.statSync(fp).size; } catch {}
+        }
+        return total;
+      };
+      const bad = duDir(path.join(SCANS_BASE, "failed")) + duDir(path.join(SCANS_BASE, "rejected"));
+      if (bad > 500 * 1024 * 1024) {
+        console.warn(`[maintenance] failed/ + rejected/ hold ${Math.round(bad / 1e6)}MB — review + clear them`);
+      }
+    } catch (err) {
+      console.error(`[maintenance] folder cleanup failed: ${err?.message}`);
+    }
+  };
+  rotateLogIfNeeded();
+  cleanupScanFolders();
+  setInterval(rotateLogIfNeeded, 6 * 3600 * 1000);
+  setInterval(cleanupScanFolders, 24 * 3600 * 1000);
+
+  // Wake-from-sleep recovery: FSEvents subscriptions can go stale across a
+  // long sleep — restart the folder watcher and immediately sweep the inbox.
+  powerMonitor.on("resume", async () => {
+    console.log("[maintenance] system resumed from sleep — restarting watcher + sweeping inbox");
+    try { await watcher.stop(); await watcher.start(); } catch (err) { console.error(`[maintenance] resume restart failed: ${err?.message}`); }
+    watcher.drainInbox().catch(() => {});
+  });
+  // Belt-and-braces: sweep the inbox every 10 min for anything chokidar
+  // missed. drainInbox is idempotent and respects the confirm/pause gates.
+  setInterval(() => watcher.drainInbox().catch(() => {}), 10 * 60 * 1000);
   refreshTray();
   surfacePriorResetStatus();
 });

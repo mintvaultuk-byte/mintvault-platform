@@ -133,6 +133,17 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
   const [pendingAnalysis, setPendingAnalysis] = useState<{ analysis: any; identification: any } | null>(null);
   const [externalIdentification, setExternalIdentification] = useState<Record<string, unknown> | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  // Deep link: /admin?search=MV430 (used by the scanner app's "Grade" button)
+  // pre-fills the search (exact cert-number match) and lands on the certs tab.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const q = new URLSearchParams(window.location.search).get("search");
+    if (q) {
+      setSearchQuery(q);
+      setActiveTab("certs");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [previewCert, setPreviewCert] = useState<CertificateRecord | null>(null);
   const [selectedGradingCertId, setSelectedGradingCertId] = useState<number | null>(null);
   const [approvedSignal, setApprovedSignal] = useState<{ certId: string; grade: string; ts: number } | null>(null);

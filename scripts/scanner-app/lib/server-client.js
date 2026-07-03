@@ -135,16 +135,32 @@ function loadEnv() {
 
 const env = loadEnv();
 const API_BASE = process.env.MINTVAULT_API_BASE || env.MINTVAULT_API_BASE || "https://mintvaultuk.com";
-const TOKEN    = process.env.SCANNER_API_TOKEN  || env.SCANNER_API_TOKEN  || "";
-// Phase 1 — per-operator identity. Set per-Mac in ~/.mintvault-scanner.env as
-// SCANNER_OPERATOR=<this operator's login email>. Sent as x-scanner-operator so
-// the server attributes scanned_by to this operator. Optional: if unset, the
-// server leaves scanned_by NULL (legacy shared-token behaviour) — scans still work.
-const OPERATOR = process.env.SCANNER_OPERATOR   || env.SCANNER_OPERATOR   || "";
+
+// Live credentials: the env file is re-read whenever its mtime changes, so a
+// rotated SCANNER_API_TOKEN takes effect on the next request WITHOUT an app
+// restart (previously the token was read once at startup and a rotation left
+// the app silently 401ing until someone kickstarted it). process.env still
+// wins when set (launchd wrapper sources the same file at boot — same values
+// unless the file changed since; the mtime check covers exactly that case).
+const ENV_PATH = path.join(os.homedir(), ".mintvault-scanner.env");
+let _envCache = { mtimeMs: -1, vals: env };
+function liveEnv() {
+  try {
+    const st = fs.statSync(ENV_PATH);
+    if (st.mtimeMs !== _envCache.mtimeMs) {
+      _envCache = { mtimeMs: st.mtimeMs, vals: loadEnv() };
+      console.log("[server-client] env file changed on disk — credentials reloaded");
+    }
+  } catch { /* keep last-known values if the file vanishes mid-session */ }
+  return _envCache.vals;
+}
 
 function authHeaders() {
-  const headers = TOKEN ? { "x-scanner-token": TOKEN } : {};
-  if (OPERATOR) headers["x-scanner-operator"] = OPERATOR;
+  const vals = liveEnv();
+  const token = vals.SCANNER_API_TOKEN || process.env.SCANNER_API_TOKEN || "";
+  const operator = vals.SCANNER_OPERATOR || process.env.SCANNER_OPERATOR || "";
+  const headers = token ? { "x-scanner-token": token } : {};
+  if (operator) headers["x-scanner-operator"] = operator;
   return headers;
 }
 

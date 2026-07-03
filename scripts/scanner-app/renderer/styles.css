@@ -597,13 +597,23 @@ body {
 }
 .confirm-card .modal-actions {
   width: 100%;
+  flex-direction: column;   /* stack the 3 buttons; each full-width, no overflow */
+  align-items: stretch;
+  gap: 8px;
+}
+.confirm-card .modal-actions .btn {
+  width: 100%;
+  margin: 0;
 }
 .confirm-ok {
   width: 100%;
   padding: 11px;
   font-size: 14px;
   font-weight: 700;
+  order: 3;                 /* OK sits at the bottom (primary action, largest target) */
 }
+#confirmGrade { order: 2; }
+#confirmReject { order: 1; }
 
 /* Reject & rescan — armed (click-again) state: unmistakably hot. */
 .btn.danger.armed {
@@ -611,4 +621,11 @@ body {
   color: #fff;
   border-color: #d34a42;
   box-shadow: 0 0 0 2px rgba(211, 74, 66, 0.35);
+}
+
+.hdr-version {
+  font-size: 10px;
+  color: var(--ink-dim, #8a8578);
+  margin-right: 2px;
+  align-self: center;
 }
