@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld("scanner", {
   retryLast:         ()            => ipcRenderer.invoke("retry-last"),
   resetBuffered:     ()            => ipcRenderer.invoke("reset-buffered"),
   ackConfirmCard:    ()            => ipcRenderer.invoke("ack-confirm-card"),
+  rejectConfirmCard: ()            => ipcRenderer.invoke("reject-confirm-card"),
   restartWatcher:    ()            => ipcRenderer.invoke("restart-watcher"),
   resetScanner:      ()            => ipcRenderer.invoke("reset-scanner"),
   forwardToCert:     (certId)      => ipcRenderer.invoke("forward-to-cert", certId),

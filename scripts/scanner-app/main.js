@@ -427,6 +427,19 @@ function setupIpc() {
     return { ok: true };
   });
 
+  // Operator pressed "Reject & rescan" on the confirmation popup. The watcher
+  // soft-deletes the cert + cleans held files; on success clear-and-drain
+  // exactly like ack (popup closes state-driven; next held scan surfaces).
+  // On failure the popup stays up and the renderer shows the error.
+  ipcMain.handle("reject-confirm-card", async () => {
+    const r = await watcher.rejectConfirmCard();
+    if (r.ok) {
+      pushStateToRenderer();
+      watcher.drainInbox().catch((e) => console.error("[main] drainInbox after reject failed:", e?.message));
+    }
+    return r;
+  });
+
   ipcMain.handle("restart-watcher", async () => {
     await watcher.stop();
     await watcher.start();

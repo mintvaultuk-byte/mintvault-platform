@@ -9877,18 +9877,28 @@ Defects (admin-confirmed): ${defectLines}`;
         return res.status(400).json({ error: "reason must be at least 10 characters" });
       }
 
+      // grade_approved_at guard: this endpoint serves the SCANNER workflow
+      // (reject & rescan, orphan cleanup). A cert whose grade has been
+      // approved/published is finished grading work — a scanner popup must
+      // never be able to soft-delete it. Admin-side deletion of graded certs
+      // goes through the separate admin route with its own confirmation.
       const r = await db.execute(sql`
         UPDATE certificates
         SET deleted_at = NOW(), updated_at = NOW()
-        WHERE certificate_number = ${certId} AND deleted_at IS NULL
+        WHERE certificate_number = ${certId} AND deleted_at IS NULL AND grade_approved_at IS NULL
         RETURNING id
       `);
       if (r.rows.length === 0) {
         const exists = await db.execute(
-          sql`SELECT id, deleted_at FROM certificates WHERE certificate_number = ${certId} LIMIT 1`
+          sql`SELECT id, deleted_at, grade_approved_at FROM certificates WHERE certificate_number = ${certId} LIMIT 1`
         );
         if (exists.rows.length === 0) return res.status(404).json({ error: "cert not found", certId });
-        return res.status(410).json({ error: "cert already soft-deleted", certId });
+        if ((exists.rows[0] as any).deleted_at)
+          return res.status(410).json({ error: "cert already soft-deleted", certId });
+        return res.status(409).json({
+          error: "cert has an approved grade — cannot be deleted from the scanner; use the admin panel",
+          certId,
+        });
       }
 
       const adminUser =

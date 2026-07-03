@@ -604,3 +604,11 @@ body {
   font-size: 14px;
   font-weight: 700;
 }
+
+/* Reject & rescan — armed (click-again) state: unmistakably hot. */
+.btn.danger.armed {
+  background: #b3261e;
+  color: #fff;
+  border-color: #d34a42;
+  box-shadow: 0 0 0 2px rgba(211, 74, 66, 0.35);
+}

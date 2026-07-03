@@ -33,6 +33,7 @@ const BASE      = process.env.MINTVAULT_SCANS_DIR || path.join(os.homedir(), "mi
 const INBOX     = path.join(BASE, "inbox");
 const PROCESSED = path.join(BASE, "processed");
 const FAILED    = path.join(BASE, "failed");
+const REJECTED  = path.join(BASE, "rejected");
 // Crash-recovery queue: records every upload that's in flight so an
 // interrupted upload (app killed / machine slept mid-POST) can be re-driven
 // on the next startup. Written when an upload starts, cleared on success or
@@ -99,7 +100,7 @@ class Watcher extends EventEmitter {
   }
 
   async start() {
-    for (const dir of [BASE, INBOX, PROCESSED, FAILED]) {
+    for (const dir of [BASE, INBOX, PROCESSED, FAILED, REJECTED]) {
       fs.mkdirSync(dir, { recursive: true });
     }
 
@@ -764,6 +765,59 @@ class Watcher extends EventEmitter {
     if (i === -1) return;
     q[i] = { ...q[i], ...fields };
     this.writePendingQueue(q);
+  }
+
+  /** Operator pressed "Reject & rescan" on the scan-confirmation popup.
+   *  Soft-deletes the just-minted cert server-side (so the number dies with
+   *  the bad scan), cleans up any still-held inbox files + pending entry
+   *  (raw_pending case — otherwise a restart would re-drive the ingest into
+   *  the deleted cert until attempts exhausted), and returns the app to idle
+   *  ready for the rescan. On server failure the popup STAYS UP so the
+   *  operator knows the cert still exists. Incomplete cards (no certId) have
+   *  nothing server-side — treated as a plain ack.
+   */
+  async rejectConfirmCard() {
+    const s = stateMod.get();
+    const c = s.confirmCard;
+    if (!c) return { ok: false, error: "no card on the confirmation popup" };
+
+    if (c.certId) {
+      let r;
+      try {
+        r = await server.softDeleteCert(c.certId, "Operator rejected at scan-confirmation popup — reject & rescan");
+      } catch (err) {
+        r = { ok: false, error: err?.message || String(err) };
+      }
+      // 404/410 = already gone/deleted — that IS the desired end-state.
+      const gone = r.ok || r.status === 404 || r.status === 410;
+      if (!gone) {
+        const why = r.body?.error || r.error || `HTTP ${r.status || "?"}`;
+        this.log(`REJECT failed for ${c.certId}: ${why}`, "error");
+        return { ok: false, error: why };
+      }
+
+      // raw_pending: the inbox file(s) + pending entry are still held for the
+      // reconciler. The cert is now deleted, so re-driving would only burn
+      // attempts against deleted_at-guarded no-ops — move files to rejected/
+      // (kept, never auto-retried) and drop the entry.
+      const entry = this.readPendingQueue().find((e) => e.certId === c.certId);
+      if (entry) {
+        const rejDir = this.dateFolder(REJECTED);
+        for (const f of [entry.frontPath, entry.backPath]) {
+          if (f && fs.existsSync(f)) this.moveFile(f, rejDir);
+        }
+        this.removePending(entry.key);
+        this.log(`${c.certId}: held inbox files moved to rejected/, pending entry dropped`);
+      }
+      this.log(`REJECTED ${c.certId} — operator reject & rescan (cert soft-deleted)`);
+    } else {
+      this.log("REJECT on incomplete card — nothing server-side, clearing popup");
+    }
+
+    stateMod.set({ confirmCard: null, state: "idle", lastError: null });
+    this.emitState();
+    this.refreshNextCert(true);
+    return { ok: true, certId: c.certId || null };
   }
 
   /** CORE INVARIANT: hold the inbox file until the server confirms raw_uploaded=

@@ -68,6 +68,7 @@ const els = {
   confirmCert:  document.getElementById("confirmCert"),
   confirmNote:  document.getElementById("confirmNote"),
   confirmOk:    document.getElementById("confirmOk"),
+  confirmReject: document.getElementById("confirmReject"),
 
   // Soft-delete confirm
   deleteModal:   document.getElementById("deleteModal"),
@@ -136,7 +137,9 @@ const STATE_LABELS = {
   manual_pending: "Manual mode — waiting for scan",
 };
 
+let lastState = null;
 function renderState(s) {
+  lastState = s;
   // Mode segmented control
   for (const b of els.modeBtns) {
     b.classList.toggle("active", b.dataset.mode === s.mode);
@@ -233,6 +236,12 @@ function renderState(s) {
       // front/back image labelling needs a human glance.
       els.confirmNote.classList.toggle("warn", incomplete || !!c.warn);
       els.confirmOk.textContent = incomplete ? "OK — rescan this card" : "OK — number written, next card";
+      // Reject only makes sense when a cert number was actually minted —
+      // an incomplete scan already has "OK — rescan" as its only action.
+      if (els.confirmReject) {
+        els.confirmReject.style.display = incomplete ? "none" : "";
+        resetRejectArm();
+      }
       openModal(els.confirmModal);
     } else {
       closeModal(els.confirmModal);
@@ -265,6 +274,45 @@ els.confirmOk.addEventListener("click", async () => {
     els.confirmOk.disabled = false;
   }
 });
+
+// Reject & rescan — two-step to prevent an accidental single-click deleting a
+// cert: first click ARMS (button asks for confirmation), second click within
+// 5s fires. The watcher soft-deletes the cert, cleans held files, and the
+// popup closes via the state-driven render. On failure the popup stays up.
+let rejectArmTimer = null;
+function resetRejectArm() {
+  if (rejectArmTimer) { clearTimeout(rejectArmTimer); rejectArmTimer = null; }
+  if (els.confirmReject) {
+    els.confirmReject.textContent = "Reject & rescan";
+    els.confirmReject.disabled = false;
+    els.confirmReject.classList.remove("armed");
+  }
+  if (els.confirmOk) els.confirmOk.disabled = false;
+}
+if (els.confirmReject) {
+  els.confirmReject.addEventListener("click", async () => {
+    const st = lastState || {};
+    const certId = st.confirmCard?.certId;
+    if (!certId) return; // incomplete cards hide this button anyway
+    if (!els.confirmReject.classList.contains("armed")) {
+      els.confirmReject.classList.add("armed");
+      els.confirmReject.textContent = `Click again — deletes ${certId}`;
+      rejectArmTimer = setTimeout(resetRejectArm, 5000);
+      return;
+    }
+    // Armed second click — fire.
+    if (rejectArmTimer) { clearTimeout(rejectArmTimer); rejectArmTimer = null; }
+    els.confirmReject.disabled = true;
+    els.confirmOk.disabled = true;
+    els.confirmReject.textContent = "Rejecting…";
+    const r = await window.scanner.rejectConfirmCard();
+    if (!r?.ok) {
+      resetRejectArm();
+      alert(`Reject failed — the cert still exists: ${r?.error || "unknown error"}`);
+    }
+    // On success the popup closes via the state update (confirmCard: null).
+  });
+}
 
 // ── Mode toggle ──────────────────────────────────────────────────────────
 
