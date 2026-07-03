@@ -23,8 +23,10 @@ set -euo pipefail
 TARGET="${1:-}"
 shift || true
 ALLOW_BEHIND=0
+ASSUME_YES=0
 for arg in "$@"; do
   [ "$arg" = "--allow-behind" ] && ALLOW_BEHIND=1
+  [ "$arg" = "--yes" ] && ASSUME_YES=1
 done
 
 case "$TARGET" in
@@ -58,10 +60,17 @@ if [ "$BASE" != "$REMOTE" ] && [ "$ALLOW_BEHIND" -ne 1 ]; then
   git --no-pager log --oneline HEAD..origin/main | sed 's/^/     behind: /' | head -10
   exit 1
 fi
-if [ -n "$(git status --porcelain)" ]; then
-  echo "⚠  working tree has uncommitted changes — they WILL be built into this deploy:"
-  git status --porcelain | sed 's/^/     /' | head -20
-  printf "   continue? [y/N] "; read -r ans; [ "$ans" = "y" ] || { echo "aborted."; exit 1; }
+# Only MODIFIED TRACKED files gate the deploy (they change the artifact).
+# Untracked files are informational — most (docs, scratch) are dockerignored.
+DIRTY_TRACKED="$(git status --porcelain | grep -v '^??' || true)"
+UNTRACKED="$(git status --porcelain | grep '^??' || true)"
+[ -n "$UNTRACKED" ] && { echo "   note: untracked files (not gating):"; echo "$UNTRACKED" | sed 's/^/     /' | head -5; }
+if [ -n "$DIRTY_TRACKED" ]; then
+  echo "⚠  MODIFIED tracked files — these WILL be built into this deploy:"
+  echo "$DIRTY_TRACKED" | sed 's/^/     /' | head -20
+  if [ "$ASSUME_YES" -ne 1 ]; then
+    printf "   continue? [y/N] "; read -r ans; [ "$ans" = "y" ] || { echo "aborted."; exit 1; }
+  fi
 fi
 echo "✔ GUARD 1: checkout is current with origin/main"
 
