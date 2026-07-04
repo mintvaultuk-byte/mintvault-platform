@@ -22,7 +22,11 @@ import { getActivePromotion } from "./promotionService";
 import { resolveGradingDiscount, type GradingStackingMode } from "./gradingDiscount";
 import { validatePromoCode } from "./promoCodeService";
 
-/** Count unused, unexpired credits of a given type (read-only). */
+/** Count unused, unexpired credits of a given type (read-only). NB: this counts
+ *  a credit even while it's reserved by an in-flight checkout — the atomic
+ *  reserveCredit() at PaymentIntent creation is the real anti-double-spend gate,
+ *  and NOT excluding reserved here keeps a same-order recompute (when e.g. a
+ *  promo is lost) from wrongly dropping the credit we've already reserved. */
 export async function countCreditsRemaining(userId: string, creditType: string = "member"): Promise<number> {
   const rows = await db.execute(sql`
     SELECT COUNT(*) AS cnt FROM member_credits

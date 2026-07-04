@@ -6,12 +6,58 @@ import { storage } from "../storage";
 import { getUncachableStripeClient } from "../stripeClient";
 import { sendSubmissionConfirmation, sendSubmissionConfirmationV2 } from "../email";
 import { computeGradingQuote } from "../services/gradingQuote";
-import { redeemPromoCode } from "../services/promoCodeService";
+import { redeemPromoCode, reservePromoCodeUse } from "../services/promoCodeService";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 
-/** Consume a single credit of the given type. Returns true if consumed. */
-async function consumeCredit(userId: string, creditType: string, submissionId: number): Promise<boolean> {
+/**
+ * Atomically RESERVE one available credit for a checkout that's about to create
+ * a discounted PaymentIntent. Returns the reserved credit id, or null if none
+ * is available (already used / expired / reserved by a concurrent checkout).
+ * Two simultaneous callers can't reserve the same row (FOR UPDATE SKIP LOCKED +
+ * the availability re-check at commit), so only one gets the discount — this is
+ * the fix for the credit double-spend race. Reservation is TTL'd (30 min): an
+ * abandoned checkout auto-frees the credit, so there is no sweeper to run.
+ */
+export async function reserveCredit(userId: string, creditType: string): Promise<number | null> {
+  const result = await db.execute(sql`
+    UPDATE member_credits
+    SET reserved_at = NOW(), reserved_until = NOW() + INTERVAL '30 minutes'
+    WHERE id = (
+      SELECT id FROM member_credits
+      WHERE user_id = ${userId} AND credit_type = ${creditType}
+        AND used_at IS NULL AND expires_at > NOW()
+        AND (reserved_at IS NULL OR reserved_until < NOW())
+      ORDER BY expires_at ASC LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+      AND used_at IS NULL
+      AND (reserved_at IS NULL OR reserved_until < NOW())
+    RETURNING id
+  `);
+  return result.rows.length > 0 ? Number((result.rows[0] as any).id) : null;
+}
+
+/** Consume a single credit of the given type. Returns true if consumed.
+ *  If reservedCreditId is given (the row reserved at PaymentIntent creation),
+ *  consume that exact row; otherwise fall back to claiming any available credit
+ *  (covers PaymentIntents created before the reservation change shipped). */
+async function consumeCredit(
+  userId: string,
+  creditType: string,
+  submissionId: number,
+  reservedCreditId?: number | null
+): Promise<boolean> {
+  if (reservedCreditId) {
+    const r = await db.execute(sql`
+      UPDATE member_credits
+      SET used_at = NOW(), used_for_submission_id = ${submissionId}
+      WHERE id = ${reservedCreditId} AND user_id = ${userId} AND used_at IS NULL
+      RETURNING id
+    `);
+    if (r.rows.length > 0) return true;
+    // Reserved row already used/gone (rare) — fall through to the generic claim.
+  }
   // Phase 3 — prevent credit double-spend under concurrency. FOR UPDATE SKIP LOCKED
   // makes two simultaneous callers lock + claim DIFFERENT unused credits (rather than
   // both picking the same row), and the outer `AND used_at IS NULL` is a belt-and-
@@ -113,7 +159,17 @@ export async function fulfilPaidSubmission(
     try {
       const creditUser = await storage.getUserByEmail(submission.email);
       if (creditUser) {
-        const consumed = await consumeCredit(creditUser.id, piMeta.creditType, numId);
+        // Consume the exact credit reserved at checkout (reservedCreditId). The
+        // reservation already claimed it atomically, so this should always
+        // succeed; consumeCredit falls back to a generic claim for legacy PIs
+        // created before the reservation shipped.
+        const reservedId = piMeta.reservedCreditId ? Number(piMeta.reservedCreditId) : null;
+        const consumed = await consumeCredit(
+          creditUser.id,
+          piMeta.creditType,
+          numId,
+          Number.isInteger(reservedId) && (reservedId as number) > 0 ? reservedId : null
+        );
         if (!consumed) {
           // Charged the discounted price but no credit was available to burn
           // (the credit was consumed by a concurrent order between quote and
@@ -149,20 +205,33 @@ export async function fulfilPaidSubmission(
     }
   }
 
-  // Redeem the promo code (atomic increment + audit, cap-guarded) if one
-  // discounted this order. The charge already reflects the discount, so we
-  // never fail fulfilment on a redeem error.
+  // Promo code usage. New PIs already counted the use atomically at checkout
+  // (reservePromoCodeUse) — flagged promoReservedAtCheckout — so we must NOT
+  // increment again here; just audit the successful redemption. Legacy PIs
+  // (created before the reserve-at-checkout change) still redeem here as before.
   if (piMeta.promoCodeId) {
     const codeId = Number(piMeta.promoCodeId);
     if (Number.isInteger(codeId) && codeId > 0) {
       try {
-        await redeemPromoCode(
-          codeId,
-          piMeta.promoCode || null,
-          piMeta.promoCodePercent ? Number(piMeta.promoCodePercent) : null,
-          numId
-        );
-        console.log(`[fulfil] submission ${sid} redeemed promo code id=${codeId}`);
+        if (piMeta.promoReservedAtCheckout === "true") {
+          await storage
+            .writeAuditLog("promo_code", String(codeId), "PROMO_CODE_REDEEMED", null, {
+              code: piMeta.promoCode || null,
+              percent: piMeta.promoCodePercent ? Number(piMeta.promoCodePercent) : null,
+              submission_id: numId,
+              reserved_at_checkout: true,
+            })
+            .catch(() => {});
+          console.log(`[fulfil] submission ${sid} promo code id=${codeId} (reserved at checkout)`);
+        } else {
+          await redeemPromoCode(
+            codeId,
+            piMeta.promoCode || null,
+            piMeta.promoCodePercent ? Number(piMeta.promoCodePercent) : null,
+            numId
+          );
+          console.log(`[fulfil] submission ${sid} redeemed promo code id=${codeId}`);
+        }
       } catch (e: any) {
         console.error(`[fulfil] submission ${sid} promo redeem error:`, e?.message || e);
       }
@@ -459,7 +528,7 @@ export function registerSubmissionRoutes(app: Express): void {
       // The /api/grading/quote endpoint calls the SAME helper with the SAME inputs,
       // so the wizard's displayed total and this PaymentIntent amount are identical
       // by construction. Vault-club status + active promo are resolved server-side.
-      const quote = await computeGradingQuote({
+      const quoteInput = {
         serviceType,
         tier,
         pricePerCard: tierData.pricePerCard,
@@ -469,7 +538,35 @@ export function registerSubmissionRoutes(app: Express): void {
         applyCredit: !!applyCredit,
         creditType: requestedCreditType,
         promoCode: typeof promoCode === "string" ? promoCode : undefined,
-      });
+      };
+      let quote = await computeGradingQuote(quoteInput);
+
+      // ── Reserve-at-checkout (fix for the credit double-spend + promo
+      // over-redemption races). Atomically claim the credit/promo BEFORE the
+      // discounted PaymentIntent is committed to Stripe, so two concurrent
+      // checkouts can't both apply the same one. If a claim is lost to a
+      // concurrent order, recompute the quote WITHOUT that discount so the
+      // charged amount is correct (full price). Not excluding reserved credits
+      // from the count (see gradingQuote.ts) means this recompute never wrongly
+      // drops a credit we DID reserve.
+      const sessionUserId = (req.session as any)?.userId ?? null;
+      let reservedCreditId: number | null = null;
+      let promoReservedAtCheckout = false;
+      if (quote.creditApplied && quote.creditTypeApplied && sessionUserId) {
+        reservedCreditId = await reserveCredit(sessionUserId, quote.creditTypeApplied);
+      }
+      if (quote.promoCodeApplied && quote.promoCodeId != null) {
+        promoReservedAtCheckout = await reservePromoCodeUse(quote.promoCodeId);
+      }
+      const creditLost = !!(quote.creditApplied && quote.creditTypeApplied && sessionUserId && !reservedCreditId);
+      const promoLost = !!(quote.promoCodeApplied && quote.promoCodeId != null && !promoReservedAtCheckout);
+      if (creditLost || promoLost) {
+        quote = await computeGradingQuote({
+          ...quoteInput,
+          applyCredit: creditLost ? false : quoteInput.applyCredit,
+          promoCode: promoLost ? undefined : quoteInput.promoCode,
+        });
+      }
       const {
         vcTier,
         vcStatus,
@@ -641,6 +738,9 @@ export function registerSubmissionRoutes(app: Express): void {
                 promoCodeId: String(promoCodeId),
                 promoCode: appliedPromoCode || "",
                 promoCodePercent: String(promoCodePercent),
+                // The use was already counted atomically at checkout
+                // (reservePromoCodeUse) — fulfilment must NOT increment again.
+                promoReservedAtCheckout: promoReservedAtCheckout ? "true" : "",
               }
             : {}),
           declaredValue: String(totalDeclaredValue),
@@ -653,6 +753,9 @@ export function registerSubmissionRoutes(app: Express): void {
                 creditApplied: "true",
                 creditType: creditTypeApplied || "",
                 creditAmountPence: String(creditAmountPence),
+                // The specific credit reserved at checkout — fulfilment consumes
+                // exactly this row (empty ⇒ legacy PI / no reservation).
+                reservedCreditId: reservedCreditId != null ? String(reservedCreditId) : "",
               }
             : {}),
           ...(type === "crossover" && crossoverCompany

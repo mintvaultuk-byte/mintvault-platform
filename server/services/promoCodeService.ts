@@ -139,6 +139,25 @@ export async function deletePromoCode(id: number, adminUser: string): Promise<vo
 }
 
 /**
+ * Atomically RESERVE one promo-code use at checkout (PaymentIntent creation),
+ * BEFORE the discounted charge is committed. Same atomic cap-guarded increment
+ * as redeemPromoCode, but called early so two concurrent checkouts can't both
+ * pass a max_uses=1 code (the over-redemption race). Returns true if a use was
+ * secured; false means the cap is already reached and the caller must recompute
+ * the quote WITHOUT the promo. Trade-off: an abandoned checkout leaves the count
+ * incremented (fails SAFE — toward under-redemption, never over). The success
+ * path must NOT increment again (see the promoReservedAtCheckout metadata flag).
+ */
+export async function reservePromoCodeUse(id: number): Promise<boolean> {
+  const res = await db.execute(sql`
+    UPDATE promo_codes SET uses_count = uses_count + 1, updated_at = NOW()
+    WHERE id = ${id} AND deleted_at IS NULL AND (max_uses IS NULL OR uses_count < max_uses)
+    RETURNING id
+  `);
+  return res.rows.length > 0;
+}
+
+/**
  * Atomically count a redemption on a SUCCESSFUL charge. The cap is guarded in the
  * UPDATE itself (uses_count < max_uses) so it can never exceed the cap even under
  * concurrency. If the cap was hit between quote and charge the UPDATE matches no

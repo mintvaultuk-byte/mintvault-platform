@@ -828,6 +828,23 @@ async function migrateServiceTiersV213() {
     console.error("[v213-migrate] ALTER member_credits failed:", e.message);
   }
 
+  // Reserve-at-checkout columns — a credit is atomically reserved when a
+  // discounted PaymentIntent is created, so two concurrent checkouts can't
+  // both apply the same credit (double-spend race). TTL-based: an abandoned
+  // checkout's reservation auto-frees once reserved_until passes, so no
+  // sweeper job is needed. Nullable/additive — safe on live data.
+  try {
+    await db.execute(
+      sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS reserved_at TIMESTAMPTZ`
+    );
+    await db.execute(
+      sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS reserved_until TIMESTAMPTZ`
+    );
+    console.log("[v213-migrate] member_credits.reserved_at/reserved_until columns ensured");
+  } catch (e: any) {
+    console.error("[v213-migrate] ALTER member_credits reservation cols failed:", e.message);
+  }
+
   console.log("[startup] migrateServiceTiersV213 complete");
 
   // ── Phase 7: Ownership schema additions (v229) ─────────────────────────────
