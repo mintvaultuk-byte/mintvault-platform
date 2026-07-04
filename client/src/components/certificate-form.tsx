@@ -428,6 +428,23 @@ export default function CertificateForm({
         const overwrite = !!id.verified || id.confidence === "high";
         // Overwrite on high-confidence/verified, otherwise only fill blanks — fields stay editable.
         const pick = (next: any, prev: any) => (overwrite ? next || prev : isEmpty(prev) ? next || prev : prev);
+        // Variant / finish from the AI: prefer a clean card_type match (e.g.
+        // "Full Art", "Secret Rare"); otherwise fall back to the deterministic
+        // finish booleans. card_type is often the same free-text as the rarity
+        // ("Holo Rare"), which doesn't exact-map, so the boolean fallback is what
+        // fills the common holo / reverse-holo / full-art / textured cases.
+        const mappedType = mapVariantTextToCode(id.card_type || "");
+        const aiVariant =
+          (mappedType && mappedType !== "OTHER" ? mappedType : "") ||
+          (id.is_reverse_holo
+            ? "REVERSE_HOLO"
+            : id.is_full_art
+              ? "FULL_ART"
+              : id.is_textured
+                ? "TEXTURED"
+                : id.is_holo || id.is_foil
+                  ? "HOLO"
+                  : "");
         setForm((prev) => ({
           ...prev,
           cardName: pick(id.detected_name, prev.cardName),
@@ -442,7 +459,9 @@ export default function CertificateForm({
           // non-empty "English" default keeps it stuck. The TCGdex lookup below overrides
           // with the authoritative resolved language when a set resolves. Stays editable.
           language: id.detected_language || prev.language,
-          // variant intentionally untouched.
+          // Variant now fills from the AI's finish detection (previously left
+          // blank). Same fill/overwrite guard as the other fields — stays editable.
+          variant: pick(aiVariant, prev.variant),
         }));
         toast({
           title: "Card identified",
