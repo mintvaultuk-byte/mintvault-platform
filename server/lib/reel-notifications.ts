@@ -7,6 +7,7 @@
  */
 
 import { Resend } from "resend";
+import { assertPublicHttpsUrl } from "./ssrf-guard";
 
 export interface ReelSummary {
   date: string;
@@ -58,10 +59,19 @@ export async function sendReelSummaryEmail(to: string, summary: ReelSummary): Pr
 }
 
 export async function postReelWebhook(url: string, summary: ReelSummary): Promise<void> {
-  const res = await fetch(url, {
+  // SSRF guard at the sink (covers every caller — scheduled job + test endpoint):
+  // an admin-set webhook URL must not be pointable at cloud metadata / internal
+  // hosts (169.254.169.254, localhost, the Fly 6PN, etc.).
+  const safe = await assertPublicHttpsUrl(url);
+  const res = await fetch(safe.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(summary),
+    // redirect:"error" closes the SSRF-via-redirect hole — otherwise an
+    // attacker-controlled public host could 302 the (already-validated) request
+    // on to http://169.254.169.254 and we'd follow it. A webhook receiver
+    // should return 2xx, never a redirect, so erroring here is correct.
+    redirect: "error",
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");

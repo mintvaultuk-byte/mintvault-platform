@@ -782,7 +782,18 @@ export function registerAuthRoutes(app: Express): void {
 
   // GET /auth/pin/reset/:token — consume the reset token, set a session
   // flag authorising a PIN write, redirect to /auth/pin/setup?reset=1.
-  app.get("/auth/pin/reset/:token", async (req, res) => {
+  // Defense-in-depth rate limit on the token-consume endpoint. The token is a
+  // 256-bit crypto.randomBytes value (unguessable), so this isn't closing a
+  // real brute-force — it just caps abuse/DB load and keeps the whole reset
+  // surface (request + consume) limited. Generous: a real user hits this once.
+  const pinResetConsumeRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many attempts. Please request a new reset link." },
+  });
+  app.get("/auth/pin/reset/:token", pinResetConsumeRateLimit, async (req, res) => {
     try {
       const token = String(req.params.token);
       // Atomic single-use consume

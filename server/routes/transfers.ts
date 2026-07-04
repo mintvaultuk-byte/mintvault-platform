@@ -547,8 +547,17 @@ export function registerTransferRoutes(app: Express): void {
     }
   );
 
-  // Status check for a v2 transfer
-  app.get("/api/v2/transfers/status/:certId", requireTransferFlowLive, async (req, res) => {
+  // Status check for a v2 transfer. Public by design (an incoming keeper can
+  // check before logging in) but rate-limited to stop cert-ID enumeration of
+  // active transfers (status + masked emails + dates leak otherwise).
+  const transferStatusRateLimit = rateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many status checks — please wait a minute." },
+  });
+  app.get("/api/v2/transfers/status/:certId", transferStatusRateLimit, requireTransferFlowLive, async (req, res) => {
     try {
       const normalizedId = normalizeCertId(String(req.params.certId));
       const transfer = await storage.getTransferV2ByCertId(normalizedId);

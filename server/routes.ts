@@ -10932,6 +10932,18 @@ Defects (admin-confirmed): ${defectLines}`;
           // unreachable — `key in PIPELINE_DEFAULTS` is the gate
           break;
       }
+      // Fail-fast SSRF check when setting the reel webhook URL, so the admin
+      // gets an immediate error instead of a silent failure at send time. The
+      // real protection is the guard at the postReelWebhook sink; this is UX.
+      if (key === "notify_webhook_url" && typeof value === "string" && value.trim()) {
+        try {
+          const { assertPublicHttpsUrl } = await import("./lib/ssrf-guard");
+          await assertPublicHttpsUrl(value);
+        } catch (e: any) {
+          return res.status(400).json({ error: `Invalid webhook URL: ${e?.message || "not allowed"}` });
+        }
+      }
+
       const before = await getSetting(key as any, (PIPELINE_DEFAULTS as any)[key]);
       const actor = (req.session as any)?.userId ?? ADMIN_EMAIL ?? "admin";
       await setSetting(key as any, value, actor);
