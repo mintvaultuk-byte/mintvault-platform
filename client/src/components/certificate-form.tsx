@@ -38,6 +38,22 @@ import {
 import { DESIGNATION_OPTIONS, getDesignationLabel } from "@/lib/designationOptions";
 import GradientButton from "@/components/ui/gradient-button";
 
+/** Variant / finish code from an AI identification result. Prefer a clean
+    card_type match (e.g. "Full Art", "Secret Rare"); otherwise fall back to
+    the deterministic finish booleans. card_type is often the same free-text
+    as the rarity ("Holo Rare"), which doesn't exact-map, so the boolean
+    fallback is what fills the common holo / reverse-holo / full-art /
+    textured cases. Returns "" when the AI gave no usable finish signal. */
+function deriveVariantFromIdentification(id: any): string {
+  const mappedType = mapVariantTextToCode(id?.card_type || "");
+  if (mappedType && mappedType !== "OTHER") return mappedType;
+  if (id?.is_reverse_holo) return "REVERSE_HOLO";
+  if (id?.is_full_art) return "FULL_ART";
+  if (id?.is_textured) return "TEXTURED";
+  if (id?.is_holo || id?.is_foil) return "HOLO";
+  return "";
+}
+
 interface Props {
   certificate: CertificateRecord | null;
   onSuccess: (newCert?: any) => void;
@@ -304,10 +320,15 @@ export default function CertificateForm({
   const [manuallyVerified, setManuallyVerified] = useState(false);
   const tcgDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Accept identification from AI panel's "Change card" button
+  // Accept identification from the AI panel (workstation "AI Identify" /
+  // "Change card"). This is the path the admin grading flow actually uses, so
+  // it must fill the same fields as the form's own AI Identify — including
+  // variant (from the AI's finish detection) and language, which used to be
+  // skipped here and left blank. All fields stay editable.
   useEffect(() => {
     if (externalIdentification) {
       const id = externalIdentification as any;
+      const aiVariant = deriveVariantFromIdentification(id);
       setForm((prev) => ({
         ...prev,
         cardName: id.officialName || id.detected_name || prev.cardName,
@@ -315,6 +336,8 @@ export default function CertificateForm({
         cardNumber: id.officialNumber || id.detected_number || prev.cardNumber,
         year: id.detected_year || prev.year,
         rarity: id.detected_rarity || prev.rarity,
+        variant: aiVariant || prev.variant,
+        language: id.detected_language || prev.language,
       }));
       setManuallyVerified(true);
       onExternalIdentificationConsumed?.();
@@ -428,23 +451,7 @@ export default function CertificateForm({
         const overwrite = !!id.verified || id.confidence === "high";
         // Overwrite on high-confidence/verified, otherwise only fill blanks — fields stay editable.
         const pick = (next: any, prev: any) => (overwrite ? next || prev : isEmpty(prev) ? next || prev : prev);
-        // Variant / finish from the AI: prefer a clean card_type match (e.g.
-        // "Full Art", "Secret Rare"); otherwise fall back to the deterministic
-        // finish booleans. card_type is often the same free-text as the rarity
-        // ("Holo Rare"), which doesn't exact-map, so the boolean fallback is what
-        // fills the common holo / reverse-holo / full-art / textured cases.
-        const mappedType = mapVariantTextToCode(id.card_type || "");
-        const aiVariant =
-          (mappedType && mappedType !== "OTHER" ? mappedType : "") ||
-          (id.is_reverse_holo
-            ? "REVERSE_HOLO"
-            : id.is_full_art
-              ? "FULL_ART"
-              : id.is_textured
-                ? "TEXTURED"
-                : id.is_holo || id.is_foil
-                  ? "HOLO"
-                  : "");
+        const aiVariant = deriveVariantFromIdentification(id);
         setForm((prev) => ({
           ...prev,
           cardName: pick(id.detected_name, prev.cardName),
