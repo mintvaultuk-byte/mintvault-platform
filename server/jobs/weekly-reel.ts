@@ -376,11 +376,26 @@ export async function runWeeklyReel(opts: { force?: boolean } = {}): Promise<Wee
   };
   if (settings.notify_email) {
     try { await sendReelSummaryEmail(settings.notify_email, summary); }
-    catch (err: any) { console.warn(`[weekly-reel] notify_email failed: ${err?.message ?? err}`); }
+    catch (err: any) {
+      console.warn(`[weekly-reel] notify_email failed: ${err?.message ?? err}`);
+      // console.warn alone is invisible unless someone is watching logs live —
+      // persist it alongside the "generated" audit row so a failed notify is
+      // discoverable after the fact, same as the other silent-send fixes.
+      await db
+        .insert(auditLog)
+        .values({ entityType: "weekly_reel", entityId: dateKey, action: "notify_email_failed", adminUser: null, details: { error: err?.message ?? String(err) } })
+        .catch(() => {});
+    }
   }
   if (settings.notify_webhook_url) {
     try { await postReelWebhook(settings.notify_webhook_url, summary); }
-    catch (err: any) { console.warn(`[weekly-reel] notify_webhook failed: ${err?.message ?? err}`); }
+    catch (err: any) {
+      console.warn(`[weekly-reel] notify_webhook failed: ${err?.message ?? err}`);
+      await db
+        .insert(auditLog)
+        .values({ entityType: "weekly_reel", entityId: dateKey, action: "notify_webhook_failed", adminUser: null, details: { error: err?.message ?? String(err) } })
+        .catch(() => {});
+    }
   }
 
   // 8. Auto-publish to social channels. Skipped entirely when card-approval

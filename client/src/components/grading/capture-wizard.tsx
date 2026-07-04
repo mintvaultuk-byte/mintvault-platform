@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { Camera, CheckCircle2, Upload, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -26,6 +26,16 @@ function DropZone({
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Stable preview URL for the "processed" thumbnail — was minted fresh with
+  // URL.createObjectURL(file) inline in JSX on every render (never revoked),
+  // leaking a blob URL on each re-render for the whole capture session.
+  // Memoized to the `file` identity and released when it changes/unmounts.
+  const previewUrl = useMemo(() => (file ? URL.createObjectURL(file) : null), [file]);
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
 
   return (
     <div
@@ -70,7 +80,7 @@ function DropZone({
       ) : processed && file ? (
         <>
           <div className="w-20 h-28 bg-[var(--admin-panel2)] rounded overflow-hidden">
-            <img src={URL.createObjectURL(file)} alt={side} className="w-full h-full object-contain" />
+            <img src={previewUrl || undefined} alt={side} className="w-full h-full object-contain" />
           </div>
           <p className="text-[var(--admin-green)] text-xs font-bold flex items-center gap-1">
             <CheckCircle2 size={12} /> PROCESSED

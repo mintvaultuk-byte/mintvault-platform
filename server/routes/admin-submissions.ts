@@ -212,9 +212,16 @@ export function registerAdminSubmissionRoutes(app: Express): void {
         cardCount: submission.cardCount || 0,
       };
 
+      // Status already committed above — a failed transactional email must
+      // never fail this request, but a bare catch left zero operator
+      // visibility that the customer never got their update. Audit instead.
       const newStatus = status.toLowerCase();
       if (newStatus === "received" && emailData.email) {
-        sendCardsReceived(emailData).catch(() => {});
+        sendCardsReceived(emailData).catch((e: any) =>
+          storage
+            .writeAuditLog("submission", String(submission.id ?? submission.submissionId), "email_cards_received_failed", null, { error: e?.message })
+            .catch(() => {})
+        );
       } else if (newStatus === "in_grading" && emailData.email) {
         // FORWARD transition only — this endpoint only ever fires on the
         // standard ladder. Step-back into in_grading from ready_to_return
@@ -223,22 +230,38 @@ export function registerAdminSubmissionRoutes(app: Express): void {
         sendGradingStarted({
           ...emailData,
           turnaroundDays: submission.turnaroundDays ?? null,
-        }).catch(() => {});
+        }).catch((e: any) =>
+          storage
+            .writeAuditLog("submission", String(submission.id ?? submission.submissionId), "email_grading_started_failed", null, { error: e?.message })
+            .catch(() => {})
+        );
       } else if ((newStatus === "completed" || newStatus === "ready_to_return") && emailData.email) {
-        sendGradingComplete(emailData).catch(() => {});
+        sendGradingComplete(emailData).catch((e: any) =>
+          storage
+            .writeAuditLog("submission", String(submission.id ?? submission.submissionId), "email_grading_complete_failed", null, { error: e?.message })
+            .catch(() => {})
+        );
       } else if (newStatus === "shipped" && emailData.email) {
         sendShipped({
           ...emailData,
           trackingNumber: returnTracking || submission.returnTracking || undefined,
           carrier: returnCarrier || submission.returnCarrier || undefined,
           service: returnService || (submission as any).returnService || undefined,
-        }).catch(() => {});
+        }).catch((e: any) =>
+          storage
+            .writeAuditLog("submission", String(submission.id ?? submission.submissionId), "email_shipped_failed", null, { error: e?.message })
+            .catch(() => {})
+        );
       } else if (newStatus === "delivered" && emailData.email) {
         sendSubmissionDelivered({
           email: emailData.email,
           firstName: emailData.firstName,
           submissionId: emailData.submissionId,
-        }).catch(() => {});
+        }).catch((e: any) =>
+          storage
+            .writeAuditLog("submission", String(submission.id ?? submission.submissionId), "email_delivered_failed", null, { error: e?.message })
+            .catch(() => {})
+        );
       }
 
       res.json({ success: true, submission: updated });

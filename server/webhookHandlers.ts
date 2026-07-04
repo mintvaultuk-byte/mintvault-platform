@@ -273,11 +273,16 @@ export class WebhookHandlers {
     );
     const user = userRows.rows[0] as any;
     if (user?.email) {
+      // Payment already succeeded (Stripe webhook) — a failed welcome email
+      // must never fail this handler, but a bare catch left the operator with
+      // zero visibility that a paying customer never got it. Audit it instead.
       sendVaultClubWelcomeEmail({
         email: user.email,
         displayName: user.display_name || null,
         tier,
-      }).catch(() => {});
+      }).catch((e: any) =>
+        writeAuthAudit("vault_club.welcome_email_failed", userId, "webhook", { tier, error: e?.message })
+      );
     }
 
     await writeAuthAudit("vault_club.subscribed", userId, "webhook", { tier, status });
@@ -368,7 +373,11 @@ export class WebhookHandlers {
     const userRows = await db.execute(sql`SELECT email, display_name FROM users WHERE id = ${userId} LIMIT 1`);
     const userRow = userRows.rows[0] as any;
     if (userRow?.email) {
-      sendVaultClubCancelledEmail({ email: userRow.email, displayName: userRow.display_name || null }).catch(() => {});
+      // Same visibility fix as the welcome email above — a failed send must
+      // not fail the webhook, but must not vanish silently either.
+      sendVaultClubCancelledEmail({ email: userRow.email, displayName: userRow.display_name || null }).catch(
+        (e: any) => writeAuthAudit("vault_club.cancelled_email_failed", userId, "webhook", { error: e?.message })
+      );
     }
 
     await writeAuthAudit("vault_club.canceled", userId, "webhook", {});

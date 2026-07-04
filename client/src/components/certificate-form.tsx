@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
@@ -636,6 +636,25 @@ export default function CertificateForm({
   // ── Build 1: Grading image upload state ──────────────────────────────────
   const [gradingImages, setGradingImages] = useState<{ front?: File; back?: File; angled?: File; closeup?: File }>({});
   const [gradingUploading, setGradingUploading] = useState(false);
+  // Stable preview URLs keyed to the File objects — object URLs were being
+  // re-minted on EVERY render (URL.createObjectURL called inline in JSX),
+  // leaking a blob URL on each keystroke elsewhere in this form. Memoized
+  // here so a URL is only (re)created when the underlying file actually
+  // changes, and revoked on the next change / unmount.
+  const gradingPreviewUrls = useMemo(() => {
+    const out: Partial<Record<"front" | "back" | "angled" | "closeup", string>> = {};
+    (["front", "back", "angled", "closeup"] as const).forEach((angle) => {
+      const f = gradingImages[angle];
+      if (f) out[angle] = URL.createObjectURL(f);
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gradingImages.front, gradingImages.back, gradingImages.angled, gradingImages.closeup]);
+  useEffect(() => {
+    return () => {
+      Object.values(gradingPreviewUrls).forEach((u) => u && URL.revokeObjectURL(u));
+    };
+  }, [gradingPreviewUrls]);
   const [gradingUploadDone, setGradingUploadDone] = useState(false);
   const [gradingQuality, setGradingQuality] = useState<Record<string, any>>({});
   const [gradingUrls, setGradingUrls] = useState<Record<string, string | null>>({});
@@ -1996,7 +2015,7 @@ export default function CertificateForm({
                         ? "Angled (optional)"
                         : "Closeup (optional)";
                 const existingUrl = gradingUrls[`${angle}_cropped`] || gradingUrls[`${angle}_original`] || null;
-                const previewUrl = gradingImages[angle] ? URL.createObjectURL(gradingImages[angle]!) : null;
+                const previewUrl = gradingPreviewUrls[angle] || null;
                 const displayUrl = previewUrl || existingUrl;
                 return (
                   <label
