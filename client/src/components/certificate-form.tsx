@@ -27,6 +27,7 @@ import { autofillCard, type AutofillResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { mapRarityTextToCode } from "@/lib/rarityOptions";
 import { mapVariantTextToCode } from "@/lib/variantOptions";
+import { deriveVariantFromIdentification } from "@shared/variant-derive";
 import {
   UNIFIED_OPTIONS,
   parseUnifiedValue,
@@ -38,21 +39,6 @@ import {
 import { DESIGNATION_OPTIONS, getDesignationLabel } from "@/lib/designationOptions";
 import GradientButton from "@/components/ui/gradient-button";
 
-/** Variant / finish code from an AI identification result. Prefer a clean
-    card_type match (e.g. "Full Art", "Secret Rare"); otherwise fall back to
-    the deterministic finish booleans. card_type is often the same free-text
-    as the rarity ("Holo Rare"), which doesn't exact-map, so the boolean
-    fallback is what fills the common holo / reverse-holo / full-art /
-    textured cases. Returns "" when the AI gave no usable finish signal. */
-function deriveVariantFromIdentification(id: any): string {
-  const mappedType = mapVariantTextToCode(id?.card_type || "");
-  if (mappedType && mappedType !== "OTHER") return mappedType;
-  if (id?.is_reverse_holo) return "REVERSE_HOLO";
-  if (id?.is_full_art) return "FULL_ART";
-  if (id?.is_textured) return "TEXTURED";
-  if (id?.is_holo || id?.is_foil) return "HOLO";
-  return "";
-}
 
 interface Props {
   certificate: CertificateRecord | null;

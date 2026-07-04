@@ -87,6 +87,7 @@ import { isBlackLabel } from "@shared/pristine";
 import { certIsPristine } from "./lib/cert-pristine";
 import { enqueueScanJob } from "./lib/scan-job-queue";
 import { isServiceValidForCarrier } from "@shared/carriers";
+import { deriveVariantFromIdentification } from "@shared/variant-derive";
 import { centeringAxisGrade } from "@shared/centering";
 import { storage, deductAiCredits } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
@@ -8350,6 +8351,19 @@ Defects (admin-confirmed): ${defectLines}`;
       const cardGame = shouldWriteDetails ? enrichedId.detected_game || null : null;
       const rarity = shouldWriteDetails ? enrichedId.detected_rarity || null : null;
 
+      // Variant (finish) vs Rarity are MUTUALLY EXCLUSIVE per card — the front
+      // label line 3 shows exactly one (owner rule, enforced in the cert
+      // create/update guards). Derive the finish here with the SAME shared logic
+      // the browser form uses, then pick ONE line-3 value: a detected finish
+      // wins; otherwise the detected rarity. This is why AI Identify previously
+      // left Variant blank — it was derived on screen but never persisted.
+      const variantCode = shouldWriteDetails ? deriveVariantFromIdentification(enrichedId) : "";
+      const variantToWrite: string | null = variantCode || null;
+      const rarityToWrite: string | null = variantCode ? null : rarity;
+      // A definitive line-3 value exists → assert it (and clear the other slot);
+      // if the AI detected neither, leave both fields untouched (non-destructive).
+      const hasLine3 = Boolean(variantToWrite || rarityToWrite);
+
       // Year normalisation: prefer copyright_year from Claude
       const currentYear = new Date().getFullYear();
       let yearText: string | null = null;
@@ -8388,7 +8402,8 @@ Defects (admin-confirmed): ${defectLines}`;
             card_number_display = COALESCE(${cardNumber}, card_number_display),
             year_text = COALESCE(${yearText}, year_text),
             card_game = COALESCE(${cardGame}, card_game),
-            rarity = COALESCE(${rarity}, rarity),
+            variant = CASE WHEN ${hasLine3} THEN ${variantToWrite} ELSE variant END,
+            rarity = CASE WHEN ${hasLine3} THEN ${rarityToWrite} ELSE rarity END,
             updated_at = NOW()
           WHERE id = ${id}
         `);
@@ -8402,7 +8417,8 @@ Defects (admin-confirmed): ${defectLines}`;
             card_number_display = CASE WHEN card_number_display IS NULL OR card_number_display = '' THEN ${cardNumber} ELSE card_number_display END,
             year_text = CASE WHEN year_text IS NULL OR year_text = '' THEN ${yearText} ELSE year_text END,
             card_game = CASE WHEN card_game IS NULL OR card_game = '' THEN ${cardGame} ELSE card_game END,
-            rarity = CASE WHEN rarity IS NULL OR rarity = '' THEN ${rarity} ELSE rarity END,
+            variant = CASE WHEN (variant IS NULL OR variant = '') AND (rarity IS NULL OR rarity = '') THEN ${variantToWrite} ELSE variant END,
+            rarity = CASE WHEN (variant IS NULL OR variant = '') AND (rarity IS NULL OR rarity = '') THEN ${rarityToWrite} ELSE rarity END,
             updated_at = NOW()
           WHERE id = ${id}
         `);
