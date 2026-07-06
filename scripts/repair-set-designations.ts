@@ -29,6 +29,12 @@ const TYPO_FIXES: ReadonlyArray<{ match: RegExp; replace: string }> = [
   { match: /\btraniner\b/gi, replace: "Trainer" },
 ];
 
+/** Whole-value set-name fixes (compared lowercase/trimmed): set CODES stored
+ *  where the set NAME belongs. Seen in the 2026-07-06 prod dry-run. */
+const SET_NAME_FIXES: Record<string, string> = {
+  paf: "Paldean Fates",
+};
+
 /** Capitalise the first letter of each word, leaving existing capitals intact
  *  ("brilliant stars" → "Brilliant Stars"; "GO", "XY", "151" unchanged).
  *  Repaired rows only — live TCGdex names arrive properly cased. */
@@ -67,6 +73,7 @@ async function main(): Promise<void> {
   for (const row of res.rows as CertRow[]) {
     let fixed = row.set_name as string;
     for (const { match, replace } of TYPO_FIXES) fixed = fixed.replace(match, replace);
+    fixed = SET_NAME_FIXES[fixed.trim().toLowerCase()] || fixed;
     const split = splitSetDesignation(fixed);
     const newSetName = titleCaseWords(split.baseSet);
     // Only certs where a designation was found (or a typo/casing changed the name).
