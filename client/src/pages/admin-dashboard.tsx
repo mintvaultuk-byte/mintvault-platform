@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
+import { getVariantDisplayLabel } from "@/lib/variantOptions";
 import { mvgsTierName } from "@shared/mvgs-scoring";
 import {
   Plus,
@@ -1493,7 +1494,16 @@ function CertRow({
           </div>
           <div className="admin-cmeta">
             {cert.cardGame} · {cert.setName} · {cert.cardNumber}
-            {cert.variant ? ` · ${cert.variant}` : ""}
+            {(() => {
+              // Line-3 value, human-readable: variant label if set, else rarity.
+              // Raw codes (TRAINER_GALLERY) map to labels; legacy free text
+              // passes through; underscores never reach the screen.
+              const line3 =
+                getVariantDisplayLabel(cert.variant, (cert as any).variantOther) ||
+                (cert.variant ? String(cert.variant) : "") ||
+                (cert.rarity ? String(cert.rarity) : "");
+              return line3 ? ` · ${line3.replace(/_/g, " ")}` : "";
+            })()}
           </div>
           <div
             className="admin-cmeta"
