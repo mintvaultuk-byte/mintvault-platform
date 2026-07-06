@@ -28,6 +28,7 @@ import { useToast } from "@/hooks/use-toast";
 import { mapRarityTextToCode } from "@/lib/rarityOptions";
 import { mapVariantTextToCode } from "@/lib/variantOptions";
 import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/variant-derive";
+import { CONFLICT_GUARDED_FIELDS } from "@shared/edit-conflict";
 import {
   UNIFIED_OPTIONS,
   parseUnifiedValue,
@@ -195,6 +196,32 @@ export default function CertificateForm({
   });
 
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
+
+  // Stale-tab guard: snapshot of the metadata values this form loaded. Sent
+  // with every save so the server can detect a field someone ELSE changed
+  // since (field-scoped — grade saves on this same page never conflict; see
+  // shared/edit-conflict.ts). Refreshed from the cert prop on refetch and
+  // from each save's own posted values on success (self-healing).
+  const loadedSnapshotRef = useRef<Record<string, string> | null>(null);
+
+  /** Snapshot = SERVER truth for the guarded fields. Always refreshed from a
+      cert row (prop refetch or a save's response) — never from what we posted,
+      because the server coerces some fields on write (empty language →
+      "English", *Other cleared unless selector is OTHER) and a posted≠written
+      snapshot would false-conflict against our own save forever. */
+  function refreshSnapshotFromCert(row: Record<string, unknown> | null | undefined) {
+    if (!row || typeof row !== "object") return;
+    const snap: Record<string, string> = {};
+    for (const f of CONFLICT_GUARDED_FIELDS) {
+      const v = (row as any)[f];
+      snap[f] = v === null || v === undefined ? "" : String(v);
+    }
+    loadedSnapshotRef.current = snap;
+  }
+
+  useEffect(() => {
+    if (certificate) refreshSnapshotFromCert(certificate as any);
+  }, [certificate]);
 
   // Sync form state when the cert prop changes (e.g. after AI autofill refetches the cert)
   // Only overwrite fields that are currently empty — never stomp manual edits
@@ -840,6 +867,12 @@ export default function CertificateForm({
     if (frontImage) formData.append("frontImage", frontImage);
     if (backImage) formData.append("backImage", backImage);
     if (confirmPublishedEdit) formData.append("confirmPublishedEdit", "true");
+    // Stale-tab guard: tell the server which metadata values this form loaded;
+    // it 409s only if a field changed elsewhere since AND this save would
+    // overwrite that newer value (see PUT /:id + shared/edit-conflict.ts).
+    if (isEdit && loadedSnapshotRef.current) {
+      formData.append("loadedSnapshot", JSON.stringify(loadedSnapshotRef.current));
+    }
     return formData;
   }
 
@@ -863,7 +896,12 @@ export default function CertificateForm({
         throw new Error(data.error || "Failed to save");
       }
 
-      return res.json();
+      const data = await res.json();
+      // The response is the cert row the server actually WROTE — refresh the
+      // stale-tab snapshot from it so the next save from this tab never
+      // conflicts with our own successful write (incl. server-coerced fields).
+      refreshSnapshotFromCert(data);
+      return data;
     },
     onSuccess: (data: any) => {
       // Clear picked files so a subsequent save (auto-save or explicit) never
@@ -891,8 +929,21 @@ export default function CertificateForm({
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedOnceRef = useRef(false);
 
+  // Serialize auto-saves: never two PUTs in flight at once. Overlapping saves
+  // were the one way this tab could race ITSELF into a stale-snapshot 409
+  // (save B built before save A's success refreshed the snapshot). A save
+  // requested mid-flight just marks pending and re-runs when the current one
+  // finishes — same debounce feel, strictly ordered writes.
+  const autoSaveInFlightRef = useRef(false);
+  const autoSavePendingRef = useRef(false);
+
   async function autoSaveNow() {
     if (!certificate?.id) return;
+    if (autoSaveInFlightRef.current) {
+      autoSavePendingRef.current = true;
+      return;
+    }
+    autoSaveInFlightRef.current = true;
     const seq = ++autoSaveSeqRef.current;
     setAutoSaveStatus("saving");
     try {
@@ -900,11 +951,20 @@ export default function CertificateForm({
       // approved in the moment between this call being scheduled and firing,
       // the server-side approval lock (added 2026-07-01) rejects the write
       // with a 409 rather than silently overwriting a live/published cert.
+      const formData = buildCertFormData();
       const res = await fetch(`/api/admin/certificates/${certificate.id}`, {
         method: "PUT",
-        body: buildCertFormData(),
+        body: formData,
         credentials: "include",
       });
+      // Snapshot refresh runs even for a superseded save — the write DID land,
+      // so later saves must compare against it (before the seq early-return).
+      // Refreshed from the response row (server-written truth), never from
+      // what we posted — the server coerces some fields on write.
+      if (res.ok) {
+        const saved = await res.json().catch(() => null);
+        refreshSnapshotFromCert(saved);
+      }
       if (seq !== autoSaveSeqRef.current) return;
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -923,6 +983,12 @@ export default function CertificateForm({
       if (seq !== autoSaveSeqRef.current) return;
       setAutoSaveStatus("error");
       toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
+    } finally {
+      autoSaveInFlightRef.current = false;
+      if (autoSavePendingRef.current) {
+        autoSavePendingRef.current = false;
+        void autoSaveNow();
+      }
     }
   }
 

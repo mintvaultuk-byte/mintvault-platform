@@ -88,6 +88,7 @@ import { certIsPristine } from "./lib/cert-pristine";
 import { enqueueScanJob } from "./lib/scan-job-queue";
 import { isServiceValidForCarrier } from "@shared/carriers";
 import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/variant-derive";
+import { findStaleOverwrites } from "@shared/edit-conflict";
 import { centeringAxisGrade } from "@shared/centering";
 import { storage, deductAiCredits } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
@@ -3786,6 +3787,36 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           return res.status(409).json({
             error: "Certificate already approved and published — reload and use explicit save to edit it",
           });
+        }
+
+        // Stale-tab guard (2026-07-06): this editor posts FULL state, so a tab
+        // opened before a concurrent change (repair script, another session)
+        // silently writes old values back — it clobbered MV237's repaired
+        // variant the same day it was fixed. FIELD-SCOPED on purpose: the
+        // grading workstation shares this page and bumps the row constantly
+        // without touching metadata, so a row-level updated_at check would
+        // false-conflict on routine grading. A field conflicts only when it
+        // changed in the DB since this tab loaded it AND this save would
+        // overwrite that newer value with something different (see
+        // shared/edit-conflict.ts). Tabs from before this deploy send no
+        // snapshot and pass through unchanged.
+        if (req.body.loadedSnapshot) {
+          let snapshot: Record<string, unknown> | null = null;
+          try {
+            snapshot = JSON.parse(String(req.body.loadedSnapshot));
+          } catch {
+            snapshot = null; // malformed → treat as legacy (no guard)
+          }
+          if (snapshot && typeof snapshot === "object") {
+            const conflicts = findStaleOverwrites(snapshot, req.body, existing as Record<string, unknown>);
+            if (conflicts.length > 0) {
+              return res.status(409).json({
+                error: `This certificate was changed elsewhere since you opened it (${conflicts.join(
+                  ", "
+                )}) — refresh the page to see the latest values, then re-apply your edit.`,
+              });
+            }
+          }
         }
 
         // Required-identity fields (matches the client's create/edit validation)
