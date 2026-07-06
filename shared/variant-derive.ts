@@ -76,3 +76,61 @@ export function deriveVariantFromIdentification(id: VariantIdentificationInput |
   if (id?.is_holo || id?.is_foil) return "HOLO";
   return "";
 }
+
+// ── Set-name / designation split (owner ruling 2026-07-06: option B) ──
+//
+// Official TCG set names often carry a subset/promo designation ("Brilliant
+// Stars Trainer Gallery", "SWSH Black Star Promos"). On the slab label the
+// owner wants the BASE set on the set line and the designation on the variant
+// line — never both crammed into the set line. This is the single shared rule
+// for that split, used by the server identify write, the form fill paths, and
+// the one-off data repair script.
+
+/** Trailing designation phrases → variant code. Longest-match wins. Order
+ *  matters only for documentation; matching strips from the END of the name,
+ *  optionally preceded by a separator (space, "-", "–", ":"). */
+const SET_DESIGNATIONS: ReadonlyArray<{ phrase: string; code: string }> = [
+  { phrase: "trainer gallery", code: "TRAINER_GALLERY" },
+  { phrase: "galarian gallery", code: "GALARIAN_GALLERY" },
+  { phrase: "black star promos", code: "PROMO" },
+  { phrase: "black star promo", code: "PROMO" },
+];
+
+/** Bare base-set abbreviations left behind after a split, expanded so the
+ *  label never reads just "2023 SWSH". Only applied to an EXACT bare match. */
+const SET_BASE_EXPANSIONS: Record<string, string> = {
+  swsh: "Sword & Shield",
+  sm: "Sun & Moon",
+};
+
+export interface SetDesignationSplit {
+  /** Set name with any trailing designation removed (original when no match). */
+  baseSet: string;
+  /** Variant code for the stripped designation, or null when none matched. */
+  designation: string | null;
+}
+
+/** Split a set name into base set + designation variant code. Case-insensitive,
+ *  whitespace-tolerant; returns the input unchanged (designation: null) when no
+ *  known designation ends the name, or when stripping would leave nothing. */
+export function splitSetDesignation(rawSetName: string | null | undefined): SetDesignationSplit {
+  const setName = typeof rawSetName === "string" ? rawSetName.trim() : "";
+  if (!setName) return { baseSet: setName, designation: null };
+  const lower = setName.toLowerCase();
+  for (const { phrase, code } of SET_DESIGNATIONS) {
+    if (!lower.endsWith(phrase)) continue;
+    // Whole-phrase only: the char before the phrase must be a separator, never
+    // a letter/digit ("Retrainer Gallery" must NOT split as "Re" + TG).
+    const boundary = setName.length - phrase.length;
+    if (boundary > 0 && /[\p{L}\p{N}]/u.test(setName[boundary - 1])) continue;
+    // Strip the phrase plus any trailing separator left behind ("- ", ": ", "– ").
+    const base = setName
+      .slice(0, boundary)
+      .replace(/[\s\-–—−:]+$/, "")
+      .trim();
+    if (!base) return { baseSet: setName, designation: code };
+    const expanded = SET_BASE_EXPANSIONS[base.toLowerCase()] || base;
+    return { baseSet: expanded, designation: code };
+  }
+  return { baseSet: setName, designation: null };
+}

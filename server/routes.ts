@@ -87,7 +87,7 @@ import { isBlackLabel } from "@shared/pristine";
 import { certIsPristine } from "./lib/cert-pristine";
 import { enqueueScanJob } from "./lib/scan-job-queue";
 import { isServiceValidForCarrier } from "@shared/carriers";
-import { deriveVariantFromIdentification } from "@shared/variant-derive";
+import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/variant-derive";
 import { centeringAxisGrade } from "@shared/centering";
 import { storage, deductAiCredits } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
@@ -332,6 +332,12 @@ const VARIANT_LABELS: Record<string, string> = {
   SECRET_RARE: "Secret Rare",
   ILLUSTRATION_RARE: "Illustration Rare",
   SPECIAL_ILLUSTRATION_RARE: "Special Illustration Rare",
+  DOUBLE_RARE: "Double Rare",
+  ULTRA_RARE: "Ultra Rare",
+  HYPER_RARE: "Hyper Rare",
+  AMAZING_RARE: "Amazing Rare",
+  ACE_SPEC_RARE: "ACE SPEC Rare",
+  EX: "Ex",
   PROMO: "Promo",
   FIRST_EDITION: "1st Edition",
   SHADOWLESS: "Shadowless",
@@ -342,7 +348,8 @@ const VARIANT_LABELS: Record<string, string> = {
 function variantDisplayLabel(code: string | null | undefined, variantOther: string | null | undefined): string | null {
   if (!code || code === "NONE") return null;
   if (code === "OTHER") return variantOther || "Other";
-  return VARIANT_LABELS[code] || code;
+  // Unmapped codes must never surface with underscores ("ULTRA_RARE").
+  return VARIANT_LABELS[code] || code.replace(/_/g, " ");
 }
 
 const DESIGNATION_LABELS: Record<string, string> = {
@@ -8346,7 +8353,12 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const cardName = shouldWriteDetails ? enrichedId.officialName || enrichedId.detected_name || null : null;
       // When trusting AI without TCG verification, leave set_name null for manual entry
-      const setName = tcgVerified ? enrichedId.officialSet || enrichedId.detected_set || null : null;
+      const rawSetName = tcgVerified ? enrichedId.officialSet || enrichedId.detected_set || null : null;
+      // Owner ruling (2026-07-06, option B): a designation carried in the official
+      // set name ("… Trainer Gallery", "SWSH Black Star Promos") moves OFF the set
+      // line — base set stays here, the designation becomes the variant below.
+      const setSplit = splitSetDesignation(rawSetName);
+      const setName = rawSetName ? setSplit.baseSet : null;
       const cardNumber = shouldWriteDetails ? enrichedId.detected_number || null : null;
       const cardGame = shouldWriteDetails ? enrichedId.detected_game || null : null;
       const rarity = shouldWriteDetails ? enrichedId.detected_rarity || null : null;
@@ -8354,10 +8366,12 @@ Defects (admin-confirmed): ${defectLines}`;
       // Variant (finish) vs Rarity are MUTUALLY EXCLUSIVE per card — the front
       // label line 3 shows exactly one (owner rule, enforced in the cert
       // create/update guards). Derive the finish here with the SAME shared logic
-      // the browser form uses, then pick ONE line-3 value: a detected finish
-      // wins; otherwise the detected rarity. This is why AI Identify previously
+      // the browser form uses, then pick ONE line-3 value: a set-name designation
+      // outranks a detected finish (more specific product identity); either
+      // wins over the detected rarity. This is why AI Identify previously
       // left Variant blank — it was derived on screen but never persisted.
-      const variantCode = shouldWriteDetails ? deriveVariantFromIdentification(enrichedId) : "";
+      const finishCode = shouldWriteDetails ? deriveVariantFromIdentification(enrichedId) : "";
+      const variantCode = shouldWriteDetails ? setSplit.designation || finishCode : "";
       const variantToWrite: string | null = variantCode || null;
       const rarityToWrite: string | null = variantCode ? null : rarity;
       // A definitive line-3 value exists → assert it (and clear the other slot);

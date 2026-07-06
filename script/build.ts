@@ -91,6 +91,24 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+
+  // One-off: set-name designation repair (scripts/repair-set-designations.ts).
+  // DRY-RUN by default; --apply writes (single transaction, audit_log per cert).
+  // Safe to remove this block once applied to prod:
+  //   fly ssh console --app mintvault -C "node /app/dist/repair-set-designations.cjs"
+  console.log("building one-off set-designation repair script...");
+  await esbuild({
+    entryPoints: ["scripts/repair-set-designations.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "dist/repair-set-designations.cjs",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
+    external: externals,
+    logLevel: "info",
+  });
 }
 
 buildAll().catch((err) => {

@@ -280,6 +280,12 @@ const VARIANT_DISPLAY: Record<string, string> = {
   SECRET_RARE: "SECRET RARE",
   ILLUSTRATION_RARE: "ILLUSTRATION RARE",
   SPECIAL_ILLUSTRATION_RARE: "SPECIAL ILLUSTRATION RARE",
+  DOUBLE_RARE: "DOUBLE RARE",
+  ULTRA_RARE: "ULTRA RARE",
+  HYPER_RARE: "HYPER RARE",
+  AMAZING_RARE: "AMAZING RARE",
+  ACE_SPEC_RARE: "ACE SPEC RARE",
+  EX: "EX",
   PROMO: "PROMO",
   FIRST_EDITION: "1ST EDITION",
   SHADOWLESS: "SHADOWLESS",
@@ -294,8 +300,12 @@ function buildVariantLine(cert: CertificateRecord): string {
     const other = (cert as any).variantOther;
     return other ? other.toUpperCase() : "OTHER";
   }
-  if (VARIANT_DISPLAY[v]) return VARIANT_DISPLAY[v];
-  return v.toUpperCase();
+  // Same defence as buildRarityText: uppercase the lookup key (form/AI/import
+  // casing varies) and never let a raw CODE reach the physical label — an
+  // unmapped code prints with its underscores stripped, not "ULTRA_RARE".
+  const key = String(v).toUpperCase();
+  if (VARIANT_DISPLAY[key]) return VARIANT_DISPLAY[key];
+  return key.replace(/_/g, " ");
 }
 
 const RARITY_DISPLAY: Record<string, string> = {
@@ -858,11 +868,14 @@ async function drawFront(
   const yearText = cert.year || "";
   const setNameText = cert.setName ? cert.setName.toUpperCase() : "";
 
+  // Owner ruling (2026-07-06): the front label is EXACTLY three lines — card
+  // name / year + set / ONE bottom line showing the variant if set, else the
+  // rarity. Never both (previously two separate slots could print four lines
+  // on legacy both-set certs).
   const lines = [
     cardNameText,
     yearText && setNameText ? yearText + " " + setNameText : yearText || setNameText,
-    buildVariantLine(cert),
-    cert.rarity ? buildRarityText(cert).toUpperCase() : "",
+    buildVariantLine(cert) || (cert.rarity ? buildRarityText(cert).toUpperCase() : ""),
   ].filter((s) => s.trim().length > 0);
 
   // Horizontal fit: pick the smallest size that satisfies the widest line.

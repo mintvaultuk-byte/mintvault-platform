@@ -214,8 +214,9 @@ export async function generateCertificateDocument(cert: CertificateRecord, owner
         ["Game", cert.cardGame],
         ["Set", cert.setName ? `${cert.setName}${cert.year ? ` (${cert.year})` : ""}` : null],
         ["Card Number", cert.cardNumber],
-        ["Rarity", cert.rarity],
-        ["Variant", cert.variant || null],
+        // Stored values may be CODES (ULTRA_RARE) or free text — never show underscores.
+        ["Rarity", cert.rarity ? String(cert.rarity).replace(/_/g, " ") : null],
+        ["Variant", cert.variant ? String(cert.variant).replace(/_/g, " ") : null],
         ["Collection", cert.collection || null],
         ["Language", cert.language || "English"],
         [

@@ -27,7 +27,7 @@ import { autofillCard, type AutofillResult } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { mapRarityTextToCode } from "@/lib/rarityOptions";
 import { mapVariantTextToCode } from "@/lib/variantOptions";
-import { deriveVariantFromIdentification } from "@shared/variant-derive";
+import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/variant-derive";
 import {
   UNIFIED_OPTIONS,
   parseUnifiedValue,
@@ -314,16 +314,24 @@ export default function CertificateForm({
   useEffect(() => {
     if (externalIdentification) {
       const id = externalIdentification as any;
-      const aiVariant = deriveVariantFromIdentification(id);
+      // Owner ruling (option B): a designation in the set name ("… Trainer
+      // Gallery", "… Black Star Promos") moves off the set line into Variant.
+      const setSplit = splitSetDesignation(id.officialSet || id.detected_set || "");
+      const aiVariant = setSplit.designation || deriveVariantFromIdentification(id);
       setForm((prev) => ({
         ...prev,
         cardName: id.officialName || id.detected_name || prev.cardName,
-        setName: id.officialSet || id.detected_set || prev.setName,
+        setName: setSplit.baseSet || prev.setName,
         cardNumber: id.officialNumber || id.detected_number || prev.cardNumber,
         year: id.detected_year || prev.year,
-        rarity: id.detected_rarity || prev.rarity,
+        // Variant/Rarity are exactly-one-of: a designation/finish claims Variant
+        // and clears Rarity so the save guard can never see both populated.
+        rarity: aiVariant ? "" : id.detected_rarity || prev.rarity,
         variant: aiVariant || prev.variant,
         language: id.detected_language || prev.language,
+        // Keep the visible unified control in sync with what will be saved —
+        // otherwise the dropdown shows the old value while the payload changed.
+        ...(aiVariant ? { unifiedSelect: `VARIANT:${aiVariant}`, otherText: "" } : {}),
       }));
       setManuallyVerified(true);
       onExternalIdentificationConsumed?.();
@@ -540,12 +548,19 @@ export default function CertificateForm({
         pt: "Portuguese",
       };
 
+      // Owner ruling (option B): strip a trailing designation from the TCGdex
+      // set name — base set stays on the set line, designation fills Variant
+      // (clearing Rarity: the two are exactly-one-of).
+      const tdSplit = splitSetDesignation(td.set_name || "");
       setForm((prev) => ({
         ...prev,
         cardName: td.card_name?.toUpperCase() || prev.cardName,
-        setName: td.set_name || prev.setName,
+        setName: tdSplit.baseSet || prev.setName,
         year: td.release_date ? td.release_date.split("-")[0] : prev.year,
         language: (td.resolved_lang && langLabel[td.resolved_lang]) || prev.language,
+        ...(tdSplit.designation
+          ? { variant: tdSplit.designation, rarity: "", unifiedSelect: `VARIANT:${tdSplit.designation}`, otherText: "" }
+          : {}),
       }));
 
       const badge = td.auto_added ? " (set auto-added)" : td.needs_manual_add ? " (set needs manual add)" : "";
@@ -569,10 +584,15 @@ export default function CertificateForm({
       if (!r.ok) return;
       const td = await r.json();
       if (!td.found) return;
+      // Same designation split as runTcgdexPrefill (owner ruling, option B).
+      const tdSplit = splitSetDesignation(td.set_name || "");
       setForm((prev) => ({
         ...prev,
-        setName: td.set_name || prev.setName,
+        setName: tdSplit.baseSet || prev.setName,
         year: td.release_date ? td.release_date.split("-")[0] : prev.year,
+        ...(tdSplit.designation
+          ? { variant: tdSplit.designation, rarity: "", unifiedSelect: `VARIANT:${tdSplit.designation}`, otherText: "" }
+          : {}),
       }));
       toast({ title: "TCGdex set resolved", description: `${name} → ${td.set_name}` });
     } catch {
