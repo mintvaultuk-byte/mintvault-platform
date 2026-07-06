@@ -41,3 +41,5 @@ uploads
 
 # Exception: one-off prod migration script needs to reach the build (additive ADD COLUMN x5, see file header)
 !scripts/run-mvgs-v2-migration.ts
+# Exception: one-off set-designation data repair (dry-run default, see file header)
+!scripts/repair-set-designations.ts
