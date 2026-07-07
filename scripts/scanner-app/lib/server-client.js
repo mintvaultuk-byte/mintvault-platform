@@ -258,7 +258,10 @@ async function attachImage(certId, side, filePath, replaceExisting) {
 
 module.exports = {
   API_BASE,
-  hasToken: () => !!TOKEN,
+  hasToken: () => {
+    const vals = liveEnv();
+    return !!(vals.SCANNER_API_TOKEN || process.env.SCANNER_API_TOKEN);
+  },
   getNextCertId,
   getOrphans,
   getCertPreview,
