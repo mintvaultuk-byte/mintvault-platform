@@ -22,6 +22,7 @@ import {
   Check,
   Tag,
   Users,
+  Sparkles,
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
 import InstallAppButton from "../install-app-button";
@@ -81,6 +82,7 @@ const NAV: NavSection[] = [
   {
     heading: "Insight",
     items: [
+      { href: "/admin/vault-quest", label: "Vault Quest", icon: Sparkles },
       { key: "learning", label: "AI Learning", icon: Brain },
       { key: "divergence", label: "AI Divergence", icon: TrendingUp },
       { key: "grading", label: "Grading", icon: BarChart3 },

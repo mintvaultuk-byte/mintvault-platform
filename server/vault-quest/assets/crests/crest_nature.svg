@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- PLACEHOLDER crest — replace with the final Nature crest symbol -->
+  <path d="M50 88 C50 60 50 30 82 16 C84 44 74 74 50 88 Z" fill="#69DB7C" stroke="#0B2E13" stroke-width="4"/>
+  <path d="M50 88 C50 60 50 30 18 16 C16 44 26 74 50 88 Z" fill="#2F9E44" stroke="#0B2E13" stroke-width="4"/>
+  <line x1="50" y1="90" x2="50" y2="40" stroke="#0B2E13" stroke-width="4" stroke-linecap="round"/>
+</svg>

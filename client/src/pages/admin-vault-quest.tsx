@@ -1,0 +1,1101 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { AdminButton } from "@/components/admin";
+import { Loader2, Upload, Save, FileImage, FileText, FileCode, Plus, AlertCircle, CheckCircle2, LayoutGrid, ArrowLeft, ShieldCheck, RotateCcw, XCircle, PackageCheck, Archive, Wand2, ChevronDown } from "lucide-react";
+import { STATUS_META, allowedTargets, type VqStatus } from "@shared/vq-workflow";
+
+// Vault Quest Studio — production control centre: dashboard board + card editor
+// with the full status workflow. Renders via the shared (locked) engine.
+
+// Core/Token intentionally omitted — the locked renderer rejects unknown types, so
+// they'd create un-renderable cards. Gated on a locked-renderer extension.
+const CARD_TYPES = ["Creature", "Tactic", "Relic", "Vault", "Collector", "Place"];
+const VARIANT_TIERS = ["STANDARD", "CHR", "SRA", "FSR", "UR", "CR"];
+const ELEMENTS = [
+  "Flame", "Water", "Nature", "Storm", "Stone", "Shadow", "Neutral",
+  "Blaze", "Tide", "Blossom", "Spark", "Earth", "Cosmos", "Wind",
+  "Electric", "Ice", "Dark", "Light", "Brand", "Crystal",
+];
+const RARITIES = ["C", "U", "R", "SR", "GR", "UR", "SRA", "RR", "FSR", "CR"];
+const SUPPORT = new Set(["Tactic", "Relic", "Vault", "Collector", "Place"]);
+
+const TONE_CLS: Record<string, string> = {
+  neutral: "bg-slate-700 text-slate-200",
+  info: "bg-sky-900 text-sky-200 border border-sky-700",
+  warn: "bg-amber-900 text-amber-200 border border-amber-700",
+  success: "bg-emerald-900 text-emerald-200 border border-emerald-700",
+  danger: "bg-red-950 text-red-300 border border-red-800",
+};
+function StatusBadge({ status }: { status: string }) {
+  const meta = STATUS_META[status as VqStatus] ?? { label: status, tone: "neutral" };
+  return <span className={`inline-block rounded px-2 py-0.5 text-[10px] font-semibold ${TONE_CLS[meta.tone]}`}>{meta.label}</span>;
+}
+
+type CardForm = {
+  cardId: string; collectorNumber: string; name: string; displayName: string; cardType: string; element: string; rarity: string;
+  familyId: string; familyName: string; stageNumber: string; lifeStage: string; previousStage: string;
+  health: string; guard: string; shift: string;
+  attack1Name: string; attack1Damage: string; attack1Effect: string; attack2Name: string; attack2Damage: string; attack2Effect: string;
+  vulnerability: string; keywords: string; notes: string; artR2Key: string; prevArtR2Key: string; artCandidateKey: string; prevArtCandidateKey: string;
+  attack1Cost: string; attack2Cost: string; variantTier: string; baseCardId: string; statusEffects: string;
+};
+
+const BLANK: CardForm = {
+  cardId: "", collectorNumber: "", name: "", displayName: "", cardType: "Creature", element: "Flame",
+  rarity: "C", familyId: "", familyName: "", stageNumber: "1", lifeStage: "BABY", previousStage: "",
+  health: "5", guard: "0", shift: "0", attack1Name: "", attack1Damage: "", attack1Effect: "",
+  attack2Name: "", attack2Damage: "", attack2Effect: "", vulnerability: "", keywords: "", notes: "",
+  artR2Key: "", prevArtR2Key: "", artCandidateKey: "", prevArtCandidateKey: "", attack1Cost: "", attack2Cost: "", variantTier: "", baseCardId: "", statusEffects: "",
+};
+
+type BaseRef = { cardId: string; name: string; cardType: string; element: string; stageNumber: number | null; health: number | null; guard: number | null; shift: number | null; attack1Name: string | null; attack1Damage: number | null; status: string } | null;
+type QaIssue = { level: "reject" | "warn"; field: string; message: string };
+type CardSummary = { cardId: string; collectorNumber: string; name: string; cardType: string; element: string; rarity: string | null; stageNumber: number | null; familyId: string | null; variantTier: string | null; baseCardId: string | null; status: string; hasData: boolean; hasArt: boolean; placeholderElement: boolean; readiness: number };
+type Dashboard = { total: number; byStatus: Record<string, number>; byType: Record<string, number>; variants: number; base: number; needsData: number; needsArtwork: number; placeholderElements: number; families: number; familiesComplete: number; cards: CardSummary[] };
+type Evaluation = { readiness: number; bucket: string; gates: { dataComplete: boolean; artworkPresent: boolean; renderPasses: boolean; isVariant: boolean; baseApproved: boolean }; suggestions: string[]; qa: QaIssue[] };
+
+function toPayload(f: CardForm) {
+  const num = (v: string) => (v.trim() === "" ? null : Number(v));
+  return {
+    cardId: f.cardId.trim(), collectorNumber: f.collectorNumber.trim(), name: f.name.trim(),
+    displayName: f.displayName.trim() || null, cardType: f.cardType, element: f.element, rarity: f.rarity,
+    familyId: f.familyId.trim() || null, familyName: f.familyName.trim() || null,
+    stageNumber: num(f.stageNumber), lifeStage: f.lifeStage.trim() || null, previousStage: f.previousStage.trim() || null,
+    health: num(f.health), guard: num(f.guard), shift: num(f.shift),
+    attack1Name: f.attack1Name.trim() || null, attack1Damage: num(f.attack1Damage), attack1Effect: f.attack1Effect.trim() || null,
+    attack2Name: f.attack2Name.trim() || null, attack2Damage: num(f.attack2Damage), attack2Effect: f.attack2Effect.trim() || null,
+    vulnerability: f.vulnerability.trim() || null,
+    keywords: f.keywords.trim() ? f.keywords.split(",").map((k) => k.trim()).filter(Boolean) : [],
+    effects: f.statusEffects.trim() ? f.statusEffects.split(",").map((k) => k.trim()).filter(Boolean) : [],
+    notes: f.notes.trim() || null, artR2Key: f.artR2Key || null, prevArtR2Key: f.prevArtR2Key || null,
+    artCandidateKey: f.artCandidateKey || null, prevArtCandidateKey: f.prevArtCandidateKey || null,
+    attack1Cost: num(f.attack1Cost), attack2Cost: num(f.attack2Cost),
+    variantTier: f.variantTier.trim() || null, baseCardId: f.baseCardId.trim() || null,
+  };
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/**
+ * Run a background export/proxy job: POST to start (returns a jobId immediately),
+ * poll for progress, then stream down the finished file. This replaces the old
+ * hold-the-request-open download so large exports can't time out.
+ */
+async function runExportJob(
+  startUrl: string,
+  body: unknown,
+  fallbackName: string,
+  onProgress: (done: number, total: number) => void,
+  isAlive: () => boolean = () => true,
+): Promise<{ rendered: number; skipped: number }> {
+  const startRes = await fetch(startUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  if (!startRes.ok) {
+    const err = new Error((await startRes.json().catch(() => ({}))).error || `failed (${startRes.status})`) as Error & { status?: number };
+    err.status = startRes.status;
+    throw err;
+  }
+  const { jobId, count } = (await startRes.json()) as { jobId: string; count: number };
+  onProgress(0, count ?? 0);
+
+  const base = `/api/admin/vault-quest/export/jobs/${encodeURIComponent(jobId)}`;
+  for (;;) {
+    await new Promise((r) => setTimeout(r, 800));
+    // stop polling if the view was left (component unmounted) — the job keeps
+    // running server-side and can be re-downloaded within its TTL.
+    if (!isAlive()) return { rendered: 0, skipped: 0 };
+    const sRes = await fetch(base, { credentials: "include" });
+    if (!sRes.ok) {
+      const err = new Error(`lost track of the export (${sRes.status}) — it may have expired`) as Error & { status?: number };
+      err.status = sRes.status;
+      throw err;
+    }
+    const s = (await sRes.json()) as { state: string; done: number; total: number; rendered: number; skipped: number; fileName?: string; error?: string };
+    onProgress(s.done ?? 0, s.total ?? count ?? 0);
+    if (s.state === "error") throw new Error(s.error || "export failed");
+    if (s.state === "done") {
+      const fRes = await fetch(`${base}/file`, { credentials: "include" });
+      if (!fRes.ok) {
+        const err = new Error((await fRes.json().catch(() => ({}))).error || `download failed (${fRes.status})`) as Error & { status?: number };
+        err.status = fRes.status;
+        throw err;
+      }
+      triggerDownload(await fRes.blob(), s.fileName || fallbackName);
+      return { rendered: s.rendered ?? 0, skipped: s.skipped ?? 0 };
+    }
+  }
+}
+
+const inputCls = "w-full rounded-md border border-slate-600 bg-slate-900 px-2 py-1.5 text-sm text-slate-100 focus:border-amber-500 focus:outline-none";
+const labelCls = "block text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1";
+
+// ---- AI Assist (Phase 7) ----
+type AiField = Record<string, unknown>;
+interface AiSug { text: string; reason?: string; pronunciation?: string; warning?: string; fields?: AiField }
+interface AiResp { suggestions: AiSug[]; provider: string; model: string; dropped: number; note?: string; generationId?: number | null }
+interface ProviderStat { id: string; label: string; connected: boolean; note: string }
+interface ArtworkResp {
+  candidateKey: string;
+  slot: "main" | "prev";
+  provider: string;
+  model: string;
+  prompt: string;
+  preview: string;
+  width: number;
+  height: number;
+  note?: string;
+  promptProvider?: string;
+  promptModel?: string;
+  generationId?: number | null;
+}
+
+const AI_TABS: { id: string; label: string; kind: string; buttons: { mode: string; label: string; kind?: string }[] }[] = [
+  { id: "names", label: "Names", kind: "name", buttons: [
+    { mode: "generate", label: "Generate" }, { mode: "alternatives", label: "10 alternatives" }, { mode: "improve", label: "Improve" },
+    { mode: "cuter", label: "Cuter" }, { mode: "powerful", label: "More powerful" }, { mode: "less-medieval", label: "Less medieval" }, { mode: "mascot", label: "Mascot-style" },
+    { mode: "stage1", label: "Stage 1" }, { mode: "stage2", label: "Stage 2" }, { mode: "stage3", label: "Stage 3" },
+    { mode: "generate", label: "Full family names", kind: "family-names" },
+  ] },
+  { id: "gameplay", label: "Gameplay", kind: "gameplay", buttons: [
+    { mode: "attack1", label: "Attack 1" }, { mode: "attack2", label: "Attack 2" }, { mode: "balanced-pair", label: "Balanced pair" },
+    { mode: "suggest-stats", label: "Suggest stats" }, { mode: "suggest-core", label: "Suggest Core" }, { mode: "suggest-vulnerability", label: "Vulnerability" },
+    { mode: "weaker", label: "Weaker" }, { mode: "stronger", label: "Stronger" },
+  ] },
+  { id: "flavour", label: "Flavour", kind: "flavour", buttons: [{ mode: "generate", label: "Generate" }, { mode: "simpler", label: "Simpler" }, { mode: "child-readable", label: "Child-readable" }] },
+  { id: "artwork", label: "Artwork", kind: "artwork-prompt", buttons: [
+    { mode: "main", label: "Main" }, { mode: "prev-portrait", label: "Prev portrait" }, { mode: "family-sheet", label: "Family sheet" }, { mode: "fsr-scene", label: "FSR scene" },
+    { mode: "cleaner", label: "Cleaner" }, { mode: "more-mascot", label: "More mascot" }, { mode: "less-pokemon", label: "Less Pokémon" },
+  ] },
+  { id: "variants", label: "Variants", kind: "artwork-prompt", buttons: [{ mode: "variant", label: "Variant artwork" }, { mode: "fsr-scene", label: "FSR scene" }] },
+];
+
+function AiAssist({ context, onApply, onUseArtwork, imageProviders, textConnected }: {
+  context: Record<string, unknown>;
+  onApply: (fields: AiField) => boolean;
+  onUseArtwork: (art: { candidateKey: string; slot: "main" | "prev"; preview: string; generationId?: number | null }) => Promise<boolean>;
+  imageProviders: ProviderStat[];
+  textConnected: boolean;
+}) {
+  const { toast } = useToast();
+  const [tab, setTab] = useState("names");
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<AiResp | null>(null);
+  const [last, setLast] = useState<{ kind: string; mode: string } | null>(null);
+  const [artwork, setArtwork] = useState<ArtworkResp | null>(null);
+  const [artworkUsed, setArtworkUsed] = useState(false);
+  const [usingArtwork, setUsingArtwork] = useState(false);
+  const [hidden, setHidden] = useState<Set<number>>(new Set());
+  const [applied, setApplied] = useState<Set<number>>(new Set());
+  const active = AI_TABS.find((t) => t.id === tab)!;
+  const artworkTab = tab === "artwork" || tab === "variants";
+  const higgsfield = imageProviders.find((p) => p.id === "higgsfield");
+  const applyableKeys = new Set([
+    "name", "health", "guard", "shift",
+    "attack1Name", "attack1Cost", "attack1Damage", "attack1Effect",
+    "attack2Name", "attack2Cost", "attack2Damage", "attack2Effect",
+    "vulnerability", "flavour", "stage1", "stage2", "stage3",
+  ]);
+
+  function messageFromError(e: unknown): string {
+    return e instanceof Error ? e.message : "Action failed.";
+  }
+
+  function handleAiError(e: unknown, title: string) {
+    const status = (e as { status?: number })?.status;
+    if (status === 401) {
+      toast({ title: "Admin login required", description: "Your admin session isn't active — taking you to the login page…", variant: "destructive" });
+      setTimeout(() => { window.location.href = "/admin/login"; }, 1400);
+      return;
+    }
+    if (status === 403) {
+      toast({ title: "Admin access required", description: "Please log in as admin to use this action.", variant: "destructive" });
+      return;
+    }
+    toast({ title, description: messageFromError(e), variant: "destructive" });
+  }
+
+  async function run(kind: string, mode: string) {
+    setBusy(true); setHidden(new Set()); setApplied(new Set()); setArtwork(null); setArtworkUsed(false); setUsingArtwork(false);
+    try {
+      const r = await apiRequest("POST", "/api/admin/vault-quest/ai/generate", { kind, mode, context, n: mode === "alternatives" ? 10 : 6 });
+      setRes(await r.json()); setLast({ kind, mode });
+    } catch (e) {
+      setRes({ suggestions: [], provider: "none", model: "none", dropped: 0, note: messageFromError(e) });
+      handleAiError(e, "AI failed");
+    } finally { setBusy(false); }
+  }
+
+  async function runArtwork(mode: string) {
+    const slot: "main" | "prev" = mode === "prev-portrait" ? "prev" : "main";
+    setBusy(true); setHidden(new Set()); setApplied(new Set()); setRes(null); setArtwork(null); setArtworkUsed(false); setUsingArtwork(false);
+    try {
+      const r = await apiRequest("POST", "/api/admin/vault-quest/ai/artwork", { mode, slot, context });
+      setArtwork(await r.json() as ArtworkResp);
+      setLast({ kind: "artwork-image", mode });
+    } catch (e) {
+      setRes({ suggestions: [], provider: "higgsfield", model: "", dropped: 0, note: messageFromError(e) });
+      handleAiError(e, "Artwork failed");
+    } finally { setBusy(false); }
+  }
+
+  function rerunLast() {
+    if (!last) return;
+    if (last.kind === "artwork-image") runArtwork(last.mode);
+    else run(last.kind, last.mode);
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+      <div className="mb-1 flex items-center gap-2"><Wand2 className="h-4 w-4 text-amber-400" /><span className="text-xs font-semibold uppercase tracking-wide text-slate-300">AI Assist</span></div>
+      <p className="mb-2 text-[10px] text-amber-400/80">AI suggestions are draft only. Founder approval required.</p>
+      {!textConnected && <p className="mb-2 rounded border border-slate-700 bg-slate-900/60 px-2 py-1 text-[11px] text-slate-400">Text provider not connected — set <span className="text-slate-200">ANTHROPIC_API_KEY</span> in your .env, then restart.</p>}
+      <div className="mb-2 flex flex-wrap gap-1">
+        {AI_TABS.map((t) => <button key={t.id} type="button" onClick={() => setTab(t.id)} className={`rounded px-2 py-1 text-xs ${tab === t.id ? "bg-amber-500/20 text-amber-300" : "text-slate-400 hover:text-slate-200"}`}>{t.label}</button>)}
+      </div>
+      <div className="mb-2 flex flex-wrap gap-1">
+        {active.buttons.map((b) => <button key={b.label} type="button" disabled={busy} onClick={() => artworkTab ? runArtwork(b.mode) : run(b.kind ?? active.kind, b.mode)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-200 hover:border-amber-500 disabled:opacity-50">{b.label}</button>)}
+      </div>
+      {artworkTab && (
+        <div className="mb-2 rounded border border-slate-700 bg-slate-900/60 p-1.5 text-[10px] leading-relaxed text-slate-400">
+          Artwork provider: <span className={higgsfield?.connected ? "text-emerald-400" : "text-amber-400"}>{higgsfield?.connected ? "Higgsfield connected" : "Higgsfield not connected"}</span>
+          {higgsfield?.note && <span className="ml-1 text-slate-500">· {higgsfield.note}</span>}
+        </div>
+      )}
+      {busy && <p className="flex items-center gap-2 text-xs text-slate-400"><Loader2 className="h-3 w-3 animate-spin" />Generating…</p>}
+      {res?.note && !busy && <p className="text-xs text-amber-400">{res.note}</p>}
+      {artwork && artworkTab && !busy && (
+        <div className="mb-2 rounded border border-slate-700 bg-slate-900/60 p-2 text-sm">
+          <div className="flex gap-2">
+            <img src={artwork.preview} alt="generated artwork candidate" className="h-24 w-24 shrink-0 rounded object-cover" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-semibold text-slate-200">{artwork.slot === "prev" ? "Previous-stage candidate" : "Main artwork candidate"}</div>
+              <div className="text-[11px] text-slate-400">{artwork.provider} · {artwork.model} · {artwork.width}×{artwork.height}</div>
+              {artwork.note && <div className="mt-1 text-[11px] text-amber-400">{artwork.note}</div>}
+              <div className="mt-2 max-h-28 overflow-auto rounded border border-slate-800 bg-slate-950/60 p-2 text-[11px] leading-relaxed text-slate-300">{artwork.prompt}</div>
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap gap-3 text-[11px]">
+            <button type="button" className="text-slate-300 hover:text-amber-300" onClick={() => { navigator.clipboard?.writeText(artwork.prompt); toast({ title: "Prompt copied" }); }}>Copy Prompt</button>
+            <button type="button" disabled={usingArtwork || artworkUsed} className="text-emerald-400 hover:text-emerald-300 disabled:opacity-50" onClick={async () => {
+              setUsingArtwork(true);
+              try {
+                const ok = await onUseArtwork({ candidateKey: artwork.candidateKey, slot: artwork.slot, preview: artwork.preview, generationId: artwork.generationId });
+                if (ok) setArtworkUsed(true);
+              } finally {
+                setUsingArtwork(false);
+              }
+            }}>{usingArtwork ? "Attaching…" : artworkUsed ? "Image attached ✓" : "Use Image"}</button>
+            <button type="button" className="text-slate-300 hover:text-amber-300" onClick={rerunLast}>Regenerate</button>
+            <button type="button" className="text-slate-500 hover:text-red-400" onClick={() => { setArtwork(null); setArtworkUsed(false); setUsingArtwork(false); }}>Reject</button>
+          </div>
+        </div>
+      )}
+      <div className="space-y-2">
+        {res?.suggestions.map((s, i) => hidden.has(i) ? null : (
+          <div key={i} className="rounded border border-slate-700 bg-slate-900/60 p-2 text-sm">
+            <div className="font-medium text-slate-100">{s.text}</div>
+            {s.pronunciation && <div className="text-[11px] text-slate-400">{s.pronunciation}</div>}
+            {s.reason && <div className="text-[11px] text-slate-400">{s.reason}</div>}
+            {s.warning && <div className="text-[11px] text-amber-400">⚠ {s.warning}</div>}
+            <div className="mt-1 flex flex-wrap gap-3 text-[11px]">
+              <button type="button" className="text-slate-300 hover:text-amber-300" onClick={() => { navigator.clipboard?.writeText(s.text); toast({ title: "Copied" }); }}>Copy</button>
+              {s.fields && Object.keys(s.fields).some((k) => applyableKeys.has(k)) && (
+                <button type="button" className="text-emerald-400 hover:text-emerald-300" onClick={async () => {
+                  if (res.generationId != null) {
+                    try {
+                      await apiRequest("POST", `/api/admin/vault-quest/ai/generations/${res.generationId}/applied`, {});
+                    } catch (e) {
+                      const status = (e as { status?: number })?.status;
+                      if (status === 401) {
+                        toast({ title: "Admin login required", description: "Your admin session isn't active — taking you to the login page…", variant: "destructive" });
+                        setTimeout(() => { window.location.href = "/admin/login"; }, 1400);
+                      } else {
+                        toast({ title: "Apply audit failed", description: e instanceof Error ? e.message : "", variant: "destructive" });
+                      }
+                      return;
+                    }
+                  }
+                  if (!onApply(s.fields!)) {
+                    toast({ title: "Nothing to apply — use Copy", variant: "destructive" });
+                    return;
+                  }
+                  setApplied((p) => new Set(p).add(i));
+                  toast({ title: "Applied — running QA" });
+                }}>{applied.has(i) ? "Applied ✓" : "Apply"}</button>
+              )}
+              <button type="button" className="text-slate-300 hover:text-amber-300" onClick={rerunLast}>Regenerate</button>
+              <button type="button" className="text-slate-500 hover:text-red-400" onClick={() => setHidden((p) => new Set(p).add(i))}>Reject</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Chip multi-select with free-form add + datalist suggestions (keywords / status effects).
+function TagInput({ value, onChange, suggestions, placeholder }: { value: string[]; onChange: (v: string[]) => void; suggestions: string[]; placeholder?: string }) {
+  const [q, setQ] = useState("");
+  const listId = "dl-" + (placeholder ?? "tags").replace(/\W/g, "");
+  const add = (t: string) => { const v = t.trim(); if (v && !value.includes(v)) onChange([...value, v]); setQ(""); };
+  return (
+    <div className="flex flex-wrap items-center gap-1 rounded-md border border-slate-600 bg-slate-900 px-2 py-1.5">
+      {value.map((t) => <span key={t} className="inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-xs text-amber-300">{t}<button type="button" onClick={() => onChange(value.filter((x) => x !== t))} className="text-amber-400/70 hover:text-amber-200">×</button></span>)}
+      <input list={listId} className="min-w-[70px] flex-1 bg-transparent text-sm text-slate-100 focus:outline-none" placeholder={value.length ? "" : (placeholder ?? "add…")} value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => { if ((e.key === "Enter" || e.key === ",") && q.trim()) { e.preventDefault(); add(q); } else if (e.key === "Backspace" && !q && value.length) onChange(value.slice(0, -1)); }}
+        onBlur={() => q.trim() && add(q)} />
+      <datalist id={listId}>{suggestions.map((s) => <option key={s} value={s} />)}</datalist>
+    </div>
+  );
+}
+
+type Opt = { value: string; label: string; hint?: string };
+
+// Searchable dropdown: type-to-filter, keyboard nav (↑/↓/Enter/Esc), click select.
+// Falls back to the value itself if it isn't in the option list (so existing data
+// like a legacy element/type is never lost).
+function Combo({ value, onChange, options, placeholder, allowEmpty = true, disabled, onAddNew, addNewLabel }: {
+  value: string;
+  onChange: (v: string) => void;
+  options: Opt[];
+  placeholder?: string;
+  allowEmpty?: boolean;
+  disabled?: boolean;
+  onAddNew?: (query: string) => void; // called with the typed text; parent creates + selects
+  addNewLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const [hi, setHi] = useState(0);
+  const wrap = useRef<HTMLDivElement>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const filtered = options.filter((o) => (o.label + " " + o.value).toLowerCase().includes(q.toLowerCase()));
+  const selected = options.find((o) => o.value === value);
+  const shownLabel = selected ? selected.label : value || "";
+
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  useEffect(() => { if (open) { setQ(""); setHi(0); const t = setTimeout(() => input.current?.focus(), 0); return () => clearTimeout(t); } }, [open]);
+
+  const pick = (v: string) => { onChange(v); setOpen(false); };
+
+  return (
+    <div className="relative" ref={wrap}>
+      <button type="button" disabled={disabled} onClick={() => !disabled && setOpen((o) => !o)}
+        className={`${inputCls} flex items-center justify-between text-left ${disabled ? "cursor-not-allowed opacity-50" : ""}`}>
+        <span className={shownLabel ? "truncate" : "text-slate-500"}>{shownLabel || placeholder || "Select…"}</span>
+        <ChevronDown className="ml-1 h-4 w-4 shrink-0 text-slate-500" />
+      </button>
+      {open && (
+        <div className="absolute z-30 mt-1 max-h-60 w-full overflow-auto rounded-md border border-slate-600 bg-slate-900 shadow-xl">
+          <input ref={input} className="sticky top-0 w-full border-b border-slate-700 bg-slate-900 px-2 py-1.5 text-sm text-slate-100 focus:outline-none"
+            placeholder="Type to search…" value={q}
+            onChange={(e) => { setQ(e.target.value); setHi(0); }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") { e.preventDefault(); setHi((h) => Math.min(h + 1, filtered.length - 1)); }
+              else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
+              else if (e.key === "Enter") { e.preventDefault(); if (filtered[hi]) pick(filtered[hi].value); }
+              else if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
+            }} />
+          {allowEmpty && <div onMouseDown={(e) => e.preventDefault()} onClick={() => pick("")} className="cursor-pointer px-2 py-1.5 text-sm text-slate-500 hover:bg-slate-800">— none —</div>}
+          {onAddNew && q.trim() && !options.some((o) => o.label.toLowerCase() === q.trim().toLowerCase()) && (
+            <div onMouseDown={(e) => e.preventDefault()} onClick={() => { onAddNew(q.trim()); setOpen(false); }} className="cursor-pointer border-b border-slate-700 px-2 py-1.5 text-sm font-medium text-amber-400 hover:bg-slate-800">+ {addNewLabel ?? "Add"} “{q.trim()}”</div>
+          )}
+          {filtered.length === 0 && !onAddNew && <div className="px-2 py-2 text-sm text-slate-500">No matches</div>}
+          {filtered.map((o, i) => (
+            <div key={o.value} onMouseDown={(e) => e.preventDefault()} onClick={() => pick(o.value)} onMouseEnter={() => setHi(i)}
+              className={`flex cursor-pointer items-center justify-between gap-2 px-2 py-1.5 text-sm ${i === hi ? "bg-slate-800" : ""} ${o.value === value ? "text-amber-300" : "text-slate-100"}`}>
+              <span className="truncate">{o.label}</span>
+              {o.hint && <span className="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400">{o.hint}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- transition button labels ----
+const TRANSITION_BTN: { to: VqStatus; label: string; icon: typeof CheckCircle2 }[] = [
+  { to: "ready_for_review", label: "Mark Ready", icon: ShieldCheck },
+  { to: "approved", label: "Approve", icon: CheckCircle2 },
+  { to: "export_ready", label: "Mark Export Ready", icon: PackageCheck },
+  { to: "printed_proxy", label: "Printed Proxy", icon: PackageCheck },
+  { to: "rejected", label: "Reject", icon: XCircle },
+  { to: "draft", label: "Return to Draft", icon: RotateCcw },
+  { to: "archived", label: "Archive", icon: Archive },
+];
+
+export default function AdminVaultQuest() {
+  const { toast } = useToast();
+  const [view, setView] = useState<"board" | "editor">("board");
+  const [form, setForm] = useState<CardForm>(BLANK);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [qa, setQa] = useState<QaIssue[]>([]);
+  const [artNonce, setArtNonce] = useState(0);
+  const [candidatePreviews, setCandidatePreviews] = useState<{ main?: string; prev?: string }>({});
+  const [rendering, setRendering] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [baseRef, setBaseRef] = useState<BaseRef>(null);
+  const [loadedStatus, setLoadedStatus] = useState<VqStatus | null>(null);
+  const [evalu, setEvalu] = useState<Evaluation | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [exportJob, setExportJob] = useState<{ label: string; done: number; total: number } | null>(null);
+  const [gen, setGen] = useState<{ mode: "card" | "family"; name: string; element: string; cardType: string } | null>(null);
+  const [genBusy, setGenBusy] = useState(false);
+  const [filters, setFilters] = useState({ q: "", status: "", cardType: "", element: "", rarity: "", need: "", family: "" });
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+
+  const isSupport = SUPPORT.has(form.cardType);
+  const set = <K extends keyof CardForm>(k: K, v: string) => { setForm((f) => ({ ...f, [k]: v })); setDirty(true); };
+
+  const dash = useQuery<Dashboard>({ queryKey: ["/api/admin/vault-quest/dashboard"], retry: false });
+  const cfg = useQuery<{ elements: Record<string, unknown>; needsApproval: string[] }>({ queryKey: ["/api/admin/vault-quest/config"], retry: false });
+  const fams = useQuery<{ families: { familyId: string; name: string | null; element?: string; stage1Name?: string | null; stage2Name?: string | null; stage3Name?: string | null }[] }>({ queryKey: ["/api/admin/vault-quest/families"], retry: false });
+  const lastAutoPrev = useRef<string>("");
+
+  // ---- dropdown option lists (Phase 1) ----
+  const needsApprovalSet = new Set(cfg.data?.needsApproval ?? []);
+  const elementOpts: Opt[] = (cfg.data ? Object.keys(cfg.data.elements) : ELEMENTS).map((e) => ({ value: e, label: e, hint: needsApprovalSet.has(e) ? "NEEDS APPROVAL" : undefined }));
+  const familyOpts: Opt[] = (fams.data?.families ?? []).map((f) => ({ value: f.familyId, label: `${f.name ?? f.familyId} · ${f.familyId}` }));
+  const baseCardOpts: Opt[] = (dash.data?.cards ?? []).filter((c) => !c.baseCardId).map((c) => ({ value: c.cardId, label: `${c.cardId} · ${c.name}` }));
+  const selFam = fams.data?.families.find((f) => f.familyId === form.familyId);
+  const autoPrev = !selFam ? "" : form.stageNumber === "2" ? (selFam.stage1Name ?? "") : form.stageNumber === "3" ? (selFam.stage2Name ?? "") : "";
+  const evolveWarn = !!form.previousStage && form.previousStage !== autoPrev;
+  const isVariantTier = !!form.variantTier && form.variantTier !== "STANDARD";
+  const tax = useQuery<{ keywords: string[]; effects: string[]; providers: ProviderStat[] }>({ queryKey: ["/api/admin/vault-quest/taxonomy"], retry: false });
+  const providers = tax.data?.providers ?? [];
+  const imageProviders = providers.filter((p) => p.id !== "anthropic");
+  const textConnected = providers.find((p) => p.id === "anthropic")?.connected ?? false;
+  const aiContext: Record<string, unknown> = {
+    cardId: form.cardId || undefined, name: form.name, cardType: form.cardType, element: form.element, stageNumber: form.stageNumber,
+    familyName: form.familyName, previousStage: form.previousStage, rarity: form.rarity, health: form.health, guard: form.guard, shift: form.shift,
+    attack1Name: form.attack1Name, attack1Damage: form.attack1Damage, vulnerability: form.vulnerability,
+  };
+
+  // Apply an AI suggestion's fields to the form (never auto — only on click), then run QA.
+  function applyAi(fields: AiField): boolean {
+    const map: Record<string, keyof CardForm> = {
+      name: "name", health: "health", guard: "guard", shift: "shift",
+      attack1Name: "attack1Name", attack1Cost: "attack1Cost", attack1Damage: "attack1Damage", attack1Effect: "attack1Effect",
+      attack2Name: "attack2Name", attack2Cost: "attack2Cost", attack2Damage: "attack2Damage", attack2Effect: "attack2Effect",
+      vulnerability: "vulnerability", flavour: "notes",
+    };
+    const updates: Record<string, string> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (v == null || v === "") continue;
+      if (map[k]) updates[map[k]] = String(v);
+      else if (k === "stage1" || k === "stage2" || k === "stage3") {
+        const want = form.stageNumber === "2" ? "stage2" : form.stageNumber === "3" ? "stage3" : "stage1";
+        if (k === want) updates.name = String(v);
+      }
+    }
+    if (Object.keys(updates).length === 0) return false; // e.g. artwork prompt — Copy only
+    setForm((p) => ({ ...p, ...updates }));
+    setDirty(true);
+    // QA runs automatically (Phase 8): the debounced live-preview effect re-fires on
+    // this form change with the applied values — no explicit (stale-closure) call needed.
+    return true;
+  }
+
+  // Add-new dropdown handlers (Element / Family) — create server-side, then select.
+  async function addElement(name: string) {
+    try {
+      await apiRequest("POST", "/api/admin/vault-quest/elements", { name });
+      await cfg.refetch();
+      set("element", name);
+      toast({ title: `Element "${name}" added`, description: "Marked NEEDS APPROVAL (placeholder palette)" });
+    } catch (e) { handleAuthError(e, "Add element failed"); }
+  }
+  const [newFamily, setNewFamily] = useState<{ name: string; element: string; s1: string; s2: string; s3: string } | null>(null);
+  async function createFamily() {
+    if (!newFamily || !newFamily.name.trim() || !newFamily.element) return;
+    try {
+      const r = await apiRequest("POST", "/api/admin/vault-quest/families", { name: newFamily.name.trim(), element: newFamily.element, stage1Name: newFamily.s1, stage2Name: newFamily.s2, stage3Name: newFamily.s3 });
+      const d = (await r.json()) as { familyId: string; name: string };
+      await fams.refetch();
+      setForm((p) => ({ ...p, familyId: d.familyId, familyName: d.name }));
+      setDirty(true);
+      setNewFamily(null);
+      toast({ title: `Family "${d.name}" created`, description: d.familyId });
+    } catch (e) { handleAuthError(e, "Add family failed"); }
+  }
+
+  // Evolves-From auto-populate from the selected family + stage (Stage 1 = none,
+  // Stage 2 = Stage 1 name, Stage 3 = Stage 2 name). Manual edits are preserved.
+  useEffect(() => {
+    const fam = fams.data?.families.find((f) => f.familyId === form.familyId);
+    const auto = !fam ? "" : form.stageNumber === "2" ? (fam.stage1Name ?? "") : form.stageNumber === "3" ? (fam.stage2Name ?? "") : "";
+    setForm((prev) => {
+      if (prev.previousStage === "" || prev.previousStage === lastAutoPrev.current) {
+        lastAutoPrev.current = auto;
+        return prev.previousStage === auto ? prev : { ...prev, previousStage: auto };
+      }
+      return prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.familyId, form.stageNumber, fams.data]);
+
+  const runPreview = useCallback(async () => {
+    if (!form.name || !form.cardId) { setPreview(null); setQa([]); return; }
+    setRendering(true);
+    try {
+      const res = await apiRequest("POST", "/api/admin/vault-quest/cards/preview", toPayload(form));
+      const data = await res.json();
+      setPreview(data.preview);
+      setQa(data.qa?.issues ?? []);
+    } catch (e) {
+      setQa([{ level: "reject", field: "preview", message: e instanceof Error ? e.message : "preview failed" }]);
+      setPreview(null);
+    } finally { setRendering(false); }
+  }, [form]);
+
+  useEffect(() => {
+    if (debounce.current) clearTimeout(debounce.current);
+    debounce.current = setTimeout(runPreview, 400);
+    return () => { if (debounce.current) clearTimeout(debounce.current); };
+  }, [runPreview]);
+
+  // warn on navigating away with unsaved edits
+  useEffect(() => {
+    const h = (e: BeforeUnloadEvent) => { if (dirty) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  }, [dirty]);
+
+  async function uploadArt(file: File, slot: "main" | "prev") {
+    if (!form.cardId) { toast({ title: "Set a Card ID first", variant: "destructive" }); return; }
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/admin/vault-quest/cards/${encodeURIComponent(form.cardId)}/art?slot=${slot}`, { method: "POST", body: fd, credentials: "include" });
+      if (!res.ok) {
+        const err = new Error((await res.json().catch(() => ({}))).error || `upload failed (${res.status})`) as Error & { status?: number };
+        err.status = res.status;
+        throw err;
+      }
+      const data = await res.json();
+      setForm((p) => slot === "main"
+        ? { ...p, artR2Key: data.key, artCandidateKey: "" }
+        : { ...p, prevArtR2Key: data.key, prevArtCandidateKey: "" });
+      setCandidatePreviews((p) => slot === "main" ? { ...p, main: undefined } : { ...p, prev: undefined });
+      setDirty(true);
+      setArtNonce((n) => n + 1);
+      toast({ title: `Artwork uploaded (${slot})`, description: `${data.width}×${data.height}` });
+    } catch (e) {
+      handleAuthError(e, "Upload failed");
+    } finally { setUploading(false); }
+  }
+
+  async function useArtworkCandidate(art: { candidateKey: string; slot: "main" | "prev"; preview: string; generationId?: number | null }): Promise<boolean> {
+    if (!form.cardId) {
+      toast({ title: "Set a Card ID first", description: "Generated artwork needs a card slot before it can be attached.", variant: "destructive" });
+      return false;
+    }
+    try {
+      const res = await apiRequest("POST", "/api/admin/vault-quest/ai/artwork/use", { cardId: form.cardId, slot: art.slot, candidateKey: art.candidateKey, generationId: art.generationId });
+      const data = (await res.json()) as { candidateKey: string; slot: "main" | "prev"; width?: number; height?: number };
+      setForm((p) => data.slot === "main"
+        ? { ...p, artCandidateKey: data.candidateKey }
+        : { ...p, prevArtCandidateKey: data.candidateKey });
+      setCandidatePreviews((p) => data.slot === "main" ? { ...p, main: art.preview } : { ...p, prev: art.preview });
+      setDirty(true);
+      setArtNonce((n) => n + 1);
+      // Preview/QA refresh comes from the debounced live-preview effect on the form change.
+      toast({ title: `Candidate attached (${data.slot})`, description: "Click Save Draft to save it as draft artwork." });
+      return true;
+    } catch (e) {
+      handleAuthError(e, "Use image failed");
+      return false;
+    }
+  }
+
+  async function exportCard(fmt: "svg" | "png" | "pdf") {
+    try {
+      const res = await fetch(`/api/admin/vault-quest/cards/export/${fmt}`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(toPayload(form)) });
+      if (!res.ok) {
+        const err = new Error((await res.json().catch(() => ({}))).error || `export failed (${res.status})`) as Error & { status?: number };
+        err.status = res.status;
+        throw err;
+      }
+      triggerDownload(await res.blob(), `${form.cardId || "card"}.${fmt}`);
+    } catch (e) {
+      handleAuthError(e, `Export ${fmt.toUpperCase()} failed`);
+    }
+  }
+
+  async function bulkProxy(ids: string[]) {
+    if (!ids.length) { toast({ title: "No cards to proxy" }); return; }
+    if (exportJob) return; // one export at a time
+    setExportJob({ label: "Proxy", done: 0, total: ids.length });
+    try {
+      const r = await runExportJob("/api/admin/vault-quest/proxy", { ids }, `VQ_proxy_${ids.length}.pdf`, (done, total) => setExportJob({ label: "Proxy", done, total }), () => alive.current);
+      toast({ title: `Proxy sheet ready — ${r.rendered} card(s)`, description: r.skipped ? `${r.skipped} skipped (not renderable yet)` : undefined });
+    } catch (e) { handleAuthError(e, "Proxy failed"); }
+    finally { setExportJob(null); }
+  }
+  async function bulkExport(ids: string[]) {
+    if (!ids.length) { toast({ title: "No cards to export" }); return; }
+    if (exportJob) return; // one export at a time
+    setExportJob({ label: "Export pack", done: 0, total: ids.length });
+    try {
+      const r = await runExportJob("/api/admin/vault-quest/export/pack", { ids }, `VQ_export_${ids.length}.zip`, (done, total) => setExportJob({ label: "Export pack", done, total }), () => alive.current);
+      toast({ title: `Export pack ready — ${r.rendered} rendered`, description: r.skipped ? `${r.skipped} skipped (not renderable yet)` : undefined });
+    } catch (e) { handleAuthError(e, "Export failed"); }
+    finally { setExportJob(null); }
+  }
+
+  async function save(status?: "draft") {
+    setSaving(true);
+    try {
+      const res = await apiRequest("POST", "/api/admin/vault-quest/cards", { ...toPayload(form), status: status ?? "draft" });
+      const data = await res.json();
+      setQa(data.qa?.issues ?? []);
+      setLoadedStatus((data.card?.status as VqStatus) ?? "draft");
+      const savedCard = (data.card ?? {}) as { artR2Key?: string | null; prevArtR2Key?: string | null };
+      setForm((p) => ({
+        ...p,
+        artR2Key: savedCard.artR2Key ? String(savedCard.artR2Key) : p.artR2Key,
+        prevArtR2Key: savedCard.prevArtR2Key ? String(savedCard.prevArtR2Key) : p.prevArtR2Key,
+        artCandidateKey: "",
+        prevArtCandidateKey: "",
+      }));
+      setCandidatePreviews({});
+      setArtNonce((n) => n + 1);
+      setDirty(false);
+      toast({ title: `Saved ${form.cardId}` });
+      dash.refetch();
+    } catch (e) {
+      handleAuthError(e, "Save failed");
+    } finally { setSaving(false); }
+  }
+
+  async function loadCard(cardId: string) {
+    try {
+      const res = await fetch(`/api/admin/vault-quest/cards/${encodeURIComponent(cardId)}`, { credentials: "include" });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `load failed (${res.status})`);
+      const data = (await res.json()) as { card: Record<string, unknown>; previousStage: string | null; familyName: string | null; base: BaseRef };
+      const c = data.card;
+      const s = (v: unknown) => (v == null ? "" : String(v));
+      setForm({
+        cardId: s(c.cardId), collectorNumber: s(c.collectorNumber), name: s(c.name), displayName: s(c.displayName),
+        cardType: s(c.cardType) || "Creature", element: s(c.element) || "Flame", rarity: s(c.rarity),
+        familyId: s(c.familyId), familyName: data.familyName ?? "", stageNumber: s(c.stageNumber),
+        lifeStage: s(c.lifeStage), previousStage: data.previousStage ?? "",
+        health: s(c.health), guard: s(c.guard), shift: s(c.shift),
+        attack1Name: s(c.attack1Name), attack1Damage: s(c.attack1Damage), attack1Effect: s(c.attack1Effect),
+        attack2Name: s(c.attack2Name), attack2Damage: s(c.attack2Damage), attack2Effect: s(c.attack2Effect),
+        vulnerability: s(c.vulnerability), keywords: Array.isArray(c.keywords) ? (c.keywords as string[]).join(", ") : "",
+        notes: s(c.notes), artR2Key: s(c.artR2Key), prevArtR2Key: s(c.prevArtR2Key), artCandidateKey: "", prevArtCandidateKey: "",
+        attack1Cost: s(c.attack1Cost), attack2Cost: s(c.attack2Cost), variantTier: s(c.variantTier), baseCardId: s(c.baseCardId),
+        statusEffects: Array.isArray(c.effects) ? (c.effects as string[]).join(", ") : "",
+      });
+      setBaseRef(data.base ?? null);
+      setCandidatePreviews({});
+      setLoadedStatus(((c.status as string) || "draft") as VqStatus);
+      setEvalu(null);
+      setDirty(false);
+      setView("editor");
+    } catch (e) {
+      toast({ title: "Failed to load card", description: e instanceof Error ? e.message : "", variant: "destructive" });
+    }
+  }
+
+  async function runFullQa() {
+    if (!form.cardId) return;
+    try {
+      const res = await fetch(`/api/admin/vault-quest/cards/${encodeURIComponent(form.cardId)}/evaluate`, { credentials: "include" });
+      if (!res.ok) {
+        const err = new Error((await res.json().catch(() => ({}))).error || "evaluate failed") as Error & { status?: number };
+        err.status = res.status;
+        throw err;
+      }
+      const e = (await res.json()) as Evaluation;
+      setEvalu(e);
+      setQa(e.qa ?? []);
+    } catch (e) { handleAuthError(e, "QA failed"); }
+  }
+
+  async function transition(to: VqStatus, override = false) {
+    if (!form.cardId) { toast({ title: "Save the card first", variant: "destructive" }); return; }
+    if (dirty) { toast({ title: "Save your changes before changing status", variant: "destructive" }); return; }
+    try {
+      const res = await fetch(`/api/admin/vault-quest/cards/${encodeURIComponent(form.cardId)}/status`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ to, override }),
+      });
+      const data = await res.json();
+      if (res.status === 401 || res.status === 403) {
+        const err = new Error(data.error || `transition failed (${res.status})`) as Error & { status?: number };
+        err.status = res.status;
+        throw err;
+      }
+      if (!res.ok) {
+        const reasons = data.reasons as string[] | undefined;
+        // The variant-base gate is the only overridable one — offer to force it.
+        if (!override && reasons?.some((r) => /base/i.test(r))) {
+          if (window.confirm(`Blocked:\n${reasons.join("\n")}\n\nForce ${STATUS_META[to].label} anyway (override the base-approval gate)?`)) {
+            return transition(to, true);
+          }
+        }
+        toast({ title: `Cannot ${STATUS_META[to].label}`, description: reasons?.join(" · ") || data.error || "blocked", variant: "destructive" });
+        if (data.evaluation) setEvalu(data.evaluation);
+        return;
+      }
+      setLoadedStatus(to);
+      if (data.evaluation) setEvalu(data.evaluation);
+      toast({ title: `→ ${STATUS_META[to].label}` });
+      dash.refetch();
+    } catch (e) { handleAuthError(e, "Transition failed"); }
+  }
+
+  function newCard() { setForm(BLANK); setPreview(null); setQa([]); setBaseRef(null); setCandidatePreviews({}); setLoadedStatus(null); setEvalu(null); setDirty(false); setView("editor"); }
+
+  // Shared error handling: an expired/absent admin session surfaces as a clear
+  // "Admin login required" + redirect to the admin login, instead of a cryptic
+  // "Unauthorized" toast. Never weakens auth — the server still enforces requireAdmin.
+  function handleAuthError(e: unknown, fallbackTitle: string) {
+    const status = (e as { status?: number })?.status;
+    if (status === 401) {
+      toast({ title: "Admin login required", description: "Your admin session isn't active — taking you to the login page…", variant: "destructive" });
+      setTimeout(() => { window.location.href = "/admin/login"; }, 1400);
+      return;
+    }
+    if (status === 403) {
+      toast({ title: "Admin access required", description: "This account can't use admin actions. Please log in as admin.", variant: "destructive" });
+      return;
+    }
+    toast({ title: fallbackTitle, description: e instanceof Error ? e.message : "", variant: "destructive" });
+  }
+
+  // Generate new draft card(s) from the locked template (create-only server-side).
+  // Uses the shared apiRequest so auth/session handling matches every other Studio
+  // call (same cookie/credentials path). A 401 means the admin session isn't active.
+  async function runGenerate() {
+    if (!gen || !gen.name.trim()) return;
+    setGenBusy(true);
+    try {
+      const res = await apiRequest("POST", "/api/admin/vault-quest/generate", {
+        mode: gen.mode,
+        name: gen.name.trim(),
+        element: gen.element,
+        cardType: gen.mode === "card" ? gen.cardType : undefined,
+      });
+      const data = (await res.json()) as { created: string[]; familyId?: string; openCardId: string };
+      setGen(null);
+      await dash.refetch();
+      toast({ title: gen.mode === "family" ? `Family created — ${data.created.length} draft cards` : "Draft card created", description: `Opening ${data.openCardId} in the editor` });
+      await loadCard(data.openCardId);
+    } catch (e) {
+      handleAuthError(e, "Generate failed");
+    } finally {
+      setGenBusy(false);
+    }
+  }
+
+  const rejects = qa.filter((i) => i.level === "reject");
+  const warns = qa.filter((i) => i.level === "warn");
+  const targets = loadedStatus ? allowedTargets(loadedStatus) : [];
+
+  // ---- filtered board ----
+  const board = (dash.data?.cards ?? []).filter((c) => {
+    if (filters.q && !(`${c.cardId} ${c.name}`.toLowerCase().includes(filters.q.toLowerCase()))) return false;
+    if (filters.status && c.status !== filters.status) return false;
+    if (filters.cardType && c.cardType !== filters.cardType) return false;
+    if (filters.element && c.element !== filters.element) return false;
+    if (filters.rarity && c.rarity !== filters.rarity) return false;
+    if (filters.need === "data" && c.hasData) return false;
+    if (filters.need === "artwork" && c.hasArt) return false;
+    if (filters.need === "variants" && !c.baseCardId) return false;
+    if (filters.need === "base" && c.baseCardId) return false;
+    if (filters.need === "placeholder" && !c.placeholderElement) return false;
+    if (filters.family && c.familyId !== filters.family) return false;
+    return true;
+  });
+  const families = [...new Set((dash.data?.cards ?? []).map((c) => c.familyId).filter(Boolean))].sort() as string[];
+
+  const Tile = ({ label, value, tone }: { label: string; value: number | string; tone?: string }) => (
+    <div className={`rounded-lg border border-slate-800 bg-slate-900/50 p-3 ${tone ?? ""}`}>
+      <div className="text-[11px] uppercase tracking-wide text-slate-400">{label}</div>
+      <div className="text-xl font-bold">{value}</div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
+      <div className="mx-auto max-w-6xl">
+        <header className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">Vault Quest Studio</h1>
+            <p className="text-sm text-slate-400">Production control centre — dashboard · workflow · live preview · export.</p>
+          </div>
+          <div className="flex gap-2">
+            {view === "editor" && <AdminButton variant="ghost" onClick={() => setView("board")}><ArrowLeft className="mr-1 h-4 w-4" />Board</AdminButton>}
+            {view === "board" && <AdminButton variant="ghost" onClick={() => dash.refetch()}><LayoutGrid className="mr-1 h-4 w-4" />Refresh</AdminButton>}
+            <AdminButton variant="gold" onClick={() => setGen({ mode: "family", name: "", element: ELEMENTS[0], cardType: "Creature" })}><Wand2 className="mr-1 h-4 w-4" />Generate</AdminButton>
+            <AdminButton variant="ghost" onClick={newCard}><Plus className="mr-1 h-4 w-4" />New card</AdminButton>
+          </div>
+        </header>
+
+        {view === "board" ? (
+          <div className="space-y-4">
+            {dash.isError && <p className="text-sm text-red-400">Dashboard unavailable — {String((dash.error as Error)?.message ?? "error")}</p>}
+            {dash.isLoading && <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />Loading 150 cards…</p>}
+            {!dash.isLoading && !dash.isError && !dash.data && (
+              <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-4">
+                <p className="font-semibold text-amber-300">Admin login required</p>
+                <p className="mt-1 text-sm text-slate-300">Your admin session isn't active, so no cards can load. Log in to use the Studio.</p>
+                <a href="/admin/login" className="mt-3 inline-flex items-center gap-1 rounded-md bg-amber-500 px-3 py-1.5 text-sm font-semibold text-slate-900 hover:bg-amber-400">Go to admin login →</a>
+              </div>
+            )}
+            {dash.data && (
+              <>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+                  <Tile label="Total" value={dash.data.total} />
+                  <Tile label="Base" value={dash.data.base} />
+                  <Tile label="Variants" value={dash.data.variants} />
+                  <Tile label="Needs data" value={dash.data.needsData} />
+                  <Tile label="Needs artwork" value={dash.data.needsArtwork} />
+                  <Tile label="Placeholder el." value={dash.data.placeholderElements} />
+                  <Tile label="Approved" value={dash.data.byStatus.approved ?? 0} />
+                  <Tile label="Export ready" value={dash.data.byStatus.export_ready ?? 0} />
+                  <Tile label="Ready" value={dash.data.byStatus.ready_for_review ?? 0} />
+                  <Tile label="Families ✓" value={`${dash.data.familiesComplete}/${dash.data.families}`} />
+                  <Tile label="Drafts" value={dash.data.byStatus.draft ?? 0} />
+                  <Tile label="Rejected" value={dash.data.byStatus.rejected ?? 0} />
+                </div>
+
+                <div className="flex flex-wrap gap-2 rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+                  <input className={`${inputCls} w-44`} placeholder="Search id / name" value={filters.q} onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))} />
+                  <select className={`${inputCls} w-36`} value={filters.status} onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value }))}><option value="">All status</option>{Object.keys(STATUS_META).map((s) => <option key={s} value={s}>{STATUS_META[s as VqStatus].label}</option>)}</select>
+                  <select className={`${inputCls} w-32`} value={filters.cardType} onChange={(e) => setFilters((f) => ({ ...f, cardType: e.target.value }))}><option value="">All types</option>{CARD_TYPES.map((t) => <option key={t}>{t}</option>)}</select>
+                  <select className={`${inputCls} w-32`} value={filters.element} onChange={(e) => setFilters((f) => ({ ...f, element: e.target.value }))}><option value="">All elements</option>{ELEMENTS.map((t) => <option key={t}>{t}</option>)}</select>
+                  <select className={`${inputCls} w-28`} value={filters.rarity} onChange={(e) => setFilters((f) => ({ ...f, rarity: e.target.value }))}><option value="">All rarity</option>{RARITIES.map((t) => <option key={t}>{t}</option>)}</select>
+                  <select className={`${inputCls} w-40`} value={filters.need} onChange={(e) => setFilters((f) => ({ ...f, need: e.target.value }))}><option value="">Any</option><option value="data">Needs gameplay</option><option value="artwork">Needs artwork</option><option value="base">Base cards only</option><option value="variants">Variants only</option><option value="placeholder">Placeholder element</option></select>
+                  <select className={`${inputCls} w-32`} value={filters.family} onChange={(e) => setFilters((f) => ({ ...f, family: e.target.value }))}><option value="">All families</option>{families.map((fam) => <option key={fam}>{fam}</option>)}</select>
+                  <div className="ml-auto flex items-center gap-2">
+                    {exportJob ? (
+                      <span className="self-center text-xs font-medium text-amber-400" role="status" aria-live="polite">
+                        {exportJob.label}… {exportJob.done}/{exportJob.total}
+                      </span>
+                    ) : (
+                      <span className="self-center text-xs text-slate-500">{board.length} shown</span>
+                    )}
+                    <AdminButton variant="ghost" disabled={!!exportJob} onClick={() => bulkProxy(board.map((c) => c.cardId))}><FileText className="mr-1 h-4 w-4" />Proxy</AdminButton>
+                    <AdminButton variant="ghost" disabled={!!exportJob} onClick={() => bulkExport(board.map((c) => c.cardId))}><FileCode className="mr-1 h-4 w-4" />Export pack</AdminButton>
+                  </div>
+                </div>
+
+                <div className="overflow-hidden rounded-lg border border-slate-800">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-900/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
+                      <tr><th className="px-3 py-2">Card</th><th className="px-2 py-2">Type</th><th className="px-2 py-2">Element</th><th className="px-2 py-2">Rarity</th><th className="px-2 py-2">Data</th><th className="px-2 py-2">Art</th><th className="px-2 py-2">Ready</th><th className="px-2 py-2">Status</th></tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800">
+                      {board.slice(0, 300).map((c) => (
+                        <tr key={c.cardId} className="cursor-pointer hover:bg-slate-900/60" onClick={() => loadCard(c.cardId)}>
+                          <td className="px-3 py-1.5"><span className="font-medium">{c.cardId}</span> <span className="text-slate-400">{c.name}</span>{c.baseCardId && <span className="ml-1 text-[10px] text-amber-400">▸{c.variantTier}</span>}</td>
+                          <td className="px-2 py-1.5 text-slate-300">{c.cardType}</td>
+                          <td className="px-2 py-1.5 text-slate-300">{c.element}{c.placeholderElement && <span className="ml-1 text-[10px] text-amber-500">◦</span>}</td>
+                          <td className="px-2 py-1.5 text-slate-300">{c.rarity}</td>
+                          <td className="px-2 py-1.5">{c.hasData ? "✓" : <span className="text-amber-500">—</span>}</td>
+                          <td className="px-2 py-1.5">{c.hasArt ? "✓" : <span className="text-amber-500">—</span>}</td>
+                          <td className="px-2 py-1.5"><span className="text-slate-400">{c.readiness}%</span></td>
+                          <td className="px-2 py-1.5"><StatusBadge status={c.status} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
+            {/* editor */}
+            <section className="space-y-5 rounded-lg border border-slate-800 bg-slate-900/40 p-5">
+              {loadedStatus && (
+                <div className="flex flex-wrap items-center gap-2 rounded-md border border-slate-800 bg-slate-900/60 p-2">
+                  <span className="text-xs text-slate-400">Status</span><StatusBadge status={loadedStatus} />
+                  {evalu && <span className="text-xs text-slate-400">· readiness <span className="font-semibold text-slate-200">{evalu.readiness}%</span></span>}
+                  <AdminButton variant="ghost" onClick={runFullQa}><ShieldCheck className="mr-1 h-4 w-4" />Run QA</AdminButton>
+                  <span className="mx-1 w-px self-stretch bg-slate-700" />
+                  {dirty && <span className="self-center text-[11px] text-amber-400">Save changes to enable status actions</span>}
+                  {!dirty && TRANSITION_BTN.filter((b) => targets.includes(b.to) && b.to !== loadedStatus).map((b) => (
+                    <AdminButton key={b.to} variant="ghost" onClick={() => transition(b.to)}><b.icon className="mr-1 h-4 w-4" />{b.label}</AdminButton>
+                  ))}
+                </div>
+              )}
+              {baseRef && (
+                <div className="rounded-md border border-amber-700/50 bg-amber-950/30 p-2 text-xs text-amber-200">
+                  Variant{form.variantTier ? ` (${form.variantTier})` : ""} of <span className="font-semibold">{baseRef.cardId} · {baseRef.name}</span> — gameplay inherited from base:
+                  Health {baseRef.health ?? "—"} · Guard {baseRef.guard ?? "—"} · Shift {baseRef.shift ?? "—"} · {baseRef.attack1Name ?? "no attack yet"}{baseRef.attack1Damage != null ? ` (${baseRef.attack1Damage})` : ""} · base: {baseRef.status}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div><label className={labelCls}>Card ID</label><input className={inputCls} value={form.cardId} onChange={(e) => set("cardId", e.target.value)} placeholder="GNV-001" /></div>
+                <div><label className={labelCls}>Collector no.</label><input className={inputCls} value={form.collectorNumber} onChange={(e) => set("collectorNumber", e.target.value)} placeholder="001/150" /></div>
+                <div><label className={labelCls}>Type</label><Combo value={form.cardType} onChange={(v) => set("cardType", v)} options={CARD_TYPES.map((t) => ({ value: t, label: t }))} allowEmpty={false} /></div>
+                <div className="col-span-2"><label className={labelCls}>Name</label><input className={inputCls} value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Flammi" /></div>
+                <div><label className={labelCls}>Element</label><Combo value={form.element} onChange={(v) => set("element", v)} options={elementOpts} allowEmpty={false} placeholder="Select element" onAddNew={addElement} addNewLabel="Add element" /></div>
+                <div><label className={labelCls}>Rarity</label><Combo value={form.rarity} onChange={(v) => set("rarity", v)} options={RARITIES.map((t) => ({ value: t, label: t }))} placeholder="Rarity" /></div>
+                <div><label className={labelCls}>Vulnerability</label><input className={inputCls} value={form.vulnerability} onChange={(e) => set("vulnerability", e.target.value)} placeholder="Water" /></div>
+              </div>
+
+              {!isSupport && (
+                <>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div><label className={labelCls}>Family</label><Combo value={form.familyId} onChange={(v) => { const f = fams.data?.families.find((x) => x.familyId === v); setForm((p) => ({ ...p, familyId: v, familyName: f?.name ?? p.familyName })); setDirty(true); }} options={familyOpts} placeholder="Search family" onAddNew={(q) => setNewFamily({ name: q, element: form.element || ELEMENTS[0], s1: `${q} I`, s2: `${q} II`, s3: `${q} III` })} addNewLabel="New family" /></div>
+                    <div><label className={labelCls}>Family name</label><input className={inputCls} value={form.familyName} onChange={(e) => set("familyName", e.target.value)} placeholder="Flammi" /></div>
+                    <div><label className={labelCls}>Stage</label><Combo value={form.stageNumber} onChange={(v) => set("stageNumber", v)} options={[{ value: "1", label: "1 Baby" }, { value: "2", label: "2 Teen" }, { value: "3", label: "3 Final" }]} allowEmpty={false} /></div>
+                    <div><label className={labelCls}>Evolves from</label><input className={inputCls} value={form.previousStage} onChange={(e) => set("previousStage", e.target.value)} placeholder="(auto from family + stage)" />{evolveWarn && <p className="mt-1 text-[10px] text-amber-400">⚠ manual override (auto: {autoPrev || "none"})</p>}</div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><label className={labelCls}>Variant tier</label><Combo value={form.variantTier} onChange={(v) => set("variantTier", v)} options={VARIANT_TIERS.map((t) => ({ value: t, label: t === "STANDARD" ? "Standard" : t }))} placeholder="Standard / none" /></div>
+                    <div><label className={labelCls}>Base card {isVariantTier && !form.baseCardId && <span className="text-red-400">· required for variants</span>}</label><Combo value={form.baseCardId} onChange={(v) => set("baseCardId", v)} options={baseCardOpts} placeholder="Search base card" /></div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div><label className={labelCls}>Health</label><input className={inputCls} value={form.health} onChange={(e) => set("health", e.target.value)} /></div>
+                    <div><label className={labelCls}>Guard</label><input className={inputCls} value={form.guard} onChange={(e) => set("guard", e.target.value)} /></div>
+                    <div><label className={labelCls}>Shift</label><input className={inputCls} value={form.shift} onChange={(e) => set("shift", e.target.value)} /></div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-[64px_1fr_80px]">
+                    <div><label className={labelCls}>A1 Core</label><input className={inputCls} value={form.attack1Cost} onChange={(e) => set("attack1Cost", e.target.value)} placeholder="0" /></div>
+                    <div><label className={labelCls}>Attack 1 name</label><input className={inputCls} value={form.attack1Name} onChange={(e) => set("attack1Name", e.target.value)} placeholder="Ember Tap" /></div>
+                    <div><label className={labelCls}>Damage</label><input className={inputCls} value={form.attack1Damage} onChange={(e) => set("attack1Damage", e.target.value)} /></div>
+                    <div className="col-span-2 sm:col-span-3"><label className={labelCls}>Attack 1 effect</label><input className={inputCls} value={form.attack1Effect} onChange={(e) => set("attack1Effect", e.target.value)} placeholder="(optional)" /></div>
+                    <div><label className={labelCls}>A2 Core</label><input className={inputCls} value={form.attack2Cost} onChange={(e) => set("attack2Cost", e.target.value)} placeholder="0" /></div>
+                    <div><label className={labelCls}>Attack 2 name</label><input className={inputCls} value={form.attack2Name} onChange={(e) => set("attack2Name", e.target.value)} placeholder="(optional)" /></div>
+                    <div><label className={labelCls}>Damage</label><input className={inputCls} value={form.attack2Damage} onChange={(e) => set("attack2Damage", e.target.value)} /></div>
+                    <div className="col-span-2 sm:col-span-3"><label className={labelCls}>Attack 2 effect</label><input className={inputCls} value={form.attack2Effect} onChange={(e) => set("attack2Effect", e.target.value)} /></div>
+                  </div>
+                </>
+              )}
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div><label className={labelCls}>Keywords</label><TagInput value={form.keywords.split(",").map((k) => k.trim()).filter(Boolean)} onChange={(v) => set("keywords", v.join(", "))} suggestions={tax.data?.keywords ?? []} placeholder="add keyword…" /></div>
+                <div><label className={labelCls}>Status effects</label><TagInput value={form.statusEffects.split(",").map((k) => k.trim()).filter(Boolean)} onChange={(v) => set("statusEffects", v.join(", "))} suggestions={tax.data?.effects ?? []} placeholder="add status effect…" /></div>
+              </div>
+              <div><label className={labelCls}>Notes</label><input className={inputCls} value={form.notes} onChange={(e) => set("notes", e.target.value)} /></div>
+
+              <div className="flex flex-wrap items-center gap-3 border-t border-slate-800 pt-4">
+                <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-600 px-3 py-1.5 text-sm hover:border-amber-500">
+                  <Upload className="h-4 w-4" />{uploading ? "Uploading…" : "Upload artwork"}
+                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && uploadArt(e.target.files[0], "main")} />
+                </label>
+                {(form.artCandidateKey || form.artR2Key) && (
+                  <span className="inline-flex items-center gap-2">
+                    <img src={form.artCandidateKey && candidatePreviews.main ? candidatePreviews.main : `/api/admin/vault-quest/cards/${encodeURIComponent(form.cardId)}/art/main?v=${artNonce}`} alt="art" className="h-10 w-10 rounded object-cover" />
+                    {form.artCandidateKey && <span className="text-[11px] text-amber-400">candidate · save draft</span>}
+                  </span>
+                )}
+                {!isSupport && (
+                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-600 px-3 py-1.5 text-sm hover:border-amber-500">
+                    <Upload className="h-4 w-4" />Prev-stage art
+                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && uploadArt(e.target.files[0], "prev")} />
+                  </label>
+                )}
+                {!isSupport && form.prevArtCandidateKey && <span className="text-[11px] text-amber-400">prev candidate · save draft</span>}
+              </div>
+
+              <div className="flex flex-wrap gap-2 border-t border-slate-800 pt-4">
+                <AdminButton onClick={() => save("draft")} disabled={saving}>{saving ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}Save Draft</AdminButton>
+                <span className="mx-1 w-px bg-slate-700" />
+                <AdminButton variant="ghost" onClick={() => exportCard("svg")}><FileCode className="mr-1 h-4 w-4" />SVG</AdminButton>
+                <AdminButton variant="ghost" onClick={() => exportCard("png")}><FileImage className="mr-1 h-4 w-4" />PNG</AdminButton>
+                <AdminButton variant="ghost" onClick={() => exportCard("pdf")}><FileText className="mr-1 h-4 w-4" />PDF</AdminButton>
+              </div>
+            </section>
+
+            <aside className="space-y-4">
+              <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+                <div className="mb-2 flex items-center justify-between"><span className={labelCls}>Live preview</span>{rendering && <Loader2 className="h-4 w-4 animate-spin text-amber-400" />}</div>
+                <div className="flex aspect-[69/94] items-center justify-center overflow-hidden rounded bg-slate-800">
+                  {preview ? <img src={preview} alt="card preview" className="h-full w-full object-contain" /> : <span className="text-xs text-slate-500">enter Card ID + Name</span>}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+                <span className={labelCls}>QA {evalu && `· readiness ${evalu.readiness}%`}</span>
+                {rejects.length === 0 && warns.length === 0 && <p className="text-sm text-emerald-400">✓ passes QA</p>}
+                {rejects.map((i, k) => <p key={`r${k}`} className="flex items-start gap-1 text-sm text-red-400"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />[{i.field}] {i.message}</p>)}
+                {warns.map((i, k) => <p key={`w${k}`} className="text-xs text-amber-400">⚠ [{i.field}] {i.message}</p>)}
+                {evalu?.suggestions?.map((sug, k) => <p key={`s${k}`} className="text-xs text-slate-400">→ {sug}</p>)}
+              </div>
+
+              <AiAssist context={aiContext} onApply={applyAi} onUseArtwork={useArtworkCandidate} imageProviders={imageProviders} textConnected={textConnected} />
+            </aside>
+          </div>
+        )}
+
+        {gen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !genBusy && setGen(null)}>
+            <div className="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-slate-100"><Wand2 className="h-5 w-5 text-amber-400" />Generate from template</h2>
+              <p className="mb-4 text-xs text-slate-400">
+                Creates new <span className="text-slate-200">draft</span> {gen.mode === "family" ? "cards for a whole family" : "card"} from the locked template (stats, rarity, numbering). It never overwrites existing cards. To work on the seeded 150, close this and click a card in the board instead.
+              </p>
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setGen({ ...gen, mode: "family" })} className={`flex-1 rounded-md border px-3 py-2 text-left text-sm ${gen.mode === "family" ? "border-amber-500 bg-amber-500/10 text-amber-300" : "border-slate-600 text-slate-300 hover:border-slate-500"}`}>Full family<span className="block text-[10px] text-slate-500">Baby · Teen · Final (3 linked cards)</span></button>
+                  <button type="button" onClick={() => setGen({ ...gen, mode: "card" })} className={`flex-1 rounded-md border px-3 py-2 text-left text-sm ${gen.mode === "card" ? "border-amber-500 bg-amber-500/10 text-amber-300" : "border-slate-600 text-slate-300 hover:border-slate-500"}`}>Single card<span className="block text-[10px] text-slate-500">one draft card</span></button>
+                </div>
+                <div><label className={labelCls}>{gen.mode === "family" ? "Family name" : "Card name"}</label><input className={inputCls} autoFocus value={gen.name} onChange={(e) => setGen({ ...gen, name: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && gen.name.trim() && !genBusy) runGenerate(); }} placeholder={gen.mode === "family" ? "e.g. Emberling" : "e.g. Emberling"} /></div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className={labelCls}>Element</label><select className={inputCls} value={gen.element} onChange={(e) => setGen({ ...gen, element: e.target.value })}>{ELEMENTS.map((t) => <option key={t}>{t}</option>)}</select></div>
+                  {gen.mode === "card" && <div><label className={labelCls}>Type</label><select className={inputCls} value={gen.cardType} onChange={(e) => setGen({ ...gen, cardType: e.target.value })}>{CARD_TYPES.map((t) => <option key={t}>{t}</option>)}</select></div>}
+                </div>
+              </div>
+              <div className="mt-5 flex justify-end gap-2">
+                <AdminButton variant="ghost" onClick={() => setGen(null)} disabled={genBusy}>Cancel</AdminButton>
+                <AdminButton variant="gold" onClick={runGenerate} disabled={genBusy || !gen.name.trim()}>{genBusy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Wand2 className="mr-1 h-4 w-4" />}Generate</AdminButton>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {newFamily && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setNewFamily(null)}>
+            <div className="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-slate-100"><Plus className="h-5 w-5 text-amber-400" />New family</h2>
+              <p className="mb-4 text-xs text-slate-400">Creates the family registry row only (no cards). The card you’re editing will be assigned to it.</p>
+              <div className="space-y-3">
+                <div><label className={labelCls}>Family name</label><input className={inputCls} autoFocus value={newFamily.name} onChange={(e) => setNewFamily({ ...newFamily, name: e.target.value })} placeholder="e.g. Emberling" /></div>
+                <div><label className={labelCls}>Element</label><Combo value={newFamily.element} onChange={(v) => setNewFamily({ ...newFamily, element: v })} options={elementOpts} allowEmpty={false} /></div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div><label className={labelCls}>Stage 1</label><input className={inputCls} value={newFamily.s1} onChange={(e) => setNewFamily({ ...newFamily, s1: e.target.value })} placeholder="Baby" /></div>
+                  <div><label className={labelCls}>Stage 2</label><input className={inputCls} value={newFamily.s2} onChange={(e) => setNewFamily({ ...newFamily, s2: e.target.value })} placeholder="Teen" /></div>
+                  <div><label className={labelCls}>Stage 3</label><input className={inputCls} value={newFamily.s3} onChange={(e) => setNewFamily({ ...newFamily, s3: e.target.value })} placeholder="Final" /></div>
+                </div>
+              </div>
+              <div className="mt-5 flex justify-end gap-2">
+                <AdminButton variant="ghost" onClick={() => setNewFamily(null)}>Cancel</AdminButton>
+                <AdminButton variant="gold" onClick={createFamily} disabled={!newFamily.name.trim() || !newFamily.element}><Plus className="mr-1 h-4 w-4" />Create family</AdminButton>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

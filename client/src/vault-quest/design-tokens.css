@@ -1,0 +1,175 @@
+/* =============================================================================
+   VAULT QUEST — DESIGN SYSTEM TOKENS  (Phase 2, v0.1)
+   Single source of truth for Vault Quest UI/web colour, spacing, elevation,
+   glow and type tokens. See VAULT_QUEST_MASTER_SPEC_v1.0.md §3 and §Phase 2.
+
+   FOUNDER RULING (OPEN-01, 2026-07-08):
+     - Navy is the Vault Quest brand / UI / card-back / website FOUNDATION.
+     - CARD FACES stay ELEMENT-COLOURED (exempt from navy-primary) — creature
+       cards need strong element identity and child-friendly colour.
+     - GOLD is reserved for premium / rarity treatments only (Secret Rare,
+       Founder, Promo, premium UI highlights). Yellow/Storm ELEMENT accents are
+       allowed as element colour — they are NOT premium gold.
+
+   ISOLATION: every token is prefixed --vq- so it can never collide with
+   MintVault tokens. Consumed by client/src/vault-quest/ui/vault-quest.css.
+   Tokens are scoped to the ".vq-theme" class — wrap any Vault Quest surface
+   root in "vq-theme" (VQPage / VQThemeRoot do this) or the vars are undefined.
+
+   STATUS LEGEND in comments:  [LOCK] founder-locked · [derived] adjustable
+   scale derived from a lock · [proposed] needs sign-off (see OPEN-## in spec).
+   ========================================================================== */
+
+.vq-theme {
+  /* ---------------------------------------------------------------------------
+     1. BRAND CORE  — the four locked colours (directive v1.0)
+     ------------------------------------------------------------------------ */
+  --vq-navy:        #102A5E; /* [LOCK] Primary Deep Navy */
+  --vq-navy-deep:   #081A3D; /* [LOCK] Secondary Navy */
+  --vq-white:       #F7F9FC; /* [LOCK] Background White */
+  --vq-silver:      #D7DCE6; /* [LOCK] Neutral Silver */
+
+  /* ---------------------------------------------------------------------------
+     2. NAVY SCALE  — [derived] a working ladder anchored on the two locked
+     navies (700 = primary, 900 = secondary). For surfaces, borders, states.
+     ------------------------------------------------------------------------ */
+  --vq-navy-950: #050F26; /* [derived] deepest — footer wells, overlays */
+  --vq-navy-900: #081A3D; /* [LOCK]   = navy-deep */
+  --vq-navy-800: #0C2252; /* [derived] */
+  --vq-navy-700: #102A5E; /* [LOCK]   = navy (primary) */
+  --vq-navy-600: #1C3B79; /* [derived] hover on primary */
+  --vq-navy-500: #2B4F98; /* [derived] active/lines on dark */
+  --vq-navy-400: #4A6BB2; /* [derived] borders/dividers on dark */
+  --vq-navy-300: #7B93C8; /* [derived] muted text on dark */
+  --vq-navy-200: #AEBFDD; /* [derived] subtle borders on light */
+  --vq-navy-100: #DCE3F0; /* [derived] tint fills on light */
+
+  /* ---------------------------------------------------------------------------
+     3. UI NEUTRALS  — white / silver system for light surfaces
+     ------------------------------------------------------------------------ */
+  --vq-bg:            var(--vq-white);   /* page background */
+  --vq-surface:       #FFFFFF;           /* cards, panels */
+  --vq-surface-sunken: #EEF2F8;          /* [derived] wells, inputs */
+  --vq-border:        var(--vq-silver);  /* default border */
+  --vq-border-strong: #B7C0D2;           /* [derived] emphasised border */
+  --vq-field-border:  #8090AC;           /* [derived] form-control border — WCAG 1.4.11 (3:1 on white) */
+  --vq-ink:           var(--vq-navy-deep); /* primary text on light */
+  --vq-ink-muted:     #48587A;           /* [derived] secondary text */
+  --vq-ink-faint:     #69758F;           /* [derived] captions/placeholders — AA on white */
+  --vq-on-navy:       #FFFFFF;           /* text on navy surfaces */
+  --vq-on-navy-muted: var(--vq-navy-300); /* muted text on navy */
+
+  /* ---------------------------------------------------------------------------
+     4. PREMIUM GOLD  — [proposed, confirm hex under OPEN-11]
+     Reserved for Secret Rare / Founder / Promo / premium UI highlights ONLY.
+     Deliberately metallic + distinct from the Storm ELEMENT yellow so the
+     "reserved / premium" signal reads. NEVER the primary colour of a standard
+     card or standard UI.
+     ------------------------------------------------------------------------ */
+  --vq-gold:        #C9A227; /* [proposed] premium gold */
+  --vq-gold-bright: #E6C35A; /* [proposed] highlight */
+  --vq-gold-deep:   #9A7B18; /* [proposed] shadow/edge */
+  --vq-gold-ink:    #7A6410; /* [proposed] text/label on gold tints — AA (metallic border stays gold-deep) */
+  --vq-gold-foil:   linear-gradient(135deg, #E6C35A 0%, #C9A227 45%, #9A7B18 100%); /* [proposed] foil sweep */
+
+  /* ---------------------------------------------------------------------------
+     4b. RARITY TOKENS  — [proposed, confirm under OPEN-11]
+     Standard tiers (C/U/R) use the neutral/navy system; PREMIUM tiers
+     (SR/GR/UR) are the ONLY rarities that use gold — this is exactly where the
+     "gold reserved for premium/rarity" rule applies. Rarity colours never use
+     an ELEMENT hue (kept independent of the card-face element palette).
+     ------------------------------------------------------------------------ */
+  --vq-rarity-common:    #5E6A82; /* C  — steel/navy (AA on tint) */
+  --vq-rarity-uncommon:  #4A6BB2; /* U  — navy-400 */
+  --vq-rarity-rare:      #102A5E; /* R  — navy primary */
+  --vq-rarity-secret:    #C9A227; /* SR — premium gold */
+  --vq-rarity-gold:      #E6C35A; /* GR — bright gold */
+  --vq-rarity-ultra:     var(--vq-gold-foil); /* UR — gold foil */
+
+  /* ---------------------------------------------------------------------------
+     5. VISUAL LANGUAGE — radial lighting, neon energy lines, glow/particles
+     (directive locks the MECHANIC; the neon HUE is [proposed] under OPEN-18).
+     ------------------------------------------------------------------------ */
+  --vq-neon:        #4EA8FF; /* [proposed OPEN-18] neon energy-line accent (a 5th hue — needs sign-off) */
+  --vq-neon-soft:   rgba(78, 168, 255, 0.35);
+  --vq-focus:       #2B8AF0; /* [proposed] focus indicator — darker blue meeting 3:1 on BOTH white and navy */
+  --vq-glow-line:   0 0 6px rgba(78, 168, 255, 0.55), 0 0 18px rgba(78, 168, 255, 0.30); /* neon line bloom */
+  --vq-glow-soft:   0 0 40px rgba(255, 255, 255, 0.10);                                  /* soft particle/light bloom */
+  --vq-radial-lighting: radial-gradient(120% 120% at 50% 0%, var(--vq-navy-600) 0%, var(--vq-navy-800) 45%, var(--vq-navy-950) 100%); /* hero/loading backdrop */
+  --vq-radial-spotlight: radial-gradient(60% 60% at 50% 35%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 70%);
+
+  /* ---------------------------------------------------------------------------
+     6. ELEVATION  — [derived] navy-tinted shadows (never pure black, so the
+     navy brand reads through the depth).
+     ------------------------------------------------------------------------ */
+  --vq-shadow-1: 0 1px 2px rgba(8, 26, 61, 0.08);
+  --vq-shadow-2: 0 4px 12px rgba(8, 26, 61, 0.10);
+  --vq-shadow-3: 0 10px 28px rgba(8, 26, 61, 0.14);
+  --vq-shadow-4: 0 24px 60px rgba(8, 26, 61, 0.22);
+
+  /* ---------------------------------------------------------------------------
+     7. SPACING  — [derived] 4px base scale
+     ------------------------------------------------------------------------ */
+  --vq-space-0: 0;
+  --vq-space-1: 0.25rem; /* 4  */
+  --vq-space-2: 0.5rem;  /* 8  */
+  --vq-space-3: 0.75rem; /* 12 */
+  --vq-space-4: 1rem;    /* 16 */
+  --vq-space-5: 1.5rem;  /* 24 */
+  --vq-space-6: 2rem;    /* 32 */
+  --vq-space-7: 3rem;    /* 48 */
+  --vq-space-8: 4rem;    /* 64 */
+  --vq-space-9: 6rem;    /* 96 */
+
+  /* ---------------------------------------------------------------------------
+     8. RADII  — [derived] (UI only; the CARD trim geometry is the LOCKED
+     template's, not these — see spec §7.)
+     ------------------------------------------------------------------------ */
+  --vq-radius-sm:   6px;
+  --vq-radius-md:   10px;
+  --vq-radius-lg:   16px;
+  --vq-radius-xl:   24px;
+  --vq-radius-pill: 999px;
+
+  /* ---------------------------------------------------------------------------
+     9. TYPOGRAPHY
+     Font family is UNRESOLVED — see OPEN-02. Do NOT assume a family; the fallback
+     stack below is a TODO placeholder until the founder locks the VQ type family.
+     The type SCALE is [proposed] (low-risk structural sizing).
+     ------------------------------------------------------------------------ */
+  --vq-font-sans: /* TODO OPEN-02: lock VQ type family */ system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --vq-font-display: var(--vq-font-sans); /* TODO OPEN-02: display face if distinct */
+
+  --vq-text-xs:   0.75rem;  /* 12 */
+  --vq-text-sm:   0.875rem; /* 14 */
+  --vq-text-base: 1rem;     /* 16 */
+  --vq-text-lg:   1.125rem; /* 18 */
+  --vq-text-xl:   1.375rem; /* 22 */
+  --vq-text-2xl:  1.75rem;  /* 28 */
+  --vq-text-3xl:  2.25rem;  /* 36 */
+  --vq-text-4xl:  3rem;     /* 48 */
+
+  --vq-weight-regular:  400;
+  --vq-weight-medium:   500;
+  --vq-weight-semibold: 600;
+  --vq-weight-bold:     700;
+  --vq-leading-tight:  1.15;
+  --vq-leading-normal: 1.5;
+
+  /* ---------------------------------------------------------------------------
+     10. CARD-FACE ELEMENT PALETTE  — [LOCK, card-face exempt from navy]
+     These MIRROR the render-engine source of truth:
+       server/vault-quest/lib/vq-constants.ts (VQ_ELEMENTS).
+     Keep the two in sync. A future colour-blind-safe revision of the roster is
+     governed by OPEN-03 (do not "fix" hues here unilaterally).
+     Exposed for UI swatches / element chips / filters — NOT for re-skinning the
+     navy foundation.
+     ------------------------------------------------------------------------ */
+  --vq-el-flame-border:   #C93316;  --vq-el-flame-accent:   #F97316;  --vq-el-flame-dark:   #2A0B05;
+  --vq-el-water-border:   #0284C7;  --vq-el-water-accent:   #38BDF8;  --vq-el-water-dark:   #082F49;
+  --vq-el-nature-border:  #2F9E44;  --vq-el-nature-accent:  #69DB7C;  --vq-el-nature-dark:  #0B2E13;
+  --vq-el-storm-border:   #E8A100;  --vq-el-storm-accent:   #FFD43B;  --vq-el-storm-dark:   #3A2A00; /* element gold — NOT premium gold */
+  --vq-el-stone-border:   #7A6A55;  --vq-el-stone-accent:   #B8A88F;  --vq-el-stone-dark:   #2A231A;
+  --vq-el-shadow-border:  #6741D9;  --vq-el-shadow-accent:  #9775FA;  --vq-el-shadow-dark:  #160B2E;
+  --vq-el-neutral-border: #64748B;  --vq-el-neutral-accent: #CBD5E1;  --vq-el-neutral-dark: #0F172A;
+}

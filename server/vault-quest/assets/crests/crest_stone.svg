@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- PLACEHOLDER crest — replace with the final Stone crest symbol -->
+  <path d="M50 8 L86 30 L86 70 L50 92 L14 70 L14 30 Z" fill="#B8A88F" stroke="#2A231A" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M50 8 L86 30 L50 50 L14 30 Z" fill="#D8CBB6" stroke="#2A231A" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M50 50 L50 92 L14 70 L14 30 Z" fill="#9C8B72" stroke="#2A231A" stroke-width="3" stroke-linejoin="round"/>
+</svg>
