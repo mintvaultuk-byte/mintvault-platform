@@ -834,11 +834,23 @@ export default function AdminVaultQuest() {
   });
   const families = [...new Set((dash.data?.cards ?? []).map((c) => c.familyId).filter(Boolean))].sort() as string[];
 
-  const Tile = ({ label, value, tone }: { label: string; value: number | string; tone?: string }) => (
-    <div className={`rounded-lg border border-slate-800 bg-slate-900/50 p-3 ${tone ?? ""}`}>
+  // Clicking a stat tile filters the card list to those cards (resets other filters)
+  // and scrolls the list into view so the result is visible.
+  const listRef = useRef<HTMLDivElement>(null);
+  const selectTile = (patch: Partial<typeof filters>) => {
+    setFilters({ q: "", status: "", cardType: "", element: "", rarity: "", need: "", family: "", ...patch });
+    setTimeout(() => listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+  };
+  const noFilter = !filters.status && !filters.need && !filters.cardType && !filters.element && !filters.rarity && !filters.family && !filters.q;
+  const Tile = ({ label, value, onClick, active }: { label: string; value: number | string; onClick?: () => void; active?: boolean }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-lg border p-3 text-left transition ${active ? "border-amber-500 bg-amber-500/10" : "border-slate-800 bg-slate-900/50"} cursor-pointer hover:border-amber-500/60 hover:bg-slate-900`}
+    >
       <div className="text-[11px] uppercase tracking-wide text-slate-400">{label}</div>
       <div className="text-xl font-bold">{value}</div>
-    </div>
+    </button>
   );
 
   return (
@@ -871,18 +883,18 @@ export default function AdminVaultQuest() {
             {dash.data && (
               <>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-                  <Tile label="Total" value={dash.data.total} />
-                  <Tile label="Base" value={dash.data.base} />
-                  <Tile label="Variants" value={dash.data.variants} />
-                  <Tile label="Needs data" value={dash.data.needsData} />
-                  <Tile label="Needs artwork" value={dash.data.needsArtwork} />
-                  <Tile label="Placeholder el." value={dash.data.placeholderElements} />
-                  <Tile label="Approved" value={dash.data.byStatus.approved ?? 0} />
-                  <Tile label="Export ready" value={dash.data.byStatus.export_ready ?? 0} />
-                  <Tile label="Ready" value={dash.data.byStatus.ready_for_review ?? 0} />
-                  <Tile label="Families ✓" value={`${dash.data.familiesComplete}/${dash.data.families}`} />
-                  <Tile label="Drafts" value={dash.data.byStatus.draft ?? 0} />
-                  <Tile label="Rejected" value={dash.data.byStatus.rejected ?? 0} />
+                  <Tile label="Total" value={dash.data.total} onClick={() => selectTile({})} active={noFilter} />
+                  <Tile label="Base" value={dash.data.base} onClick={() => selectTile({ need: "base" })} active={filters.need === "base"} />
+                  <Tile label="Variants" value={dash.data.variants} onClick={() => selectTile({ need: "variants" })} active={filters.need === "variants"} />
+                  <Tile label="Needs data" value={dash.data.needsData} onClick={() => selectTile({ need: "data" })} active={filters.need === "data"} />
+                  <Tile label="Needs artwork" value={dash.data.needsArtwork} onClick={() => selectTile({ need: "artwork" })} active={filters.need === "artwork"} />
+                  <Tile label="Placeholder el." value={dash.data.placeholderElements} onClick={() => selectTile({ need: "placeholder" })} active={filters.need === "placeholder"} />
+                  <Tile label="Approved" value={dash.data.byStatus.approved ?? 0} onClick={() => selectTile({ status: "approved" })} active={filters.status === "approved"} />
+                  <Tile label="Export ready" value={dash.data.byStatus.export_ready ?? 0} onClick={() => selectTile({ status: "export_ready" })} active={filters.status === "export_ready"} />
+                  <Tile label="Ready" value={dash.data.byStatus.ready_for_review ?? 0} onClick={() => selectTile({ status: "ready_for_review" })} active={filters.status === "ready_for_review"} />
+                  <Tile label="Families ✓" value={`${dash.data.familiesComplete}/${dash.data.families}`} onClick={() => selectTile({ cardType: "Creature" })} active={filters.cardType === "Creature"} />
+                  <Tile label="Drafts" value={dash.data.byStatus.draft ?? 0} onClick={() => selectTile({ status: "draft" })} active={filters.status === "draft"} />
+                  <Tile label="Rejected" value={dash.data.byStatus.rejected ?? 0} onClick={() => selectTile({ status: "rejected" })} active={filters.status === "rejected"} />
                 </div>
 
                 <div className="flex flex-wrap gap-2 rounded-lg border border-slate-800 bg-slate-900/40 p-3">
@@ -906,7 +918,7 @@ export default function AdminVaultQuest() {
                   </div>
                 </div>
 
-                <div className="overflow-hidden rounded-lg border border-slate-800">
+                <div ref={listRef} className="scroll-mt-4 overflow-hidden rounded-lg border border-slate-800">
                   <table className="w-full text-sm">
                     <thead className="bg-slate-900/60 text-left text-[11px] uppercase tracking-wide text-slate-400">
                       <tr><th className="px-3 py-2">Card</th><th className="px-2 py-2">Type</th><th className="px-2 py-2">Element</th><th className="px-2 py-2">Rarity</th><th className="px-2 py-2">Data</th><th className="px-2 py-2">Art</th><th className="px-2 py-2">Ready</th><th className="px-2 py-2">Status</th></tr>
