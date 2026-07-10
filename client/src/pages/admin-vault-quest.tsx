@@ -5,7 +5,16 @@ import { useToast } from "@/hooks/use-toast";
 import { AdminButton } from "@/components/admin";
 import { Loader2, Upload, Save, History, FileImage, FileText, FileCode, Plus, AlertCircle, CheckCircle2, LayoutGrid, ArrowLeft, ShieldCheck, RotateCcw, XCircle, PackageCheck, Archive, Wand2, Sparkles, ChevronDown, BookOpen, Lock, Unlock } from "lucide-react";
 import { STATUS_META, allowedTargets, type VqStatus } from "@shared/vq-workflow";
-import { ReusePanel, fetchReuseCheck, type ReuseCheck, type ReusableAsset } from "@/components/vault-quest/workflow";
+import { ReusePanel, fetchReuseCheck, useAdvancedMode, type ReuseCheck, type ReusableAsset } from "@/components/vault-quest/workflow";
+
+// AI Cost Mode — founder-friendly quality tiers that map to real image models.
+// Simple Mode shows only these; Advanced Mode still exposes the model dropdown.
+const COST_MODES: { key: "cheapest" | "balanced" | "highest"; label: string; hint: string; model: VqImageModel }[] = [
+  { key: "cheapest", label: "Cheapest", hint: "Lowest credits", model: VQ_QUALITY_MODEL.draft },
+  { key: "balanced", label: "Balanced", hint: "Recommended", model: VQ_QUALITY_MODEL.standard },
+  { key: "highest", label: "Highest Quality", hint: "Best detail", model: VQ_QUALITY_MODEL.premium },
+];
+const costModeFor = (m: VqImageModel) => COST_MODES.find((c) => c.model === m)?.key ?? "balanced";
 import { VQ_IMAGE_MODELS, VQ_QUALITY_MODEL, vqCreditsPerImage, type VqImageModel } from "@shared/vq-schema";
 
 // Vault Quest Studio — production control centre: dashboard board + card editor
@@ -648,6 +657,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   // Image model / quality — default DRAFT/CHEAP (never the expensive model unless chosen).
   const [imgModel, setImgModel] = useState<VqImageModel>("z_image");
   const creditsPerImage = vqCreditsPerImage(imgModel);
+  const [advanced] = useAdvancedMode(); // Simple founder workflow is the default; Advanced reveals technical controls.
   const imagesPerItem = refType === "master_portrait" ? (cost.data?.masterImagesPerItem ?? 3) : 1;
   const higgsProvider = cost.data?.providers?.find((p) => p.id === "higgsfield");
   const openaiProvider = cost.data?.providers?.find((p) => p.id === "openai");
@@ -863,20 +873,23 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
 
   // Reuse-before-generate: never silently regenerate when approved assets exist.
   const [reuseCheck, setReuseCheck] = useState<ReuseCheck | null>(null);
+  const [reuseType, setReuseType] = useState<VqRefType>("master_portrait");
 
-  async function generateMasterArtwork() {
+  async function generateMasterArtwork(typeOverride?: VqRefType) {
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    const type = typeOverride ?? refType;
+    if (typeOverride && typeOverride !== refType) setRefType(typeOverride); // keep gallery + approved-image in sync
     // Check for approved reusable assets FIRST — reuse must be an explicit choice.
-    const check = await fetchReuseCheck({ characterId: selected.characterId, referenceType: refType });
-    if (check && check.assets.length > 0) { setReuseCheck(check); return; }
-    await doGenerateReference();
+    const check = await fetchReuseCheck({ characterId: selected.characterId, referenceType: type });
+    if (check && check.assets.length > 0) { setReuseType(type); setReuseCheck(check); return; }
+    await doGenerateReference(type);
   }
 
   async function applyReuseAsset(asset: ReusableAsset) {
     if (!selected) return;
     setBusy("gen-art");
     try {
-      const r = await apiRequest("POST", `/api/admin/vault-quest/sets/GNV/reuse-apply`, { characterId: selected.characterId, sourceR2Key: asset.r2Key, referenceType: refType });
+      const r = await apiRequest("POST", `/api/admin/vault-quest/sets/GNV/reuse-apply`, { characterId: selected.characterId, sourceR2Key: asset.r2Key, referenceType: reuseType });
       if (!r.ok) throw Object.assign(new Error((await r.json().catch(() => ({}))).error || "reuse failed"), { status: r.status });
       await candQuery.refetch();
       setArtNonce((n) => n + 1);
@@ -889,14 +902,16 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     }
   }
 
-  async function doGenerateReference() {
+  async function doGenerateReference(typeOverride?: VqRefType) {
     if (!selected) return;
+    const type = typeOverride ?? refType;
+    const typeLabel = REF_TYPES.find((t) => t.value === type)?.label ?? type;
     setReuseCheck(null);
     setBusy("gen-art");
     try {
-      if (refType === "master_portrait") {
+      if (type === "master_portrait") {
         // Master Reference always produces THREE strict studio candidates (enforced server-side).
-        const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: refType, model: imgModel });
+        const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: type, model: imgModel });
         const data = (await res.json()) as { created?: unknown[]; autoRejected?: number };
         await candQuery.refetch();
         setArtNonce((n) => n + 1);
@@ -905,15 +920,15 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
         trackCredits(made * creditsPerImage);
         toast({ title: `Master Reference — ${made} candidate${made === 1 ? "" : "s"}`, description: rejected ? `${rejected} auto-rejected for identity drift. Choose one below.` : "Studio references generated — choose one below." });
       } else {
-        const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: refType, model: imgModel });
+        const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: type, model: imgModel });
         const data = (await res.json()) as { width: number; height: number };
         await candQuery.refetch();
         trackCredits(creditsPerImage);
         setArtNonce((n) => n + 1);
-        toast({ title: `${refTypeMeta.label} generated`, description: `${data.width}x${data.height} — review below, then Approve.` });
+        toast({ title: `${typeLabel} generated`, description: `${data.width}x${data.height} — review below, then Approve.` });
       }
     } catch (e) {
-      artworkError(e, `Generate ${refTypeMeta.label} failed`);
+      artworkError(e, `Generate ${typeLabel} failed`);
     } finally {
       setBusy(null);
     }
@@ -1331,16 +1346,17 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                 </div>
               </div>
 
-              {/* ═══ Production workflow — the permanent 7-step pipeline ═══ */}
+              {/* ═══ Character workflow timeline — the permanent 8-step pipeline ═══ */}
               {(() => {
                 const steps = [
-                  { label: "Description Approved", done: descStatus(selected) === "approved" },
-                  { label: "Master Reference", done: packApproved(selected, "master_portrait") },
-                  { label: "Action Pose", done: packApproved(selected, "action_pose") },
+                  { label: "Create Character", done: descStatus(selected) === "approved" && packApproved(selected, "master_portrait") },
+                  { label: "Create Battle Pose", done: packApproved(selected, "action_pose") },
                   { label: "Lock Character", done: selected.locked },
-                  { label: "Generate Full Card", done: false },
+                  { label: "Create Cards", done: false },
+                  { label: "Create Rare Cards", done: false },
+                  { label: "Packaging", done: false },
                   { label: "QA", done: false },
-                  { label: "Export Ready", done: false },
+                  { label: "Release", done: false },
                 ];
                 const active = steps.findIndex((s) => !s.done);
                 return (
@@ -1430,15 +1446,210 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                 </div>
               </div>
 
-              {/* ═══ 2 · REFERENCES — generated only from the approved description ═══ */}
-              <div className="rounded-md border border-amber-800/40 bg-amber-950/10 p-3">
+              {/* ═══ SIMPLE guided reference workflow (Phase 5.3) — Master → Action → Lock ═══ */}
+              {!advanced && (() => {
+                const descOk = descStatus(selected) === "approved";
+                const masterOk = packApproved(selected, "master_portrait");
+                const actionOk = packApproved(selected, "action_pose");
+                const cid = encodeURIComponent(selected.characterId);
+                const busyGen = busy === "gen-art";
+                const masterCands = candidates.filter((c) => c.referenceType === "master_portrait" && c.status === "candidate");
+                const actionCands = candidates.filter((c) => c.referenceType === "action_pose" && c.status === "candidate");
+                const packPct = (masterOk ? 50 : 0) + (actionOk ? 50 : 0);
+                const dots = [
+                  { label: "Description", ok: descOk },
+                  { label: "Master", ok: masterOk },
+                  { label: "Action", ok: actionOk },
+                  { label: "Lock", ok: selected.locked },
+                  { label: "Canonical", ok: isCanonical(selected) },
+                ];
+                const next = !descOk ? { now: "Write & approve the description", do: "Approve Description first (above)", primary: null }
+                  : !masterOk ? { now: "Description approved", do: "Generate Master Reference", primary: "master" as const }
+                    : masterCands.length > 0 && !masterOk ? { now: "Master candidates ready", do: "Approve a Master Reference", primary: null }
+                      : !actionOk ? { now: "Master approved", do: "Generate Matching Action Pose", primary: "action" as const }
+                        : !selected.locked ? { now: "Action approved", do: "Lock Character", primary: "lock" as const }
+                          : { now: "Character locked", do: "Generate Cards", primary: null };
+                const gold = "#D4AF37";
+                return (
+                  <div className="space-y-4">
+                    {/* Character Identity panel */}
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+                      <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Character Identity</div>
+                      <div className="flex flex-wrap gap-2">
+                        {dots.map((d) => (
+                          <span key={d.label} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold ${d.ok ? "border-emerald-700 bg-emerald-950/50 text-emerald-300" : "border-slate-700 bg-slate-900 text-slate-500"}`}>
+                            {d.ok ? <CheckCircle2 className="h-3.5 w-3.5" /> : <span className="h-3 w-3 rounded-full border-2 border-slate-600" />}{d.label}
+                          </span>
+                        ))}
+                      </div>
+                      {!dots.every((d) => d.ok) && <p className="mt-2 text-[11px] text-slate-500">Everything must be green before cards can be generated for this character.</p>}
+                    </div>
+
+                    {/* Current → Next step */}
+                    <div className="flex items-center gap-3 rounded-xl border p-3" style={{ borderColor: "#3f3410", background: "rgba(212,175,55,0.06)" }}>
+                      <div className="flex-1">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Now</span>
+                        <div className="text-sm font-semibold text-slate-200">{next.now}</div>
+                      </div>
+                      <span className="text-slate-600">→</span>
+                      <div className="flex-1">
+                        <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: gold }}>Next</span>
+                        <div className="text-sm font-bold" style={{ color: gold }}>{next.do}</div>
+                      </div>
+                    </div>
+
+                    {/* AI Cost Mode */}
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                      <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">AI Cost Mode</div>
+                      <div className="flex flex-wrap gap-2">
+                        {COST_MODES.map((cm) => {
+                          const active = costModeFor(imgModel) === cm.key;
+                          return (
+                            <button key={cm.key} type="button" onClick={() => setImgModel(cm.model)} className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${active ? "border-amber-500 bg-amber-500/15 text-amber-200" : "border-slate-700 text-slate-400 hover:border-slate-500"}`}>
+                              <span className={`h-3 w-3 rounded-full border-2 ${active ? "border-amber-400 bg-amber-400" : "border-slate-600"}`} />
+                              {cm.label}{cm.key === "balanced" && <span className="text-[10px] text-slate-500">(Recommended)</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* STEP 1 · MASTER REFERENCE */}
+                    <div className={`rounded-xl border p-4 ${masterOk ? "border-emerald-800/50 bg-emerald-950/10" : "border-slate-800 bg-slate-900/40"}`}>
+                      <div className="mb-3 flex items-center justify-between">
+                        <span className="flex items-center gap-2 text-sm font-bold text-slate-100"><span className="flex h-6 w-6 items-center justify-center rounded-lg bg-slate-800 text-xs font-bold text-slate-300">1</span>Master Reference{masterOk && <CheckCircle2 className="h-4 w-4 text-emerald-400" />}</span>
+                      </div>
+                      {masterOk ? (
+                        <div className="flex items-center gap-3">
+                          <img src={`/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}`} alt="approved master" className="h-24 w-24 rounded-lg bg-slate-950 object-contain" />
+                          <div>
+                            <div className="text-sm text-emerald-300">Approved Master on file</div>
+                            <p className="mt-0.5 max-w-sm text-[11px] text-slate-500">Every future card and pose reuses this exact image so the character always looks the same.</p>
+                            <button type="button" onClick={() => generateMasterArtwork("master_portrait")} disabled={busyGen || selected.locked} className="mt-2 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 disabled:opacity-40">Replace Master</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <button type="button" onClick={() => generateMasterArtwork("master_portrait")} disabled={busyGen || !descOk || selected.locked} title={!descOk ? "Approve the description first" : undefined}
+                            className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40" style={{ background: gold }}>
+                            {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}Generate Master Reference
+                          </button>
+                          {!descOk && <p className="mt-2 text-center text-[11px] text-slate-500">Approve the character description above to unlock this.</p>}
+                          {masterCands.length > 0 && (
+                            <div className="mt-3">
+                              <div className="mb-1.5 text-[11px] font-semibold text-slate-400">Choose your favourite:</div>
+                              <div className="grid grid-cols-3 gap-2">
+                                {masterCands.map((c) => (
+                                  <div key={c.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-1.5">
+                                    <img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="master candidate" className="aspect-square w-full rounded bg-slate-950 object-contain" />
+                                    <div className="mt-1 flex items-center justify-between">
+                                      <span className="text-[10px] text-slate-500">{c.identityScore != null ? `Match ${c.identityScore}` : ""}</span>
+                                      <div className="flex gap-1">
+                                        <button type="button" onClick={() => rejectCandidate(c.id)} className="rounded p-0.5 text-slate-500 hover:text-red-400"><XCircle className="h-4 w-4" /></button>
+                                        <button type="button" onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-500">Approve</button>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    {/* STEP 2 · ACTION REFERENCE — disabled until Master approved */}
+                    <div className={`relative rounded-xl border p-4 ${!masterOk ? "border-slate-800 bg-slate-950/60" : actionOk ? "border-emerald-800/50 bg-emerald-950/10" : "border-slate-800 bg-slate-900/40"}`}>
+                      <div className="mb-3 flex items-center justify-between">
+                        <span className="flex items-center gap-2 text-sm font-bold text-slate-100"><span className="flex h-6 w-6 items-center justify-center rounded-lg bg-slate-800 text-xs font-bold text-slate-300">2</span>Action Reference{actionOk && <CheckCircle2 className="h-4 w-4 text-emerald-400" />}</span>
+                        {!masterOk && <span className="inline-flex items-center gap-1 text-[11px] text-slate-500"><Lock className="h-3 w-3" />Locked until Master approved</span>}
+                      </div>
+                      {!masterOk ? (
+                        <p className="text-[11px] text-slate-600">Approve a Master Reference first — the Action Pose is built from it so the character stays identical.</p>
+                      ) : actionOk ? (
+                        <div className="flex items-center gap-3">
+                          <img src={`/api/admin/vault-quest/characters/${cid}/pack/action_pose?v=${artNonce}`} alt="approved action" className="h-24 w-24 rounded-lg bg-slate-950 object-contain" />
+                          <div>
+                            <div className="text-sm text-emerald-300">Approved Action Pose on file</div>
+                            <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked} className="mt-2 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 disabled:opacity-40">Replace Action</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked}
+                            className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>
+                            {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}Generate Matching Action Pose
+                          </button>
+                          <p className="mt-2 text-center text-[11px] text-slate-500">Uses your approved Master so the face, colours, markings and shape stay the same — only the pose changes.</p>
+                          {actionCands.length > 0 && (
+                            <div className="mt-3 space-y-2">
+                              <div className="text-[11px] font-semibold text-slate-400">Compare each pose to your approved Master:</div>
+                              {actionCands.map((c) => (
+                                <div key={c.id} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 p-2">
+                                  <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}`} alt="master" className="h-20 w-20 rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Approved Master</div></div>
+                                  <span className="text-slate-600">→</span>
+                                  <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="action candidate" className="h-20 w-20 rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Action Candidate</div></div>
+                                  <div className="ml-2 flex-1">
+                                    <div className="text-xs font-semibold" style={{ color: (c.identityScore ?? 0) >= 70 ? "#6ee7b7" : "#fcd34d" }}>Identity Score {c.identityScore ?? "—"}</div>
+                                    <div className="mt-1.5 flex gap-1.5">
+                                      <button type="button" onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500">Approve</button>
+                                      <button type="button" onClick={() => rejectCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400">Reject</button>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    {/* Reference Pack progress */}
+                    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-sm font-bold text-slate-200">Reference Pack</span>
+                        <span className="text-xs font-semibold" style={{ color: packPct === 100 ? "#6ee7b7" : gold }}>{packPct === 100 ? "Complete ✅" : `${packPct}%`}</span>
+                      </div>
+                      <div className="mb-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full transition-all" style={{ width: `${packPct}%`, background: packPct === 100 ? "#34d399" : gold }} /></div>
+                      <div className="flex gap-4 text-xs">
+                        <span className={masterOk ? "text-emerald-300" : "text-slate-500"}>{masterOk ? "✅" : "⬜"} Master Reference</span>
+                        <span className={actionOk ? "text-emerald-300" : "text-slate-500"}>{actionOk ? "✅" : "⬜"} Action Pose</span>
+                      </div>
+                    </div>
+
+                    {/* Lock explanation + Continue */}
+                    {!selected.locked && (
+                      <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+                        {requiredComplete(selected) ? (
+                          <button type="button" onClick={toggleLock} disabled={busy === "lock"} className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>
+                            {busy === "lock" ? <Loader2 className="h-5 w-5 animate-spin" /> : <Lock className="h-5 w-5" />}Lock Character
+                          </button>
+                        ) : (
+                          <>
+                            <div className="mb-2 text-sm font-semibold text-slate-300">Before you can lock this character, you still need:</div>
+                            <div className="space-y-1 text-sm">
+                              {!descOk && <div className="flex items-center gap-2 text-slate-400"><span className="h-4 w-4 rounded-sm border-2 border-slate-600" />Approve the Description</div>}
+                              {descOk && !masterOk && <div className="flex items-center gap-2 text-slate-400"><span className="h-4 w-4 rounded-sm border-2 border-slate-600" />Approve a Master Reference</div>}
+                              {masterOk && !actionOk && <div className="flex items-center gap-2 text-slate-400"><span className="h-4 w-4 rounded-sm border-2 border-slate-600" />Approve an Action Pose</div>}
+                            </div>
+                            <div className="mt-3 text-[11px] text-slate-500">Continue below — the next step is <b style={{ color: gold }}>{next.do}</b>.</div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* ═══ 2 · REFERENCES — full editor (Advanced Mode) ═══ */}
+              {advanced && (<div className="rounded-md border border-amber-800/40 bg-amber-950/10 p-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <span className="flex items-center gap-2">
                     <span className="text-xs font-bold uppercase tracking-widest text-amber-300">References</span>
                     <span className={labelCls}>generating <b className="text-amber-300">{refTypeMeta.label}</b></span>
                   </span>
                   <div className="flex flex-wrap gap-2">
-                    <AdminButton data-deeplink="generate-reference" variant="gold" size="sm" onClick={generateMasterArtwork} disabled={busy === "gen-art" || selected.locked || descStatus(selected) !== "approved"} title={descStatus(selected) !== "approved" ? "Approve the description first — artwork reads from the approved description only." : undefined}>
+                    <AdminButton data-deeplink="generate-reference" variant="gold" size="sm" onClick={() => generateMasterArtwork()} disabled={busy === "gen-art" || selected.locked || descStatus(selected) !== "approved"} title={descStatus(selected) !== "approved" ? "Approve the description first — artwork reads from the approved description only." : undefined}>
                       {busy === "gen-art" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Wand2 className="mr-1 h-4 w-4" />}Generate {refTypeMeta.label}
                     </AdminButton>
                     <AdminButton variant="ghost" size="sm" onClick={generate3More} disabled={busy === "gen-3more" || selected.locked || descStatus(selected) !== "approved"}>
@@ -1627,7 +1838,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                             <button type="button" title="Compare (pick two)" onClick={() => setCompareSel((p) => { const n = p.includes(c.id) ? p.filter((x) => x !== c.id) : [...p.slice(-1), c.id]; if (n.length === 2) setShowCompare(true); return n; })} className={`${mini} ${inCompare ? "border-sky-500 text-sky-300" : ""}`}>Compare</button>
                             <button type="button" title="Delete (hides it — file kept)" onClick={() => deleteCandidate(c.id)} disabled={busy === `del-${c.id}`} className={`${mini} hover:border-red-500 hover:text-red-300`}>{busy === `del-${c.id}` ? "…" : "Delete"}</button>
                             <button type="button" title="Show the exact prompt used" onClick={() => setPromptFor(c)} className={mini}>Prompt</button>
-                            <button type="button" title={`Generate another ${refTypeMeta.label} from the same description`} onClick={generateMasterArtwork} disabled={busy === "gen-art" || descStatus(selected) !== "approved"} className={mini}>Regen Similar</button>
+                            <button type="button" title={`Generate another ${refTypeMeta.label} from the same description`} onClick={() => generateMasterArtwork()} disabled={busy === "gen-art" || descStatus(selected) !== "approved"} className={mini}>Regen Similar</button>
                           </div>
                         </div>
                       );
@@ -1661,9 +1872,9 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                     </div>
                   </div>
                 )}
-              </div>
+              </div>)}
 
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              {advanced && (<div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                 <div className="rounded-md border border-slate-800 bg-slate-950/40 p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <span className={labelCls}>Reference artwork</span>
@@ -1686,7 +1897,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                     {selected.approvedArtworkR2Key ? <img src={`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/art/approved?v=${artNonce}`} alt="approved artwork" className="h-full w-full object-contain" /> : <span className="text-xs text-slate-500">not approved</span>}
                   </div>
                 </div>
-              </div>
+              </div>)}
 
             </section>
           )}
