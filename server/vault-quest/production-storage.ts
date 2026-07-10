@@ -13,6 +13,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { vqStorage } from "./storage";
+import { sanitizeWrite } from "./lib/write-sanitize";
 import { vqAiGenerations } from "@shared/vq-schema";
 import { STATUS_META, type VqStatus } from "@shared/vq-workflow";
 import {
@@ -278,49 +279,52 @@ export const productionStorage = {
   // ── Settings ──
   getSettings: (setCode: string) => safe(() => db.select().from(vqSetSettings).where(eq(vqSetSettings.setCode, setCode)).then((r) => r[0] ?? null), null),
   async upsertSettings(setCode: string, patch: Record<string, unknown>) {
+    const clean = sanitizeWrite(patch);
     const existing = await db.select().from(vqSetSettings).where(eq(vqSetSettings.setCode, setCode)).then((r) => r[0]);
     if (existing) {
-      const [row] = await db.update(vqSetSettings).set({ ...patch, updatedAt: new Date() }).where(eq(vqSetSettings.setCode, setCode)).returning();
+      const [row] = await db.update(vqSetSettings).set({ ...clean, updatedAt: new Date() }).where(eq(vqSetSettings.setCode, setCode)).returning();
       return row;
     }
-    const [row] = await db.insert(vqSetSettings).values({ setCode, ...patch }).returning();
+    const [row] = await db.insert(vqSetSettings).values({ ...clean, setCode }).returning();
     return row;
   },
 
   // ── Packaging ──
   listPackaging: (setCode: string) => safe(() => db.select().from(vqPackagingItems).where(eq(vqPackagingItems.setCode, setCode)).orderBy(vqPackagingItems.type), []),
-  createPackaging: async (setCode: string, values: Record<string, unknown>) => (await db.insert(vqPackagingItems).values({ setCode, type: String(values.type), name: String(values.name), ...values }).returning())[0],
-  updatePackaging: async (id: number, patch: Record<string, unknown>) => (await db.update(vqPackagingItems).set({ ...patch, updatedAt: new Date() }).where(eq(vqPackagingItems.id, id)).returning())[0],
+  createPackaging: async (setCode: string, values: Record<string, unknown>) => (await db.insert(vqPackagingItems).values({ ...sanitizeWrite(values), setCode, type: String(values.type), name: String(values.name) }).returning())[0],
+  updatePackaging: async (id: number, setCode: string, patch: Record<string, unknown>) => (await db.update(vqPackagingItems).set({ ...sanitizeWrite(patch), updatedAt: new Date() }).where(and(eq(vqPackagingItems.id, id), eq(vqPackagingItems.setCode, setCode))).returning())[0],
 
   // ── Pack config ──
   getPackConfig: (setCode: string) => safe(() => db.select().from(vqPackConfig).where(eq(vqPackConfig.setCode, setCode)).then((r) => r[0] ?? null), null),
   async upsertPackConfig(setCode: string, patch: Record<string, unknown>) {
+    const clean = sanitizeWrite(patch);
     const existing = await db.select().from(vqPackConfig).where(eq(vqPackConfig.setCode, setCode)).then((r) => r[0]);
-    if (existing) return (await db.update(vqPackConfig).set({ ...patch, updatedAt: new Date() }).where(eq(vqPackConfig.id, existing.id)).returning())[0];
-    return (await db.insert(vqPackConfig).values({ setCode, ...patch }).returning())[0];
+    if (existing) return (await db.update(vqPackConfig).set({ ...clean, updatedAt: new Date() }).where(eq(vqPackConfig.id, existing.id)).returning())[0];
+    return (await db.insert(vqPackConfig).values({ ...clean, setCode }).returning())[0];
   },
 
   // ── Print exports ──
   listPrint: (setCode: string) => safe(() => db.select().from(vqPrintExports).where(eq(vqPrintExports.setCode, setCode)), []),
-  createPrint: async (setCode: string, values: Record<string, unknown>) => (await db.insert(vqPrintExports).values({ setCode, type: String(values.type), ...values }).returning())[0],
-  updatePrint: async (id: number, patch: Record<string, unknown>) => (await db.update(vqPrintExports).set({ ...patch, updatedAt: new Date() }).where(eq(vqPrintExports.id, id)).returning())[0],
+  createPrint: async (setCode: string, values: Record<string, unknown>) => (await db.insert(vqPrintExports).values({ ...sanitizeWrite(values), setCode, type: String(values.type) }).returning())[0],
+  updatePrint: async (id: number, setCode: string, patch: Record<string, unknown>) => (await db.update(vqPrintExports).set({ ...sanitizeWrite(patch), updatedAt: new Date() }).where(and(eq(vqPrintExports.id, id), eq(vqPrintExports.setCode, setCode))).returning())[0],
 
   // ── QA ──
   listQa: (setCode: string) => safe(() => db.select().from(vqQaChecks).where(eq(vqQaChecks.setCode, setCode)), []),
-  createQa: async (setCode: string, values: Record<string, unknown>) => (await db.insert(vqQaChecks).values({ setCode, assetType: String(values.assetType), assetRef: String(values.assetRef), ...values }).returning())[0],
-  updateQa: async (id: number, patch: Record<string, unknown>) => (await db.update(vqQaChecks).set({ ...patch, updatedAt: new Date() }).where(eq(vqQaChecks.id, id)).returning())[0],
+  createQa: async (setCode: string, values: Record<string, unknown>) => (await db.insert(vqQaChecks).values({ ...sanitizeWrite(values), setCode, assetType: String(values.assetType), assetRef: String(values.assetRef) }).returning())[0],
+  updateQa: async (id: number, setCode: string, patch: Record<string, unknown>) => (await db.update(vqQaChecks).set({ ...sanitizeWrite(patch), updatedAt: new Date() }).where(and(eq(vqQaChecks.id, id), eq(vqQaChecks.setCode, setCode))).returning())[0],
 
   // ── Release ──
   getRelease: (setCode: string) => safe(() => db.select().from(vqReleaseState).where(eq(vqReleaseState.setCode, setCode)).then((r) => r[0] ?? null), null),
   async upsertRelease(setCode: string, patch: Record<string, unknown>) {
+    const clean = sanitizeWrite(patch);
     const existing = await db.select().from(vqReleaseState).where(eq(vqReleaseState.setCode, setCode)).then((r) => r[0]);
-    if (existing) return (await db.update(vqReleaseState).set({ ...patch, updatedAt: new Date() }).where(eq(vqReleaseState.setCode, setCode)).returning())[0];
-    return (await db.insert(vqReleaseState).values({ setCode, ...patch }).returning())[0];
+    if (existing) return (await db.update(vqReleaseState).set({ ...clean, updatedAt: new Date() }).where(eq(vqReleaseState.setCode, setCode)).returning())[0];
+    return (await db.insert(vqReleaseState).values({ ...clean, setCode }).returning())[0];
   },
 
   // ── Asset library ──
   listAssets: (setCode: string) => safe(() => db.select().from(vqAssetLibrary).where(eq(vqAssetLibrary.setCode, setCode)).orderBy(vqAssetLibrary.category), []),
-  createAsset: async (setCode: string, values: Record<string, unknown>) => (await db.insert(vqAssetLibrary).values({ setCode, category: String(values.category), name: String(values.name), ...values }).returning())[0],
+  createAsset: async (setCode: string, values: Record<string, unknown>) => (await db.insert(vqAssetLibrary).values({ ...sanitizeWrite(values), setCode, category: String(values.category), name: String(values.name) }).returning())[0],
 
   // ── Stage overrides ──
   async setStageStatus(setCode: string, stageKey: string, status: string, note?: string) {

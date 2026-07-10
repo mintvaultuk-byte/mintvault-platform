@@ -13,6 +13,7 @@ import { uploadToR2, getR2Buffer } from "../r2";
 import { toolsUpload } from "../lib/multer-configs";
 import { vqStorage, type CharacterBibleContext, type CharacterBiblePatch } from "../vault-quest/storage";
 import { validateArtwork } from "../vault-quest/upload-guard";
+import { intOrNull } from "../vault-quest/lib/write-sanitize";
 import { renderCard, type RenderCardInput } from "../vault-quest/render-service";
 import { evaluateCard } from "../vault-quest/qa-engine";
 import { vqArtKey, vqCharacterArtworkKey, vqCharacterCandidateKey, vqCharacterApprovedKey, fetchArt, renderSavedFromStudio, assertVqWriteKey } from "../vault-quest/render-saved";
@@ -75,18 +76,18 @@ function toInsert(body: VqEditorPayload): InsertVqCard {
     element: body.element,
     rarity: body.rarity ?? null,
     familyId: body.familyId ?? null,
-    stageNumber: body.stageNumber ?? null,
+    stageNumber: intOrNull(body.stageNumber),
     lifeStage: body.lifeStage ?? null,
-    health: body.health ?? null,
-    guard: body.guard ?? null,
-    shift: body.shift ?? null,
+    health: intOrNull(body.health),
+    guard: intOrNull(body.guard),
+    shift: intOrNull(body.shift),
     attack1Name: body.attack1Name ?? null,
-    attack1Cost: body.attack1Cost ?? null,
-    attack1Damage: body.attack1Damage ?? null,
+    attack1Cost: intOrNull(body.attack1Cost),
+    attack1Damage: intOrNull(body.attack1Damage),
     attack1Effect: body.attack1Effect ?? null,
     attack2Name: body.attack2Name ?? null,
-    attack2Cost: body.attack2Cost ?? null,
-    attack2Damage: body.attack2Damage ?? null,
+    attack2Cost: intOrNull(body.attack2Cost),
+    attack2Damage: intOrNull(body.attack2Damage),
     attack2Effect: body.attack2Effect ?? null,
     vulnerability: body.vulnerability ?? null,
     keywords: body.keywords ?? [],
@@ -97,7 +98,7 @@ function toInsert(body: VqEditorPayload): InsertVqCard {
     prevArtR2Key: (body.prevArtR2Key || body.prevArtCandidateKey) ? vqArtKey(body.cardId, "prev") : null,
     setCode: body.setCode ?? "GNV",
     language: body.language ?? "EN",
-    year: body.year ?? 2026,
+    year: intOrNull(body.year) ?? 2026,
     edition: body.edition ?? "FIRST EDITION",
     status: body.status ?? "draft",
     notes: body.notes ?? null,
@@ -136,9 +137,12 @@ const CHARACTER_PATCH_KEYS: (keyof CharacterBiblePatch)[] = [
   "elementIdentity",
   "negativePrompt",
   "masterArtworkPrompt",
-  "referenceArtworkR2Key",
-  "approvedArtworkR2Key",
-  "approvalStatus",
+  // NOTE: referenceArtworkR2Key / approvedArtworkR2Key / approvalStatus are
+  // deliberately NOT client-writable here. They are set only by the dedicated
+  // artwork/approve routes (which re-derive + prefix-guard the R2 key). Allowing
+  // them via the free-form Bible PATCH let a crafted call store an arbitrary key
+  // or fake `approvalStatus` (spoofing the Full-Card "has master portrait" gate).
+  // The client Bible save only ever sends the text/DNA fields + `locked`.
   "locked",
 ];
 
@@ -572,6 +576,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
       const character = await vqStorage.getCharacter(characterId);
       if (!character) return res.status(404).json({ error: "character not found" });
+      if (character.locked) return res.status(423).json({ error: "Character is locked — unlock before changing its reference pack." });
       const sourceKey = character.referenceArtworkR2Key;
       if (!sourceKey || !sourceKey.startsWith("vq/characters/")) {
         return res.status(400).json({ error: "Upload reference artwork before approving this character." });
@@ -754,6 +759,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!Number.isInteger(candidateId)) return res.status(400).json({ error: "candidateId required" });
       const character = await vqStorage.getCharacter(characterId);
       if (!character) return res.status(404).json({ error: "character not found" });
+      if (character.locked) return res.status(423).json({ error: "Character is locked — unlock before changing its reference pack." });
       const cand = await vqStorage.getArtworkCandidate(candidateId);
       if (!cand || cand.characterId !== characterId || !cand.r2Key.startsWith("vq/characters/")) {
         return res.status(404).json({ error: "candidate not found for this character" });
@@ -854,6 +860,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         return res.status(400).json({ error: `All ${fam.length} stages need a selected candidate first — missing ${missing.map((m) => `Stage ${m.stageNumber}`).join(", ")}.` });
       }
       // Pre-validate EVERY selection before mutating anything (atomic-ish).
+      const lockedStage = fam.find((c) => c.locked);
+      if (lockedStage) {
+        return res.status(423).json({ error: `Stage ${lockedStage.stageNumber} is locked — unlock it before changing the family's reference pack.` });
+      }
       const toApprove: { ch: VqCharacter; candidateId: number; referenceType: VqReferenceType; identityScore: number | null; png: Buffer }[] = [];
       for (const ch of fam) {
         const candidateId = selByChar.get(ch.characterId) as number;
@@ -1589,7 +1599,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const card = await vqStorage.setCardStatusAudited(cardId, body.to, body.note, "admin", from);
       res.json({ card, evaluation: { ...evaluation, status: body.to } });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : "transition failed" });
+      const msg = err instanceof Error ? err.message : "transition failed";
+      // A lost compare-and-set (another tab changed the status first) is a conflict,
+      // not a server fault — tell the client to reload, don't surface a 500.
+      if (/concurrently|status changed/i.test(msg)) return res.status(409).json({ error: msg });
+      res.status(500).json({ error: msg });
     }
   });
 
@@ -1678,7 +1692,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         const { id } = startExportJob(kind, ids);
         res.status(202).json({ jobId: id, count: ids.length });
       } catch (err) {
-        res.status(500).json({ error: err instanceof Error ? err.message : `${kind} failed to start` });
+        const msg = err instanceof Error ? err.message : `${kind} failed to start`;
+        // Concurrency back-pressure is a "try again shortly", not a server error.
+        if (/too many exports/i.test(msg)) return res.status(429).json({ error: msg });
+        res.status(500).json({ error: msg });
       }
     };
   }
