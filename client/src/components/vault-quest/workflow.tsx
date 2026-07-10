@@ -448,7 +448,7 @@ export function ReusePanel({ check, providerLabel, onReuse, onGenerateWithRefs, 
         </div>
         <div className="flex flex-wrap gap-2 border-t border-slate-800 p-4">
           <AdminButton variant="gold" disabled={busy || !picked} onClick={() => picked && onReuse(picked)}>Reuse Approved Asset (0 cr)</AdminButton>
-          <AdminButton variant="ghost" disabled={busy} onClick={onGenerateWithRefs}>Use as Reference &amp; Generate New</AdminButton>
+          <AdminButton variant="ghost" disabled={busy} onClick={() => onGenerateWithRefs()}>Use as Reference &amp; Generate New</AdminButton>
           <AdminButton variant="ghost" disabled={busy} onClick={() => { if (window.confirm(`Generate new artwork anyway?\n\nThis spends ≈${check.creditsSaved || check.perImage} credits even though ${check.assets.length} approved asset(s) already exist.`)) onGenerateAnyway(); }}>Generate New Anyway</AdminButton>
         </div>
       </div>

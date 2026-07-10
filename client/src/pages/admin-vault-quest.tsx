@@ -118,6 +118,10 @@ const REF_TYPES: { value: VqRefType; label: string; tier: "required" | "recommen
   { value: "turnaround_sheet", label: "Turnaround Sheet", tier: "optional" },
 ];
 const REQUIRED_REF_TYPES: VqRefType[] = ["master_portrait", "action_pose"];
+// Runtime guard: a handler wired as onClick={fn} passes a React MouseEvent as the
+// first arg. This keeps such an event from ever reaching a request body / toast —
+// only a real VqRefType string is accepted, otherwise callers fall back to state.
+const isVqRefType = (v: unknown): v is VqRefType => typeof v === "string" && REF_TYPES.some((t) => t.value === v);
 function packCompleteness(pack: VqCharacterRow["referencePack"]): "missing" | "partial" | "complete" {
   const p = pack ?? {};
   if (p.master_portrait?.r2Key && p.action_pose?.r2Key) return "complete";
@@ -878,8 +882,9 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
 
   async function generateMasterArtwork(typeOverride?: VqRefType) {
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
-    const type = typeOverride ?? refType;
-    if (typeOverride && typeOverride !== refType) setRefType(typeOverride); // keep gallery + approved-image in sync
+    // Guard: only accept a real ref-type string; never a forwarded MouseEvent.
+    const type: VqRefType = isVqRefType(typeOverride) ? typeOverride : refType;
+    if (isVqRefType(typeOverride) && typeOverride !== refType) setRefType(typeOverride); // keep gallery + approved-image in sync
     // Check for approved reusable assets FIRST — reuse must be an explicit choice.
     const check = await fetchReuseCheck({ characterId: selected.characterId, referenceType: type });
     if (check && check.assets.length > 0) { setReuseType(type); setReuseCheck(check); return; }
@@ -905,8 +910,10 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
 
   async function doGenerateReference(typeOverride?: VqRefType) {
     if (!selected) return;
-    const type = typeOverride ?? refType;
-    const typeLabel = REF_TYPES.find((t) => t.value === type)?.label ?? type;
+    // Guard: only a real ref-type string; never a forwarded MouseEvent (would put a
+    // DOM node into the JSON body → "Converting circular structure to JSON").
+    const type: VqRefType = isVqRefType(typeOverride) ? typeOverride : refType;
+    const typeLabel = REF_TYPES.find((t) => t.value === type)?.label ?? "reference";
     setReuseCheck(null);
     setBusy("gen-art");
     try {
