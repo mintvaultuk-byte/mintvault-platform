@@ -366,22 +366,31 @@ function AiAssist({ context, onApply, onUseArtwork, imageProviders, textConnecte
     } finally { setBusy(false); }
   }
 
+  // Ref latch: paid artwork generation must be double-click-proof even during the
+  // awaited reuse-check below (state-based `busy` only updates on re-render).
+  const artworkInFlight = useRef(false);
   async function runArtwork(mode: string) {
+    if (artworkInFlight.current) return;
+    artworkInFlight.current = true;
+    setBusy(true);
     const slot: "main" | "prev" = mode === "prev-portrait" ? "prev" : "main";
     // Reuse-before-generate: if approved assets exist for this card's character,
     // generation must be an explicit choice (server already uses approved refs).
     const cardId = String(context.cardId ?? "");
     if (cardId && slot === "main") {
       const check = await fetchReuseCheck({ cardId });
+      if (check === null) {
+        toast({ title: "Reuse check unavailable", description: "Couldn't verify existing approved assets — generating new artwork." });
+      }
       if (check && check.assets.length > 0) {
         const ok = window.confirm(
           `${check.assets.length} approved asset(s) already exist for this character (saving ≈${check.creditsSaved} credits if reused via the Character Bible).\n\n` +
             `OK = generate NEW artwork anyway (uses approved references, spends credits).\nCancel = stop and reuse from the Character Bible instead.`,
         );
-        if (!ok) return;
+        if (!ok) { artworkInFlight.current = false; setBusy(false); return; }
       }
     }
-    setBusy(true); setHidden(new Set()); setApplied(new Set()); setRes(null); setArtwork(null); setArtworkUsed(false); setUsingArtwork(false);
+    setHidden(new Set()); setApplied(new Set()); setRes(null); setArtwork(null); setArtworkUsed(false); setUsingArtwork(false);
     try {
       const r = await apiRequest("POST", "/api/admin/vault-quest/ai/artwork", { mode, slot, context });
       setArtwork(await r.json() as ArtworkResp);
@@ -389,7 +398,7 @@ function AiAssist({ context, onApply, onUseArtwork, imageProviders, textConnecte
     } catch (e) {
       setRes({ suggestions: [], provider: "higgsfield", model: "", dropped: 0, note: messageFromError(e) });
       handleAiError(e, "Artwork failed");
-    } finally { setBusy(false); }
+    } finally { artworkInFlight.current = false; setBusy(false); }
   }
 
   function rerunLast() {
@@ -630,15 +639,25 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   const [selectedChars, setSelectedChars] = useState<Set<string>>(new Set());
   const [batch, setBatch] = useState<BatchItem[] | null>(null);
   const [batchRunning, setBatchRunning] = useState(false);
-  const [estimate, setEstimate] = useState<{ items: BatchItem[]; images: number; credits: number; needTyped: boolean; label: string } | null>(null);
+  // `model` is FROZEN at estimate time — the founder confirms a specific cost, so the
+  // batch must spend on that model even if the selector changes before Confirm.
+  const [estimate, setEstimate] = useState<{ items: BatchItem[]; images: number; credits: number; needTyped: boolean; label: string; model: VqImageModel } | null>(null);
   const [typedConfirm, setTypedConfirm] = useState("");
   const [stopOnFail, setStopOnFail] = useState(false);
   const stopRef = useRef(false);
   const pauseRef = useRef(false);
   const skipRef = useRef(false);
+  // Unmount latch for the batch loop: leaving the Bible view must stop the queue
+  // (its Pause/Stop controls unmount with the view — a paused loop would otherwise
+  // spin forever and a running one would keep spending credits invisibly).
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const [queuePaused, setQueuePaused] = useState(false);
   // Candidate review extras
-  const [favourites, setFavourites] = useState<Set<number>>(() => new Set(JSON.parse(localStorage.getItem("vq-fav-candidates") ?? "[]") as number[]));
+  const [favourites, setFavourites] = useState<Set<number>>(() => {
+    // Guarded: corrupt localStorage must not crash the whole Bible view on mount.
+    try { return new Set(JSON.parse(localStorage.getItem("vq-fav-candidates") ?? "[]") as number[]); } catch { return new Set(); }
+  });
   const toggleFavourite = (id: number) => setFavourites((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); localStorage.setItem("vq-fav-candidates", JSON.stringify([...n])); return n; });
   const [compareSel, setCompareSel] = useState<number[]>([]); // up to 2 candidate ids
   const [showCompare, setShowCompare] = useState(false);
@@ -656,7 +675,9 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   const trackCredits = (n: number) => {
     if (!n) return;
     setSessionCredits((s) => Math.round((s + n) * 100) / 100);
-    setTodayCredits((t) => { const v = Math.round((t + n) * 100) / 100; localStorage.setItem(todayKey, String(v)); return v; });
+    // Read the stored value for TODAY's key (not accumulated state) so a session
+    // that crosses midnight doesn't carry yesterday's total into the new day.
+    setTodayCredits(() => { const v = Math.round((Number(localStorage.getItem(todayKey) ?? 0) + n) * 100) / 100; localStorage.setItem(todayKey, String(v)); return v; });
   };
   const cost = useQuery<{ model: string; connected: boolean; creditsPerImage: number; masterImagesPerItem: number; providers: { id: string; label: string; enabled: boolean; note: string }[] }>({ queryKey: ["/api/admin/vault-quest/artwork-cost"], retry: false });
   // Image model / quality — default DRAFT/CHEAP (never the expensive model unless chosen).
@@ -677,8 +698,12 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     acc[key] = [...(acc[key] ?? []), ch];
     return acc;
   }, {});
+  // Simple mode shows Master AND Action sections side by side, so it must fetch ALL
+  // candidate types (they're filtered per-section client-side). Fetching only the
+  // active refType hid the other section's pending candidates, inviting duplicate
+  // paid generation. Advanced mode keeps the single-type fetch for its gallery.
   const candQuery = useQuery<{ candidates: VqCandidateRow[] } | null>({
-    queryKey: [`/api/admin/vault-quest/characters/${selected?.characterId ?? "none"}/candidates?type=${refType}`],
+    queryKey: [`/api/admin/vault-quest/characters/${selected?.characterId ?? "none"}/candidates${advanced ? `?type=${refType}` : ""}`],
     enabled: !!selected?.characterId,
     retry: false,
   });
@@ -704,6 +729,12 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
 
   useEffect(() => {
     setDraft(draftFromCharacter(selected));
+    // Compare/zoom selections are candidate IDs of the PREVIOUS character — carrying
+    // them across a switch let the compare overlay mix candidates from two characters
+    // (the server 404s the foreign one → broken image in the comparison).
+    setCompareSel([]);
+    setShowCompare(false);
+    setZoomId(null);
   }, [selected?.characterId]);
 
   async function seedCharacters() {
@@ -880,15 +911,36 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   const [reuseCheck, setReuseCheck] = useState<ReuseCheck | null>(null);
   const [reuseType, setReuseType] = useState<VqRefType>("master_portrait");
 
+  // In-flight latch for PAID reference generation. A ref (not state) so a rapid
+  // double-click within one render frame cannot double-bill: state-based `busy`
+  // only updates on re-render, leaving a window during the reuse-check round-trip.
+  const genInFlight = useRef(false);
+
   async function generateMasterArtwork(typeOverride?: VqRefType) {
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
-    // Guard: only accept a real ref-type string; never a forwarded MouseEvent.
-    const type: VqRefType = isVqRefType(typeOverride) ? typeOverride : refType;
-    if (isVqRefType(typeOverride) && typeOverride !== refType) setRefType(typeOverride); // keep gallery + approved-image in sync
-    // Check for approved reusable assets FIRST — reuse must be an explicit choice.
-    const check = await fetchReuseCheck({ characterId: selected.characterId, referenceType: type });
-    if (check && check.assets.length > 0) { setReuseType(type); setReuseCheck(check); return; }
-    await doGenerateReference(type);
+    if (genInFlight.current) return; // re-entrancy guard (double-click during reuse-check)
+    genInFlight.current = true;
+    setBusy("gen-art");
+    try {
+      // Guard: only accept a real ref-type string; never a forwarded MouseEvent.
+      const type: VqRefType = isVqRefType(typeOverride) ? typeOverride : refType;
+      if (isVqRefType(typeOverride) && typeOverride !== refType) setRefType(typeOverride); // keep gallery + approved-image in sync
+      // Check for approved reusable assets FIRST — reuse must be an explicit choice.
+      const check = await fetchReuseCheck({ characterId: selected.characterId, referenceType: type });
+      if (check === null) {
+        // Fail OPEN but never SILENTLY: the reuse endpoint errored, so we can't rule
+        // out existing approved assets — tell the founder before spending credits.
+        toast({ title: "Reuse check unavailable", description: "Couldn't verify existing approved assets — generating new artwork." });
+      }
+      if (check && check.assets.length > 0) { setReuseType(type); setReuseCheck(check); setBusy(null); return; }
+      // Release before delegating — doGenerateReference acquires the latch itself
+      // (it is also called directly by the ReusePanel buttons). Same synchronous
+      // frame, so no click can interleave between release and re-acquire.
+      genInFlight.current = false;
+      await doGenerateReference(type);
+    } finally {
+      genInFlight.current = false;
+    }
   }
 
   async function applyReuseAsset(asset: ReusableAsset) {
@@ -910,6 +962,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
 
   async function doGenerateReference(typeOverride?: VqRefType) {
     if (!selected) return;
+    if (genInFlight.current) return; // double-click guard for the ReusePanel entry points too
+    genInFlight.current = true;
     // Guard: only a real ref-type string; never a forwarded MouseEvent (would put a
     // DOM node into the JSON body → "Converting circular structure to JSON").
     const type: VqRefType = isVqRefType(typeOverride) ? typeOverride : refType;
@@ -938,6 +992,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     } catch (e) {
       artworkError(e, `Generate ${typeLabel} failed`);
     } finally {
+      genInFlight.current = false;
       setBusy(null);
     }
   }
@@ -951,6 +1006,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       const data = (await res.json()) as { generated?: unknown[] };
       await candQuery.refetch();
       setArtNonce((n) => n + 1);
+      trackCredits((data.generated?.length ?? 0) * creditsPerImage); // paid images — keep the spend counters honest
       toast({ title: "Family master artwork generated", description: `${data.generated?.length ?? 0} stage candidate(s). Select each stage to review + approve.` });
     } catch (e) {
       artworkError(e, "Generate family artwork failed");
@@ -968,6 +1024,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       const data = (await res.json()) as { created?: unknown[] };
       await candQuery.refetch();
       setArtNonce((n) => n + 1);
+      trackCredits((data.created?.length ?? 0) * creditsPerImage); // paid images — keep the spend counters honest
       toast({ title: "Generated more candidates", description: `${data.created?.length ?? 0} new candidate(s).` });
     } catch (e) {
       artworkError(e, "Generate 3 more failed");
@@ -1037,11 +1094,16 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     const items: BatchItem[] = work.map((w) => ({ ...w, status: "queued" }));
     const images = work.reduce((a, w) => a + imagesForType(w.referenceType), 0);
     setTypedConfirm("");
-    setEstimate({ items, images, credits: Math.ceil(images * creditsPerImage), needTyped: images > BATCH_IMAGE_LIMIT, label });
+    setEstimate({ items, images, credits: Math.ceil(images * creditsPerImage), needTyped: images > BATCH_IMAGE_LIMIT, label, model: imgModel });
   }
   // Convenience: a batch of the CURRENT reference type over the given characters.
+  // Filters to characters the server would actually accept AND that still need this
+  // type — otherwise "Generate Selected/Family/Stage" happily re-billed approved
+  // references and enqueued locked/description-less characters as failures. This is
+  // the filtering the empty-case toast in openBatchItems already promises.
   function openBatch(chars: VqCharacterRow[], label: string) {
-    openBatchItems(chars.map((c) => ({ characterId: c.characterId, name: c.characterName, stage: c.stageNumber, referenceType: refType })), label);
+    const eligible = chars.filter((c) => !c.locked && c.descriptionStatus === "approved" && !packApproved(c, refType));
+    openBatchItems(eligible.map((c) => ({ characterId: c.characterId, name: c.characterName, stage: c.stageNumber, referenceType: refType })), label);
   }
 
   function stopBatch() { stopRef.current = true; pauseRef.current = false; setQueuePaused(false); }
@@ -1055,7 +1117,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     if (!work.length) { toast({ title: "Nothing to retry" }); return; }
     const images = work.reduce((a, w) => a + (w.kind === "description" ? 0 : imagesForType(w.referenceType)), 0);
     setTypedConfirm("");
-    setEstimate({ items: work.map((w) => ({ ...w, status: "queued" as BatchStatus })), images, credits: Math.ceil(images * creditsPerImage), needTyped: images > BATCH_IMAGE_LIMIT, label: `Retry ${statuses.join("/")}` });
+    setEstimate({ items: work.map((w) => ({ ...w, status: "queued" as BatchStatus })), images, credits: Math.ceil(images * creditsPerImage), needTyped: images > BATCH_IMAGE_LIMIT, label: `Retry ${statuses.join("/")}`, model: imgModel });
   }
 
   async function runBatch() {
@@ -1065,6 +1127,9 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       return;
     }
     const items = estimate.items.map((i) => ({ ...i, status: "queued" as BatchStatus }));
+    // Spend on the model the founder CONFIRMED, not whatever the selector says now.
+    const batchModel = estimate.model;
+    const batchCreditsPerImage = vqCreditsPerImage(batchModel);
     setBatch(items);
     setEstimate(null);
     setBatchRunning(true);
@@ -1072,11 +1137,15 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     const setItem = (idx: number, patch: Partial<BatchItem>) => setBatch((prev) => (prev ? prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)) : prev));
     let ok = 0, failed = 0, rejected = 0, skipped = 0;
     for (let i = 0; i < items.length; i++) {
+      // Unmount = stop: leaving the Bible view removes the Stop/Pause controls, so the
+      // loop must never keep spending credits (or spinning in the pause-wait) unseen.
+      if (!alive.current) { stopRef.current = true; }
       // Pause: hold BEFORE starting the next item (never mid-request).
-      while (pauseRef.current && !stopRef.current) {
+      while (pauseRef.current && !stopRef.current && alive.current) {
         setItem(i, { status: "paused" });
         await new Promise((r) => setTimeout(r, 400));
       }
+      if (!alive.current) return; // unmounted: no further requests, no toast, no refetch
       if (stopRef.current) {
         setBatch((prev) => (prev ? prev.map((it) => (it.status === "queued" || it.status === "generating" || it.status === "paused" ? { ...it, status: "skipped" as BatchStatus } : it)) : prev));
         skipped = items.length - i;
@@ -1093,16 +1162,25 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
           await apiRequest("PATCH", `/api/admin/vault-quest/characters/${encodeURIComponent(items[i].characterId)}`, { ...data.fields, reason: "batch description draft" });
           setItem(i, { status: "succeeded", note: "draft — review & approve" }); ok++;
         } else {
-          const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(items[i].characterId)}/generate-artwork`, { referenceType: items[i].referenceType, model: imgModel });
+          const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(items[i].characterId)}/generate-artwork`, { referenceType: items[i].referenceType, model: batchModel });
           const data = (await res.json()) as { created?: unknown[]; autoRejected?: number; candidateId?: number };
           const made = Array.isArray(data.created) ? data.created.length : data.candidateId ? 1 : 0;
-          trackCredits(made * creditsPerImage);
+          trackCredits(made * batchCreditsPerImage);
           if (made === 0 && (data.autoRejected ?? 0) > 0) { setItem(i, { status: "rejected", note: "identity drift" }); rejected++; }
           else { setItem(i, { status: "succeeded" }); ok++; }
         }
       } catch (e) {
         const status = (e as { status?: number })?.status;
-        if (status === 401) { onAuthError(e, "Batch generation failed"); setItem(i, { status: "failed", note: "auth" }); failed++; break; }
+        if (status === 401) {
+          // Auth expired: mark the current item failed AND release the queued remainder
+          // as skipped (previously they were stranded "queued" forever with no retry path).
+          onAuthError(e, "Batch generation failed");
+          setItem(i, { status: "failed", note: "auth" });
+          failed++;
+          setBatch((prev) => (prev ? prev.map((it) => (it.status === "queued" ? { ...it, status: "skipped" as BatchStatus, note: "auth expired" } : it)) : prev));
+          skipped = items.length - i - 1;
+          break;
+        }
         if (status === 422 && /identity|drift/i.test((e as Error)?.message ?? "")) { setItem(i, { status: "rejected", note: "identity drift" }); rejected++; }
         else {
           setItem(i, { status: "failed", note: (e as Error)?.message?.slice(0, 50) });
@@ -1113,6 +1191,10 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
             break;
           }
         }
+      } finally {
+        // A Skip pressed while THIS item was already in-flight cannot abort the HTTP
+        // request — clear it so it doesn't leak onto (and wrongly skip) the NEXT item.
+        skipRef.current = false;
       }
     }
     setBatchRunning(false);
@@ -1127,11 +1209,13 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   // skips approved descriptions, locked characters, and canonical/complete characters.
   function generateMissingDescriptions() {
     const work = characters
-      .filter((c) => !c.locked && !isCanonical(c) && c.descriptionStatus !== "approved")
+      // "Missing" means missing: characters with fully-written (just unapproved) DNA are
+      // NOT regenerated — this button previously clobbered manual unapproved drafts.
+      .filter((c) => !c.locked && !isCanonical(c) && c.descriptionStatus !== "approved" && !dnaComplete(c))
       .map((c) => ({ characterId: c.characterId, name: c.characterName, stage: c.stageNumber, referenceType: "master_portrait" as VqRefType, kind: "description" as const }));
     if (!work.length) { toast({ title: "Nothing to generate", description: "Every unlocked character already has an approved description." }); return; }
     setTypedConfirm("");
-    setEstimate({ items: work.map((w) => ({ ...w, status: "queued" as BatchStatus })), images: 0, credits: 0, needTyped: false, label: `Missing descriptions (${work.length}) — Anthropic text, 0 Higgsfield credits` });
+    setEstimate({ items: work.map((w) => ({ ...w, status: "queued" as BatchStatus })), images: 0, credits: 0, needTyped: false, label: `Missing descriptions (${work.length}) — Anthropic text, 0 Higgsfield credits`, model: imgModel });
   }
 
   // ── Family actions ─────────────────────────────────────────────────────────
@@ -1466,12 +1550,15 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                 const packPct = (masterOk ? 50 : 0) + (actionOk ? 50 : 0);
                 const health = characterHealth(selected);
                 const next = !descOk ? { now: "Write & approve the description", do: "Approve Description first (above)" }
-                  : !masterOk ? { now: "Description approved", do: "Generate Master Reference" }
-                    : masterCands.length > 0 && !masterOk ? { now: "Master candidates ready", do: "Approve a Master Reference" }
-                      : !actionOk ? { now: "Master approved", do: "Generate Matching Action Pose" }
-                        : health.identityScore != null && health.identityScore < 70 ? { now: "Identity too low", do: "Generate a closer Action Pose" }
-                          : !selected.locked ? { now: "Action approved", do: "Lock Character" }
-                            : { now: "Character locked", do: "Generate Cards" };
+                  // Candidates-pending check must come BEFORE the generate nudge, or the
+                  // banner tells the founder to (re)generate while approvals are waiting.
+                  : !masterOk && masterCands.length > 0 ? { now: "Master candidates ready", do: "Approve a Master Reference" }
+                    : !masterOk ? { now: "Description approved", do: "Generate Master Reference" }
+                      : !actionOk && actionCands.length > 0 ? { now: "Action candidates ready", do: "Approve an Action Pose" }
+                        : !actionOk ? { now: "Master approved", do: "Generate Matching Action Pose" }
+                          : health.identityScore != null && health.identityScore < 70 ? { now: "Identity too low", do: "Generate a closer Action Pose" }
+                            : !selected.locked ? { now: "Action approved", do: "Lock Character" }
+                              : { now: "Character locked", do: "Generate Cards" };
                 const gold = "#D4AF37";
                 return (
                   <div className="space-y-4">
@@ -1532,8 +1619,9 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                         })}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 rounded-lg bg-slate-900/60 px-3 py-2 text-[11px] text-slate-400">
-                        <span>Images to generate: <b className="text-slate-200">{masterOk ? 1 : 3}</b></span>
-                        <span>Est. credits: <b className="text-slate-200">~{(masterOk ? 1 : 3) * creditsPerImage}</b></span>
+                        {/* Master ALWAYS generates 3 candidates (server-enforced, incl. Replace); Action generates 1. */}
+                        <span>Master: <b className="text-slate-200">3 images (~{3 * creditsPerImage} cr)</b></span>
+                        <span>Action: <b className="text-slate-200">1 image (~{creditsPerImage} cr)</b></span>
                         <span>Approved assets: <b className="text-slate-200">{(masterOk ? 1 : 0) + (actionOk ? 1 : 0)}</b></span>
                         <span className="text-emerald-400">Reuse-first always checks these before generating.</span>
                       </div>
@@ -1560,26 +1648,29 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                             {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}Generate Master Reference
                           </button>
                           {!descOk && <p className="mt-2 text-center text-[11px] text-slate-500">Approve the character description above to unlock this.</p>}
-                          {masterCands.length > 0 && (
-                            <div className="mt-3">
-                              <div className="mb-1.5 text-[11px] font-semibold text-slate-400">Choose your favourite:</div>
-                              <div className="grid grid-cols-3 gap-2">
-                                {masterCands.map((c) => (
-                                  <div key={c.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-1.5">
-                                    <img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="master candidate" className="aspect-square w-full rounded bg-slate-950 object-contain" />
-                                    <div className="mt-1 flex items-center justify-between">
-                                      <span className="text-[10px] text-slate-500">{c.identityScore != null ? `Match ${c.identityScore}` : ""}</span>
-                                      <div className="flex gap-1">
-                                        <button type="button" onClick={() => rejectCandidate(c.id)} className="rounded p-0.5 text-slate-500 hover:text-red-400"><XCircle className="h-4 w-4" /></button>
-                                        <button type="button" onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-500">Approve</button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
                         </>
+                      )}
+                      {/* Candidate chooser renders in BOTH branches: after "Replace Master" the
+                          approved image stays on file, but the new (paid) candidates must be
+                          reviewable — previously they were generated and then hidden. */}
+                      {masterCands.length > 0 && (
+                        <div className="mt-3">
+                          <div className="mb-1.5 text-[11px] font-semibold text-slate-400">{masterOk ? "Replacement candidates — approving one replaces the current Master:" : "Choose your favourite:"}</div>
+                          <div className="grid grid-cols-3 gap-2">
+                            {masterCands.map((c) => (
+                              <div key={c.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-1.5">
+                                <img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="master candidate" className="aspect-square w-full rounded bg-slate-950 object-contain" />
+                                <div className="mt-1 flex items-center justify-between">
+                                  <span className="text-[10px] text-slate-500">{c.identityScore != null ? `Match ${c.identityScore}` : ""}</span>
+                                  <div className="flex gap-1">
+                                    <button type="button" disabled={!!busy} onClick={() => rejectCandidate(c.id)} className="rounded p-0.5 text-slate-500 hover:text-red-400 disabled:opacity-40"><XCircle className="h-4 w-4" /></button>
+                                    <button type="button" disabled={!!busy} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve</button>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       )}
                     </div>
 
@@ -1608,9 +1699,13 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                             </button>
                           )}
                           <p className="mt-2 text-center text-[11px] text-slate-500">Always built from your approved Master — face, colours, markings, ears, tail, accessories &amp; shape stay the same. Only pose, expression, camera angle and movement change.</p>
-                          {actionCands.length > 0 && (
+                        </>
+                      )}
+                      {/* Candidate review renders in BOTH branches (see Master note above):
+                          Replace Action generates a paid candidate that must stay reviewable. */}
+                      {masterOk && actionCands.length > 0 && (
                             <div className="mt-3 space-y-2">
-                              <div className="text-[11px] font-semibold text-slate-400">Compare each pose to your approved Master:</div>
+                              <div className="text-[11px] font-semibold text-slate-400">{actionOk ? "Replacement poses — approving one replaces the current Action Pose:" : "Compare each pose to your approved Master:"}</div>
                               {actionCands.map((c) => {
                                 const band = scoreBand(c.identityScore);
                                 const traits = traitsFromBreakdown(c.identityBreakdown);
@@ -1629,8 +1724,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                           })}
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
-                                          <button type="button" onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500">Approve Action Pose</button>
-                                          <button type="button" onClick={() => rejectCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400">Reject</button>
+                                          <button type="button" disabled={!!busy} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve Action Pose</button>
+                                          <button type="button" disabled={!!busy} onClick={() => rejectCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400 disabled:opacity-40">Reject</button>
                                           <button type="button" onClick={() => setZoomId(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200">Zoom</button>
                                         </div>
                                       </div>
@@ -1641,8 +1736,6 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                               <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked} className="w-full rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-500 disabled:opacity-40">{busyGen ? "Generating…" : "Generate Another Matching Pose"}</button>
                             </div>
                           )}
-                        </>
-                      )}
                     </div>
 
                     {/* Reference Pack progress */}
@@ -1833,8 +1926,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                   {estimate && (
                     <div className="mt-2 rounded border border-amber-700/50 bg-amber-950/20 p-2.5">
                       <p className="text-xs font-semibold text-amber-200">Credit estimate — {estimate.label}</p>
-                      <p className="mt-1 text-[11px] text-slate-300">Provider <b>Higgsfield</b> · model <b>{VQ_IMAGE_MODELS.find((m) => m.value === imgModel)?.label ?? imgModel}</b> · {refTypeMeta.label}</p>
-                      <p className="mt-0.5 text-[11px] text-slate-300">{estimate.items.length} character{estimate.items.length === 1 ? "" : "s"} · <b>{estimate.images} image{estimate.images === 1 ? "" : "s"}</b> · est. <b>~{estimate.credits} credits</b> (~{creditsPerImage}/image)</p>
+                      <p className="mt-1 text-[11px] text-slate-300">Provider <b>Higgsfield</b> · model <b>{VQ_IMAGE_MODELS.find((m) => m.value === estimate.model)?.label ?? estimate.model}</b> · {refTypeMeta.label}</p>
+                      <p className="mt-0.5 text-[11px] text-slate-300">{estimate.items.length} character{estimate.items.length === 1 ? "" : "s"} · <b>{estimate.images} image{estimate.images === 1 ? "" : "s"}</b> · est. <b>~{estimate.credits} credits</b> (~{vqCreditsPerImage(estimate.model)}/image)</p>
                       <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400"><input type="checkbox" className="h-3 w-3 accent-amber-500" checked={stopOnFail} onChange={(e) => setStopOnFail(e.target.checked)} />Stop on first failure (otherwise continue)</label>
                       {estimate.needTyped && (
                         <div className="mt-1.5">
@@ -1876,7 +1969,9 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                         </div>
                         <div className="mt-1.5 max-h-28 space-y-0.5 overflow-auto">
                           {batch.map((b) => (
-                            <div key={b.characterId} className="flex items-center justify-between gap-2 text-[10px]">
+                            // A character can appear once per reference type (e.g. "Generate Required
+                            // References" queues master + action) — characterId alone duplicated keys.
+                            <div key={`${b.characterId}-${b.referenceType}-${b.kind ?? "artwork"}`} className="flex items-center justify-between gap-2 text-[10px]">
                               <span className="text-slate-400">S{b.stage} · {b.name} · {REF_TYPES.find((t) => t.value === b.referenceType)?.label ?? b.referenceType}</span>
                               <span className={b.status === "succeeded" ? "text-emerald-400" : b.status === "generating" ? "text-sky-400" : b.status === "failed" ? "text-red-400" : b.status === "rejected" ? "text-amber-400" : "text-slate-500"}>{b.status}{b.note ? ` (${b.note})` : ""}</span>
                             </div>
@@ -1961,7 +2056,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                     <span className={labelCls}>Reference artwork</span>
                     <label className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:border-amber-500">
                       {busy === "upload" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}Upload
-                      <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && uploadReference(e.target.files[0])} />
+                      <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; /* allow re-selecting the same file after a failure */ if (f) void uploadReference(f); }} />
                     </label>
                   </div>
                   <div className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded bg-slate-900">
@@ -2264,8 +2359,11 @@ export default function AdminVaultQuest() {
       const artCtx = { ...aiContext, ...fields, cardId: form.cardId };
       const ares = await apiRequest("POST", "/api/admin/vault-quest/ai/artwork", { context: artCtx, mode: "main", slot: "main", promptOverride: artworkPrompt || undefined });
       const art = (await ares.json()) as { candidateKey: string; preview: string; generationId?: number | null };
-      await useArtworkCandidate({ candidateKey: art.candidateKey, slot: "main", preview: art.preview, generationId: art.generationId });
-      toast({ title: "Full card drafted ✨", description: "Review the fields + art, then click Save Draft to keep it." });
+      // useArtworkCandidate handles its own errors and returns false — don't show the
+      // success toast (on top of its error toast) when attaching the artwork failed.
+      const attached = await useArtworkCandidate({ candidateKey: art.candidateKey, slot: "main", preview: art.preview, generationId: art.generationId });
+      if (attached) toast({ title: "Full card drafted ✨", description: "Review the fields + art, then click Save Draft to keep it." });
+      else toast({ title: "Full card drafted — artwork not attached", description: "The fields are filled in, but the generated artwork couldn't be attached. Use AI Assist → artwork to retry.", variant: "destructive" });
     } catch (e) {
       const status = (e as { status?: number })?.status;
       if (status === 401) { handleAuthError(e, "Artwork failed"); }
@@ -2705,7 +2803,7 @@ export default function AdminVaultQuest() {
               <div className="flex flex-wrap items-center gap-3 border-t border-slate-800 pt-4">
                 <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-600 px-3 py-1.5 text-sm hover:border-amber-500">
                   <Upload className="h-4 w-4" />{uploading ? "Uploading…" : "Upload artwork"}
-                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && uploadArt(e.target.files[0], "main")} />
+                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void uploadArt(f, "main"); }} />
                 </label>
                 {(form.artCandidateKey || form.artR2Key) && (
                   <span className="inline-flex items-center gap-2">
@@ -2716,7 +2814,7 @@ export default function AdminVaultQuest() {
                 {!isSupport && (
                   <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-slate-600 px-3 py-1.5 text-sm hover:border-amber-500">
                     <Upload className="h-4 w-4" />Prev-stage art
-                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && uploadArt(e.target.files[0], "prev")} />
+                    <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void uploadArt(f, "prev"); }} />
                   </label>
                 )}
                 {!isSupport && form.prevArtCandidateKey && <span className="text-[11px] text-amber-400">prev candidate · save draft</span>}

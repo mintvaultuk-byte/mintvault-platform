@@ -119,12 +119,23 @@ export function useOrderedQueue(feed: WorkflowFeed | undefined) {
     retry: (id: string) => update({ ...ov, skipped: ov.skipped.filter((s) => s !== id) }),
     setPaused: (p: boolean) => update({ ...ov, paused: p }),
     move: (id: string, dir: -1 | 1) => {
-      const ids = queue.map((t) => t.id);
-      const i = ids.indexOf(id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= ids.length) return;
-      [ids[i], ids[j]] = [ids[j], ids[i]];
-      update({ ...ov, order: ids });
+      // Persist the order over the FULL feed queue (current override order applied),
+      // not just the visible/filtered one — otherwise the first move snapshots only
+      // unskipped ids, and skipped-then-retried or newly-arrived tasks all fall to
+      // the bottom regardless of their real priority.
+      const pos = new Map(ov.order.map((oid, i) => [oid, i]));
+      const full = feed ? [...feed.queue].sort((a, b) => (pos.get(a.id) ?? 1e9) - (pos.get(b.id) ?? 1e9)).map((t) => t.id) : queue.map((t) => t.id);
+      // Swap with the adjacent VISIBLE item (what the founder sees), then persist full order.
+      const visible = queue.map((t) => t.id);
+      const vi = visible.indexOf(id);
+      const vj = vi + dir;
+      if (vi < 0 || vj < 0 || vj >= visible.length) return;
+      const otherId = visible[vj];
+      const fi = full.indexOf(id);
+      const fj = full.indexOf(otherId);
+      if (fi < 0 || fj < 0) return;
+      [full[fi], full[fj]] = [full[fj], full[fi]];
+      update({ ...ov, order: full });
     },
   };
 }
@@ -159,7 +170,7 @@ export function HomeDashboard({ feed, loading, go }: { feed: WorkflowFeed | unde
                 <span>Set <b className="text-slate-200">{feed?.setCode}</b></span>
                 {cur.familyId && <span>Family <b className="text-slate-200">{cur.familyId}</b></span>}
                 {cur.characterName && <span>Character <b className="text-slate-200">{cur.characterName}</b></span>}
-                <span>Stage <b className="text-slate-200">{cur.label}</b></span>
+                {cur.stageNumber != null && <span>Stage <b className="text-slate-200">{cur.stageNumber}</b></span>}
                 <span className="inline-flex items-center gap-1"><Clock3 className="h-3 w-3" />Remaining <b className="text-slate-200">{fmtMins(feed?.estMinutesRemaining ?? 0)}</b> across {feed?.queueTotal} tasks</span>
               </div>
               {cur.reuse?.alreadyExists && <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-sky-800 bg-sky-950/40 px-2 py-1 text-[11px] text-sky-300"><Sparkles className="h-3 w-3" />{cur.reuse.note}</div>}
@@ -175,8 +186,11 @@ export function HomeDashboard({ feed, loading, go }: { feed: WorkflowFeed | unde
               {cur.estCredits > 0 && <span className="text-[11px] text-slate-500">≈ {cur.estCredits} credits for this step</span>}
             </div>
           </div>
-        ) : (
+        ) : feed ? (
           <div className="mt-2 text-2xl font-black text-emerald-300">All production tasks complete 🎉</div>
+        ) : (
+          // No feed at all (expired session / fetch failure) is NOT completion.
+          <div className="mt-2 text-sm text-slate-400">Couldn't load your tasks — check you're signed in as admin, then refresh.</div>
         )}
       </div>
 
