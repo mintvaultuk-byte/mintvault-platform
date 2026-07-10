@@ -6,6 +6,7 @@ import { AdminButton } from "@/components/admin";
 import { Loader2, Upload, Save, History, FileImage, FileText, FileCode, Plus, AlertCircle, CheckCircle2, LayoutGrid, ArrowLeft, ShieldCheck, RotateCcw, XCircle, PackageCheck, Archive, Wand2, Sparkles, ChevronDown, BookOpen, Lock, Unlock } from "lucide-react";
 import { STATUS_META, allowedTargets, type VqStatus } from "@shared/vq-workflow";
 import { ReusePanel, fetchReuseCheck, useAdvancedMode, type ReuseCheck, type ReusableAsset } from "@/components/vault-quest/workflow";
+import { characterHealth, traitsFromBreakdown, matchBand, scoreBand, STATE_CLS, type IdentityBreakdown, type HealthState } from "@/components/vault-quest/quality";
 
 // AI Cost Mode — founder-friendly quality tiers that map to real image models.
 // Simple Mode shows only these; Advanced Mode still exposes the model dropdown.
@@ -576,7 +577,7 @@ function Combo({ value, onChange, options, placeholder, allowEmpty = true, disab
   );
 }
 
-type VqCandidateRow = { id: number; status: string; source: string; referenceType: VqRefType; identityScore: number | null; prompt: string | null; width: number | null; height: number | null; createdAt: string };
+type VqCandidateRow = { id: number; status: string; source: string; referenceType: VqRefType; identityScore: number | null; identityBreakdown?: IdentityBreakdown | null; prompt: string | null; width: number | null; height: number | null; createdAt: string };
 type BatchStatus = "queued" | "generating" | "paused" | "succeeded" | "failed" | "skipped" | "rejected";
 // kind "artwork" spends Higgsfield credits; kind "description" is Anthropic text only (0 credits).
 type BatchItem = { characterId: string; name: string; stage: number; referenceType: VqRefType; status: BatchStatus; note?: string; kind?: "artwork" | "description" };
@@ -1456,33 +1457,40 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                 const masterCands = candidates.filter((c) => c.referenceType === "master_portrait" && c.status === "candidate");
                 const actionCands = candidates.filter((c) => c.referenceType === "action_pose" && c.status === "candidate");
                 const packPct = (masterOk ? 50 : 0) + (actionOk ? 50 : 0);
-                const dots = [
-                  { label: "Description", ok: descOk },
-                  { label: "Master", ok: masterOk },
-                  { label: "Action", ok: actionOk },
-                  { label: "Lock", ok: selected.locked },
-                  { label: "Canonical", ok: isCanonical(selected) },
-                ];
-                const next = !descOk ? { now: "Write & approve the description", do: "Approve Description first (above)", primary: null }
-                  : !masterOk ? { now: "Description approved", do: "Generate Master Reference", primary: "master" as const }
-                    : masterCands.length > 0 && !masterOk ? { now: "Master candidates ready", do: "Approve a Master Reference", primary: null }
-                      : !actionOk ? { now: "Master approved", do: "Generate Matching Action Pose", primary: "action" as const }
-                        : !selected.locked ? { now: "Action approved", do: "Lock Character", primary: "lock" as const }
-                          : { now: "Character locked", do: "Generate Cards", primary: null };
+                const health = characterHealth(selected);
+                const next = !descOk ? { now: "Write & approve the description", do: "Approve Description first (above)" }
+                  : !masterOk ? { now: "Description approved", do: "Generate Master Reference" }
+                    : masterCands.length > 0 && !masterOk ? { now: "Master candidates ready", do: "Approve a Master Reference" }
+                      : !actionOk ? { now: "Master approved", do: "Generate Matching Action Pose" }
+                        : health.identityScore != null && health.identityScore < 70 ? { now: "Identity too low", do: "Generate a closer Action Pose" }
+                          : !selected.locked ? { now: "Action approved", do: "Lock Character" }
+                            : { now: "Character locked", do: "Generate Cards" };
                 const gold = "#D4AF37";
                 return (
                   <div className="space-y-4">
-                    {/* Character Identity panel */}
-                    <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-3">
-                      <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Character Identity</div>
-                      <div className="flex flex-wrap gap-2">
-                        {dots.map((d) => (
-                          <span key={d.label} className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold ${d.ok ? "border-emerald-700 bg-emerald-950/50 text-emerald-300" : "border-slate-700 bg-slate-900 text-slate-500"}`}>
-                            {d.ok ? <CheckCircle2 className="h-3.5 w-3.5" /> : <span className="h-3 w-3 rounded-full border-2 border-slate-600" />}{d.label}
-                          </span>
+                    {/* ═ Character Health Check ═ */}
+                    <div className={`rounded-xl border p-4 ${health.readyForCards ? "border-emerald-700 bg-emerald-950/20" : "border-slate-800 bg-slate-950/50"}`}>
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Character Health Check</span>
+                        {health.readyForCards && <span className="rounded-full bg-emerald-500 px-2.5 py-0.5 text-[10px] font-bold text-slate-900">READY FOR CARDS ✅</span>}
+                      </div>
+                      <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                        {health.items.map((it) => (
+                          <div key={it.label} className={`flex items-center justify-between rounded-lg border px-2.5 py-1.5 text-xs ${STATE_CLS[it.state]}`}>
+                            <span className="font-medium">{it.label}</span>
+                            <span className="font-bold tabular-nums">{it.value}</span>
+                          </div>
                         ))}
                       </div>
-                      {!dots.every((d) => d.ok) && <p className="mt-2 text-[11px] text-slate-500">Everything must be green before cards can be generated for this character.</p>}
+                      {!health.readyForCards && (
+                        <div className="mt-3 rounded-lg border border-amber-800/50 bg-amber-950/20 p-2.5">
+                          <div className="text-xs font-semibold text-amber-300">Not ready for cards — you still need:</div>
+                          <ul className="mt-1 space-y-0.5 text-[11px] text-slate-300">
+                            {health.missing.map((m) => <li key={m} className="flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm border-2 border-slate-600" />{m}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      <p className="mt-2 text-[10px] text-slate-600">Background is validated at generation; colour &amp; style consistency are derived from the identity analysis (colour, markings &amp; shape). No artwork is ever auto-approved or auto-locked.</p>
                     </div>
 
                     {/* Current → Next step */}
@@ -1501,16 +1509,26 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                     {/* AI Cost Mode */}
                     <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
                       <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">AI Cost Mode</div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                         {COST_MODES.map((cm) => {
                           const active = costModeFor(imgModel) === cm.key;
+                          const blurb = cm.key === "cheapest" ? "Fast drafts and testing" : cm.key === "balanced" ? "Best value for most reference generation" : "Use for final canonical artwork";
                           return (
-                            <button key={cm.key} type="button" onClick={() => setImgModel(cm.model)} className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm ${active ? "border-amber-500 bg-amber-500/15 text-amber-200" : "border-slate-700 text-slate-400 hover:border-slate-500"}`}>
-                              <span className={`h-3 w-3 rounded-full border-2 ${active ? "border-amber-400 bg-amber-400" : "border-slate-600"}`} />
-                              {cm.label}{cm.key === "balanced" && <span className="text-[10px] text-slate-500">(Recommended)</span>}
+                            <button key={cm.key} type="button" onClick={() => setImgModel(cm.model)} className={`rounded-lg border p-2.5 text-left ${active ? "border-amber-500 bg-amber-500/15" : "border-slate-700 hover:border-slate-500"}`}>
+                              <div className="flex items-center gap-2">
+                                <span className={`h-3 w-3 rounded-full border-2 ${active ? "border-amber-400 bg-amber-400" : "border-slate-600"}`} />
+                                <span className={`text-sm font-semibold ${active ? "text-amber-200" : "text-slate-300"}`}>{cm.label}</span>
+                              </div>
+                              <div className="mt-1 text-[10px] text-slate-500">{cm.key === "balanced" ? "Recommended · " : ""}{blurb}</div>
                             </button>
                           );
                         })}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 rounded-lg bg-slate-900/60 px-3 py-2 text-[11px] text-slate-400">
+                        <span>Images to generate: <b className="text-slate-200">{masterOk ? 1 : 3}</b></span>
+                        <span>Est. credits: <b className="text-slate-200">~{(masterOk ? 1 : 3) * creditsPerImage}</b></span>
+                        <span>Approved assets: <b className="text-slate-200">{(masterOk ? 1 : 0) + (actionOk ? 1 : 0)}</b></span>
+                        <span className="text-emerald-400">Reuse-first always checks these before generating.</span>
                       </div>
                     </div>
 
@@ -1576,28 +1594,44 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                         </div>
                       ) : (
                         <>
-                          <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked}
-                            className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>
-                            {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}Generate Matching Action Pose
-                          </button>
-                          <p className="mt-2 text-center text-[11px] text-slate-500">Uses your approved Master so the face, colours, markings and shape stay the same — only the pose changes.</p>
+                          {actionCands.length === 0 && (
+                            <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked}
+                              className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>
+                              {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}Generate Matching Action Pose
+                            </button>
+                          )}
+                          <p className="mt-2 text-center text-[11px] text-slate-500">Always built from your approved Master — face, colours, markings, ears, tail, accessories &amp; shape stay the same. Only pose, expression, camera angle and movement change.</p>
                           {actionCands.length > 0 && (
                             <div className="mt-3 space-y-2">
                               <div className="text-[11px] font-semibold text-slate-400">Compare each pose to your approved Master:</div>
-                              {actionCands.map((c) => (
-                                <div key={c.id} className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/60 p-2">
-                                  <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}`} alt="master" className="h-20 w-20 rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Approved Master</div></div>
-                                  <span className="text-slate-600">→</span>
-                                  <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="action candidate" className="h-20 w-20 rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Action Candidate</div></div>
-                                  <div className="ml-2 flex-1">
-                                    <div className="text-xs font-semibold" style={{ color: (c.identityScore ?? 0) >= 70 ? "#6ee7b7" : "#fcd34d" }}>Identity Score {c.identityScore ?? "—"}</div>
-                                    <div className="mt-1.5 flex gap-1.5">
-                                      <button type="button" onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500">Approve</button>
-                                      <button type="button" onClick={() => rejectCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400">Reject</button>
+                              {actionCands.map((c) => {
+                                const band = scoreBand(c.identityScore);
+                                const traits = traitsFromBreakdown(c.identityBreakdown);
+                                return (
+                                  <div key={c.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-2">
+                                    <div className="flex items-start gap-2">
+                                      <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}`} alt="master" onClick={() => setZoomId(-1)} className="h-24 w-24 cursor-zoom-in rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Approved Master</div></div>
+                                      <span className="mt-8 text-slate-600">→</span>
+                                      <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="action candidate" onClick={() => setZoomId(c.id)} className="h-24 w-24 cursor-zoom-in rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Action Candidate</div></div>
+                                      <div className="ml-1 flex-1">
+                                        <div className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-bold ${STATE_CLS[band.state]}`}>Identity {c.identityScore ?? "—"} · {band.label}</div>
+                                        <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px]">
+                                          {[...traits, { label: "Background", score: 100 }].map((t) => {
+                                            const mb = t.label === "Background" ? { label: "Pass", state: "pass" as HealthState } : matchBand(t.score);
+                                            return <div key={t.label} className="flex items-center justify-between"><span className="text-slate-500">{t.label}</span><span className={mb.state === "pass" ? "text-emerald-400" : mb.state === "review" ? "text-amber-400" : mb.state === "fail" ? "text-red-400" : "text-slate-600"}>{mb.label}</span></div>;
+                                          })}
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                          <button type="button" onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500">Approve Action Pose</button>
+                                          <button type="button" onClick={() => rejectCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400">Reject</button>
+                                          <button type="button" onClick={() => setZoomId(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200">Zoom</button>
+                                        </div>
+                                      </div>
                                     </div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
+                              <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked} className="w-full rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-500 disabled:opacity-40">{busyGen ? "Generating…" : "Generate Another Matching Pose"}</button>
                             </div>
                           )}
                         </>
@@ -1635,6 +1669,46 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                             <div className="mt-3 text-[11px] text-slate-500">Continue below — the next step is <b style={{ color: gold }}>{next.do}</b>.</div>
                           </>
                         )}
+                      </div>
+                    )}
+
+                    {/* Stage evolution review — review-only, never regenerates */}
+                    {(() => {
+                      const fam = characters.filter((c) => c.familyId === selected.familyId).sort((a, b) => a.stageNumber - b.stageNumber);
+                      if (fam.length < 2) return null;
+                      const flags: string[] = [];
+                      for (let i = 1; i < fam.length; i++) {
+                        const a = fam[i - 1], b = fam[i];
+                        if (a.visualDescription && b.visualDescription && a.visualDescription.trim() === b.visualDescription.trim()) flags.push(`Stage ${b.stageNumber} looks identical to Stage ${a.stageNumber} — stages must clearly evolve, not repeat.`);
+                      }
+                      return (
+                        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                          <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">Family Evolution</div>
+                          <div className="flex items-end justify-center gap-2">
+                            {fam.map((c, i) => (
+                              <div key={c.characterId} className="flex items-end gap-2">
+                                {i > 0 && <span className="mb-8 text-slate-600">→</span>}
+                                <div className="text-center">
+                                  {c.referencePack?.master_portrait?.r2Key
+                                    ? <img src={`/api/admin/vault-quest/characters/${encodeURIComponent(c.characterId)}/pack/master_portrait?v=${artNonce}`} alt={`stage ${c.stageNumber}`} onClick={() => setSelectedId(c.characterId)} className="h-20 w-20 cursor-pointer rounded-lg bg-slate-950 object-contain" style={c.characterId === selected.characterId ? { outline: `2px solid ${gold}` } : undefined} />
+                                    : <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-dashed border-slate-700 text-[9px] text-slate-600">no master</div>}
+                                  <div className="mt-0.5 text-[9px] uppercase text-slate-600">Stage {c.stageNumber}</div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {flags.length > 0
+                            ? <div className="mt-2 space-y-0.5">{flags.map((f) => <div key={f} className="text-[11px] text-amber-400">⚠ {f}</div>)}</div>
+                            : <p className="mt-2 text-center text-[11px] text-slate-600">Review the three stages — each should clearly grow from the last, keeping the same colours &amp; markings. Click a stage to open it.</p>}
+                        </div>
+                      );
+                    })()}
+
+                    {/* Simple zoom overlay (fit to screen) */}
+                    {zoomId != null && (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setZoomId(null)}>
+                        <img src={zoomId === -1 ? `/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}` : `/api/admin/vault-quest/characters/${cid}/candidate/${zoomId}?v=${artNonce}`} alt="zoom" className="max-h-full max-w-full rounded-lg object-contain" onClick={(e) => e.stopPropagation()} />
+                        <button type="button" onClick={() => setZoomId(null)} className="absolute right-6 top-6 rounded-lg bg-slate-800 px-3 py-1.5 text-sm text-slate-200">Close</button>
                       </div>
                     )}
                   </div>

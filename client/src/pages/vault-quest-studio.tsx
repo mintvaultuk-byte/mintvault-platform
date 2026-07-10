@@ -16,6 +16,7 @@ import {
   type WorkflowFeed,
 } from "@/components/vault-quest/workflow";
 import { GuidedHome, GuidedStep } from "@/components/vault-quest/guided";
+import { characterHealth, type HealthCharacter } from "@/components/vault-quest/quality";
 
 /**
  * Genesis Production Studio (Phase 4) — set-centric TCG production control tower.
@@ -743,6 +744,27 @@ function AssetLibrary() {
 // ── FOUNDER DASHBOARD ──
 function FounderDashboard({ status, go }: { status: ProductionStatus; go: (s: SectionKey) => void }) {
   const f = status.founder;
+  const chars = useQuery<{ characters?: HealthCharacter[] } | null>({ queryKey: ["/api/admin/vault-quest/characters"], retry: false });
+  const buckets = useMemo(() => {
+    const b = { ready: 0, needs_master: 0, needs_action: 0, needs_review: 0, failed_identity: 0, needs_description: 0 } as Record<string, number>;
+    const firstOf: Record<string, string | undefined> = {};
+    for (const ch of chars.data?.characters ?? []) {
+      const h = characterHealth(ch);
+      b[h.bucket] = (b[h.bucket] ?? 0) + 1;
+      if (!firstOf[h.bucket]) firstOf[h.bucket] = ch.characterId;
+    }
+    return { b, firstOf };
+  }, [chars.data]);
+  // Clickable total → open the exact first matching character in the Character Bible.
+  const openBucket = (bucket: string) => { const id = buckets.firstOf[bucket]; if (id) window.location.href = `/admin/vault-quest?bible=${encodeURIComponent(id)}`; };
+  const QUALITY: { key: string; label: string }[] = [
+    { key: "ready", label: "Ready for Cards" },
+    { key: "needs_description", label: "Needing Description" },
+    { key: "needs_master", label: "Needing Master" },
+    { key: "needs_action", label: "Needing Action" },
+    { key: "needs_review", label: "Needing Review" },
+    { key: "failed_identity", label: "Failed Identity" },
+  ];
   return (
     <SectionShell title="Founder Dashboard" desc="Your production cockpit — today's task, what's left, and credit usage at a glance.">
       <div className="mb-5 rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900 to-[#0c0f15] p-6">
@@ -752,6 +774,17 @@ function FounderDashboard({ status, go }: { status: ProductionStatus; go: (s: Se
           {status.nextStep && <button onClick={() => go(STAGE_TO_SECTION[status.nextStep!.key] ?? "overview")} className="rounded-lg px-4 py-2 text-sm font-bold text-black" style={{ background: GOLD }}>{status.nextStep.label}</button>}
         </div>
         <div className="mt-2 text-xs text-slate-500">Current stage · {status.overallProgress}% overall</div>
+      </div>
+
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">Character quality</h2>
+      <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+        {QUALITY.map((q) => (
+          <button key={q.key} onClick={() => openBucket(q.key)} disabled={!buckets.firstOf[q.key]} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-left transition enabled:hover:border-slate-600 disabled:cursor-default">
+            <div className="text-2xl font-bold tabular-nums" style={q.key === "ready" ? { color: GOLD } : q.key === "failed_identity" && (buckets.b[q.key] ?? 0) > 0 ? { color: "#f87171" } : undefined}>{buckets.b[q.key] ?? 0}</div>
+            <div className="mt-0.5 text-[11px] text-slate-400">{q.label}</div>
+          </button>
+        ))}
+        <Tile label="Families complete" value={`${status.counts.familiesComplete}/${status.counts.familiesTotal}`} />
       </div>
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
         <Tile label="Characters remaining" value={f.charactersRemaining} accent={f.charactersRemaining === 0} />

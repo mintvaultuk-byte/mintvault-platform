@@ -718,7 +718,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       res.json({
         candidates: rows
           .filter((r) => r.status !== "auto_rejected" && r.status !== "deleted")
-          .map((r) => ({ id: r.id, status: r.status, source: r.source, referenceType: r.referenceType, identityScore: r.identityScore, prompt: r.prompt, width: r.width, height: r.height, createdAt: r.createdAt })),
+          .map((r) => ({ id: r.id, status: r.status, source: r.source, referenceType: r.referenceType, identityScore: r.identityScore, identityBreakdown: r.identityBreakdown, prompt: r.prompt, width: r.width, height: r.height, createdAt: r.createdAt })),
       });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : "failed to list candidates" });
