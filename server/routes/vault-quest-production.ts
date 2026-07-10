@@ -9,6 +9,7 @@
 import type { Express, Request, Response } from "express";
 import { requireAdmin } from "../auth";
 import { productionStorage, isUndefinedTable } from "../vault-quest/production-storage";
+import { getWorkflow, searchAll } from "../vault-quest/workflow-engine";
 
 function isMissingTable(err: unknown): boolean {
   return isUndefinedTable(err);
@@ -34,6 +35,26 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
     } catch (err) {
       console.error("[vq-production] status failed:", (err as Error)?.message);
       res.status(500).json({ error: "Failed to compute production status" });
+    }
+  });
+
+  // ── Workflow feed: next task, queue, warnings, credits, recent, activity ──
+  app.get(`${base}/workflow`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
+    try {
+      res.json(await getWorkflow(String(req.params.setCode)));
+    } catch (err) {
+      console.error("[vq-production] workflow failed:", (err as Error)?.message);
+      res.status(500).json({ error: "Failed to compute workflow" });
+    }
+  });
+
+  // ── Global search across characters/families/cards/packaging/assets/print/QA ──
+  app.get(`${base}/search`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
+    try {
+      res.json(await searchAll(String(req.params.setCode), String(req.query.q ?? "")));
+    } catch (err) {
+      console.error("[vq-production] search failed:", (err as Error)?.message);
+      res.status(500).json({ error: "Search failed" });
     }
   });
 
@@ -129,6 +150,16 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
   });
   app.put(`${base}/release`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
     try {
+      // HARD GATE: a release can never be archived/finalised while smart warnings exist.
+      if (req.body?.archived === true) {
+        const wf = await getWorkflow(String(req.params.setCode));
+        if (wf.warnings.length > 0) {
+          return res.status(409).json({
+            error: `Release blocked — ${wf.warnings.length} warning(s) must be resolved first`,
+            warnings: wf.warnings,
+          });
+        }
+      }
       res.json(await productionStorage.upsertRelease(String(req.params.setCode), req.body ?? {}));
     } catch (err) {
       handleWriteError(res, err);

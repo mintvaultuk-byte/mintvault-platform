@@ -1,0 +1,294 @@
+/**
+ * Next Task Engine + workflow feed (Phase 5).
+ *
+ * Derives "what should the founder do next" ENTIRELY from existing data — no new
+ * tables, no migrations. Per character the canonical order is:
+ *   Description → Approve Description → Master Reference → Action Pose →
+ *   Approve References → Lock Character → Generate Cards
+ * then set-level: QA → Packaging → Release.
+ *
+ * Also computes: the production queue (every open task, ordered), smart warnings
+ * (release is blocked while any exist), credits usage (from vq_ai_generations),
+ * recent items and the activity timeline (from revision + generation history).
+ *
+ * VQ-only; read-only; degrades gracefully where Phase-4 tables (0007) are absent.
+ */
+import { desc } from "drizzle-orm";
+import { db } from "../db";
+import { vqStorage } from "./storage";
+import { vqAiGenerations, vqCharacterRevisions, vqCardRevisions, type VqCharacter, type VqCardRow } from "@shared/vq-schema";
+import { STATUS_META, type VqStatus } from "@shared/vq-workflow";
+import { higgsfieldCreditsPerImage } from "./ai/higgsfield";
+import { productionStorage, isUndefinedTable } from "./production-storage";
+
+async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    if (isUndefinedTable(err)) return fallback;
+    throw err;
+  }
+}
+
+const cardIsDone = (status: string) => STATUS_META[status as VqStatus]?.tone === "success";
+
+// ── Task model ───────────────────────────────────────────────────────────────
+export type TaskKind =
+  | "description"
+  | "approve_description"
+  | "master_reference"
+  | "action_pose"
+  | "approve_references"
+  | "lock_character"
+  | "generate_cards"
+  | "qa"
+  | "packaging"
+  | "release";
+
+const TASK_META: Record<TaskKind, { label: string; section: string; priority: number }> = {
+  description: { label: "Generate Description", section: "characters", priority: 1 },
+  approve_description: { label: "Approve Description", section: "characters", priority: 2 },
+  master_reference: { label: "Generate Master Reference", section: "characters", priority: 3 },
+  action_pose: { label: "Generate Action Pose", section: "characters", priority: 4 },
+  approve_references: { label: "Approve References", section: "characters", priority: 5 },
+  lock_character: { label: "Lock Character", section: "characters", priority: 6 },
+  generate_cards: { label: "Generate Cards", section: "standard", priority: 7 },
+  qa: { label: "Run QA", section: "qa", priority: 8 },
+  packaging: { label: "Packaging", section: "packaging", priority: 9 },
+  release: { label: "Release", section: "release", priority: 10 },
+};
+
+export interface WorkflowTask {
+  id: string;
+  kind: TaskKind;
+  label: string;
+  section: string;
+  characterId: string | null;
+  characterName: string | null;
+  familyId: string | null;
+  stageNumber: number | null;
+  status: "queued" | "waiting_for_review" | "approved" | "locked" | "completed";
+  /** rough founder-minutes to complete — powers "estimated time remaining" */
+  estMinutes: number;
+  /** estimated credit cost if this task generates images */
+  estCredits: number;
+  /** asset-reuse hint: an approved asset already exists for this need */
+  reuse: { alreadyExists: boolean; note: string } | null;
+}
+
+export interface SmartWarning {
+  code: string;
+  severity: "warn" | "block";
+  message: string;
+  ref: string | null;
+}
+
+/** Per-character: the FIRST unfinished step in the canonical order, or null when done. */
+function nextTaskForCharacter(ch: VqCharacter, cardsByBase: Map<string, VqCardRow[]>): WorkflowTask | null {
+  const pack = (ch.referencePack ?? {}) as Partial<Record<string, { r2Key?: string }>>;
+  const hasDescriptionText = !!(ch.visualDescription && ch.characterDna);
+  const hasMaster = !!pack.master_portrait?.r2Key || !!ch.approvedArtworkR2Key;
+  const hasAction = !!pack.action_pose?.r2Key;
+
+  const mk = (kind: TaskKind, status: WorkflowTask["status"], estMinutes: number, estCredits: number, reuse: WorkflowTask["reuse"] = null): WorkflowTask => ({
+    id: `${ch.characterId}:${kind}`,
+    kind,
+    label: TASK_META[kind].label,
+    section: TASK_META[kind].section,
+    characterId: ch.characterId,
+    characterName: ch.characterName,
+    familyId: ch.familyId,
+    stageNumber: ch.stageNumber,
+    status,
+    estMinutes,
+    estCredits,
+    reuse,
+  });
+
+  const perImage = higgsfieldCreditsPerImage();
+  if (ch.descriptionStatus !== "approved") {
+    if (!hasDescriptionText) return mk("description", "queued", 3, 0);
+    return mk("approve_description", "waiting_for_review", 2, 0);
+  }
+  if (!hasMaster) return mk("master_reference", "queued", 5, perImage * 3, ch.approvedArtworkR2Key ? { alreadyExists: true, note: "Approved artwork exists — reuse instead of regenerating" } : null);
+  if (!hasAction) return mk("action_pose", "queued", 5, perImage * 3);
+  if (ch.approvalStatus !== "approved") return mk("approve_references", "waiting_for_review", 3, 0, { alreadyExists: true, note: "References generated — review, don't regenerate" });
+  if (!ch.locked) return mk("lock_character", "approved", 1, 0);
+
+  const cards = cardsByBase.get(ch.cardId ?? "") ?? [];
+  const undone = cards.filter((c) => !cardIsDone(c.status));
+  const noArt = undone.filter((c) => !c.artR2Key);
+  if (undone.length > 0) {
+    return mk("generate_cards", "locked", undone.length * 4, noArt.length * perImage, noArt.length < undone.length ? { alreadyExists: true, note: `${undone.length - noArt.length} card(s) already have artwork — reuse` } : null);
+  }
+  return null; // character fully complete
+}
+
+export async function getWorkflow(setCode = "GNV") {
+  const [characters, cards, status] = await Promise.all([
+    vqStorage.listCharacters(setCode).catch(() => [] as VqCharacter[]),
+    vqStorage.listCards({ setCode }).catch(() => [] as VqCardRow[]),
+    productionStorage.getProductionStatus(setCode),
+  ]);
+
+  const cardsByBase = new Map<string, VqCardRow[]>();
+  for (const c of cards) {
+    const base = c.baseCardId ?? c.cardId;
+    const list = cardsByBase.get(base) ?? [];
+    list.push(c);
+    cardsByBase.set(base, list);
+  }
+
+  // ── queue: every open character task in canonical family/stage order ──
+  const queue: WorkflowTask[] = [];
+  const sorted = [...characters].sort((a, b) => a.familyId.localeCompare(b.familyId) || a.stageNumber - b.stageNumber);
+  for (const ch of sorted) {
+    const t = nextTaskForCharacter(ch, cardsByBase);
+    if (t) queue.push(t);
+  }
+  // set-level tasks once all character work is queued
+  const packagingStage = status.stages.find((s) => s.key === "packaging");
+  const qaStage = status.stages.find((s) => s.key === "qa");
+  if (qaStage && qaStage.status !== "completed") queue.push({ id: "set:qa", kind: "qa", label: TASK_META.qa.label, section: "qa", characterId: null, characterName: null, familyId: null, stageNumber: null, status: "queued", estMinutes: 30, estCredits: 0, reuse: null });
+  if (packagingStage && packagingStage.status !== "completed") queue.push({ id: "set:packaging", kind: "packaging", label: TASK_META.packaging.label, section: "packaging", characterId: null, characterName: null, familyId: null, stageNumber: null, status: "queued", estMinutes: 60, estCredits: 0, reuse: null });
+  if (!status.release.releaseReady) queue.push({ id: "set:release", kind: "release", label: TASK_META.release.label, section: "release", characterId: null, characterName: null, familyId: null, stageNumber: null, status: "queued", estMinutes: 15, estCredits: 0, reuse: null });
+
+  // Character-priority ordering: finish lower-priority steps first across the set
+  queue.sort((a, b) => TASK_META[a.kind].priority - TASK_META[b.kind].priority || (a.familyId ?? "zz").localeCompare(b.familyId ?? "zz") || (a.stageNumber ?? 9) - (b.stageNumber ?? 9));
+
+  const current = queue[0] ?? null;
+  const estMinutesRemaining = queue.reduce((a, t) => a + t.estMinutes, 0);
+  const estCreditsRemaining = queue.reduce((a, t) => a + t.estCredits, 0);
+
+  // ── smart warnings ──
+  const warnings: SmartWarning[] = [];
+  const byFamily = new Map<string, VqCharacter[]>();
+  for (const ch of characters) {
+    const l = byFamily.get(ch.familyId) ?? [];
+    l.push(ch);
+    byFamily.set(ch.familyId, l);
+  }
+  for (const [famId, list] of byFamily) {
+    const stages = [...list].sort((a, b) => a.stageNumber - b.stageNumber);
+    for (let i = 1; i < stages.length; i++) {
+      const a = stages[i - 1];
+      const b = stages[i];
+      if (a.visualDescription && b.visualDescription && a.visualDescription.trim() === b.visualDescription.trim()) {
+        warnings.push({ code: "stage_identical", severity: "block", message: `${famId}: Stage ${b.stageNumber} description is identical to Stage ${a.stageNumber} — stages must evolve`, ref: b.characterId });
+      }
+    }
+    const approved = list.filter((c) => c.approvalStatus === "approved").length;
+    if (approved > 0 && approved < list.length) {
+      warnings.push({ code: "family_incomplete", severity: "warn", message: `${famId}: family incomplete — ${approved}/${list.length} characters approved`, ref: famId });
+    }
+  }
+  for (const ch of characters) {
+    if (ch.approvalStatus === "approved" && !ch.locked) {
+      warnings.push({ code: "character_not_locked", severity: "warn", message: `${ch.characterName} (${ch.characterId}) is approved but not locked`, ref: ch.characterId });
+    }
+  }
+  const packaging = await productionStorage.listPackaging(setCode);
+  const allLocked = characters.length > 0 && characters.every((c) => c.locked);
+  for (const p of packaging) {
+    if (p.artworkR2Key && !allLocked) {
+      warnings.push({ code: "packaging_unfinished_art", severity: "block", message: `Packaging "${p.name}" has artwork while characters are still unlocked — packaging must use only locked canonical characters`, ref: String(p.id) });
+    }
+  }
+  const qaChecks = await productionStorage.listQa(setCode);
+  const qaRefs = new Set(qaChecks.map((q) => q.assetRef));
+  const doneCards = cards.filter((c) => cardIsDone(c.status));
+  for (const c of doneCards) {
+    if (!qaRefs.has(c.cardId)) warnings.push({ code: "card_missing_qa", severity: "warn", message: `Card ${c.cardId} is done but has no QA check`, ref: c.cardId });
+  }
+  const releaseBlocked = warnings.length > 0;
+
+  // ── credits (from vq_ai_generations; ~1 image-generation ≈ perImage credits, text ≈ 0) ──
+  const gens = await safe(() => db.select().from(vqAiGenerations).orderBy(desc(vqAiGenerations.createdAt)).limit(500), [] as (typeof vqAiGenerations.$inferSelect)[]);
+  const perImage = higgsfieldCreditsPerImage();
+  const now = Date.now();
+  const dayMs = 86_400_000;
+  const startOfToday = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+  const isImage = (g: { kind?: string | null; mode?: string | null }) => /art|image|reference|portrait|pose/i.test(`${g.kind ?? ""} ${g.mode ?? ""}`);
+  const creditsOf = (list: typeof gens) => list.reduce((a, g) => a + (isImage(g) ? perImage : 0), 0);
+  const inWindow = (g: (typeof gens)[number], ms: number) => !!g.createdAt && now - new Date(g.createdAt).getTime() <= ms;
+  const gensToday = gens.filter((g) => !!g.createdAt && new Date(g.createdAt).getTime() >= startOfToday);
+  const gensWeek = gens.filter((g) => inWindow(g, 7 * dayMs));
+  const gensMonth = gens.filter((g) => inWindow(g, 30 * dayMs));
+  const cardIdsWithGens = new Set(gens.map((g) => g.cardId).filter(Boolean));
+  const familyOf = new Map(cards.map((c) => [c.cardId, c.familyId]));
+  const famWithGens = new Set([...cardIdsWithGens].map((id) => familyOf.get(id as string)).filter(Boolean));
+  const totalCredits = creditsOf(gens);
+  const reusableApproved = characters.filter((c) => !!c.approvedArtworkR2Key || !!(c.referencePack as Record<string, unknown> | null)?.master_portrait).length;
+  const credits = {
+    today: creditsOf(gensToday),
+    week: creditsOf(gensWeek),
+    month: creditsOf(gensMonth),
+    generationsToday: gensToday.length,
+    avgPerCard: cardIdsWithGens.size ? Math.round((totalCredits / cardIdsWithGens.size) * 10) / 10 : 0,
+    avgPerFamily: famWithGens.size ? Math.round((totalCredits / famWithGens.size) * 10) / 10 : 0,
+    estimatedRemaining: estCreditsRemaining,
+    potentialSavings: reusableApproved * perImage,
+    perImage,
+  };
+
+  // ── recent items + activity timeline (revision/generation history) ──
+  const charRevs = await safe(() => db.select().from(vqCharacterRevisions).orderBy(desc(vqCharacterRevisions.editedAt)).limit(15), [] as (typeof vqCharacterRevisions.$inferSelect)[]);
+  const cardRevs = await safe(() => db.select().from(vqCardRevisions).orderBy(desc(vqCardRevisions.editedAt)).limit(15), [] as (typeof vqCardRevisions.$inferSelect)[]);
+  const byUpdated = [...characters].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  const recent = {
+    edited: charRevs.slice(0, 5).map((r) => ({ ref: r.characterId, note: r.reason ?? "edited", at: r.editedAt ? new Date(r.editedAt).toISOString() : "" })),
+    generated: gens.slice(0, 5).map((g) => ({ ref: g.cardId ?? "—", note: `${g.kind ?? "generation"}${g.mode ? ` · ${g.mode}` : ""}`, at: g.createdAt ? new Date(g.createdAt).toISOString() : "" })),
+    approved: byUpdated.filter((c) => c.approvalStatus === "approved").slice(0, 5).map((c) => ({ ref: c.characterId, note: c.characterName, at: new Date(c.updatedAt).toISOString() })),
+    locked: byUpdated.filter((c) => c.locked).slice(0, 5).map((c) => ({ ref: c.characterId, note: c.characterName, at: new Date(c.updatedAt).toISOString() })),
+  };
+  const activity = [
+    ...charRevs.map((r) => ({ kind: "character", label: `${r.reason ?? "Edited"} — ${r.characterId}`, at: r.editedAt ? new Date(r.editedAt).toISOString() : "" })),
+    ...cardRevs.map((r) => ({ kind: "card", label: `Card edited — ${r.cardId}`, at: r.editedAt ? new Date(r.editedAt).toISOString() : "" })),
+    ...gens.slice(0, 15).map((g) => ({ kind: "generation", label: `Generated ${g.kind ?? "content"}${g.cardId ? ` — ${g.cardId}` : ""}`, at: g.createdAt ? new Date(g.createdAt).toISOString() : "" })),
+  ]
+    .filter((a) => a.at)
+    .sort((a, b) => b.at.localeCompare(a.at))
+    .slice(0, 25);
+
+  return {
+    setCode,
+    current,
+    queue: queue.slice(0, 100),
+    queueTotal: queue.length,
+    estMinutesRemaining,
+    warnings,
+    releaseBlocked,
+    credits,
+    recent,
+    activity,
+  };
+}
+
+// ── Global search across everything (degrades where 0007 absent) ──────────────
+export async function searchAll(setCode: string, q: string) {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return { results: [] };
+  const match = (...vals: (string | null | undefined)[]) => vals.some((v) => v && v.toLowerCase().includes(needle));
+
+  const [characters, cards, families, packaging, assets, prints, qa] = await Promise.all([
+    vqStorage.listCharacters(setCode).catch(() => []),
+    vqStorage.listCards({ setCode }).catch(() => []),
+    vqStorage.listFamilies(setCode).catch(() => []),
+    productionStorage.listPackaging(setCode),
+    productionStorage.listAssets(setCode),
+    productionStorage.listPrint(setCode),
+    productionStorage.listQa(setCode),
+  ]);
+
+  const results = [
+    ...characters.filter((c) => match(c.characterName, c.characterId, c.familyId)).map((c) => ({ type: "character", ref: c.characterId, label: c.characterName, sub: `${c.familyId} · stage ${c.stageNumber}`, section: "characters" })),
+    ...families.filter((f) => match(f.name, f.familyId)).map((f) => ({ type: "family", ref: f.familyId, label: f.name, sub: f.familyId, section: "families" })),
+    ...cards.filter((c) => match(c.name, c.cardId, c.collectorNumber)).map((c) => ({ type: "card", ref: c.cardId, label: c.name, sub: `${c.cardId} · ${c.status}`, section: c.baseCardId ? "variant" : "standard" })),
+    ...packaging.filter((p) => match(p.name, p.type)).map((p) => ({ type: "packaging", ref: String(p.id), label: p.name, sub: p.type, section: "packaging" })),
+    ...assets.filter((a) => match(a.name, a.category)).map((a) => ({ type: "asset", ref: String(a.id), label: a.name, sub: a.category, section: "assets" })),
+    ...prints.filter((p) => match(p.type)).map((p) => ({ type: "print", ref: String(p.id), label: p.type, sub: p.status, section: "print" })),
+    ...qa.filter((c) => match(c.assetRef, c.assetType)).map((c) => ({ type: "qa", ref: c.assetRef, label: c.assetRef, sub: `QA · ${c.status}`, section: "qa" })),
+  ].slice(0, 30);
+
+  return { results };
+}

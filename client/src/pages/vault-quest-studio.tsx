@@ -8,7 +8,13 @@ import {
   LayoutDashboard, Settings2, Users, Boxes, Layers, Sparkles, Package, Printer,
   ShieldCheck, Rocket, FolderArchive, Gauge, Lock, ChevronRight, ArrowUpRight,
   CheckCircle2, Circle, CircleDot, AlertTriangle, PlusCircle, ExternalLink,
+  Home, ListOrdered, Coins, Search,
 } from "lucide-react";
+import {
+  useWorkflow, useFounderMode, usePalette, CommandPalette, HomeDashboard,
+  ProductionQueue, CreditsDashboard, WarningsPanel, BulkBar, Collapse,
+  type WorkflowFeed,
+} from "@/components/vault-quest/workflow";
 
 /**
  * Genesis Production Studio (Phase 4) — set-centric TCG production control tower.
@@ -40,10 +46,13 @@ interface ProductionStatus {
 }
 
 type SectionKey =
+  | "home" | "queue" | "credits"
   | "overview" | "settings" | "characters" | "families" | "standard" | "variant"
   | "packaging" | "print" | "qa" | "release" | "assets" | "founder";
 
 const NAV: { key: SectionKey; label: string; icon: typeof LayoutDashboard; group?: string }[] = [
+  { key: "home", label: "Home", icon: Home },
+  { key: "queue", label: "Production Queue", icon: ListOrdered },
   { key: "overview", label: "Overview", icon: LayoutDashboard },
   { key: "settings", label: "Set Settings", icon: Settings2 },
   { key: "characters", label: "Characters", icon: Users },
@@ -55,6 +64,7 @@ const NAV: { key: SectionKey; label: string; icon: typeof LayoutDashboard; group
   { key: "qa", label: "QA", icon: ShieldCheck },
   { key: "release", label: "Release", icon: Rocket },
   { key: "assets", label: "Asset Library", icon: FolderArchive, group: "Library" },
+  { key: "credits", label: "Credits", icon: Coins, group: "Library" },
   { key: "founder", label: "Founder Dashboard", icon: Gauge, group: "Library" },
 ];
 
@@ -116,15 +126,20 @@ function Deferred({ label }: { label: string }) {
 
 // ═══════════════════════════════════════════════════════════════════════════
 export default function VaultQuestStudioPage() {
-  const [section, setSection] = useState<SectionKey>("overview");
+  const [section, setSection] = useState<SectionKey>("home");
   const prod = useQuery<ProductionStatus>({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/production`], retry: false });
   const status = prod.data;
+  const workflow = useWorkflow();
+  const [founderMode, setFounderMode] = useFounderMode();
+  const [paletteOpen, setPaletteOpen] = usePalette();
+  const goSection = (s: string) => setSection(s as SectionKey);
 
   return (
     <div className="min-h-screen bg-[#0a0c11] text-slate-200">
+      <CommandPalette open={paletteOpen} close={() => setPaletteOpen(false)} go={goSection} />
       <div className="flex">
         {/* ── Sidebar ── */}
-        <aside className="sticky top-0 h-screen w-60 shrink-0 border-r border-slate-800 bg-[#0c0f15] p-4">
+        <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col border-r border-slate-800 bg-[#0c0f15] p-4">
           <Link href="/admin/vault-quest" className="mb-4 flex items-center gap-2 text-xs font-medium text-slate-500 hover:text-slate-300">
             <ChevronRight className="h-3 w-3 rotate-180" /> Vault Quest
           </Link>
@@ -135,6 +150,9 @@ export default function VaultQuestStudioPage() {
               <div className="text-[10px] text-slate-500">GNV · {status ? `${status.overallProgress}% complete` : "…"}</div>
             </div>
           </div>
+          <button onClick={() => setPaletteOpen(true)} className="mb-3 flex w-full items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-1.5 text-xs text-slate-500 hover:border-slate-700 hover:text-slate-300">
+            <Search className="h-3.5 w-3.5" />Search everything…<kbd className="ml-auto rounded border border-slate-800 px-1 text-[9px]">⌘K</kbd>
+          </button>
           <nav className="space-y-0.5">
             {NAV.map((n, i) => {
               const prev = NAV[i - 1];
@@ -156,15 +174,42 @@ export default function VaultQuestStudioPage() {
               );
             })}
           </nav>
+          <label className="mt-auto flex cursor-pointer items-center justify-between rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
+            <span className="text-xs font-semibold text-slate-400">Founder Mode</span>
+            <button
+              role="switch"
+              aria-checked={founderMode}
+              onClick={() => setFounderMode(!founderMode)}
+              className={`relative h-5 w-9 rounded-full transition ${founderMode ? "" : "bg-slate-700"}`}
+              style={founderMode ? { background: GOLD } : undefined}
+            >
+              <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${founderMode ? "left-[18px]" : "left-0.5"}`} />
+            </button>
+          </label>
         </aside>
 
         {/* ── Main ── */}
         <main className="min-w-0 flex-1 p-8">
           {prod.isLoading && <div className="text-sm text-slate-500">Loading production status…</div>}
           {prod.isError && <div className="rounded-lg border border-red-900 bg-red-950/40 p-4 text-sm text-red-300">Failed to load — are you signed in as admin?</div>}
+          {section === "home" && (
+            <SectionShell title="Home" desc="The system always knows the next production task — pick up exactly where you left off.">
+              <HomeDashboard feed={workflow.data} loading={workflow.isLoading} go={goSection} />
+            </SectionShell>
+          )}
+          {section === "queue" && (
+            <SectionShell title="Production Queue" desc="Every open task in canonical order: description → references → approval → lock → cards → QA → packaging → release.">
+              <ProductionQueue feed={workflow.data} loading={workflow.isLoading} founderMode={founderMode} go={goSection} />
+            </SectionShell>
+          )}
+          {section === "credits" && (
+            <SectionShell title="Credits" desc="AI spend, derived from the generation audit trail.">
+              <CreditsDashboard feed={workflow.data} loading={workflow.isLoading} />
+            </SectionShell>
+          )}
           {status && (
             <>
-              {!status.migrationApplied && (
+              {!status.migrationApplied && section !== "home" && section !== "queue" && section !== "credits" && (
                 <div className="mb-5 flex items-start gap-2 rounded-lg border border-amber-800 bg-amber-950/30 p-3 text-xs text-amber-200">
                   <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>Production tables aren’t applied on this database yet — Packaging, Print, QA, Release &amp; Asset Library are read-only until <code className="rounded bg-black/30 px-1">migrations-vq/0007</code> is applied. Character, family &amp; card progress is fully live.</span>
@@ -172,14 +217,14 @@ export default function VaultQuestStudioPage() {
               )}
               {section === "overview" && <Overview status={status} go={setSection} />}
               {section === "settings" && <SetSettings />}
-              {section === "characters" && <CharactersView status={status} />}
+              {section === "characters" && <CharactersView status={status} founderMode={founderMode} />}
               {section === "families" && <FamiliesView status={status} />}
               {section === "standard" && <CardsView status={status} kind="standard" />}
               {section === "variant" && <CardsView status={status} kind="variant" />}
               {section === "packaging" && <PackagingStudio />}
               {section === "print" && <PrintStudio />}
               {section === "qa" && <QaStudio />}
-              {section === "release" && <ReleaseManager status={status} />}
+              {section === "release" && <ReleaseManager status={status} feed={workflow.data} />}
               {section === "assets" && <AssetLibrary />}
               {section === "founder" && <FounderDashboard status={status} go={setSection} />}
             </>
@@ -317,11 +362,22 @@ function SetSettings() {
   );
 }
 
-// ── CHARACTERS (summary + deep link to Character Bible) ──
-function CharactersView({ status }: { status: ProductionStatus }) {
+// ── CHARACTERS (summary + list with bulk operations + deep link) ──
+type CharacterListRow = { characterId: string; characterName: string; familyId: string; stageNumber: number; descriptionStatus?: string; approvalStatus: string; locked?: boolean };
+function CharactersView({ status, founderMode }: { status: ProductionStatus; founderMode: boolean }) {
+  const qc = useQueryClient();
   const c = status.counts;
   const familyPct = c.familiesTotal ? Math.round((c.familiesComplete / c.familiesTotal) * 100) : 0;
   const stage = status.stages.find((s) => s.key === "characters");
+  const q = useQuery<{ characters?: CharacterListRow[] } | null>({ queryKey: ["/api/admin/vault-quest/characters"], retry: false });
+  const chars = q.data?.characters ?? [];
+  const [selected, setSelected] = useState<string[]>([]);
+  const toggle = (id: string) => setSelected((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["/api/admin/vault-quest/characters"] });
+    qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/production`] });
+    qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/workflow`] });
+  };
   return (
     <SectionShell title="Character Studio" desc="The Character Bible — canonical identity, descriptions &amp; reference artwork. Full editor opens in Card Studio."
       actions={<Link href="/admin/vault-quest"><AdminButton variant="gold">Open Character Bible <ExternalLink className="ml-1 inline h-3 w-3" /></AdminButton></Link>}>
@@ -331,7 +387,35 @@ function CharactersView({ status }: { status: ProductionStatus }) {
         <Tile label="Family completion" value={`${familyPct}%`} sub={`${c.familiesComplete}/${c.familiesTotal}`} />
         <Tile label="Workflow stage" value={stage ? STATE_META[stage.status].label : "—"} />
       </div>
-      <div className="max-w-xl"><div className="mb-1 text-xs text-slate-400">Character approval progress</div><Bar pct={stage?.progress ?? 0} gold /></div>
+      <div className="mb-5 max-w-xl"><div className="mb-1 text-xs text-slate-400">Character approval progress</div><Bar pct={stage?.progress ?? 0} gold /></div>
+
+      <Collapse id="characters-list" title={`Characters (${chars.length})`} badge={founderMode && selected.length ? <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">{selected.length} selected</span> : undefined}>
+        {chars.length === 0 ? <p className="text-xs text-slate-600">No characters loaded.</p> : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-left text-xs">
+              <thead><tr className="text-[10px] uppercase tracking-wider text-slate-600">
+                {founderMode && <th className="w-8 pb-2" />}
+                <th className="pb-2">Character</th><th className="pb-2">Family</th><th className="pb-2">Stage</th><th className="pb-2">Description</th><th className="pb-2">Approval</th><th className="pb-2">Lock</th>
+              </tr></thead>
+              <tbody>
+                {chars.map((ch) => (
+                  <tr key={ch.characterId} className="border-t border-slate-800/70">
+                    {founderMode && <td className="py-1.5"><input type="checkbox" checked={selected.includes(ch.characterId)} onChange={() => toggle(ch.characterId)} className="accent-[#D4AF37]" /></td>}
+                    <td className="py-1.5 font-medium text-slate-200">{ch.characterName}<span className="ml-1.5 text-slate-600">{ch.characterId}</span></td>
+                    <td className="py-1.5 text-slate-400">{ch.familyId}</td>
+                    <td className="py-1.5 tabular-nums text-slate-400">{ch.stageNumber}</td>
+                    <td className="py-1.5">{ch.descriptionStatus === "approved" ? <span className="text-emerald-400">approved</span> : <span className="text-slate-500">{ch.descriptionStatus ?? "draft"}</span>}</td>
+                    <td className="py-1.5">{ch.approvalStatus === "approved" ? <span className="text-emerald-400">approved</span> : <span className="text-slate-500">{ch.approvalStatus}</span>}</td>
+                    <td className="py-1.5">{ch.locked ? <Lock className="h-3 w-3 text-violet-400" /> : <span className="text-slate-700">—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {founderMode && <BulkBar selected={selected} clear={() => setSelected([])} onDone={refresh} />}
+        {!founderMode && <p className="mt-3 text-[11px] text-slate-600">Enable Founder Mode (sidebar) for bulk approve / lock operations.</p>}
+      </Collapse>
     </SectionShell>
   );
 }
@@ -545,7 +629,8 @@ function QaStudio() {
 }
 
 // ── RELEASE MANAGER ──
-function ReleaseManager({ status }: { status: ProductionStatus }) {
+function ReleaseManager({ status, feed }: { status: ProductionStatus; feed: WorkflowFeed | undefined }) {
+  const warningCount = feed?.warnings.length ?? 0;
   const qc = useQueryClient();
   const { toast } = useToast();
   const q = useQuery<Record<string, unknown>>({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/release`], retry: false });
@@ -572,9 +657,12 @@ function ReleaseManager({ status }: { status: ProductionStatus }) {
           <div className="flex items-center gap-2">{g.ok ? <CheckCircle2 className="h-4 w-4 text-emerald-400" /> : <Circle className="h-4 w-4 text-slate-600" />}<span className="text-sm font-semibold text-slate-200">{g.label}</span></div>
         </div>)}
       </div>
-      <div className={`mb-5 rounded-xl border p-4 ${rel.releaseReady ? "border-emerald-700 bg-emerald-900/40" : "border-amber-800 bg-amber-950/20"}`}>
-        <span className="text-sm font-bold" style={{ color: rel.releaseReady ? "#6ee7b7" : "#fcd34d" }}>{rel.releaseReady ? "✓ Release ready — all gates passed" : "Awaiting upstream stages before release"}</span>
+      <div className={`mb-5 rounded-xl border p-4 ${rel.releaseReady && warningCount === 0 ? "border-emerald-700 bg-emerald-900/40" : "border-amber-800 bg-amber-950/20"}`}>
+        <span className="text-sm font-bold" style={{ color: rel.releaseReady && warningCount === 0 ? "#6ee7b7" : "#fcd34d" }}>
+          {rel.releaseReady && warningCount === 0 ? "✓ Release ready — all gates passed, no warnings" : warningCount > 0 ? `Release blocked — ${warningCount} smart warning(s) must be resolved` : "Awaiting upstream stages before release"}
+        </span>
       </div>
+      {warningCount > 0 && <div className="mb-5"><WarningsPanel warnings={feed!.warnings} /></div>}
       <div className="grid max-w-2xl grid-cols-1 gap-4 md:grid-cols-2">
         <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-400">Release Date</span><input type="date" value={form.releaseDate ?? (r.releaseDate ? String(r.releaseDate) : "")} onChange={(e) => setForm((p) => ({ ...p, releaseDate: e.target.value }))} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-500" /></label>
         <label className="block"><span className="mb-1 block text-xs font-semibold text-slate-400">Print Quantity</span><input type="number" value={form.printQuantity ?? (r.printQuantity != null ? String(r.printQuantity) : "")} onChange={(e) => setForm((p) => ({ ...p, printQuantity: e.target.value }))} className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-500" /></label>
@@ -582,7 +670,7 @@ function ReleaseManager({ status }: { status: ProductionStatus }) {
       </div>
       <div className="mt-4 flex gap-2">
         <AdminButton variant="ghost" onClick={() => save()}>Save</AdminButton>
-        <AdminButton variant="gold" onClick={() => save({ archived: true })} disabled={!rel.releaseReady}>Archive Final Release</AdminButton>
+        <AdminButton variant="gold" onClick={() => save({ archived: true })} disabled={!rel.releaseReady || warningCount > 0}>Archive Final Release</AdminButton>
       </div>
     </SectionShell>
   );
