@@ -16,7 +16,7 @@ const COST_MODES: { key: "cheapest" | "balanced" | "highest"; label: string; hin
   { key: "highest", label: "Highest Quality", hint: "Best detail", model: VQ_QUALITY_MODEL.premium },
 ];
 const costModeFor = (m: VqImageModel) => COST_MODES.find((c) => c.model === m)?.key ?? "balanced";
-import { VQ_IMAGE_MODELS, VQ_QUALITY_MODEL, vqCreditsPerImage, type VqImageModel } from "@shared/vq-schema";
+import { VQ_IMAGE_MODELS, VQ_QUALITY_MODEL, vqCreditsPerImage, vqChargedCredits, type VqImageModel } from "@shared/vq-schema";
 
 // Vault Quest Studio — production control centre: dashboard board + card editor
 // with the full status workflow. Renders via the shared (locked) engine.
@@ -974,18 +974,18 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       if (type === "master_portrait") {
         // Master Reference always produces THREE strict studio candidates (enforced server-side).
         const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: type, model: imgModel });
-        const data = (await res.json()) as { created?: unknown[]; autoRejected?: number };
+        const data = (await res.json()) as { created?: { model?: string }[]; autoRejected?: number; bgRejected?: number };
         await candQuery.refetch();
         setArtNonce((n) => n + 1);
         const made = data.created?.length ?? 0;
         const rejected = data.autoRejected ?? 0;
-        trackCredits(made * creditsPerImage);
+        trackCredits(vqChargedCredits(data, imgModel)); // counts billed rejects at the model actually used
         toast({ title: `Master Reference — ${made} candidate${made === 1 ? "" : "s"}`, description: rejected ? `${rejected} auto-rejected for identity drift. Choose one below.` : "Studio references generated — choose one below." });
       } else {
         const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: type, model: imgModel });
-        const data = (await res.json()) as { width: number; height: number };
+        const data = (await res.json()) as { width: number; height: number; model?: string };
         await candQuery.refetch();
-        trackCredits(creditsPerImage);
+        trackCredits(vqCreditsPerImage(data.model ?? imgModel)); // model the server actually used (refs may upgrade it)
         setArtNonce((n) => n + 1);
         toast({ title: `${typeLabel} generated`, description: `${data.width}x${data.height} — review below, then Approve.` });
       }
@@ -1021,10 +1021,10 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     setBusy("gen-3more");
     try {
       const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork/batch`, { count: 3, referenceType: refType, model: imgModel });
-      const data = (await res.json()) as { created?: unknown[] };
+      const data = (await res.json()) as { created?: { model?: string }[]; autoRejected?: number; bgRejected?: number };
       await candQuery.refetch();
       setArtNonce((n) => n + 1);
-      trackCredits((data.created?.length ?? 0) * creditsPerImage); // paid images — keep the spend counters honest
+      trackCredits(vqChargedCredits(data, imgModel)); // counts billed rejects at the model actually used
       toast({ title: "Generated more candidates", description: `${data.created?.length ?? 0} new candidate(s).` });
     } catch (e) {
       artworkError(e, "Generate 3 more failed");
@@ -2014,7 +2014,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                             <button type="button" title="Compare (pick two)" onClick={() => setCompareSel((p) => { const n = p.includes(c.id) ? p.filter((x) => x !== c.id) : [...p.slice(-1), c.id]; if (n.length === 2) setShowCompare(true); return n; })} className={`${mini} ${inCompare ? "border-sky-500 text-sky-300" : ""}`}>Compare</button>
                             <button type="button" title="Delete (hides it — file kept)" onClick={() => deleteCandidate(c.id)} disabled={busy === `del-${c.id}`} className={`${mini} hover:border-red-500 hover:text-red-300`}>{busy === `del-${c.id}` ? "…" : "Delete"}</button>
                             <button type="button" title="Show the exact prompt used" onClick={() => setPromptFor(c)} className={mini}>Prompt</button>
-                            <button type="button" title={`Generate another ${refTypeMeta.label} from the same description`} onClick={() => generateMasterArtwork()} disabled={busy === "gen-art" || descStatus(selected) !== "approved"} className={mini}>Regen Similar</button>
+                            <button type="button" title={`Generate another ${refTypeMeta.label} from the same description`} onClick={() => generateMasterArtwork()} disabled={busy === "gen-art" || selected.locked || descStatus(selected) !== "approved"} className={mini}>Regen Similar</button>
                           </div>
                         </div>
                       );
@@ -2103,6 +2103,10 @@ export default function AdminVaultQuest() {
   const [artNonce, setArtNonce] = useState(0);
   const [candidatePreviews, setCandidatePreviews] = useState<{ main?: string; prev?: string }>({});
   const [fullBusy, setFullBusy] = useState<string | null>(null);
+  // Synchronous re-entrancy latch: `fullBusy` is state, so two clicks in one frame
+  // both read it as null and both fire (double text + double paid artwork). Mirrors
+  // the artworkInFlight/genInFlight latches used by every other paid generate action.
+  const fullInFlight = useRef(false);
   const [rendering, setRendering] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -2327,7 +2331,8 @@ export default function AdminVaultQuest() {
   // Draft-only: fields update client-side; the user still clicks Save Draft to persist.
   async function generateFullCard() {
     if (!form.cardId) { toast({ title: "Set a Card ID first", variant: "destructive" }); return; }
-    if (fullBusy) return;
+    if (fullInFlight.current || fullBusy) return;
+    fullInFlight.current = true;
     setFullBusy("Writing card…");
     let fields: Record<string, unknown>;
     let artworkPrompt = "";
@@ -2337,16 +2342,18 @@ export default function AdminVaultQuest() {
       const data = (await res.json()) as { fields: Record<string, unknown>; artworkPrompt?: string; artworkBlockedReason?: string };
       fields = data.fields ?? {};
       artworkPrompt = data.artworkPrompt ?? "";
-      if (Object.keys(fields).length === 0) { toast({ title: "No card returned — try again", variant: "destructive" }); setFullBusy(null); return; }
+      if (Object.keys(fields).length === 0) { toast({ title: "No card returned — try again", variant: "destructive" }); fullInFlight.current = false; setFullBusy(null); return; }
       if (data.artworkBlockedReason) {
         setForm((p) => ({ ...p, ...fullCardFieldsToForm(fields) }));
         setDirty(true);
         toast({ title: "Text drafted — artwork blocked", description: data.artworkBlockedReason, variant: "destructive" });
+        fullInFlight.current = false;
         setFullBusy(null);
         return;
       }
     } catch (e) {
       handleAuthError(e, "Generate Full Card failed"); // 401 → login; else error. Form untouched.
+      fullInFlight.current = false;
       setFullBusy(null);
       return;
     }
@@ -2375,6 +2382,7 @@ export default function AdminVaultQuest() {
         toast({ title: "Text saved — artwork failed", description: desc, variant: "destructive" });
       }
     } finally {
+      fullInFlight.current = false;
       setFullBusy(null);
     }
   }

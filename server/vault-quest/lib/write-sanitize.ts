@@ -54,6 +54,24 @@ export function isCandidateReferencedInPack(
 }
 
 /**
+ * Build the one-slot JSON payload for an atomic reference-pack merge
+ * (`reference_pack || <this>::jsonb`). Only ever a SINGLE top-level key so a
+ * concurrent approval of a different reference type can't clobber this one.
+ * Pure: the caller supplies the ISO timestamp so this stays deterministic.
+ */
+export function referencePackMergeJson(
+  referenceType: string,
+  r2Key: string,
+  candidateId: number | null,
+  identityScore: number | null | undefined,
+  approvedAtIso: string,
+): string {
+  return JSON.stringify({
+    [referenceType]: { r2Key, candidateId, approvedAt: approvedAtIso, identityScore: identityScore ?? null },
+  });
+}
+
+/**
  * Next free card number for a set. Card ids are `${setCode}-NNN`; the prefix must
  * match the set being generated (a hardcoded prefix breaks numbering for any other
  * set → id collision on create).

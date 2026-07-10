@@ -5,7 +5,8 @@
  * across sets) without needing a live database.
  */
 import { describe, it, expect } from "vitest";
-import { sanitizeWrite, intOrNull, nextCardNumFrom, isCandidateReferencedInPack } from "../server/vault-quest/lib/write-sanitize";
+import { sanitizeWrite, intOrNull, nextCardNumFrom, isCandidateReferencedInPack, referencePackMergeJson } from "../server/vault-quest/lib/write-sanitize";
+import { vqChargedCredits } from "../shared/vq-schema";
 
 describe("sanitizeWrite — mass-assignment guard", () => {
   it("strips setCode so a body cannot escape the URL's set scope", () => {
@@ -86,5 +87,40 @@ describe("isCandidateReferencedInPack — reject-candidate dangling guard", () =
   it("ignores slots with a null/absent candidateId (manual uploads)", () => {
     const pack = { master_portrait: { candidateId: null, r2Key: "vq/..." }, action_pose: null };
     expect(isCandidateReferencedInPack(pack, 57)).toBe(false);
+  });
+});
+
+describe("referencePackMergeJson — atomic reference-pack merge payload (DATA-01)", () => {
+  it("emits exactly one top-level reference-type key with the slot fields", () => {
+    const s = referencePackMergeJson("action_pose", "vq/characters/X/approved/action_pose.png", 12, 88, "2026-07-10T00:00:00.000Z");
+    const parsed = JSON.parse(s);
+    expect(Object.keys(parsed)).toEqual(["action_pose"]);
+    expect(parsed.action_pose).toEqual({ r2Key: "vq/characters/X/approved/action_pose.png", candidateId: 12, approvedAt: "2026-07-10T00:00:00.000Z", identityScore: 88 });
+  });
+  it("never contains a sibling type — a concurrent approve of another type can't be clobbered", () => {
+    const parsed = JSON.parse(referencePackMergeJson("master_portrait", "k", null, null, "t"));
+    expect(parsed).not.toHaveProperty("action_pose");
+    expect(parsed.master_portrait.candidateId).toBeNull();
+    expect(parsed.master_portrait.identityScore).toBeNull();
+  });
+});
+
+describe("vqChargedCredits — honest spend counter (FE-03 / PROV-05)", () => {
+  it("counts auto-rejected and bg-rejected images (all were billed)", () => {
+    // 1 kept + 1 identity-reject + 1 bg-reject = 3 billed @ nano_banana(1) = 3
+    const resp = { created: [{ model: "nano_banana" }], autoRejected: 1, bgRejected: 1 };
+    expect(vqChargedCredits(resp, "z_image")).toBe(3);
+  });
+  it("uses the model the server actually used (ref upgrade), not the requested one", () => {
+    // requested z_image(0.15) but server upgraded to nano_banana(1) for references
+    const resp = { created: [{ model: "nano_banana" }], autoRejected: 0, bgRejected: 0 };
+    expect(vqChargedCredits(resp, "z_image")).toBe(1);
+  });
+  it("falls back to the requested model when nothing was created (all rejected)", () => {
+    const resp = { created: [], autoRejected: 2, bgRejected: 1 };
+    expect(vqChargedCredits(resp, "nano_banana")).toBe(3); // 3 billed @ 1
+  });
+  it("handles a missing created array", () => {
+    expect(vqChargedCredits({ autoRejected: 0, bgRejected: 0 }, "z_image")).toBe(0);
   });
 });

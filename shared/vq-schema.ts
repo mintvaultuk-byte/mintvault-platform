@@ -268,6 +268,22 @@ export function vqCreditsPerImage(model: string): number {
 export function vqModelRefCapable(model: string): boolean {
   return VQ_IMAGE_MODELS.find((m) => m.value === model)?.refCapable ?? true;
 }
+/**
+ * Display-estimate of the credits a generate response actually cost.
+ * Counts EVERY billed image — auto-rejected (identity drift) and bg-rejected images
+ * were generated and charged too — at the model the server ACTUALLY used (an attached
+ * reference silently upgrades z_image → nano_banana), falling back to the requested
+ * model. Prevents the on-screen spend tiles from under-reporting real spend.
+ */
+export function vqChargedCredits(
+  resp: { created?: { model?: string | null }[] | null; autoRejected?: number | null; bgRejected?: number | null },
+  fallbackModel: string,
+): number {
+  const made = resp.created?.length ?? 0;
+  const billedImages = made + (resp.autoRejected ?? 0) + (resp.bgRejected ?? 0);
+  const effModel = resp.created?.[0]?.model ?? fallbackModel;
+  return billedImages * vqCreditsPerImage(effModel);
+}
 export function vqValidImageModel(model: string | undefined): VqImageModel | undefined {
   return VQ_IMAGE_MODELS.find((m) => m.value === model)?.value;
 }
