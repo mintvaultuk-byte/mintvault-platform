@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { AdminButton } from "@/components/admin";
 import { Loader2, Upload, Save, History, FileImage, FileText, FileCode, Plus, AlertCircle, CheckCircle2, LayoutGrid, ArrowLeft, ShieldCheck, RotateCcw, XCircle, PackageCheck, Archive, Wand2, Sparkles, ChevronDown, BookOpen, Lock, Unlock } from "lucide-react";
 import { STATUS_META, allowedTargets, type VqStatus } from "@shared/vq-workflow";
+import { ReusePanel, fetchReuseCheck, type ReuseCheck, type ReusableAsset } from "@/components/vault-quest/workflow";
 import { VQ_IMAGE_MODELS, VQ_QUALITY_MODEL, vqCreditsPerImage, type VqImageModel } from "@shared/vq-schema";
 
 // Vault Quest Studio — production control centre: dashboard board + card editor
@@ -353,6 +354,19 @@ function AiAssist({ context, onApply, onUseArtwork, imageProviders, textConnecte
 
   async function runArtwork(mode: string) {
     const slot: "main" | "prev" = mode === "prev-portrait" ? "prev" : "main";
+    // Reuse-before-generate: if approved assets exist for this card's character,
+    // generation must be an explicit choice (server already uses approved refs).
+    const cardId = String(context.cardId ?? "");
+    if (cardId && slot === "main") {
+      const check = await fetchReuseCheck({ cardId });
+      if (check && check.assets.length > 0) {
+        const ok = window.confirm(
+          `${check.assets.length} approved asset(s) already exist for this character (saving ≈${check.creditsSaved} credits if reused via the Character Bible).\n\n` +
+            `OK = generate NEW artwork anyway (uses approved references, spends credits).\nCancel = stop and reuse from the Character Bible instead.`,
+        );
+        if (!ok) return;
+      }
+    }
     setBusy(true); setHidden(new Set()); setApplied(new Set()); setRes(null); setArtwork(null); setArtworkUsed(false); setUsingArtwork(false);
     try {
       const r = await apiRequest("POST", "/api/admin/vault-quest/ai/artwork", { mode, slot, context });
@@ -566,7 +580,29 @@ function stageProgress(ch: VqCharacterRow): { label: string; icon: string; cls: 
   return { label: "Missing", icon: "🔴", cls: "text-red-400" };
 }
 
-function CharacterBibleView({ onBack, onAuthError }: { onBack: () => void; onAuthError: (e: unknown, fallbackTitle: string) => void }) {
+/** Deep-link payload from the Production Studio (?bible=&step=&ref=). */
+type BibleDeepLink = { characterId: string; step?: string | null; refType?: string | null };
+
+/** Scroll to + briefly highlight the element carrying data-deeplink=<key>. */
+function flashDeepLink(key: string) {
+  const el = document.querySelector<HTMLElement>(`[data-deeplink="${key}"]`);
+  if (!el) return;
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  const prev = el.style.outline;
+  el.style.outline = "2px solid #D4AF37";
+  el.style.outlineOffset = "3px";
+  setTimeout(() => { el.style.outline = prev; el.style.outlineOffset = ""; }, 3000);
+}
+const STEP_TO_ANCHOR: Record<string, string> = {
+  description: "description",
+  approve_description: "approve_description",
+  master_reference: "generate-reference",
+  action_pose: "generate-reference",
+  approve_references: "generate-reference",
+  lock_character: "lock_character",
+};
+
+function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => void; onAuthError: (e: unknown, fallbackTitle: string) => void; deepLink?: BibleDeepLink | null }) {
   const { toast } = useToast();
   const chars = useQuery<{ characters: VqCharacterRow[] } | null>({ queryKey: ["/api/admin/vault-quest/characters"], retry: false });
   const [selectedId, setSelectedId] = useState("");
@@ -636,6 +672,20 @@ function CharacterBibleView({ onBack, onAuthError }: { onBack: () => void; onAut
   useEffect(() => {
     if (!selectedId && characters[0]) setSelectedId(characters[0].characterId);
   }, [characters, selectedId]);
+
+  // Deep-link from the Production Studio: select the exact character, switch the
+  // Reference Pack slot, then scroll/flash the exact step control. Applied once.
+  const deepLinkApplied = useRef(false);
+  useEffect(() => {
+    if (deepLinkApplied.current || !deepLink || characters.length === 0) return;
+    if (!characters.some((c) => c.characterId === deepLink.characterId)) return;
+    deepLinkApplied.current = true;
+    setSelectedId(deepLink.characterId);
+    const refT = deepLink.refType;
+    if (refT && REF_TYPES.some((t) => t.value === refT)) setRefType(refT as VqRefType);
+    const anchor = deepLink.step ? STEP_TO_ANCHOR[deepLink.step] : undefined;
+    if (anchor) setTimeout(() => flashDeepLink(anchor), 700);
+  }, [deepLink, characters]);
 
   useEffect(() => {
     setDraft(draftFromCharacter(selected));
@@ -811,8 +861,37 @@ function CharacterBibleView({ onBack, onAuthError }: { onBack: () => void; onAut
     else onAuthError(e, fallback);
   }
 
+  // Reuse-before-generate: never silently regenerate when approved assets exist.
+  const [reuseCheck, setReuseCheck] = useState<ReuseCheck | null>(null);
+
   async function generateMasterArtwork() {
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    // Check for approved reusable assets FIRST — reuse must be an explicit choice.
+    const check = await fetchReuseCheck({ characterId: selected.characterId, referenceType: refType });
+    if (check && check.assets.length > 0) { setReuseCheck(check); return; }
+    await doGenerateReference();
+  }
+
+  async function applyReuseAsset(asset: ReusableAsset) {
+    if (!selected) return;
+    setBusy("gen-art");
+    try {
+      const r = await apiRequest("POST", `/api/admin/vault-quest/sets/GNV/reuse-apply`, { characterId: selected.characterId, sourceR2Key: asset.r2Key, referenceType: refType });
+      if (!r.ok) throw Object.assign(new Error((await r.json().catch(() => ({}))).error || "reuse failed"), { status: r.status });
+      await candQuery.refetch();
+      setArtNonce((n) => n + 1);
+      setReuseCheck(null);
+      toast({ title: "Approved asset reused — 0 credits", description: "Copied into the candidate gallery. Review and approve it like any candidate — nothing was auto-approved." });
+    } catch (e) {
+      artworkError(e, "Reuse failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function doGenerateReference() {
+    if (!selected) return;
+    setReuseCheck(null);
     setBusy("gen-art");
     try {
       if (refType === "master_portrait") {
@@ -1102,6 +1181,17 @@ function CharacterBibleView({ onBack, onAuthError }: { onBack: () => void; onAut
 
   return (
     <div className="space-y-4">
+      {reuseCheck && (
+        <ReusePanel
+          check={reuseCheck}
+          providerLabel={`higgsfield · ${imgModel}`}
+          busy={busy === "gen-art"}
+          onReuse={applyReuseAsset}
+          onGenerateWithRefs={() => void doGenerateReference()}
+          onGenerateAnyway={() => void doGenerateReference()}
+          onClose={() => setReuseCheck(null)}
+        />
+      )}
       <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/40 p-3">
         <div>
           <h2 className="flex items-center gap-2 text-lg font-bold"><BookOpen className="h-5 w-5 text-amber-400" />Character Bible</h2>
@@ -1228,7 +1318,7 @@ function CharacterBibleView({ onBack, onAuthError }: { onBack: () => void; onAut
                   {missing.length > 0 && <p className="mt-1 text-xs text-amber-400">DNA missing: {missing.slice(0, 8).join(", ")}{missing.length > 8 ? "..." : ""}</p>}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <AdminButton variant="ghost" onClick={toggleLock} disabled={busy === "lock" || (!selected.locked && !requiredComplete(selected))} title={
+                  <AdminButton data-deeplink="lock_character" variant="ghost" onClick={toggleLock} disabled={busy === "lock" || (!selected.locked && !requiredComplete(selected))} title={
                     selected.locked ? "Unlock this character"
                       : !packApproved(selected, "master_portrait") ? "Complete the required reference pack before locking."
                         : !packApproved(selected, "action_pose") ? "Action Pose is required before locking."
@@ -1275,13 +1365,13 @@ function CharacterBibleView({ onBack, onAuthError }: { onBack: () => void; onAut
                     <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${DESC_STATUS_META[descStatus(selected)].cls}`}>{DESC_STATUS_META[descStatus(selected)].label}</span>
                   </span>
                   <div className="flex flex-wrap gap-1.5">
-                    <AdminButton variant="gold" size="sm" onClick={() => generateDescription("generate")} disabled={busy === "desc-generate" || selected.locked}>
+                    <AdminButton data-deeplink="description" variant="gold" size="sm" onClick={() => generateDescription("generate")} disabled={busy === "desc-generate" || selected.locked}>
                       {busy === "desc-generate" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Wand2 className="mr-1 h-4 w-4" />}{dnaComplete(selected) ? "Regenerate Description" : "Generate Description"}
                     </AdminButton>
                     <AdminButton variant="ghost" size="sm" onClick={() => generateDescription("improve")} disabled={busy === "desc-improve" || selected.locked || !dnaComplete(selected)} title={!dnaComplete(selected) ? "Generate a description first" : "Improve the current description without changing the identity"}>
                       {busy === "desc-improve" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}Improve
                     </AdminButton>
-                    <AdminButton size="sm" onClick={approveDescription} disabled={busy === "desc-approve" || selected.locked || descStatus(selected) === "approved"} title={descStatus(selected) === "approved" ? "Already approved" : "Saves the fields below, then approves the description — unlocks artwork generation"}>
+                    <AdminButton data-deeplink="approve_description" size="sm" onClick={approveDescription} disabled={busy === "desc-approve" || selected.locked || descStatus(selected) === "approved"} title={descStatus(selected) === "approved" ? "Already approved" : "Saves the fields below, then approves the description — unlocks artwork generation"}>
                       {busy === "desc-approve" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1 h-4 w-4" />}Approve Description
                     </AdminButton>
                     <AdminButton variant="ghost" size="sm" onClick={() => { setHistCompare(null); setHistOpen(true); }} title="Every save is recorded — view, compare or restore a previous description">
@@ -1348,7 +1438,7 @@ function CharacterBibleView({ onBack, onAuthError }: { onBack: () => void; onAut
                     <span className={labelCls}>generating <b className="text-amber-300">{refTypeMeta.label}</b></span>
                   </span>
                   <div className="flex flex-wrap gap-2">
-                    <AdminButton variant="gold" size="sm" onClick={generateMasterArtwork} disabled={busy === "gen-art" || selected.locked || descStatus(selected) !== "approved"} title={descStatus(selected) !== "approved" ? "Approve the description first — artwork reads from the approved description only." : undefined}>
+                    <AdminButton data-deeplink="generate-reference" variant="gold" size="sm" onClick={generateMasterArtwork} disabled={busy === "gen-art" || selected.locked || descStatus(selected) !== "approved"} title={descStatus(selected) !== "approved" ? "Approve the description first — artwork reads from the approved description only." : undefined}>
                       {busy === "gen-art" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Wand2 className="mr-1 h-4 w-4" />}Generate {refTypeMeta.label}
                     </AdminButton>
                     <AdminButton variant="ghost" size="sm" onClick={generate3More} disabled={busy === "gen-3more" || selected.locked || descStatus(selected) !== "approved"}>
@@ -1640,6 +1730,23 @@ export default function AdminVaultQuest() {
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+
+  // ── Deep-link entry from the Production Studio (refresh-safe query params):
+  //    ?bible=<characterId>&step=<taskKind>&ref=<referenceType> → exact Bible target
+  //    ?card=<cardId>&step=generate_cards                       → exact card editor
+  const [bibleDeepLink, setBibleDeepLink] = useState<BibleDeepLink | null>(null);
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const bible = p.get("bible");
+    const card = p.get("card");
+    if (bible) {
+      setBibleDeepLink({ characterId: bible, step: p.get("step"), refType: p.get("ref") });
+      setView("bible");
+    } else if (card) {
+      void loadCard(card); // loadCard sets view("editor") on success
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const isSupport = SUPPORT.has(form.cardType);
   const set = <K extends keyof CardForm>(k: K, v: string) => { setForm((f) => ({ ...f, [k]: v })); setDirty(true); };
@@ -2234,7 +2341,7 @@ export default function AdminVaultQuest() {
             )}
           </div>
         ) : view === "bible" ? (
-          <CharacterBibleView onBack={() => setView("board")} onAuthError={handleAuthError} />
+          <CharacterBibleView onBack={() => setView("board")} onAuthError={handleAuthError} deepLink={bibleDeepLink} />
         ) : (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
             {/* editor */}

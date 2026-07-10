@@ -9,7 +9,7 @@
 import type { Express, Request, Response } from "express";
 import { requireAdmin } from "../auth";
 import { productionStorage, isUndefinedTable } from "../vault-quest/production-storage";
-import { getWorkflow, searchAll } from "../vault-quest/workflow-engine";
+import { getWorkflow, searchAll, checkReuse, applyReuse } from "../vault-quest/workflow-engine";
 
 function isMissingTable(err: unknown): boolean {
   return isUndefinedTable(err);
@@ -55,6 +55,38 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
     } catch (err) {
       console.error("[vq-production] search failed:", (err as Error)?.message);
       res.status(500).json({ error: "Search failed" });
+    }
+  });
+
+  // ── Approved-asset reuse: check before generating, apply is explicit + zero-credit ──
+  app.get(`${base}/reuse-check`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
+    try {
+      res.json(await checkReuse(String(req.params.setCode), {
+        characterId: req.query.characterId ? String(req.query.characterId) : undefined,
+        cardId: req.query.cardId ? String(req.query.cardId) : undefined,
+        referenceType: req.query.referenceType ? String(req.query.referenceType) : undefined,
+      }));
+    } catch (err) {
+      console.error("[vq-production] reuse-check failed:", (err as Error)?.message);
+      res.status(500).json({ error: "Reuse check failed" });
+    }
+  });
+  app.post(`${base}/reuse-apply`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
+    try {
+      if (!req.body?.sourceR2Key) return res.status(400).json({ error: "sourceR2Key required" });
+      if (!req.body?.characterId && !req.body?.cardId) return res.status(400).json({ error: "characterId or cardId required" });
+      const result = await applyReuse({
+        characterId: req.body.characterId ? String(req.body.characterId) : undefined,
+        cardId: req.body.cardId ? String(req.body.cardId) : undefined,
+        sourceR2Key: String(req.body.sourceR2Key),
+        referenceType: req.body.referenceType ? String(req.body.referenceType) : undefined,
+      });
+      res.status(201).json(result);
+    } catch (err) {
+      const msg = (err as Error)?.message ?? "";
+      if (/must be an existing|not found|required/.test(msg)) return res.status(400).json({ error: msg });
+      console.error("[vq-production] reuse-apply failed:", msg);
+      res.status(500).json({ error: "Reuse failed" });
     }
   });
 

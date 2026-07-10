@@ -125,8 +125,20 @@ function Deferred({ label }: { label: string }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+const SECTION_KEYS: SectionKey[] = ["home", "queue", "credits", "overview", "settings", "characters", "families", "standard", "variant", "packaging", "print", "qa", "release", "assets", "founder"];
+
 export default function VaultQuestStudioPage() {
-  const [section, setSection] = useState<SectionKey>("home");
+  // Section is mirrored into ?section= so deep-links + browser refresh land on the exact view.
+  const [section, setSectionState] = useState<SectionKey>(() => {
+    const s = new URLSearchParams(window.location.search).get("section") as SectionKey | null;
+    return s && SECTION_KEYS.includes(s) ? s : "home";
+  });
+  const setSection = (s: SectionKey) => {
+    setSectionState(s);
+    const u = new URL(window.location.href);
+    u.searchParams.set("section", s);
+    window.history.replaceState({}, "", u.toString());
+  };
   const prod = useQuery<ProductionStatus>({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/production`], retry: false });
   const status = prod.data;
   const workflow = useWorkflow();
@@ -524,7 +536,7 @@ function PackagingStudio() {
         {PACKAGING_TYPES.map(({ type, label }) => {
           const item = items.find((i) => i.type === type);
           return (
-            <div key={type} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+            <div key={type} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4" style={new URLSearchParams(window.location.search).get("item") === type ? { outline: `2px solid ${GOLD}`, outlineOffset: 2 } : undefined}>
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <Package className="h-4 w-4 text-slate-500" />
@@ -615,7 +627,7 @@ function QaStudio() {
       </div>
       {rows.length === 0 ? <p className="text-sm text-slate-500">No QA checks yet.</p> : (
         <div className="space-y-3">{rows.map((row) => (
-          <div key={row.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+          <div key={row.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4" style={new URLSearchParams(window.location.search).get("ref") === row.assetRef ? { outline: `2px solid ${GOLD}`, outlineOffset: 2 } : undefined}>
             <div className="mb-3 flex items-center justify-between"><span className="text-sm font-bold text-slate-100">{row.assetRef} <span className="text-slate-500">· {row.assetType}</span></span><StatePill status={row.status as StageState} /></div>
             <div className="flex flex-wrap gap-1.5">{QA_ITEMS.map((item) => { const on = !!row.checklist?.[item]; return (
               <button key={item} onClick={() => toggle(row, item)} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium capitalize transition ${on ? "border-emerald-700 bg-emerald-950/50 text-emerald-300" : "border-slate-700 bg-slate-800/40 text-slate-400 hover:text-slate-200"}`}>

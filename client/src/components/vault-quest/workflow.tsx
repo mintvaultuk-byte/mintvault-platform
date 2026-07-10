@@ -21,12 +21,18 @@ export const SET_CODE = "GNV";
 const GOLD = "#D4AF37";
 
 // ── shared types (mirror server/vault-quest/workflow-engine.ts) ──
+export interface TaskTarget {
+  setCode: string; familyId: string | null; characterId: string | null; cardId: string | null;
+  section: string; step: string; referenceType: string | null; url: string;
+}
 export interface WorkflowTask {
   id: string; kind: string; label: string; section: string;
   characterId: string | null; characterName: string | null; familyId: string | null; stageNumber: number | null;
+  cardId: string | null;
   status: "queued" | "waiting_for_review" | "approved" | "locked" | "completed";
   estMinutes: number; estCredits: number;
   reuse: { alreadyExists: boolean; note: string } | null;
+  target: TaskTarget;
 }
 export interface SmartWarning { code: string; severity: "warn" | "block"; message: string; ref: string | null }
 export interface WorkflowFeed {
@@ -148,8 +154,8 @@ export function HomeDashboard({ feed, loading, go }: { feed: WorkflowFeed | unde
               {cur.reuse?.alreadyExists && <div className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-sky-800 bg-sky-950/40 px-2 py-1 text-[11px] text-sky-300"><Sparkles className="h-3 w-3" />{cur.reuse.note}</div>}
             </div>
             <div className="flex flex-col items-start gap-1 md:items-end">
-              {cur.characterId ? (
-                <Link href="/admin/vault-quest" onClick={() => localStorage.setItem("vq.resume", JSON.stringify(cur))}>
+              {cur.characterId || cur.cardId ? (
+                <Link href={cur.target?.url ?? "/admin/vault-quest"} onClick={() => localStorage.setItem("vq.resume", JSON.stringify(cur.target ?? cur))}>
                   <span className="inline-flex cursor-pointer items-center gap-2 rounded-xl px-8 py-3.5 text-sm font-bold text-black transition hover:brightness-110" style={{ background: GOLD }}><Play className="h-4 w-4" />RESUME WORK</span>
                 </Link>
               ) : (
@@ -227,7 +233,11 @@ export function ProductionQueue({ feed, loading, founderMode, go }: { feed: Work
               </div>
               <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${Q_STATUS[t.status]?.cls ?? Q_STATUS.queued.cls}`}>{Q_STATUS[t.status]?.label ?? t.status}</span>
               <div className="flex shrink-0 items-center gap-0.5">
-                <button title="Open" onClick={() => go(t.section)} className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><ExternalLink className="h-3.5 w-3.5" /></button>
+                {t.characterId || t.cardId ? (
+                  <Link href={t.target?.url ?? "/admin/vault-quest"} title="Open exact target" className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><ExternalLink className="h-3.5 w-3.5" /></Link>
+                ) : (
+                  <button title="Open" onClick={() => go(t.section)} className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><ExternalLink className="h-3.5 w-3.5" /></button>
+                )}
                 {founderMode && <>
                   <button title="Move up" onClick={() => move(t.id, -1)} className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><ArrowUp className="h-3.5 w-3.5" /></button>
                   <button title="Move down" onClick={() => move(t.id, 1)} className="rounded p-1 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><ArrowDown className="h-3.5 w-3.5" /></button>
@@ -368,6 +378,65 @@ export function CommandPalette({ open, close, go }: { open: boolean; close: () =
               <Command className="h-3.5 w-3.5 text-slate-600" />{c.label}
             </button>
           ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── APPROVED-ASSET REUSE PANEL (shown BEFORE any generation when reusable assets exist) ──
+export interface ReusableAsset { label: string; r2Key: string; kind: string; approvalStatus: string; identityScore: number | null; from: string }
+export interface ReuseCheck { assets: ReusableAsset[]; creditsSaved: number; perImage: number; referenceType: string | null }
+
+export async function fetchReuseCheck(params: { characterId?: string; cardId?: string; referenceType?: string }): Promise<ReuseCheck | null> {
+  const qs = new URLSearchParams();
+  if (params.characterId) qs.set("characterId", params.characterId);
+  if (params.cardId) qs.set("cardId", params.cardId);
+  if (params.referenceType) qs.set("referenceType", params.referenceType);
+  try {
+    const r = await fetch(`/api/admin/vault-quest/sets/${SET_CODE}/reuse-check?${qs}`, { credentials: "include" });
+    if (!r.ok) return null;
+    return (await r.json()) as ReuseCheck;
+  } catch {
+    return null;
+  }
+}
+
+export function ReusePanel({ check, providerLabel, onReuse, onGenerateWithRefs, onGenerateAnyway, onClose, busy }: {
+  check: ReuseCheck;
+  providerLabel: string;
+  onReuse: (asset: ReusableAsset) => void;
+  onGenerateWithRefs: () => void;
+  onGenerateAnyway: () => void;
+  onClose: () => void;
+  busy: boolean;
+}) {
+  const [picked, setPicked] = useState<ReusableAsset | null>(check.assets[0] ?? null);
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-xl overflow-hidden rounded-xl border border-slate-700 bg-[#10131a] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
+          <span className="flex items-center gap-2 text-sm font-bold text-slate-100"><Sparkles className="h-4 w-4" style={{ color: GOLD }} />Approved assets found — reuse before generating?</span>
+          <button onClick={onClose} className="rounded p-1 text-slate-500 hover:text-slate-200"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="max-h-[45vh] space-y-1.5 overflow-y-auto p-4">
+          {check.assets.map((a) => (
+            <label key={a.r2Key} className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 ${picked?.r2Key === a.r2Key ? "border-slate-500 bg-slate-800/70" : "border-slate-800 bg-slate-900/50"}`}>
+              <input type="radio" name="reuse-asset" checked={picked?.r2Key === a.r2Key} onChange={() => setPicked(a)} className="accent-[#D4AF37]" />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-slate-200">{a.label}</div>
+                <div className="text-[10px] text-slate-500">{a.kind.replace(/_/g, " ")} · from {a.from} · <span className={a.approvalStatus === "approved" ? "text-emerald-400" : ""}>{a.approvalStatus}</span>{a.identityScore != null ? ` · identity ${a.identityScore}` : ""}</div>
+              </div>
+            </label>
+          ))}
+        </div>
+        <div className="border-t border-slate-800 px-4 py-2 text-[11px] text-slate-500">
+          Reusing spends <b className="text-emerald-400">0 credits</b> (saves ≈{check.creditsSaved}). Generating new spends ≈{check.creditsSaved || check.perImage} on <b className="text-slate-300">{providerLabel}</b>.
+        </div>
+        <div className="flex flex-wrap gap-2 border-t border-slate-800 p-4">
+          <AdminButton variant="gold" disabled={busy || !picked} onClick={() => picked && onReuse(picked)}>Reuse Approved Asset (0 cr)</AdminButton>
+          <AdminButton variant="ghost" disabled={busy} onClick={onGenerateWithRefs}>Use as Reference &amp; Generate New</AdminButton>
+          <AdminButton variant="ghost" disabled={busy} onClick={() => { if (window.confirm(`Generate new artwork anyway?\n\nThis spends ≈${check.creditsSaved || check.perImage} credits even though ${check.assets.length} approved asset(s) already exist.`)) onGenerateAnyway(); }}>Generate New Anyway</AdminButton>
         </div>
       </div>
     </div>
