@@ -4,7 +4,39 @@ Chronological record of Vault Quest changes. Additive, isolated (`vq_` / `client
 
 ---
 
+## 2026-07-09 (Phase 2 — Visual Identity Lock)
+
+### 🔒 Approved references now ACTUALLY drive generation + Character Identity Score
+_VQ-only, staging DB, no deploy/commit. ~13 Higgsfield credits spent verifying._
+
+- **Higgsfield image_references WIRE-VERIFIED live** (was static-only): `POST /media?type=image` → PUT bytes → `POST /media/{id}/confirm?type=image` → `params.image_references:[{type:"media_input",id}]` (nano_banana ≤8, pro ≤14). `uploadHiggsfieldMedia` + sha1 media cache (1h) in `ai/higgsfield.ts`; non-ref-capable models refuse refs loudly (never silently redesign). **Poll loop now tolerates 5 transient gateway failures** (a single mid-poll 503 used to kill an already-charged job).
+- **Reference hierarchy live:** own pack (all 5 types, `VQ_REFERENCE_TYPES` order — new types join the pipeline by joining the array) → prev-stage master/action/colour as evolution anchor for S2/S3. Variants resolve to the BASE character's pack via the bible. Identity-lock prompt: only pose/camera/lighting/background/expression/action may change; evolution prompt for stage progression.
+- **Character Identity Score** (`ai/identity.ts`, Anthropic vision on haiku): generated image vs approved refs, 0-100 per trait (bodyShape/colours/markings/eyes/silhouette/accessories/familyTraits/stageTraits) + overall. **Below threshold (VQ_IDENTITY_MIN, default 70) ⇒ auto-rejected** — stored for audit (`auto_rejected`), never shown, cannot be approved. Fail-open if the scorer itself is unavailable (outage ≠ rejection). Scores persist on candidates (migration **0005**: identity_score, identity_breakdown) + into pack entries on approve.
+- **Pack Status chips** replace the single Partial badge: DNA / Pack Complete / Identity Locked / ID Score / Refs n/5 (+ per-type ✓ pills, ID chip per candidate). **game_metadata jsonb** added on vq_characters — future game/3D/merch slots, metadata only.
+- **Verified via real route handlers (26 checks):** refs actually attached (`own:master_portrait,own:action_pose`), scored 90-94; forced threshold 100 → real auto-reject 422 + hidden + unapprovable; card art for GNV-004 used refs + scored 94; variant GNV-064 → base pack; S2 Aquanix anchored on `prev:*` refs; text tabs + Bible + board 156 + 0 non-draft all intact.
+
+## 2026-07-09
+
+### ✨ "Generate Full Card" — one-click AI: all fields + artwork (draft-only)
+_Additive, VQ-only. No deploy. Grading/cert/payment/label pipeline untouched (4 VQ files only)._
+
+- **New backend `generateFullCard()`** (`server/vault-quest/ai/generators.ts`, +98): a single Anthropic call writes **every** card field + a clean, card-vocabulary-free Higgsfield artwork prompt. Honours locked element/cardType/stage, stats clamped, guard-railed (rejects IP hits in name/gameplay/flavour; unsafe artwork prompt falls back to "" rather than blocking the whole card). Verified 8/8 + live E2E: "Voltpup" 8/1/1 stage-2, attack "Zap".
+- **New route `POST /ai/full-card`** (`vault-quest-admin.ts`, requireAdmin) → `{fields, artworkPrompt, warnings, disclaimer}`; 503 if provider not connected, 422 if empty; audit best-effort (`recordAiGeneration kind:"full-card"`, failure can't 500).
+- **`/ai/artwork` `promptOverride`**: full-card passes its clean prompt straight through (re-guarded); otherwise falls back to `runGenerator`. Candidate-preview support in `/cards/preview` (read-only, key must belong to the card).
+- **Client (`admin-vault-quest.tsx`, +74):** prominent gold **Generate Full Card** button above the existing AI tabs (Names/Gameplay/Flavour/Artwork/Variants all preserved). Orchestration: text → apply fields client-side (draft-only, `setDirty`) → artwork candidate → auto-attach like "Use Image" → preview → **Save Draft promotes** `vq/art-candidates/…` → `vq/art/{cardId}/main.png`. **Partial-failure handling exactly per spec:** text fails → form untouched + error; artwork fails → text still saved + clear toast; logged out → login redirect.
+- **Higgsfield plan-limit handled cleanly:** the default model `nano_banana` requires a paid Higgsfield plan → the free-plan account gets `403 job_minimum_basic_plan_required`. Route now maps plan/credit limits to a clean **402** ("needs a higher plan or more credits — text is saved; upload art manually") instead of a raw 500; client shows the actionable toast. `z_image` (0.15cr) works on the free plan and produced a real 1800×1350 image from the full-card prompt (verified). **Model/plan choice left to the founder** — no default changed, no secret touched.
+- `npm run check` 0 · `git diff --check` clean · `npm run build` exit 0. **No deploy.**
+
 ## 2026-07-08
+
+### 🚀 DEPLOYED TO PRODUCTION (commit 3d8d9ce, Fly mintvault)
+_Founder-approved, VQ-only. Live-artifact verified. Non-VQ provably untouched._
+
+- **Prod DB (approved VQ-only migration):** backed up (256K schema dump + row-count fingerprint) → applied the 3 vq_ migrations in ONE transaction (8 vq_ tables, **vq_ only** — no grading/cert/user/label table touched) → copied canonical data staging→prod (156 cards / 14 families / 14 config; the 6 beyond GNV-150 are the founder's own Generate drafts). **All 156 draft** (0 approved). Rollback = `DROP` the 8 isolated vq_ tables. Verified after: certificates=434, users=50 UNCHANGED (80→88 tables = exactly the 8 new).
+- **Higgsfield:** prod was MISSING the key → set `HIGGSFIELD_API_KEY` Fly secret (fresh CLI token). ⚠️ **TEMPORARY — OAuth token expires**; when it does, artwork cleanly reports "provider not connected" (new 503 fallback) while text AI + Save Draft keep working (no crash).
+- **Concurrent-session reconcile:** local was 21 commits behind prod / 23 behind origin/main. Rebased VQ onto origin/main (resolved the admin-nav conflict — kept upstream structure + added the VQ item once), so the deploy shipped VQ + brought prod current with main (the only other delta = a scanner-app-only commit with zero web-server impact). Deployed via `safe-deploy.sh prod` (Guard 1 not-behind + Guard 2 live /api/version = 3d8d9ce).
+- **Post-deploy verified:** version 3d8d9ce on both machines · `/admin/vault-quest` 200 · AI routes gated (401 unauth, no crash) · **public cert lookup works** (`/api/cert/MV1` → real grading data) · homepage 200 · prod non-VQ DB unchanged. Committed 65 VQ-only files (no `.env`/secrets/scanner/audit). `tsc` 0, `git diff --check` clean.
+- **Not testable without admin login (needs founder's browser):** the authed AI Assist click-through (Names/Gameplay/Flavour/Artwork Generate → Use → Save Draft). Code + data + all 3 secrets verified in place; identical code+keys verified working locally this session.
 
 ### Anthropic text AI connected locally (AI Assist names/gameplay/flavour live)
 _Local `.env` only. No code change, no deploy. Higgsfield/R2/grading untouched._

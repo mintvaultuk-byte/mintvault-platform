@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import sharp from "sharp";
+import { vqCreditsPerImage } from "@shared/vq-schema";
 import type { CardContext } from "./generators";
 
 export type ArtworkSlot = "main" | "prev";
@@ -37,6 +38,11 @@ const MAX_PROMPT_CHARS = 3600;
 
 function env(name: string): string {
   return (process.env[name] ?? "").trim();
+}
+
+// Per-image credit estimate (display only) — sourced from the shared model table.
+export function higgsfieldCreditsPerImage(model?: string): number {
+  return vqCreditsPerImage(model ?? higgsfieldConnection().model);
 }
 
 export function higgsfieldConnection(): HiggsfieldConnection {
@@ -79,6 +85,16 @@ export function buildVaultQuestArtworkPrompt(ctx: CardContext, mode: string, slo
   const previous = clean(ctx.previousStage) || "previous evolution stage";
   const rarity = clean(ctx.rarity) || "standard rarity";
   const attack = clean(ctx.attack1Name);
+  const dna = clean(ctx.characterDna);
+  const visual = clean(ctx.visualDescription);
+  const body = clean(ctx.bodyShape);
+  const colours = clean(ctx.colours);
+  const markings = clean(ctx.markings);
+  const eyes = clean(ctx.eyes);
+  const accessories = clean(ctx.tailAccessories);
+  const stageNotes = clean(ctx.stageProgressionNotes);
+  const masterPrompt = clean(ctx.masterArtworkPrompt);
+  const negative = clean(ctx.negativePrompt);
   const subject =
     slot === "prev" || mode === "prev-portrait"
       ? `${previous}, the earlier evolution before ${name}`
@@ -104,14 +120,24 @@ export function buildVaultQuestArtworkPrompt(ctx: CardContext, mode: string, slo
   return [
     `Character illustration ONLY — a standalone painting of a single subject on a plain clean background. No frame, no border, no panel, no banner, no name plate, no text, no letters, no numbers, no logo, no watermark, no user interface.`,
     `Subject: ${subject}.`,
+    dna ? `Locked character DNA: ${dna}.` : "",
+    visual ? `Locked visual description: ${visual}.` : "",
+    body ? `Locked body shape/proportions: ${body}.` : "",
+    colours ? `Locked colours: ${colours}.` : "",
+    markings ? `Locked markings/patterns: ${markings}.` : "",
+    eyes ? `Locked eyes: ${eyes}.` : "",
+    accessories ? `Locked tail/accessories: ${accessories}.` : "",
+    stageNotes ? `Evolution continuity: ${stageNotes}.` : "",
+    masterPrompt ? `Master identity prompt: ${masterPrompt}.` : "",
     `Style focus: ${modeDirection[mode] ?? modeDirection.main}.`,
     `Theme: ${element}-themed original creature design${type !== "Creature" ? ` (${type.toLowerCase()} object)` : ""}, maturity level ${stage} of 3 (1 = cute baby, 3 = powerful final form).`,
     attack ? `Personality/action cue: ${attack}.` : "Personality: friendly, adventurous, bold, family-safe.",
     "Art direction: premium character illustration, soft cinematic light, crisp readable silhouette, charming but not childish, fully original design.",
     "Composition: subject centred with generous breathing room on every side, simple clean or softly-lit plain background.",
     `Colour palette: driven by the ${element} theme with balanced secondary colours and strong contrast.`,
+    negative ? `Avoid: ${negative}.` : "",
     "Do not imitate any famous franchise, character, or art style. Artwork only.",
-  ].join(" ");
+  ].filter(Boolean).join(" ");
 }
 
 export function safeVqCardId(cardId: string): string {
@@ -182,6 +208,40 @@ interface HfJob {
   detail?: unknown;
 }
 
+// ── Image references (visual identity lock) ─────────────────────────────────
+// WIRE-VERIFIED live 2026-07-09 (1-credit nano_banana job): upload flow is
+//   POST {base}/developer/v2alpha/media?type=image            → {id, upload_url}
+//   PUT  bytes → upload_url  (S3 presigned; Content-Type: image/png)
+//   POST {base}/developer/v2alpha/media/{id}/confirm?type=image → {status:"uploaded"}
+// and generations accept params.image_references: [{type:"media_input", id}].
+// Reference caps per `higgsfield model get`: nano_banana ≤8, nano_banana_pro ≤14.
+const REF_CAPABLE_MODELS = /^nano_banana/;
+const REF_CAP: Record<string, number> = { nano_banana: 8, nano_banana_pro: 14 };
+
+// Uploads are free but slow — cache media ids by content hash for 1 hour so the
+// same approved reference isn't re-uploaded on every generation.
+const mediaCache = new Map<string, { id: string; at: number }>();
+const MEDIA_CACHE_TTL_MS = 60 * 60 * 1000;
+
+/** Upload one PNG to Higgsfield media storage → media id for image_references. */
+export async function uploadHiggsfieldMedia(png: Buffer, opts: { baseUrl: string; key: string; workspaceId: string }): Promise<string> {
+  const { createHash } = await import("crypto");
+  const hash = createHash("sha1").update(png).digest("hex");
+  const cached = mediaCache.get(hash);
+  if (cached && Date.now() - cached.at < MEDIA_CACHE_TTL_MS) return cached.id;
+  const headers = { Authorization: `Bearer ${opts.key}`, "hf-workspace-id": opts.workspaceId, "Content-Type": "application/json" };
+  const createRes = await fetchWithTimeout(`${opts.baseUrl}/developer/v2alpha/media?type=image`, { method: "POST", headers, body: "{}" }, 30_000);
+  if (!createRes.ok) throw new Error(`Higgsfield media create failed (${createRes.status})`);
+  const slot = (await readJson(createRes)) as { id?: string; upload_url?: string };
+  if (!slot.id || !slot.upload_url) throw new Error("Higgsfield media create returned no upload slot.");
+  const putRes = await fetchWithTimeout(slot.upload_url, { method: "PUT", headers: { "Content-Type": "image/png" }, body: new Uint8Array(png) }, 60_000);
+  if (!putRes.ok) throw new Error(`Higgsfield media upload failed (${putRes.status})`);
+  const confRes = await fetchWithTimeout(`${opts.baseUrl}/developer/v2alpha/media/${encodeURIComponent(slot.id)}/confirm?type=image`, { method: "POST", headers, body: "{}" }, 30_000);
+  if (!confRes.ok) throw new Error(`Higgsfield media confirm failed (${confRes.status})`);
+  mediaCache.set(hash, { id: slot.id, at: Date.now() });
+  return slot.id;
+}
+
 async function normaliseGeneratedImage(raw: Buffer): Promise<{ png: Buffer; width: number; height: number }> {
   const png = await sharp(raw)
     .rotate()
@@ -199,12 +259,18 @@ export async function generateHiggsfieldArtwork(input: {
   prompt: string;
   mode: string;
   slot: ArtworkSlot;
+  /** Approved reference images (PNG buffers) — the model must reuse this exact character. */
+  imageReferences?: Buffer[];
+  /** Override the model for this request (e.g. z_image / nano_banana / nano_banana_pro). */
+  model?: string;
 }): Promise<HiggsfieldArtworkResult> {
   const key = env("HIGGSFIELD_API_KEY");
   const conn = higgsfieldConnection();
   if (!key || !conn.connected) {
     throw new Error("Higgsfield provider not connected — set HIGGSFIELD_API_KEY (from `higgsfield auth token`) and restart the local server.");
   }
+  // Per-request model override (validated to a safe token); default = env/connection model.
+  let model = input.model && /^[a-z0-9_]+$/.test(input.model) ? input.model : conn.model;
   const workspaceId = await resolveWorkspaceId(conn.baseUrl, key);
   const headers = {
     Authorization: `Bearer ${key}`,
@@ -212,15 +278,30 @@ export async function generateHiggsfieldArtwork(input: {
     "Content-Type": "application/json",
   };
 
+  // Visual identity lock: upload the approved references and attach them. If the chosen
+  // model can't take references (e.g. the cheap z_image), AUTO-UPGRADE to nano_banana so
+  // identity is never silently dropped — never redesign an established character to save credits.
+  let imageRefs: { type: "media_input"; id: string }[] | undefined;
+  if (input.imageReferences?.length) {
+    if (!REF_CAPABLE_MODELS.test(model)) model = "nano_banana";
+    const cap = REF_CAP[model] ?? 8;
+    const refs = input.imageReferences.slice(0, cap);
+    imageRefs = [];
+    for (const buf of refs) {
+      imageRefs.push({ type: "media_input", id: await uploadHiggsfieldMedia(buf, { baseUrl: conn.baseUrl, key, workspaceId }) });
+    }
+  }
+
   // Create: POST /developer/v2alpha/images/{job_type}/generations  {params:{…}}
   const body = {
     params: {
       prompt: input.prompt.slice(0, MAX_PROMPT_CHARS),
       aspect_ratio: aspectRatioFor(input.slot, input.mode),
+      ...(imageRefs?.length ? { image_references: imageRefs } : {}),
     },
   };
   const createRes = await fetchWithTimeout(
-    `${conn.baseUrl}/developer/v2alpha/images/${encodeURIComponent(conn.model)}/generations`,
+    `${conn.baseUrl}/developer/v2alpha/images/${encodeURIComponent(model)}/generations`,
     { method: "POST", headers, body: JSON.stringify(body) },
     45_000,
   );
@@ -235,14 +316,28 @@ export async function generateHiggsfieldArtwork(input: {
   if (!jobId) throw new Error("Higgsfield create returned no job id.");
 
   // Poll: GET /developer/v2alpha/jobs/{id} until completed/failed (~2 min cap).
+  // Transient gateway blips (502/503/timeout) mid-poll are tolerated — the job is
+  // already running (and charged), so give it several consecutive failures before
+  // abandoning instead of dying on the first hiccup.
   let job: HfJob | null = null;
+  let pollFailures = 0;
   for (let attempt = 0; attempt < 40; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 1500 : 3000));
-    const pollRes = await fetchWithTimeout(`${conn.baseUrl}/developer/v2alpha/jobs/${encodeURIComponent(jobId)}`, { headers }, 30_000);
+    let pollRes: Response;
+    try {
+      pollRes = await fetchWithTimeout(`${conn.baseUrl}/developer/v2alpha/jobs/${encodeURIComponent(jobId)}`, { headers }, 30_000);
+    } catch {
+      if (++pollFailures >= 5) throw new Error("Higgsfield poll kept timing out — the job may still finish; try Regenerate in a moment.");
+      continue;
+    }
     if (!pollRes.ok) {
       const errBody = await pollRes.text().catch(() => "");
-      throw new Error(`Higgsfield poll failed (${pollRes.status})${errBody ? `: ${errBody.slice(0, 180)}` : ""}`);
+      if (++pollFailures >= 5) {
+        throw new Error(`Higgsfield poll failed (${pollRes.status})${errBody ? `: ${errBody.slice(0, 180)}` : ""}`);
+      }
+      continue;
     }
+    pollFailures = 0;
     const data = (await readJson(pollRes)) as HfJob;
     const status = (data.status ?? "").toLowerCase();
     if (["failed", "failure", "error", "errored", "cancelled", "canceled"].includes(status)) {
@@ -258,5 +353,5 @@ export async function generateHiggsfieldArtwork(input: {
   const raw = Buffer.from(await dl.arrayBuffer());
 
   const image = await normaliseGeneratedImage(raw);
-  return { provider: "higgsfield", model: conn.model, jobId, ...image };
+  return { provider: "higgsfield", model, jobId, ...image };
 }

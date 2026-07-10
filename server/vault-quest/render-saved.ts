@@ -4,6 +4,7 @@
  * art-key derivation lives once, and so batch jobs can render a pre-loaded studio
  * payload with NO extra DB round-trip (the N+1 fix).
  */
+import { randomUUID } from "node:crypto";
 import { getR2Buffer } from "../r2";
 import { renderCard, type RenderFormat, type RenderResult } from "./render-service";
 import { resolveVariant, cardRowToRenderInput } from "./qa-engine";
@@ -16,6 +17,25 @@ export function vqArtKey(cardId: string, slot: "main" | "prev"): string {
   return `vq/art/${cardId}/${slot}.png`;
 }
 
+/** Deterministic Character Bible artwork key. */
+export function vqCharacterArtworkKey(characterId: string, kind: "reference" | "approved"): string {
+  const safe = characterId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
+  return `vq/characters/${safe}/${kind}.png`;
+}
+
+const safeCharId = (characterId: string) => characterId.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
+
+/** Unique candidate key for a generated Character Bible master-art candidate (gallery keeps many). */
+export function vqCharacterCandidateKey(characterId: string): string {
+  return `vq/characters/${safeCharId(characterId)}/candidates/${Date.now()}-${randomUUID()}.png`;
+}
+
+/** Approved Character Bible reference artwork — one canonical image per Reference Pack type. */
+export function vqCharacterApprovedKey(characterId: string, referenceType = "master_portrait"): string {
+  const safeType = referenceType.replace(/[^a-z0-9_]/g, "_").slice(0, 40);
+  return `vq/characters/${safeCharId(characterId)}/approved/${safeType}.png`;
+}
+
 /**
  * HARD prefix guard for every Vault Quest R2 WRITE. VQ may only ever write inside
  * its own isolated prefixes — it must never be able to touch MintVault grading /
@@ -25,7 +45,7 @@ export function vqArtKey(cardId: string, slot: "main" | "prev"): string {
  * chars). R2 keys are literal strings, so this is defence-in-depth — but it makes
  * the isolation a hard invariant instead of a convention.
  */
-export const VQ_WRITE_PREFIXES = ["vq/art-candidates/", "vq/art/"] as const;
+export const VQ_WRITE_PREFIXES = ["vq/art-candidates/", "vq/art/", "vq/characters/"] as const;
 export function assertVqWriteKey(key: string): string {
   const ok =
     VQ_WRITE_PREFIXES.some((p) => key.startsWith(p)) &&

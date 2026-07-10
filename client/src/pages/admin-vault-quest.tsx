@@ -3,8 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { AdminButton } from "@/components/admin";
-import { Loader2, Upload, Save, FileImage, FileText, FileCode, Plus, AlertCircle, CheckCircle2, LayoutGrid, ArrowLeft, ShieldCheck, RotateCcw, XCircle, PackageCheck, Archive, Wand2, ChevronDown } from "lucide-react";
+import { Loader2, Upload, Save, History, FileImage, FileText, FileCode, Plus, AlertCircle, CheckCircle2, LayoutGrid, ArrowLeft, ShieldCheck, RotateCcw, XCircle, PackageCheck, Archive, Wand2, Sparkles, ChevronDown, BookOpen, Lock, Unlock } from "lucide-react";
 import { STATUS_META, allowedTargets, type VqStatus } from "@shared/vq-workflow";
+import { VQ_IMAGE_MODELS, VQ_QUALITY_MODEL, vqCreditsPerImage, type VqImageModel } from "@shared/vq-schema";
 
 // Vault Quest Studio — production control centre: dashboard board + card editor
 // with the full status workflow. Renders via the shared (locked) engine.
@@ -54,7 +55,116 @@ type BaseRef = { cardId: string; name: string; cardType: string; element: string
 type QaIssue = { level: "reject" | "warn"; field: string; message: string };
 type CardSummary = { cardId: string; collectorNumber: string; name: string; cardType: string; element: string; rarity: string | null; stageNumber: number | null; familyId: string | null; variantTier: string | null; baseCardId: string | null; status: string; hasData: boolean; hasArt: boolean; placeholderElement: boolean; readiness: number };
 type Dashboard = { total: number; byStatus: Record<string, number>; byType: Record<string, number>; variants: number; base: number; needsData: number; needsArtwork: number; placeholderElements: number; families: number; familiesComplete: number; cards: CardSummary[] };
+type GenerateModal = {
+  mode: "open-family" | "open-card" | "new-family" | "new-card";
+  setCode: string;
+  familyId: string;
+  cardId: string;
+  name: string;
+  element: string;
+  cardType: string;
+};
 type Evaluation = { readiness: number; bucket: string; gates: { dataComplete: boolean; artworkPresent: boolean; renderPasses: boolean; isVariant: boolean; baseApproved: boolean }; suggestions: string[]; qa: QaIssue[] };
+type VqCharacterRow = {
+  characterId: string;
+  familyId: string;
+  familyName: string | null;
+  cardId: string;
+  stageNumber: number;
+  characterName: string;
+  element: string;
+  role: string | null;
+  variantCardIds: string[] | null;
+  evolvesFromCharacterId: string | null;
+  sourceNotes: string | null;
+  characterDna: string | null;
+  visualDescription: string | null;
+  bodyShape: string | null;
+  colours: string | null;
+  markings: string | null;
+  eyes: string | null;
+  tailAccessories: string | null;
+  personality: string | null;
+  stageProgressionNotes: string | null;
+  elementIdentity: string | null;
+  negativePrompt: string | null;
+  masterArtworkPrompt: string | null;
+  referenceArtworkR2Key: string | null;
+  approvedArtworkR2Key: string | null;
+  referencePack: Partial<Record<VqRefType, { r2Key: string; identityScore?: number | null }>> | null;
+  descriptionStatus: string;
+  approvalStatus: string;
+  locked: boolean;
+};
+
+// Reference Pack (mirrors shared/vq-schema VQ_REFERENCE_TYPES; TCG requires the first two).
+type VqRefType = "master_portrait" | "action_pose" | "face_closeup" | "colour_sheet" | "turnaround_sheet";
+const REF_TYPES: { value: VqRefType; label: string; tier: "required" | "recommended" | "optional" }[] = [
+  { value: "master_portrait", label: "Master Reference", tier: "required" },
+  { value: "action_pose", label: "Action Pose", tier: "required" },
+  { value: "face_closeup", label: "Face Close-up", tier: "recommended" },
+  { value: "colour_sheet", label: "Colour Sheet", tier: "recommended" },
+  { value: "turnaround_sheet", label: "Turnaround Sheet", tier: "optional" },
+];
+const REQUIRED_REF_TYPES: VqRefType[] = ["master_portrait", "action_pose"];
+function packCompleteness(pack: VqCharacterRow["referencePack"]): "missing" | "partial" | "complete" {
+  const p = pack ?? {};
+  if (p.master_portrait?.r2Key && p.action_pose?.r2Key) return "complete";
+  return Object.values(p).some((v) => v?.r2Key) ? "partial" : "missing";
+}
+const packApproved = (ch: VqCharacterRow, t: VqRefType) => !!ch.referencePack?.[t]?.r2Key;
+const requiredComplete = (ch: VqCharacterRow) => REQUIRED_REF_TYPES.every((t) => packApproved(ch, t));
+const requiredCount = (ch: VqCharacterRow) => REQUIRED_REF_TYPES.filter((t) => packApproved(ch, t)).length;
+// character.identity passes when NO approved reference scored below the 70 threshold
+// (bootstrap references with no score are treated as a pass).
+const identityPassed = (ch: VqCharacterRow) => Object.values(ch.referencePack ?? {}).every((v) => v?.identityScore == null || v.identityScore >= 70);
+
+type BibleFieldKey =
+  | "characterDna"
+  | "visualDescription"
+  | "bodyShape"
+  | "colours"
+  | "markings"
+  | "eyes"
+  | "tailAccessories"
+  | "personality"
+  | "stageProgressionNotes"
+  | "elementIdentity"
+  | "negativePrompt"
+  | "masterArtworkPrompt";
+type BibleDraft = Record<BibleFieldKey, string>;
+
+const BIBLE_FIELDS: { key: BibleFieldKey; label: string; rows: number }[] = [
+  { key: "characterDna", label: "Character DNA", rows: 4 },
+  { key: "visualDescription", label: "Visual description", rows: 4 },
+  { key: "bodyShape", label: "Body shape", rows: 3 },
+  { key: "colours", label: "Colours", rows: 2 },
+  { key: "markings", label: "Markings", rows: 2 },
+  { key: "eyes", label: "Eyes", rows: 2 },
+  { key: "tailAccessories", label: "Tail / accessories", rows: 2 },
+  { key: "personality", label: "Personality", rows: 2 },
+  { key: "stageProgressionNotes", label: "Stage progression notes", rows: 3 },
+  { key: "elementIdentity", label: "Element identity", rows: 2 },
+  { key: "negativePrompt", label: "Negative prompt", rows: 3 },
+  { key: "masterArtworkPrompt", label: "Master artwork prompt", rows: 5 },
+];
+
+const dnaComplete = (ch: VqCharacterRow) => BIBLE_FIELDS.every((f) => String(ch[f.key] ?? "").trim());
+// Description workflow status (text before pixels): artwork needs an APPROVED description.
+const descStatus = (ch: VqCharacterRow): "missing" | "draft" | "approved" | "needs_review" =>
+  !dnaComplete(ch) ? "missing" : ch.descriptionStatus === "approved" ? "approved" : ch.descriptionStatus === "needs_review" ? "needs_review" : "draft";
+const DESC_STATUS_META: Record<ReturnType<typeof descStatus>, { label: string; cls: string }> = {
+  missing: { label: "Description Missing", cls: "bg-red-950 text-red-300" },
+  draft: { label: "Description Draft", cls: "bg-amber-950 text-amber-300" },
+  approved: { label: "Description Approved", cls: "bg-emerald-950 text-emerald-300" },
+  needs_review: { label: "Needs Description Review", cls: "bg-orange-950 text-orange-300" },
+};
+// CANONICAL = DNA complete + description approved + required references + identity + locked.
+const isCanonical = (ch: VqCharacterRow) => dnaComplete(ch) && ch.descriptionStatus === "approved" && requiredComplete(ch) && identityPassed(ch) && ch.locked;
+
+function draftFromCharacter(ch?: VqCharacterRow | null): BibleDraft {
+  return Object.fromEntries(BIBLE_FIELDS.map((f) => [f.key, ch?.[f.key] ?? ""])) as BibleDraft;
+}
 
 function toPayload(f: CardForm) {
   const num = (v: string) => (v.trim() === "" ? null : Number(v));
@@ -181,12 +291,16 @@ const AI_TABS: { id: string; label: string; kind: string; buttons: { mode: strin
   { id: "variants", label: "Variants", kind: "artwork-prompt", buttons: [{ mode: "variant", label: "Variant artwork" }, { mode: "fsr-scene", label: "FSR scene" }] },
 ];
 
-function AiAssist({ context, onApply, onUseArtwork, imageProviders, textConnected }: {
+function AiAssist({ context, onApply, onUseArtwork, imageProviders, textConnected, onGenerateFull, fullBusy, fullCardBlocked }: {
   context: Record<string, unknown>;
   onApply: (fields: AiField) => boolean;
   onUseArtwork: (art: { candidateKey: string; slot: "main" | "prev"; preview: string; generationId?: number | null }) => Promise<boolean>;
   imageProviders: ProviderStat[];
   textConnected: boolean;
+  onGenerateFull: () => void;
+  fullBusy: string | null;
+  /** Reason the Full Card button is disabled (e.g. character not locked). Null = enabled. */
+  fullCardBlocked?: string | null;
 }) {
   const { toast } = useToast();
   const [tab, setTab] = useState("names");
@@ -261,6 +375,13 @@ function AiAssist({ context, onApply, onUseArtwork, imageProviders, textConnecte
       <div className="mb-1 flex items-center gap-2"><Wand2 className="h-4 w-4 text-amber-400" /><span className="text-xs font-semibold uppercase tracking-wide text-slate-300">AI Assist</span></div>
       <p className="mb-2 text-[10px] text-amber-400/80">AI suggestions are draft only. Founder approval required.</p>
       {!textConnected && <p className="mb-2 rounded border border-slate-700 bg-slate-900/60 px-2 py-1 text-[11px] text-slate-400">Text provider not connected — set <span className="text-slate-200">ANTHROPIC_API_KEY</span> in your .env, then restart.</p>}
+      {/* One-flow: writes every field + generates artwork in a single click (draft-only). */}
+      <button type="button" disabled={!!fullBusy || !!fullCardBlocked} onClick={onGenerateFull} title={fullCardBlocked ?? undefined}
+        className="mb-3 flex w-full items-center justify-center gap-2 rounded-md bg-gradient-to-r from-amber-400 to-amber-600 px-3 py-2.5 text-sm font-bold text-slate-900 shadow hover:from-amber-300 hover:to-amber-500 disabled:opacity-60">
+        {fullBusy ? <><Loader2 className="h-4 w-4 animate-spin" />{fullBusy}</> : <><Wand2 className="h-4 w-4" />{fullCardBlocked ? "🔒 " : ""}Generate Full Card</>}
+      </button>
+      {fullCardBlocked && <p className="mb-2 text-[10px] text-amber-400/80">{fullCardBlocked}</p>}
+      <p className="mb-2 text-[10px] uppercase tracking-wide text-slate-500">or refine one part:</p>
       <div className="mb-2 flex flex-wrap gap-1">
         {AI_TABS.map((t) => <button key={t.id} type="button" onClick={() => setTab(t.id)} className={`rounded px-2 py-1 text-xs ${tab === t.id ? "bg-amber-500/20 text-amber-300" : "text-slate-400 hover:text-slate-200"}`}>{t.label}</button>)}
       </div>
@@ -432,6 +553,1059 @@ function Combo({ value, onChange, options, placeholder, allowEmpty = true, disab
   );
 }
 
+type VqCandidateRow = { id: number; status: string; source: string; referenceType: VqRefType; identityScore: number | null; prompt: string | null; width: number | null; height: number | null; createdAt: string };
+type BatchStatus = "queued" | "generating" | "paused" | "succeeded" | "failed" | "skipped" | "rejected";
+// kind "artwork" spends Higgsfield credits; kind "description" is Anthropic text only (0 credits).
+type BatchItem = { characterId: string; name: string; stage: number; referenceType: VqRefType; status: BatchStatus; note?: string; kind?: "artwork" | "description" };
+// Sidebar production stage per character: canonical → references → description → missing.
+function stageProgress(ch: VqCharacterRow): { label: string; icon: string; cls: string } {
+  if (isCanonical(ch)) return { label: "Canonical", icon: "✅", cls: "text-emerald-400" };
+  if (ch.descriptionStatus === "approved" && requiredCount(ch) > 0) return { label: `References ${requiredCount(ch)}/2`, icon: "🟡", cls: "text-amber-400" };
+  if (ch.descriptionStatus === "approved") return { label: "References", icon: "🟡", cls: "text-amber-400" };
+  if (dnaComplete(ch)) return { label: "Description", icon: "🟡", cls: "text-amber-400" };
+  return { label: "Missing", icon: "🔴", cls: "text-red-400" };
+}
+
+function CharacterBibleView({ onBack, onAuthError }: { onBack: () => void; onAuthError: (e: unknown, fallbackTitle: string) => void }) {
+  const { toast } = useToast();
+  const chars = useQuery<{ characters: VqCharacterRow[] } | null>({ queryKey: ["/api/admin/vault-quest/characters"], retry: false });
+  const [selectedId, setSelectedId] = useState("");
+  const [draft, setDraft] = useState<BibleDraft>(draftFromCharacter(null));
+  const [busy, setBusy] = useState<string | null>(null);
+  const [artNonce, setArtNonce] = useState(0);
+  const [familySel, setFamilySel] = useState<Record<string, number>>({}); // characterId → chosen candidateId (for family approve)
+  const [refType, setRefType] = useState<VqRefType>("master_portrait"); // active Reference Pack slot
+  const refTypeMeta = REF_TYPES.find((t) => t.value === refType) ?? REF_TYPES[0];
+  // ── Batch generation (client-orchestrated queue over existing per-character routes) ──
+  const [selectedChars, setSelectedChars] = useState<Set<string>>(new Set());
+  const [batch, setBatch] = useState<BatchItem[] | null>(null);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [estimate, setEstimate] = useState<{ items: BatchItem[]; images: number; credits: number; needTyped: boolean; label: string } | null>(null);
+  const [typedConfirm, setTypedConfirm] = useState("");
+  const [stopOnFail, setStopOnFail] = useState(false);
+  const stopRef = useRef(false);
+  const pauseRef = useRef(false);
+  const skipRef = useRef(false);
+  const [queuePaused, setQueuePaused] = useState(false);
+  // Candidate review extras
+  const [favourites, setFavourites] = useState<Set<number>>(() => new Set(JSON.parse(localStorage.getItem("vq-fav-candidates") ?? "[]") as number[]));
+  const toggleFavourite = (id: number) => setFavourites((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); localStorage.setItem("vq-fav-candidates", JSON.stringify([...n])); return n; });
+  const [compareSel, setCompareSel] = useState<number[]>([]); // up to 2 candidate ids
+  const [showCompare, setShowCompare] = useState(false);
+  const [promptFor, setPromptFor] = useState<VqCandidateRow | null>(null);
+  const [zoomId, setZoomId] = useState<number | null>(null);
+  // Description history (vq_character_revisions is already written on every change)
+  const [histOpen, setHistOpen] = useState(false);
+  const [histCompare, setHistCompare] = useState<number | null>(null);
+  // Card-level stats for the founder dashboard (same endpoint as the board).
+  const bibleDash = useQuery<Dashboard>({ queryKey: ["/api/admin/vault-quest/dashboard"], retry: false });
+  // Session/today credit tracking (client-side ESTIMATE of spend, persisted per day).
+  const [sessionCredits, setSessionCredits] = useState(0);
+  const todayKey = `vq-credits-${new Date().toISOString().slice(0, 10)}`;
+  const [todayCredits, setTodayCredits] = useState(() => Number(localStorage.getItem(todayKey) ?? 0));
+  const trackCredits = (n: number) => {
+    if (!n) return;
+    setSessionCredits((s) => Math.round((s + n) * 100) / 100);
+    setTodayCredits((t) => { const v = Math.round((t + n) * 100) / 100; localStorage.setItem(todayKey, String(v)); return v; });
+  };
+  const cost = useQuery<{ model: string; connected: boolean; creditsPerImage: number; masterImagesPerItem: number; providers: { id: string; label: string; enabled: boolean; note: string }[] }>({ queryKey: ["/api/admin/vault-quest/artwork-cost"], retry: false });
+  // Image model / quality — default DRAFT/CHEAP (never the expensive model unless chosen).
+  const [imgModel, setImgModel] = useState<VqImageModel>("z_image");
+  const creditsPerImage = vqCreditsPerImage(imgModel);
+  const imagesPerItem = refType === "master_portrait" ? (cost.data?.masterImagesPerItem ?? 3) : 1;
+  const higgsProvider = cost.data?.providers?.find((p) => p.id === "higgsfield");
+  const openaiProvider = cost.data?.providers?.find((p) => p.id === "openai");
+  const BATCH_IMAGE_LIMIT = 3; // default max images before the typed confirmation is required
+  const TYPED_PHRASE = "I understand this will spend credits";
+
+  const characters = chars.data?.characters ?? [];
+  const selected = characters.find((c) => c.characterId === selectedId) ?? characters[0] ?? null;
+  const missing = selected ? BIBLE_FIELDS.filter((f) => !String(selected[f.key] ?? "").trim()).map((f) => f.label) : [];
+  const grouped = characters.reduce<Record<string, VqCharacterRow[]>>((acc, ch) => {
+    const key = ch.familyId;
+    acc[key] = [...(acc[key] ?? []), ch];
+    return acc;
+  }, {});
+  const candQuery = useQuery<{ candidates: VqCandidateRow[] } | null>({
+    queryKey: [`/api/admin/vault-quest/characters/${selected?.characterId ?? "none"}/candidates?type=${refType}`],
+    enabled: !!selected?.characterId,
+    retry: false,
+  });
+  const candidates = candQuery.data?.candidates ?? [];
+
+  useEffect(() => {
+    if (!selectedId && characters[0]) setSelectedId(characters[0].characterId);
+  }, [characters, selectedId]);
+
+  useEffect(() => {
+    setDraft(draftFromCharacter(selected));
+  }, [selected?.characterId]);
+
+  async function seedCharacters() {
+    setBusy("seed");
+    try {
+      const res = await apiRequest("POST", "/api/admin/vault-quest/characters/seed", { setCode: "GNV" });
+      const data = (await res.json()) as { created: number; familyRulesCreated: number };
+      await chars.refetch();
+      toast({ title: "Character Bible seeded", description: `${data.created} character(s), ${data.familyRulesCreated} family rule(s)` });
+    } catch (e) {
+      onAuthError(e, "Seed failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function saveCharacter() {
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    if (selected.locked) { toast({ title: "Character locked", description: "Unlock the character before editing its Bible fields.", variant: "destructive" }); return; }
+    setBusy("save");
+    try {
+      await apiRequest("PATCH", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}`, {
+        ...draft,
+        reason: "Character Bible edit",
+      });
+      await chars.refetch();
+      toast({ title: "Character Bible saved", description: selected.characterId });
+    } catch (e) {
+      onAuthError(e, "Save Character Bible failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // ── Description workflow (Anthropic text — never artwork) ──────────────────
+  // Generate/Improve fills the DRAFT fields only; the founder reviews, saves, then
+  // explicitly approves. Approving saves the current draft first, then approves.
+  async function generateDescription(mode: "generate" | "improve") {
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    if (selected.locked) { toast({ title: "Character locked", description: "Unlock before changing the description.", variant: "destructive" }); return; }
+    setBusy(`desc-${mode}`);
+    try {
+      const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/describe`, { mode });
+      const data = (await res.json()) as { fields: Record<BibleFieldKey, string> };
+      setDraft((p) => ({ ...p, ...data.fields }));
+      toast({ title: mode === "improve" ? "Description improved" : "Description generated", description: "Review the fields, edit if needed, then Approve Description (saves + approves)." });
+    } catch (e) {
+      onAuthError(e, "Description generation failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function approveDescription() {
+    if (!selected) return;
+    setBusy("desc-approve");
+    try {
+      // Persist the current draft first so what's approved is exactly what's on screen.
+      await apiRequest("PATCH", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}`, { ...draft, reason: "description review" });
+      await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/approve-description`, {});
+      await chars.refetch();
+      toast({ title: "Description approved", description: "Artwork generation is now unlocked for this character." });
+    } catch (e) {
+      onAuthError(e, "Approve description failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Candidate extras: delete (hide, R2 kept) + regenerate-similar (same type, 1 image)
+  async function deleteCandidate(candidateId: number) {
+    if (!selected) return;
+    setBusy(`del-${candidateId}`);
+    try {
+      await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/reject-candidate`, { candidateId, action: "delete" });
+      setCompareSel((p) => p.filter((id) => id !== candidateId));
+      await candQuery.refetch();
+      toast({ title: "Candidate deleted", description: "Hidden from the gallery (file kept in storage)." });
+    } catch (e) {
+      onAuthError(e, "Delete candidate failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // Description history — revisions are already recorded on every save/approval.
+  const revisions = useQuery<{ revisions: { id: number; reason: string | null; editedBy: string | null; editedAt: string; revisionJson: Record<string, unknown> }[] } | null>({
+    queryKey: [`/api/admin/vault-quest/characters/${selected?.characterId ?? "none"}/revisions`],
+    enabled: !!selected?.characterId && histOpen,
+    retry: false,
+  });
+  function restoreRevision(rev: Record<string, unknown>) {
+    // Restores into the DRAFT only — founder must Save/Approve. Never overwrites approved work silently.
+    const restored = Object.fromEntries(BIBLE_FIELDS.map((f) => [f.key, String(rev[f.key] ?? "")])) as BibleDraft;
+    setDraft(restored);
+    setHistOpen(false);
+    toast({ title: "Revision restored to draft", description: "Review the fields, then Save Bible / Approve Description to keep it." });
+  }
+
+  async function uploadReference(file: File) {
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    setBusy("upload");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/artwork`, {
+        method: "POST",
+        body: fd,
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = new Error((await res.json().catch(() => ({}))).error || `upload failed (${res.status})`) as Error & { status?: number };
+        err.status = res.status;
+        throw err;
+      }
+      const data = (await res.json()) as { width: number; height: number };
+      await chars.refetch();
+      setArtNonce((n) => n + 1);
+      toast({ title: "Reference artwork uploaded", description: `${data.width}x${data.height}` });
+    } catch (e) {
+      onAuthError(e, "Upload reference failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function approveArtwork() {
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    if (!selected.referenceArtworkR2Key) { toast({ title: "Upload reference artwork first", variant: "destructive" }); return; }
+    setBusy("approve");
+    try {
+      await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/approve-artwork`, {});
+      await chars.refetch();
+      setArtNonce((n) => n + 1);
+      toast({ title: "Artwork approved", description: "This is now the approved Character Bible artwork." });
+    } catch (e) {
+      onAuthError(e, "Approve artwork failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function setLocked(id: string, locked: boolean) {
+    await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(id)}/lock`, { locked });
+  }
+  // The character Lock button is the ONLY place a character locks. Gated by the disabled
+  // button (required pack complete) + a confirmation; the server also enforces it.
+  async function toggleLock() {
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    if (!selected.locked) {
+      if (!requiredComplete(selected)) { toast({ title: "Complete the required reference pack before locking.", variant: "destructive" }); return; }
+      if (!window.confirm(`You are about to permanently lock ${selected.characterName}.\n\nThis identity will become the source for:\n\n• Stage evolutions\n• Variants\n• Full Card generation\n• Future game assets\n• Animations\n• 3D models\n\nContinue?`)) return;
+    }
+    setBusy("lock");
+    try {
+      await setLocked(selected.characterId, !selected.locked);
+      await chars.refetch();
+      toast({ title: !selected.locked ? "Character locked" : "Character unlocked", description: selected.characterId });
+    } catch (e) {
+      onAuthError(e, "Lock update failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function artworkError(e: unknown, fallback: string) {
+    const status = (e as { status?: number })?.status;
+    if (status === 402) toast({ title: "Higgsfield limit", description: "Needs a higher plan or more credits — no artwork generated.", variant: "destructive" });
+    else if (status === 503) toast({ title: "Provider not connected", description: "Higgsfield token missing or expired.", variant: "destructive" });
+    else onAuthError(e, fallback);
+  }
+
+  async function generateMasterArtwork() {
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    setBusy("gen-art");
+    try {
+      if (refType === "master_portrait") {
+        // Master Reference always produces THREE strict studio candidates (enforced server-side).
+        const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: refType, model: imgModel });
+        const data = (await res.json()) as { created?: unknown[]; autoRejected?: number };
+        await candQuery.refetch();
+        setArtNonce((n) => n + 1);
+        const made = data.created?.length ?? 0;
+        const rejected = data.autoRejected ?? 0;
+        trackCredits(made * creditsPerImage);
+        toast({ title: `Master Reference — ${made} candidate${made === 1 ? "" : "s"}`, description: rejected ? `${rejected} auto-rejected for identity drift. Choose one below.` : "Studio references generated — choose one below." });
+      } else {
+        const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: refType, model: imgModel });
+        const data = (await res.json()) as { width: number; height: number };
+        await candQuery.refetch();
+        trackCredits(creditsPerImage);
+        setArtNonce((n) => n + 1);
+        toast({ title: `${refTypeMeta.label} generated`, description: `${data.width}x${data.height} — review below, then Approve.` });
+      }
+    } catch (e) {
+      artworkError(e, `Generate ${refTypeMeta.label} failed`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function generateFamilyArtwork() {
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    if (!window.confirm(`Generate Stage 1/2/3 master artwork for family ${selected.familyId}? This spends Higgsfield credits (up to 3 images).`)) return;
+    setBusy("gen-family");
+    try {
+      const res = await apiRequest("POST", `/api/admin/vault-quest/characters/family/${encodeURIComponent(selected.familyId)}/generate-artwork`, { model: imgModel });
+      const data = (await res.json()) as { generated?: unknown[] };
+      await candQuery.refetch();
+      setArtNonce((n) => n + 1);
+      toast({ title: "Family master artwork generated", description: `${data.generated?.length ?? 0} stage candidate(s). Select each stage to review + approve.` });
+    } catch (e) {
+      artworkError(e, "Generate family artwork failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function generate3More() {
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    if (!window.confirm(`Generate 3 more ${refTypeMeta.label} candidates for ${selected.characterName}? This spends Higgsfield credits (3 images).`)) return;
+    setBusy("gen-3more");
+    try {
+      const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork/batch`, { count: 3, referenceType: refType, model: imgModel });
+      const data = (await res.json()) as { created?: unknown[] };
+      await candQuery.refetch();
+      setArtNonce((n) => n + 1);
+      toast({ title: "Generated more candidates", description: `${data.created?.length ?? 0} new candidate(s).` });
+    } catch (e) {
+      artworkError(e, "Generate 3 more failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function approveCandidate(candidateId: number, lock = false) {
+    if (!selected) return;
+    setBusy(`${lock ? "lock" : "approve"}-${candidateId}`);
+    try {
+      await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/approve-candidate`, { candidateId, lock });
+      await chars.refetch();
+      await candQuery.refetch();
+      setArtNonce((n) => n + 1);
+      toast({ title: lock ? "Approved + locked" : "Approved as reference", description: lock ? "Approved artwork set; character locked." : "This is now the approved Character Bible artwork." });
+    } catch (e) {
+      onAuthError(e, "Approve candidate failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function rejectCandidate(candidateId: number) {
+    if (!selected) return;
+    setBusy(`reject-${candidateId}`);
+    try {
+      await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/reject-candidate`, { candidateId });
+      setFamilySel((p) => { if (p[selected.characterId] === candidateId) { const n = { ...p }; delete n[selected.characterId]; return n; } return p; });
+      await candQuery.refetch();
+      toast({ title: "Candidate rejected", description: "Marked rejected (kept in storage)." });
+    } catch (e) {
+      onAuthError(e, "Reject candidate failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function approveFamilyReferences() {
+    if (!selected) return;
+    const stages = characters.filter((c) => c.familyId === selected.familyId).sort((a, b) => a.stageNumber - b.stageNumber);
+    const selections = stages.map((s) => ({ characterId: s.characterId, candidateId: familySel[s.characterId] })).filter((x) => Number.isInteger(x.candidateId));
+    if (stages.length !== 3 || selections.length !== 3) { toast({ title: "Select a candidate for all 3 stages first", variant: "destructive" }); return; }
+    setBusy("approve-family");
+    try {
+      await apiRequest("POST", `/api/admin/vault-quest/characters/family/${encodeURIComponent(selected.familyId)}/approve-references`, { selections });
+      await chars.refetch();
+      setArtNonce((n) => n + 1);
+      toast({ title: "Family references approved", description: `All 3 stages of ${selected.familyId} now have an approved reference.` });
+    } catch (e) {
+      onAuthError(e, "Approve family references failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const familyStages = selected ? characters.filter((c) => c.familyId === selected.familyId).sort((a, b) => a.stageNumber - b.stageNumber) : [];
+  const familyReady = familyStages.length === 3 && familyStages.every((s) => Number.isInteger(familySel[s.characterId]));
+
+  const masterImages = cost.data?.masterImagesPerItem ?? 3;
+  const imagesForType = (rt: VqRefType) => (rt === "master_portrait" ? masterImages : 1);
+  // Build the estimate for an explicit list of (character, referenceType) work items.
+  function openBatchItems(work: { characterId: string; name: string; stage: number; referenceType: VqRefType }[], label: string) {
+    if (batchRunning) return;
+    if (work.length === 0) { toast({ title: "Nothing to generate", description: `Everything for “${label}” is already approved / locked / complete — 0 credits.` }); return; }
+    const items: BatchItem[] = work.map((w) => ({ ...w, status: "queued" }));
+    const images = work.reduce((a, w) => a + imagesForType(w.referenceType), 0);
+    setTypedConfirm("");
+    setEstimate({ items, images, credits: Math.ceil(images * creditsPerImage), needTyped: images > BATCH_IMAGE_LIMIT, label });
+  }
+  // Convenience: a batch of the CURRENT reference type over the given characters.
+  function openBatch(chars: VqCharacterRow[], label: string) {
+    openBatchItems(chars.map((c) => ({ characterId: c.characterId, name: c.characterName, stage: c.stageNumber, referenceType: refType })), label);
+  }
+
+  function stopBatch() { stopRef.current = true; pauseRef.current = false; setQueuePaused(false); }
+  function pauseQueue() { pauseRef.current = true; setQueuePaused(true); }
+  function resumeQueue() { pauseRef.current = false; setQueuePaused(false); }
+  function skipCurrent() { skipRef.current = true; }
+  // Re-queue failed / rejected items from the finished batch as a fresh estimate.
+  function retryBatch(statuses: BatchStatus[]) {
+    if (!batch || batchRunning) return;
+    const work = batch.filter((b) => statuses.includes(b.status)).map((b) => ({ characterId: b.characterId, name: b.name, stage: b.stage, referenceType: b.referenceType, kind: b.kind }));
+    if (!work.length) { toast({ title: "Nothing to retry" }); return; }
+    const images = work.reduce((a, w) => a + (w.kind === "description" ? 0 : imagesForType(w.referenceType)), 0);
+    setTypedConfirm("");
+    setEstimate({ items: work.map((w) => ({ ...w, status: "queued" as BatchStatus })), images, credits: Math.ceil(images * creditsPerImage), needTyped: images > BATCH_IMAGE_LIMIT, label: `Retry ${statuses.join("/")}` });
+  }
+
+  async function runBatch() {
+    if (!estimate || batchRunning) return;
+    if (estimate.needTyped && typedConfirm.trim() !== TYPED_PHRASE) {
+      toast({ title: "Type the confirmation to proceed", description: `Type: ${TYPED_PHRASE}`, variant: "destructive" });
+      return;
+    }
+    const items = estimate.items.map((i) => ({ ...i, status: "queued" as BatchStatus }));
+    setBatch(items);
+    setEstimate(null);
+    setBatchRunning(true);
+    stopRef.current = false; pauseRef.current = false; skipRef.current = false; setQueuePaused(false);
+    const setItem = (idx: number, patch: Partial<BatchItem>) => setBatch((prev) => (prev ? prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)) : prev));
+    let ok = 0, failed = 0, rejected = 0, skipped = 0;
+    for (let i = 0; i < items.length; i++) {
+      // Pause: hold BEFORE starting the next item (never mid-request).
+      while (pauseRef.current && !stopRef.current) {
+        setItem(i, { status: "paused" });
+        await new Promise((r) => setTimeout(r, 400));
+      }
+      if (stopRef.current) {
+        setBatch((prev) => (prev ? prev.map((it) => (it.status === "queued" || it.status === "generating" || it.status === "paused" ? { ...it, status: "skipped" as BatchStatus } : it)) : prev));
+        skipped = items.length - i;
+        break;
+      }
+      if (skipRef.current) { skipRef.current = false; setItem(i, { status: "skipped", note: "skipped by founder" }); skipped++; continue; }
+      setItem(i, { status: "generating" });
+      try {
+        if (items[i].kind === "description") {
+          // Anthropic text only — generates a DRAFT description (never approves), 0 credits.
+          const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(items[i].characterId)}/describe`, { mode: "generate" });
+          const data = (await res.json()) as { fields?: Record<string, string> };
+          if (!data.fields) { setItem(i, { status: "failed", note: "no fields" }); failed++; continue; }
+          await apiRequest("PATCH", `/api/admin/vault-quest/characters/${encodeURIComponent(items[i].characterId)}`, { ...data.fields, reason: "batch description draft" });
+          setItem(i, { status: "succeeded", note: "draft — review & approve" }); ok++;
+        } else {
+          const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(items[i].characterId)}/generate-artwork`, { referenceType: items[i].referenceType, model: imgModel });
+          const data = (await res.json()) as { created?: unknown[]; autoRejected?: number; candidateId?: number };
+          const made = Array.isArray(data.created) ? data.created.length : data.candidateId ? 1 : 0;
+          trackCredits(made * creditsPerImage);
+          if (made === 0 && (data.autoRejected ?? 0) > 0) { setItem(i, { status: "rejected", note: "identity drift" }); rejected++; }
+          else { setItem(i, { status: "succeeded" }); ok++; }
+        }
+      } catch (e) {
+        const status = (e as { status?: number })?.status;
+        if (status === 401) { onAuthError(e, "Batch generation failed"); setItem(i, { status: "failed", note: "auth" }); failed++; break; }
+        if (status === 422 && /identity|drift/i.test((e as Error)?.message ?? "")) { setItem(i, { status: "rejected", note: "identity drift" }); rejected++; }
+        else {
+          setItem(i, { status: "failed", note: (e as Error)?.message?.slice(0, 50) });
+          failed++;
+          if (stopOnFail) {
+            setBatch((prev) => (prev ? prev.map((it) => (it.status === "queued" ? { ...it, status: "skipped" as BatchStatus } : it)) : prev));
+            skipped = items.length - i - 1;
+            break;
+          }
+        }
+      }
+    }
+    setBatchRunning(false);
+    stopRef.current = false; pauseRef.current = false; setQueuePaused(false);
+    await candQuery.refetch();
+    await chars.refetch();
+    setArtNonce((n) => n + 1);
+    toast({ title: "Batch complete", description: `${ok} done · ${rejected} rejected · ${failed} failed · ${skipped} skipped` });
+  }
+
+  // Generate Missing Descriptions — Anthropic only (0 Higgsfield credits). Drafts only;
+  // skips approved descriptions, locked characters, and canonical/complete characters.
+  function generateMissingDescriptions() {
+    const work = characters
+      .filter((c) => !c.locked && !isCanonical(c) && c.descriptionStatus !== "approved")
+      .map((c) => ({ characterId: c.characterId, name: c.characterName, stage: c.stageNumber, referenceType: "master_portrait" as VqRefType, kind: "description" as const }));
+    if (!work.length) { toast({ title: "Nothing to generate", description: "Every unlocked character already has an approved description." }); return; }
+    setTypedConfirm("");
+    setEstimate({ items: work.map((w) => ({ ...w, status: "queued" as BatchStatus })), images: 0, credits: 0, needTyped: false, label: `Missing descriptions (${work.length}) — Anthropic text, 0 Higgsfield credits` });
+  }
+
+  // ── Family actions ─────────────────────────────────────────────────────────
+  // Generate the REQUIRED references (Master + Action) for the family's unlocked stages,
+  // skipping any already-approved reference, locked characters and completed packs.
+  function generateRequiredReferences() {
+    const work = familyStages.flatMap((ch) =>
+      ch.locked || ch.descriptionStatus !== "approved" ? [] : REQUIRED_REF_TYPES.filter((t) => !packApproved(ch, t)).map((t) => ({ characterId: ch.characterId, name: ch.characterName, stage: ch.stageNumber, referenceType: t })),
+    );
+    const skippedDesc = familyStages.filter((c) => !c.locked && c.descriptionStatus !== "approved").length;
+    if (skippedDesc) toast({ title: `${skippedDesc} stage(s) skipped`, description: "Their description isn't approved yet — approve descriptions first." });
+    openBatchItems(work, `Required references — ${selected?.familyId ?? "family"}`);
+  }
+  // Generate the FULL pack (all 5 types) for all 3 stages, skipping approved refs + locked stages.
+  function generateCompleteFamilyPack() {
+    const work = familyStages.flatMap((ch) =>
+      ch.locked || ch.descriptionStatus !== "approved" ? [] : REF_TYPES.filter((t) => !packApproved(ch, t.value)).map((t) => ({ characterId: ch.characterId, name: ch.characterName, stage: ch.stageNumber, referenceType: t.value })),
+    );
+    openBatchItems(work, `Complete family pack — ${selected?.familyId ?? "family"}`);
+  }
+  // Approve the NEWEST un-approved candidate of the current reference type for each family stage.
+  async function approveSelectedFamily() {
+    if (!selected) return;
+    setBusy("approve-family");
+    let approved = 0;
+    try {
+      for (const ch of familyStages) {
+        if (packApproved(ch, refType)) continue;
+        const list = (await (await apiRequest("GET", `/api/admin/vault-quest/characters/${encodeURIComponent(ch.characterId)}/candidates?type=${refType}`)).json()) as { candidates?: { id: number; status: string }[] };
+        const pick = (list.candidates ?? []).find((c) => c.status === "candidate" || c.status === "approved");
+        if (!pick) continue;
+        await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(ch.characterId)}/approve-candidate`, { candidateId: pick.id });
+        approved++;
+      }
+      await chars.refetch();
+      setArtNonce((n) => n + 1);
+      toast({ title: "Approved selected", description: `${approved} stage(s) got an approved ${refTypeMeta.label}.` });
+    } catch (e) {
+      onAuthError(e, "Approve selected failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function lockFamily(lock: boolean) {
+    if (!selected) return;
+    if (lock && !familyStages.every((c) => requiredComplete(c))) { toast({ title: "Every stage needs a complete required pack before locking the family.", variant: "destructive" }); return; }
+    if (lock && !window.confirm(`Lock all 3 stages of ${selected.familyId}?\n\nLocked characters become the permanent identity for all future AI generations.`)) return;
+    setBusy("lock-family");
+    try {
+      for (const ch of familyStages) {
+        if (ch.locked === lock) continue;
+        if (lock && !requiredComplete(ch)) continue;
+        await setLocked(ch.characterId, lock);
+      }
+      await chars.refetch();
+      toast({ title: lock ? "Family locked" : "Family unlocked", description: selected.familyId });
+    } catch (e) {
+      onAuthError(e, "Family lock failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+  const familyLockedCount = familyStages.filter((c) => c.locked).length;
+  const familyAllRequired = familyStages.length === 3 && familyStages.every((c) => requiredComplete(c));
+  const packScores = Object.values(selected?.referencePack ?? {}).map((v) => v?.identityScore).filter((s): s is number => typeof s === "number");
+  const avgIdentity = packScores.length ? Math.round(packScores.reduce((a, b) => a + b, 0) / packScores.length) : null;
+  const statusChip = (label: string, ok: boolean, partial = false) => (
+    <span className={`rounded px-1.5 py-0.5 ${ok ? "bg-emerald-950 text-emerald-300" : partial ? "bg-amber-950 text-amber-300" : "bg-slate-800 text-slate-500"}`}>{ok ? "✅ " : partial ? "◐ " : "○ "}{label}</span>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-lg font-bold"><BookOpen className="h-5 w-5 text-amber-400" />Character Bible</h2>
+          <p className="text-xs text-slate-400">Permanent creature identity, artwork approval and lock state.</p>
+        </div>
+        <div className="flex gap-2">
+          <AdminButton variant="ghost" onClick={onBack}><ArrowLeft className="mr-1 h-4 w-4" />Board</AdminButton>
+          <AdminButton variant="gold" onClick={seedCharacters} disabled={busy === "seed"}>{busy === "seed" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <BookOpen className="mr-1 h-4 w-4" />}Seed missing</AdminButton>
+        </div>
+      </div>
+
+      {/* ═══ Founder production dashboard (live) ═══ */}
+      {characters.length > 0 && (() => {
+        const descA = characters.filter((c) => c.descriptionStatus === "approved").length;
+        const refsA = characters.filter((c) => requiredComplete(c)).length;
+        const lockedN = characters.filter((c) => c.locked).length;
+        const canonN = characters.filter((c) => isCanonical(c)).length;
+        const famIds = [...new Set(characters.map((c) => c.familyId))];
+        const famComplete = famIds.filter((f) => characters.filter((c) => c.familyId === f).every((c) => isCanonical(c))).length;
+        const cardsGen = bibleDash.data ? bibleDash.data.total - bibleDash.data.needsArtwork : null;
+        const qaPassed = bibleDash.data?.byStatus?.approved ?? 0;
+        const exportReady = bibleDash.data?.byStatus?.published ?? 0;
+        const remainingImages = characters.filter((c) => !c.locked && c.descriptionStatus === "approved").reduce((a, c) => a + REQUIRED_REF_TYPES.filter((t) => !packApproved(c, t)).length, 0);
+        const cell = (label: string, value: string | number, cls = "text-slate-100") => (
+          <div className="rounded border border-slate-800 bg-slate-950/60 px-2 py-1.5"><p className="text-[9px] uppercase tracking-wide text-slate-500">{label}</p><p className={`text-sm font-bold ${cls}`}>{value}</p></div>
+        );
+        return (
+          <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Production dashboard</span>
+              <span className="text-[10px] text-slate-500">
+                Provider <b className="text-slate-300">Higgsfield</b> · model <b className="text-slate-300">{VQ_IMAGE_MODELS.find((m) => m.value === imgModel)?.label ?? imgModel}</b> · ~{creditsPerImage} cr/image · queue {batchRunning ? (queuePaused ? "paused" : "running") : "idle"}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-6 lg:grid-cols-12">
+              {cell("Characters", characters.length)}
+              {cell("Descriptions ✓", `${descA}/${characters.length}`, descA === characters.length ? "text-emerald-400" : "text-amber-300")}
+              {cell("References ✓", `${refsA}/${characters.length}`, refsA === characters.length ? "text-emerald-400" : "text-amber-300")}
+              {cell("Locked", `${lockedN}/${characters.length}`, lockedN ? "text-emerald-400" : "text-slate-100")}
+              {cell("Canonical", canonN, canonN ? "text-emerald-400" : "text-slate-100")}
+              {cell("Families ✓", `${famComplete}/${famIds.length}`, famComplete === famIds.length ? "text-emerald-400" : "text-slate-100")}
+              {cell("Cards w/ art", cardsGen ?? "—")}
+              {cell("QA passed", qaPassed)}
+              {cell("Export ready", exportReady)}
+              {cell("Imgs remaining", remainingImages, "text-amber-300")}
+              {cell("Credits (sess.)", `~${sessionCredits}`, "text-amber-300")}
+              {cell("Credits (today)", `~${todayCredits}`, "text-amber-300")}
+            </div>
+            <p className="mt-1 text-[9px] text-slate-600">Credit figures are client-side estimates of images generated here (~{creditsPerImage}/image current model). Est. remaining spend for required refs: ~{Math.ceil(remainingImages * creditsPerImage)} credits.</p>
+          </div>
+        );
+      })()}
+
+      {chars.isLoading && <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />Loading Character Bible...</p>}
+      {chars.isError && <p className="rounded border border-red-900 bg-red-950/40 p-3 text-sm text-red-300">Character Bible unavailable — {String((chars.error as Error)?.message ?? "error")}</p>}
+      {!chars.isLoading && !chars.isError && !chars.data && (
+        <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-4">
+          <p className="font-semibold text-amber-300">Admin login required</p>
+          <p className="mt-1 text-sm text-slate-300">Your admin session isn't active, so the Character Bible cannot load.</p>
+          <a href="/admin/login" className="mt-3 inline-flex items-center gap-1 rounded-md bg-amber-500 px-3 py-1.5 text-sm font-semibold text-slate-900 hover:bg-amber-400">Go to admin login</a>
+        </div>
+      )}
+      {!chars.isLoading && !chars.isError && chars.data && characters.length === 0 && (
+        <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-4 text-sm text-slate-300">
+          <p className="font-semibold text-amber-300">No Character Bible rows yet.</p>
+          <p className="mt-1">Click Seed missing to create the 36 canonical stage characters from the existing Vault Quest cards.</p>
+        </div>
+      )}
+
+      {characters.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px_1fr]">
+          <section className="max-h-[calc(100vh-220px)] overflow-auto rounded-lg border border-slate-800 bg-slate-900/40 p-2">
+            {Object.entries(grouped).map(([familyId, rows]) => {
+              const stages = [...rows].sort((a, b) => a.stageNumber - b.stageNumber);
+              const complete = stages.filter((c) => isCanonical(c)).length;
+              return (
+              <div key={familyId} className="mb-2">
+                <div className="flex items-center justify-between px-2 py-1">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{rows[0]?.familyName ?? familyId} Family</span>
+                  <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold ${complete === 3 ? "bg-emerald-950 text-emerald-300" : complete > 0 ? "bg-amber-950 text-amber-300" : "bg-slate-800 text-slate-500"}`}>{complete} / 3 Complete</span>
+                </div>
+                {stages.map((ch) => {
+                  const isSelected = selected?.characterId === ch.characterId;
+                  const ticked = selectedChars.has(ch.characterId);
+                  const prog = stageProgress(ch);
+                  return (
+                    <div key={ch.characterId} className={`mb-1 flex items-stretch gap-1 rounded-md border ${isSelected ? "border-amber-500 bg-amber-500/10" : "border-slate-800 bg-slate-950/40"}`}>
+                      <label className="flex cursor-pointer items-center pl-2" title="Tick for batch generation" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" className="h-3.5 w-3.5 accent-amber-500" checked={ticked} onChange={() => setSelectedChars((prev) => { const n = new Set(prev); n.has(ch.characterId) ? n.delete(ch.characterId) : n.add(ch.characterId); return n; })} />
+                      </label>
+                      <button type="button" onClick={() => setSelectedId(ch.characterId)} className="flex-1 rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-800/40">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-medium text-slate-100">S{ch.stageNumber} · {ch.characterName}</span>
+                          {ch.locked && <Lock className="h-3.5 w-3.5 text-emerald-400" />}
+                        </div>
+                        <div className={`mt-0.5 text-[10px] font-medium ${prog.cls}`}>{prog.icon} {prog.label}</div>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            );})}
+          </section>
+
+          {selected && (
+            <section className="space-y-4 rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-xl font-bold">{selected.characterName}</h3>
+                    {isCanonical(selected) && <span className="rounded bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-slate-900">★ CANONICAL CHARACTER</span>}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                    {statusChip("DNA Complete", dnaComplete(selected))}
+                    {statusChip(`Reference Pack ${requiredCount(selected)}/2`, requiredComplete(selected), requiredCount(selected) > 0)}
+                    {statusChip(avgIdentity != null ? `Identity ${avgIdentity}` : "Identity —", identityPassed(selected) && (avgIdentity == null || avgIdentity >= 70), avgIdentity != null)}
+                    {statusChip("Locked", selected.locked)}
+                    {statusChip("Family Complete", familyLockedCount === 3)}
+                  </div>
+                  {isCanonical(selected) && <p className="mt-1 text-[11px] text-emerald-400">Ready for Full Card generation — Full Card will use the approved Master Reference + Action Pose.</p>}
+                  <p className="mt-1 text-xs text-slate-400">
+                    {selected.characterId} · {selected.cardId} · {selected.familyId} · Stage {selected.stageNumber} · {selected.element}
+                  </p>
+                  {missing.length > 0 && <p className="mt-1 text-xs text-amber-400">DNA missing: {missing.slice(0, 8).join(", ")}{missing.length > 8 ? "..." : ""}</p>}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <AdminButton variant="ghost" onClick={toggleLock} disabled={busy === "lock" || (!selected.locked && !requiredComplete(selected))} title={
+                    selected.locked ? "Unlock this character"
+                      : !packApproved(selected, "master_portrait") ? "Complete the required reference pack before locking."
+                        : !packApproved(selected, "action_pose") ? "Action Pose is required before locking."
+                          : "Lock this character as the permanent identity"
+                  }>
+                    {busy === "lock" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : selected.locked ? <Unlock className="mr-1 h-4 w-4" /> : <Lock className="mr-1 h-4 w-4" />}
+                    {selected.locked ? "Unlock" : "Lock Character"}
+                  </AdminButton>
+                  <AdminButton onClick={saveCharacter} disabled={busy === "save"}>{busy === "save" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}Save Bible</AdminButton>
+                </div>
+              </div>
+
+              {/* ═══ Production workflow — the permanent 7-step pipeline ═══ */}
+              {(() => {
+                const steps = [
+                  { label: "Description Approved", done: descStatus(selected) === "approved" },
+                  { label: "Master Reference", done: packApproved(selected, "master_portrait") },
+                  { label: "Action Pose", done: packApproved(selected, "action_pose") },
+                  { label: "Lock Character", done: selected.locked },
+                  { label: "Generate Full Card", done: false },
+                  { label: "QA", done: false },
+                  { label: "Export Ready", done: false },
+                ];
+                const active = steps.findIndex((s) => !s.done);
+                return (
+                  <div className="flex flex-wrap items-center gap-1 rounded-md border border-slate-800 bg-slate-950/60 p-2 text-[10px]">
+                    {steps.map((s, i) => (
+                      <span key={s.label} className="flex items-center gap-1">
+                        {i > 0 && <span className="text-slate-700">→</span>}
+                        <span className={`rounded px-1.5 py-0.5 font-semibold ${s.done ? "bg-emerald-950 text-emerald-300" : i === active ? "border border-amber-500 bg-amber-500/15 text-amber-200" : "bg-slate-900 text-slate-600"}`}>
+                          {s.done ? "✅" : i === active ? "▶" : `${i + 1}.`} {s.label}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                );
+              })()}
+
+              {/* ═══ 1 · IDENTITY — description first, artwork second ═══ */}
+              <div className="rounded-md border border-sky-800/40 bg-sky-950/10 p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-widest text-sky-300">Identity</span>
+                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${DESC_STATUS_META[descStatus(selected)].cls}`}>{DESC_STATUS_META[descStatus(selected)].label}</span>
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    <AdminButton variant="gold" size="sm" onClick={() => generateDescription("generate")} disabled={busy === "desc-generate" || selected.locked}>
+                      {busy === "desc-generate" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Wand2 className="mr-1 h-4 w-4" />}{dnaComplete(selected) ? "Regenerate Description" : "Generate Description"}
+                    </AdminButton>
+                    <AdminButton variant="ghost" size="sm" onClick={() => generateDescription("improve")} disabled={busy === "desc-improve" || selected.locked || !dnaComplete(selected)} title={!dnaComplete(selected) ? "Generate a description first" : "Improve the current description without changing the identity"}>
+                      {busy === "desc-improve" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}Improve
+                    </AdminButton>
+                    <AdminButton size="sm" onClick={approveDescription} disabled={busy === "desc-approve" || selected.locked || descStatus(selected) === "approved"} title={descStatus(selected) === "approved" ? "Already approved" : "Saves the fields below, then approves the description — unlocks artwork generation"}>
+                      {busy === "desc-approve" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1 h-4 w-4" />}Approve Description
+                    </AdminButton>
+                    <AdminButton variant="ghost" size="sm" onClick={() => { setHistCompare(null); setHistOpen(true); }} title="Every save is recorded — view, compare or restore a previous description">
+                      <History className="mr-1 h-4 w-4" />History
+                    </AdminButton>
+                  </div>
+                </div>
+                {descStatus(selected) !== "approved" && (
+                  <p className="mb-2 text-[11px] text-sky-300/80">Artwork generation is locked until the description is approved. Stage 2/3 descriptions inherit the previous stage and must clearly evolve it.</p>
+                )}
+                {histOpen && (
+                  <div className="mb-2 max-h-72 overflow-auto rounded border border-slate-700 bg-slate-950/80 p-2">
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-slate-300">Description history — restore fills the DRAFT only (approved work is never overwritten)</span>
+                      <button type="button" onClick={() => setHistOpen(false)} className="text-[11px] text-slate-500 hover:text-slate-300">close</button>
+                    </div>
+                    {revisions.isLoading && <p className="text-[11px] text-slate-500">Loading revisions…</p>}
+                    {(revisions.data?.revisions ?? []).slice(0, 25).map((r) => {
+                      const rv = r.revisionJson as Record<string, unknown>;
+                      const comparing = histCompare === r.id;
+                      return (
+                        <div key={r.id} className="mb-1 rounded border border-slate-800 bg-slate-900/60 p-1.5">
+                          <div className="flex flex-wrap items-center justify-between gap-1 text-[10px]">
+                            <span className="text-slate-400">{new Date(r.editedAt).toLocaleString()} · {r.reason ?? "edit"} · {r.editedBy ?? "admin"}</span>
+                            <span className="flex gap-1">
+                              <button type="button" onClick={() => setHistCompare(comparing ? null : r.id)} className="rounded border border-slate-600 px-1.5 py-0.5 text-slate-300 hover:border-sky-500">{comparing ? "Hide" : "Compare"}</button>
+                              <button type="button" onClick={() => restoreRevision(rv)} className="rounded bg-amber-500 px-1.5 py-0.5 font-semibold text-slate-900 hover:bg-amber-400">Restore to draft</button>
+                            </span>
+                          </div>
+                          {comparing && (
+                            <div className="mt-1 grid grid-cols-2 gap-2 text-[10px]">
+                              <div><p className="font-semibold text-slate-400">This revision</p>{BIBLE_FIELDS.filter((f) => String(rv[f.key] ?? "") !== draft[f.key]).slice(0, 6).map((f) => <p key={f.key} className="truncate text-slate-500"><b className="text-slate-400">{f.label}:</b> {String(rv[f.key] ?? "").slice(0, 90)}</p>)}</div>
+                              <div><p className="font-semibold text-slate-400">Current draft</p>{BIBLE_FIELDS.filter((f) => String(rv[f.key] ?? "") !== draft[f.key]).slice(0, 6).map((f) => <p key={f.key} className="truncate text-slate-500"><b className="text-slate-400">{f.label}:</b> {draft[f.key].slice(0, 90)}</p>)}</div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {!revisions.isLoading && (revisions.data?.revisions ?? []).length === 0 && <p className="text-[11px] text-slate-500">No revisions yet.</p>}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {BIBLE_FIELDS.map((field) => (
+                    <div key={field.key} className={field.key === "characterDna" || field.key === "masterArtworkPrompt" ? "md:col-span-2" : ""}>
+                      <label className={labelCls}>{field.label}</label>
+                      <textarea
+                        className={`${inputCls} min-h-[72px] resize-y`}
+                        rows={field.rows}
+                        value={draft[field.key]}
+                        disabled={selected.locked}
+                        onChange={(e) => setDraft((p) => ({ ...p, [field.key]: e.target.value }))}
+                        placeholder={field.label}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ═══ 2 · REFERENCES — generated only from the approved description ═══ */}
+              <div className="rounded-md border border-amber-800/40 bg-amber-950/10 p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-widest text-amber-300">References</span>
+                    <span className={labelCls}>generating <b className="text-amber-300">{refTypeMeta.label}</b></span>
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <AdminButton variant="gold" size="sm" onClick={generateMasterArtwork} disabled={busy === "gen-art" || selected.locked || descStatus(selected) !== "approved"} title={descStatus(selected) !== "approved" ? "Approve the description first — artwork reads from the approved description only." : undefined}>
+                      {busy === "gen-art" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Wand2 className="mr-1 h-4 w-4" />}Generate {refTypeMeta.label}
+                    </AdminButton>
+                    <AdminButton variant="ghost" size="sm" onClick={generate3More} disabled={busy === "gen-3more" || selected.locked || descStatus(selected) !== "approved"}>
+                      {busy === "gen-3more" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Plus className="mr-1 h-4 w-4" />}Generate 3 More
+                    </AdminButton>
+                    <select
+                      value=""
+                      disabled={batchRunning || busy === "approve-family" || busy === "lock-family"}
+                      onChange={(e) => { const v = e.target.value; e.currentTarget.value = ""; if (v === "required") generateRequiredReferences(); else if (v === "complete") generateCompleteFamilyPack(); else if (v === "approve") approveSelectedFamily(); else if (v === "lock") lockFamily(true); else if (v === "unlock") lockFamily(false); }}
+                      className={`${inputCls} w-auto text-xs`}
+                    >
+                      <option value="">Family Actions…</option>
+                      <option value="required">Generate Required References (skip done)</option>
+                      <option value="complete">Generate Complete Family Pack (5 × 3)</option>
+                      <option value="approve" disabled={packApproved(selected, refType)}>Approve Selected ({refTypeMeta.label})</option>
+                      <option value="lock" disabled={!familyAllRequired || familyLockedCount === 3}>Lock Entire Family</option>
+                      <option value="unlock" disabled={familyLockedCount === 0}>Unlock Family</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Reference Pack checklist — live. Click a row to switch the active type. */}
+                <div className="mb-2 rounded border border-slate-800 bg-slate-950/40 p-2">
+                  <div className="mb-1 flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide">
+                    <span className="text-slate-500">Reference Pack</span>
+                    <span className={requiredComplete(selected) ? "text-emerald-400" : "text-amber-400"}>Required {requiredCount(selected)} / {REQUIRED_REF_TYPES.length} Complete</span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-0.5 sm:grid-cols-2">
+                    {REF_TYPES.map((t) => {
+                      const ok = packApproved(selected, t.value);
+                      const req = t.tier === "required";
+                      return (
+                        <button key={t.value} type="button" onClick={() => setRefType(t.value)} className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 text-left text-[11px] ${refType === t.value ? "bg-slate-800" : "hover:bg-slate-900"}`}>
+                          <span>{ok ? "✅" : req ? "❌" : "⬜"}</span>
+                          <span className={ok ? "text-emerald-300" : req ? "text-slate-200" : "text-slate-500"}>{t.label}{req ? "" : " (optional)"}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                {selected.referencePack?.[refType]?.r2Key && (
+                  <div className="mb-2 flex items-center gap-2 rounded border border-emerald-900/60 bg-emerald-950/20 p-1.5">
+                    <img src={`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/pack/${refType}?v=${artNonce}`} alt={`approved ${refTypeMeta.label}`} className="h-14 w-14 rounded bg-slate-950 object-contain" />
+                    <span className="text-[11px] text-emerald-300">Approved {refTypeMeta.label} on file — new approvals replace it.</span>
+                  </div>
+                )}
+
+                {/* ── Image engine: provider · quality · model ──────────────────── */}
+                <div className="mb-2 rounded-md border border-slate-800 bg-slate-950/40 p-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Image engine</span>
+                    <button type="button" disabled className="rounded border border-amber-500 bg-amber-500/15 px-2 py-1 text-[11px] text-amber-200" title={higgsProvider?.note ?? "Higgsfield"}>Higgsfield</button>
+                    <button type="button" disabled className="rounded border border-slate-800 px-2 py-1 text-[11px] text-slate-600" title={openaiProvider?.note}>OpenAI Images — {openaiProvider?.note ?? "unavailable"}</button>
+                    <div className="ml-auto flex gap-1">
+                      {(["draft", "standard", "premium"] as const).map((q) => {
+                        const m = VQ_QUALITY_MODEL[q];
+                        const active = imgModel === m;
+                        const label = q === "draft" ? "Draft / Cheap" : q === "standard" ? "Standard" : "Premium";
+                        return (
+                          <button key={q} type="button" onClick={() => setImgModel(m)} className={`rounded px-2 py-1 text-[11px] font-semibold ${active ? "border border-amber-500 bg-amber-500/15 text-amber-200" : "border border-slate-700 text-slate-400 hover:border-slate-500"}`}>{label}</button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                    <select value={imgModel} onChange={(e) => setImgModel(e.target.value as VqImageModel)} className={`${inputCls} w-auto text-xs`}>
+                      {VQ_IMAGE_MODELS.map((m) => <option key={m.value} value={m.value}>{m.label} — ~{m.creditsPerImage} cr/image{m.refCapable ? "" : " · no identity lock"}</option>)}
+                    </select>
+                    <span className="text-[10px] text-slate-500">~{creditsPerImage} credit{creditsPerImage === 1 ? "" : "s"}/image · Master Reference = {imagesPerItem} image{imagesPerItem === 1 ? "" : "s"}/character{imgModel === "z_image" ? " · cheap model auto-upgrades to Nano Banana when identity references are needed" : ""}</span>
+                  </div>
+                </div>
+
+                {/* ── Safe batch generation ─────────────────────────────────────── */}
+                <div className="mb-3 rounded-md border border-indigo-800/40 bg-indigo-950/10 p-2.5">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-wide text-indigo-300">Batch · {refTypeMeta.label} · ~{creditsPerImage} cr/image{imagesPerItem > 1 ? ` × ${imagesPerItem}/character` : ""}</span>
+                    <span className="text-[10px] text-slate-500">{selectedChars.size} ticked · {characters.length} characters</span>
+                  </div>
+                  {(() => {
+                    // Buttons are DISABLED (with a reason) instead of throwing errors.
+                    const descOk = descStatus(selected) === "approved";
+                    const actionNeedsMaster = refType === "action_pose" && !packApproved(selected, "master_portrait");
+                    const genBlocked = batchRunning || !descOk || actionNeedsMaster;
+                    const blockTitle = !descOk ? "Approve the Character Description first." : actionNeedsMaster ? "Approve a Master Reference first." : undefined;
+                    const btn = "rounded border border-indigo-600 px-2 py-1 text-[11px] text-indigo-200 hover:bg-indigo-500/15 disabled:opacity-40";
+                    return (
+                      <div className="flex flex-wrap gap-1.5">
+                        <button type="button" disabled={genBlocked || selectedChars.size === 0} title={blockTitle} onClick={() => openBatch(characters.filter((c) => selectedChars.has(c.characterId)), `Selected (${selectedChars.size})`)} className={btn}>{genBlocked ? "🔒 " : ""}Generate Selected</button>
+                        <button type="button" disabled={batchRunning || actionNeedsMaster} title={actionNeedsMaster ? "Approve a Master Reference first." : `Only characters missing an approved ${refTypeMeta.label}`} onClick={() => openBatch(characters.filter((c) => !c.referencePack?.[refType]?.r2Key && c.descriptionStatus === "approved" && !c.locked), `Missing ${refTypeMeta.label}s`)} className={btn}>Generate Missing {refTypeMeta.label}s</button>
+                        <button type="button" disabled={genBlocked || familyStages.length === 0} title={blockTitle} onClick={() => openBatch(familyStages, `Family ${selected.familyId}`)} className={btn}>{genBlocked ? "🔒 " : ""}Generate Current Family</button>
+                        <button type="button" disabled={genBlocked} title={blockTitle} onClick={() => openBatch([selected], `Current stage — ${selected.characterName}`)} className={btn}>{genBlocked ? "🔒 " : ""}Generate Current Stage Only</button>
+                        <button type="button" disabled={batchRunning} title="Anthropic text only — 0 Higgsfield credits. Drafts for every character missing an approved description." onClick={generateMissingDescriptions} className="rounded border border-sky-600 px-2 py-1 text-[11px] text-sky-200 hover:bg-sky-500/15 disabled:opacity-40">Generate Missing Descriptions (0 cr)</button>
+                        <button type="button" disabled title="Coming soon — staged auto pipeline: descriptions → approve → masters → approve → action poses → approve → lock → cards → QA → export. Every stage pauses for founder approval." className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-600">Auto Mode (soon)</button>
+                        {selectedChars.size > 0 && !batchRunning && <button type="button" onClick={() => setSelectedChars(new Set())} className="rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-400 hover:border-slate-500">Clear ticks</button>}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Credit estimate + confirmation */}
+                  {estimate && (
+                    <div className="mt-2 rounded border border-amber-700/50 bg-amber-950/20 p-2.5">
+                      <p className="text-xs font-semibold text-amber-200">Credit estimate — {estimate.label}</p>
+                      <p className="mt-1 text-[11px] text-slate-300">Provider <b>Higgsfield</b> · model <b>{VQ_IMAGE_MODELS.find((m) => m.value === imgModel)?.label ?? imgModel}</b> · {refTypeMeta.label}</p>
+                      <p className="mt-0.5 text-[11px] text-slate-300">{estimate.items.length} character{estimate.items.length === 1 ? "" : "s"} · <b>{estimate.images} image{estimate.images === 1 ? "" : "s"}</b> · est. <b>~{estimate.credits} credits</b> (~{creditsPerImage}/image)</p>
+                      <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-400"><input type="checkbox" className="h-3 w-3 accent-amber-500" checked={stopOnFail} onChange={(e) => setStopOnFail(e.target.checked)} />Stop on first failure (otherwise continue)</label>
+                      {estimate.needTyped && (
+                        <div className="mt-1.5">
+                          <p className="text-[11px] text-red-300">Over {BATCH_IMAGE_LIMIT} images — type to confirm: <span className="font-mono text-red-200">{TYPED_PHRASE}</span></p>
+                          <input value={typedConfirm} onChange={(e) => setTypedConfirm(e.target.value)} placeholder={TYPED_PHRASE} className={`${inputCls} mt-1 text-xs`} />
+                        </div>
+                      )}
+                      <div className="mt-2 flex gap-1.5">
+                        <button type="button" onClick={runBatch} disabled={estimate.needTyped && typedConfirm.trim() !== TYPED_PHRASE} className="rounded bg-amber-500 px-2.5 py-1 text-[11px] font-semibold text-slate-900 hover:bg-amber-400 disabled:opacity-40">Confirm &amp; generate {estimate.images} image{estimate.images === 1 ? "" : "s"}</button>
+                        <button type="button" onClick={() => { setEstimate(null); setTypedConfirm(""); }} className="rounded border border-slate-600 px-2.5 py-1 text-[11px] text-slate-300 hover:border-slate-400">Cancel</button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Queue manager */}
+                  {batch && (() => {
+                    const n = (s: BatchStatus) => batch.filter((b) => b.status === s).length;
+                    const qbtn = "rounded border px-1.5 py-0.5 text-[10px] font-semibold";
+                    return (
+                      <div className="mt-2 rounded border border-slate-800 bg-slate-950/50 p-2">
+                        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Queue {batchRunning ? (queuePaused ? "· PAUSED" : "· RUNNING") : "· FINISHED"}</span>
+                          {batchRunning && !queuePaused && <button type="button" onClick={pauseQueue} className={`${qbtn} border-amber-600 text-amber-300 hover:bg-amber-900/30`}>⏸ Pause Queue</button>}
+                          {batchRunning && queuePaused && <button type="button" onClick={resumeQueue} className={`${qbtn} border-emerald-600 text-emerald-300 hover:bg-emerald-900/30`}>▶ Resume Queue</button>}
+                          {batchRunning && <button type="button" onClick={skipCurrent} className={`${qbtn} border-slate-600 text-slate-300 hover:border-slate-400`}>⤼ Skip Current</button>}
+                          {batchRunning && <button type="button" onClick={stopBatch} className={`${qbtn} border-red-600 bg-red-950/40 text-red-300 hover:bg-red-900/40`}>■ Stop Queue</button>}
+                          {!batchRunning && n("failed") > 0 && <button type="button" onClick={() => retryBatch(["failed"])} className={`${qbtn} border-red-600 text-red-300 hover:bg-red-900/30`}>↻ Retry Failed ({n("failed")})</button>}
+                          {!batchRunning && n("rejected") > 0 && <button type="button" onClick={() => retryBatch(["rejected"])} className={`${qbtn} border-amber-600 text-amber-300 hover:bg-amber-900/30`}>↻ Retry Rejected ({n("rejected")})</button>}
+                        </div>
+                        <div className="flex flex-wrap gap-2 text-[10px] font-semibold">
+                          <span className="text-slate-400">Queued {n("queued")}</span>
+                          <span className="text-sky-300">Running {n("generating")}</span>
+                          <span className="text-amber-300">Paused {n("paused")}</span>
+                          <span className="text-emerald-300">Finished {n("succeeded")}</span>
+                          <span className="text-red-300">Failed {n("failed")}</span>
+                          <span className="text-amber-300">Rejected {n("rejected")}</span>
+                          <span className="text-slate-500">Skipped {n("skipped")}</span>
+                          {!batchRunning && <button type="button" onClick={() => setBatch(null)} className="ml-auto text-slate-500 hover:text-slate-300">clear</button>}
+                        </div>
+                        <div className="mt-1.5 max-h-28 space-y-0.5 overflow-auto">
+                          {batch.map((b) => (
+                            <div key={b.characterId} className="flex items-center justify-between gap-2 text-[10px]">
+                              <span className="text-slate-400">S{b.stage} · {b.name} · {REF_TYPES.find((t) => t.value === b.referenceType)?.label ?? b.referenceType}</span>
+                              <span className={b.status === "succeeded" ? "text-emerald-400" : b.status === "generating" ? "text-sky-400" : b.status === "failed" ? "text-red-400" : b.status === "rejected" ? "text-amber-400" : "text-slate-500"}>{b.status}{b.note ? ` (${b.note})` : ""}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {candQuery.isLoading ? (
+                  <p className="flex items-center gap-2 text-xs text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin" />Loading candidates…</p>
+                ) : candidates.length === 0 ? (
+                  <p className="text-xs text-slate-500">No candidates yet — generate master artwork to create this character's first reference. Standalone character art only; nothing is approved automatically.</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+                    {candidates.map((c) => {
+                      const rejected = c.status === "rejected";
+                      const approved = c.status === "approved";
+                      const fav = favourites.has(c.id);
+                      const inCompare = compareSel.includes(c.id);
+                      const candUrl = `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/candidate/${c.id}?v=${artNonce}`;
+                      const mini = "rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300 hover:border-sky-500";
+                      return (
+                        <div key={c.id} className={`rounded border p-1 bg-slate-900 ${approved ? "border-emerald-500 ring-1 ring-emerald-500/50" : inCompare ? "border-sky-500 ring-1 ring-sky-500/50" : "border-slate-800"} ${rejected ? "opacity-40" : ""}`}>
+                          <img src={candUrl} alt="reference candidate" className="aspect-square w-full cursor-zoom-in rounded bg-slate-950 object-contain" onClick={() => setZoomId(c.id)} />
+                          <div className="mt-1 flex items-center justify-between gap-1">
+                            <span className="flex items-center gap-1">
+                              <button type="button" onClick={() => toggleFavourite(c.id)} title="Favourite" className={`text-[12px] ${fav ? "text-amber-400" : "text-slate-600 hover:text-amber-400"}`}>{fav ? "★" : "☆"}</button>
+                              {typeof c.identityScore === "number" && (
+                                <span className={`rounded px-1 text-[9px] font-semibold ${c.identityScore >= 70 ? "bg-emerald-950 text-emerald-300" : "bg-red-950 text-red-300"}`} title="Character Identity Score vs approved references">ID {c.identityScore}</span>
+                              )}
+                            </span>
+                            <span className={`text-[10px] uppercase ${approved ? "text-emerald-400" : rejected ? "text-red-400" : "text-slate-500"}`}>{c.status}</span>
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {!rejected && <button type="button" onClick={() => approveCandidate(c.id)} disabled={busy === `approve-${c.id}`} className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold text-slate-900 hover:bg-amber-400 disabled:opacity-50">{busy === `approve-${c.id}` ? "…" : "Approve"}</button>}
+                            {!rejected && <button type="button" onClick={() => rejectCandidate(c.id)} disabled={busy === `reject-${c.id}`} className="rounded border border-slate-600 px-1.5 py-0.5 text-[10px] text-slate-300 hover:border-red-500 hover:text-red-300 disabled:opacity-50">{busy === `reject-${c.id}` ? "…" : "Reject"}</button>}
+                            <button type="button" title="Zoom" onClick={() => setZoomId(c.id)} className={mini}>Zoom</button>
+                            <button type="button" title="Compare (pick two)" onClick={() => setCompareSel((p) => { const n = p.includes(c.id) ? p.filter((x) => x !== c.id) : [...p.slice(-1), c.id]; if (n.length === 2) setShowCompare(true); return n; })} className={`${mini} ${inCompare ? "border-sky-500 text-sky-300" : ""}`}>Compare</button>
+                            <button type="button" title="Delete (hides it — file kept)" onClick={() => deleteCandidate(c.id)} disabled={busy === `del-${c.id}`} className={`${mini} hover:border-red-500 hover:text-red-300`}>{busy === `del-${c.id}` ? "…" : "Delete"}</button>
+                            <button type="button" title="Show the exact prompt used" onClick={() => setPromptFor(c)} className={mini}>Prompt</button>
+                            <button type="button" title={`Generate another ${refTypeMeta.label} from the same description`} onClick={generateMasterArtwork} disabled={busy === "gen-art" || descStatus(selected) !== "approved"} className={mini}>Regen Similar</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Zoom / Compare / Prompt overlays */}
+                {zoomId != null && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setZoomId(null)}>
+                    <img src={`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/candidate/${zoomId}?v=${artNonce}`} alt="zoom" className="max-h-full max-w-full rounded object-contain" />
+                  </div>
+                )}
+                {showCompare && compareSel.length === 2 && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => { setShowCompare(false); setCompareSel([]); }}>
+                    <div className="grid max-h-full w-full max-w-5xl grid-cols-2 gap-2">
+                      {compareSel.map((id) => (
+                        <img key={id} src={`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/candidate/${id}?v=${artNonce}`} alt={`compare ${id}`} className="max-h-[80vh] w-full rounded bg-slate-950 object-contain" />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {promptFor && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setPromptFor(null)}>
+                    <div className="max-h-[80vh] max-w-2xl overflow-auto rounded-lg border border-slate-700 bg-slate-900 p-4" onClick={(e) => e.stopPropagation()}>
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-xs font-semibold text-slate-300">Prompt — candidate #{promptFor.id} ({promptFor.referenceType})</span>
+                        <button type="button" onClick={() => setPromptFor(null)} className="text-xs text-slate-500 hover:text-slate-300">close</button>
+                      </div>
+                      <p className="whitespace-pre-wrap text-[11px] leading-relaxed text-slate-400">{promptFor.prompt ?? "(no prompt recorded)"}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <div className="rounded-md border border-slate-800 bg-slate-950/40 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className={labelCls}>Reference artwork</span>
+                    <label className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-slate-600 px-2 py-1 text-xs text-slate-200 hover:border-amber-500">
+                      {busy === "upload" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}Upload
+                      <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && uploadReference(e.target.files[0])} />
+                    </label>
+                  </div>
+                  <div className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded bg-slate-900">
+                    {selected.referenceArtworkR2Key ? <img src={`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/art/reference?v=${artNonce}`} alt="reference artwork" className="h-full w-full object-contain" /> : <span className="text-xs text-slate-500">no reference uploaded</span>}
+                  </div>
+                </div>
+
+                <div className="rounded-md border border-slate-800 bg-slate-950/40 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className={labelCls}>Approved artwork</span>
+                    <AdminButton variant="ghost" size="sm" onClick={approveArtwork} disabled={busy === "approve"}>{busy === "approve" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1 h-4 w-4" />}Approve reference</AdminButton>
+                  </div>
+                  <div className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded bg-slate-900">
+                    {selected.approvedArtworkR2Key ? <img src={`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/art/approved?v=${artNonce}`} alt="approved artwork" className="h-full w-full object-contain" /> : <span className="text-xs text-slate-500">not approved</span>}
+                  </div>
+                </div>
+              </div>
+
+            </section>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---- transition button labels ----
 const TRANSITION_BTN: { to: VqStatus; label: string; icon: typeof CheckCircle2 }[] = [
   { to: "ready_for_review", label: "Mark Ready", icon: ShieldCheck },
@@ -445,12 +1619,13 @@ const TRANSITION_BTN: { to: VqStatus; label: string; icon: typeof CheckCircle2 }
 
 export default function AdminVaultQuest() {
   const { toast } = useToast();
-  const [view, setView] = useState<"board" | "editor">("board");
+  const [view, setView] = useState<"board" | "editor" | "bible">("board");
   const [form, setForm] = useState<CardForm>(BLANK);
   const [preview, setPreview] = useState<string | null>(null);
   const [qa, setQa] = useState<QaIssue[]>([]);
   const [artNonce, setArtNonce] = useState(0);
   const [candidatePreviews, setCandidatePreviews] = useState<{ main?: string; prev?: string }>({});
+  const [fullBusy, setFullBusy] = useState<string | null>(null);
   const [rendering, setRendering] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -459,7 +1634,7 @@ export default function AdminVaultQuest() {
   const [evalu, setEvalu] = useState<Evaluation | null>(null);
   const [dirty, setDirty] = useState(false);
   const [exportJob, setExportJob] = useState<{ label: string; done: number; total: number } | null>(null);
-  const [gen, setGen] = useState<{ mode: "card" | "family"; name: string; element: string; cardType: string } | null>(null);
+  const [gen, setGen] = useState<GenerateModal | null>(null);
   const [genBusy, setGenBusy] = useState(false);
   const [filters, setFilters] = useState({ q: "", status: "", cardType: "", element: "", rarity: "", need: "", family: "" });
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -489,9 +1664,17 @@ export default function AdminVaultQuest() {
   const textConnected = providers.find((p) => p.id === "anthropic")?.connected ?? false;
   const aiContext: Record<string, unknown> = {
     cardId: form.cardId || undefined, name: form.name, cardType: form.cardType, element: form.element, stageNumber: form.stageNumber,
-    familyName: form.familyName, previousStage: form.previousStage, rarity: form.rarity, health: form.health, guard: form.guard, shift: form.shift,
+    familyId: form.familyId, familyName: form.familyName, previousStage: form.previousStage, rarity: form.rarity, health: form.health, guard: form.guard, shift: form.shift,
     attack1Name: form.attack1Name, attack1Damage: form.attack1Damage, vulnerability: form.vulnerability,
+    variantTier: form.variantTier, baseCardId: form.baseCardId,
   };
+  // Full Card is gated on the CANONICAL (locked) character — disabled with a reason,
+  // never a confusing error. Support cards (no Bible character) are never gated.
+  const editorChars = useQuery<{ characters: VqCharacterRow[] } | null>({ queryKey: ["/api/admin/vault-quest/characters"], retry: false, enabled: form.cardType === "Creature" });
+  const editorChar = form.cardType === "Creature"
+    ? (editorChars.data?.characters ?? []).find((c) => c.cardId === (form.baseCardId || form.cardId))
+    : undefined;
+  const fullCardBlockReason = editorChar && !editorChar.locked ? "Lock the canonical character before generating cards." : null;
 
   // Apply an AI suggestion's fields to the form (never auto — only on click), then run QA.
   function applyAi(fields: AiField): boolean {
@@ -628,6 +1811,74 @@ export default function AdminVaultQuest() {
     } catch (e) {
       handleAuthError(e, "Use image failed");
       return false;
+    }
+  }
+
+  // Map an AI full-card result to the editor form (numbers → strings, keywords → csv).
+  function fullCardFieldsToForm(f: Record<string, unknown>): Partial<CardForm> {
+    const patch: Partial<CardForm> = {};
+    const put = (k: keyof CardForm, v: unknown) => { if (v != null && v !== "") (patch as Record<string, string>)[k] = String(v); };
+    put("name", f.name); put("displayName", f.displayName); put("cardType", f.cardType); put("element", f.element); put("rarity", f.rarity);
+    put("stageNumber", f.stageNumber); put("health", f.health); put("guard", f.guard); put("shift", f.shift);
+    put("attack1Name", f.attack1Name); put("attack1Cost", f.attack1Cost); put("attack1Damage", f.attack1Damage); put("attack1Effect", f.attack1Effect);
+    put("attack2Name", f.attack2Name); put("attack2Cost", f.attack2Cost); put("attack2Damage", f.attack2Damage); put("attack2Effect", f.attack2Effect);
+    put("vulnerability", f.vulnerability);
+    if (Array.isArray(f.keywords)) patch.keywords = (f.keywords as unknown[]).map(String).join(", ");
+    put("notes", f.flavour);
+    return patch;
+  }
+
+  // Generate Full Card — one flow: Anthropic writes every field + a clean artwork
+  // prompt, then Higgsfield makes the image and it's auto-attached as a candidate.
+  // Draft-only: fields update client-side; the user still clicks Save Draft to persist.
+  async function generateFullCard() {
+    if (!form.cardId) { toast({ title: "Set a Card ID first", variant: "destructive" }); return; }
+    if (fullBusy) return;
+    setFullBusy("Writing card…");
+    let fields: Record<string, unknown>;
+    let artworkPrompt = "";
+    try {
+      // 1) text — every field. If this fails, the form is NOT touched.
+      const res = await apiRequest("POST", "/api/admin/vault-quest/ai/full-card", { context: aiContext });
+      const data = (await res.json()) as { fields: Record<string, unknown>; artworkPrompt?: string; artworkBlockedReason?: string };
+      fields = data.fields ?? {};
+      artworkPrompt = data.artworkPrompt ?? "";
+      if (Object.keys(fields).length === 0) { toast({ title: "No card returned — try again", variant: "destructive" }); setFullBusy(null); return; }
+      if (data.artworkBlockedReason) {
+        setForm((p) => ({ ...p, ...fullCardFieldsToForm(fields) }));
+        setDirty(true);
+        toast({ title: "Text drafted — artwork blocked", description: data.artworkBlockedReason, variant: "destructive" });
+        setFullBusy(null);
+        return;
+      }
+    } catch (e) {
+      handleAuthError(e, "Generate Full Card failed"); // 401 → login; else error. Form untouched.
+      setFullBusy(null);
+      return;
+    }
+    // 2) apply the text fields (draft-only, client-side)
+    setForm((p) => ({ ...p, ...fullCardFieldsToForm(fields) }));
+    setDirty(true);
+    // 3) artwork from the generated card + clean prompt (independent failure)
+    setFullBusy("Generating artwork…");
+    try {
+      const artCtx = { ...aiContext, ...fields, cardId: form.cardId };
+      const ares = await apiRequest("POST", "/api/admin/vault-quest/ai/artwork", { context: artCtx, mode: "main", slot: "main", promptOverride: artworkPrompt || undefined });
+      const art = (await ares.json()) as { candidateKey: string; preview: string; generationId?: number | null };
+      await useArtworkCandidate({ candidateKey: art.candidateKey, slot: "main", preview: art.preview, generationId: art.generationId });
+      toast({ title: "Full card drafted ✨", description: "Review the fields + art, then click Save Draft to keep it." });
+    } catch (e) {
+      const status = (e as { status?: number })?.status;
+      if (status === 401) { handleAuthError(e, "Artwork failed"); }
+      else {
+        const desc =
+          status === 503 ? "Artwork provider not connected. Upload art manually, then Save Draft." :
+          status === 402 ? "Higgsfield needs a higher plan or more credits. Upload art manually, then Save Draft." :
+          (e instanceof Error ? e.message : "");
+        toast({ title: "Text saved — artwork failed", description: desc, variant: "destructive" });
+      }
+    } finally {
+      setFullBusy(null);
     }
   }
 
@@ -796,15 +2047,15 @@ export default function AdminVaultQuest() {
     setGenBusy(true);
     try {
       const res = await apiRequest("POST", "/api/admin/vault-quest/generate", {
-        mode: gen.mode,
+        mode: gen.mode === "new-family" ? "family" : "card",
         name: gen.name.trim(),
         element: gen.element,
-        cardType: gen.mode === "card" ? gen.cardType : undefined,
+        cardType: gen.mode === "new-card" ? gen.cardType : undefined,
       });
       const data = (await res.json()) as { created: string[]; familyId?: string; openCardId: string };
       setGen(null);
       await dash.refetch();
-      toast({ title: gen.mode === "family" ? `Family created — ${data.created.length} draft cards` : "Draft card created", description: `Opening ${data.openCardId} in the editor` });
+      toast({ title: gen.mode === "new-family" ? `Family created — ${data.created.length} draft cards` : "Draft card created", description: `Opening ${data.openCardId} in the editor` });
       await loadCard(data.openCardId);
     } catch (e) {
       handleAuthError(e, "Generate failed");
@@ -833,6 +2084,45 @@ export default function AdminVaultQuest() {
     return true;
   });
   const families = [...new Set((dash.data?.cards ?? []).map((c) => c.familyId).filter(Boolean))].sort() as string[];
+  const setCodes = [...new Set((dash.data?.cards ?? []).map((c) => c.cardId.split("-")[0]).filter(Boolean))].sort();
+  const activeSet = gen?.setCode || setCodes[0] || "GNV";
+  const setCards = (dash.data?.cards ?? []).filter((c) => c.cardId.startsWith(`${activeSet}-`));
+  const familyRows = (fams.data?.families ?? []).filter((f) => f.familyId.startsWith(`${activeSet}-`));
+  const familyChoices = familyRows.map((f) => {
+    const cards = setCards.filter((c) => c.familyId === f.familyId).sort((a, b) => String(a.collectorNumber).localeCompare(String(b.collectorNumber)));
+    const first = cards[0];
+    const last = cards[cards.length - 1];
+    const range = first && last ? `${first.collectorNumber}-${last.collectorNumber}` : "no cards";
+    return {
+      familyId: f.familyId,
+      label: `${f.name ?? f.familyId} · ${f.familyId}`,
+      hint: `${range} · ${f.element ?? "element"} · ${cards.length} card(s)`,
+      cards,
+    };
+  });
+  const selectedFamily = gen ? familyChoices.find((f) => f.familyId === gen.familyId) : undefined;
+  const selectedFamilyCards = selectedFamily?.cards ?? [];
+  const cardChoices = setCards
+    .filter((c) => !gen?.familyId || c.familyId === gen.familyId)
+    .sort((a, b) => String(a.collectorNumber).localeCompare(String(b.collectorNumber)));
+  const syncGenSet = (setCode: string) => {
+    const rows = (fams.data?.families ?? []).filter((f) => f.familyId.startsWith(`${setCode}-`));
+    const cards = (dash.data?.cards ?? []).filter((c) => c.cardId.startsWith(`${setCode}-`));
+    setGen((prev) => prev && ({ ...prev, setCode, familyId: rows[0]?.familyId ?? "", cardId: cards[0]?.cardId ?? "" }));
+  };
+  const openSelectedFamily = () => {
+    if (!gen?.familyId) { toast({ title: "Choose a family first", variant: "destructive" }); return; }
+    setFilters({ q: "", status: "", cardType: "", element: "", rarity: "", need: "", family: gen.familyId });
+    setGen(null);
+    setTimeout(() => listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+    toast({ title: "Family shown", description: "Click any card in that family to open AI Assist." });
+  };
+  const openSelectedCard = async () => {
+    if (!gen?.cardId) { toast({ title: "Choose a card first", variant: "destructive" }); return; }
+    const cardId = gen.cardId;
+    setGen(null);
+    await loadCard(cardId);
+  };
 
   // Clicking a stat tile filters the card list to those cards (resets other filters)
   // and scrolls the list into view so the result is visible.
@@ -862,9 +2152,10 @@ export default function AdminVaultQuest() {
             <p className="text-sm text-slate-400">Production control centre — dashboard · workflow · live preview · export.</p>
           </div>
           <div className="flex gap-2">
-            {view === "editor" && <AdminButton variant="ghost" onClick={() => setView("board")}><ArrowLeft className="mr-1 h-4 w-4" />Board</AdminButton>}
+            {view !== "board" && <AdminButton variant="ghost" onClick={() => setView("board")}><ArrowLeft className="mr-1 h-4 w-4" />Board</AdminButton>}
             {view === "board" && <AdminButton variant="ghost" onClick={() => dash.refetch()}><LayoutGrid className="mr-1 h-4 w-4" />Refresh</AdminButton>}
-            <AdminButton variant="gold" onClick={() => setGen({ mode: "family", name: "", element: ELEMENTS[0], cardType: "Creature" })}><Wand2 className="mr-1 h-4 w-4" />Generate</AdminButton>
+            <AdminButton variant={view === "bible" ? "gold" : "ghost"} onClick={() => setView("bible")}><BookOpen className="mr-1 h-4 w-4" />Character Bible</AdminButton>
+            <AdminButton variant="gold" onClick={() => setGen({ mode: "open-family", setCode: setCodes[0] || "GNV", familyId: familyRows[0]?.familyId ?? "", cardId: setCards[0]?.cardId ?? "", name: "", element: ELEMENTS[0], cardType: "Creature" })}><Wand2 className="mr-1 h-4 w-4" />Generate</AdminButton>
             <AdminButton variant="ghost" onClick={newCard}><Plus className="mr-1 h-4 w-4" />New card</AdminButton>
           </div>
         </header>
@@ -942,6 +2233,8 @@ export default function AdminVaultQuest() {
               </>
             )}
           </div>
+        ) : view === "bible" ? (
+          <CharacterBibleView onBack={() => setView("board")} onAuthError={handleAuthError} />
         ) : (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_360px]">
             {/* editor */}
@@ -1055,7 +2348,7 @@ export default function AdminVaultQuest() {
                 {evalu?.suggestions?.map((sug, k) => <p key={`s${k}`} className="text-xs text-slate-400">→ {sug}</p>)}
               </div>
 
-              <AiAssist context={aiContext} onApply={applyAi} onUseArtwork={useArtworkCandidate} imageProviders={imageProviders} textConnected={textConnected} />
+              <AiAssist context={aiContext} onApply={applyAi} onUseArtwork={useArtworkCandidate} imageProviders={imageProviders} textConnected={textConnected} onGenerateFull={generateFullCard} fullBusy={fullBusy} fullCardBlocked={fullCardBlockReason} />
             </aside>
           </div>
         )}
@@ -1063,24 +2356,43 @@ export default function AdminVaultQuest() {
         {gen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !genBusy && setGen(null)}>
             <div className="w-full max-w-md rounded-lg border border-slate-700 bg-slate-900 p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
-              <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-slate-100"><Wand2 className="h-5 w-5 text-amber-400" />Generate from template</h2>
+              <h2 className="mb-1 flex items-center gap-2 text-lg font-bold text-slate-100"><Wand2 className="h-5 w-5 text-amber-400" />Choose cards to generate</h2>
               <p className="mb-4 text-xs text-slate-400">
-                Creates new <span className="text-slate-200">draft</span> {gen.mode === "family" ? "cards for a whole family" : "card"} from the locked template (stats, rarity, numbering). It never overwrites existing cards. To work on the seeded 150, close this and click a card in the board instead.
+                Pick from the existing set, family, and card list first. Opening a card shows AI Assist. The create-new options add extra draft cards only.
               </p>
               <div className="space-y-3">
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setGen({ ...gen, mode: "family" })} className={`flex-1 rounded-md border px-3 py-2 text-left text-sm ${gen.mode === "family" ? "border-amber-500 bg-amber-500/10 text-amber-300" : "border-slate-600 text-slate-300 hover:border-slate-500"}`}>Full family<span className="block text-[10px] text-slate-500">Baby · Teen · Final (3 linked cards)</span></button>
-                  <button type="button" onClick={() => setGen({ ...gen, mode: "card" })} className={`flex-1 rounded-md border px-3 py-2 text-left text-sm ${gen.mode === "card" ? "border-amber-500 bg-amber-500/10 text-amber-300" : "border-slate-600 text-slate-300 hover:border-slate-500"}`}>Single card<span className="block text-[10px] text-slate-500">one draft card</span></button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setGen({ ...gen, mode: "open-family" })} className={`rounded-md border px-3 py-2 text-left text-sm ${gen.mode === "open-family" ? "border-amber-500 bg-amber-500/10 text-amber-300" : "border-slate-600 text-slate-300 hover:border-slate-500"}`}>Existing family<span className="block text-[10px] text-slate-500">show all cards</span></button>
+                  <button type="button" onClick={() => setGen({ ...gen, mode: "open-card" })} className={`rounded-md border px-3 py-2 text-left text-sm ${gen.mode === "open-card" ? "border-amber-500 bg-amber-500/10 text-amber-300" : "border-slate-600 text-slate-300 hover:border-slate-500"}`}>Existing card<span className="block text-[10px] text-slate-500">open editor</span></button>
+                  <button type="button" onClick={() => setGen({ ...gen, mode: "new-family" })} className={`rounded-md border px-3 py-2 text-left text-sm ${gen.mode === "new-family" ? "border-amber-500 bg-amber-500/10 text-amber-300" : "border-slate-600 text-slate-300 hover:border-slate-500"}`}>New family<span className="block text-[10px] text-slate-500">3 extra draft cards</span></button>
+                  <button type="button" onClick={() => setGen({ ...gen, mode: "new-card" })} className={`rounded-md border px-3 py-2 text-left text-sm ${gen.mode === "new-card" ? "border-amber-500 bg-amber-500/10 text-amber-300" : "border-slate-600 text-slate-300 hover:border-slate-500"}`}>New card<span className="block text-[10px] text-slate-500">1 extra draft card</span></button>
                 </div>
-                <div><label className={labelCls}>{gen.mode === "family" ? "Family name" : "Card name"}</label><input className={inputCls} autoFocus value={gen.name} onChange={(e) => setGen({ ...gen, name: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && gen.name.trim() && !genBusy) runGenerate(); }} placeholder={gen.mode === "family" ? "e.g. Emberling" : "e.g. Emberling"} /></div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div><label className={labelCls}>Element</label><select className={inputCls} value={gen.element} onChange={(e) => setGen({ ...gen, element: e.target.value })}>{ELEMENTS.map((t) => <option key={t}>{t}</option>)}</select></div>
-                  {gen.mode === "card" && <div><label className={labelCls}>Type</label><select className={inputCls} value={gen.cardType} onChange={(e) => setGen({ ...gen, cardType: e.target.value })}>{CARD_TYPES.map((t) => <option key={t}>{t}</option>)}</select></div>}
-                </div>
+                {(gen.mode === "open-family" || gen.mode === "open-card") ? (
+                  <>
+                    <div><label className={labelCls}>Set</label><select className={inputCls} value={gen.setCode} onChange={(e) => syncGenSet(e.target.value)}>{(setCodes.length ? setCodes : ["GNV"]).map((s) => <option key={s} value={s}>{s}</option>)}</select></div>
+                    <div><label className={labelCls}>Family</label><select className={inputCls} value={gen.familyId} onChange={(e) => setGen({ ...gen, familyId: e.target.value, cardId: familyChoices.find((f) => f.familyId === e.target.value)?.cards[0]?.cardId ?? "" })}><option value="">All families</option>{familyChoices.map((f) => <option key={f.familyId} value={f.familyId}>{f.label} · {f.hint}</option>)}</select></div>
+                    {gen.mode === "open-card" && <div><label className={labelCls}>Card</label><select className={inputCls} value={gen.cardId} onChange={(e) => setGen({ ...gen, cardId: e.target.value })}>{cardChoices.map((c) => <option key={c.cardId} value={c.cardId}>{c.collectorNumber} · {c.cardId} · {c.name} · {c.familyId ?? "No family"}</option>)}</select></div>}
+                    {gen.mode === "open-family" && selectedFamilyCards.length > 0 && (
+                      <div className="max-h-36 overflow-auto rounded-md border border-slate-700 bg-slate-950/40 p-2 text-xs text-slate-300">
+                        {selectedFamilyCards.map((c) => <div key={c.cardId} className="flex justify-between gap-2 py-0.5"><span>{c.collectorNumber} · {c.cardId}</span><span className="text-slate-400">{c.name}</span></div>)}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div><label className={labelCls}>{gen.mode === "new-family" ? "New family name" : "New card name"}</label><input className={inputCls} autoFocus value={gen.name} onChange={(e) => setGen({ ...gen, name: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter" && gen.name.trim() && !genBusy) runGenerate(); }} placeholder={gen.mode === "new-family" ? "e.g. Emberling" : "e.g. Emberling"} /></div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div><label className={labelCls}>Element</label><select className={inputCls} value={gen.element} onChange={(e) => setGen({ ...gen, element: e.target.value })}>{ELEMENTS.map((t) => <option key={t}>{t}</option>)}</select></div>
+                      {gen.mode === "new-card" && <div><label className={labelCls}>Type</label><select className={inputCls} value={gen.cardType} onChange={(e) => setGen({ ...gen, cardType: e.target.value })}>{CARD_TYPES.map((t) => <option key={t}>{t}</option>)}</select></div>}
+                    </div>
+                  </>
+                )}
               </div>
               <div className="mt-5 flex justify-end gap-2">
                 <AdminButton variant="ghost" onClick={() => setGen(null)} disabled={genBusy}>Cancel</AdminButton>
-                <AdminButton variant="gold" onClick={runGenerate} disabled={genBusy || !gen.name.trim()}>{genBusy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Wand2 className="mr-1 h-4 w-4" />}Generate</AdminButton>
+                {gen.mode === "open-family" && <AdminButton variant="gold" onClick={openSelectedFamily} disabled={!gen.familyId}>Show family</AdminButton>}
+                {gen.mode === "open-card" && <AdminButton variant="gold" onClick={openSelectedCard} disabled={!gen.cardId}>Open card</AdminButton>}
+                {(gen.mode === "new-family" || gen.mode === "new-card") && <AdminButton variant="gold" onClick={runGenerate} disabled={genBusy || !gen.name.trim()}>{genBusy ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Wand2 className="mr-1 h-4 w-4" />}Create draft</AdminButton>}
               </div>
             </div>
           </div>

@@ -14,6 +14,10 @@ import { db } from "../db";
 import {
   vqCards,
   vqCardRevisions,
+  vqCharacters,
+  vqCharacterRevisions,
+  vqArtworkCandidates,
+  vqFamilyRules,
   vqFamilies,
   vqSets,
   vqElements,
@@ -27,7 +31,13 @@ import {
   type VqFamily,
   type VqRelease,
   type InsertVqAiGeneration,
+  type InsertVqArtworkCandidate,
+  type InsertVqCharacter,
   type VqElementRow,
+  type VqCharacter,
+  type VqArtworkCandidate,
+  type VqReferencePack,
+  type VqReferenceType,
 } from "@shared/vq-schema";
 
 export interface CardFilter {
@@ -37,7 +47,302 @@ export interface CardFilter {
   element?: string;
 }
 
+const CANONICAL_FAMILY_IDS = new Set([
+  "GNV-F01", "GNV-F02", "GNV-F03", "GNV-F04", "GNV-F05", "GNV-F06",
+  "GNV-F07", "GNV-F08", "GNV-F09", "GNV-F10", "GNV-F11", "GNV-F12",
+]);
+
+const FAMILY_SEED_NOTES: Record<string, { vibe: string; source: string }> = {
+  "GNV-F01": { vibe: "Energetic / Loyal / Brave", source: "Approved Family 01 sheet" },
+  "GNV-F02": { vibe: "Calm / Loyal / Playful", source: "Approved Family 02 sheet" },
+  "GNV-F03": { vibe: "Gentle / Natural / Nurturing", source: "Approved Family 03 sheet" },
+  "GNV-F04": { vibe: "Energetic / Bold / Electric", source: "Approved Family 04 sheet" },
+  "GNV-F05": { vibe: "Steady / Strong / Loyal", source: "Approved Family 05 sheet" },
+  "GNV-F06": { vibe: "Mystical / Wise / Dreamy", source: "Generated Family 06 sheet - Option B update" },
+  "GNV-F07": { vibe: "Free / Agile / Playful", source: "Generated Family 07 sheet - Option B update" },
+  "GNV-F08": { vibe: "Energetic / Bold / Confident", source: "Generated Family 08 sheet - Option B update" },
+  "GNV-F09": { vibe: "Calm / Wise / Resilient", source: "Generated Family 09 sheet - Option B update" },
+  "GNV-F10": { vibe: "Mysterious / Sneaky / Loyal", source: "Generated Family 10 sheet - Option B update" },
+  "GNV-F11": { vibe: "Steady / Strong / Nurturing", source: "Generated Family 11 sheet - Option B update" },
+  "GNV-F12": { vibe: "Adaptable / Playful / Fluid", source: "Generated Family 12 sheet - Option B update" },
+};
+
+function characterIdFor(familyId: string, stageNumber: number): string {
+  return `${familyId}-S${stageNumber}`;
+}
+
+function attackThemesFor(element: string): string[] {
+  const themes: Record<string, string[]> = {
+    Blaze: ["fire", "flame", "ember", "heat"],
+    Tide: ["water", "wave", "tidal", "ocean"],
+    Blossom: ["nature", "petal", "bloom", "vine"],
+    Spark: ["spark", "jolt", "static", "electric"],
+    Earth: ["earth", "rock", "stone", "boulder"],
+    Cosmos: ["cosmic", "star", "gravity", "nebula"],
+    Wind: ["wind", "gust", "gale", "air"],
+    Electric: ["lightning", "shock", "volt", "thunder"],
+    Ice: ["ice", "frost", "snow", "glacial"],
+    Dark: ["shadow", "night", "dark", "umbral"],
+    Water: ["water", "current", "splash", "aqua"],
+  };
+  return themes[element] ?? [`${element.toLowerCase()}-themed`];
+}
+
+export type CharacterBiblePatch = Partial<Pick<
+  VqCharacter,
+  | "characterDna"
+  | "visualDescription"
+  | "bodyShape"
+  | "colours"
+  | "markings"
+  | "eyes"
+  | "tailAccessories"
+  | "personality"
+  | "stageProgressionNotes"
+  | "elementIdentity"
+  | "negativePrompt"
+  | "masterArtworkPrompt"
+  | "referenceArtworkR2Key"
+  | "approvedArtworkR2Key"
+  | "approvalStatus"
+  | "locked"
+>>;
+
+export interface CharacterBibleContext {
+  card: VqCardRow;
+  baseCard: VqCardRow | null;
+  character: VqCharacter | null;
+  previousCharacter: VqCharacter | null;
+  family: VqFamily | undefined;
+}
+
 export const vqStorage = {
+  // ---- Character Bible ----
+  async listCharacters(setCode = "GNV"): Promise<VqCharacter[]> {
+    const rows = await db.select().from(vqCharacters).where(eq(vqCharacters.setCode, setCode));
+    return rows.sort((a, b) => a.familyId.localeCompare(b.familyId) || a.stageNumber - b.stageNumber);
+  },
+
+  async getCharacter(characterId: string): Promise<VqCharacter | undefined> {
+    const [row] = await db.select().from(vqCharacters).where(eq(vqCharacters.characterId, characterId));
+    return row;
+  },
+
+  async getCharacterByBaseCardId(cardId: string): Promise<VqCharacter | undefined> {
+    const [row] = await db.select().from(vqCharacters).where(eq(vqCharacters.cardId, cardId));
+    return row;
+  },
+
+  async getCharacterBibleForCard(cardId: string): Promise<CharacterBibleContext | undefined> {
+    const card = await this.getCard(cardId);
+    if (!card) return undefined;
+    const baseCard = card.baseCardId ? (await this.getCard(card.baseCardId)) ?? null : null;
+    const identityCard = baseCard ?? card;
+    const character = await this.getCharacterByBaseCardId(identityCard.cardId);
+    const previousCharacter = character?.evolvesFromCharacterId ? (await this.getCharacter(character.evolvesFromCharacterId)) ?? null : null;
+    const family = identityCard.familyId ? await this.getFamily(identityCard.familyId) : undefined;
+    return { card, baseCard, character: character ?? null, previousCharacter, family };
+  },
+
+  async seedCharactersFromCards(setCode = "GNV"): Promise<{ created: number; familyRulesCreated: number }> {
+    const cards = await this.listCards({ setCode });
+    const families = await this.listFamilies(setCode);
+    const familiesById = new Map(families.map((f) => [f.familyId, f]));
+    const variantsByBase = new Map<string, string[]>();
+    for (const card of cards) {
+      if (card.baseCardId) {
+        const list = variantsByBase.get(card.baseCardId) ?? [];
+        list.push(card.cardId);
+        variantsByBase.set(card.baseCardId, list);
+      }
+    }
+
+    let created = 0;
+    let familyRulesCreated = 0;
+    await db.transaction(async (tx) => {
+      for (const card of cards) {
+        if (card.cardType !== "Creature" || card.baseCardId || !card.familyId || !card.stageNumber) continue;
+        if (!CANONICAL_FAMILY_IDS.has(card.familyId)) continue;
+        const family = familiesById.get(card.familyId);
+        const notes = FAMILY_SEED_NOTES[card.familyId];
+        const row: InsertVqCharacter = {
+          characterId: characterIdFor(card.familyId, card.stageNumber),
+          setCode: card.setCode,
+          familyId: card.familyId,
+          familyName: family?.name ?? null,
+          cardId: card.cardId,
+          stageNumber: card.stageNumber,
+          characterName: card.name,
+          element: card.element,
+          role: card.lifeStage ?? null,
+          variantCardIds: (variantsByBase.get(card.cardId) ?? []).sort(),
+          evolvesFromCharacterId: card.stageNumber > 1 ? characterIdFor(card.familyId, card.stageNumber - 1) : null,
+          sourceNotes: notes ? `${notes.vibe}. ${notes.source}.` : null,
+          personality: notes?.vibe ?? null,
+          approvalStatus: "draft",
+          locked: false,
+        };
+        const inserted = await tx.insert(vqCharacters).values(row).onConflictDoNothing().returning({ id: vqCharacters.id });
+        if (inserted.length) created++;
+      }
+
+      for (const family of families) {
+        if (!CANONICAL_FAMILY_IDS.has(family.familyId)) continue;
+        const inserted = await tx.insert(vqFamilyRules).values({
+          familyId: family.familyId,
+          element: family.element,
+          allowedAttackThemes: attackThemesFor(family.element),
+          forbiddenAttackTerms: [],
+          statProfile: {
+            stage1: { health: 5, guard: 0, shift: 0 },
+            stage2: { health: 8, guard: 1, shift: 1 },
+            stage3: { health: 12, guard: 3, shift: 2 },
+          },
+          notes: "Seeded from canonical family element; refine after playtest.",
+        }).onConflictDoNothing().returning({ id: vqFamilyRules.id });
+        if (inserted.length) familyRulesCreated++;
+      }
+    });
+
+    return { created, familyRulesCreated };
+  },
+
+  async updateCharacterBible(characterId: string, patch: CharacterBiblePatch, editedBy?: string, reason?: string): Promise<VqCharacter> {
+    const existing = await this.getCharacter(characterId);
+    if (!existing) throw new Error("character not found");
+    const cleanPatch = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) as CharacterBiblePatch;
+    if (Object.keys(cleanPatch).length === 0) return existing;
+    if (existing.locked && cleanPatch.locked !== false) {
+      throw new Error("Character is locked — unlock before editing its Bible fields.");
+    }
+    await db.insert(vqCharacterRevisions).values({
+      characterId,
+      revisionJson: existing as unknown as Record<string, unknown>,
+      editedBy,
+      reason: reason ?? null,
+    });
+    // Editing identity fields after description approval demotes the description to
+    // needs_review — the founder must re-approve before more artwork is generated.
+    const DESCRIPTION_KEYS = ["characterDna", "visualDescription", "bodyShape", "colours", "markings", "eyes", "tailAccessories", "personality", "stageProgressionNotes", "elementIdentity", "negativePrompt", "masterArtworkPrompt"];
+    const touchesDescription = Object.entries(cleanPatch).some(([k, v]) => DESCRIPTION_KEYS.includes(k) && v !== (existing as unknown as Record<string, unknown>)[k]);
+    const demote = existing.descriptionStatus === "approved" && touchesDescription ? { descriptionStatus: "needs_review" } : {};
+    const [updated] = await db
+      .update(vqCharacters)
+      .set({ ...cleanPatch, ...demote, updatedAt: new Date() })
+      .where(eq(vqCharacters.characterId, characterId))
+      .returning();
+    if (!updated) throw new Error("character update failed");
+    return updated;
+  },
+
+  async setCharacterDescriptionStatus(characterId: string, status: "draft" | "approved" | "needs_review", editedBy?: string): Promise<VqCharacter> {
+    const existing = await this.getCharacter(characterId);
+    if (!existing) throw new Error("character not found");
+    await db.insert(vqCharacterRevisions).values({
+      characterId,
+      revisionJson: existing as unknown as Record<string, unknown>,
+      editedBy,
+      reason: `description ${status}`,
+    });
+    const [updated] = await db.update(vqCharacters).set({ descriptionStatus: status, updatedAt: new Date() }).where(eq(vqCharacters.characterId, characterId)).returning();
+    if (!updated) throw new Error("description status update failed");
+    return updated;
+  },
+
+  async setCharacterArtworkKey(characterId: string, kind: "reference" | "approved", key: string, editedBy?: string): Promise<VqCharacter> {
+    const existing = await this.getCharacter(characterId);
+    if (!existing) throw new Error("character not found");
+    await db.insert(vqCharacterRevisions).values({
+      characterId,
+      revisionJson: existing as unknown as Record<string, unknown>,
+      editedBy,
+      reason: kind === "approved" ? "approved artwork set" : "reference artwork set",
+    });
+    const patch = kind === "approved"
+      ? { approvedArtworkR2Key: key, approvalStatus: "artwork_approved", updatedAt: new Date() }
+      : { referenceArtworkR2Key: key, approvalStatus: existing.approvalStatus === "draft" ? "reference_uploaded" : existing.approvalStatus, updatedAt: new Date() };
+    const [updated] = await db.update(vqCharacters).set(patch).where(eq(vqCharacters.characterId, characterId)).returning();
+    if (!updated) throw new Error("character artwork update failed");
+    return updated;
+  },
+
+  async setCharacterLocked(characterId: string, locked: boolean, editedBy?: string): Promise<VqCharacter> {
+    const existing = await this.getCharacter(characterId);
+    if (!existing) throw new Error("character not found");
+    await db.insert(vqCharacterRevisions).values({
+      characterId,
+      revisionJson: existing as unknown as Record<string, unknown>,
+      editedBy,
+      reason: locked ? "character locked" : "character unlocked",
+    });
+    const [updated] = await db.update(vqCharacters).set({ locked, updatedAt: new Date() }).where(eq(vqCharacters.characterId, characterId)).returning();
+    if (!updated) throw new Error("character lock update failed");
+    return updated;
+  },
+
+  async listCharacterRevisions(characterId: string) {
+    return db.select().from(vqCharacterRevisions).where(eq(vqCharacterRevisions.characterId, characterId)).orderBy(desc(vqCharacterRevisions.editedAt));
+  },
+
+  async recordArtworkCandidate(row: InsertVqArtworkCandidate): Promise<VqArtworkCandidate> {
+    const [created] = await db.insert(vqArtworkCandidates).values(row).returning();
+    return created;
+  },
+
+  async markArtworkCandidateStatusByKey(r2Key: string, status: string): Promise<void> {
+    await db.update(vqArtworkCandidates).set({ status, updatedAt: new Date() }).where(eq(vqArtworkCandidates.r2Key, r2Key));
+  },
+
+  async listArtworkCandidates(characterId: string, referenceType?: string): Promise<VqArtworkCandidate[]> {
+    const where = referenceType
+      ? and(eq(vqArtworkCandidates.characterId, characterId), eq(vqArtworkCandidates.referenceType, referenceType))
+      : eq(vqArtworkCandidates.characterId, characterId);
+    return db.select().from(vqArtworkCandidates).where(where).orderBy(desc(vqArtworkCandidates.createdAt));
+  },
+
+  /**
+   * Approve a reference image for ONE pack slot (master_portrait, action_pose, …).
+   * Master Reference (master_portrait slot) doubles as the legacy single reference: it also syncs
+   * referenceArtworkR2Key/approvedArtworkR2Key so the Full Card gate keeps working.
+   * Character-level only — never touches vq_cards.
+   */
+  async setCharacterReferencePack(characterId: string, referenceType: VqReferenceType, key: string, candidateId: number | null, editedBy?: string, identityScore?: number | null): Promise<VqCharacter> {
+    const existing = await this.getCharacter(characterId);
+    if (!existing) throw new Error("character not found");
+    await db.insert(vqCharacterRevisions).values({
+      characterId,
+      revisionJson: existing as unknown as Record<string, unknown>,
+      editedBy,
+      reason: `reference pack: ${referenceType} approved`,
+    });
+    const pack: VqReferencePack = {
+      ...(existing.referencePack ?? {}),
+      [referenceType]: { r2Key: key, candidateId, approvedAt: new Date().toISOString(), identityScore: identityScore ?? null },
+    };
+    const patch: Partial<typeof vqCharacters.$inferInsert> = { referencePack: pack, updatedAt: new Date() };
+    if (referenceType === "master_portrait") {
+      patch.referenceArtworkR2Key = key;
+      patch.approvedArtworkR2Key = key;
+      patch.approvalStatus = "artwork_approved";
+    }
+    const [updated] = await db.update(vqCharacters).set(patch).where(eq(vqCharacters.characterId, characterId)).returning();
+    if (!updated) throw new Error("reference pack update failed");
+    return updated;
+  },
+
+  async getArtworkCandidate(id: number): Promise<VqArtworkCandidate | undefined> {
+    const [row] = await db.select().from(vqArtworkCandidates).where(eq(vqArtworkCandidates.id, id));
+    return row;
+  },
+
+  async markArtworkCandidateStatusById(id: number, status: string): Promise<void> {
+    await db.update(vqArtworkCandidates).set({ status, updatedAt: new Date() }).where(eq(vqArtworkCandidates.id, id));
+  },
+
+  async setArtworkCandidateIdentity(id: number, identityScore: number, identityBreakdown: Record<string, unknown>): Promise<void> {
+    await db.update(vqArtworkCandidates).set({ identityScore, identityBreakdown, updatedAt: new Date() }).where(eq(vqArtworkCandidates.id, id));
+  },
+
   // ---- sets ----
   async getSet(setCode: string): Promise<typeof vqSets.$inferSelect | undefined> {
     const [row] = await db.select().from(vqSets).where(eq(vqSets.setCode, setCode));
