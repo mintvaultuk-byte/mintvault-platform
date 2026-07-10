@@ -58,6 +58,7 @@ import { registerAdminConfigRoutes } from "./routes/admin-config";
 import { registerTransferRoutes } from "./routes/transfers";
 import { registerPreGradeRoutes } from "./routes/pre-grade";
 import { registerVaultQuestAdminRoutes } from "./routes/vault-quest-admin";
+import { registerVaultQuestProductionRoutes } from "./routes/vault-quest-production";
 import { registerStolenRoutes } from "./routes/stolen";
 import { registerRedirectRoutes } from "./routes/redirects";
 import { registerEmbeddingRoutes } from "./routes/embedding";
@@ -1409,6 +1410,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── Vault Quest admin (isolated feature — server/routes/vault-quest-admin.ts) ──
   registerVaultQuestAdminRoutes(app);
+  // ── Vault Quest Genesis Production Studio (Phase 4 — server/routes/vault-quest-production.ts) ──
+  registerVaultQuestProductionRoutes(app);
 
   // ── Legacy-URL + SEO 301 redirects (extracted → server/routes/redirects.ts) ──
   registerRedirectRoutes(app);
