@@ -398,6 +398,10 @@ export async function applyReuse(opts: { characterId?: string; cardId?: string; 
   if (!buf) throw new Error("source asset not found in storage");
 
   if (opts.characterId) {
+    // Validate the target parent exists — recordArtworkCandidate is a bare insert
+    // with no FK, so an unknown characterId would mint an orphaned candidate.
+    const character = await vqStorage.getCharacter(opts.characterId);
+    if (!character) throw new Error("target character not found");
     const targetKey = assertVqWriteKey(vqCharacterCandidateKey(opts.characterId));
     await uploadToR2(targetKey, buf, "image/png");
     const candidate = await vqStorage.recordArtworkCandidate({
@@ -412,6 +416,8 @@ export async function applyReuse(opts: { characterId?: string; cardId?: string; 
     return { targetKey, candidateId: candidate.id, creditsSpent: 0 };
   }
   if (opts.cardId) {
+    const card = await vqStorage.getCard(opts.cardId);
+    if (!card) throw new Error("target card not found");
     const targetKey = assertVqWriteKey(vqArtworkCandidateKey(opts.cardId));
     await uploadToR2(targetKey, buf, "image/png");
     return { targetKey, candidateId: null, creditsSpent: 0 };

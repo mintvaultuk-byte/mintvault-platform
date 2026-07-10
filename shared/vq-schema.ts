@@ -97,7 +97,9 @@ export const vqCards = pgTable(
     language: text("language").notNull().default("EN"),
     year: integer("year").notNull().default(2026),
     edition: text("edition").notNull().default("FIRST EDITION"),
-    // draft -> approved (QA clean) -> published (reaches exports/public)
+    // Workflow status — the authoritative vocabulary is VQ_STATUSES in
+    // shared/vq-workflow.ts (draft → … → export_ready/printed_proxy); every write
+    // goes through setCardStatusAudited, gated by isVqStatus + canTransition.
     status: text("status").notNull().default("draft"),
     notes: text("notes"),
     createdAt: timestamp("created_at").notNull().defaultNow(),

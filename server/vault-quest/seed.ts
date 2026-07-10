@@ -363,6 +363,18 @@ export async function importMaster(
     if (rejects.length > 0) {
       throw new Error(`Refusing to commit: ${rejects.length} card(s) fail validation. Run without --commit to see them.`);
     }
+    // Prod-host safety: refuse the production DB unless explicitly allowed, mirroring
+    // scripts/seed-vq-character-bible.mjs. A --commit run writes to whatever
+    // MINTVAULT_DATABASE_URL points at; this stops an accidental prod overwrite.
+    try {
+      const host = new URL(process.env.MINTVAULT_DATABASE_URL ?? "").hostname;
+      if (host.includes("ep-wispy-morning") && process.env.ALLOW_PROD !== "1") {
+        throw new Error("[vq-seed] Refusing to commit against the production DB host. Set ALLOW_PROD=1 to override.");
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith("[vq-seed]")) throw e;
+      // URL parse failure (unset/odd var) is non-fatal here — the DB pool import below surfaces it.
+    }
     // storage (and the DB pool) is only imported in commit mode, so dry runs
     // never require a database connection.
     const { vqStorage } = await import("./storage");

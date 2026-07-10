@@ -5,7 +5,7 @@
  * across sets) without needing a live database.
  */
 import { describe, it, expect } from "vitest";
-import { sanitizeWrite, intOrNull, nextCardNumFrom } from "../server/vault-quest/lib/write-sanitize";
+import { sanitizeWrite, intOrNull, nextCardNumFrom, isCandidateReferencedInPack } from "../server/vault-quest/lib/write-sanitize";
 
 describe("sanitizeWrite — mass-assignment guard", () => {
   it("strips setCode so a body cannot escape the URL's set scope", () => {
@@ -67,5 +67,24 @@ describe("nextCardNumFrom — set-scoped card numbering", () => {
     expect(nextCardNumFrom(cards, "A.B")).toBe(3);
     // A literal dot must not act as a wildcard that would also match "AXB-...".
     expect(nextCardNumFrom([{ cardId: "AXB-050" }], "A.B")).toBe(1);
+  });
+});
+
+describe("isCandidateReferencedInPack — reject-candidate dangling guard", () => {
+  it("returns true when a pack slot's candidateId matches", () => {
+    const pack = { master_portrait: { candidateId: 57, r2Key: "vq/..." }, action_pose: { candidateId: 12 } };
+    expect(isCandidateReferencedInPack(pack, 57)).toBe(true);
+    expect(isCandidateReferencedInPack(pack, 12)).toBe(true);
+  });
+  it("returns false for an unreferenced candidate and for empty/null packs", () => {
+    const pack = { master_portrait: { candidateId: 57 } };
+    expect(isCandidateReferencedInPack(pack, 99)).toBe(false);
+    expect(isCandidateReferencedInPack({}, 1)).toBe(false);
+    expect(isCandidateReferencedInPack(null, 1)).toBe(false);
+    expect(isCandidateReferencedInPack(undefined, 1)).toBe(false);
+  });
+  it("ignores slots with a null/absent candidateId (manual uploads)", () => {
+    const pack = { master_portrait: { candidateId: null, r2Key: "vq/..." }, action_pose: null };
+    expect(isCandidateReferencedInPack(pack, 57)).toBe(false);
   });
 });

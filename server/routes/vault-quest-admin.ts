@@ -13,7 +13,7 @@ import { uploadToR2, getR2Buffer } from "../r2";
 import { toolsUpload } from "../lib/multer-configs";
 import { vqStorage, type CharacterBibleContext, type CharacterBiblePatch } from "../vault-quest/storage";
 import { validateArtwork } from "../vault-quest/upload-guard";
-import { intOrNull } from "../vault-quest/lib/write-sanitize";
+import { intOrNull, isCandidateReferencedInPack } from "../vault-quest/lib/write-sanitize";
 import { renderCard, type RenderCardInput } from "../vault-quest/render-service";
 import { evaluateCard } from "../vault-quest/qa-engine";
 import { vqArtKey, vqCharacterArtworkKey, vqCharacterCandidateKey, vqCharacterApprovedKey, fetchArt, renderSavedFromStudio, assertVqWriteKey } from "../vault-quest/render-saved";
@@ -703,6 +703,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!Number.isInteger(candidateId)) return res.status(400).json({ error: "candidateId required" });
       const cand = await vqStorage.getArtworkCandidate(candidateId);
       if (!cand || cand.characterId !== characterId) return res.status(404).json({ error: "candidate not found for this character" });
+      // Don't reject/delete a candidate that is the SOURCE of an approved reference-
+      // pack slot — it would leave reference_pack.<type>.candidateId dangling.
+      // (Real occurrence found in staging: GNV-F03-S2 master_portrait → deleted cand.)
+      const character = await vqStorage.getCharacter(characterId);
+      if (isCandidateReferencedInPack(character?.referencePack, candidateId)) {
+        return res.status(409).json({ error: "This candidate is the approved reference for this character — replace or re-approve a different one before rejecting it." });
+      }
       // "delete" only hides it from the gallery (status flag) — the R2 object is kept.
       const action = String((req.body as { action?: string })?.action) === "delete" ? "deleted" : "rejected";
       await vqStorage.markArtworkCandidateStatusById(candidateId, action); // R2 object intentionally kept
@@ -997,6 +1004,20 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const body = req.body as VqEditorPayload;
       if (!body.cardId || !body.name || !body.cardType || !body.element) {
         return res.status(400).json({ error: "cardId, name, cardType and element are required" });
+      }
+      // Relational fields have no FK — validate the parents exist and share this
+      // card's set, so a save can't mint a dangling variant/family reference or a
+      // cross-set inheritance link (the columns are otherwise trusted verbatim).
+      const cardSet = body.setCode ?? "GNV";
+      if (body.baseCardId) {
+        const base = await vqStorage.getCard(String(body.baseCardId));
+        if (!base) return res.status(400).json({ error: "baseCardId does not reference an existing card" });
+        if (base.setCode !== cardSet) return res.status(400).json({ error: "a variant and its base card must be in the same set" });
+      }
+      if (body.familyId) {
+        const fam = await vqStorage.getFamily(String(body.familyId));
+        if (!fam) return res.status(400).json({ error: "familyId does not reference an existing family" });
+        if (fam.setCode !== cardSet) return res.status(400).json({ error: "a card and its family must be in the same set" });
       }
       // Single-door status: SAVE never sets a forward workflow status. A new card is
       // a draft; an existing card keeps its current status. Forward transitions

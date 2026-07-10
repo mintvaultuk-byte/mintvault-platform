@@ -510,10 +510,6 @@ export const vqStorage = {
     });
   },
 
-  async setCardStatus(cardId: string, status: "draft" | "approved" | "published"): Promise<void> {
-    await db.update(vqCards).set({ status, updatedAt: new Date() }).where(eq(vqCards.cardId, cardId));
-  },
-
   async listRevisions(cardId: string) {
     return db.select().from(vqCardRevisions).where(eq(vqCardRevisions.cardId, cardId)).orderBy(desc(vqCardRevisions.editedAt));
   },

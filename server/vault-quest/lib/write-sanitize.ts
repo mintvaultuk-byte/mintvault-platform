@@ -41,6 +41,19 @@ export function sanitizeWrite(values: Record<string, unknown>): Record<string, u
 }
 
 /**
+ * True if `candidateId` is the approved source of any reference-pack slot.
+ * Used to block rejecting/deleting a candidate that a character's reference_pack
+ * still points at (which would leave `reference_pack.<type>.candidateId` dangling).
+ */
+export function isCandidateReferencedInPack(
+  pack: Record<string, { candidateId?: number | null } | null | undefined> | null | undefined,
+  candidateId: number,
+): boolean {
+  if (!pack) return false;
+  return Object.values(pack).some((slot) => !!slot && slot.candidateId === candidateId);
+}
+
+/**
  * Next free card number for a set. Card ids are `${setCode}-NNN`; the prefix must
  * match the set being generated (a hardcoded prefix breaks numbering for any other
  * set → id collision on create).
