@@ -2,10 +2,11 @@
  * Vault Quest AI provider abstraction (Phase 5).
  *
  * Model/provider choices live here in config, not hard-coded at call sites, so a
- * future model swap is a one-line change. Text runs on the existing
- * ANTHROPIC_API_KEY; artwork generation uses the existing MintVault Higgsfield
- * API-key path when configured. Nothing here fails the Studio when a provider is
- * absent — clicks surface a provider-not-connected state instead.
+ * future model swap is a one-line change. Text runs on the dedicated
+ * VAULT_QUEST_ANTHROPIC_API_KEY; artwork generation uses the dedicated Higgsfield
+ * token (VAULT_QUEST_HIGGSFIELD_TOKEN) when configured. Vault Quest never falls
+ * back to grading keys. Nothing here fails the Studio when a provider is absent —
+ * clicks surface a provider-not-connected state instead.
  */
 import { anthropicFetch } from "../../anthropic-fetch";
 import { higgsfieldConnection } from "./higgsfield";
@@ -31,7 +32,7 @@ export interface TextProvider {
 
 /** The active text provider, or null if no key is configured. */
 export function getTextProvider(): TextProvider | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.VAULT_QUEST_ANTHROPIC_API_KEY;
   if (!apiKey) return null;
   return {
     id: "anthropic",
@@ -72,7 +73,7 @@ export function providerStatuses(): ProviderStatus[] {
       kind: "text",
       label: "Anthropic (text)",
       connected: !!text,
-      note: text ? `model ${text.model}` : "ANTHROPIC_API_KEY not set",
+      note: text ? `model ${text.model}` : "VAULT_QUEST_ANTHROPIC_API_KEY not set",
     },
     ...imageProviders(),
   ];

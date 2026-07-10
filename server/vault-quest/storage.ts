@@ -10,7 +10,7 @@
  * substitute for a DB-edited card).
  */
 import { and, desc, eq, sql } from "drizzle-orm";
-import { db } from "../db";
+import { db } from "./db";
 import {
   vqCards,
   vqCardRevisions,

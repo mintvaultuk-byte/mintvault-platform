@@ -12,16 +12,20 @@ import { defineConfig } from "drizzle-kit";
  * Push:     npx drizzle-kit push --config drizzle-vq.config.ts     (staging first)
  * Generate: npx drizzle-kit generate --config drizzle-vq.config.ts (SQL only, no DB)
  */
-if (!process.env.MINTVAULT_DATABASE_URL) {
-  throw new Error("MINTVAULT_DATABASE_URL is not set");
+if (!process.env.VAULT_QUEST_DATABASE_URL) {
+  throw new Error(
+    "VAULT_QUEST_DATABASE_URL is not set — Vault Quest migrations target the dedicated Vault Quest database only.",
+  );
 }
 
 export default defineConfig({
   out: "./migrations-vq",
   schema: "./shared/vq-schema.ts",
   dialect: "postgresql",
+  // Retained as defence-in-depth: even against a mistargeted URL, drizzle-kit can
+  // only ever introspect/diff vq_-prefixed tables.
   tablesFilter: ["vq_*"],
   dbCredentials: {
-    url: process.env.MINTVAULT_DATABASE_URL,
+    url: process.env.VAULT_QUEST_DATABASE_URL,
   },
 });

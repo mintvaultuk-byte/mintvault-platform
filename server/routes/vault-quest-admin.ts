@@ -9,7 +9,7 @@
  */
 import type { Express, Request, Response } from "express";
 import { requireAdmin } from "../auth";
-import { uploadToR2, getR2Buffer } from "../r2";
+import { uploadToVqR2, getVqR2Buffer } from "../vault-quest/vq-r2";
 import { toolsUpload } from "../lib/multer-configs";
 import { vqStorage, type CharacterBibleContext, type CharacterBiblePatch } from "../vault-quest/storage";
 import { validateArtwork } from "../vault-quest/upload-guard";
@@ -109,13 +109,13 @@ async function promoteArtworkCandidate(cardId: string, slot: ArtworkSlot, candid
   if (!key) return null;
   if (!validVqCardId(cardId)) throw new Error("Card ID can only use letters, numbers, dots, dashes, and underscores.");
   if (!isCandidateKeyForCard(key, cardId)) throw new Error("Artwork candidate does not belong to this card.");
-  const buf = await getR2Buffer(key);
+  const buf = await getVqR2Buffer(key);
   if (!buf) throw new Error("Artwork candidate expired or was not found.");
   const guard = await validateArtwork(buf);
   if (!guard.ok) throw new Error(guard.error ?? "Artwork candidate failed validation.");
   const png = await (await import("sharp")).default(buf).png().toBuffer();
   const draftKey = assertVqWriteKey(vqArtKey(cardId, slot));
-  await uploadToR2(draftKey, png, "image/png");
+  await uploadToVqR2(draftKey, png, "image/png");
   // The candidate is now actually promoted into draft art — flip the audit flag
   // here (on Save Draft), not on Use. Best-effort: never fail the save.
   await vqStorage.markAiGenerationAppliedByCandidate(key).catch(() => {});
@@ -316,14 +316,14 @@ async function collectReferenceImages(character: VqCharacter, prevCharacter?: Vq
   for (const t of VQ_REFERENCE_TYPES) {
     const key = character.referencePack?.[t.value]?.r2Key;
     if (!key || !key.startsWith("vq/characters/")) continue;
-    const buf = await getR2Buffer(key);
+    const buf = await getVqR2Buffer(key);
     if (buf) { buffers.push(buf); used.push(`own:${t.value}`); ownRefCount++; }
   }
   if (prevCharacter) {
     for (const t of PREV_STAGE_ANCHOR_TYPES) {
       const key = prevCharacter.referencePack?.[t]?.r2Key;
       if (!key || !key.startsWith("vq/characters/")) continue;
-      const buf = await getR2Buffer(key);
+      const buf = await getVqR2Buffer(key);
       if (buf) { buffers.push(buf); used.push(`prev:${t}`); }
     }
   }
@@ -389,7 +389,7 @@ async function generateCharacterCandidate(character: VqCharacter, referenceType:
   if (!artwork) return { rejected: true, reason: bgReason ? `studio background rejected (${bgReason})` : "no image produced" };
 
   const key = assertVqWriteKey(vqCharacterCandidateKey(character.characterId));
-  await uploadToR2(key, artwork.png, "image/png");
+  await uploadToVqR2(key, artwork.png, "image/png");
   const candidate = await vqStorage.recordArtworkCandidate({
     characterId: character.characterId, cardId: character.cardId, slot: "main", referenceType, source: "generated",
     provider: artwork.provider, model: artwork.model, prompt, r2Key: key,
@@ -523,7 +523,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (!guard.ok) return res.status(400).json({ error: guard.error });
         const png = await (await import("sharp")).default(file.buffer).png().toBuffer();
         const key = assertVqWriteKey(vqCharacterArtworkKey(characterId, "reference"));
-        await uploadToR2(key, png, "image/png");
+        await uploadToVqR2(key, png, "image/png");
         const updated = await vqStorage.setCharacterArtworkKey(characterId, "reference", key, "admin");
         await vqStorage.recordArtworkCandidate({
           characterId,
@@ -556,7 +556,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!character) return res.status(404).json({ error: "character not found" });
       const key = kind === "approved" ? character.approvedArtworkR2Key : character.referenceArtworkR2Key;
       if (!key || !key.startsWith("vq/characters/")) return res.status(404).json({ error: "no artwork on file" });
-      const buf = await getR2Buffer(key);
+      const buf = await getVqR2Buffer(key);
       if (!buf) return res.status(404).json({ error: "no artwork on file" });
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Cache-Control", "private, max-age=60");
@@ -576,14 +576,14 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!sourceKey || !sourceKey.startsWith("vq/characters/")) {
         return res.status(400).json({ error: "Upload reference artwork before approving this character." });
       }
-      const buf = await getR2Buffer(sourceKey);
+      const buf = await getVqR2Buffer(sourceKey);
       if (!buf) return res.status(404).json({ error: "reference artwork was not found" });
       const guard = await validateArtwork(buf);
       if (!guard.ok) return res.status(422).json({ error: guard.error ?? "reference artwork failed validation" });
       const png = await (await import("sharp")).default(buf).png().toBuffer();
       // Manual reference upload approves as the MASTER PORTRAIT pack slot.
       const approvedKey = assertVqWriteKey(vqCharacterApprovedKey(characterId, "master_portrait"));
-      await uploadToR2(approvedKey, png, "image/png");
+      await uploadToVqR2(approvedKey, png, "image/png");
       const updated = await vqStorage.setCharacterReferencePack(characterId, "master_portrait", approvedKey, null, "admin");
       await vqStorage.markArtworkCandidateStatusByKey(sourceKey, "approved").catch(() => {});
       res.json({ character: updated, key: approvedKey, packCompleteness: vqPackCompleteness(updated.referencePack), width: guard.width, height: guard.height });
@@ -733,7 +733,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!validVqCardId(characterId) || !Number.isInteger(candidateId)) return res.status(400).json({ error: "invalid id" });
       const cand = await vqStorage.getArtworkCandidate(candidateId);
       if (!cand || cand.characterId !== characterId || !cand.r2Key.startsWith("vq/characters/")) return res.status(404).json({ error: "candidate not found" });
-      const buf = await getR2Buffer(cand.r2Key);
+      const buf = await getVqR2Buffer(cand.r2Key);
       if (!buf) return res.status(404).json({ error: "candidate image expired" });
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Cache-Control", "private, max-age=60");
@@ -761,7 +761,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (cand.status === "rejected" || cand.status === "auto_rejected") {
         return res.status(422).json({ error: "This candidate was rejected — it cannot be approved as a reference." });
       }
-      const buf = await getR2Buffer(cand.r2Key);
+      const buf = await getVqR2Buffer(cand.r2Key);
       if (!buf) return res.status(404).json({ error: "candidate image not found" });
       const referenceType = parseReferenceType(cand.referenceType); // approve for the candidate's OWN type
       // Approve ONLY — approving never locks (locking is a separate, explicit step on
@@ -771,7 +771,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!guard.ok) return res.status(422).json({ error: guard.error ?? "candidate failed validation" });
       const png = await (await import("sharp")).default(buf).png().toBuffer();
       const approvedKey = assertVqWriteKey(vqCharacterApprovedKey(characterId, referenceType));
-      await uploadToR2(approvedKey, png, "image/png");
+      await uploadToVqR2(approvedKey, png, "image/png");
       const updated = await vqStorage.setCharacterReferencePack(characterId, referenceType, approvedKey, candidateId, "admin", cand.identityScore ?? null);
       await vqStorage.markArtworkCandidateStatusById(candidateId, "approved").catch(() => {});
       res.json({ character: updated, key: approvedKey, referenceType, locked: updated.locked, packCompleteness: vqPackCompleteness(updated.referencePack), width: guard.width, height: guard.height });
@@ -790,7 +790,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!character) return res.status(404).json({ error: "character not found" });
       const key = character.referencePack?.[referenceType]?.r2Key;
       if (!key || !key.startsWith("vq/characters/")) return res.status(404).json({ error: "no approved image for this reference type" });
-      const buf = await getR2Buffer(key);
+      const buf = await getVqR2Buffer(key);
       if (!buf) return res.status(404).json({ error: "approved image not found" });
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Cache-Control", "private, max-age=60");
@@ -864,7 +864,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (cand.status === "rejected" || cand.status === "auto_rejected") {
           return res.status(422).json({ error: `${ch.characterId}: candidate ${candidateId} was rejected — pick another.` });
         }
-        const buf = await getR2Buffer(cand.r2Key);
+        const buf = await getVqR2Buffer(cand.r2Key);
         if (!buf) return res.status(404).json({ error: `candidate image missing for ${ch.characterId}` });
         const guard = await validateArtwork(buf);
         if (!guard.ok) return res.status(422).json({ error: `${ch.characterId}: ${guard.error ?? "candidate failed validation"}` });
@@ -873,7 +873,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const approved: { characterId: string; stageNumber: number; referenceType: string; key: string }[] = [];
       for (const { ch, candidateId, referenceType, identityScore, png } of toApprove) {
         const approvedKey = assertVqWriteKey(vqCharacterApprovedKey(ch.characterId, referenceType));
-        await uploadToR2(approvedKey, png, "image/png");
+        await uploadToVqR2(approvedKey, png, "image/png");
         await vqStorage.setCharacterReferencePack(ch.characterId, referenceType, approvedKey, candidateId, "admin", identityScore);
         await vqStorage.markArtworkCandidateStatusById(candidateId, "approved").catch(() => {});
         approved.push({ characterId: ch.characterId, stageNumber: ch.stageNumber, referenceType, key: approvedKey });
@@ -1148,7 +1148,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
 
       const artwork = await generateHiggsfieldArtwork({ prompt, mode, slot, imageReferences: referenceBuffers.length ? referenceBuffers : undefined, model: String(body.model ?? "").trim() || undefined });
       const candidateKey = assertVqWriteKey(vqArtworkCandidateKey(cardId));
-      await uploadToR2(candidateKey, artwork.png, "image/png");
+      await uploadToVqR2(candidateKey, artwork.png, "image/png");
       // Audit is best-effort: the image is already generated + uploaded, so a
       // logging failure must NOT 500 the request (matches /ai/generate).
       let generationId: number | null = null;
@@ -1253,7 +1253,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!validVqCardId(cardId)) return res.status(400).json({ error: "Card ID can only use letters, numbers, dots, dashes, and underscores." });
       if (!candidateKey || !isCandidateKeyForCard(candidateKey, cardId)) return res.status(400).json({ error: "Artwork candidate does not belong to this card." });
       const slot: ArtworkSlot = body.slot === "prev" ? "prev" : "main";
-      const buf = await getR2Buffer(candidateKey);
+      const buf = await getVqR2Buffer(candidateKey);
       if (!buf) return res.status(404).json({ error: "Artwork candidate expired or was not found." });
       const guard = await validateArtwork(buf);
       if (!guard.ok) return res.status(422).json({ error: guard.error ?? "Artwork candidate failed validation." });
@@ -1406,11 +1406,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // belong to this card). Lets Generate Full Card / Use Image preview before Save.
       const cid = String(body.cardId ?? "").trim();
       if (body.artCandidateKey && cid && isCandidateKeyForCard(body.artCandidateKey, cid)) {
-        const buf = await getR2Buffer(body.artCandidateKey);
+        const buf = await getVqR2Buffer(body.artCandidateKey);
         if (buf) art = { ...art, mainArt: buf };
       }
       if (body.prevArtCandidateKey && cid && isCandidateKeyForCard(body.prevArtCandidateKey, cid)) {
-        const buf = await getR2Buffer(body.prevArtCandidateKey);
+        const buf = await getVqR2Buffer(body.prevArtCandidateKey);
         if (buf) art = { ...art, prevArt: buf };
       }
       const { qa, previewPng } = await renderCard(body, art, "preview");
@@ -1470,7 +1470,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         const slot = (req.query.slot as string) === "prev" ? "prev" : "main";
         const png = await (await import("sharp")).default(file.buffer).png().toBuffer();
         const key = assertVqWriteKey(vqArtKey(cardId, slot));
-        await uploadToR2(key, png, "image/png");
+        await uploadToVqR2(key, png, "image/png");
         res.json({ key, slot, width: guard.width, height: guard.height });
       } catch (err) {
         res.status(500).json({ error: err instanceof Error ? err.message : "upload failed" });
@@ -1485,7 +1485,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!validVqCardId(cardId)) return res.status(400).json({ error: "invalid card id" });
       const slot = String(req.params.slot) === "prev" ? "prev" : "main";
       const key = `vq/art/${cardId}/${slot}.png`;
-      const buf = await getR2Buffer(key);
+      const buf = await getVqR2Buffer(key);
       if (!buf) return res.status(404).json({ error: "no artwork on file" });
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Cache-Control", "private, max-age=60");

@@ -5,7 +5,7 @@
  * payload with NO extra DB round-trip (the N+1 fix).
  */
 import { randomUUID } from "node:crypto";
-import { getR2Buffer } from "../r2";
+import { getVqR2Buffer } from "./vq-r2";
 import { renderCard, type RenderFormat, type RenderResult } from "./render-service";
 import { resolveVariant, cardRowToRenderInput } from "./qa-engine";
 import { normalizePdf } from "./pdf-normalize";
@@ -37,26 +37,12 @@ export function vqCharacterApprovedKey(characterId: string, referenceType = "mas
 }
 
 /**
- * HARD prefix guard for every Vault Quest R2 WRITE. VQ may only ever write inside
- * its own isolated prefixes — it must never be able to touch MintVault grading /
- * customer paths (images/, certificates/, labels/, scans/, uploads/, …). Called
- * at every VQ upload site; throws on anything outside the allowlist or any key
- * that could be normalised elsewhere (`..`, backslash, leading slash, control
- * chars). R2 keys are literal strings, so this is defence-in-depth — but it makes
- * the isolation a hard invariant instead of a convention.
+ * The Vault Quest R2 write-prefix guard now lives in the dedicated transport
+ * module (server/vault-quest/vq-r2.ts) so it is enforced inside uploadToVqR2 as
+ * well as at every call site. Re-exported here unchanged so existing importers
+ * (vault-quest-admin.ts) keep working with no change.
  */
-export const VQ_WRITE_PREFIXES = ["vq/art-candidates/", "vq/art/", "vq/characters/"] as const;
-export function assertVqWriteKey(key: string): string {
-  const ok =
-    VQ_WRITE_PREFIXES.some((p) => key.startsWith(p)) &&
-    !key.includes("..") &&
-    !key.includes("\\") &&
-    !key.startsWith("/") &&
-    // eslint-disable-next-line no-control-regex
-    !/[\x00-\x1f]/.test(key);
-  if (!ok) throw new Error(`blocked R2 write outside Vault Quest prefixes: "${key.slice(0, 80)}"`);
-  return key;
-}
+export { assertVqWriteKey, VQ_WRITE_PREFIXES } from "./vq-r2";
 
 /**
  * Fetch artwork buffers by CARD ID only (keys are derived, never taken from the
@@ -77,11 +63,11 @@ export async function fetchArt(input: {
   const prevCandidate = (input.prevArtCandidateKey ?? "").trim();
   const [mainArt, prevArt] = await Promise.all([
     mainCandidate && isCandidateKeyForCard(mainCandidate, cardId)
-      ? getR2Buffer(mainCandidate)
-      : input.artR2Key ? getR2Buffer(vqArtKey(cardId, "main")) : Promise.resolve(null),
+      ? getVqR2Buffer(mainCandidate)
+      : input.artR2Key ? getVqR2Buffer(vqArtKey(cardId, "main")) : Promise.resolve(null),
     prevCandidate && isCandidateKeyForCard(prevCandidate, cardId)
-      ? getR2Buffer(prevCandidate)
-      : input.prevArtR2Key ? getR2Buffer(vqArtKey(cardId, "prev")) : Promise.resolve(null),
+      ? getVqR2Buffer(prevCandidate)
+      : input.prevArtR2Key ? getVqR2Buffer(vqArtKey(cardId, "prev")) : Promise.resolve(null),
   ]);
   return { mainArt: mainArt ?? undefined, prevArt: prevArt ?? undefined };
 }

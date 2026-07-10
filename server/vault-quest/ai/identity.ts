@@ -62,7 +62,7 @@ export async function scoreCharacterIdentity(
   referencePngs: Buffer[],
   character: Pick<VqCharacter, "characterName" | "bodyShape" | "colours" | "markings" | "eyes" | "tailAccessories" | "stageNumber" | "element">,
 ): Promise<IdentityResult | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.VAULT_QUEST_ANTHROPIC_API_KEY;
   if (!apiKey || referencePngs.length === 0) return null;
   try {
     const refs = referencePngs.slice(0, 2); // primary references are enough to judge identity

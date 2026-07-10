@@ -30,14 +30,18 @@ loadEnvFile();
 
 const COMMIT = process.argv.includes("--commit");
 const FORCE = process.argv.includes("--force");
-const DATABASE_URL = process.env.MINTVAULT_DATABASE_URL;
-if (!DATABASE_URL) throw new Error("MINTVAULT_DATABASE_URL is not set");
+// Seeds the DEDICATED Vault Quest database only. Reads VAULT_QUEST_DATABASE_URL;
+// never MINTVAULT_DATABASE_URL (no fallback to the grading database).
+const DATABASE_URL = process.env.VAULT_QUEST_DATABASE_URL;
+if (!DATABASE_URL) throw new Error("VAULT_QUEST_DATABASE_URL is not set");
 
 const parsed = new URL(DATABASE_URL);
 const DB_HOST = parsed.hostname;
 const DB_NAME = parsed.pathname.replace(/^\//, "");
+// Belt-and-suspenders: refuse the grading production host in case the URL is
+// ever mis-set. Add the Vault Quest prod host here once vaultquest-prod exists.
 if (DB_HOST.includes("ep-wispy-morning") && process.env.ALLOW_PROD !== "1") {
-  throw new Error("[vq-bible-seed] Refusing production DB host ep-wispy-morning.");
+  throw new Error("[vq-bible-seed] Refusing grading production DB host ep-wispy-morning — this seed targets the dedicated Vault Quest database only.");
 }
 
 const pool = new pg.Pool({

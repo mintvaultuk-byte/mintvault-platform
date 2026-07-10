@@ -31,7 +31,7 @@ export interface HiggsfieldArtworkResult {
 // (api.higgsfield.ai is dead — Cloudflare 521; platform.higgsfield.ai is a different service.)
 const DEFAULT_API_BASE = "https://fnf-api-gw.higgsfield.ai/fnf";
 // Default image model: Nano Banana (1 credit/image). Verified available via
-// `higgsfield model list`; override with HIGGSFIELD_MODEL (e.g. z_image = 0.15cr,
+// `higgsfield model list`; override with VAULT_QUEST_HIGGSFIELD_MODEL (e.g. z_image = 0.15cr,
 // nano_banana_pro, seedream_v4_5, …).
 const DEFAULT_MODEL = "nano_banana";
 const MAX_PROMPT_CHARS = 3600;
@@ -46,11 +46,11 @@ export function higgsfieldCreditsPerImage(model?: string): number {
 }
 
 export function higgsfieldConnection(): HiggsfieldConnection {
-  const apiKey = env("HIGGSFIELD_API_KEY");
-  const model = env("HIGGSFIELD_MODEL") || DEFAULT_MODEL;
-  // Accept either HIGGSFIELD_API_URL or HIGGSFIELD_API_BASE (both mean the API host);
-  // default is already the live host, so neither is required.
-  const baseUrl = (env("HIGGSFIELD_API_URL") || env("HIGGSFIELD_API_BASE") || DEFAULT_API_BASE).replace(/\/+$/, "");
+  const apiKey = env("VAULT_QUEST_HIGGSFIELD_TOKEN");
+  const model = env("VAULT_QUEST_HIGGSFIELD_MODEL") || DEFAULT_MODEL;
+  // Accept either VAULT_QUEST_HIGGSFIELD_API_URL or VAULT_QUEST_HIGGSFIELD_API_BASE
+  // (both mean the API host); default is already the live host, so neither is required.
+  const baseUrl = (env("VAULT_QUEST_HIGGSFIELD_API_URL") || env("VAULT_QUEST_HIGGSFIELD_API_BASE") || DEFAULT_API_BASE).replace(/\/+$/, "");
   if (apiKey) {
     return { connected: true, note: `API key configured · model ${model}`, model, baseUrl };
   }
@@ -58,12 +58,12 @@ export function higgsfieldConnection(): HiggsfieldConnection {
   if (hfBin) {
     return {
       connected: false,
-      note: "HF_BIN is configured, but Card Studio needs HIGGSFIELD_API_KEY for in-app image generation",
+      note: "HF_BIN is configured, but Card Studio needs VAULT_QUEST_HIGGSFIELD_TOKEN for in-app image generation",
       model,
       baseUrl,
     };
   }
-  return { connected: false, note: "HIGGSFIELD_API_KEY not set", model, baseUrl };
+  return { connected: false, note: "VAULT_QUEST_HIGGSFIELD_TOKEN not set", model, baseUrl };
 }
 
 function clean(v: unknown): string {
@@ -179,18 +179,18 @@ async function readJson(res: Response): Promise<unknown> {
 
 /**
  * Resolve the Higgsfield workspace id (required as the hf-workspace-id header on
- * every call). Uses HIGGSFIELD_WORKSPACE_ID when set, otherwise fetches the
+ * every call). Uses VAULT_QUEST_HIGGSFIELD_WORKSPACE_ID when set, otherwise fetches the
  * account's workspaces once and caches the first (private) workspace.
  */
 let cachedWorkspaceId: string | null = null;
 async function resolveWorkspaceId(baseUrl: string, key: string): Promise<string> {
-  const fromEnv = env("HIGGSFIELD_WORKSPACE_ID");
+  const fromEnv = env("VAULT_QUEST_HIGGSFIELD_WORKSPACE_ID");
   if (fromEnv) return fromEnv;
   if (cachedWorkspaceId) return cachedWorkspaceId;
   const res = await fetchWithTimeout(`${baseUrl}/developer/v2alpha/account/workspaces`, {
     headers: { Authorization: `Bearer ${key}` },
   }, 20_000);
-  if (!res.ok) throw new Error(`Higgsfield workspaces failed (${res.status}) — token may have expired; run \`higgsfield auth token\` and update HIGGSFIELD_API_KEY.`);
+  if (!res.ok) throw new Error(`Higgsfield workspaces failed (${res.status}) — token may have expired; run \`higgsfield auth token\` and update VAULT_QUEST_HIGGSFIELD_TOKEN.`);
   const data = (await readJson(res)) as { id?: string }[] | { items?: { id?: string }[] };
   const list = Array.isArray(data) ? data : (data.items ?? []);
   const id = list.find((w) => w?.id)?.id;
@@ -264,10 +264,10 @@ export async function generateHiggsfieldArtwork(input: {
   /** Override the model for this request (e.g. z_image / nano_banana / nano_banana_pro). */
   model?: string;
 }): Promise<HiggsfieldArtworkResult> {
-  const key = env("HIGGSFIELD_API_KEY");
+  const key = env("VAULT_QUEST_HIGGSFIELD_TOKEN");
   const conn = higgsfieldConnection();
   if (!key || !conn.connected) {
-    throw new Error("Higgsfield provider not connected — set HIGGSFIELD_API_KEY (from `higgsfield auth token`) and restart the local server.");
+    throw new Error("Higgsfield provider not connected — set VAULT_QUEST_HIGGSFIELD_TOKEN (from `higgsfield auth token`) and restart the local server.");
   }
   // Per-request model override (validated to a safe token); default = env/connection model.
   let model = input.model && /^[a-z0-9_]+$/.test(input.model) ? input.model : conn.model;
@@ -307,7 +307,7 @@ export async function generateHiggsfieldArtwork(input: {
   );
   if (!createRes.ok) {
     const errBody = await createRes.text().catch(() => "");
-    if (createRes.status === 401) throw new Error("Higgsfield rejected the token (401) — it has likely expired. Run `higgsfield auth token` and update HIGGSFIELD_API_KEY in .env.");
+    if (createRes.status === 401) throw new Error("Higgsfield rejected the token (401) — it has likely expired. Run `higgsfield auth token` and update VAULT_QUEST_HIGGSFIELD_TOKEN in .env.");
     if (createRes.status === 402) throw new Error("Higgsfield: not enough credits to generate an image.");
     throw new Error(`Higgsfield create failed (${createRes.status})${errBody ? `: ${errBody.slice(0, 220)}` : ""}`);
   }
