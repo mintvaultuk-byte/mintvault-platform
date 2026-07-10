@@ -11,10 +11,11 @@ import {
   Home, ListOrdered, Coins, Search,
 } from "lucide-react";
 import {
-  useWorkflow, useFounderMode, usePalette, CommandPalette, HomeDashboard,
+  useWorkflow, useAdvancedMode, usePalette, CommandPalette, HomeDashboard,
   ProductionQueue, CreditsDashboard, WarningsPanel, BulkBar, Collapse,
   type WorkflowFeed,
 } from "@/components/vault-quest/workflow";
+import { GuidedHome, GuidedStep } from "@/components/vault-quest/guided";
 
 /**
  * Genesis Production Studio (Phase 4) — set-centric TCG production control tower.
@@ -47,6 +48,7 @@ interface ProductionStatus {
 
 type SectionKey =
   | "home" | "queue" | "credits"
+  | "step1" | "step2" | "step3" | "step4"
   | "overview" | "settings" | "characters" | "families" | "standard" | "variant"
   | "packaging" | "print" | "qa" | "release" | "assets" | "founder";
 
@@ -125,7 +127,16 @@ function Deferred({ label }: { label: string }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-const SECTION_KEYS: SectionKey[] = ["home", "queue", "credits", "overview", "settings", "characters", "families", "standard", "variant", "packaging", "print", "qa", "release", "assets", "founder"];
+const SECTION_KEYS: SectionKey[] = ["home", "queue", "credits", "step1", "step2", "step3", "step4", "overview", "settings", "characters", "families", "standard", "variant", "packaging", "print", "qa", "release", "assets", "founder"];
+
+/** Simple founder navigation — the whole studio as 4 large production stages. */
+const SIMPLE_NAV: { key: SectionKey; label: string; icon: typeof LayoutDashboard }[] = [
+  { key: "home", label: "Home", icon: Home },
+  { key: "step1", label: "1 · Create Characters", icon: Users },
+  { key: "step2", label: "2 · Create Cards", icon: Layers },
+  { key: "step3", label: "3 · Create Rare Cards", icon: Sparkles },
+  { key: "step4", label: "4 · Packaging & Print", icon: Package },
+];
 
 export default function VaultQuestStudioPage() {
   // Section is mirrored into ?section= so deep-links + browser refresh land on the exact view.
@@ -142,9 +153,10 @@ export default function VaultQuestStudioPage() {
   const prod = useQuery<ProductionStatus>({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/production`], retry: false });
   const status = prod.data;
   const workflow = useWorkflow();
-  const [founderMode, setFounderMode] = useFounderMode();
+  const [advanced, setAdvanced] = useAdvancedMode();
   const [paletteOpen, setPaletteOpen] = usePalette();
   const goSection = (s: string) => setSection(s as SectionKey);
+  const openStep = (n: 1 | 2 | 3 | 4) => setSection(`step${n}` as SectionKey);
 
   return (
     <div className="min-h-screen bg-[#0a0c11] text-slate-200">
@@ -166,14 +178,15 @@ export default function VaultQuestStudioPage() {
             <Search className="h-3.5 w-3.5" />Search everything…<kbd className="ml-auto rounded border border-slate-800 px-1 text-[9px]">⌘K</kbd>
           </button>
           <nav className="space-y-0.5">
-            {NAV.map((n, i) => {
-              const prev = NAV[i - 1];
-              const showGroup = n.group && prev?.group !== n.group;
+            {(advanced ? NAV : SIMPLE_NAV).map((n, i, list) => {
+              const prev = list[i - 1] as (typeof NAV)[number] | undefined;
+              const group = (n as (typeof NAV)[number]).group;
+              const showGroup = group && prev?.group !== group;
               const Icon = n.icon;
               const active = section === n.key;
               return (
                 <div key={n.key}>
-                  {showGroup && <div className="mb-1 mt-3 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">{n.group}</div>}
+                  {showGroup && <div className="mb-1 mt-3 px-2 text-[10px] font-semibold uppercase tracking-wider text-slate-600">{group}</div>}
                   <button
                     onClick={() => setSection(n.key)}
                     className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition ${active ? "bg-slate-800 font-semibold text-slate-100" : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"}`}
@@ -186,16 +199,21 @@ export default function VaultQuestStudioPage() {
               );
             })}
           </nav>
-          <label className="mt-auto flex cursor-pointer items-center justify-between rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2">
-            <span className="text-xs font-semibold text-slate-400">Founder Mode</span>
+          <label className="mt-auto flex cursor-pointer items-center justify-between rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-2" title="Shows technical controls: AI provider & model names, credits detail, identity scores, queue and batch settings.">
+            <span className="text-xs font-semibold text-slate-400">Advanced Mode</span>
             <button
               role="switch"
-              aria-checked={founderMode}
-              onClick={() => setFounderMode(!founderMode)}
-              className={`relative h-5 w-9 rounded-full transition ${founderMode ? "" : "bg-slate-700"}`}
-              style={founderMode ? { background: GOLD } : undefined}
+              aria-checked={advanced}
+              onClick={() => {
+                const next = !advanced;
+                setAdvanced(next);
+                // leaving Advanced while on a technical section → land back on the simple home
+                if (!next && !["home", "step1", "step2", "step3", "step4"].includes(section)) setSection("home");
+              }}
+              className={`relative h-5 w-9 rounded-full transition ${advanced ? "" : "bg-slate-700"}`}
+              style={advanced ? { background: GOLD } : undefined}
             >
-              <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${founderMode ? "left-[18px]" : "left-0.5"}`} />
+              <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${advanced ? "left-[18px]" : "left-0.5"}`} />
             </button>
           </label>
         </aside>
@@ -204,14 +222,22 @@ export default function VaultQuestStudioPage() {
         <main className="min-w-0 flex-1 p-8">
           {prod.isLoading && <div className="text-sm text-slate-500">Loading production status…</div>}
           {prod.isError && <div className="rounded-lg border border-red-900 bg-red-950/40 p-4 text-sm text-red-300">Failed to load — are you signed in as admin?</div>}
-          {section === "home" && (
+          {section === "home" && !advanced && (
+            <SectionShell title="Genesis Vault" desc="Work from top to bottom — the studio always knows your next step.">
+              <GuidedHome feed={workflow.data} counts={status?.counts} loading={workflow.isLoading} openStep={openStep} />
+            </SectionShell>
+          )}
+          {(section === "step1" || section === "step2" || section === "step3" || section === "step4") && (
+            <GuidedStep n={Number(section.slice(4)) as 1 | 2 | 3 | 4} feed={workflow.data} counts={status?.counts} back={() => setSection("home")} />
+          )}
+          {section === "home" && advanced && (
             <SectionShell title="Home" desc="The system always knows the next production task — pick up exactly where you left off.">
               <HomeDashboard feed={workflow.data} loading={workflow.isLoading} go={goSection} />
             </SectionShell>
           )}
           {section === "queue" && (
             <SectionShell title="Production Queue" desc="Every open task in canonical order: description → references → approval → lock → cards → QA → packaging → release.">
-              <ProductionQueue feed={workflow.data} loading={workflow.isLoading} founderMode={founderMode} go={goSection} />
+              <ProductionQueue feed={workflow.data} loading={workflow.isLoading} founderMode={advanced} go={goSection} />
             </SectionShell>
           )}
           {section === "credits" && (
@@ -229,7 +255,7 @@ export default function VaultQuestStudioPage() {
               )}
               {section === "overview" && <Overview status={status} go={setSection} />}
               {section === "settings" && <SetSettings />}
-              {section === "characters" && <CharactersView status={status} founderMode={founderMode} />}
+              {section === "characters" && <CharactersView status={status} founderMode={advanced} />}
               {section === "families" && <FamiliesView status={status} />}
               {section === "standard" && <CardsView status={status} kind="standard" />}
               {section === "variant" && <CardsView status={status} kind="variant" />}
@@ -426,7 +452,7 @@ function CharactersView({ status, founderMode }: { status: ProductionStatus; fou
           </div>
         )}
         {founderMode && <BulkBar selected={selected} clear={() => setSelected([])} onDone={refresh} />}
-        {!founderMode && <p className="mt-3 text-[11px] text-slate-600">Enable Founder Mode (sidebar) for bulk approve / lock operations.</p>}
+        {!founderMode && <p className="mt-3 text-[11px] text-slate-600">Enable Advanced Mode (sidebar) for bulk approve / lock operations.</p>}
       </Collapse>
     </SectionShell>
   );

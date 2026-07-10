@@ -53,6 +53,17 @@ export function useFounderMode(): [boolean, (v: boolean) => void] {
   return [on, (v) => { localStorage.setItem("vq.founderMode", v ? "1" : "0"); setOn(v); }];
 }
 
+/**
+ * Advanced Mode (Phase 5.2). DEFAULT OFF — the Studio opens in the simple
+ * founder workflow with plain language only. Turning this ON reveals the
+ * technical surface: full navigation, AI provider/model names, credits detail,
+ * identity scores, queue reordering, bulk operations, developer info.
+ */
+export function useAdvancedMode(): [boolean, (v: boolean) => void] {
+  const [on, setOn] = useState(() => localStorage.getItem("vq.advancedMode") === "1");
+  return [on, (v) => { localStorage.setItem("vq.advancedMode", v ? "1" : "0"); setOn(v); }];
+}
+
 // ── collapsible section that remembers open state ──
 export function Collapse({ id, title, defaultOpen = true, children, badge }: { id: string; title: string; defaultOpen?: boolean; children: React.ReactNode; badge?: React.ReactNode }) {
   const key = `vq.collapse.${id}`;
@@ -430,8 +441,10 @@ export function ReusePanel({ check, providerLabel, onReuse, onGenerateWithRefs, 
             </label>
           ))}
         </div>
-        <div className="border-t border-slate-800 px-4 py-2 text-[11px] text-slate-500">
-          Reusing spends <b className="text-emerald-400">0 credits</b> (saves ≈{check.creditsSaved}). Generating new spends ≈{check.creditsSaved || check.perImage} on <b className="text-slate-300">{providerLabel}</b>.
+        <div className="space-y-0.5 border-t border-slate-800 px-4 py-2.5 text-[11px] text-slate-400">
+          <div>Images already exist: <b className="text-slate-200">{check.assets.length}</b></div>
+          <div>Credits that can be saved: <b className="text-emerald-400">{check.creditsSaved}</b></div>
+          <div>Recommended action: <b style={{ color: "#D4AF37" }}>Reuse existing assets</b> — generating new spends ≈{check.creditsSaved || check.perImage} on <span className="text-slate-300">{providerLabel}</span>.</div>
         </div>
         <div className="flex flex-wrap gap-2 border-t border-slate-800 p-4">
           <AdminButton variant="gold" disabled={busy || !picked} onClick={() => picked && onReuse(picked)}>Reuse Approved Asset (0 cr)</AdminButton>
