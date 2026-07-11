@@ -487,3 +487,28 @@ or a mocked test is at most `Implemented`/`Locally verified` — it is NOT an ac
 production fix. "Fixed"/"done"/"shipped" with no attached level and evidence
 reference is forbidden (see `templates/definition-of-proof.md`). This is the
 same discipline as [[mintvault-silent-failure-prevention]], made durable.
+
+## Program, scale & scope layer (Phase 9C)
+
+For multi-phase work, use the PROGRAM layer, not just per-task dirs:
+
+- **Program dir:** `.claude/controlled-code-lead/programs/<program-id>/` —
+  `program-ledger.md`, `deferred-carry-forward.md` (open items carry into the next
+  phase's Stage 0), commit-chain, program-rollback. Finding IDs are program-scoped
+  (`<PROG>-P<phase>-F<n>`) so they don't collide across phases. A landed
+  substrate/design is NOT "closed" until its proof level is `Activated`.
+- **Cross-task index:** `.claude/controlled-code-lead/INDEX.md` — find current state
+  without grepping the repo. Update at Stage 0 and Stage 7.
+- **Scope & concurrency:** `.claude/controlled-code-lead/scope-and-concurrency.md` —
+  multi-repo scoping (STOP if a command/edit targets another repo; never apply
+  MintVault protected-systems elsewhere) + the parallel-session lock model (default
+  read-only under a live lock; shared state is append-only).
+- **Owner approvals:** `.claude/controlled-code-lead/approvals/` (records gitignored).
+- **Project memory:** `.claude/project-memory/` (indexed sections, not one flat file).
+- **Risk & budget templates:** `templates/architecture-before.md` + `-after.md`,
+  `templates/implementation-budget.md` (estimate files/lines/commits/tests up front;
+  STOP + re-manifest if actuals exceed ~25%), `templates/confidence-scoring.md`
+  (confidence never replaces evidence; each % cites its evidence + missing proof).
+- **Self-tests:** `bash .claude/governance-tests/run-all.sh` — validates skill load,
+  reviewer read-only allowlists, hook detection (incl. wrapper/SDK forms) + fail-closed,
+  and state persistence. Keep it green.

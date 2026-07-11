@@ -57,20 +57,20 @@ check() { if printf '%s' "$lower" | grep -qE "$1"; then matched="${matched}${2}\
 
 # --- push (incl. git -C <dir> push and force) --------------------------------
 check 'git([[:space:]]+-c[[:space:]]+[^[:space:]]+)?[[:space:]]+push'   "git push (incl. git -C … push / force)"
-# --- deploy (incl. the project wrapper) --------------------------------------
-check '(fly|flyctl)[[:space:]]+deploy'                                   "deploy (fly deploy)"
+# --- deploy (incl. flags between the verb, and the project wrapper) ----------
+check '(fly|flyctl)[[:space:]].*\bdeploy\b'                              "deploy (fly/flyctl deploy)"
 check 'safe-deploy\.sh'                                                  "deploy (safe-deploy.sh wrapper)"
-check '(fly|flyctl)[[:space:]]+(ssh|scale|machine)'                      "prod infra (fly ssh/scale/machine)"
-# --- secrets -----------------------------------------------------------------
-check '(fly|flyctl)[[:space:]]+secrets'                                  "secret change (fly secrets)"
-# --- migrations (incl. wrapper scripts + additive DDL) -----------------------
-check 'drizzle-kit[[:space:]]+push|npm[[:space:]]+run[[:space:]]+db:push' "migration (drizzle-kit / db:push)"
-check '(tsx|node)[[:space:]]+[^\n]*(migrat|apply-migration|drizzle)'      "migration (tsx/node wrapper script)"
-check '\b(create|alter|drop)[[:space:]]+(table|index|column)\b'          "DDL (CREATE/ALTER/DROP table/index/column)"
+check '(fly|flyctl)[[:space:]].*\b(ssh|scale|machine)\b'                 "prod infra (fly ssh/scale/machine)"
+# --- secrets (flags allowed between) -----------------------------------------
+check '(fly|flyctl)[[:space:]].*\bsecrets\b'                             "secret change (fly secrets)"
+# --- migrations (drizzle, db:push via any runner, wrapper scripts, DDL) ------
+check 'drizzle-kit[[:space:]]+push|\bdb:push\b'                          "migration (drizzle-kit / db:push)"
+check '(tsx|node)[[:space:]]+.*(migrat|apply-migration|drizzle)'      "migration (tsx/node wrapper script)"
+check '\b(create|alter|drop)[[:space:]]+(table|index|column|database|schema|view|function|trigger)\b' "DDL (CREATE/ALTER/DROP …)"
 check '\btruncate\b'                                                     "destructive SQL (TRUNCATE)"
 check '\bdelete[[:space:]]+from\b'                                       "destructive SQL (DELETE FROM)"
-# --- storage deletion (aws-cli, rclone, AND aws-sdk in a script) -------------
-check '(aws[[:space:]]+s3[[:space:]]+rm|rclone[[:space:]]+delete|-x[[:space:]]+delete)' "storage deletion (cli)"
+# --- storage deletion (aws-cli rm/rb/s3api, rclone delete/purge, aws-sdk) ----
+check 'aws[[:space:]]+s3[[:space:]]+(rm|rb)\b|s3api[[:space:]]+delete|rclone[[:space:]]+(delete|purge)|-x[[:space:]]+delete' "storage deletion (cli)"
 check 'deleteobjectcommand|deletebucketcommand|\.deleteobject\('         "storage deletion (aws-sdk)"
 # --- paid providers ----------------------------------------------------------
 check 'higgsfield|api\.higgsfield|generate(image|video|artwork)'         "paid provider call (Higgsfield generation)"
@@ -78,7 +78,7 @@ check 'stripe\b.*(charge|paymentintent|refund)'                          "paid p
 # --- secrets / prod host literals in the command -----------------------------
 check 'sk_live_'                                                         "live Stripe key in command"
 check 'ep-wispy-morning'                                                 "production DB host referenced"
-check '\.env\b.*(>>|>|sed[[:space:]]+-i|perl[[:space:]]+-pi)'            "env file mutation"
+check '(sed[[:space:]]+-i|perl[[:space:]]+-pi|tee[[:space:]]+-a).*\.env|\.env.*(>>|[[:space:]]>[[:space:]])' "env file mutation"
 # --- dependency install ------------------------------------------------------
 check 'npm[[:space:]]+install[[:space:]]+[^-]|npm[[:space:]]+i[[:space:]]|yarn[[:space:]]+add|pnpm[[:space:]]+add' "dependency install"
 
