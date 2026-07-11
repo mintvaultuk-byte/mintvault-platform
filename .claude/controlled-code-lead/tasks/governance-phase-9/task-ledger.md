@@ -29,8 +29,9 @@ This task governs the governance framework itself. It MUST NOT use an inline-onl
 | 9A.5 — session recovery | done | SKILL.md Session Recovery section added |
 | 9A.6 — durable transitions | done | SKILL.md updated |
 | 9A.7 — proof vocabulary | done | SKILL.md proof-state vocabulary added |
-| Restart checkpoint | REACHED | commit 9A locally, STOP, owner restarts, resume from this ledger |
-| 9B / 9C | NOT STARTED | require post-restart reviewer-isolation + hook-load proof |
+| Restart checkpoint | PASSED | resumed; recovery verified; snapshot MATCH `eab189ef` |
+| 9B — enforcement & permissions | done | reviewer isolation PROVEN; secret rules removed; ask/deny; hook hardened+tested; approvals dir; protected-systems expanded |
+| 9C — durable program + scale | done | program layer, cross-task index, template + multi-repo/parallel + memory + self-tests |
 
 ## NEXT AUTHORISED ACTION (read this first on resume)
 1. Restart Claude Code (new process) so `.claude/agents/*` + hook registration loads from disk.

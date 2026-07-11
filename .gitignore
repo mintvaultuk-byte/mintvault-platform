@@ -64,3 +64,8 @@ docs/v521-audit.md
 # OS
 Thumbs.db
 .claude/worktrees/
+
+# controlled-code-lead: local approval records + session locks (never committed)
+.claude/controlled-code-lead/approvals/*.record.md
+.claude/controlled-code-lead/approvals/*.record.json
+.claude/controlled-code-lead/locks/

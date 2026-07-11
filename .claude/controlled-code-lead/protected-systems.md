@@ -18,7 +18,11 @@ before any change lands.
 | cert_counter / certificate_number | `cert_counter` table, `normalizeCertId()` | Desync causes a 500 on next cert allocation | [[mintvault-db-migration-discipline]] Check 4 |
 | Vault Quest DB | `shared/vq-schema.ts`, `drizzle-vq.config.ts` | Separate config on purpose so a whole-DB diff can't propose changes to grading tables | Always push with `--config drizzle-vq.config.ts`, staging first; never plain `drizzle-kit push` |
 | Environment/secrets | `ADMIN_PASSWORD`, `ADMIN_PIN`, `SESSION_SECRET`, `SIGNED_URL_SECRET`, R2/Resend/Stripe keys | CLAUDE.md golden rule 3 | Never change without confirming first |
-| Production database | Neon host `ep-wispy-morning-ab6f4o08` | Live customer data | Confirm host before any mutation; see [[project_db_branches]] |
+| Production database | Neon host `ep-wispy-morning-ab6f4o08` (prod) vs `ep-purple-voice-abfez796` (staging) | Live customer data | Confirm host by identity before any mutation; see [[project_db_branches]] |
+| Database migrations (any env) | `migrations*/**`, `drizzle*.config.ts`, `db:push`, `drizzle-kit push`, `scripts/**apply-migration**`, raw DDL (incl. additive `CREATE`/`ALTER … ADD`) | A migration that type-checks can still 500 at runtime; staging≠prod schema | [[mintvault-db-migration-discipline]] — owner approval; validate against the live target DB, staging first |
+| Authentication logic | admin/staff login + PIN, `mv.sid` session, `require_admin` middleware | Only the owner should reach admin; session cookie shared with staff/grader | CLAUDE.md golden rule 3 — owner approval for any auth edit |
+| Payment / Stripe webhook CODE | `server/stripeClient.ts`, the `/api/stripe/webhook` handler, checkout/PaymentIntent flow | Editing payment code (not just calling Stripe) is high-risk; webhook must stay before `express.json()` | CLAUDE.md golden rule 6 — full explanation + owner approval |
+| Dependency management | `package.json`, `package-lock.json` (`npm install <pkg>`, upgrades) | Supply-chain + lockfile risk | CLAUDE.md golden rule 5 — owner approval; state what/why/alternatives |
 
 ## How to update this list
 When a task uncovers a new protected system (a subsystem where a "helpful"
