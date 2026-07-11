@@ -21,7 +21,8 @@ import { normalizePdf } from "../vault-quest/pdf-normalize";
 import { VQ_ELEMENTS, VQ_ELEMENTS_NEEDS_APPROVAL } from "../vault-quest/lib/vq-constants";
 import { canTransition, isVqStatus } from "@shared/vq-workflow";
 import { setIntegrity, cardMetadata } from "../vault-quest/qa-set";
-import { startExportJob, getExportJob, jobStatus } from "../vault-quest/export-jobs";
+import { startExport, getExportStatusView, resolveExportDownload } from "../vault-quest/export-jobs";
+import { getR2ObjectStream } from "../r2";
 import { generate, type GenerateReq } from "../vault-quest/generate";
 import { runGenerator, generateFullCard, generateCharacterDescription, DESCRIPTION_FIELD_KEYS, type GenKind, type CardContext } from "../vault-quest/ai/generators";
 import { providerStatuses } from "../vault-quest/ai/provider";
@@ -1710,12 +1711,14 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       try {
         const ids = await resolveCardIds(req.body as Selector);
         if (!ids.length) return res.status(400).json({ error: "no cards selected" });
-        const { id } = startExportJob(kind, ids);
-        res.status(202).json({ jobId: id, count: ids.length });
+        const ownerAdminId = req.session?.adminEmail || "admin";
+        const { jobId, count } = await startExport(kind, ownerAdminId, ids);
+        res.status(202).json({ jobId, count });
       } catch (err) {
+        const status = (err as { status?: number }).status;
         const msg = err instanceof Error ? err.message : `${kind} failed to start`;
         // Concurrency back-pressure is a "try again shortly", not a server error.
-        if (/too many exports/i.test(msg)) return res.status(429).json({ error: msg });
+        if (status === 429 || /too many exports/i.test(msg)) return res.status(429).json({ error: msg });
         res.status(500).json({ error: msg });
       }
     };
@@ -1726,33 +1729,55 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // export pack (.zip): svg/png/pdf + per-card metadata + manifest + checksums — background job
   app.post("/api/admin/vault-quest/export/pack", requireAdmin, startBatch("pack"));
 
-  // job progress (poll)
-  app.get("/api/admin/vault-quest/export/jobs/:id", requireAdmin, (req: Request, res: Response) => {
-    const job = getExportJob(String(req.params.id));
-    if (!job) return res.status(404).json({ error: "job not found or expired" });
-    res.json(jobStatus(job));
+  // job progress (poll) — durable (Postgres) first, legacy in-memory fallback, so a
+  // poll that lands on a different Fly machine than the POST still finds the job.
+  app.get("/api/admin/vault-quest/export/jobs/:id", requireAdmin, async (req: Request, res: Response) => {
+    const view = await getExportStatusView(String(req.params.id));
+    if (!view) return res.status(404).json({ error: "job not found or expired" });
+    res.json(view);
   });
 
-  // download the finished file (streamed from the temp file; kept until TTL so it
-  // can be re-downloaded)
+  // download the finished file. Durable jobs stream from shared R2 (same-origin,
+  // behind admin auth) so any machine can serve it; legacy jobs stream the temp file.
   app.get("/api/admin/vault-quest/export/jobs/:id/file", requireAdmin, async (req: Request, res: Response) => {
-    const job = getExportJob(String(req.params.id));
-    if (!job) return res.status(404).json({ error: "job not found or expired" });
-    if (job.state === "running") return res.status(409).json({ error: "export still running" });
-    if (job.state === "error") return res.status(422).json({ error: job.error ?? "export failed" });
-    if (!job.filePath) return res.status(410).json({ error: "export file no longer available" });
-    const fs = await import("fs");
-    if (!fs.existsSync(job.filePath)) return res.status(410).json({ error: "export file no longer available" });
-    res.setHeader("Content-Type", job.contentType ?? "application/octet-stream");
-    res.setHeader("Content-Disposition", `attachment; filename="${job.fileName ?? "export.bin"}"`);
-    if (job.bytes) res.setHeader("Content-Length", String(job.bytes));
-    const stream = fs.createReadStream(job.filePath);
-    stream.on("error", () => {
-      if (!res.headersSent) res.status(500).json({ error: "failed to read export file" });
-      else res.destroy();
-    });
-    // if the client disconnects mid-download, tear the read stream down (no fd leak)
-    res.on("close", () => stream.destroy());
-    stream.pipe(res);
+    const plan = await resolveExportDownload(String(req.params.id));
+    switch (plan.kind) {
+      case "not_found":
+        return res.status(404).json({ error: "job not found or expired" });
+      case "running":
+        return res.status(409).json({ error: "export still running" });
+      case "failed":
+        return res.status(422).json({ error: plan.message });
+      case "gone":
+        return res.status(410).json({ error: "export file no longer available" });
+      case "r2": {
+        const obj = await getR2ObjectStream(plan.outputKey);
+        if (!obj) return res.status(410).json({ error: "export file no longer available" });
+        res.setHeader("Content-Type", plan.contentType);
+        res.setHeader("Content-Disposition", `attachment; filename="${plan.fileName}"`);
+        const len = plan.bytes ?? obj.contentLength;
+        if (len) res.setHeader("Content-Length", String(len));
+        res.on("close", () => (obj.body as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.());
+        obj.body.on("error", () => {
+          if (!res.headersSent) res.status(500).json({ error: "failed to read export file" });
+          else res.destroy();
+        });
+        return obj.body.pipe(res);
+      }
+      case "file": {
+        const fs = await import("fs");
+        if (!fs.existsSync(plan.filePath)) return res.status(410).json({ error: "export file no longer available" });
+        res.setHeader("Content-Type", plan.contentType);
+        res.setHeader("Content-Disposition", `attachment; filename="${plan.fileName}"`);
+        if (plan.bytes) res.setHeader("Content-Length", String(plan.bytes));
+        const stream = fs.createReadStream(plan.filePath);
+        stream.on("error", () => {
+          if (!res.headersSent) res.status(500).json({ error: "failed to read export file" });
+          else res.destroy();
+        });
+        res.on("close", () => stream.destroy());
+        return stream.pipe(res);
+      }
+    }
   });
 }

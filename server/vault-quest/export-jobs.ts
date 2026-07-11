@@ -32,6 +32,20 @@ import { ZipStream } from "./zip";
 import { buildProxyPdf, type ProxyProvider } from "./proxy";
 import { cardMetadata } from "./qa-set";
 import { VQ_ELEMENTS_NEEDS_APPROVAL } from "./lib/vq-constants";
+import { uploadToR2 } from "../r2";
+import {
+  createOrGetExportJob,
+  claimExportJob,
+  cancelExportJob,
+  getExportJobByPublicId,
+  updateExportProgress,
+  finishExportJob,
+  failExportJob,
+  exportOutputKey,
+  type ExportOutput,
+} from "./lib/export-job-store";
+import type { ExportCounts } from "./lib/export-job-state";
+import type { VqExportJob } from "@shared/vq-export-schema";
 
 export type JobKind = "pack" | "proxy";
 export type JobState = "running" | "done" | "error";
@@ -91,7 +105,35 @@ function scheduleCleanup(job: ExportJob): void {
   (t as { unref?: () => void }).unref?.();
 }
 
-/** Start a background export/proxy job over the (already capped) card ids. */
+/**
+ * Render into `job` (temp file + counts) under the hard timeout, so a hung render
+ * can never permanently hold a slot. Shared by the legacy in-memory path and the
+ * durable path. Throws on error/timeout; on success `job` carries filePath/bytes/
+ * fileName/contentType/counts.
+ */
+async function renderInto(job: ExportJob, ids: string[], onProgress?: () => void): Promise<void> {
+  const run = job.kind === "pack" ? runPack : runProxy;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("export timed out")), JOB_TIMEOUT_MS);
+    (timer as { unref?: () => void }).unref?.();
+  });
+  const runner = run(job, ids, onProgress);
+  // A late rejection from the runner AFTER the timeout already won the race would
+  // otherwise be an unhandled rejection (fatal in Node) — swallow it here.
+  runner.catch(() => {});
+  try {
+    await Promise.race([runner, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * LEGACY in-memory path — kept as the fallback for a DB where the durable
+ * `vq_export_jobs` table isn't migrated yet (the durable facade below routes to
+ * this when the store signals `unavailable`). Single-machine only.
+ */
 export function startExportJob(kind: JobKind, ids: string[]): { id: string } {
   const active = [...JOBS.values()].filter((j) => j.state === "running").length;
   if (active >= MAX_ACTIVE) throw new Error("too many exports already running — wait for one to finish");
@@ -107,26 +149,13 @@ export function startExportJob(kind: JobKind, ids: string[]): { id: string } {
     startedAt: Date.now(),
   };
   JOBS.set(id, job);
-  const run = kind === "pack" ? runPack : runProxy;
-  // Hard timeout so a hung render can never permanently hold a MAX_ACTIVE slot.
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("export timed out")), JOB_TIMEOUT_MS);
-    (timer as { unref?: () => void }).unref?.();
-  });
-  const runner = run(job, ids);
-  // A late rejection from the runner AFTER the timeout already won the race would
-  // otherwise be an unhandled rejection (fatal in Node) — swallow it here.
-  runner.catch(() => {});
-  Promise.race([runner, timeout])
+  renderInto(job, ids)
     .then(() => {
-      if (timer) clearTimeout(timer);
       job.state = "done";
       job.finishedAt = Date.now();
       scheduleCleanup(job);
     })
     .catch((err) => {
-      if (timer) clearTimeout(timer);
       job.state = "error";
       job.error = err instanceof Error ? err.message : "export failed";
       job.finishedAt = Date.now();
@@ -139,9 +168,178 @@ export function startExportJob(kind: JobKind, ids: string[]): { id: string } {
   return { id };
 }
 
+// ---------------------------------------------------------------------------
+// DURABLE path (INFRA-01 / OPEN-27) — state in Postgres, bytes in R2, so poll +
+// download work from ANY Fly machine. Falls back to the legacy path above when
+// the vq_export_jobs table isn't migrated on the target DB.
+// ---------------------------------------------------------------------------
+
+const LEASE_MS = JOB_TIMEOUT_MS + 60 * 1000; // outlive the render timeout by a minute
+const PROGRESS_THROTTLE_MS = 1500; // cap durable progress writes (avoid a write storm)
+const machineId = (): string => process.env.FLY_MACHINE_ID || "local";
+
+// Per-machine cap on concurrent heavy renders (mirrors the legacy MAX_ACTIVE).
+let activeDurableRenders = 0;
+
+/** Public, poll-safe view — identical shape whether the job is durable or legacy,
+ *  collapsed to the 3 states the client understands (running/done/error). */
+export interface ExportStatusView {
+  id: string;
+  kind: string;
+  state: "running" | "done" | "error";
+  total: number;
+  done: number;
+  rendered: number;
+  skipped: number;
+  fileName?: string;
+  bytes?: number;
+  error?: string;
+  elapsedMs: number;
+  durable: boolean;
+}
+
+function durableToView(j: VqExportJob): ExportStatusView {
+  const state: ExportStatusView["state"] =
+    j.state === "queued" || j.state === "processing"
+      ? "running"
+      : j.state === "completed" || j.state === "partial"
+        ? "done"
+        : "error";
+  const rendered = j.completedCount;
+  const skipped = j.skippedCount + j.failedCount;
+  return {
+    id: j.jobId,
+    kind: j.kind,
+    state,
+    total: j.requestedCount,
+    done: rendered + skipped,
+    rendered,
+    skipped,
+    fileName: j.fileName ?? undefined,
+    bytes: j.outputSize ?? undefined,
+    error: state === "error" ? j.errorMessage ?? "export failed" : undefined,
+    elapsedMs: (j.completedAt ?? new Date()).getTime() - j.createdAt.getTime(),
+    durable: true,
+  };
+}
+
+function legacyToView(job: ExportJob): ExportStatusView {
+  const s = jobStatus(job);
+  return { ...s, state: job.state === "running" ? "running" : job.state === "done" ? "done" : "error", skipped: job.skipped.length, durable: false };
+}
+
+/** Start an export — durable when the table exists, else legacy in-memory. */
+export async function startExport(
+  kind: JobKind,
+  ownerAdminId: string,
+  ids: string[],
+): Promise<{ jobId: string; deduped: boolean; durable: boolean; count: number }> {
+  const created = await createOrGetExportJob(kind, ownerAdminId, ids, Date.now());
+  if (!created.ok) {
+    // Table not migrated on this DB → keep working via the legacy single-machine path.
+    const { id } = startExportJob(kind, ids);
+    return { jobId: id, deduped: false, durable: false, count: ids.length };
+  }
+  const { job, deduped } = created.value;
+  if (deduped) {
+    return { jobId: job.jobId, deduped: true, durable: true, count: job.requestedCount };
+  }
+  // Fresh job. Guard per-machine concurrency; with no cross-machine scheduler yet,
+  // a job we can't run now is retired cleanly rather than stranded as `queued`.
+  if (activeDurableRenders >= MAX_ACTIVE) {
+    await cancelExportJob(job.jobId, "too many exports already running", Date.now());
+    const e = new Error("too many exports already running — wait for one to finish") as Error & { status?: number };
+    e.status = 429;
+    throw e;
+  }
+  const claimed = await claimExportJob(job.jobId, machineId(), LEASE_MS, Date.now());
+  if (!claimed.ok) {
+    // Another machine won the claim for this same new job — treat as deduped.
+    return { jobId: job.jobId, deduped: true, durable: true, count: job.requestedCount };
+  }
+  void runDurableRender(job.jobId, kind, ids);
+  return { jobId: job.jobId, deduped: false, durable: true, count: ids.length };
+}
+
+/** Run a claimed durable job: render → upload artifact to R2 → persist outcome.
+ *  Never throws to the caller (fire-and-forget); failures land on the DB row. */
+async function runDurableRender(jobId: string, kind: JobKind, ids: string[]): Promise<void> {
+  activeDurableRenders++;
+  const job: ExportJob = { id: jobId, kind, state: "running", total: ids.length, done: 0, rendered: 0, skipped: [], startedAt: Date.now() };
+  let lastProgressAt = 0;
+  const onProgress = () => {
+    const now = Date.now();
+    if (now - lastProgressAt < PROGRESS_THROTTLE_MS) return;
+    lastProgressAt = now;
+    void updateExportProgress(jobId, { completed: job.rendered, skipped: job.skipped.length, failed: 0 });
+  };
+  try {
+    await renderInto(job, ids, onProgress);
+    const counts: ExportCounts = {
+      requested: ids.length,
+      completed: job.rendered,
+      skipped: job.skipped.length,
+      failed: 0,
+      hasOutput: !!job.filePath && !!job.bytes,
+    };
+    // Only upload when the outcome will actually be downloadable — never leave an
+    // orphan R2 object behind a job that decideExportOutcome will call `failed`.
+    let output: ExportOutput | null = null;
+    if (job.filePath && job.bytes && job.fileName && job.contentType && counts.completed > 0) {
+      const buf = await fs.promises.readFile(job.filePath);
+      const key = exportOutputKey(jobId, job.fileName);
+      const hash = createHash("sha256").update(buf).digest("hex");
+      await uploadToR2(key, buf, job.contentType);
+      output = { outputKey: key, outputHash: hash, outputSize: buf.length, contentType: job.contentType, fileName: job.fileName };
+    }
+    await finishExportJob(jobId, counts, output, Date.now());
+  } catch (err) {
+    await failExportJob(jobId, "render_failed", err instanceof Error ? err.message : "export failed", Date.now()).catch(() => {});
+  } finally {
+    if (job.filePath) fs.unlink(job.filePath, () => {});
+    activeDurableRenders--;
+  }
+}
+
+/** Poll view for a job — durable first, legacy fallback. Null = genuinely unknown. */
+export async function getExportStatusView(jobId: string): Promise<ExportStatusView | null> {
+  const res = await getExportJobByPublicId(jobId);
+  if (res.ok) return durableToView(res.value);
+  const legacy = getExportJob(jobId);
+  return legacy ? legacyToView(legacy) : null;
+}
+
+/** What the download route should do for a job. */
+export type DownloadPlan =
+  | { kind: "r2"; outputKey: string; contentType: string; fileName: string; bytes?: number }
+  | { kind: "file"; filePath: string; contentType: string; fileName: string; bytes?: number }
+  | { kind: "not_found" }
+  | { kind: "running" }
+  | { kind: "failed"; message: string }
+  | { kind: "gone" };
+
+export async function resolveExportDownload(jobId: string): Promise<DownloadPlan> {
+  const res = await getExportJobByPublicId(jobId);
+  if (res.ok) {
+    const j = res.value;
+    if (j.state === "queued" || j.state === "processing") return { kind: "running" };
+    if (j.state === "failed" || j.state === "cancelled") return { kind: "failed", message: j.errorMessage ?? "export failed" };
+    if (j.state === "expired") return { kind: "gone" };
+    if (!j.outputKey) return { kind: "gone" }; // completed/partial but output already swept
+    return { kind: "r2", outputKey: j.outputKey, contentType: j.contentType ?? "application/octet-stream", fileName: j.fileName ?? "export.bin", bytes: j.outputSize ?? undefined };
+  }
+  // unavailable / not_found in the durable store → legacy in-memory
+  const job = getExportJob(jobId);
+  if (!job) return { kind: "not_found" };
+  if (job.state === "running") return { kind: "running" };
+  if (job.state === "error") return { kind: "failed", message: job.error ?? "export failed" };
+  if (!job.filePath) return { kind: "gone" };
+  return { kind: "file", filePath: job.filePath, contentType: job.contentType ?? "application/octet-stream", fileName: job.fileName ?? "export.bin", bytes: job.bytes };
+}
+
 // ---- runners ----
 
-async function runPack(job: ExportJob, ids: string[]): Promise<void> {
+async function runPack(job: ExportJob, ids: string[], onProgress?: () => void): Promise<void> {
   const studios = await vqStorage.getStudioCardsBatch(ids); // 2 queries, no per-card N+1
   job.total = studios.length;
 
@@ -150,7 +348,7 @@ async function runPack(job: ExportJob, ids: string[]): Promise<void> {
   const ws = fs.createWriteStream(tmp);
   const zip = new ZipStream(ws);
   try {
-    await buildPack(job, studios, zip);
+    await buildPack(job, studios, zip, onProgress);
     job.bytes = fs.statSync(tmp).size;
   } catch (err) {
     ws.destroy(); // free the fd; the caller's .catch unlinks job.filePath
@@ -158,7 +356,7 @@ async function runPack(job: ExportJob, ids: string[]): Promise<void> {
   }
 }
 
-async function buildPack(job: ExportJob, studios: Awaited<ReturnType<typeof vqStorage.getStudioCardsBatch>>, zip: ZipStream): Promise<void> {
+async function buildPack(job: ExportJob, studios: Awaited<ReturnType<typeof vqStorage.getStudioCardsBatch>>, zip: ZipStream, onProgress?: () => void): Promise<void> {
   const manifest: Record<string, unknown>[] = [];
   const checksums: string[] = [];
   let rendered = 0;
@@ -199,6 +397,7 @@ async function buildPack(job: ExportJob, studios: Awaited<ReturnType<typeof vqSt
       job.skipped.push(c.cardId);
     } finally {
       job.done++;
+      onProgress?.();
     }
   }
 
@@ -221,7 +420,7 @@ async function buildPack(job: ExportJob, studios: Awaited<ReturnType<typeof vqSt
   job.contentType = "application/zip";
 }
 
-async function runProxy(job: ExportJob, ids: string[]): Promise<void> {
+async function runProxy(job: ExportJob, ids: string[], onProgress?: () => void): Promise<void> {
   const studios = await vqStorage.getStudioCardsBatch(ids); // 2 queries, no per-card N+1
   job.total = studios.length;
   const cfg = await vqStorage.getConfig().catch(() => ({}) as Record<string, string>);
@@ -244,6 +443,7 @@ async function runProxy(job: ExportJob, ids: string[]): Promise<void> {
         return null;
       } finally {
         job.done++;
+        onProgress?.();
       }
     },
   };

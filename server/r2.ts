@@ -101,6 +101,26 @@ export async function getR2Buffer(key: string): Promise<Buffer | null> {
   }
 }
 
+/** Stream an R2 object (null on missing / any error) WITHOUT buffering it whole in
+ *  memory. Used by the durable VQ export download so a finished pack/proxy can be
+ *  streamed back same-origin (behind admin auth) from any machine — the bytes live
+ *  in shared R2, not on the machine that rendered them. */
+export async function getR2ObjectStream(
+  key: string,
+): Promise<{ body: NodeJS.ReadableStream; contentLength?: number; contentType?: string } | null> {
+  try {
+    const out = await getClient().send(new GetObjectCommand({ Bucket: getBucket(), Key: key }));
+    if (!out.Body) return null;
+    return {
+      body: out.Body as NodeJS.ReadableStream,
+      contentLength: out.ContentLength,
+      contentType: out.ContentType,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** List object keys under a prefix — used to locate raw_front.* / raw_back.*
  *  whose extension varies (.tif/.jpg/.png). */
 export async function listR2Keys(prefix: string): Promise<string[]> {

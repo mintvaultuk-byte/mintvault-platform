@@ -7,7 +7,7 @@ Local = pure + mocked + local-Postgres integration. NEVER call local mocks/2-wor
 | Subsystem | Commit | Proof level | Evidence |
 |---|---|---|---|
 | 10A-0 prerequisites | (this) | **Locally verified** | migrations 0012/0013 applied to LOCAL DB (127.0.0.1:55432) — attempt_count≥0 + ids≤1000 CHECKs fire; vq-config resolveVqCeilings + r2-identity checkR2Identity + 7-state provider-status + tablesFilter → 35 targeted + 437 full tests green; tsc clean; lint 4452 |
-| 10A-1 durable exports | pending | — | needs export-jobs rewrite + storage + routes + client + 2-worker local sims |
+| 10A-1 durable exports | 169366a→(this) | **Locally verified** | export-job-store.ts (DB+R2 adapter, safe/42P01 degrade) + export-jobs facade (durable-first, legacy fallback) + routes stream from shared R2. 8 store integration tests vs LOCAL Postgres prove idempotent create / atomic single-winner claim / cross-'machine' visibility / counts-derived partial-vs-failed / cancel; 10 facade tests lock the 3-state client contract + download plan. tsc clean; full 447 + integration 18 green; lint no new issues. **Deferred to 10B (staging):** real multi-machine routing, real R2 upload/stream, streaming-multipart upload (final artifact is buffered once for upload — bounded), active lease-reclaim scheduler (ids/attempt_count columns ready, no cron wired). |
 | 10A-2 idempotency/spend | pending | — | |
 | 10A-3 provider status | pending | — | |
 | 10A-4 feature controls | pending | — | |
