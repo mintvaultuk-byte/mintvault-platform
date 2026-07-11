@@ -33,6 +33,7 @@ import {
   generateHiggsfieldArtwork,
   higgsfieldConnection,
   higgsfieldCreditsPerImage,
+  effectiveCreditsPerImage,
   isCandidateKeyForCard,
   validVqCardId,
   vqArtworkCandidateKey,
@@ -363,8 +364,11 @@ async function scoreAndGateCandidate(candidateId: number, generatedPng: Buffer, 
 // reuses the exact character; the result is identity-scored and auto-rejected on drift.
 // Throws on provider errors (mapped by artworkErrorResponse). Reused by the single /
 // "3 more" / family generate routes. Never approves, locks, or touches cards.
-interface GenCandidateResult { candidate: VqArtworkCandidate; artwork: HiggsfieldArtworkResult; key: string; identity: IdentityResult | null; autoRejected: boolean; referencesUsed: string[] }
-async function generateCharacterCandidate(character: VqCharacter, referenceType: VqReferenceType = "master_portrait", opts?: { model?: string }): Promise<GenCandidateResult | { rejected: true; reason: string }> {
+// providerCalls = actual number of paid Higgsfield creates this made (a master can
+// retry once on studio-background failure → up to 2), so the caller records ACTUAL
+// spend, not just candidate count (Reviewer 1 F-1 / financial accuracy).
+interface GenCandidateResult { candidate: VqArtworkCandidate; artwork: HiggsfieldArtworkResult; key: string; identity: IdentityResult | null; autoRejected: boolean; referencesUsed: string[]; providerCalls: number }
+async function generateCharacterCandidate(character: VqCharacter, referenceType: VqReferenceType = "master_portrait", opts?: { model?: string }): Promise<GenCandidateResult | { rejected: true; reason: string; providerCalls: number }> {
   const prev = character.evolvesFromCharacterId ? (await vqStorage.getCharacter(character.evolvesFromCharacterId)) ?? null : null;
   const basePrompt = characterMasterArtworkPrompt(character, prev, referenceType);
   if (basePrompt.length < 20) throw new Error("Character Bible has no master artwork prompt or DNA yet — fill the Bible first.");
@@ -379,8 +383,10 @@ async function generateCharacterCandidate(character: VqCharacter, referenceType:
   let artwork: HiggsfieldArtworkResult | null = null;
   let prompt = "";
   let bgReason: string | undefined;
+  let providerCalls = 0; // every generateHiggsfieldArtwork below is a PAID create
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     prompt = basePrompt + idLock + (attempt > 1 ? STRICTER_BG_SUFFIX : "");
+    providerCalls++;
     const generated = await generateHiggsfieldArtwork({ prompt, mode: "main", slot: "main", imageReferences: buffers.length ? buffers : undefined, model });
     if (!isMaster) { artwork = generated; break; }
     const bg = await validateStudioBackground(generated.png);
@@ -388,11 +394,11 @@ async function generateCharacterCandidate(character: VqCharacter, referenceType:
     bgReason = bg.reason;
     if (attempt === maxAttempts) {
       // Background never passed — reject WITHOUT uploading/recording (don't clutter R2/gallery,
-      // don't consume the approval workflow). The image is discarded.
-      return { rejected: true, reason: `studio background rejected (${bg.reason})` };
+      // don't consume the approval workflow). The image is discarded — but it WAS charged.
+      return { rejected: true, reason: `studio background rejected (${bg.reason})`, providerCalls };
     }
   }
-  if (!artwork) return { rejected: true, reason: bgReason ? `studio background rejected (${bgReason})` : "no image produced" };
+  if (!artwork) return { rejected: true, reason: bgReason ? `studio background rejected (${bgReason})` : "no image produced", providerCalls };
 
   const key = assertVqWriteKey(vqCharacterCandidateKey(character.characterId));
   await uploadToR2(key, artwork.png, "image/png");
@@ -407,7 +413,7 @@ async function generateCharacterCandidate(character: VqCharacter, referenceType:
   }).catch(() => {});
   const ownRefs = buffers.slice(0, ownRefCount);
   const { identity, autoRejected } = await scoreAndGateCandidate(candidate.id, artwork.png, ownRefs, character);
-  return { candidate, artwork, key, identity, autoRejected, referencesUsed: used };
+  return { candidate, artwork, key, identity, autoRejected, referencesUsed: used, providerCalls };
 }
 
 // Map a Higgsfield failure to a clean status: 503 not-connected, 402 plan/credit, else 500.
@@ -621,7 +627,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // Spend gate (Phase 10A-2): master ALWAYS makes 3 candidates, others 1. Enforce
       // the ceiling BEFORE any paid provider call.
       const isMaster = referenceType === "master_portrait";
-      const perImage = higgsfieldCreditsPerImage(model);
+      const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
       const spend = await checkGenerationSpend({ requestedImages: isMaster ? 3 : 1, perImageCredits: perImage, scope: "single", nowMs: Date.now() });
       if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
 
@@ -629,10 +635,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // so even a raw API call with referenceType=master_portrait yields 3, never 1.
       if (isMaster) {
         const created: { candidateId: number; key: string; width: number; height: number; identityScore: number | null; model: string }[] = [];
-        let autoRejectedCount = 0, bgRejectedCount = 0;
+        let autoRejectedCount = 0, bgRejectedCount = 0, providerCalls = 0;
         for (let i = 0; i < 3; i++) {
           try {
             const r = await generateCharacterCandidate(character, referenceType, { model });
+            providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each)
             if ("rejected" in r) { bgRejectedCount++; continue; } // studio background failed
             if (r.autoRejected) { autoRejectedCount++; continue; }
             created.push({ candidateId: r.candidate.id, key: r.key, width: r.artwork.width, height: r.artwork.height, identityScore: r.identity?.score ?? null, model: r.artwork.model });
@@ -641,13 +648,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             break;
           }
         }
-        // Record ACTUAL images produced (autoRejected/bgRejected still consumed credits).
-        await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "single", imagesProduced: created.length + autoRejectedCount + bgRejectedCount, perImageCredits: perImage, model, characterId, nowMs: Date.now() });
+        // Record ACTUAL paid creates (incl. bg-retries + auto/bg-rejected, which still billed).
+        await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "single", imagesProduced: providerCalls, perImageCredits: perImage, model, characterId, nowMs: Date.now() });
         return res.status(201).json({ referenceType, created, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, count: created.length });
       }
 
       const r = await generateCharacterCandidate(character, referenceType, { model });
-      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "single", imagesProduced: 1, perImageCredits: perImage, model, characterId, nowMs: Date.now() });
+      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "single", imagesProduced: r.providerCalls, perImageCredits: perImage, model, characterId, nowMs: Date.now() });
       if ("rejected" in r) return res.status(422).json({ error: r.reason, rejected: true });
       const { candidate, artwork, key, identity, autoRejected, referencesUsed } = r;
       if (autoRejected) {
@@ -688,14 +695,15 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
       // Spend gate (Phase 10A-2) BEFORE any paid provider call.
-      const perImage = higgsfieldCreditsPerImage(model);
+      const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
       const spend = await checkGenerationSpend({ requestedImages: count, perImageCredits: perImage, scope: "batch", nowMs: Date.now() });
       if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
       const created: { candidateId: number; key: string; width: number; height: number; identityScore: number | null; model: string }[] = [];
-      let autoRejectedCount = 0, bgRejectedCount = 0;
+      let autoRejectedCount = 0, bgRejectedCount = 0, providerCalls = 0;
       for (let i = 0; i < count; i++) {
         try {
           const r = await generateCharacterCandidate(character, referenceType, { model });
+          providerCalls += r.providerCalls; // ACTUAL paid creates
           if ("rejected" in r) { bgRejectedCount++; continue; }
           if (r.autoRejected) { autoRejectedCount++; continue; } // stored for audit, never shown
           created.push({ candidateId: r.candidate.id, key: r.key, width: r.artwork.width, height: r.artwork.height, identityScore: r.identity?.score ?? null, model: r.artwork.model });
@@ -704,7 +712,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           break; // a later one failed → return the ones that succeeded
         }
       }
-      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "batch", imagesProduced: created.length + autoRejectedCount + bgRejectedCount, perImageCredits: perImage, model, characterId, nowMs: Date.now() });
+      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "batch", imagesProduced: providerCalls, perImageCredits: perImage, model, characterId, nowMs: Date.now() });
       res.status(201).json({ characterId, referenceType, created, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount });
     } catch (err) {
       artworkErrorResponse(res, err);
@@ -846,18 +854,19 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
       // Spend gate (Phase 10A-2): family generates one image per eligible character in ONE
       // press, so it is capped by the per-BATCH credit ceiling (D8), not the per-image count.
-      const perImage = higgsfieldCreditsPerImage(model);
+      const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
       const eligible = fam.filter((c) => c.descriptionStatus === "approved").length;
       const spend = await checkGenerationSpend({ requestedImages: Math.max(1, eligible), perImageCredits: perImage, scope: "family", nowMs: Date.now() });
       if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
       const generated: { characterId: string; stageNumber: number; candidateId: number; key: string; identityScore: number | null }[] = [];
-      let autoRejectedCount = 0, bgRejectedCount = 0, descSkipped = 0;
+      let autoRejectedCount = 0, bgRejectedCount = 0, descSkipped = 0, providerCalls = 0;
       for (const ch of fam) {
         // Each stage references the previous stage's DNA + approved pack (evolution anchor,
         // handled inside generateCharacterCandidate → collectReferenceImages).
         if (ch.descriptionStatus !== "approved") { descSkipped++; continue; } // text before pixels
         try {
           const r = await generateCharacterCandidate(ch, "master_portrait", { model });
+          providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each)
           if ("rejected" in r) { bgRejectedCount++; continue; }
           if (r.autoRejected) { autoRejectedCount++; continue; }
           generated.push({ characterId: ch.characterId, stageNumber: ch.stageNumber, candidateId: r.candidate.id, key: r.key, identityScore: r.identity?.score ?? null });
@@ -866,7 +875,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           break; // a later stage failed → return the ones that succeeded
         }
       }
-      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "family", imagesProduced: generated.length + autoRejectedCount + bgRejectedCount, perImageCredits: perImage, model, setCode: "GNV", nowMs: Date.now() });
+      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "family", imagesProduced: providerCalls, perImageCredits: perImage, model, setCode: "GNV", nowMs: Date.now() });
       res.status(201).json({ familyId, generated, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, descriptionSkipped: descSkipped });
     } catch (err) {
       artworkErrorResponse(res, err);
@@ -1186,7 +1195,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
 
       // Spend gate (Phase 10A-2): card artwork is a single paid image — cap BEFORE the call.
-      const perImage = higgsfieldCreditsPerImage(String(body.model ?? "").trim() || undefined);
+      // Price the EFFECTIVE (upgraded) model so a z_image+references request isn't undercounted (F-2).
+      const perImage = effectiveCreditsPerImage(String(body.model ?? "").trim() || undefined);
       const spend = await checkGenerationSpend({ requestedImages: 1, perImageCredits: perImage, scope: "single", nowMs: Date.now() });
       if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
 
@@ -1209,8 +1219,9 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const artwork = await generateHiggsfieldArtwork({ prompt, mode, slot, imageReferences: referenceBuffers.length ? referenceBuffers : undefined, model: String(body.model ?? "").trim() || undefined });
       const candidateKey = assertVqWriteKey(vqArtworkCandidateKey(cardId));
       await uploadToR2(candidateKey, artwork.png, "image/png");
-      // Record the paid image for the hourly/daily spend windows (best-effort).
-      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "card-artwork", scope: "single", imagesProduced: 1, perImageCredits: perImage, model: artwork.model, cardId, providerJobId: artwork.jobId ?? null, nowMs: Date.now() });
+      // Record the paid image for the hourly/daily spend windows (best-effort). Price the
+      // ACTUAL model the provider used (artwork.model reflects any z_image→nano_banana upgrade).
+      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "card-artwork", scope: "single", imagesProduced: 1, perImageCredits: higgsfieldCreditsPerImage(artwork.model), model: artwork.model, cardId, providerJobId: artwork.jobId ?? null, nowMs: Date.now() });
       // Audit is best-effort: the image is already generated + uploaded, so a
       // logging failure must NOT 500 the request (matches /ai/generate).
       let generationId: number | null = null;
@@ -1747,9 +1758,12 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       } catch (err) {
         const status = (err as { status?: number }).status;
         const msg = err instanceof Error ? err.message : `${kind} failed to start`;
-        // Concurrency back-pressure is a "try again shortly", not a server error.
+        // Concurrency back-pressure ("too many exports") is our own safe text → surface it.
         if (status === 429 || /too many exports/i.test(msg)) return res.status(429).json({ error: msg });
-        res.status(500).json({ error: msg });
+        // Otherwise return a GENERIC 500 — never echo err.message, which could carry raw
+        // Postgres text (e.g. "column \"ids\" does not exist") on an unexpected DB error.
+        console.error(`[vq-export] ${kind} start failed:`, msg);
+        res.status(500).json({ error: `${kind} failed to start` });
       }
     };
   }

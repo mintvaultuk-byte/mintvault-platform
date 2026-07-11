@@ -46,6 +46,21 @@ export function higgsfieldCreditsPerImage(model?: string): number {
   return vqCreditsPerImage(model ?? higgsfieldConnection().model);
 }
 
+/**
+ * Per-image credits priced at the EFFECTIVE model (Phase 10A-2 fix, Reviewer 1 F-2).
+ * generateHiggsfieldArtwork silently upgrades a non-ref-capable model (e.g. the cheap
+ * z_image, 0.15cr) to nano_banana (1cr) the moment references are attached — which is
+ * the standard identity-lock path for character/card art. Pricing the ceiling and the
+ * spend record against the REQUESTED model therefore undercounts real spend by up to
+ * ~6.67×. This prices non-ref-capable models at their nano_banana upgrade floor so the
+ * cap and the daily window never undercount. It over-estimates only the rare
+ * z_image-WITHOUT-references case — the SAFE direction for a spend ceiling.
+ */
+export function effectiveCreditsPerImage(model?: string): number {
+  const m = model ?? higgsfieldConnection().model;
+  return vqCreditsPerImage(REF_CAPABLE_MODELS.test(m) ? m : "nano_banana");
+}
+
 export function higgsfieldConnection(): HiggsfieldConnection {
   const apiKey = env("HIGGSFIELD_API_KEY");
   const model = env("HIGGSFIELD_MODEL") || DEFAULT_MODEL;

@@ -26,7 +26,7 @@ import { sql } from "drizzle-orm";
 import { db } from "../../db";
 import { vqConfig } from "@shared/vq-config-schema";
 import { vqGenerationRequests } from "@shared/vq-generation-schema";
-import { isUndefinedTable } from "../production-storage";
+import { isUndefinedTableOrColumn } from "../production-storage";
 import { resolveVqCeilings, type VqSpendCeilings } from "./vq-config";
 import { spendDecision, type SpendReason } from "./generation-idempotency";
 
@@ -34,7 +34,9 @@ async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {
     return await fn();
   } catch (err) {
-    if (isUndefinedTable(err)) return fallback; // table not migrated on this DB → degrade
+    // 42P01 (table absent) or 42703 (partial migration) → degrade to conservative
+    // defaults / zero windows; the per-request cap still binds and nothing 500s.
+    if (isUndefinedTableOrColumn(err)) return fallback;
     throw err;
   }
 }

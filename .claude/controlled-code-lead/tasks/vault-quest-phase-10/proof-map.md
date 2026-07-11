@@ -16,6 +16,17 @@ Local = pure + mocked + local-Postgres integration. NEVER call local mocks/2-wor
 | 10A-7 reconciliation | pending | — | |
 | 10A-8 B2 framework | pending | — | |
 
+## Verification pass (169366a/fb89bb7/4cd8fb4) + corrective commit
+Full report: [verification-10A-0-to-2.md](verification-10A-0-to-2.md). 3 read-only reviewers + Lead.
+Grading isolation PROVEN safe (drizzle-kit 0.31.10 source trace). 4 verified defects fixed in ONE
+corrective commit (Locally verified — tsc, full Vitest **478**, spy 5/5 zero-create, parallel
+concurrency, build, lint parity 4452, 0 secrets):
+- R2-F1: `isUndefinedTableOrColumn` degrades on 42703 (partial migration = staging) instead of 500; pg-msg leak scrubbed.
+- R1-F2: `effectiveCreditsPerImage` prices non-ref-capable models at the nano_banana upgrade floor (kills the z_image undercount) — gate + record, all 4 routes.
+- R1-F1: `providerCalls` threaded from generateCharacterCandidate → record ACTUAL paid creates (incl. master bg-retries).
+- R3-F1: vq-schema.ts re-exports all 13 operational+production tables + drizzle-vq header de-advertises push → a stray VQ `push` is non-destructive.
+Deferred (documented): R1-F3 charged-but-failed record, R1-F7/D10 idempotency, R1-F4 kill-switch(10A-4), R1-F5 config clamp, R2-F3 reclaim/GC(10A-7/8), ownership filter. See report.
+
 ## Staging-only evidence (NOT closeable locally — 10B)
 Multi-machine export routing; real Higgsfield sandbox gen; real R2/B2 bucket integration;
 prod-unpooled-host write behaviour; migration application on staging/prod.

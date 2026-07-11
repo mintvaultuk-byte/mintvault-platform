@@ -20,7 +20,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { vqExportJobs, type VqExportJob } from "@shared/vq-export-schema";
-import { isUndefinedTable } from "../production-storage";
+import { isUndefinedTableOrColumn } from "../production-storage";
 import {
   computeExportIdempotencyKey,
   decideExportOutcome,
@@ -49,7 +49,9 @@ async function guard<T>(fn: () => Promise<T>): Promise<StoreResult<T>> {
   try {
     return { ok: true, value: await fn() };
   } catch (err) {
-    if (isUndefinedTable(err)) return UNAVAILABLE;
+    // 42P01 (table absent) OR 42703 (partial migration — table present, 0012 columns
+    // absent, which is staging's current state) → degrade to the legacy in-memory path.
+    if (isUndefinedTableOrColumn(err)) return UNAVAILABLE;
     throw err;
   }
 }

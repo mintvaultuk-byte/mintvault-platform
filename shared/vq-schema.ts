@@ -423,3 +423,22 @@ export type InsertVqSet = z.infer<typeof insertVqSetSchema>;
 export type InsertVqCharacter = z.infer<typeof insertVqCharacterSchema>;
 export type InsertVqArtworkCandidate = z.infer<typeof insertVqArtworkCandidateSchema>;
 export type InsertVqFamilyRule = z.infer<typeof insertVqFamilyRuleSchema>;
+
+// ── Operational + production tables — RE-EXPORTED so the VQ drizzle surface is COMPLETE ──
+// These tables live in their own files (Phases 4 + 7–10) but drizzle-vq.config.ts reads
+// ONLY this barrel. Without these re-exports, `drizzle-kit push --config drizzle-vq.config.ts`
+// would diff them as "present in DB, absent from schema" and propose DROPPING all 13 —
+// destroying durable export state, spend config, generation audit, artwork backups, and the
+// production pipeline (Reviewer 3 F-1, Phase 10A). They are managed EXCLUSIVELY by
+// hand-applied migrations-vq/*.sql (never generate/push); this re-export makes push
+// non-destructive as defence-in-depth. Table objects only — insert schemas/types stay in
+// their own modules to avoid duplicate-symbol churn.
+export {
+  vqSetSettings, vqProductionStages, vqPackagingItems, vqPackConfig,
+  vqPrintExports, vqQaChecks, vqReleaseState, vqAssetLibrary,
+} from "./vq-production-schema";
+export { vqExportJobs } from "./vq-export-schema";
+export { vqConfig } from "./vq-config-schema";
+export { vqGenerationRequests } from "./vq-generation-schema";
+export { vqArtworkRevisions } from "./vq-artwork-schema";
+export { vqFeatureFlags } from "./vq-feature-flags-schema";

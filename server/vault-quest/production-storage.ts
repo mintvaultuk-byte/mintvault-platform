@@ -40,6 +40,25 @@ export function isUndefinedTable(err: unknown): boolean {
   return false;
 }
 
+/**
+ * True if the error is "schema not ready" for a VQ feature — either the whole table
+ * is absent (42P01) OR the table exists but a column this code selects/inserts does
+ * not (42703, undefined_column). The latter is the PARTIAL-MIGRATION case: e.g. a DB
+ * that has vq_export_jobs (migration 0008) but not the ids/attempt_count columns
+ * (0012). Both mean "this feature's migration isn't fully applied here" → callers that
+ * degrade to a legacy/default path should treat them identically, so a partial migration
+ * degrades gracefully instead of throwing a 500. Kept SEPARATE from isUndefinedTable so
+ * strict table-only callers don't start swallowing genuine column bugs.
+ */
+export function isUndefinedTableOrColumn(err: unknown): boolean {
+  let e = err as { code?: string; cause?: unknown } | undefined;
+  for (let i = 0; i < 5 && e; i++) {
+    if (e.code === "42P01" || e.code === "42703") return true;
+    e = e.cause as typeof e;
+  }
+  return false;
+}
+
 /** Run a query that may hit a not-yet-migrated table; return the fallback on 42P01. */
 async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {
