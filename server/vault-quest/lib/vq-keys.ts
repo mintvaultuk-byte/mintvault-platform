@@ -17,7 +17,7 @@
  * chars). R2 keys are literal strings, so this is defence-in-depth — but it makes
  * the isolation a hard invariant instead of a convention.
  */
-export const VQ_WRITE_PREFIXES = ["vq/art-candidates/", "vq/art/", "vq/characters/"] as const;
+export const VQ_WRITE_PREFIXES = ["vq/art-candidates/", "vq/art/", "vq/characters/", "vq/exports/"] as const;
 export function assertVqWriteKey(key: string): string {
   const ok =
     VQ_WRITE_PREFIXES.some((p) => key.startsWith(p)) &&
