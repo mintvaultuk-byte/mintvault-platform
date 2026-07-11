@@ -97,4 +97,58 @@ async function identifyFrontBack(fileA, fileB) {
     reason: `no confident back: A=${scoreA.toFixed(1)} B=${scoreB.toFixed(1)} (band ${BACK_MAX}/${FRONT_MIN})` };
 }
 
-module.exports = { identifyFrontBack, backScore, signature, mae, SIG_DIM, BACK_MAX, FRONT_MIN };
+// Game-agnostic duplicate-pair guard: catches "both scans are the same card
+// face" (e.g. front scanned twice by mistake — the operator forgot they'd
+// already buffered a front and re-scanned it, or scanned the same side again
+// after a long gap) — independent of identifyFrontBack's Pokémon-back
+// template, so it works for every card game, not just Pokémon.
+//
+// WHY NOT reuse identifyFrontBack for this: it can only ever say "confident"
+// for a Pokémon card (the only content it recognises is a Pokémon back). For
+// any other game confident is always false, and the caller's existing
+// fallback is to proceed anyway with a warning flag — so tightening THAT
+// check would silently break auto-scanning for every non-Pokémon card. This
+// is a separate, additive check: are these two arbitrary scans suspiciously
+// similar to EACH OTHER, regardless of what either one depicts.
+//
+// THRESHOLD: SAME_MAX=15 is deliberately tighter than BACK_MAX (22) — real
+// Pokémon backs (which are near-identical by design) score 3.3–14.5 against
+// the fixed reference, so two independent photos of the same physical card
+// face should land comfortably inside that same band against each other.
+// Two genuinely different card faces (front vs back of a real card, or two
+// different cards) score far higher (fronts alone: 38.7–56.4 against the
+// reference) — there's wide margin either side. Not yet validated against a
+// duplicate-scan corpus the way BACK_MAX/FRONT_MIN were (no such corpus
+// existed at time of writing) — err on catching real dupes; revisit the
+// threshold if it ever both-legitimate-pairs false-flags in practice.
+const SAME_MAX = 15;
+
+/**
+ * Do fileA and fileB look like scans of the SAME physical card face (a
+ * mistaken duplicate — front+front, back+back, or a literal re-scan), rather
+ * than a genuine front+back pair? Never throws — an unreadable file is
+ * treated as "not a duplicate" (Infinity distance) so a decode failure can
+ * never itself block an upload; that failure surfaces separately downstream.
+ */
+async function looksLikeSameCard(fileA, fileB) {
+  let sigA, sigB;
+  try {
+    [sigA, sigB] = await Promise.all([signature(fileA), signature(fileB)]);
+  } catch {
+    return { same: false, distance: Infinity };
+  }
+  const distance = mae(sigA, sigB);
+  return { same: distance <= SAME_MAX, distance };
+}
+
+module.exports = {
+  identifyFrontBack,
+  looksLikeSameCard,
+  backScore,
+  signature,
+  mae,
+  SIG_DIM,
+  BACK_MAX,
+  FRONT_MIN,
+  SAME_MAX,
+};
