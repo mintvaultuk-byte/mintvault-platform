@@ -18,10 +18,14 @@ export interface VqSpendCeilings {
   providerPollMaxAttempts: number;
 }
 
-/** Conservative defaults used when a vq_config row is absent or unparseable. */
+/** Conservative defaults used when a vq_config row is absent or unparseable.
+ *  maxCreditsPerRequest is 8 (owner decision D9, Phase 10A-2) so a premium
+ *  3-candidate master (3 × 2cr = 6cr) is not blocked, while still capping an
+ *  accidental large single spend. maxCreditsPerBatch (12) governs the family
+ *  "generate for every character" path (D8) instead of the per-request image cap. */
 export const VQ_CONFIG_DEFAULTS: VqSpendCeilings = {
   maxImagesPerRequest: 3,
-  maxCreditsPerRequest: 5,
+  maxCreditsPerRequest: 8,
   maxCreditsPerBatch: 12,
   maxRequestsPerHour: 30,
   maxCreditsPerDay: 50,

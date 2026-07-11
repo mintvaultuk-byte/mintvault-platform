@@ -23,6 +23,7 @@ import { canTransition, isVqStatus } from "@shared/vq-workflow";
 import { setIntegrity, cardMetadata } from "../vault-quest/qa-set";
 import { startExport, getExportStatusView, resolveExportDownload } from "../vault-quest/export-jobs";
 import { getR2ObjectStream } from "../r2";
+import { checkGenerationSpend, recordGenerationAttempt } from "../vault-quest/lib/generation-guard";
 import { generate, type GenerateReq } from "../vault-quest/generate";
 import { runGenerator, generateFullCard, generateCharacterDescription, DESCRIPTION_FIELD_KEYS, type GenKind, type CardContext } from "../vault-quest/ai/generators";
 import { providerStatuses } from "../vault-quest/ai/provider";
@@ -617,9 +618,16 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
 
+      // Spend gate (Phase 10A-2): master ALWAYS makes 3 candidates, others 1. Enforce
+      // the ceiling BEFORE any paid provider call.
+      const isMaster = referenceType === "master_portrait";
+      const perImage = higgsfieldCreditsPerImage(model);
+      const spend = await checkGenerationSpend({ requestedImages: isMaster ? 3 : 1, perImageCredits: perImage, scope: "single", nowMs: Date.now() });
+      if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
+
       // Master Reference ALWAYS produces THREE studio candidates — ENFORCED server-side,
       // so even a raw API call with referenceType=master_portrait yields 3, never 1.
-      if (referenceType === "master_portrait") {
+      if (isMaster) {
         const created: { candidateId: number; key: string; width: number; height: number; identityScore: number | null; model: string }[] = [];
         let autoRejectedCount = 0, bgRejectedCount = 0;
         for (let i = 0; i < 3; i++) {
@@ -633,10 +641,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             break;
           }
         }
+        // Record ACTUAL images produced (autoRejected/bgRejected still consumed credits).
+        await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "single", imagesProduced: created.length + autoRejectedCount + bgRejectedCount, perImageCredits: perImage, model, characterId, nowMs: Date.now() });
         return res.status(201).json({ referenceType, created, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, count: created.length });
       }
 
       const r = await generateCharacterCandidate(character, referenceType, { model });
+      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "single", imagesProduced: 1, perImageCredits: perImage, model, characterId, nowMs: Date.now() });
       if ("rejected" in r) return res.status(422).json({ error: r.reason, rejected: true });
       const { candidate, artwork, key, identity, autoRejected, referencesUsed } = r;
       if (autoRejected) {
@@ -676,6 +687,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       }
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
+      // Spend gate (Phase 10A-2) BEFORE any paid provider call.
+      const perImage = higgsfieldCreditsPerImage(model);
+      const spend = await checkGenerationSpend({ requestedImages: count, perImageCredits: perImage, scope: "batch", nowMs: Date.now() });
+      if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
       const created: { candidateId: number; key: string; width: number; height: number; identityScore: number | null; model: string }[] = [];
       let autoRejectedCount = 0, bgRejectedCount = 0;
       for (let i = 0; i < count; i++) {
@@ -689,6 +704,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           break; // a later one failed → return the ones that succeeded
         }
       }
+      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "batch", imagesProduced: created.length + autoRejectedCount + bgRejectedCount, perImageCredits: perImage, model, characterId, nowMs: Date.now() });
       res.status(201).json({ characterId, referenceType, created, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount });
     } catch (err) {
       artworkErrorResponse(res, err);
@@ -828,6 +844,12 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const model = String((req.body as { model?: string })?.model ?? "").trim() || undefined;
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
+      // Spend gate (Phase 10A-2): family generates one image per eligible character in ONE
+      // press, so it is capped by the per-BATCH credit ceiling (D8), not the per-image count.
+      const perImage = higgsfieldCreditsPerImage(model);
+      const eligible = fam.filter((c) => c.descriptionStatus === "approved").length;
+      const spend = await checkGenerationSpend({ requestedImages: Math.max(1, eligible), perImageCredits: perImage, scope: "family", nowMs: Date.now() });
+      if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
       const generated: { characterId: string; stageNumber: number; candidateId: number; key: string; identityScore: number | null }[] = [];
       let autoRejectedCount = 0, bgRejectedCount = 0, descSkipped = 0;
       for (const ch of fam) {
@@ -844,6 +866,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           break; // a later stage failed → return the ones that succeeded
         }
       }
+      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "family", imagesProduced: generated.length + autoRejectedCount + bgRejectedCount, perImageCredits: perImage, model, setCode: "GNV", nowMs: Date.now() });
       res.status(201).json({ familyId, generated, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, descriptionSkipped: descSkipped });
     } catch (err) {
       artworkErrorResponse(res, err);
@@ -1162,6 +1185,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
 
+      // Spend gate (Phase 10A-2): card artwork is a single paid image — cap BEFORE the call.
+      const perImage = higgsfieldCreditsPerImage(String(body.model ?? "").trim() || undefined);
+      const spend = await checkGenerationSpend({ requestedImages: 1, perImageCredits: perImage, scope: "single", nowMs: Date.now() });
+      if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
+
       // Phase 2 visual identity lock: attach the character's APPROVED references
       // (a variant's bible resolves to its BASE character, so variants reuse the
       // base pack — background/pose/lighting may change, the creature may not).
@@ -1181,6 +1209,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const artwork = await generateHiggsfieldArtwork({ prompt, mode, slot, imageReferences: referenceBuffers.length ? referenceBuffers : undefined, model: String(body.model ?? "").trim() || undefined });
       const candidateKey = assertVqWriteKey(vqArtworkCandidateKey(cardId));
       await uploadToR2(candidateKey, artwork.png, "image/png");
+      // Record the paid image for the hourly/daily spend windows (best-effort).
+      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "card-artwork", scope: "single", imagesProduced: 1, perImageCredits: perImage, model: artwork.model, cardId, providerJobId: artwork.jobId ?? null, nowMs: Date.now() });
       // Audit is best-effort: the image is already generated + uploaded, so a
       // logging failure must NOT 500 the request (matches /ai/generate).
       let generationId: number | null = null;
