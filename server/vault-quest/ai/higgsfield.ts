@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import sharp from "sharp";
+import { MAX_PIXELS } from "../upload-guard";
 import { vqCreditsPerImage } from "@shared/vq-schema";
 import type { CardContext } from "./generators";
 
@@ -145,7 +146,10 @@ export function safeVqCardId(cardId: string): string {
 }
 
 export function validVqCardId(cardId: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$/.test(cardId);
+  // Reject `..` so a card/character id can never contribute a path-traversal
+  // segment to a derived R2 key (defence-in-depth alongside assertVqWriteKey /
+  // assertVqReadKey). Legitimate ids (GNV-001, GNV-F03-S2) never contain `..`.
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$/.test(cardId) && !cardId.includes("..");
 }
 
 export function vqArtworkCandidateKey(cardId: string): string {
@@ -154,7 +158,14 @@ export function vqArtworkCandidateKey(cardId: string): string {
 
 export function isCandidateKeyForCard(key: string, cardId: string): boolean {
   const safe = safeVqCardId(cardId);
-  return key.startsWith(`vq/art-candidates/${safe}/`) && /^[A-Za-z0-9/._:-]+\.png$/.test(key);
+  // `..` is explicitly rejected: the char class below permits `.` and `/`, so a
+  // key like `vq/art-candidates/{safe}/../../images/MV1/front.png` would satisfy
+  // the prefix + regex — the `!includes("..")` guard closes that traversal.
+  return (
+    key.startsWith(`vq/art-candidates/${safe}/`) &&
+    !key.includes("..") &&
+    /^[A-Za-z0-9/._:-]+\.png$/.test(key)
+  );
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -243,7 +254,9 @@ export async function uploadHiggsfieldMedia(png: Buffer, opts: { baseUrl: string
 }
 
 async function normaliseGeneratedImage(raw: Buffer): Promise<{ png: Buffer; width: number; height: number }> {
-  const png = await sharp(raw)
+  // Provider bytes are decoded here WITHOUT the validateArtwork gate — bound the
+  // decode so a hostile/corrupt provider response can't be a decompression bomb.
+  const png = await sharp(raw, { limitInputPixels: MAX_PIXELS })
     .rotate()
     .resize({ width: 1800, height: 1800, fit: "inside", withoutEnlargement: true })
     .png()

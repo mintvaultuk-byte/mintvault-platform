@@ -16,6 +16,17 @@ export const WRITE_INT_FIELDS = new Set([
   "releaseYear", "cardCount", "boosterSize", "cardsPerPack", "variantSlots", "holoSlots", "printQuantity",
 ]);
 
+/** Production columns that hold a Cloudflare R2 object key. A client must never be
+ *  able to persist a grading/customer key (`images/…`, `labels/…`, `scans/…`) into
+ *  one of these: nothing reads them from R2 today, but the first future
+ *  "download print file / preview asset" reader would otherwise serve a
+ *  cross-system object out of the shared bucket. Blank clears the field; any
+ *  non-`vq/` value is rejected (see assertVqReadKey / assertVqWriteKey). */
+export const WRITE_R2_KEY_FIELDS = new Set([
+  "setLogoR2Key", "artworkR2Key", "mockupR2Key", "printPdfR2Key", "dielineR2Key",
+  "fileR2Key", "finalExportR2Key", "r2Key",
+]);
+
 /** Coerce a client numeric field: "" / null / non-finite → null, else the number.
  *  Integer columns reject '' with Postgres 22P02 (a raw 500 instead of a clean save). */
 export function intOrNull(v: unknown): number | null {
@@ -35,6 +46,9 @@ export function sanitizeWrite(values: Record<string, unknown>): Record<string, u
   for (const [k, v] of Object.entries(values)) {
     if (WRITE_STRIP.has(k)) continue;
     if (WRITE_INT_FIELDS.has(k)) { out[k] = intOrNull(v); continue; }
+    if (WRITE_R2_KEY_FIELDS.has(k) && typeof v === "string" && v.trim() !== "" && !v.startsWith("vq/")) {
+      throw new Error(`${k} must be a Vault Quest asset key (vq/…) — got a non-vq/ key`);
+    }
     out[k] = v;
   }
   return out;

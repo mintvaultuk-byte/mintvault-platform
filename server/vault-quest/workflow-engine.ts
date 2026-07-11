@@ -19,7 +19,7 @@ import { vqStorage } from "./storage";
 import { vqAiGenerations, vqCharacterRevisions, vqCardRevisions, type VqCharacter, type VqCardRow } from "@shared/vq-schema";
 import { STATUS_META, type VqStatus } from "@shared/vq-workflow";
 import { higgsfieldCreditsPerImage, vqArtworkCandidateKey } from "./ai/higgsfield";
-import { vqCharacterCandidateKey, assertVqWriteKey } from "./render-saved";
+import { vqCharacterCandidateKey, assertVqWriteKey, assertVqReadKey } from "./render-saved";
 import { getR2Buffer, uploadToR2 } from "../r2";
 import { productionStorage, isUndefinedTable } from "./production-storage";
 
@@ -394,6 +394,7 @@ export async function checkReuse(setCode: string, opts: { characterId?: string; 
 export async function applyReuse(opts: { characterId?: string; cardId?: string; sourceR2Key: string; referenceType?: string }) {
   const source = (opts.sourceR2Key ?? "").trim();
   if (!source.startsWith("vq/")) throw new Error("reuse source must be an existing Vault Quest asset (vq/…)");
+  assertVqReadKey(source); // reject `..` / backslash / control-char traversal within the vq/ keyspace
   const buf = await getR2Buffer(source);
   if (!buf) throw new Error("source asset not found in storage");
 

@@ -5,7 +5,11 @@
  * across sets) without needing a live database.
  */
 import { describe, it, expect } from "vitest";
+import sharp from "sharp";
 import { sanitizeWrite, intOrNull, nextCardNumFrom, isCandidateReferencedInPack, referencePackMergeJson } from "../server/vault-quest/lib/write-sanitize";
+import { assertVqWriteKey, assertVqReadKey } from "../server/vault-quest/lib/vq-keys";
+import { validVqCardId, isCandidateKeyForCard } from "../server/vault-quest/ai/higgsfield";
+import { validateArtwork } from "../server/vault-quest/upload-guard";
 import { vqChargedCredits } from "../shared/vq-schema";
 
 describe("sanitizeWrite — mass-assignment guard", () => {
@@ -122,5 +126,104 @@ describe("vqChargedCredits — honest spend counter (FE-03 / PROV-05)", () => {
   });
   it("handles a missing created array", () => {
     expect(vqChargedCredits({ autoRejected: 0, bgRejected: 0 }, "z_image")).toBe(0);
+  });
+});
+
+// ── Phase 5 — storage-layer hardening ───────────────────────────────────────
+
+describe("assertVqWriteKey — write-key isolation (unchanged after lib/vq-keys extraction)", () => {
+  it("accepts keys inside the VQ write prefixes", () => {
+    expect(assertVqWriteKey("vq/art/GNV-001/main.png")).toBe("vq/art/GNV-001/main.png");
+    expect(assertVqWriteKey("vq/characters/GNV-F03-S2/approved/master_portrait.png")).toContain("vq/characters/");
+    expect(assertVqWriteKey("vq/art-candidates/GNV-001/123-abc.png")).toContain("vq/art-candidates/");
+  });
+  it("blocks grading/customer prefixes and traversal", () => {
+    expect(() => assertVqWriteKey("images/MV1/front.jpg")).toThrow(/blocked R2 write/);
+    expect(() => assertVqWriteKey("labels/MV5/both.pdf")).toThrow();
+    expect(() => assertVqWriteKey("vq/art/../images/MV1/front.png")).toThrow();
+    expect(() => assertVqWriteKey("/vq/art/GNV-001/main.png")).toThrow();
+    expect(() => assertVqWriteKey("vq/art\\GNV-001\\main.png")).toThrow();
+  });
+});
+
+describe("assertVqReadKey — read-key isolation (R1-KEY-01)", () => {
+  it("accepts any key inside the vq/ keyspace", () => {
+    expect(assertVqReadKey("vq/art/GNV-001/main.png")).toBe("vq/art/GNV-001/main.png");
+    expect(assertVqReadKey("vq/characters/X/candidates/1-2.png")).toContain("vq/characters/");
+  });
+  it("blocks traversal out of vq/ into grading/customer objects (shared bucket)", () => {
+    expect(() => assertVqReadKey("vq/art/../../images/MV1/front.jpg")).toThrow(/blocked R2 read/);
+    expect(() => assertVqReadKey("vq/art-candidates/GNV-001/../../images/MV1/front.png")).toThrow();
+  });
+  it("blocks non-vq prefixes, leading slash, backslash and control chars", () => {
+    expect(() => assertVqReadKey("images/MV1/front.jpg")).toThrow();
+    expect(() => assertVqReadKey("/vq/art/GNV-001/main.png")).toThrow();
+    expect(() => assertVqReadKey("vq/art\\x")).toThrow();
+    expect(() => assertVqReadKey("vq/art/\x00/x.png")).toThrow();
+  });
+});
+
+describe("isCandidateKeyForCard — rejects path traversal (R1-KEY-02)", () => {
+  it("accepts a legitimate candidate key for the card", () => {
+    expect(isCandidateKeyForCard("vq/art-candidates/GNV-001/123-abc.png", "GNV-001")).toBe(true);
+  });
+  it("rejects a `..` escape even though the prefix and char-class would match", () => {
+    // The regex permits `.` and `/`, so without the explicit `..` guard this key
+    // (prefix-valid, regex-valid) would read a customer scan under a normalising layer.
+    expect(isCandidateKeyForCard("vq/art-candidates/GNV-001/../../images/MV1/front.png", "GNV-001")).toBe(false);
+  });
+  it("rejects a candidate key that belongs to a different card", () => {
+    expect(isCandidateKeyForCard("vq/art-candidates/GNV-002/123-abc.png", "GNV-001")).toBe(false);
+  });
+});
+
+describe("validVqCardId — rejects `..` traversal ids (R1-KEY-05)", () => {
+  it("accepts real card and character ids", () => {
+    expect(validVqCardId("GNV-001")).toBe(true);
+    expect(validVqCardId("GNV-F03-S2")).toBe(true);
+  });
+  it("rejects ids containing `..` or that would escape a derived key", () => {
+    expect(validVqCardId("a..b")).toBe(false);
+    expect(validVqCardId("GNV-../x")).toBe(false);
+  });
+  it("still rejects empty and out-of-class ids", () => {
+    expect(validVqCardId("")).toBe(false);
+    expect(validVqCardId("../etc")).toBe(false);
+    expect(validVqCardId("a b")).toBe(false);
+  });
+});
+
+describe("sanitizeWrite — rejects cross-system R2 keys on production columns (R1-KEY-03)", () => {
+  it("throws when an R2-key column is set to a grading/customer key", () => {
+    expect(() => sanitizeWrite({ fileR2Key: "images/MV1/front.jpg" })).toThrow(/vq\//);
+    expect(() => sanitizeWrite({ artworkR2Key: "labels/MV5/both.pdf" })).toThrow();
+    expect(() => sanitizeWrite({ setLogoR2Key: "certificates/MV1.pdf" })).toThrow();
+  });
+  it("allows a valid vq/ key and treats blank/undefined as clearing the field", () => {
+    expect(sanitizeWrite({ fileR2Key: "vq/art/GNV-001/main.png" }).fileR2Key).toBe("vq/art/GNV-001/main.png");
+    expect(sanitizeWrite({ artworkR2Key: "" }).artworkR2Key).toBe("");
+    expect(sanitizeWrite({ mockupR2Key: "  " }).mockupR2Key).toBe("  ");
+    expect(sanitizeWrite({ printPdfR2Key: null }).printPdfR2Key).toBeNull();
+  });
+});
+
+describe("validateArtwork — dimension/pixel ceiling (R2-UP-01)", () => {
+  const mkPng = (w: number, h: number) =>
+    sharp({ create: { width: w, height: h, channels: 3, background: { r: 255, g: 255, b: 255 } } }).png().toBuffer();
+
+  it("accepts a normal in-range image", async () => {
+    const r = await validateArtwork(await mkPng(256, 256));
+    expect(r.ok).toBe(true);
+    expect(r.format).toBe("png");
+  });
+  it("rejects an image whose side exceeds the max dimension (decompression-bomb guard)", async () => {
+    // 8193×64 is tiny in memory but its declared width is over the 8192px ceiling.
+    const r = await validateArtwork(await mkPng(8193, 64));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/too large/);
+  });
+  it("still rejects too-small and non-image inputs", async () => {
+    expect((await validateArtwork(await mkPng(32, 32))).ok).toBe(false);
+    expect((await validateArtwork(Buffer.from("not an image"))).ok).toBe(false);
   });
 });
