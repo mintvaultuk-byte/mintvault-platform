@@ -14,6 +14,7 @@ import { db } from "../server/db";
 import { listR2Objects } from "../server/r2";
 import { vqArtworkCandidates, vqCharacters, vqCards } from "../shared/vq-schema";
 import { reconcile, type ReconcilePackRef, type ReconcileCandidateRow, type ReconcileR2Object } from "../server/vault-quest/lib/reconcile-logic";
+import { checkR2Identity, r2IdentityMessage } from "../server/vault-quest/lib/r2-identity";
 
 function parseDuration(s: string | undefined, fallbackMs: number): number {
   if (!s) return fallbackMs;
@@ -50,6 +51,16 @@ async function main(): Promise<number> {
   const ttlMs = parseDuration(arg("ttl"), 30 * 86400000);
   const minAgeMs = parseDuration(arg("min-age"), 0);
   const nowMs = Date.now();
+
+  // R2 IDENTITY GUARD (Phase 10A): a staging DB does NOT imply staging R2. Refuse to
+  // list R2 unless the operator names the expected bucket via --r2=<bucket> and it
+  // matches R2_BUCKET_NAME. Fail-closed; never prints credentials/signed URLs.
+  const r2id = checkR2Identity({ expectedBucket: arg("r2"), actualBucket: process.env.R2_BUCKET_NAME, actualEndpoint: process.env.R2_ENDPOINT });
+  if (!r2id.ok) {
+    console.error(r2IdentityMessage(r2id));
+    return 2;
+  }
+  console.error(r2IdentityMessage(r2id));
 
   // R2: every vq/ object (read-only, paged, with metadata).
   const rawObjects = await listR2Objects("vq/");

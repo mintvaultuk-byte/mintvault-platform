@@ -43,50 +43,58 @@ export class HiggsfieldError extends Error {
   }
 }
 
-/** The safe admin-facing connection status. `connected` is only claimed after a
- *  real successful outcome — never from "the env var is set". */
+/** The canonical 7-state admin-facing provider status (Phase 10A D6). One central
+ *  type — no duplicate enums. `connected` is only claimed after a real successful
+ *  outcome, never from "the env var is set". */
 export type HiggsfieldStatus =
   | "not_configured"
-  | "configured_but_unverified"
+  | "configured_unverified"
   | "connected"
-  | "authentication_invalid_or_expired"
-  | "provider_unavailable";
+  | "authentication_invalid"
+  | "provider_unavailable"
+  | "rate_limited"
+  | "disabled_by_owner";
 
 /** The last observed provider outcome (recorded best-effort on each call; must
  *  never itself fail a generation). `null`/absent = no call observed yet. */
 export type ProviderLastOutcome = { ok: true } | { ok: false; kind: HiggsfieldFailureKind } | null | undefined;
 
-/** HTTP status the route should return for each admin status (503 = temporary). */
+/** HTTP status the route should return for each admin status (503 = temporary,
+ *  429 = rate limited). Exhaustive switch — extend all consumers together. */
 export function httpForHiggsfieldStatus(status: HiggsfieldStatus): number {
   switch (status) {
     case "connected":
+    case "configured_unverified":
       return 200;
-    case "configured_but_unverified":
-      return 200;
+    case "rate_limited":
+      return 429;
     case "not_configured":
-      return 503;
-    case "authentication_invalid_or_expired":
-      return 503;
+    case "authentication_invalid":
     case "provider_unavailable":
+    case "disabled_by_owner":
       return 503;
   }
 }
 
 /**
- * Derive the admin status from config (`connected` = HIGGSFIELD_API_KEY present)
- * and the last observed outcome. No network call. Precedence: no key →
- * not_configured; key but no call yet → configured_but_unverified; last call
- * failed on auth → authentication_invalid_or_expired; failed otherwise →
- * provider_unavailable; last call ok → connected.
+ * Derive the admin status from config (`connected` = HIGGSFIELD_API_KEY present),
+ * the last observed outcome, and the owner feature-flag (composed in). No network
+ * call. Precedence: owner-disabled → disabled_by_owner (highest); no key →
+ * not_configured; key but no call yet → configured_unverified; last 401 →
+ * authentication_invalid; last 429 → rate_limited; other failure →
+ * provider_unavailable; last ok (or out-of-credits, creds still valid) → connected.
  */
 export function deriveHiggsfieldStatus(
   conn: { connected: boolean },
   last?: ProviderLastOutcome,
+  opts?: { disabledByOwner?: boolean },
 ): HiggsfieldStatus {
+  if (opts?.disabledByOwner) return "disabled_by_owner"; // owner/provider feature control wins
   if (!conn.connected) return "not_configured";
-  if (!last) return "configured_but_unverified";
+  if (!last) return "configured_unverified";
   if (last.ok) return "connected";
-  if (last.kind === "auth_expired") return "authentication_invalid_or_expired";
-  if (last.kind === "insufficient_credits") return "connected"; // credentials work; the account is just out of credits (surface separately)
+  if (last.kind === "auth_expired") return "authentication_invalid";
+  if (last.kind === "rate_limited") return "rate_limited";
+  if (last.kind === "insufficient_credits") return "connected"; // credentials work; account just out of credits (surface separately)
   return "provider_unavailable";
 }

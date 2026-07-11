@@ -14,7 +14,7 @@
  * hand-applied to the VQ DB (never `drizzle-kit push`). Pure state/idempotency
  * logic lives in server/vault-quest/lib/export-job-state.ts (unit-tested).
  */
-import { pgTable, text, integer, bigint, timestamp, uuid, serial, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, bigint, timestamp, uuid, serial, index, uniqueIndex, jsonb } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 
@@ -31,6 +31,8 @@ export const vqExportJobs = pgTable(
     ownerAdminId: text("owner_admin_id").notNull(),
     idempotencyKey: text("idempotency_key").notNull(), // hash(kind|owner|sorted ids)
     state: text("state").notNull().default("queued"),
+    ids: jsonb("ids").$type<string[]>(), // requested card/item ids — a reclaiming machine needs these to render (0012)
+    attemptCount: integer("attempt_count").notNull().default(0), // bounded requeue guard (0012)
     requestedCount: integer("requested_count").notNull().default(0),
     completedCount: integer("completed_count").notNull().default(0),
     skippedCount: integer("skipped_count").notNull().default(0),
