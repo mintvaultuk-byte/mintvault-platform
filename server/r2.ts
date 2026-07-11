@@ -112,6 +112,32 @@ export async function listR2Keys(prefix: string): Promise<string[]> {
   }
 }
 
+/** List objects under a prefix WITH metadata (key + size + last-modified), paged.
+ *  Read-only; used by the VQ orphan reconciler, whose age filter needs
+ *  LastModified (which listR2Keys drops). Returns [] on any error. */
+export async function listR2Objects(
+  prefix: string,
+): Promise<{ key: string; sizeBytes: number | null; lastModified: Date | null }[]> {
+  const out: { key: string; sizeBytes: number | null; lastModified: Date | null }[] = [];
+  try {
+    const client = getClient();
+    const bucket = getBucket();
+    let continuationToken: string | undefined;
+    do {
+      const page = await client.send(
+        new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: continuationToken }),
+      );
+      for (const o of page.Contents ?? []) {
+        if (o.Key) out.push({ key: o.Key, sizeBytes: o.Size ?? null, lastModified: o.LastModified ?? null });
+      }
+      continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (continuationToken);
+  } catch {
+    return [];
+  }
+  return out;
+}
+
 /**
  * HEAD an R2 object — returns LastModified or null on any error.
  * Used by the logbook PDF cache stale-check (compare against cert.updated_at).
