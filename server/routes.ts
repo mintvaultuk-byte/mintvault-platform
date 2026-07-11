@@ -9990,7 +9990,26 @@ Defects (admin-confirmed): ${defectLines}`;
         (req.session as any)?.adminEmail || (req.headers["x-scanner-token"] ? "scanner-watcher" : "admin");
       await storage.writeAuditLog("certificate", certId, "soft_delete", adminUser, { reason });
 
-      res.json({ ok: true, cert_id: certId });
+      // Best-effort number reclaim: if this was the most-recently-issued cert
+      // number (a scanner reject right after a bad scan, the common case), give
+      // it back to the pool so the next real scan reuses it instead of leaving a
+      // gap. No-ops safely if another scan has already claimed the next number
+      // in the meantime — see reclaimCertNumberIfLatest. Never blocks the reject
+      // itself; a reclaim failure just falls back to today's gap-on-reject.
+      let numberReclaimed = false;
+      const numericPart = certNumberFromId(certId);
+      if (numericPart !== null) {
+        try {
+          numberReclaimed = await storage.reclaimCertNumberIfLatest(parseInt(numericPart, 10));
+          if (numberReclaimed) {
+            console.log(`[cert-soft-delete] reclaimed number ${certId} — next scan will reuse it`);
+          }
+        } catch (reclaimErr: any) {
+          console.warn(`[cert-soft-delete] number-reclaim check failed (non-fatal): ${reclaimErr.message}`);
+        }
+      }
+
+      res.json({ ok: true, cert_id: certId, number_reclaimed: numberReclaimed });
     } catch (err: any) {
       console.error("[cert-soft-delete] failed:", err);
       sendServerError(res, err);

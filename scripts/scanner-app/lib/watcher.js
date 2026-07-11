@@ -768,13 +768,17 @@ class Watcher extends EventEmitter {
   }
 
   /** Operator pressed "Reject & rescan" on the scan-confirmation popup.
-   *  Soft-deletes the just-minted cert server-side (so the number dies with
-   *  the bad scan), cleans up any still-held inbox files + pending entry
-   *  (raw_pending case — otherwise a restart would re-drive the ingest into
-   *  the deleted cert until attempts exhausted), and returns the app to idle
-   *  ready for the rescan. On server failure the popup STAYS UP so the
-   *  operator knows the cert still exists. Incomplete cards (no certId) have
-   *  nothing server-side — treated as a plain ack.
+   *  Soft-deletes the just-minted cert server-side, cleans up any still-held
+   *  inbox files + pending entry (raw_pending case — otherwise a restart would
+   *  re-drive the ingest into the deleted cert until attempts exhausted), and
+   *  returns the app to idle ready for the rescan. If this was the
+   *  most-recently-issued number, the server also gives it back to the pool
+   *  (see number_reclaimed below) so the very next scan reuses it instead of
+   *  leaving a permanent gap — safe because the server only does that when
+   *  nothing else has claimed a later number in the meantime. On server
+   *  failure the popup STAYS UP so the operator knows the cert still exists.
+   *  Incomplete cards (no certId) have nothing server-side — treated as a
+   *  plain ack.
    */
   async rejectConfirmCard() {
     const s = stateMod.get();
@@ -809,7 +813,8 @@ class Watcher extends EventEmitter {
         this.removePending(entry.key);
         this.log(`${c.certId}: held inbox files moved to rejected/, pending entry dropped`);
       }
-      this.log(`REJECTED ${c.certId} — operator reject & rescan (cert soft-deleted)`);
+      const reclaimNote = r.body?.number_reclaimed ? " — number reclaimed, next scan reuses it" : "";
+      this.log(`REJECTED ${c.certId} — operator reject & rescan (cert soft-deleted)${reclaimNote}`);
     } else {
       this.log("REJECT on incomplete card — nothing server-side, clearing popup");
     }
