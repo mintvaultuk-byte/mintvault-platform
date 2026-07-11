@@ -10,7 +10,7 @@
  *
  * VQ-only. Touches no grading/cert/payment table.
  */
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import { vqStorage } from "./storage";
 import { sanitizeWrite } from "./lib/write-sanitize";
@@ -242,7 +242,9 @@ export const productionStorage = {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const recentGen = await safe(() => db.select().from(vqAiGenerations).orderBy(desc(vqAiGenerations.createdAt)).limit(10), [] as (typeof vqAiGenerations.$inferSelect)[]);
-    const allGenCount = await safe(async () => (await db.select().from(vqAiGenerations)).length, 0);
+    // count(*) instead of materialising the whole vq_ai_generations table just to
+    // read .length — this runs on every dashboard/workflow poll (P6-R4-01).
+    const allGenCount = await safe(async () => (await db.select({ n: sql<number>`count(*)::int` }).from(vqAiGenerations))[0]?.n ?? 0, 0);
     const todayCount = recentGen.filter((g) => g.createdAt && new Date(g.createdAt) >= startOfDay).length;
 
     const cardsTotalAll = standard.length + support.length + variant.length + collector.length;
