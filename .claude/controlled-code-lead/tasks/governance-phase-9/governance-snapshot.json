@@ -1,0 +1,13 @@
+{
+  "note": "Lock set = files that DEFINE governance. On resume, recompute the lock set and compare to post9A. STOP on unexpected drift.",
+  "pre9A": {
+    "snapshotAt": "2026-07-11T08:33:11Z",
+    "combinedSnapshotHash": "0e91bb652dae00a7b6f0f96f0aed29149672b49374e0364fea11062cc299836d"
+  },
+  "post9A": {
+    "snapshotAt": "2026-07-11T08:41:27Z",
+    "branch": "governance-phase-9",
+    "authorisedDeltas": ["CLAUDE.md (test/lint claim)", "SKILL.md (Stage6, authority, protected-actions, Session Recovery, durable transitions, proof vocab)"],
+    "combinedSnapshotHash": "eab189ef386ad6f819ba3abb6a28c3e5acd146c73538a10af94acc6ea723937c"
+  }
+}
