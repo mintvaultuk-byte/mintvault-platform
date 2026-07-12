@@ -904,13 +904,15 @@ async function drawFront(
   const yearText = cert.year || "";
   const setNameText = cert.setName ? cert.setName.toUpperCase() : "";
 
-  // Owner ruling (2026-07-06): the front label is EXACTLY three lines — card
-  // name / year + set / ONE bottom line showing the variant if set, else the
-  // rarity. Never both (previously two separate slots could print four lines
-  // on legacy both-set certs).
+  // Owner ruling (2026-07-12): year and set name are separate lines — a long
+  // real-world set name (e.g. "Sword & Shield Black Star Promos") must never
+  // get crushed onto the year line. Bottom line still shows the variant if
+  // set, else the rarity — never both. Font auto-shrinks (below) to fit
+  // whatever line count a given cert ends up with.
   const lines = [
     cardNameText,
-    yearText && setNameText ? yearText + " " + setNameText : yearText || setNameText,
+    yearText,
+    setNameText,
     buildVariantLine(cert) || (cert.rarity ? buildRarityText(cert).toUpperCase() : ""),
   ].filter((s) => s.trim().length > 0);
 
