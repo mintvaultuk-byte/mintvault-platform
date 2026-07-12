@@ -251,6 +251,13 @@ function GradeTab() {
   const [active, setActive] = useState<{ ref: string; card: GCard } | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [aLoading, setALoading] = useState(true);
+  // Bad-scan: view front/back + clear-for-re-scan (own assigned cards only).
+  const [viewCard, setViewCard] = useState<GCard | null>(null);
+  const [viewUrls, setViewUrls] = useState<{ front: string | null; back: string | null } | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [clearCard, setClearCard] = useState<GCard | null>(null);
+  const [clearBusy, setClearBusy] = useState(false);
+  const [clearMsg, setClearMsg] = useState<string | null>(null);
   const load = useCallback(async () => {
     const r = await fetch("/api/grader/queue", { credentials: "include" });
     if (r.ok) setQueue((await r.json()).items || []);
@@ -268,6 +275,43 @@ function GradeTab() {
   useEffect(() => {
     load();
   }, [load]);
+
+  async function openViewer(card: GCard) {
+    setViewCard(card);
+    setViewUrls(null);
+    setViewLoading(true);
+    try {
+      const r = await fetch(`/api/grader/certificates/${card.certId}/images`, { credentials: "include" });
+      if (!r.ok) throw new Error("Couldn't load images");
+      const d = await r.json();
+      const u = d.urls || {};
+      setViewUrls({ front: u.front_original || u.front_cropped || null, back: u.back_original || u.back_cropped || null });
+    } catch {
+      setViewUrls({ front: null, back: null });
+    } finally {
+      setViewLoading(false);
+    }
+  }
+
+  async function doClearScan() {
+    if (!clearCard) return;
+    setClearBusy(true);
+    setClearMsg(null);
+    try {
+      const r = await fetch(`/api/grader/certificates/${clearCard.certId}/clear-scan`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Clear failed");
+      setClearCard(null);
+      await load();
+    } catch (e: any) {
+      setClearMsg(e.message);
+    } finally {
+      setClearBusy(false);
+    }
+  }
 
   if (active) {
     const c = active.card;
@@ -380,12 +424,34 @@ function GradeTab() {
         </div>
       </div>
       {card.gradingStatus === "assigned" && card.assignedToMe ? (
-        <button
-          onClick={() => setActive({ ref, card })}
-          className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#B8960C] shrink-0"
-        >
-          Grade
-        </button>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => openViewer(card)}
+              data-testid={`btn-view-scan-${card.certId}`}
+              className="border border-[#D4AF37]/40 text-[#D4AF37] text-xs px-2.5 py-1.5 rounded hover:bg-[#D4AF37]/10"
+            >
+              View
+            </button>
+            <button
+              onClick={() => setActive({ ref, card })}
+              className="bg-[#D4AF37] text-[#1A1400] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#B8960C]"
+            >
+              Grade
+            </button>
+          </div>
+          {/* Soft clear — NOT a delete; sends the card to an admin for re-scan. */}
+          <button
+            onClick={() => {
+              setClearMsg(null);
+              setClearCard(card);
+            }}
+            data-testid={`btn-bad-scan-${card.certId}`}
+            className="text-[10px] uppercase tracking-wider text-amber-300/80 hover:text-amber-300 underline underline-offset-2"
+          >
+            Bad scan — clear for re-scan
+          </button>
+        </div>
       ) : card.gradingStatus === "pending_review" && card.gradedByMe ? (
         // Submitted but not yet approved — reopen the FULL workstation to correct
         // it. Stays pending_review, never auto-publishes (gated /edit-submission).
@@ -440,6 +506,104 @@ function GradeTab() {
           {section("Other", other)}
           {section("Done", done)}
         </>
+      )}
+
+      {/* Scan viewer — front/back originals (signed R2 urls, PII-free). */}
+      {viewCard && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setViewCard(null)}
+        >
+          <div
+            className="bg-[#1A1400] border border-[#D4AF37]/30 rounded-xl p-4 max-w-3xl w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <span className="font-mono text-[#D4AF37] text-sm">
+                {viewCard.certIdStr} · {viewCard.cardName || "Unidentified"}
+              </span>
+              <button onClick={() => setViewCard(null)} className="text-[#E8E4DC]/60 hover:text-[#E8E4DC] text-sm">
+                Close
+              </button>
+            </div>
+            {viewLoading ? (
+              <p className="text-[#E8E4DC]/60 text-sm text-center py-10">Loading images…</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {(["front", "back"] as const).map((side) => {
+                  const url = viewUrls?.[side] || null;
+                  return (
+                    <div key={side} className="space-y-1">
+                      <div className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/50">{side}</div>
+                      {url ? (
+                        <img
+                          src={url}
+                          alt={`${viewCard!.certIdStr} ${side}`}
+                          className="w-full rounded border border-[#D4AF37]/20 bg-black/30"
+                        />
+                      ) : (
+                        <div className="w-full aspect-[3/4] rounded border border-[#D4AF37]/20 bg-black/30 flex items-center justify-center text-[#E8E4DC]/40 text-xs">
+                          No {side} image
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="mt-3 flex justify-end">
+              <button
+                onClick={() => {
+                  setClearMsg(null);
+                  setClearCard(viewCard);
+                  setViewCard(null);
+                }}
+                className="text-[11px] uppercase tracking-wider text-amber-300/80 hover:text-amber-300 underline underline-offset-2"
+              >
+                Bad scan — clear for re-scan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear-for-re-scan confirm — soft, not a delete. */}
+      {clearCard && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => !clearBusy && setClearCard(null)}
+        >
+          <div
+            className="bg-[#1A1400] border border-amber-500/40 rounded-xl p-5 max-w-sm w-full space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-amber-300 font-bold">Clear this scan for re-scan?</h3>
+            <p className="text-[#E8E4DC]/80 text-sm">
+              This clears the scan images on{" "}
+              <span className="font-mono text-[#D4AF37]">{clearCard.certIdStr}</span> so the card can be re-scanned by
+              an admin. <strong>The card and its MV number stay</strong> — nothing is deleted. It leaves your grading
+              queue and an admin re-dispatches it for a fresh scan.
+            </p>
+            {clearMsg && <p className="text-red-400 text-xs">{clearMsg}</p>}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setClearCard(null)}
+                disabled={clearBusy}
+                className="text-[#E8E4DC]/70 hover:text-[#E8E4DC] text-xs px-3 py-1.5"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={doClearScan}
+                disabled={clearBusy}
+                data-testid="btn-confirm-clear-scan"
+                className="bg-amber-500 text-[#1A1400] font-bold text-xs px-4 py-1.5 rounded hover:bg-amber-400 disabled:opacity-50"
+              >
+                {clearBusy ? "Clearing…" : "Clear for re-scan"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   );

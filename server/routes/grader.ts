@@ -238,6 +238,70 @@ export function registerGraderRoutes(app: Express): void {
     return res.json(payload);
   });
 
+  // ── Grader: clear a BAD SCAN so the card can be re-scanned (soft) ────────────
+  // The grader can only act on their OWN assigned card. This SOFT-clears the scan
+  // image references (sets the per-side image columns NULL — does NOT purge the R2
+  // objects), drops the card out of the grader's queue (grader_status='unassigned'
+  // + assigned_grader_id NULL), and audits it. It does NOT touch submission
+  // scan_status (that's the admin's reopen step) and NEVER deletes the cert row /
+  // changes certificate_number / cert_counter. The cleared card surfaces on the
+  // admin "needs re-scan" list (GET /api/admin/certificates/needs-rescan).
+  app.post("/api/grader/certificates/:id/clear-scan", requireCapability("grade"), async (req: Request, res: Response) => {
+    try {
+      const certId = parseInt(String(req.params.id), 10);
+      const auth = await authorizeGraderCert(req, certId);
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      const graderEmail = (req.session as any).graderEmail as string;
+
+      const row = (
+        await db.execute(sql`
+          SELECT grader_status, front_image_path, grading_front_original, back_image_path, grading_back_original
+          FROM certificates WHERE id = ${certId} AND deleted_at IS NULL`)
+      ).rows[0] as any;
+      if (!row) return res.status(404).json({ error: "Certificate not found" });
+
+      const hadFront = !!(row.front_image_path || row.grading_front_original);
+      const hadBack = !!(row.back_image_path || row.grading_back_original);
+
+      // Idempotent: nothing to clear → clean no-op (no status change, no audit spam).
+      if (!hadFront && !hadBack) {
+        return res.json({ ok: true, alreadyCleared: true, clearedFront: false, clearedBack: false });
+      }
+
+      // SOFT clear: NULL every per-side scan/grading image column (front + back).
+      // R2 objects are deliberately NOT deleted (truly soft, unlike the admin DELETE
+      // images endpoint). Drop the card from the grader's queue: status 'unassigned'
+      // AND assigned_grader_id NULL — both are needed because the grader queue
+      // (/api/grader/queue) lists cards by assigned_grader_id regardless of status,
+      // so leaving the id set would keep the card in the grader's "To grade".
+      await db.execute(sql`
+        UPDATE certificates SET
+          front_image_path = NULL, grading_front_original = NULL, grading_front_cropped = NULL,
+          grading_front_greyscale = NULL, grading_front_highcontrast = NULL,
+          grading_front_edgeenhanced = NULL, grading_front_inverted = NULL,
+          back_image_path = NULL, grading_back_original = NULL, grading_back_cropped = NULL,
+          grading_back_greyscale = NULL, grading_back_highcontrast = NULL,
+          grading_back_edgeenhanced = NULL, grading_back_inverted = NULL,
+          grader_status = 'unassigned', assigned_grader_id = NULL,
+          updated_at = NOW()
+        WHERE id = ${certId}
+      `);
+
+      await storage.writeAuditLog("certificate", String(certId), "grader_scan_cleared", graderEmail, {
+        certId,
+        prev_grader_status: row.grader_status ?? null,
+        clearedFront: hadFront,
+        clearedBack: hadBack,
+      });
+      console.log(`[grader] ${graderEmail} cleared bad scan on cert id=${certId} (front=${hadFront} back=${hadBack})`);
+
+      return res.json({ ok: true, clearedFront: hadFront, clearedBack: hadBack });
+    } catch (e: any) {
+      console.error("[grader] clear-scan error:", e.message);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/grader/certificates/:id/grading", requireCapability("grade"), async (req: Request, res: Response) => {
     const certId = parseInt(String(req.params.id), 10);
     const auth = await authorizeGraderCert(req, certId);
@@ -532,6 +596,108 @@ export function registerGraderRoutes(app: Express): void {
   // ── Admin: grader accounts (+ per-grader counts) ────────────────────────────
   app.get("/api/admin/graders", requireAdmin, async (_req: Request, res: Response) => {
     return res.json({ graders: await getGraderCountsForAdmin() });
+  });
+
+  // ── Admin: cards a grader flagged as a BAD SCAN, awaiting re-dispatch ────────
+  // Predicate (clean + self-resolving): a cert that (a) has a grader_scan_cleared
+  // audit row, (b) is STILL in the cleared state — both scan markers null,
+  // grader_status='unassigned', not deleted — and (c) whose parent submission is
+  // NOT already back in the scanner queue (scan_status <> 'assigned'). It drops off
+  // this list automatically once an admin reopens it (submission → 'assigned') or
+  // once it's re-scanned (image columns repopulate). PII-safe (no customer fields).
+  app.get("/api/admin/certificates/needs-rescan", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const rows = (
+        await db.execute(sql`
+          SELECT cert.id AS cert_id, cert.certificate_number AS cert_id_str,
+                 cert.card_name, cert.set_name,
+                 c.submission_id, s.tracking_number AS submission_ref, s.scan_status AS submission_scan_status,
+                 a.admin_user AS cleared_by, a.created_at AS cleared_at
+          FROM certificates cert
+          JOIN LATERAL (
+            SELECT admin_user, created_at FROM audit_log
+            WHERE entity_type = 'certificate' AND entity_id = cert.id::text AND action = 'grader_scan_cleared'
+            ORDER BY created_at DESC LIMIT 1
+          ) a ON true
+          LEFT JOIN cards c ON cert.card_id = c.id
+          LEFT JOIN submissions s ON s.id = c.submission_id
+          WHERE cert.deleted_at IS NULL
+            AND cert.grader_status = 'unassigned'
+            AND cert.front_image_path IS NULL AND cert.grading_front_original IS NULL
+            AND cert.back_image_path IS NULL AND cert.grading_back_original IS NULL
+            AND (s.scan_status IS NULL OR s.scan_status <> 'assigned')
+          ORDER BY a.created_at DESC
+        `)
+      ).rows as any[];
+      return res.json({
+        items: rows.map((r) => ({
+          certId: Number(r.cert_id),
+          certIdStr: r.cert_id_str,
+          cardName: r.card_name ?? null,
+          setName: r.set_name ?? null,
+          submissionId: r.submission_id != null ? Number(r.submission_id) : null,
+          submissionRef: r.submission_ref ?? null,
+          submissionScanStatus: r.submission_scan_status ?? null,
+          clearedBy: r.cleared_by ?? null,
+          clearedAt: r.cleared_at ?? null,
+        })),
+      });
+    } catch (e: any) {
+      console.error("[needs-rescan] error:", e.message);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Admin: reopen a grader-cleared card's submission for re-scan ─────────────
+  // The ONLY place submission scan_status changes for this flow. Sets the parent
+  // submission back to 'assigned' so it re-enters the scanner's queue (scan_assigned_to
+  // is retained, so it returns to the same scanner). NOTE: reopening a submission
+  // re-lists its SIBLING cards in the scan queue too — accepted + expected.
+  app.post("/api/admin/certificates/:id/reopen-rescan", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const certId = parseInt(String(req.params.id), 10);
+      const adminUser = (req.session as any).adminEmail || "admin";
+      const row = (
+        await db.execute(sql`
+          SELECT cert.certificate_number AS cert_id_str, c.submission_id, s.scan_status, s.scan_assigned_to
+          FROM certificates cert
+          LEFT JOIN cards c ON cert.card_id = c.id
+          LEFT JOIN submissions s ON s.id = c.submission_id
+          WHERE cert.id = ${certId} AND cert.deleted_at IS NULL
+          LIMIT 1`)
+      ).rows[0] as any;
+      if (!row) return res.status(404).json({ error: "Certificate not found" });
+      if (row.submission_id == null) {
+        return res.status(409).json({ error: "Cert has no parent submission to reopen for scanning" });
+      }
+      const submissionId = Number(row.submission_id);
+
+      await db.execute(sql`
+        UPDATE submissions SET scan_status = 'assigned', updated_at = NOW()
+        WHERE id = ${submissionId} AND scan_status <> 'assigned'
+      `);
+      await storage.writeAuditLog("submission", String(submissionId), "admin_rescan_reopened", adminUser, {
+        certId,
+        submissionId,
+      });
+      console.log(`[reopen-rescan] admin ${adminUser} reopened submission ${submissionId} for re-scan (cert id=${certId})`);
+
+      // Surface whether a scanner is actually assigned — if scan_assigned_to is null
+      // the submission is 'assigned' but in nobody's queue; the admin must assign a scanner.
+      const hasScanner = !!row.scan_assigned_to;
+      return res.json({
+        ok: true,
+        submissionId,
+        scanStatus: "assigned",
+        hasScannerAssigned: hasScanner,
+        message: hasScanner
+          ? "Submission reopened for re-scan — back in the scanner's queue (sibling cards re-listed too)."
+          : "Submission reopened for re-scan, but no scanner is assigned — assign a scanner to this submission.",
+      });
+    } catch (e: any) {
+      console.error("[reopen-rescan] error:", e.message);
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   // ── Admin: Phase 5 per-operator grading stats (read-only dashboard) ─────────
