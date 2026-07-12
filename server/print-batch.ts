@@ -586,17 +586,32 @@ function drawGuillotineLines(doc: InstanceType<typeof PDFDocument>): void {
 // Draw `buf` rotated 90° clockwise at page position (xMm, yMm), appearing as
 // wMm wide × hMm tall. The source image's natural orientation is landscape
 // (hMm × wMm); the rotate makes it run tall in the column.
+//
+// `flip180` draws the same rotated placement but 180° opposed — anchored at
+// the destination rect's bottom-left corner and rotated -90° instead of the
+// top-right/+90° anchor above. The front and back cells in a unit sit flush
+// against each other with zero gap (see buildPortraitLayout) so the strip can
+// be cut as one continuous piece and folded around the slab; without this
+// flip the back reads upside down once folded, since it's currently stamped
+// with the identical on-page orientation as the front instead of the 180°
+// opposed one the fold requires.
 function drawImageRotated90CW(
   doc: InstanceType<typeof PDFDocument>,
   buf: Buffer,
   xMm: number,
   yMm: number,
   wMm: number,
-  hMm: number
+  hMm: number,
+  flip180: boolean = false
 ): void {
   doc.save();
-  doc.translate(mm(xMm + wMm), mm(yMm));
-  doc.rotate(90);
+  if (flip180) {
+    doc.translate(mm(xMm), mm(yMm + hMm));
+    doc.rotate(-90);
+  } else {
+    doc.translate(mm(xMm + wMm), mm(yMm));
+    doc.rotate(90);
+  }
   doc.image(buf, 0, 0, { width: mm(hMm), height: mm(wMm) });
   doc.restore();
 }
@@ -689,7 +704,17 @@ export async function generatePrintBatchPDF(items: PrintBatchItem[]): Promise<Bu
                   ? backs[cell.itemIndex]
                   : inserts[cell.itemIndex];
             // Each set is rotated 90° CW so the labels/insert run tall down the page.
-            drawImageRotated90CW(doc, buf, cell.xMm, cell.yMm, cell.wMm, cell.hMm);
+            // The back cell is flipped 180° from that so it reads right-side up once
+            // the strip is folded over at the front|back seam.
+            drawImageRotated90CW(
+              doc,
+              buf,
+              cell.xMm,
+              cell.yMm,
+              cell.wMm,
+              cell.hMm,
+              cell.kind === "back"
+            );
           }
           drawPortraitGuillotineLines(doc);
         }
