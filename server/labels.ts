@@ -373,6 +373,19 @@ function buildRarityText(cert: CertificateRecord): string {
   return RARITY_DISPLAY[String(code).toUpperCase()] || String(code).replace(/_/g, " ");
 }
 
+// Real-world TCG sets in this recurring "<Era> Black Star Promos" family (e.g.
+// "Sword & Shield Black Star Promos", "XY Black Star Promos") name the whole
+// promo sub-line as part of the set name. Split that trailing qualifier off
+// so it can print on its own line instead of crushing onto the year line —
+// sets with no such suffix are returned untouched (base = full name).
+const PROMO_SUFFIX_RE = /\s+black star promos?$/i;
+
+function splitPromoSuffix(setName: string): { base: string; suffix: string } {
+  const m = setName.match(PROMO_SUFFIX_RE);
+  if (!m) return { base: setName, suffix: "" };
+  return { base: setName.slice(0, m.index).trim(), suffix: m[0].trim() };
+}
+
 function buildLine3(cert: CertificateRecord): string {
   const parts: string[] = [];
   const rText = buildRarityText(cert);
@@ -902,15 +915,20 @@ async function drawFront(
   // into the bottom strip alongside the cert ID (rendered earlier).
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
   const yearText = cert.year || "";
-  const setNameText = cert.setName ? cert.setName.toUpperCase() : "";
+  const { base: setBase, suffix: setSuffix } = splitPromoSuffix(cert.setName || "");
+  const setBaseText = setBase.toUpperCase();
+  const setSuffixText = setSuffix.toUpperCase();
 
-  // Owner ruling (2026-07-06): the front label is EXACTLY three lines — card
-  // name / year + set / ONE bottom line showing the variant if set, else the
-  // rarity. Never both (previously two separate slots could print four lines
-  // on legacy both-set certs).
+  // Owner ruling (2026-07-12): year + set name share a line as before, EXCEPT
+  // a recurring "<Era> Black Star Promos" suffix (e.g. "Sword & Shield Black
+  // Star Promos") splits onto its own line below — that family of real-world
+  // set names is long enough to crush onto the year line otherwise. Bottom
+  // line still shows the variant if set, else the rarity — never both. Font
+  // auto-shrinks (below) to fit whatever line count a given cert ends up with.
   const lines = [
     cardNameText,
-    yearText && setNameText ? yearText + " " + setNameText : yearText || setNameText,
+    yearText && setBaseText ? yearText + " " + setBaseText : yearText || setBaseText,
+    setSuffixText,
     buildVariantLine(cert) || (cert.rarity ? buildRarityText(cert).toUpperCase() : ""),
   ].filter((s) => s.trim().length > 0);
 
