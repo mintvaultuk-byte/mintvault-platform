@@ -143,7 +143,6 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
       setSearchQuery(q);
       setActiveTab("certs");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [previewCert, setPreviewCert] = useState<CertificateRecord | null>(null);
   const [selectedGradingCertId, setSelectedGradingCertId] = useState<number | null>(null);

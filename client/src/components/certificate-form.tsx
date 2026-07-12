@@ -707,7 +707,6 @@ export default function CertificateForm({
       if (f) out[angle] = URL.createObjectURL(f);
     });
     return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gradingImages.front, gradingImages.back, gradingImages.angled, gradingImages.closeup]);
   useEffect(() => {
     return () => {

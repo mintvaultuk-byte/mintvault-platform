@@ -639,7 +639,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   const [queuePaused, setQueuePaused] = useState(false);
   // Candidate review extras
   const [favourites, setFavourites] = useState<Set<number>>(() => new Set(JSON.parse(localStorage.getItem("vq-fav-candidates") ?? "[]") as number[]));
-  const toggleFavourite = (id: number) => setFavourites((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); localStorage.setItem("vq-fav-candidates", JSON.stringify([...n])); return n; });
+  const toggleFavourite = (id: number) => setFavourites((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); localStorage.setItem("vq-fav-candidates", JSON.stringify([...n])); return n; });
   const [compareSel, setCompareSel] = useState<number[]>([]); // up to 2 candidate ids
   const [showCompare, setShowCompare] = useState(false);
   const [promptFor, setPromptFor] = useState<VqCandidateRow | null>(null);
@@ -1303,7 +1303,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                   return (
                     <div key={ch.characterId} className={`mb-1 flex items-stretch gap-1 rounded-md border ${isSelected ? "border-amber-500 bg-amber-500/10" : "border-slate-800 bg-slate-950/40"}`}>
                       <label className="flex cursor-pointer items-center pl-2" title="Tick for batch generation" onClick={(e) => e.stopPropagation()}>
-                        <input type="checkbox" className="h-3.5 w-3.5 accent-amber-500" checked={ticked} onChange={() => setSelectedChars((prev) => { const n = new Set(prev); n.has(ch.characterId) ? n.delete(ch.characterId) : n.add(ch.characterId); return n; })} />
+                        <input type="checkbox" className="h-3.5 w-3.5 accent-amber-500" checked={ticked} onChange={() => setSelectedChars((prev) => { const n = new Set(prev); if (n.has(ch.characterId)) n.delete(ch.characterId); else n.add(ch.characterId); return n; })} />
                       </label>
                       <button type="button" onClick={() => setSelectedId(ch.characterId)} className="flex-1 rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-800/40">
                         <div className="flex items-center justify-between gap-2">
@@ -2037,7 +2037,6 @@ export default function AdminVaultQuest() {
     } else if (card) {
       void loadCard(card); // loadCard sets view("editor") on success
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const isSupport = SUPPORT.has(form.cardType);
@@ -2135,7 +2134,6 @@ export default function AdminVaultQuest() {
       }
       return prev;
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.familyId, form.stageNumber, fams.data]);
 
   const runPreview = useCallback(async () => {
