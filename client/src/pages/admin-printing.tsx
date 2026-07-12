@@ -30,6 +30,8 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  Archive,
+  ArchiveRestore,
 } from "lucide-react";
 import AdminCertBrowser from "./admin-cert-browser";
 import { PokemonSetPicker } from "@/components/certificate-form";
@@ -88,6 +90,17 @@ type SheetSummary = {
   printed: boolean;
   queuedAt: string;
   printedAt: string | null;
+};
+// A cert currently hidden by soft-delete (e.g. scanner "Reject & rescan" on a
+// bad scan). Server only allows this state for certs that were never graded —
+// see GET /certs/deleted's comment in server/routes.ts.
+type DeletedCert = {
+  certId: string;
+  cardName: string | null;
+  setName: string | null;
+  cardGame: string | null;
+  issuedAt: string | null;
+  deletedAt: string | null;
 };
 
 function gradeDisplay(cert: CertificateRecord): string {
@@ -865,6 +878,107 @@ function LatestSheetSection({
   );
 }
 
+// ── Deleted Certs section ─────────────────────────────────────────────────────
+// Certs hidden by soft-delete (currently: scanner "Reject & rescan" on a bad
+// scan) never actually disappear from the database — they're just filtered out
+// of every normal list. Server guarantees only never-graded certs can land here,
+// so restoring is always safe (nothing shown to a customer can be affected).
+function DeletedCertsSection() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const base = useContext(PrintApiBase);
+  const [open, setOpen] = useState(false);
+
+  const { data: deleted = [], isLoading } = useQuery<DeletedCert[]>({
+    queryKey: [`${base}/certs/deleted`],
+    enabled: open,
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: (certId: string) => apiRequest("POST", `${base}/certs/${certId}/restore`).then(() => certId),
+    onSuccess: (certId) => {
+      toast({ title: "Certificate restored", description: `${certId} is back in the active list` });
+      qc.invalidateQueries({ queryKey: [`${base}/certs/deleted`] });
+      qc.invalidateQueries({ queryKey: [`${base}/printing/queue`] });
+    },
+    onError: (err: any) => toast({ title: "Restore failed", description: err.message, variant: "destructive" }),
+  });
+
+  return (
+    <div className="space-y-1" data-testid="deleted-certs-section">
+      <button
+        className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel2)] hover:bg-[var(--admin-panel3)] transition-colors text-left"
+        onClick={() => setOpen((v) => !v)}
+        data-testid="btn-toggle-deleted-certs"
+      >
+        <div className="flex items-center gap-3 min-w-0">
+          <Archive className="h-4 w-4 text-[var(--admin-ink-faint)] shrink-0" />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-[var(--admin-ink)]">Hidden / Rejected Certificates</p>
+            <p className="text-[11px] text-[var(--admin-ink-faint)] mt-0.5">
+              Rejected on the scanner (bad scan) — never graded, safe to restore
+            </p>
+          </div>
+        </div>
+        {open ? (
+          <ChevronUp className="h-4 w-4 text-[var(--admin-ink-faint)] shrink-0" />
+        ) : (
+          <ChevronDown className="h-4 w-4 text-[var(--admin-ink-faint)] shrink-0" />
+        )}
+      </button>
+
+      {open && (
+        <div className="rounded-lg border border-[var(--admin-line)] p-3 space-y-1 max-h-72 overflow-y-auto">
+          {isLoading ? (
+            <div className="flex justify-center py-4">
+              <Loader2 className="h-4 w-4 animate-spin text-[var(--admin-gold)]" />
+            </div>
+          ) : deleted.length === 0 ? (
+            <p className="text-xs text-[var(--admin-ink-faint)] text-center py-2">Nothing hidden right now.</p>
+          ) : (
+            deleted.map((c) => (
+              <div
+                key={c.certId}
+                className="flex items-center gap-3 px-2 py-1.5 rounded text-xs text-[var(--admin-ink-dim)] bg-[var(--admin-bg2)]"
+                data-testid={`deleted-cert-row-${c.certId}`}
+              >
+                <span
+                  className="text-[var(--admin-gold-hi)] shrink-0 w-16"
+                  style={{ fontFamily: "var(--admin-mono)" }}
+                >
+                  {c.certId}
+                </span>
+                <span className="truncate">
+                  {c.cardName || "—"}
+                  {c.setName ? ` · ${c.setName}` : ""}
+                </span>
+                <span className="ml-auto text-[var(--admin-ink-faint)] shrink-0">
+                  Rejected {fmtDate(c.deletedAt)}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={restoreMutation.isPending && restoreMutation.variables === c.certId}
+                  onClick={() => restoreMutation.mutate(c.certId)}
+                  className="h-6 text-[10px] px-2 shrink-0 border-[var(--admin-gold)]/60 text-[var(--admin-gold-hi)] hover:bg-[var(--admin-gold)]/10"
+                  data-testid={`btn-restore-${c.certId}`}
+                >
+                  {restoreMutation.isPending && restoreMutation.variables === c.certId ? (
+                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                  ) : (
+                    <ArchiveRestore className="h-3 w-3 mr-1" />
+                  )}
+                  Restore
+                </Button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main tab wrapper ──────────────────────────────────────────────────────────
 export default function AdminPrinting() {
   const [tab, setTab] = useState<"sheet" | "browser">("sheet");
@@ -1593,6 +1707,9 @@ function SheetPrintingPanel() {
         onDownloadPng={handleDownloadPng}
         downloadingPng={downloadingPng}
       />
+
+      {/* Hidden/rejected certs — restore a cert soft-deleted via scanner reject. */}
+      <DeletedCertsSection />
 
       {/* Reprint with reason modal */}
       {reprintModal && (

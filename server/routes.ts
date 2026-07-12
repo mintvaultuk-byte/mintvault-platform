@@ -9999,6 +9999,66 @@ Defects (admin-confirmed): ${defectLines}`;
 
 
 
+  // ── Soft-delete recovery ────────────────────────────────────────────────
+  // The scanner's reject/soft-delete route (above) and "Fix orphan" cleanup
+  // hide a cert (deleted_at) rather than destroying it, specifically so a
+  // mistaken reject — e.g. a duplicate-scan pair minted before the operator
+  // could catch it (MV451/476/479/484) — is recoverable. Until now there was
+  // no way to actually DO that recovery: the image-attach route has always
+  // returned "cert is soft-deleted; restore before attaching images" (above)
+  // for an action that didn't exist. These two routes are that missing half.
+  //
+  // Admin-only (not requireScannerOrAdmin) — restoring is a deliberate admin
+  // decision, not something the scanner's own automated reject flow should
+  // trigger. Safe by construction: soft-delete's own guard (grade_approved_at
+  // IS NULL) means only certs that were NEVER approved/graded/printed can
+  // reach this state, so restoring one can never resurrect something that
+  // already reached a customer.
+
+  app.get("/api/admin/certs/deleted", requireAdmin, async (_req, res) => {
+    try {
+      const certs = await storage.listDeletedCertificates();
+      res.json(
+        certs.map((c: any) => ({
+          certId: normalizeCertId(c.certId),
+          cardName: c.cardName,
+          setName: c.setName,
+          cardGame: c.cardGame,
+          issuedAt: c.createdAt,
+          deletedAt: c.deletedAt,
+        }))
+      );
+    } catch (err: any) {
+      console.error("[certs-deleted] failed:", err.message);
+      sendServerError(res, err);
+    }
+  });
+
+  app.post("/api/admin/certs/:certId/restore", requireAdmin, async (req, res) => {
+    try {
+      const certId = normalizeCertId(String(req.params.certId));
+      const r = await db.execute(sql`
+        UPDATE certificates
+        SET deleted_at = NULL, updated_at = NOW()
+        WHERE certificate_number = ${certId} AND deleted_at IS NOT NULL
+        RETURNING id
+      `);
+      if (r.rows.length === 0) {
+        const exists = await db.execute(
+          sql`SELECT id, deleted_at FROM certificates WHERE certificate_number = ${certId} LIMIT 1`
+        );
+        if (exists.rows.length === 0) return res.status(404).json({ error: "cert not found", certId });
+        return res.status(409).json({ error: "cert is not soft-deleted — nothing to restore", certId });
+      }
+      const adminUser = (req.session as any)?.adminEmail || "admin";
+      await storage.writeAuditLog("certificate", certId, "restore", adminUser, {});
+      res.json({ ok: true, cert_id: certId });
+    } catch (err: any) {
+      console.error("[cert-restore] failed:", err.message);
+      sendServerError(res, err);
+    }
+  });
+
   // ── One-time-use metadata backfill ────────────────────────────────────────
   // Re-runs AI Identify on certs that were approved before identification
   // happened (per docs/corpus-capture-audit.md — MV20/21/41/44). Only fills

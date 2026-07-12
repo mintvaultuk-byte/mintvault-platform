@@ -185,6 +185,7 @@ export interface IStorage {
   clearLabelOverride(certId: string): Promise<void>;
   logReprint(certId: string): Promise<void>;
   listCertificatesBrowser(): Promise<Array<CertificateRecord & { isPrinted: boolean; reprintCount: number }>>;
+  listDeletedCertificates(): Promise<CertificateRecord[]>;
 
   getDistinctRarityOthers(): Promise<string[]>;
   getDistinctVariants(): Promise<string[]>;
@@ -1616,6 +1617,22 @@ export class DatabaseStorage implements IStorage {
       isPrinted: printedSet.has(cert.certId),
       reprintCount: reprintMap.get(cert.certId) ?? 0,
     }));
+  }
+
+  /**
+   * Every currently soft-deleted certificate (deleted_at IS NOT NULL) — hidden
+   * from listCertificatesBrowser and every other normal lookup, but never
+   * actually removed. Only certs whose grade was never approved can reach this
+   * state in the first place (the reject/soft-delete routes guard on
+   * grade_approved_at IS NULL) — so nothing this surfaces was ever printed,
+   * published, or shown to a customer.
+   */
+  async listDeletedCertificates(): Promise<CertificateRecord[]> {
+    return db
+      .select()
+      .from(certificates)
+      .where(isNotNull(certificates.deletedAt))
+      .orderBy(sql`CAST(REGEXP_REPLACE(${certificates.certId}, '[^0-9]', '', 'g') AS INTEGER) DESC NULLS LAST`);
   }
 
   // ── Ownership system ──────────────────────────────────────────────────────
