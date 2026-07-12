@@ -45,6 +45,32 @@ const GOLD_LIGHT = "#D4AF37";
 const BLACK = "#000000";
 const WHITE = "#FFFFFF";
 
+// ── Holographic-paper mode ────────────────────────────────────────────────
+// MintVault slab inserts are moving from plain white paper to holographic
+// (silver/rainbow) stock. On the office printer, "white" (#FFFFFF) is printed
+// as NO INK — the bare paper shows through — so on holographic stock every
+// white area shimmers. Gold and black areas still lay their ink, so the gold
+// frame stays gold and the black label stays black. The only casualty is
+// legibility: dark text (card name/set on the front, QR + verify text on the
+// back) that used to sit on white paper now sits on shimmer.
+//
+// In holographic mode we lay a solid PRINTED plate (HOLO_BACKING) behind those
+// dark elements so they stay crisp and the QR stays scannable. The plate is a
+// deliberate light grey, NOT pure white — white would print as nothing and the
+// shimmer would bleed straight through it. Everything else (gold frame, gold
+// grade box, black banner, black label) is untouched.
+//
+// Toggle with the LABEL_HOLOGRAPHIC env/secret: "1" = holographic paper,
+// unset/"0" = the original white-paper rendering (byte-for-byte unchanged).
+// Fully reversible with a single secret flip + redeploy.
+const HOLOGRAPHIC_PAPER = process.env.LABEL_HOLOGRAPHIC === "1";
+// Printed backing colour behind text/QR in holographic mode. Must be a colour
+// the printer actually lays as ink — a light grey lays a faint ink film that
+// covers the shimmer so dark text and the QR read cleanly. If a test print
+// shows the shimmer still bleeding through, nudge this DARKER (e.g. "#ECECEC"
+// or "#E4E4E4"); if it looks too grey/dirty, nudge it LIGHTER toward white.
+const HOLO_BACKING = "#F4F4F4";
+
 // v424 — frame gradient removed in favour of a flat GOLD fill. The diagonal
 // 5-stop gradient looked rich on screen but printed muddy on label stock and
 // fought with the wordmark/grade panel readability.
@@ -862,6 +888,18 @@ async function drawFront(
   // so the main block uses the full textZoneH (no RARITY_ZONE_H reservation).
   const mainBlockZoneH = textZoneH;
 
+  // Holographic mode — lay a solid printed plate behind the left-panel text so
+  // the card name/set stay crisp on the shimmer stock. WHITE-label only: the
+  // black label is already fully black-inked (gold text on black) and must not
+  // get a grey plate over it, so its rendering is left byte-for-byte unchanged.
+  // The plate covers the artwork wash + white base behind the text; the gold
+  // frame, grade panel and black banner sit outside this region and are
+  // unaffected. No grading value, gate, or grade-panel pixel is touched.
+  if (HOLOGRAPHIC_PAPER && labelBg === WHITE) {
+    ctx.fillStyle = HOLO_BACKING;
+    ctx.fillRect(I_LEFT, textZoneT, panelX - I_LEFT, I_BOTTOM - textZoneT);
+  }
+
   // v432 — main block has TWO lines (card name + year+set). Rarity moved
   // into the bottom strip alongside the cert ID (rendered earlier).
   const cardNameText = cert.cardName ? cert.cardName.toUpperCase() : "";
@@ -941,7 +979,11 @@ async function drawBack(
   // Overpaints the inner area white regardless of label variant. The back
   // is uniformly white-bg with dark text + gold accents for both Black
   // Label and Standard variants.
-  ctx.fillStyle = WHITE;
+  // Holographic mode: use the printed light-grey plate instead of white so the
+  // back (QR + verify text) actually lays ink and stays scannable/readable on
+  // shimmer stock — a pure-white fill would print as nothing and shimmer.
+  const backBg = HOLOGRAPHIC_PAPER ? HOLO_BACKING : WHITE;
+  ctx.fillStyle = backBg;
   ctx.fillRect(I_LEFT, I_TOP, I_W, I_H);
 
   // ── 2. BANNER fillRect ───────────────────────────────────────────────────
@@ -1060,7 +1102,9 @@ async function drawBack(
   const qrBuf = await generateQRBuffer(certUrl, qrSize);
   const qrImg = await loadImage(qrBuf);
   // White box behind QR — covers the banner in the top-right corner.
-  ctx.fillStyle = WHITE;
+  // Holographic mode: printed light-grey plate so the QR keeps a solid,
+  // scannable background instead of shimmering paper.
+  ctx.fillStyle = backBg;
   ctx.fillRect(qrX, qrY, qrSize, qrSize);
   ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
 

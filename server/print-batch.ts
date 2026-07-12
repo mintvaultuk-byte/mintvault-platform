@@ -841,11 +841,17 @@ export async function generatePrintBatchPrintPNG(items: PrintBatchItem[]): Promi
 // stale older-layout PDF for the same batchId. Same dance the PNG history did
 // inline historically (-v2 / -v3 / -v6) — now centralised so the version
 // flows from one constant to every read+write site.
+// Paper-mode tag — folded into every cached R2 key so a holographic-paper
+// render (light-grey text/QR backing) can never be served from a cached
+// white-paper object of the same batchId+layout version, or vice versa. Empty
+// suffix in white-paper mode keeps existing keys byte-for-byte unchanged.
+const PAPER_TAG = process.env.LABEL_HOLOGRAPHIC === "1" ? "-holo" : "";
+
 export function r2KeyForPrintBatch(batchId: string, ext: "pdf" | "png" | "print-png"): string {
   // "print-png" → the 400-DPI print variant at a distinct -print.png suffix;
   // "pdf"/"png" keep their existing {batchId}-{VERSION}.{ext} form.
-  if (ext === "print-png") return `print-batches/${batchId}-${SHEET_LAYOUT_VERSION}-print.png`;
-  return `print-batches/${batchId}-${SHEET_LAYOUT_VERSION}.${ext}`;
+  if (ext === "print-png") return `print-batches/${batchId}-${SHEET_LAYOUT_VERSION}${PAPER_TAG}-print.png`;
+  return `print-batches/${batchId}-${SHEET_LAYOUT_VERSION}${PAPER_TAG}.${ext}`;
 }
 
 export async function uploadPrintBatchArtifacts(
@@ -873,7 +879,7 @@ export async function uploadPrintBatchPDF(batchId: string, pdfBuf: Buffer): Prom
 // Cricut cut-guide SVG R2 key — separate key/suffix from the pdf/png artefacts,
 // version-folded so a layout bump writes a fresh object (same as the others).
 export function r2KeyForCricutSvg(batchId: string): string {
-  return `print-batches/${batchId}-${SHEET_LAYOUT_VERSION}-cricut-cut.svg`;
+  return `print-batches/${batchId}-${SHEET_LAYOUT_VERSION}${PAPER_TAG}-cricut-cut.svg`;
 }
 
 export async function uploadCricutSvg(batchId: string, svg: string): Promise<void> {
