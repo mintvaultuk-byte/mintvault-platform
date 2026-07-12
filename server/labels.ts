@@ -45,31 +45,30 @@ const GOLD_LIGHT = "#D4AF37";
 const BLACK = "#000000";
 const WHITE = "#FFFFFF";
 
-// ── Holographic-paper mode ────────────────────────────────────────────────
-// MintVault slab inserts are moving from plain white paper to holographic
-// (silver/rainbow) stock. On the office printer, "white" (#FFFFFF) is printed
-// as NO INK — the bare paper shows through — so on holographic stock every
-// white area shimmers. Gold and black areas still lay their ink, so the gold
-// frame stays gold and the black label stays black. The only casualty is
-// legibility: dark text (card name/set on the front, QR + verify text on the
-// back) that used to sit on white paper now sits on shimmer.
+// ── Holographic-paper mode (founder-approved design) ──────────────────────
+// Slab inserts print on holographic (silver/rainbow) stock. The office printer
+// has NO white ink, so anywhere the artwork is WHITE (#FFFFFF) it lays no ink
+// and the holographic paper shows through — that IS the shimmer. The design
+// leans into that: the BORDER and ALL lettering/numbers are drawn WHITE, so
+// they print as nothing and shimmer on the paper; the label backgrounds are
+// printed ink (warm gold #c18e22 on the standard label, jet black on the
+// Pristine label); the QR is printed black on a solid printable light colour
+// (silver #CFCFCF on black, gold on the gold label) so it stays scannable with
+// no shimmer behind it. No black banners; no faint separator lines.
 //
-// In holographic mode we lay a solid PRINTED plate (HOLO_BACKING) behind those
-// dark elements so they stay crisp and the QR stays scannable. The plate is a
-// deliberate light grey, NOT pure white — white would print as nothing and the
-// shimmer would bleed straight through it. Everything else (gold frame, gold
-// grade box, black banner, black label) is untouched.
+// On an on-screen preview (admin) the holographic areas will look WHITE, not
+// rainbow — the shimmer only appears on the physical holographic paper.
 //
-// Toggle with the LABEL_HOLOGRAPHIC env/secret: "1" = holographic paper,
+// Toggle with the LABEL_HOLOGRAPHIC env/secret: "1" = holographic design,
 // unset/"0" = the original white-paper rendering (byte-for-byte unchanged).
-// Fully reversible with a single secret flip + redeploy.
+// Fully reversible with one secret flip + redeploy.
 const HOLOGRAPHIC_PAPER = process.env.LABEL_HOLOGRAPHIC === "1";
-// Printed backing colour behind text/QR in holographic mode. Must be a colour
-// the printer actually lays as ink — a light grey lays a faint ink film that
-// covers the shimmer so dark text and the QR read cleanly. If a test print
-// shows the shimmer still bleeding through, nudge this DARKER (e.g. "#ECECEC"
-// or "#E4E4E4"); if it looks too grey/dirty, nudge it LIGHTER toward white.
-const HOLO_BACKING = "#F4F4F4";
+// Warm gold printed on the standard (non-Pristine) label in holographic mode.
+const HOLO_GOLD = "#c18e22";
+// Printable light background behind the QR on the BLACK/Pristine label (no
+// white ink available). Silver reads clean against black + hologram and keeps
+// QR contrast. Nudge darker (e.g. "#C2C2C2") if a test scan is marginal.
+const HOLO_QR_SILVER = "#CFCFCF";
 
 // v424 — frame gradient removed in favour of a flat GOLD fill. The diagonal
 // 5-stop gradient looked rich on screen but printed muddy on label stock and
@@ -99,13 +98,15 @@ function getCertUrl(certId: string): string {
   return `${APP_BASE_URL}/vault/${certId}`;
 }
 
-async function generateQRBuffer(url: string, size: number): Promise<Buffer> {
+async function generateQRBuffer(url: string, size: number, light: string = WHITE): Promise<Buffer> {
   return await QRCode.toBuffer(url, {
     type: "png",
     width: size,
     margin: 1,
     errorCorrectionLevel: "M",
-    color: { dark: BLACK, light: WHITE },
+    // Dark modules always black; light modules default WHITE (unchanged), or a
+    // printable light colour in holographic mode so the QR stays scannable.
+    color: { dark: BLACK, light },
   });
 }
 
@@ -389,13 +390,12 @@ function buildLine4(cert: CertificateRecord): string {
  * Draws the gold outer frame onto ctx. Called once during setup and again
  * after the logo is painted on the back label to prevent bleed-over.
  */
-function drawGoldFrame(ctx: any) {
+function drawGoldFrame(ctx: any, frameColor: string = GOLD_LIGHT) {
   ctx.shadowBlur = 0;
   ctx.shadowColor = "transparent";
-  // v424 — flat GOLD_LIGHT fill (was 5-stop diagonal gradient). Brand-
-  // unification pass folded the separate slightly-darker outer-frame
-  // shade into GOLD_LIGHT so every gold surface uses one brand value.
-  ctx.fillStyle = GOLD_LIGHT;
+  // Flat frame fill. GOLD_LIGHT normally; WHITE in holographic mode so the
+  // border prints as nothing and the holographic paper shows through it.
+  ctx.fillStyle = frameColor;
   // Four strips — top, bottom, left, right
   ctx.fillRect(0, 0, PX_W, FRAME_W);
   ctx.fillRect(0, PX_H - FRAME_W, PX_W, FRAME_W);
@@ -470,12 +470,15 @@ export async function generateLabelPNG(cert: CertificateRecord, side: "front" | 
       gradeNum,
       mvgsDeductions
     );
-  const labelBg = isBlack ? BLACK : WHITE;
-  // Black Label foreground: GOLD_LIGHT for premium gold-on-black look.
-  // Affects three text elements inside drawFront(): card title block (L742),
-  // rarity strip (L629), and cert ID in grade-panel column (L606). White
-  // Label is unaffected (black on white).
-  const labelFg = isBlack ? GOLD_LIGHT : "#000000";
+  // Backgrounds: holographic mode prints the standard label warm gold #c18e22
+  // (was white) and keeps the Pristine label black; white-paper mode unchanged.
+  const labelBg = isBlack ? BLACK : (HOLOGRAPHIC_PAPER ? HOLO_GOLD : WHITE);
+  // Foreground: holographic mode draws ALL lettering WHITE (prints as nothing →
+  // holographic paper shimmers through it). White-paper mode unchanged
+  // (GOLD_LIGHT on the black label, black on the white label).
+  const labelFg = HOLOGRAPHIC_PAPER ? WHITE : (isBlack ? GOLD_LIGHT : "#000000");
+  // Frame: WHITE (holographic border) in holo mode, else the gold frame.
+  const frameColor = HOLOGRAPHIC_PAPER ? WHITE : GOLD_LIGHT;
 
   const SCALE = 2.4; // 300 base × 2.4 = 720 DPI effective. Uniform ctx.scale —
   // PX_W/PX_H and all derived layout constants stay identical; only the physical
@@ -491,7 +494,7 @@ export async function generateLabelPNG(cert: CertificateRecord, side: "front" | 
   ctx.fillRect(0, 0, PX_W, PX_H);
 
   // ── 2. GOLD OUTER FRAME — fills from canvas edge to FRAME_W inward ───────
-  drawGoldFrame(ctx);
+  drawGoldFrame(ctx, frameColor);
 
   // ── 3. INNER BACKGROUND — content zone inside gold frame ─────────────────
   ctx.fillStyle = labelBg;
@@ -613,7 +616,9 @@ async function drawFront(
   // ── 1. CARD ARTWORK BACKGROUND ────────────────────────────────────────────
   // If artwork is available, draw it then add a white wash overlay so dark
   // text remains legible on any card image. Full inner-area extent.
-  const artworkUrl = (cert as any).frontImageUrl;
+  // Holographic mode uses a solid gold/black background (no washed artwork),
+  // matching the approved design; white-paper mode keeps the artwork wash.
+  const artworkUrl = HOLOGRAPHIC_PAPER ? null : (cert as any).frontImageUrl;
   const artH = I_H;
   if (artworkUrl) {
     try {
@@ -640,19 +645,22 @@ async function drawFront(
   const DARK = "#1A1000";
 
   if (!isNonNum) {
-    // v424 — flat GOLD_LIGHT fill (was 5-stop metallic gradient + shine
-    // overlay). Solid gold prints reliably and the grade digit sits on a
-    // uniform background instead of competing with a fade.
-    ctx.fillStyle = GOLD_LIGHT;
+    // Grade panel background. White-paper: solid gold panel. Holographic: fill
+    // the panel with the label background (gold/black) so the holographic grade
+    // digit sits on a seamless field — no separate panel, no faint lines.
+    ctx.fillStyle = HOLOGRAPHIC_PAPER ? labelBg : GOLD_LIGHT;
     ctx.fillRect(panelX, panelY, PANEL_W, panelH);
 
-    // Subtle vertical separator on the left edge of the panel
-    ctx.strokeStyle = "rgba(212,175,55,0.25)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(panelX, panelY);
-    ctx.lineTo(panelX, stripY);
-    ctx.stroke();
+    // Subtle vertical separator on the left edge of the panel (white-paper
+    // only — removed in holographic mode per "no faint lines").
+    if (!HOLOGRAPHIC_PAPER) {
+      ctx.strokeStyle = "rgba(212,175,55,0.25)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(panelX, panelY);
+      ctx.lineTo(panelX, stripY);
+      ctx.stroke();
+    }
 
     const gradeStr = String(grade);
     // Tier NAME from the MVGS table keyed by the grade itself, so the slab and
@@ -674,7 +682,7 @@ async function drawFront(
     const cardNumFontSize = 30;
     if (cardNumPanelText) {
       ctx.font = `bold ${cardNumFontSize}px Arial, Helvetica, sans-serif`;
-      ctx.fillStyle = "#1A1A1A";
+      ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : "#1A1A1A";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       try {
@@ -694,12 +702,16 @@ async function drawFront(
     // em-box middle (digits are top-heavy). 0.04*em shift pushes the
     // digit down so it reads visually centred on digitCY.
     const digitY = digitCY - gradeFontSize * 0.04;
-    ctx.shadowOffsetX = 1;
-    ctx.shadowOffsetY = 1;
-    ctx.shadowBlur = 1;
-    ctx.shadowColor = "rgba(0,0,0,0.25)";
+    // Drop shadow on white-paper only — on a holographic (white) digit a grey
+    // shadow reads as a faint smudge, so it's dropped in holo mode.
+    if (!HOLOGRAPHIC_PAPER) {
+      ctx.shadowOffsetX = 1;
+      ctx.shadowOffsetY = 1;
+      ctx.shadowBlur = 1;
+      ctx.shadowColor = "rgba(0,0,0,0.25)";
+    }
     ctx.font = `bold ${gradeFontSize}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle = "#1A1A1A";
+    ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : "#1A1A1A";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(gradeStr, panelCX, digitY);
@@ -722,7 +734,7 @@ async function drawFront(
       (ctx as any).letterSpacing = `${abbrLetterSpacing}px`;
     } catch {}
     ctx.font = `bold ${abbrFontSize}px Arial, Helvetica, sans-serif`;
-    ctx.fillStyle = "#1A1A1A";
+    ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : "#1A1A1A";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(gradeAbbr, panelCX, abbrCY);
@@ -735,16 +747,16 @@ async function drawFront(
     if (gradeType === "AA" || gradeType === "authentic_altered") {
       ctx.textBaseline = "middle";
       ctx.font = `bold 28px Arial, Helvetica, sans-serif`;
-      ctx.fillStyle = "#1A1A1A";
+      ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : "#1A1A1A";
       ctx.fillText("AUTHENTIC", panelCX, panelY + panelH / 2 - 20);
       ctx.font = `bold 22px Arial, Helvetica, sans-serif`;
-      ctx.fillStyle = GOLD_DARK;
+      ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : GOLD_DARK;
       ctx.fillText("ALTERED", panelCX, panelY + panelH / 2 + 14);
     } else {
       const authSize = fitFontSize(ctx, "AUTHENTIC", PANEL_W - 8, 30, 18);
       ctx.textBaseline = "middle";
       ctx.font = `bold ${authSize}px Arial, Helvetica, sans-serif`;
-      ctx.fillStyle = "#1A1A1A";
+      ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : "#1A1A1A";
       ctx.fillText("AUTHENTIC", panelCX, panelY + panelH / 2);
     }
   }
@@ -830,12 +842,11 @@ async function drawFront(
   const BOX_Y = MV_HDR_Y - BOX_PY;
   const BOX_CY = BOX_Y + BOX_H / 2; // vertical centre of box
 
-  // Step 3 — black top banner. Spans the inner area from the left gold
-  // frame to the grade panel's left edge, vertically from the inner top
-  // down to the bottom of the wordmark box so the gold MINTVAULT glyphs
-  // sit on a pure black plate. Drawn before the wordmark text so the
-  // fillText below renders on top of the banner.
-  ctx.fillStyle = "#000000";
+  // Step 3 — top banner. White-paper: a black plate behind the gold MINTVAULT
+  // wordmark. Holographic: filled with the label background (gold/black) so
+  // there is NO black bar — the holographic wordmark sits directly on the
+  // label colour. Same rect/position either way.
+  ctx.fillStyle = HOLOGRAPHIC_PAPER ? labelBg : "#000000";
   ctx.fillRect(I_LEFT, I_TOP, panelX - I_LEFT, BOX_Y + BOX_H - I_TOP);
 
   // Step 4 — v424 — solid GOLD_LIGHT fill replaces the 5-stop gradient and
@@ -848,10 +859,9 @@ async function drawFront(
   ctx.textBaseline = "middle";
   const mvTextX = BOX_X + Math.round((BOX_W - mvBaseW) / 2);
 
-  // Always gold — the wordmark sits on the black top banner regardless
-  // of label variant, so the previous white-vs-black conditional has been
-  // removed.
-  ctx.fillStyle = GOLD_LIGHT;
+  // Wordmark: gold on the black banner (white-paper), or holographic WHITE in
+  // holo mode (prints as nothing → holographic paper shows through the glyphs).
+  ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : GOLD_LIGHT;
   ctx.shadowBlur = 0;
   ctx.shadowColor = "transparent";
   ctx.fillText(MV_TEXT, mvTextX, BOX_CY);
@@ -887,18 +897,6 @@ async function drawFront(
   // v432 — rarity moves OUT of the white panel and into the bottom strip,
   // so the main block uses the full textZoneH (no RARITY_ZONE_H reservation).
   const mainBlockZoneH = textZoneH;
-
-  // Holographic mode — lay a solid printed plate behind the left-panel text so
-  // the card name/set stay crisp on the shimmer stock. WHITE-label only: the
-  // black label is already fully black-inked (gold text on black) and must not
-  // get a grey plate over it, so its rendering is left byte-for-byte unchanged.
-  // The plate covers the artwork wash + white base behind the text; the gold
-  // frame, grade panel and black banner sit outside this region and are
-  // unaffected. No grading value, gate, or grade-panel pixel is touched.
-  if (HOLOGRAPHIC_PAPER && labelBg === WHITE) {
-    ctx.fillStyle = HOLO_BACKING;
-    ctx.fillRect(I_LEFT, textZoneT, panelX - I_LEFT, I_BOTTOM - textZoneT);
-  }
 
   // v432 — main block has TWO lines (card name + year+set). Rarity moved
   // into the bottom strip alongside the cert ID (rendered earlier).
@@ -956,9 +954,16 @@ async function drawBack(
   cert: CertificateRecord,
   _logo: any,
   loadImage: any,
-  _labelBg = WHITE,
+  labelBg = WHITE,
   _labelFg = "#1A1A1A"
 ) {
+  // Holographic mode: the back prints on the label colour (gold/black) with
+  // holographic (WHITE) lettering, matching the front. isBlack is derived from
+  // the passed background. The QR sits on a printed light colour so it scans:
+  // silver on the black label, gold on the gold label.
+  const isBlackHolo = labelBg === BLACK;
+  const holoFg = WHITE; // holographic lettering
+  const qrBg = HOLOGRAPHIC_PAPER ? (isBlackHolo ? HOLO_QR_SILVER : HOLO_GOLD) : WHITE;
   // ── Layout constants ─────────────────────────────────────────────────────
   const PANEL_X = I_LEFT; // 18
   const PANEL_W = 58;
@@ -975,22 +980,18 @@ async function drawBack(
   const qrY = I_TOP;
   const centreX = (PANEL_RIGHT + qrX) / 2;
 
-  // ── 1. WHITE BACKGROUND FILL ─────────────────────────────────────────────
-  // Overpaints the inner area white regardless of label variant. The back
-  // is uniformly white-bg with dark text + gold accents for both Black
-  // Label and Standard variants.
-  // Holographic mode: use the printed light-grey plate instead of white so the
-  // back (QR + verify text) actually lays ink and stays scannable/readable on
-  // shimmer stock — a pure-white fill would print as nothing and shimmer.
-  const backBg = HOLOGRAPHIC_PAPER ? HOLO_BACKING : WHITE;
+  // ── 1. BACKGROUND FILL ───────────────────────────────────────────────────
+  // White-paper: uniform white. Holographic: the label colour (gold/black) so
+  // the back matches the front and the holographic lettering shows through.
+  const backBg = HOLOGRAPHIC_PAPER ? labelBg : WHITE;
   ctx.fillStyle = backBg;
   ctx.fillRect(I_LEFT, I_TOP, I_W, I_H);
 
   // ── 2. BANNER fillRect ───────────────────────────────────────────────────
-  // Banner spans from the panel's right edge to I_RIGHT (NOT full inner
-  // width) so the gold panel (drawn later, step 4) sits on top of nothing
-  // dark and bleeds cleanly into the inner frame.
-  ctx.fillStyle = BANNER_BG;
+  // White-paper: dark banner strip behind GRADED UNDER / MVGS / GRADING
+  // STANDARD. Holographic: filled with the label colour so there is no black
+  // strip — the holographic text sits directly on the label. Same rect.
+  ctx.fillStyle = HOLOGRAPHIC_PAPER ? labelBg : BANNER_BG;
   ctx.fillRect(PANEL_RIGHT, I_TOP, I_RIGHT - PANEL_RIGHT, BANNER_H);
 
   // ── 3. BANNER TEXT ───────────────────────────────────────────────────────
@@ -1038,10 +1039,10 @@ async function drawBack(
   (ctx as any).imageSmoothingEnabled = false;
   ctx.font = `bold ${markFontSize}px Georgia, "Times New Roman", serif`;
   (ctx as any).letterSpacing = "2px";
-  ctx.strokeStyle = GOLD_MARK;
+  ctx.strokeStyle = HOLOGRAPHIC_PAPER ? holoFg : GOLD_MARK;
   ctx.lineWidth = 3;
   ctx.strokeRect(markRectX, markRectY, markRectW, markRectH);
-  ctx.fillStyle = GOLD_MARK;
+  ctx.fillStyle = HOLOGRAPHIC_PAPER ? holoFg : GOLD_MARK;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
   ctx.fillText("MVGS", markTextX, markTextY);
@@ -1058,11 +1059,11 @@ async function drawBack(
   ctx.fillText("GRADING STANDARD", Math.round((markRight + qrX) / 2), bannerMidY);
   ctx.restore();
 
-  // ── 4. GOLD PANEL fillRect ───────────────────────────────────────────────
-  // Drawn AFTER the banner so the panel cleanly covers the banner's left
-  // edge if any rendering drifted. Full inner height — not just below the
-  // banner — so the wordmark has the full vertical canvas to centre in.
-  ctx.fillStyle = GOLD_LIGHT;
+  // ── 4. LEFT PANEL fillRect ───────────────────────────────────────────────
+  // White-paper: gold strip for the rotated MINTVAULT wordmark. Holographic:
+  // filled with the label colour so it is a seamless field with the holographic
+  // wordmark on top. Same rect/position.
+  ctx.fillStyle = HOLOGRAPHIC_PAPER ? labelBg : GOLD_LIGHT;
   ctx.fillRect(PANEL_X, I_TOP, PANEL_W, I_BOTTOM - I_TOP);
 
   // ── 5. MINTVAULT ROTATED TEXT ────────────────────────────────────────────
@@ -1071,7 +1072,7 @@ async function drawBack(
   ctx.rotate(-Math.PI / 2);
   ctx.font = "bold 28px Georgia, 'Times New Roman', serif";
   (ctx as any).letterSpacing = "3px";
-  ctx.fillStyle = INK;
+  ctx.fillStyle = HOLOGRAPHIC_PAPER ? holoFg : INK;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText("MINTVAULT", 0, 0);
@@ -1081,7 +1082,7 @@ async function drawBack(
   ctx.save();
   ctx.font = "bold 26px 'Cinzel', Georgia, 'Times New Roman', serif";
   (ctx as any).letterSpacing = "1.5px";
-  ctx.fillStyle = INK;
+  ctx.fillStyle = HOLOGRAPHIC_PAPER ? holoFg : INK;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
   ctx.fillText("mintvaultuk.com", centreX, I_TOP + BANNER_H + 38);
@@ -1091,7 +1092,7 @@ async function drawBack(
   ctx.save();
   ctx.font = "bold 20px Georgia, 'Times New Roman', serif";
   (ctx as any).letterSpacing = "1.5px";
-  ctx.fillStyle = INK;
+  ctx.fillStyle = HOLOGRAPHIC_PAPER ? holoFg : INK;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
   ctx.fillText("Tap NFC to verify", centreX, I_BOTTOM - 28);
@@ -1099,12 +1100,12 @@ async function drawBack(
 
   // ── 8. QR CODE ───────────────────────────────────────────────────────────
   const certUrl = getCertUrl(cert.certId);
-  const qrBuf = await generateQRBuffer(certUrl, qrSize);
+  // White-paper: black-on-white QR on a white box. Holographic: black-on-qrBg
+  // (silver on black label, gold on gold label) — a PRINTED light background so
+  // the QR is high-contrast and scannable with no holographic shimmer behind it.
+  const qrBuf = await generateQRBuffer(certUrl, qrSize, qrBg);
   const qrImg = await loadImage(qrBuf);
-  // White box behind QR — covers the banner in the top-right corner.
-  // Holographic mode: printed light-grey plate so the QR keeps a solid,
-  // scannable background instead of shimmering paper.
-  ctx.fillStyle = backBg;
+  ctx.fillStyle = qrBg;
   ctx.fillRect(qrX, qrY, qrSize, qrSize);
   ctx.drawImage(qrImg, qrX, qrY, qrSize, qrSize);
 
@@ -1117,13 +1118,14 @@ async function drawBack(
   ctx.textBaseline = "middle";
   const certBackFit = fitFontSize(ctx, cert.certId.replace(/^MV/, ""), qrSize - 8, certFontH, 14);
   ctx.font = `bold ${certBackFit}px Arial, Helvetica, sans-serif`;
-  ctx.fillStyle = INK;
+  ctx.fillStyle = HOLOGRAPHIC_PAPER ? holoFg : INK;
   ctx.fillText(cert.certId.replace(/^MV/, ""), qrX + qrSize - 8, certMidY);
   ctx.restore();
 
-  // ── 10. GOLD FRAME (last) ────────────────────────────────────────────────
-  // Painted last so nothing can bleed into the border.
-  drawGoldFrame(ctx);
+  // ── 10. FRAME (last) ─────────────────────────────────────────────────────
+  // Painted last so nothing can bleed into the border. WHITE (holographic
+  // border) in holo mode, else gold.
+  drawGoldFrame(ctx, HOLOGRAPHIC_PAPER ? WHITE : GOLD_LIGHT);
 
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
