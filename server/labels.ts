@@ -998,9 +998,13 @@ async function drawBack(
   // Pre-compute the MVGS mark geometry so the two side texts can centre
   // themselves against the mark's left and right edges (PANEL_RIGHT ↔
   // markRectX for "GRADED UNDER", markRight ↔ qrX for "GRADING STANDARD").
-  const markFontSize = 22;
-  const markPadX = 20;
-  const markPadY = 8;
+  // Founder review of the printed holographic sample: MVGS mark ~25% larger,
+  // GRADED UNDER / GRADING STANDARD bigger, holographic mode only — the
+  // white-paper back label (already approved, unchanged) keeps its sizes.
+  const markFontSize = HOLOGRAPHIC_PAPER ? 28 : 22; // was 22; holo: +~25%
+  const markPadX = HOLOGRAPHIC_PAPER ? 25 : 20;
+  const markPadY = HOLOGRAPHIC_PAPER ? 10 : 8;
+  const bandFontSize = HOLOGRAPHIC_PAPER ? 18 : 14; // GRADED UNDER / GRADING STANDARD, was 14
   ctx.save();
   ctx.font = `bold ${markFontSize}px Georgia, "Times New Roman", serif`;
   (ctx as any).letterSpacing = "2px";
@@ -1019,7 +1023,7 @@ async function drawBack(
   // Left — "GRADED UNDER" centred between the gold left panel and the
   // MVGS box.
   ctx.save();
-  ctx.font = "900 14px Arial, Helvetica, sans-serif";
+  ctx.font = `900 ${bandFontSize}px Arial, Helvetica, sans-serif`;
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle = "#FFFFFF";
   ctx.textAlign = "center";
@@ -1051,7 +1055,7 @@ async function drawBack(
   // Right — "GRADING STANDARD" centred between the MVGS box right edge
   // and the QR's left edge.
   ctx.save();
-  ctx.font = "900 14px Arial, Helvetica, sans-serif";
+  ctx.font = `900 ${bandFontSize}px Arial, Helvetica, sans-serif`;
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle = "#FFFFFF";
   ctx.textAlign = "center";
@@ -1079,23 +1083,30 @@ async function drawBack(
   ctx.restore();
 
   // ── 6. URL ───────────────────────────────────────────────────────────────
+  // Founder review: double size in holographic mode (white-paper unchanged).
+  // Baseline pushed down from +38 to +50 so the taller glyphs clear the
+  // banner above (verified by rendering — see commit note).
   ctx.save();
-  ctx.font = "bold 26px 'Cinzel', Georgia, 'Times New Roman', serif";
+  const urlFontSize = HOLOGRAPHIC_PAPER ? 52 : 26;
+  ctx.font = `bold ${urlFontSize}px 'Cinzel', Georgia, 'Times New Roman', serif`;
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle = HOLOGRAPHIC_PAPER ? holoFg : INK;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
-  ctx.fillText("mintvaultuk.com", centreX, I_TOP + BANNER_H + 38);
+  ctx.fillText("mintvaultuk.com", centreX, I_TOP + BANNER_H + (HOLOGRAPHIC_PAPER ? 50 : 38));
   ctx.restore();
 
   // ── 7. TAP NFC TEXT ──────────────────────────────────────────────────────
+  // Founder review: double size in holographic mode. Baseline pulled up from
+  // -28 to -40 so the taller glyphs clear the inner frame below.
   ctx.save();
-  ctx.font = "bold 20px Georgia, 'Times New Roman', serif";
+  const nfcFontSize = HOLOGRAPHIC_PAPER ? 40 : 20;
+  ctx.font = `bold ${nfcFontSize}px Georgia, 'Times New Roman', serif`;
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle = HOLOGRAPHIC_PAPER ? holoFg : INK;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
-  ctx.fillText("Tap NFC to verify", centreX, I_BOTTOM - 28);
+  ctx.fillText("Tap NFC to verify", centreX, I_BOTTOM - (HOLOGRAPHIC_PAPER ? 40 : 28));
   ctx.restore();
 
   // ── 8. QR CODE ───────────────────────────────────────────────────────────
