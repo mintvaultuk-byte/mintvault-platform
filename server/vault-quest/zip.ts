@@ -20,7 +20,8 @@ function sanitizeEntryName(name: string): string {
     .split("/")
     .filter((seg) => seg && seg !== "." && seg !== "..")
     .join("/")
-    .replace(/[\x00-\x1f]/g, "");
+    // Intentional: strips control chars from zip entry names (zip-slip sanitisation above).
+    .replace(/[\x00-\x1f]/g, ""); // eslint-disable-line no-control-regex
 }
 
 function crc32(buf: Buffer): number {
