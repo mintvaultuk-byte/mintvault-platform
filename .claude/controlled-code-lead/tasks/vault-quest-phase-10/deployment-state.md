@@ -66,3 +66,23 @@ against staging/prod:
    trusting an unqualified `vq_artwork_revisions` query against a fresh branch.
    This is a **10B/staging-deploy gate**, not something a local session can prove — flagging it here so
    it isn't silently assumed away when 10A-8 eventually gets scheduled for real.
+
+## Production migrations 0008–0014 APPLIED (2026-07-13, owner-approved)
+
+Owner explicitly approved applying migrations-vq/0008 through 0014 to **production**
+(`ep-wispy-morning-ab6f4o08`) ahead of deploying Phase 10A code, specifically so D10
+idempotency (`vq_generation_requests`) is genuinely active rather than silently
+degrading — discovered mid-deploy that prod had NONE of 0008-0014 applied (still
+Phase-7E schema + the 5 independent label/scanner commits already merged straight to
+`main`). Applied via a one-off script run over `fly ssh console -a mintvault`
+(raw `pg` against the app's own `MINTVAULT_DATABASE_URL`, each statement executed
+individually — no multi-statement transaction, so pooled-connection DDL risk does
+not apply here specifically); confirmed via direct read-only schema query
+(`information_schema.tables`) before and after; reapplied a second time immediately
+after to prove idempotency (clean no-op, 0 errors, matching every other
+`IF NOT EXISTS`-guarded migration this phase). Production now has all 26 `vq_` tables
+including `vq_generation_requests`, `vq_artwork_revisions`, `vq_feature_flags`,
+`vq_export_jobs`, `vq_config`, `vq_artwork_revision_events`. No grading/payment table
+touched; no data in any existing table modified. The pooled-vs-unpooled concern above
+is about the APP's own runtime write path at generation time, not this one-off DDL
+apply — still an open, separately-tracked item, not resolved by this migration apply.

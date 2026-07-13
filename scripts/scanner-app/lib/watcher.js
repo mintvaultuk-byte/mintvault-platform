@@ -580,6 +580,39 @@ class Watcher extends EventEmitter {
       const a = this.bufferedFront;
       const b = filePath;
       this.bufferedFront = null;
+
+      // Game-agnostic duplicate guard (independent of front/back content —
+      // see back-detect.js's looksLikeSameCard): if these two scans are the
+      // SAME card face — front scanned twice, e.g. the operator forgot a
+      // front was already buffered (possibly minutes earlier) and re-scanned
+      // it — refuse to auto-pair. Uploading would mint a real, numbered cert
+      // with the same picture on both sides (MV476/MV479). Neither scan is
+      // deleted — both move to rejected/ for manual review/rescan, the same
+      // convention an operator's own "Reject & rescan" already uses.
+      try {
+        const dupe = await backDetect.looksLikeSameCard(a, b);
+        if (dupe.same) {
+          const reason = `both scans look like the same card face (distance=${dupe.distance.toFixed(1)}, threshold=${backDetect.SAME_MAX}) — refusing to auto-pair as front+back`;
+          this.log(`DUPLICATE SCAN: ${path.basename(a)} + ${path.basename(b)} — ${reason}`, "error");
+          const rejDir = this.dateFolder(REJECTED);
+          for (const f of [a, b]) {
+            const moved = this.moveFile(f, rejDir);
+            if (moved) this.writeError(moved, reason);
+          }
+          stateMod.set({
+            state: "error",
+            bufferedFront: null,
+            lastError: "Duplicate scan detected — both files moved to rejected/, please rescan (see log for details)",
+          });
+          this.emitState();
+          return;
+        }
+      } catch (err) {
+        // Never let the guard itself block a legitimate pair — if the check
+        // errors, fall through to the existing front/back logic as before.
+        this.log(`duplicate-scan check error (continuing): ${err.message}`, "warn");
+      }
+
       // Decide front vs back by CONTENT, not arrival order (order-independent —
       // see back-detect.js). Falls back to scan order (the buffered file `a` was
       // scanned first = front) and FLAGS the card when detection can't confirm —
