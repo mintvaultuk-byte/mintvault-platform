@@ -694,10 +694,16 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   const [compareSel, setCompareSel] = useState<number[]>([]); // up to 2 candidate ids
   const [showCompare, setShowCompare] = useState(false);
   const [promptFor, setPromptFor] = useState<VqCandidateRow | null>(null);
-  const [zoomId, setZoomId] = useState<number | null>(null);
+  const [zoomId, setZoomId] = useState<number | "master" | "action" | null>(null);
+  // Archive/History panel (Phase B) — which reference slot's revision history is open.
+  const [historyFor, setHistoryFor] = useState<VqRefType | null>(null);
   // Description history (vq_character_revisions is already written on every change)
   const [histOpen, setHistOpen] = useState(false);
   const [histCompare, setHistCompare] = useState<number | null>(null);
+  // Locked-character edit override (Phase B): a locked/canonical character stays
+  // locked while this is true — it only unblocks the Bible/description controls for
+  // one deliberate, confirmed edit session. Reset whenever the selected character changes.
+  const [editingLocked, setEditingLocked] = useState(false);
   // Card-level stats for the founder dashboard (same endpoint as the board).
   const bibleDash = useQuery<Dashboard>({ queryKey: ["/api/admin/vault-quest/dashboard"], retry: false });
   // Session/today credit tracking (client-side ESTIMATE of spend, persisted per day).
@@ -767,6 +773,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     setCompareSel([]);
     setShowCompare(false);
     setZoomId(null);
+    setEditingLocked(false);
+    setHistoryFor(null);
   }, [selected?.characterId]);
 
   async function seedCharacters() {
@@ -785,15 +793,18 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
 
   async function saveCharacter() {
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
-    if (selected.locked) { toast({ title: "Character locked", description: "Unlock the character before editing its Bible fields.", variant: "destructive" }); return; }
+    const lockedOverride = selected.locked && editingLocked;
+    if (selected.locked && !editingLocked) { toast({ title: "Character locked", description: "Click Edit in the Identity section to make a confirmed change to this locked character, or Unlock it.", variant: "destructive" }); return; }
     setBusy("save");
     try {
       await apiRequest("PATCH", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}`, {
         ...draft,
-        reason: "Character Bible edit",
+        reason: lockedOverride ? "Character Bible edit (locked override)" : "Character Bible edit",
+        ...(lockedOverride ? { confirmReplaceLocked: true } : {}),
       });
       await chars.refetch();
-      toast({ title: "Character Bible saved", description: selected.characterId });
+      if (lockedOverride) setEditingLocked(false);
+      toast({ title: "Character Bible saved", description: lockedOverride ? "Description may now need re-approval before new artwork uses it." : selected.characterId });
     } catch (e) {
       onAuthError(e, "Save Character Bible failed");
     } finally {
@@ -806,7 +817,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   // explicitly approves. Approving saves the current draft first, then approves.
   async function generateDescription(mode: "generate" | "improve") {
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
-    if (selected.locked) { toast({ title: "Character locked", description: "Unlock before changing the description.", variant: "destructive" }); return; }
+    if (selected.locked && !editingLocked) { toast({ title: "Character locked", description: "Click Edit in the Identity section first, or Unlock the character.", variant: "destructive" }); return; }
     setBusy(`desc-${mode}`);
     try {
       const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/describe`, { mode });
@@ -822,12 +833,18 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
 
   async function approveDescription() {
     if (!selected) return;
+    const lockedOverride = selected.locked && editingLocked;
     setBusy("desc-approve");
     try {
       // Persist the current draft first so what's approved is exactly what's on screen.
-      await apiRequest("PATCH", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}`, { ...draft, reason: "description review" });
+      await apiRequest("PATCH", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}`, {
+        ...draft,
+        reason: lockedOverride ? "description review (locked override)" : "description review",
+        ...(lockedOverride ? { confirmReplaceLocked: true } : {}),
+      });
       await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/approve-description`, {});
       await chars.refetch();
+      if (lockedOverride) setEditingLocked(false);
       toast({ title: "Description approved", description: "Artwork generation is now unlocked for this character." });
     } catch (e) {
       onAuthError(e, "Approve description failed");
@@ -864,6 +881,34 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     setDraft(restored);
     setHistOpen(false);
     toast({ title: "Revision restored to draft", description: "Review the fields, then Save Bible / Approve Description to keep it." });
+  }
+
+  // Archive/History for Master + Action reference images (Phase B) — wires the
+  // already-built, already-tested immutable revision ledger into the UI for the
+  // first time. Every approve keeps the previous image here forever; Restore never
+  // deletes anything, it just re-activates an older revision.
+  type VqRevisionRow = { id: number; r2Key: string; isActive: boolean; width: number | null; height: number | null; createdBy: string | null; createdAt: string; archivedAt: string | null };
+  const revisionHistory = useQuery<{ revisions: VqRevisionRow[] } | null>({
+    queryKey: [`/api/admin/vault-quest/artwork-revisions?entityType=character&entityId=${selected?.characterId ?? "none"}&slot=${historyFor ?? "none"}`],
+    enabled: !!selected?.characterId && !!historyFor,
+    retry: false,
+  });
+  async function restoreRevisionImage(revisionId: number) {
+    if (!selected) return;
+    const lockedOverride = selected.locked;
+    if (lockedOverride && !window.confirm(`${selected.characterName} is locked as canonical.\n\nRestoring this older image will archive the current one and make this the active reference again. Nothing is ever deleted — you can restore back at any time.\n\nContinue?`)) return;
+    setBusy(`restore-${revisionId}`);
+    try {
+      await apiRequest("POST", `/api/admin/vault-quest/artwork-revisions/${revisionId}/restore`, lockedOverride ? { confirmReplaceLocked: true } : {});
+      await chars.refetch();
+      await revisionHistory.refetch();
+      setArtNonce((n) => n + 1);
+      toast({ title: "Revision restored", description: "This image is now the active reference." });
+    } catch (e) {
+      onAuthError(e, "Restore failed");
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function uploadReference(file: File) {
@@ -1119,9 +1164,14 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
 
   async function approveCandidate(candidateId: number, lock = false) {
     if (!selected) return;
+    // Approving on an already-locked character replaces its Master/Action reference
+    // (Phase B) — a deliberate, confirmed action every time. The old image is archived,
+    // never destroyed (promoteCharacterReferenceRevision), and stays in Archive/History.
+    const lockedOverride = selected.locked;
+    if (lockedOverride && !window.confirm(`${selected.characterName} is locked as canonical.\n\nApproving this candidate will archive the current approved reference image and make this the new one. The replaced image stays available in Archive/History and can be restored at any time.\n\nContinue?`)) return;
     setBusy(`${lock ? "lock" : "approve"}-${candidateId}`);
     try {
-      await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/approve-candidate`, { candidateId, lock });
+      await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/approve-candidate`, { candidateId, lock, ...(lockedOverride ? { confirmReplaceLocked: true } : {}) });
       await chars.refetch();
       await candQuery.refetch();
       setArtNonce((n) => n + 1);
@@ -1562,13 +1612,30 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                     <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${DESC_STATUS_META[descStatus(selected)].cls}`}>{DESC_STATUS_META[descStatus(selected)].label}</span>
                   </span>
                   <div className="flex flex-wrap gap-1.5">
-                    <AdminButton data-deeplink="description" variant="gold" size="sm" onClick={() => generateDescription("generate")} disabled={busy === "desc-generate" || selected.locked}>
+                    {selected.locked && !editingLocked && (
+                      <AdminButton
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          if (window.confirm(`${selected.characterName} is locked as a canonical character.\n\nYou can still edit its description here. Saving will require the description to be re-approved before new artwork can use it — the current locked/approved state and full history are preserved either way.\n\nContinue editing?`)) setEditingLocked(true);
+                        }}
+                        title="Locked characters need a confirmed Edit before their description can change"
+                      >
+                        <Wand2 className="mr-1 h-4 w-4" />Edit
+                      </AdminButton>
+                    )}
+                    {selected.locked && editingLocked && (
+                      <AdminButton variant="ghost" size="sm" onClick={() => { setEditingLocked(false); setDraft(draftFromCharacter(selected)); }}>
+                        Cancel Edit
+                      </AdminButton>
+                    )}
+                    <AdminButton data-deeplink="description" variant="gold" size="sm" onClick={() => generateDescription("generate")} disabled={busy === "desc-generate" || (selected.locked && !editingLocked)}>
                       {busy === "desc-generate" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Wand2 className="mr-1 h-4 w-4" />}{dnaComplete(selected) ? "Regenerate Description" : "Generate Description"}
                     </AdminButton>
-                    <AdminButton variant="ghost" size="sm" onClick={() => generateDescription("improve")} disabled={busy === "desc-improve" || selected.locked || !dnaComplete(selected)} title={!dnaComplete(selected) ? "Generate a description first" : "Improve the current description without changing the identity"}>
+                    <AdminButton variant="ghost" size="sm" onClick={() => generateDescription("improve")} disabled={busy === "desc-improve" || (selected.locked && !editingLocked) || !dnaComplete(selected)} title={!dnaComplete(selected) ? "Generate a description first" : "Improve the current description without changing the identity"}>
                       {busy === "desc-improve" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Sparkles className="mr-1 h-4 w-4" />}Improve
                     </AdminButton>
-                    <AdminButton data-deeplink="approve_description" size="sm" onClick={approveDescription} disabled={busy === "desc-approve" || selected.locked || descStatus(selected) === "approved"} title={descStatus(selected) === "approved" ? "Already approved" : "Saves the fields below, then approves the description — unlocks artwork generation"}>
+                    <AdminButton data-deeplink="approve_description" size="sm" onClick={approveDescription} disabled={busy === "desc-approve" || (selected.locked && !editingLocked) || descStatus(selected) === "approved"} title={descStatus(selected) === "approved" ? "Already approved" : "Saves the fields below, then approves the description — unlocks artwork generation"}>
                       {busy === "desc-approve" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1 h-4 w-4" />}Approve Description
                     </AdminButton>
                     <AdminButton variant="ghost" size="sm" onClick={() => { setHistCompare(null); setHistOpen(true); }} title="Every save is recorded — view, compare or restore a previous description">
@@ -1576,6 +1643,9 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                     </AdminButton>
                   </div>
                 </div>
+                {selected.locked && editingLocked && (
+                  <p className="mb-2 text-[11px] text-amber-300/90">Editing a locked character — Save Bible will demote the description to Needs Review until you re-approve it. The character itself stays locked/canonical.</p>
+                )}
                 {descStatus(selected) !== "approved" && (
                   <p className="mb-2 text-[11px] text-sky-300/80">Artwork generation is locked until the description is approved. Stage 2/3 descriptions inherit the previous stage and must clearly evolve it.</p>
                 )}
@@ -1618,7 +1688,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                         className={`${inputCls} min-h-[72px] resize-y`}
                         rows={field.rows}
                         value={draft[field.key]}
-                        disabled={selected.locked}
+                        disabled={selected.locked && !editingLocked}
                         onChange={(e) => setDraft((p) => ({ ...p, [field.key]: e.target.value }))}
                         placeholder={field.label}
                       />
@@ -1723,11 +1793,15 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                       </div>
                       {masterOk ? (
                         <div className="flex items-center gap-3">
-                          <img src={`/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}`} alt="approved master" className="h-24 w-24 rounded-lg bg-slate-950 object-contain" />
+                          <img src={`/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}`} alt="approved master" onClick={() => setZoomId("master")} className="h-24 w-24 cursor-zoom-in rounded-lg bg-slate-950 object-contain" />
                           <div>
                             <div className="text-sm text-emerald-300">Approved Master on file</div>
                             <p className="mt-0.5 max-w-sm text-[11px] text-slate-500">Every future card and pose reuses this exact image so the character always looks the same.</p>
-                            <button type="button" onClick={() => generateMasterArtwork("master_portrait")} disabled={busyGen || selected.locked} className="mt-2 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 disabled:opacity-40">Replace Master</button>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <button type="button" onClick={() => setZoomId("master")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500">View</button>
+                              <button type="button" onClick={() => generateMasterArtwork("master_portrait")} disabled={busyGen} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 disabled:opacity-40">Replace Master</button>
+                              <button type="button" onClick={() => setHistoryFor("master_portrait")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500">Archive</button>
+                            </div>
                           </div>
                         </div>
                       ) : (
@@ -1785,6 +1859,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                         <div className="mt-2 flex flex-wrap gap-1.5">
                                           <button type="button" disabled={!!busy || evoFailed} title={evoFailed ? "Blocked — too similar to the previous evolution stage" : undefined} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve</button>
                                           <button type="button" disabled={!!busy} onClick={() => rejectCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400 disabled:opacity-40">Reject</button>
+                                          <button type="button" disabled={busy === `del-${c.id}`} onClick={() => deleteCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400 disabled:opacity-40">{busy === `del-${c.id}` ? "…" : "Delete"}</button>
                                           <button type="button" onClick={() => setZoomId(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200">Zoom</button>
                                         </div>
                                       </div>
@@ -1804,8 +1879,9 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                   <img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="master candidate" className="aspect-square w-full rounded bg-slate-950 object-contain" />
                                   <div className="mt-1 flex items-center justify-between">
                                     <span className="text-[10px] text-slate-500">{c.identityScore != null ? `Match ${c.identityScore}` : ""}</span>
-                                    <div className="flex gap-1">
-                                      <button type="button" disabled={!!busy} onClick={() => rejectCandidate(c.id)} className="rounded p-0.5 text-slate-500 hover:text-red-400 disabled:opacity-40"><XCircle className="h-4 w-4" /></button>
+                                    <div className="flex items-center gap-1">
+                                      <button type="button" disabled={!!busy} onClick={() => rejectCandidate(c.id)} title="Reject" className="rounded p-0.5 text-slate-500 hover:text-red-400 disabled:opacity-40"><XCircle className="h-4 w-4" /></button>
+                                      <button type="button" disabled={busy === `del-${c.id}`} onClick={() => deleteCandidate(c.id)} title="Delete (hides it — file kept)" className="rounded px-1 text-[9px] text-slate-500 hover:text-red-400 disabled:opacity-40">Del</button>
                                       <button type="button" disabled={!!busy} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve</button>
                                     </div>
                                   </div>
@@ -1827,10 +1903,14 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                         <p className="text-[11px] text-slate-600">Approve a Master Reference first — the Action Pose is built from it so the character stays identical.</p>
                       ) : actionOk ? (
                         <div className="flex items-center gap-3">
-                          <img src={`/api/admin/vault-quest/characters/${cid}/pack/action_pose?v=${artNonce}`} alt="approved action" className="h-24 w-24 rounded-lg bg-slate-950 object-contain" />
+                          <img src={`/api/admin/vault-quest/characters/${cid}/pack/action_pose?v=${artNonce}`} alt="approved action" onClick={() => setZoomId("action")} className="h-24 w-24 cursor-zoom-in rounded-lg bg-slate-950 object-contain" />
                           <div>
                             <div className="text-sm text-emerald-300">Approved Action Pose on file</div>
-                            <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked} className="mt-2 rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 disabled:opacity-40">Replace Action</button>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <button type="button" onClick={() => setZoomId("action")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500">View</button>
+                              <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 disabled:opacity-40">Replace Action</button>
+                              <button type="button" onClick={() => setHistoryFor("action_pose")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500">Archive</button>
+                            </div>
                           </div>
                         </div>
                       ) : (
@@ -1857,7 +1937,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                 return (
                                   <div key={c.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-2">
                                     <div className="flex items-start gap-2">
-                                      <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}`} alt="master" onClick={() => setZoomId(-1)} className="h-24 w-24 cursor-zoom-in rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Approved Master</div></div>
+                                      <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}`} alt="master" onClick={() => setZoomId("master")} className="h-24 w-24 cursor-zoom-in rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Approved Master</div></div>
                                       <span className="mt-8 text-slate-600">→</span>
                                       <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="action candidate" onClick={() => setZoomId(c.id)} className="h-24 w-24 cursor-zoom-in rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Action Candidate</div></div>
                                       <div className="ml-1 flex-1">
@@ -1877,6 +1957,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                         <div className="mt-2 flex flex-wrap gap-1.5">
                                           <button type="button" disabled={!!busy || poseFailed} title={poseFailed ? "Blocked — pose is too similar to the Master Reference" : undefined} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve Action Pose</button>
                                           <button type="button" disabled={!!busy} onClick={() => rejectCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400 disabled:opacity-40">Reject</button>
+                                          <button type="button" disabled={busy === `del-${c.id}`} onClick={() => deleteCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400 disabled:opacity-40">{busy === `del-${c.id}` ? "…" : "Delete"}</button>
                                           <button type="button" onClick={() => setZoomId(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200">Zoom</button>
                                         </div>
                                       </div>
@@ -1884,7 +1965,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                   </div>
                                 );
                               })}
-                              <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked} className="w-full rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-500 disabled:opacity-40">{busyGen ? (genPhaseLabel ?? "Generating…") : "Generate Another Matching Pose"}</button>
+                              <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen} className="w-full rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-500 disabled:opacity-40">{busyGen ? (genPhaseLabel ?? "Generating…") : "Generate Another Matching Pose"}</button>
                             </div>
                           )}
                     </div>
@@ -1958,8 +2039,39 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                     {/* Simple zoom overlay (fit to screen) */}
                     {zoomId != null && (
                       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setZoomId(null)}>
-                        <img src={zoomId === -1 ? `/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}` : `/api/admin/vault-quest/characters/${cid}/candidate/${zoomId}?v=${artNonce}`} alt="zoom" className="max-h-full max-w-full rounded-lg object-contain" onClick={(e) => e.stopPropagation()} />
+                        <img src={zoomId === "master" ? `/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}` : zoomId === "action" ? `/api/admin/vault-quest/characters/${cid}/pack/action_pose?v=${artNonce}` : `/api/admin/vault-quest/characters/${cid}/candidate/${zoomId}?v=${artNonce}`} alt="zoom" className="max-h-full max-w-full rounded-lg object-contain" onClick={(e) => e.stopPropagation()} />
                         <button type="button" onClick={() => setZoomId(null)} className="absolute right-6 top-6 rounded-lg bg-slate-800 px-3 py-1.5 text-sm text-slate-200">Close</button>
+                      </div>
+                    )}
+
+                    {/* Archive / History overlay — every approved image ever, oldest work never lost */}
+                    {historyFor && (
+                      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setHistoryFor(null)}>
+                        <div className="max-h-[85vh] w-full max-w-2xl overflow-auto rounded-lg border border-slate-700 bg-slate-900 p-4" onClick={(e) => e.stopPropagation()}>
+                          <div className="mb-3 flex items-center justify-between">
+                            <span className="text-sm font-semibold text-slate-200">Archive — {REF_TYPES.find((t) => t.value === historyFor)?.label} history</span>
+                            <button type="button" onClick={() => setHistoryFor(null)} className="text-xs text-slate-500 hover:text-slate-300">close</button>
+                          </div>
+                          {revisionHistory.isLoading && <p className="text-xs text-slate-500">Loading history…</p>}
+                          {!revisionHistory.isLoading && (revisionHistory.data?.revisions ?? []).length === 0 && (
+                            <p className="text-xs text-slate-500">No revision history yet for this slot — it was set before Archive tracking was added, or nothing has been approved yet.</p>
+                          )}
+                          <div className="space-y-2">
+                            {(revisionHistory.data?.revisions ?? []).map((r) => (
+                              <div key={r.id} className={`flex items-center gap-3 rounded border p-2 ${r.isActive ? "border-emerald-700 bg-emerald-950/20" : "border-slate-800 bg-slate-950/40"}`}>
+                                <img src={`/api/admin/vault-quest/artwork-revisions/${r.id}/image`} alt={`revision ${r.id}`} className="h-16 w-16 rounded bg-slate-950 object-contain" />
+                                <div className="flex-1 text-[11px] text-slate-400">
+                                  <div className={r.isActive ? "font-semibold text-emerald-300" : "text-slate-300"}>{r.isActive ? "Active" : "Archived"}{r.width ? ` · ${r.width}×${r.height}` : ""}</div>
+                                  <div>{new Date(r.createdAt).toLocaleString()} · {r.createdBy ?? "admin"}</div>
+                                  {r.archivedAt && <div className="text-slate-600">archived {new Date(r.archivedAt).toLocaleString()}</div>}
+                                </div>
+                                {!r.isActive && (
+                                  <button type="button" disabled={busy === `restore-${r.id}`} onClick={() => restoreRevisionImage(r.id)} className="rounded bg-amber-500 px-2.5 py-1 text-[11px] font-semibold text-slate-900 hover:bg-amber-400 disabled:opacity-50">{busy === `restore-${r.id}` ? "…" : "Restore"}</button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -1974,10 +2086,10 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                     <span className={labelCls}>generating <b className="text-amber-300">{refTypeMeta.label}</b></span>
                   </span>
                   <div className="flex flex-wrap gap-2">
-                    <AdminButton data-deeplink="generate-reference" variant="gold" size="sm" onClick={() => generateMasterArtwork()} disabled={busy === "gen-art" || selected.locked || descStatus(selected) !== "approved"} title={descStatus(selected) !== "approved" ? "Approve the description first — artwork reads from the approved description only." : undefined}>
+                    <AdminButton data-deeplink="generate-reference" variant="gold" size="sm" onClick={() => generateMasterArtwork()} disabled={busy === "gen-art" || descStatus(selected) !== "approved"} title={descStatus(selected) !== "approved" ? "Approve the description first — artwork reads from the approved description only." : undefined}>
                       {busy === "gen-art" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Wand2 className="mr-1 h-4 w-4" />}Generate {refTypeMeta.label}
                     </AdminButton>
-                    <AdminButton variant="ghost" size="sm" onClick={generate3More} disabled={busy === "gen-3more" || selected.locked || descStatus(selected) !== "approved"}>
+                    <AdminButton variant="ghost" size="sm" onClick={generate3More} disabled={busy === "gen-3more" || descStatus(selected) !== "approved"}>
                       {busy === "gen-3more" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Plus className="mr-1 h-4 w-4" />}Generate 3 More
                     </AdminButton>
                     <select
@@ -2165,7 +2277,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                             <button type="button" title="Compare (pick two)" onClick={() => setCompareSel((p) => { const n = p.includes(c.id) ? p.filter((x) => x !== c.id) : [...p.slice(-1), c.id]; if (n.length === 2) setShowCompare(true); return n; })} className={`${mini} ${inCompare ? "border-sky-500 text-sky-300" : ""}`}>Compare</button>
                             <button type="button" title="Delete (hides it — file kept)" onClick={() => deleteCandidate(c.id)} disabled={busy === `del-${c.id}`} className={`${mini} hover:border-red-500 hover:text-red-300`}>{busy === `del-${c.id}` ? "…" : "Delete"}</button>
                             <button type="button" title="Show the exact prompt used" onClick={() => setPromptFor(c)} className={mini}>Prompt</button>
-                            <button type="button" title={`Generate another ${refTypeMeta.label} from the same description`} onClick={() => generateMasterArtwork()} disabled={busy === "gen-art" || selected.locked || descStatus(selected) !== "approved"} className={mini}>Regen Similar</button>
+                            <button type="button" title={`Generate another ${refTypeMeta.label} from the same description`} onClick={() => generateMasterArtwork()} disabled={busy === "gen-art" || descStatus(selected) !== "approved"} className={mini}>Regen Similar</button>
                           </div>
                         </div>
                       );

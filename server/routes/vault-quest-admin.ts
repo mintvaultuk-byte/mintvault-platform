@@ -46,6 +46,7 @@ import {
   listRevisionHistory,
   restoreArtworkRevision,
   getActiveRevisionKey,
+  getRevisionById,
 } from "../vault-quest/lib/vq-artwork-revisions-store";
 import type { VqFeature } from "../vault-quest/lib/vq-feature-state";
 import type { GenerationPayload } from "../vault-quest/lib/generation-idempotency";
@@ -991,7 +992,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         characterId,
         patch,
         "admin",
-        String(body.reason ?? "bible edit")
+        String(body.reason ?? "bible edit"),
+        { allowWhileLocked: body.confirmReplaceLocked === true }
       );
       res.json({ character });
     } catch (err) {
@@ -1576,6 +1578,30 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     }
   });
 
+  // Serve one specific (possibly archived) revision's image bytes — the Archive/History
+  // panel's thumbnails. Character entities only for now (card art history isn't shown
+  // in any UI yet); the key is re-validated with assertVqReadKey regardless of what's
+  // stored, exactly like every other VQ image route.
+  app.get(
+    "/api/admin/vault-quest/artwork-revisions/:revisionId/image",
+    requireAdmin,
+    async (req: Request, res: Response) => {
+      try {
+        const revisionId = Number(req.params.revisionId);
+        if (!Number.isInteger(revisionId)) return res.status(400).json({ error: "invalid revisionId" });
+        const revision = await getRevisionById(revisionId);
+        if (!revision || revision.entityType !== "character") return res.status(404).json({ error: "revision not found" });
+        const buf = await getR2Buffer(assertVqReadKey(revision.r2Key));
+        if (!buf) return res.status(404).json({ error: "revision image not found in storage" });
+        res.setHeader("Content-Type", "image/png");
+        res.setHeader("Cache-Control", "private, max-age=300");
+        return res.send(buf);
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : "failed to load revision image" });
+      }
+    }
+  );
+
   // Roll back to a previous revision (Phase 10A-6) — a RECOVERY action, not a new
   // upload. Fails safely (no pointer change) if the target asset is missing or
   // its stored hash no longer matches what's actually in R2.
@@ -1586,6 +1612,19 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       try {
         const revisionId = Number(req.params.revisionId);
         if (!Number.isInteger(revisionId)) return res.status(400).json({ error: "invalid revisionId" });
+        const target = await getRevisionById(revisionId);
+        if (!target) return res.status(404).json({ error: "That revision no longer exists.", reason: "not_found" });
+        // Restoring changes the active pointer exactly like approving a candidate does,
+        // so it gets the SAME locked/confirm gate (this route had none before Phase B —
+        // closing that gap now that it's actually wired into the UI).
+        if (target.entityType === "character") {
+          const character = await vqStorage.getCharacter(target.entityId);
+          const confirmReplaceLocked = (req.body as { confirmReplaceLocked?: boolean } | undefined)?.confirmReplaceLocked === true;
+          if (character?.locked && !confirmReplaceLocked)
+            return res
+              .status(423)
+              .json({ error: "Character is locked — unlock before restoring an older reference, or confirm the restore.", locked: true });
+        }
         const outcome = await restoreArtworkRevision(revisionId, req.session?.adminEmail || "admin");
         if (!outcome.ok) {
           const messages: Record<string, string> = {
@@ -1617,13 +1656,19 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       try {
         const characterId = String(req.params.characterId);
         if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
-        const body = (req.body ?? {}) as { candidateId?: number; lock?: boolean };
+        const body = (req.body ?? {}) as { candidateId?: number; lock?: boolean; confirmReplaceLocked?: boolean };
         const candidateId = Number(body.candidateId);
         if (!Number.isInteger(candidateId)) return res.status(400).json({ error: "candidateId required" });
         const character = await vqStorage.getCharacter(characterId);
         if (!character) return res.status(404).json({ error: "character not found" });
-        if (character.locked)
-          return res.status(423).json({ error: "Character is locked — unlock before changing its reference pack." });
+        // A locked/canonical character may still have its reference replaced via an
+        // explicit, confirmed Replace action (Phase B founder decision) — the character
+        // stays locked; promoteCharacterReferenceRevision below still archives the old
+        // image and keeps full history either way. Without the flag, still hard-blocked.
+        if (character.locked && body.confirmReplaceLocked !== true)
+          return res
+            .status(423)
+            .json({ error: "Character is locked — unlock before changing its reference pack, or confirm the Replace action.", locked: true });
         const cand = await vqStorage.getArtworkCandidate(candidateId);
         if (!cand || cand.characterId !== characterId || !cand.r2Key.startsWith("vq/characters/")) {
           return res.status(404).json({ error: "candidate not found for this character" });
@@ -1953,8 +1998,9 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
         const character = await vqStorage.getCharacter(characterId);
         if (!character) return res.status(404).json({ error: "character not found" });
-        if (character.locked)
-          return res.status(423).json({ error: "Character is locked — unlock before regenerating its description." });
+        // No locked check here (Phase B): this only drafts a suggestion into the
+        // response body — nothing is persisted until the PATCH save, which enforces
+        // its own allowWhileLocked confirmation. Safe to draft even while locked.
         const mode = String((req.body as { mode?: string })?.mode) === "improve" ? "improve" : "generate";
         const prev = character.evolvesFromCharacterId
           ? ((await vqStorage.getCharacter(character.evolvesFromCharacterId)) ?? null)

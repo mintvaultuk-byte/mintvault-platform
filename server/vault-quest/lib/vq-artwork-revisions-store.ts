@@ -219,6 +219,13 @@ export async function listRevisionHistory(entityType: VqRevisionEntityType, enti
     .orderBy(desc(vqArtworkRevisions.createdAt));
 }
 
+/** A single revision row by id — for the Archive/History "view this exact image" and
+ *  restore-confirmation routes. Returns null rather than throwing (route decides 404). */
+export async function getRevisionById(revisionId: number): Promise<VqArtworkRevision | null> {
+  const [row] = await db.select().from(vqArtworkRevisions).where(eq(vqArtworkRevisions.id, revisionId)).limit(1);
+  return row ?? null;
+}
+
 /**
  * The ledger's own idea of the active key for (entity, slot) — a fallback source
  * of truth for the rare window where a direct-upload route created a revision

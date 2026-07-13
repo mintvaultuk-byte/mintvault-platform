@@ -207,12 +207,15 @@ export const vqStorage = {
     return { created, familyRulesCreated };
   },
 
-  async updateCharacterBible(characterId: string, patch: CharacterBiblePatch, editedBy?: string, reason?: string): Promise<VqCharacter> {
+  async updateCharacterBible(characterId: string, patch: CharacterBiblePatch, editedBy?: string, reason?: string, opts?: { allowWhileLocked?: boolean }): Promise<VqCharacter> {
     const existing = await this.getCharacter(characterId);
     if (!existing) throw new Error("character not found");
     const cleanPatch = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) as CharacterBiblePatch;
     if (Object.keys(cleanPatch).length === 0) return existing;
-    if (existing.locked && cleanPatch.locked !== false) {
+    // A locked/canonical character can still be deliberately edited (Phase B founder
+    // decision) via an explicit allowWhileLocked bypass — the character stays locked,
+    // nothing is unlocked implicitly. Without the flag, locked stays fully frozen.
+    if (existing.locked && cleanPatch.locked !== false && !opts?.allowWhileLocked) {
       throw new Error("Character is locked — unlock before editing its Bible fields.");
     }
     await db.insert(vqCharacterRevisions).values({
