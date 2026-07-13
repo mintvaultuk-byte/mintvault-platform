@@ -7,6 +7,7 @@ import { Loader2, Upload, Save, History, FileImage, FileText, FileCode, Plus, Al
 import { STATUS_META, allowedTargets, type VqStatus } from "@shared/vq-workflow";
 import { ReusePanel, fetchReuseCheck, useAdvancedMode, type ReuseCheck, type ReusableAsset } from "@/components/vault-quest/workflow";
 import { characterHealth, traitsFromBreakdown, matchBand, scoreBand, STATE_CLS, type IdentityBreakdown, type HealthState } from "@/components/vault-quest/quality";
+import { getOrCreateIdempotencyKey, clearIdempotencyKey } from "@/lib/vq-idempotency";
 
 // AI Cost Mode — founder-friendly quality tiers that map to real image models.
 // Simple Mode shows only these; Advanced Mode still exposes the model dropdown.
@@ -391,11 +392,17 @@ function AiAssist({ context, onApply, onUseArtwork, imageProviders, textConnecte
       }
     }
     setHidden(new Set()); setApplied(new Set()); setRes(null); setArtwork(null); setArtworkUsed(false); setUsingArtwork(false);
+    const cardScopeKey = `card:${cardId || "new"}:${mode}:${slot}`;
+    const cardIdempotencyKey = getOrCreateIdempotencyKey(cardScopeKey);
     try {
-      const r = await apiRequest("POST", "/api/admin/vault-quest/ai/artwork", { mode, slot, context });
-      setArtwork(await r.json() as ArtworkResp);
+      const r = await apiRequest("POST", "/api/admin/vault-quest/ai/artwork", { mode, slot, context, idempotencyKey: cardIdempotencyKey });
+      const data = await r.json() as ArtworkResp & { pending?: boolean; message?: string };
+      if (data.pending) { toast({ title: "Already generating", description: data.message ?? "This is already running — please wait." }); return; }
+      clearIdempotencyKey(cardScopeKey);
+      setArtwork(data);
       setLast({ kind: "artwork-image", mode });
     } catch (e) {
+      clearIdempotencyKey(cardScopeKey);
       setRes({ suggestions: [], provider: "higgsfield", model: "", dropped: 0, note: messageFromError(e) });
       handleAiError(e, "Artwork failed");
     } finally { artworkInFlight.current = false; setBusy(false); }
@@ -970,11 +977,18 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     const typeLabel = REF_TYPES.find((t) => t.value === type)?.label ?? "reference";
     setReuseCheck(null);
     setBusy("gen-art");
+    // Double-pay protection (D10): reuse the SAME key across a reload/2nd tab for this
+    // exact character+type+model; cleared below on any TERMINAL outcome so a deliberate
+    // next click (new roll, or a retry after a real failure) gets a fresh one.
+    const scopeKey = `character:${selected.characterId}:${type}:${imgModel || "default"}`;
+    const idempotencyKey = getOrCreateIdempotencyKey(scopeKey);
     try {
       if (type === "master_portrait") {
         // Master Reference always produces THREE strict studio candidates (enforced server-side).
-        const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: type, model: imgModel });
-        const data = (await res.json()) as { created?: { model?: string }[]; autoRejected?: number; bgRejected?: number };
+        const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: type, model: imgModel, idempotencyKey });
+        const data = (await res.json()) as { created?: { model?: string }[]; autoRejected?: number; bgRejected?: number; pending?: boolean; message?: string };
+        if (data.pending) { toast({ title: "Already generating", description: data.message ?? "This is already running — please wait." }); return; }
+        clearIdempotencyKey(scopeKey);
         await candQuery.refetch();
         setArtNonce((n) => n + 1);
         const made = data.created?.length ?? 0;
@@ -982,14 +996,17 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
         trackCredits(vqChargedCredits(data, imgModel)); // counts billed rejects at the model actually used
         toast({ title: `Master Reference — ${made} candidate${made === 1 ? "" : "s"}`, description: rejected ? `${rejected} auto-rejected for identity drift. Choose one below.` : "Studio references generated — choose one below." });
       } else {
-        const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: type, model: imgModel });
-        const data = (await res.json()) as { width: number; height: number; model?: string };
+        const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: type, model: imgModel, idempotencyKey });
+        const data = (await res.json()) as { width: number; height: number; model?: string; pending?: boolean; message?: string };
+        if (data.pending) { toast({ title: "Already generating", description: data.message ?? "This is already running — please wait." }); return; }
+        clearIdempotencyKey(scopeKey);
         await candQuery.refetch();
         trackCredits(vqCreditsPerImage(data.model ?? imgModel)); // model the server actually used (refs may upgrade it)
         setArtNonce((n) => n + 1);
         toast({ title: `${typeLabel} generated`, description: `${data.width}x${data.height} — review below, then Approve.` });
       }
     } catch (e) {
+      clearIdempotencyKey(scopeKey); // terminal (error) response — a deliberate retry should charge again
       artworkError(e, `Generate ${typeLabel} failed`);
     } finally {
       genInFlight.current = false;
@@ -1001,14 +1018,19 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
     if (!window.confirm(`Generate Stage 1/2/3 master artwork for family ${selected.familyId}? This spends Higgsfield credits (up to 3 images).`)) return;
     setBusy("gen-family");
+    const familyScopeKey = `family:${selected.familyId}:${imgModel || "default"}`;
+    const familyIdempotencyKey = getOrCreateIdempotencyKey(familyScopeKey);
     try {
-      const res = await apiRequest("POST", `/api/admin/vault-quest/characters/family/${encodeURIComponent(selected.familyId)}/generate-artwork`, { model: imgModel });
-      const data = (await res.json()) as { generated?: unknown[] };
+      const res = await apiRequest("POST", `/api/admin/vault-quest/characters/family/${encodeURIComponent(selected.familyId)}/generate-artwork`, { model: imgModel, idempotencyKey: familyIdempotencyKey });
+      const data = (await res.json()) as { generated?: unknown[]; pending?: boolean; message?: string };
+      if (data.pending) { toast({ title: "Already generating", description: data.message ?? "This is already running — please wait." }); return; }
+      clearIdempotencyKey(familyScopeKey);
       await candQuery.refetch();
       setArtNonce((n) => n + 1);
       trackCredits((data.generated?.length ?? 0) * creditsPerImage); // paid images — keep the spend counters honest
       toast({ title: "Family master artwork generated", description: `${data.generated?.length ?? 0} stage candidate(s). Select each stage to review + approve.` });
     } catch (e) {
+      clearIdempotencyKey(familyScopeKey);
       artworkError(e, "Generate family artwork failed");
     } finally {
       setBusy(null);
@@ -1019,14 +1041,19 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
     if (!window.confirm(`Generate 3 more ${refTypeMeta.label} candidates for ${selected.characterName}? This spends Higgsfield credits (3 images).`)) return;
     setBusy("gen-3more");
+    const batchScopeKey = `character:${selected.characterId}:batch:${refType}:${imgModel || "default"}`;
+    const batchIdempotencyKey = getOrCreateIdempotencyKey(batchScopeKey);
     try {
-      const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork/batch`, { count: 3, referenceType: refType, model: imgModel });
-      const data = (await res.json()) as { created?: { model?: string }[]; autoRejected?: number; bgRejected?: number };
+      const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork/batch`, { count: 3, referenceType: refType, model: imgModel, idempotencyKey: batchIdempotencyKey });
+      const data = (await res.json()) as { created?: { model?: string }[]; autoRejected?: number; bgRejected?: number; pending?: boolean; message?: string };
+      if (data.pending) { toast({ title: "Already generating", description: data.message ?? "This is already running — please wait." }); return; }
+      clearIdempotencyKey(batchScopeKey);
       await candQuery.refetch();
       setArtNonce((n) => n + 1);
       trackCredits(vqChargedCredits(data, imgModel)); // counts billed rejects at the model actually used
       toast({ title: "Generated more candidates", description: `${data.created?.length ?? 0} new candidate(s).` });
     } catch (e) {
+      clearIdempotencyKey(batchScopeKey);
       artworkError(e, "Generate 3 more failed");
     } finally {
       setBusy(null);
@@ -1153,6 +1180,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       }
       if (skipRef.current) { skipRef.current = false; setItem(i, { status: "skipped", note: "skipped by founder" }); skipped++; continue; }
       setItem(i, { status: "generating" });
+      const queueScopeKey = items[i].kind === "description" ? null : `character:${items[i].characterId}:${items[i].referenceType}:${batchModel || "default"}`;
       try {
         if (items[i].kind === "description") {
           // Anthropic text only — generates a DRAFT description (never approves), 0 credits.
@@ -1162,14 +1190,18 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
           await apiRequest("PATCH", `/api/admin/vault-quest/characters/${encodeURIComponent(items[i].characterId)}`, { ...data.fields, reason: "batch description draft" });
           setItem(i, { status: "succeeded", note: "draft — review & approve" }); ok++;
         } else {
-          const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(items[i].characterId)}/generate-artwork`, { referenceType: items[i].referenceType, model: batchModel });
-          const data = (await res.json()) as { created?: unknown[]; autoRejected?: number; candidateId?: number };
+          const queueIdempotencyKey = getOrCreateIdempotencyKey(queueScopeKey!);
+          const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(items[i].characterId)}/generate-artwork`, { referenceType: items[i].referenceType, model: batchModel, idempotencyKey: queueIdempotencyKey });
+          const data = (await res.json()) as { created?: unknown[]; autoRejected?: number; candidateId?: number; pending?: boolean };
+          if (data.pending) { setItem(i, { status: "queued", note: "already running elsewhere" }); continue; } // don't clear the key — genuinely still in flight
+          clearIdempotencyKey(queueScopeKey!);
           const made = Array.isArray(data.created) ? data.created.length : data.candidateId ? 1 : 0;
           trackCredits(made * batchCreditsPerImage);
           if (made === 0 && (data.autoRejected ?? 0) > 0) { setItem(i, { status: "rejected", note: "identity drift" }); rejected++; }
           else { setItem(i, { status: "succeeded" }); ok++; }
         }
       } catch (e) {
+        if (queueScopeKey) clearIdempotencyKey(queueScopeKey); // terminal (error) — a deliberate retry should charge again
         const status = (e as { status?: number })?.status;
         if (status === 401) {
           // Auth expired: mark the current item failed AND release the queued remainder

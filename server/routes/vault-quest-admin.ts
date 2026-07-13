@@ -23,7 +23,10 @@ import { canTransition, isVqStatus } from "@shared/vq-workflow";
 import { setIntegrity, cardMetadata } from "../vault-quest/qa-set";
 import { startExport, getExportStatusView, resolveExportDownload } from "../vault-quest/export-jobs";
 import { getR2ObjectStream } from "../r2";
-import { checkGenerationSpend, recordGenerationAttempt } from "../vault-quest/lib/generation-guard";
+import { checkGenerationSpend } from "../vault-quest/lib/generation-guard";
+import { reserveOrDecide, finalizeSuccess, finalizeFailure, classifyAndMapThrown, idempotencyResponseFor } from "../vault-quest/lib/generation-idempotency-store";
+import type { GenerationPayload } from "../vault-quest/lib/generation-idempotency";
+import { randomUUID } from "crypto";
 import { generate, type GenerateReq } from "../vault-quest/generate";
 import { runGenerator, generateFullCard, generateCharacterDescription, DESCRIPTION_FIELD_KEYS, type GenKind, type CardContext } from "../vault-quest/ai/generators";
 import { providerStatuses } from "../vault-quest/ai/provider";
@@ -416,6 +419,18 @@ async function generateCharacterCandidate(character: VqCharacter, referenceType:
   return { candidate, artwork, key, identity, autoRejected, referencesUsed: used, providerCalls };
 }
 
+// Phase 10A D10 — read the client-persisted idempotency key (the browser mints + stores
+// it per action-context across reloads/tabs; see admin-vault-quest.tsx). Falls back to a
+// server-minted key so an older/raw client caller still works, though a fallback key gives
+// NO cross-request dedup (a fresh key every call) — real protection needs the client to
+// resend the SAME key for the SAME logical action. Never trust a client-sent key blindly
+// for anything beyond dedup: it only ever gates OUR OWN reservation row, never auth/data.
+function readIdempotencyKey(req: Request): string {
+  const raw = (req.body as { idempotencyKey?: unknown })?.idempotencyKey ?? req.header("Idempotency-Key");
+  const s = String(raw ?? "").trim();
+  return s.length >= 8 && s.length <= 200 ? s : randomUUID();
+}
+
 // Map a Higgsfield failure to a clean status: 503 not-connected, 402 plan/credit, else 500.
 function artworkErrorResponse(res: Response, err: unknown): void {
   const msg = err instanceof Error ? err.message : "artwork generation failed";
@@ -609,6 +624,15 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // candidate from Character Bible DNA — allowed WITHOUT approved artwork (this is
   // how the first reference is created). Never approves/locks/creates cards. ──
   app.post("/api/admin/vault-quest/characters/:characterId/generate-artwork", requireAdmin, async (req: Request, res: Response) => {
+    // Declared OUTSIDE the try so the outer catch (a thrown provider error) can still
+    // finalize the reservation — see readIdempotencyKey's doc comment for the design.
+    let reservedRowId: number | null = null;
+    const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
+      if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+    };
+    const finishErr = async (err: unknown) => {
+      if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
+    };
     try {
       const characterId = String(req.params.characterId);
       if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
@@ -631,6 +655,20 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const spend = await checkGenerationSpend({ requestedImages: isMaster ? 3 : 1, perImageCredits: perImage, scope: "single", nowMs: Date.now() });
       if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
 
+      // Double-pay protection (Phase 10A D10): reserve BEFORE any provider call. A
+      // duplicate (reload / 2nd tab / retry / 2nd Fly machine) reusing the SAME client-
+      // persisted key gets replayed, told to wait, or refused — never a second charge.
+      const idempotencyKey = readIdempotencyKey(req);
+      const payload: GenerationPayload = { generationType: "character-artwork-single", characterId, referenceType, model, count: isMaster ? 3 : 1 };
+      const reserve = await reserveOrDecide({ idempotencyKey, payload, adminId: req.session?.adminEmail, maxAuthorisedSpend: spend.estimatedCredits });
+      if (reserve.durable) {
+        if (!reserve.proceed) {
+          const r = idempotencyResponseFor(reserve.action, reserve.row);
+          return res.status(r.status).json(r.body);
+        }
+        reservedRowId = reserve.rowId;
+      }
+
       // Master Reference ALWAYS produces THREE studio candidates — ENFORCED server-side,
       // so even a raw API call with referenceType=master_portrait yields 3, never 1.
       if (isMaster) {
@@ -644,21 +682,24 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             if (r.autoRejected) { autoRejectedCount++; continue; }
             created.push({ candidateId: r.candidate.id, key: r.key, width: r.artwork.width, height: r.artwork.height, identityScore: r.identity?.score ?? null, model: r.artwork.model });
           } catch (e) {
-            if (!created.length && !autoRejectedCount && !bgRejectedCount) return artworkErrorResponse(res, e);
+            if (!created.length && !autoRejectedCount && !bgRejectedCount) { await finishErr(e); return artworkErrorResponse(res, e); }
             break;
           }
         }
-        // Record ACTUAL paid creates (incl. bg-retries + auto/bg-rejected, which still billed).
-        await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "single", imagesProduced: providerCalls, perImageCredits: perImage, model, characterId, nowMs: Date.now() });
-        return res.status(201).json({ referenceType, created, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, count: created.length });
+        // Finalize on ACTUAL paid creates (incl. bg-retries + auto/bg-rejected, which still billed).
+        await finishOk(providerCalls * perImage, created[0]?.candidateId ?? null, model ?? null);
+        return res.status(201).json({ referenceType, created, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, count: created.length, idempotencyKey });
       }
 
       const r = await generateCharacterCandidate(character, referenceType, { model });
-      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "single", imagesProduced: r.providerCalls, perImageCredits: perImage, model, characterId, nowMs: Date.now() });
-      if ("rejected" in r) return res.status(422).json({ error: r.reason, rejected: true });
+      if ("rejected" in r) {
+        await finishOk(r.providerCalls * perImage, null, model ?? null);
+        return res.status(422).json({ error: r.reason, rejected: true });
+      }
       const { candidate, artwork, key, identity, autoRejected, referencesUsed } = r;
       if (autoRejected) {
         // Identity drifted below threshold — candidate stored for audit, never shown.
+        await finishOk(r.providerCalls * perImage, candidate.id, artwork.model);
         return res.status(422).json({
           error: `Identity Score ${identity?.score}/${identity?.threshold} — the generated image drifted from the approved references, so it was auto-rejected. Generate again.`,
           autoRejected: true,
@@ -667,12 +708,15 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         });
       }
       const thumb = await (await import("sharp")).default(artwork.png).resize(320, 320, { fit: "inside" }).png().toBuffer();
+      await finishOk(r.providerCalls * perImage, candidate.id, artwork.model);
       res.status(201).json({
         candidateId: candidate.id, key, referenceType, width: artwork.width, height: artwork.height,
         identityScore: identity?.score ?? null, model: artwork.model, referencesUsed,
         preview: `data:image/png;base64,${thumb.toString("base64")}`,
+        idempotencyKey,
       });
     } catch (err) {
+      await finishErr(err);
       artworkErrorResponse(res, err);
     }
   });
@@ -680,6 +724,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // Generate N more candidates (default 3, max 3) for THIS character only. Partial-tolerant:
   // if a later image fails (e.g. credits), the ones already created are still returned.
   app.post("/api/admin/vault-quest/characters/:characterId/generate-artwork/batch", requireAdmin, async (req: Request, res: Response) => {
+    let reservedRowId: number | null = null;
+    const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
+      if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+    };
+    const finishErr = async (err: unknown) => {
+      if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
+    };
     try {
       const characterId = String(req.params.characterId);
       if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
@@ -698,6 +749,19 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
       const spend = await checkGenerationSpend({ requestedImages: count, perImageCredits: perImage, scope: "batch", nowMs: Date.now() });
       if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
+
+      // Double-pay protection (Phase 10A D10) — reserve BEFORE any provider call.
+      const idempotencyKey = readIdempotencyKey(req);
+      const payload: GenerationPayload = { generationType: "character-artwork-batch", characterId, referenceType, model, count };
+      const reserve = await reserveOrDecide({ idempotencyKey, payload, adminId: req.session?.adminEmail, maxAuthorisedSpend: spend.estimatedCredits });
+      if (reserve.durable) {
+        if (!reserve.proceed) {
+          const r = idempotencyResponseFor(reserve.action, reserve.row);
+          return res.status(r.status).json(r.body);
+        }
+        reservedRowId = reserve.rowId;
+      }
+
       const created: { candidateId: number; key: string; width: number; height: number; identityScore: number | null; model: string }[] = [];
       let autoRejectedCount = 0, bgRejectedCount = 0, providerCalls = 0;
       for (let i = 0; i < count; i++) {
@@ -708,13 +772,14 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           if (r.autoRejected) { autoRejectedCount++; continue; } // stored for audit, never shown
           created.push({ candidateId: r.candidate.id, key: r.key, width: r.artwork.width, height: r.artwork.height, identityScore: r.identity?.score ?? null, model: r.artwork.model });
         } catch (e) {
-          if (!created.length && !autoRejectedCount && !bgRejectedCount) return artworkErrorResponse(res, e); // first one failed → clean error
+          if (!created.length && !autoRejectedCount && !bgRejectedCount) { await finishErr(e); return artworkErrorResponse(res, e); } // first one failed → clean error
           break; // a later one failed → return the ones that succeeded
         }
       }
-      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "batch", imagesProduced: providerCalls, perImageCredits: perImage, model, characterId, nowMs: Date.now() });
-      res.status(201).json({ characterId, referenceType, created, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount });
+      await finishOk(providerCalls * perImage, created[0]?.candidateId ?? null, model ?? null);
+      res.status(201).json({ characterId, referenceType, created, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, idempotencyKey });
     } catch (err) {
+      await finishErr(err);
       artworkErrorResponse(res, err);
     }
   });
@@ -842,6 +907,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // DNA, with each later stage referencing the previous stage's DNA for continuity.
   // Sequential (spends Higgsfield credits per stage). No approval/lock/card changes.
   app.post("/api/admin/vault-quest/characters/family/:familyId/generate-artwork", requireAdmin, async (req: Request, res: Response) => {
+    let reservedRowId: number | null = null;
+    const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
+      if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+    };
+    const finishErr = async (err: unknown) => {
+      if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
+    };
     try {
       const familyId = String(req.params.familyId);
       if (!validVqCardId(familyId)) return res.status(400).json({ error: "invalid family id" });
@@ -858,6 +930,19 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const eligible = fam.filter((c) => c.descriptionStatus === "approved").length;
       const spend = await checkGenerationSpend({ requestedImages: Math.max(1, eligible), perImageCredits: perImage, scope: "family", nowMs: Date.now() });
       if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
+
+      // Double-pay protection (Phase 10A D10) — reserve BEFORE any provider call.
+      const idempotencyKey = readIdempotencyKey(req);
+      const payload: GenerationPayload = { generationType: "character-artwork-family", familyId, model, count: eligible };
+      const reserve = await reserveOrDecide({ idempotencyKey, payload, adminId: req.session?.adminEmail, maxAuthorisedSpend: spend.estimatedCredits });
+      if (reserve.durable) {
+        if (!reserve.proceed) {
+          const r = idempotencyResponseFor(reserve.action, reserve.row);
+          return res.status(r.status).json(r.body);
+        }
+        reservedRowId = reserve.rowId;
+      }
+
       const generated: { characterId: string; stageNumber: number; candidateId: number; key: string; identityScore: number | null }[] = [];
       let autoRejectedCount = 0, bgRejectedCount = 0, descSkipped = 0, providerCalls = 0;
       for (const ch of fam) {
@@ -871,13 +956,14 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           if (r.autoRejected) { autoRejectedCount++; continue; }
           generated.push({ characterId: ch.characterId, stageNumber: ch.stageNumber, candidateId: r.candidate.id, key: r.key, identityScore: r.identity?.score ?? null });
         } catch (e) {
-          if (!generated.length && !autoRejectedCount && !bgRejectedCount) return artworkErrorResponse(res, e);
+          if (!generated.length && !autoRejectedCount && !bgRejectedCount) { await finishErr(e); return artworkErrorResponse(res, e); }
           break; // a later stage failed → return the ones that succeeded
         }
       }
-      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "character-artwork", scope: "family", imagesProduced: providerCalls, perImageCredits: perImage, model, setCode: "GNV", nowMs: Date.now() });
-      res.status(201).json({ familyId, generated, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, descriptionSkipped: descSkipped });
+      await finishOk(providerCalls * perImage, generated[0]?.candidateId ?? null, model ?? null);
+      res.status(201).json({ familyId, generated, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, descriptionSkipped: descSkipped, idempotencyKey });
     } catch (err) {
+      await finishErr(err);
       artworkErrorResponse(res, err);
     }
   });
@@ -1117,6 +1203,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   });
 
   app.post("/api/admin/vault-quest/ai/artwork", requireAdmin, async (req: Request, res: Response) => {
+    let reservedRowId: number | null = null;
+    const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
+      if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+    };
+    const finishErr = async (err: unknown) => {
+      if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
+    };
     try {
       const body = req.body as { context?: CardContext & { cardId?: string }; mode?: string; slot?: string; promptOverride?: string; model?: string };
       const ctx = (body.context ?? {}) as CardContext & { cardId?: string };
@@ -1200,6 +1293,18 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const spend = await checkGenerationSpend({ requestedImages: 1, perImageCredits: perImage, scope: "single", nowMs: Date.now() });
       if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
 
+      // Double-pay protection (Phase 10A D10) — reserve BEFORE any provider call.
+      const idempotencyKey = readIdempotencyKey(req);
+      const payload: GenerationPayload = { generationType: "card-artwork", cardId, model: String(body.model ?? "").trim() || undefined, count: 1 };
+      const reserve = await reserveOrDecide({ idempotencyKey, payload, adminId: req.session?.adminEmail, maxAuthorisedSpend: spend.estimatedCredits });
+      if (reserve.durable) {
+        if (!reserve.proceed) {
+          const rr = idempotencyResponseFor(reserve.action, reserve.row);
+          return res.status(rr.status).json(rr.body);
+        }
+        reservedRowId = reserve.rowId;
+      }
+
       // Phase 2 visual identity lock: attach the character's APPROVED references
       // (a variant's bible resolves to its BASE character, so variants reuse the
       // base pack — background/pose/lighting may change, the creature may not).
@@ -1219,9 +1324,6 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const artwork = await generateHiggsfieldArtwork({ prompt, mode, slot, imageReferences: referenceBuffers.length ? referenceBuffers : undefined, model: String(body.model ?? "").trim() || undefined });
       const candidateKey = assertVqWriteKey(vqArtworkCandidateKey(cardId));
       await uploadToR2(candidateKey, artwork.png, "image/png");
-      // Record the paid image for the hourly/daily spend windows (best-effort). Price the
-      // ACTUAL model the provider used (artwork.model reflects any z_image→nano_banana upgrade).
-      await recordGenerationAttempt({ adminId: req.session?.adminEmail, generationType: "card-artwork", scope: "single", imagesProduced: 1, perImageCredits: higgsfieldCreditsPerImage(artwork.model), model: artwork.model, cardId, providerJobId: artwork.jobId ?? null, nowMs: Date.now() });
       // Audit is best-effort: the image is already generated + uploaded, so a
       // logging failure must NOT 500 the request (matches /ai/generate).
       let generationId: number | null = null;
@@ -1270,6 +1372,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         const gate = await scoreAndGateCandidate(candRow.id, artwork.png, referenceBuffers.slice(0, ownRefCount), bible.character);
         cardIdentity = gate.identity;
         if (gate.autoRejected) {
+          await finishOk(perImage, candRow?.id ?? null, artwork.model);
           return res.status(422).json({
             error: `Identity Score ${gate.identity?.score}/${gate.identity?.threshold} — the artwork drifted from the approved character, so it was auto-rejected. Generate again.`,
             autoRejected: true,
@@ -1279,6 +1382,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         }
       }
 
+      await finishOk(perImage, candRow?.id ?? null, artwork.model);
       res.status(201).json({
         identityScore: cardIdentity?.score ?? null,
         referencesUsed,
@@ -1295,8 +1399,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         height: artwork.height,
         preview: `data:image/png;base64,${artwork.png.toString("base64")}`,
         disclaimer: AI_DISCLAIMER,
+        idempotencyKey,
       });
     } catch (err) {
+      await finishErr(err);
       // Expired/invalid token → clean 503 "provider not connected" (not a crash).
       // Higgsfield plan/credit limits → clean 402 with an actionable message.
       // Real generation faults stay 500. Text AI + Save Draft are unaffected either way.
