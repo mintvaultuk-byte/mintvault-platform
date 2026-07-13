@@ -2,12 +2,15 @@
  * Phase 7C + 10A D6 — pure Higgsfield status classification (7-state canonical model).
  * No network/secrets. The live wiring (typed throws, admin status surface) is Category C.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   classifyHiggsfieldStatus,
   deriveHiggsfieldStatus,
   httpForHiggsfieldStatus,
   HiggsfieldError,
+  recordHiggsfieldOutcome,
+  getLastHiggsfieldOutcome,
+  __resetHiggsfieldOutcomeForTests,
 } from "../server/vault-quest/ai/provider-status";
 
 describe("classifyHiggsfieldStatus", () => {
@@ -67,5 +70,30 @@ describe("HiggsfieldError", () => {
     expect(e.kind).toBe("auth_expired");
     expect(e.httpStatus).toBe(401);
     expect(e).toBeInstanceOf(Error);
+  });
+});
+
+describe("recordHiggsfieldOutcome / getLastHiggsfieldOutcome — Phase 10A-3 observation point", () => {
+  beforeEach(() => __resetHiggsfieldOutcomeForTests());
+
+  it("starts null (no call observed yet this process) → configured_unverified, never connected", () => {
+    expect(getLastHiggsfieldOutcome()).toBeNull();
+    expect(deriveHiggsfieldStatus({ connected: true }, getLastHiggsfieldOutcome())).toBe("configured_unverified");
+  });
+
+  it("a recorded success flips the derived status to connected", () => {
+    recordHiggsfieldOutcome({ ok: true });
+    expect(deriveHiggsfieldStatus({ connected: true }, getLastHiggsfieldOutcome())).toBe("connected");
+  });
+
+  it("a recorded auth failure flips the derived status to authentication_invalid — the bug this phase fixes: an expired token no longer shows green", () => {
+    recordHiggsfieldOutcome({ ok: false, kind: "auth_expired" });
+    expect(deriveHiggsfieldStatus({ connected: true }, getLastHiggsfieldOutcome())).toBe("authentication_invalid");
+  });
+
+  it("the latest call wins — a later success clears a prior failure, and vice versa", () => {
+    recordHiggsfieldOutcome({ ok: false, kind: "provider_unavailable" });
+    recordHiggsfieldOutcome({ ok: true });
+    expect(getLastHiggsfieldOutcome()).toEqual({ ok: true });
   });
 });

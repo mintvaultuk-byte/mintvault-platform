@@ -9,6 +9,7 @@
  */
 import { anthropicFetch } from "../../anthropic-fetch";
 import { higgsfieldConnection } from "./higgsfield";
+import { deriveHiggsfieldStatus, getLastHiggsfieldOutcome, type HiggsfieldStatus } from "./provider-status";
 
 export type ProviderKind = "text" | "image";
 
@@ -18,7 +19,21 @@ export interface ProviderStatus {
   label: string;
   connected: boolean;
   note: string;
+  /** 7-state detail (Phase 10A-3), Higgsfield only for now. `connected` above stays
+   *  the simple boolean the existing UI reads; this is the honest detail behind it —
+   *  see the note field for a human-readable reason when not fully `connected`. */
+  status?: HiggsfieldStatus;
 }
+
+const STATUS_NOTE: Record<HiggsfieldStatus, string> = {
+  connected: "connected",
+  configured_unverified: "key configured — not yet verified by a real call",
+  not_configured: "HIGGSFIELD_API_KEY not set",
+  authentication_invalid: "token invalid or expired — run `higgsfield auth token` and update HIGGSFIELD_API_KEY",
+  provider_unavailable: "provider had a problem on the last attempt — try again shortly",
+  rate_limited: "rate limited — try again shortly",
+  disabled_by_owner: "turned off by the owner",
+};
 
 // Text model is overridable via env; defaults to the model the rest of the app uses.
 const TEXT_MODEL = process.env.VQ_AI_TEXT_MODEL || "claude-haiku-4-5-20251001";
@@ -51,12 +66,19 @@ export function getTextProvider(): TextProvider | null {
   };
 }
 
-/** Image providers shown in Card Studio. Higgsfield is the active artwork path. */
+/** Image providers shown in Card Studio. Higgsfield is the active artwork path.
+ *  `status` is derived from a REAL observed outcome (Phase 10A-3) — an env var
+ *  being merely present is never enough to claim `connected`. */
 export function imageProviders(): ProviderStatus[] {
   const has = (v: string | undefined) => !!v && v.trim().length > 0;
   const higgsfield = higgsfieldConnection();
+  const status = deriveHiggsfieldStatus({ connected: higgsfield.connected }, getLastHiggsfieldOutcome());
+  // `connected` stays true through `configured_unverified` too (key present, not yet
+  // proven bad) so a fresh restart doesn't flash a scary red before the first real
+  // call — it flips false only once a REAL failure (auth/rate/provider) is observed.
+  const connected = status === "connected" || status === "configured_unverified";
   return [
-    { id: "higgsfield", kind: "image", label: "Higgsfield", connected: higgsfield.connected, note: higgsfield.note },
+    { id: "higgsfield", kind: "image", label: "Higgsfield", connected, note: STATUS_NOTE[status], status },
     { id: "openai-images", kind: "image", label: "OpenAI Images", connected: false, note: has(process.env.OPENAI_API_KEY) ? "configured elsewhere; out of scope for Vault Quest artwork" : "out of scope for this pass" },
     { id: "nano-banana", kind: "image", label: "Nano Banana", connected: false, note: "out of scope for this pass" },
     { id: "nano-banana-pro", kind: "image", label: "Nano Banana Pro", connected: false, note: "out of scope for this pass" },

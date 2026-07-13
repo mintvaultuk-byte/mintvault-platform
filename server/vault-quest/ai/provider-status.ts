@@ -98,3 +98,32 @@ export function deriveHiggsfieldStatus(
   if (last.kind === "insufficient_credits") return "connected"; // credentials work; account just out of credits (surface separately)
   return "provider_unavailable";
 }
+
+// ── observability (Phase 10A-3) ──────────────────────────────────────────────
+//
+// The pure functions above need a REAL observed outcome to ever report anything
+// other than `configured_unverified` — this is that observation point. In-memory,
+// single-process by design: on the 2-machine Fly deploy each machine's status
+// correctly reflects only ITS OWN recent Higgsfield calls (there is no shared,
+// cross-machine "is the provider up" state to get right here — a stale/wrong
+// status is a display nuisance, not a spend or correctness risk, unlike the
+// export-job / generation-idempotency stores which DO need to be cross-machine).
+let lastHiggsfieldOutcome: ProviderLastOutcome = null;
+
+/** Record the result of a REAL Higgsfield network call (never a pre-flight
+ *  "is a key configured" check — that's a config fact, not an observation).
+ *  Best-effort by construction: a plain in-memory write, cannot itself throw. */
+export function recordHiggsfieldOutcome(outcome: ProviderLastOutcome): void {
+  lastHiggsfieldOutcome = outcome;
+}
+
+/** The most recent observed outcome, or `null` if no real call has happened yet
+ *  since this process started (→ `configured_unverified`, never `connected`). */
+export function getLastHiggsfieldOutcome(): ProviderLastOutcome {
+  return lastHiggsfieldOutcome;
+}
+
+/** Test-only: reset the module-level observation state between test cases. */
+export function __resetHiggsfieldOutcomeForTests(): void {
+  lastHiggsfieldOutcome = null;
+}
