@@ -56,3 +56,38 @@ export const vqArtworkRevisions = pgTable(
 export type VqArtworkRevision = typeof vqArtworkRevisions.$inferSelect;
 export type InsertVqArtworkRevision = typeof vqArtworkRevisions.$inferInsert;
 export const insertVqArtworkRevisionSchema = createInsertSchema(vqArtworkRevisions).omit({ id: true, createdAt: true });
+
+/**
+ * Append-only audit log for revision lifecycle events (Phase 10A-6). Independent
+ * of vqArtworkRevisions.isActive/archivedAt, which only reflect the LATEST
+ * transition for a row — this answers "what happened, in what order, by whom"
+ * across multiple activate/deactivate/restore cycles. Never UPDATEd/DELETEd.
+ *
+ * Matching migration: migrations-vq/0014_artwork_revision_events.sql.
+ */
+export const VQ_REVISION_EVENT_ACTIONS = [
+  "created", "activated", "deactivated", "restored", "upload_failed", "commit_failed",
+] as const;
+export type VqRevisionEventAction = (typeof VQ_REVISION_EVENT_ACTIONS)[number];
+
+export const vqArtworkRevisionEvents = pgTable(
+  "vq_artwork_revision_events",
+  {
+    id: serial("id").primaryKey(),
+    revisionId: integer("revision_id").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: text("entity_id").notNull(),
+    slot: text("slot").notNull(),
+    action: text("action").notNull(), // one of VQ_REVISION_EVENT_ACTIONS
+    actor: text("actor"),
+    note: text("note"),
+    occurredAt: timestamp("occurred_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    entityIdx: index("vq_artwork_revision_events_entity_idx").on(t.entityType, t.entityId, t.slot, t.occurredAt),
+    revisionIdx: index("vq_artwork_revision_events_revision_idx").on(t.revisionId),
+  }),
+);
+
+export type VqArtworkRevisionEvent = typeof vqArtworkRevisionEvents.$inferSelect;
+export type InsertVqArtworkRevisionEvent = typeof vqArtworkRevisionEvents.$inferInsert;

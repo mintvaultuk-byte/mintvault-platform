@@ -440,5 +440,5 @@ export {
 export { vqExportJobs } from "./vq-export-schema";
 export { vqConfig } from "./vq-config-schema";
 export { vqGenerationRequests } from "./vq-generation-schema";
-export { vqArtworkRevisions } from "./vq-artwork-schema";
+export { vqArtworkRevisions, vqArtworkRevisionEvents } from "./vq-artwork-schema";
 export { vqFeatureFlags } from "./vq-feature-flags-schema";

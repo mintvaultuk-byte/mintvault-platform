@@ -16,7 +16,7 @@ import { validateArtwork } from "../vault-quest/upload-guard";
 import { intOrNull, isCandidateReferencedInPack } from "../vault-quest/lib/write-sanitize";
 import { renderCard, type RenderCardInput } from "../vault-quest/render-service";
 import { evaluateCard } from "../vault-quest/qa-engine";
-import { vqArtKey, vqCharacterArtworkKey, vqCharacterCandidateKey, vqCharacterApprovedKey, fetchArt, renderSavedFromStudio, assertVqWriteKey } from "../vault-quest/render-saved";
+import { vqCharacterArtworkKey, vqCharacterCandidateKey, fetchArt, renderSavedFromStudio, assertVqWriteKey, assertVqReadKey } from "../vault-quest/render-saved";
 import { normalizePdf } from "../vault-quest/pdf-normalize";
 import { VQ_ELEMENTS, VQ_ELEMENTS_NEEDS_APPROVAL } from "../vault-quest/lib/vq-constants";
 import { canTransition, isVqStatus } from "@shared/vq-workflow";
@@ -27,6 +27,7 @@ import { checkGenerationSpend } from "../vault-quest/lib/generation-guard";
 import { reserveOrDecide, finalizeSuccess, finalizeFailure, classifyAndMapThrown, idempotencyResponseFor } from "../vault-quest/lib/generation-idempotency-store";
 import { checkVqFeature, setVqFeatureFlag } from "../vault-quest/lib/vq-feature-flags-store";
 import { getVqOpsStatus } from "../vault-quest/lib/vq-ops-status";
+import { promoteCardArtRevision, promoteCharacterReferenceRevision, listRevisionHistory, restoreArtworkRevision, getActiveRevisionKey } from "../vault-quest/lib/vq-artwork-revisions-store";
 import type { VqFeature } from "../vault-quest/lib/vq-feature-state";
 import type { GenerationPayload } from "../vault-quest/lib/generation-idempotency";
 import { randomUUID } from "crypto";
@@ -101,10 +102,15 @@ function toInsert(body: VqEditorPayload): InsertVqCard {
     vulnerability: body.vulnerability ?? null,
     keywords: body.keywords ?? [],
     effects: body.effects ?? null,
-    // Store only the DERIVED key (gated on the client's "art present" flag) — never
-    // a client-supplied key.
-    artR2Key: (body.artR2Key || body.artCandidateKey) ? vqArtKey(body.cardId, "main") : null,
-    prevArtR2Key: (body.prevArtR2Key || body.prevArtCandidateKey) ? vqArtKey(body.cardId, "prev") : null,
+    // Phase 10A-6 (R5-F1): pass through VERBATIM — the caller (the /cards route) has
+    // ALREADY resolved this to a safe, server-known value (a freshly promoted revision
+    // key, or the card's own existing DB value) before calling toInsert. Re-deriving
+    // vqArtKey(cardId, slot) here would silently discard a real immutable revisioned
+    // pointer and reset display to the legacy flat key on every save without a new
+    // candidate — never trust a raw client-supplied string directly, but toInsert is
+    // never handed one; the route resolves it first (see promoteArtworkCandidate below).
+    artR2Key: body.artR2Key ?? null,
+    prevArtR2Key: body.prevArtR2Key ?? null,
     setCode: body.setCode ?? "GNV",
     language: body.language ?? "EN",
     year: intOrNull(body.year) ?? 2026,
@@ -114,7 +120,14 @@ function toInsert(body: VqEditorPayload): InsertVqCard {
   };
 }
 
-async function promoteArtworkCandidate(cardId: string, slot: ArtworkSlot, candidateKey?: string | null): Promise<string | null> {
+/**
+ * Promote a generated candidate into the card's DRAFT art slot as an immutable
+ * revision (Phase 10A-6, R5-F1/F2) — replaces the old overwrite-in-place
+ * `uploadToR2(vqArtKey(cardId,slot), ...)`. The upload+ledger+pointer swap is
+ * atomic (see vq-artwork-revisions-store.ts): if anything fails, the card's
+ * CURRENT art is completely untouched.
+ */
+async function promoteArtworkCandidate(cardId: string, slot: ArtworkSlot, candidateKey?: string | null, actor?: string | null): Promise<string | null> {
   const key = String(candidateKey ?? "").trim();
   if (!key) return null;
   if (!validVqCardId(cardId)) throw new Error("Card ID can only use letters, numbers, dots, dashes, and underscores.");
@@ -124,13 +137,12 @@ async function promoteArtworkCandidate(cardId: string, slot: ArtworkSlot, candid
   const guard = await validateArtwork(buf);
   if (!guard.ok) throw new Error(guard.error ?? "Artwork candidate failed validation.");
   const png = await (await import("sharp")).default(buf).png().toBuffer();
-  const draftKey = assertVqWriteKey(vqArtKey(cardId, slot));
-  await uploadToR2(draftKey, png, "image/png");
+  const { r2Key } = await promoteCardArtRevision({ cardId, slot, buffer: png, width: guard.width, height: guard.height, createdBy: actor ?? null });
   // The candidate is now actually promoted into draft art — flip the audit flag
   // here (on Save Draft), not on Use. Best-effort: never fail the save.
   await vqStorage.markAiGenerationAppliedByCandidate(key).catch(() => {});
   await vqStorage.markArtworkCandidateStatusByKey(key, "draft_saved").catch(() => {});
-  return draftKey;
+  return r2Key;
 }
 
 const CHARACTER_PATCH_KEYS: (keyof CharacterBiblePatch)[] = [
@@ -685,10 +697,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const guard = await validateArtwork(buf);
       if (!guard.ok) return res.status(422).json({ error: guard.error ?? "reference artwork failed validation" });
       const png = await (await import("sharp")).default(buf).png().toBuffer();
-      // Manual reference upload approves as the MASTER PORTRAIT pack slot.
-      const approvedKey = assertVqWriteKey(vqCharacterApprovedKey(characterId, "master_portrait"));
-      await uploadToR2(approvedKey, png, "image/png");
-      const updated = await vqStorage.setCharacterReferencePack(characterId, "master_portrait", approvedKey, null, "admin");
+      // Manual reference upload approves as the MASTER PORTRAIT pack slot — atomic
+      // immutable revision (Phase 10A-6, R5-F2), never an overwrite-in-place.
+      const { r2Key: approvedKey, character: updated } = await promoteCharacterReferenceRevision({
+        characterId, referenceType: "master_portrait", buffer: png, width: guard.width, height: guard.height, createdBy: req.session?.adminEmail || "admin",
+      });
       await vqStorage.markArtworkCandidateStatusByKey(sourceKey, "approved").catch(() => {});
       res.json({ character: updated, key: approvedKey, packCompleteness: vqPackCompleteness(updated.referencePack), width: guard.width, height: guard.height });
     } catch (err) {
@@ -923,6 +936,49 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     }
   });
 
+  // Full revision history for one artwork slot (Phase 10A-6) — founder-facing
+  // "what changed, when, by whom" view. Read-only; works for either entity type.
+  app.get("/api/admin/vault-quest/artwork-revisions", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const entityType = String(req.query.entityType) === "card" ? "card" : "character";
+      const entityId = String(req.query.entityId ?? "").trim();
+      const slot = String(req.query.slot ?? "").trim();
+      if (!entityId || !slot || !validVqCardId(entityId)) return res.status(400).json({ error: "entityId and slot are required" });
+      const history = await listRevisionHistory(entityType, entityId, slot);
+      res.json({
+        entityType, entityId, slot,
+        revisions: history.map((r) => ({
+          id: r.id, r2Key: r.r2Key, isActive: r.isActive, backupState: r.backupState,
+          width: r.width, height: r.height, createdBy: r.createdBy, createdAt: r.createdAt, archivedAt: r.archivedAt,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "failed to load revision history" });
+    }
+  });
+
+  // Roll back to a previous revision (Phase 10A-6) — a RECOVERY action, not a new
+  // upload. Fails safely (no pointer change) if the target asset is missing or
+  // its stored hash no longer matches what's actually in R2.
+  app.post("/api/admin/vault-quest/artwork-revisions/:revisionId/restore", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const revisionId = Number(req.params.revisionId);
+      if (!Number.isInteger(revisionId)) return res.status(400).json({ error: "invalid revisionId" });
+      const outcome = await restoreArtworkRevision(revisionId, req.session?.adminEmail || "admin");
+      if (!outcome.ok) {
+        const messages: Record<string, string> = {
+          not_found: "That revision no longer exists.",
+          asset_missing: "That revision's image is no longer in storage — cannot restore it.",
+          integrity_mismatch: "That revision's stored image no longer matches its recorded checksum — refusing to restore a possibly-corrupted asset.",
+        };
+        return res.status(422).json({ error: messages[outcome.reason] ?? "restore failed", reason: outcome.reason });
+      }
+      res.json({ ok: true, revisionId: outcome.revision.id, r2Key: outcome.revision.r2Key, previousKey: outcome.previousKey });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "failed to restore revision" });
+    }
+  });
+
   // Approve a candidate as the character's reference/approved artwork. Promotes to the
   // approved/ folder + stores the key on the Bible. Does NOT touch vq_cards or its status.
   app.post("/api/admin/vault-quest/characters/:characterId/approve-candidate", requireAdmin, async (req: Request, res: Response) => {
@@ -951,9 +1007,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const guard = await validateArtwork(buf);
       if (!guard.ok) return res.status(422).json({ error: guard.error ?? "candidate failed validation" });
       const png = await (await import("sharp")).default(buf).png().toBuffer();
-      const approvedKey = assertVqWriteKey(vqCharacterApprovedKey(characterId, referenceType));
-      await uploadToR2(approvedKey, png, "image/png");
-      const updated = await vqStorage.setCharacterReferencePack(characterId, referenceType, approvedKey, candidateId, "admin", cand.identityScore ?? null);
+      // Atomic immutable revision (Phase 10A-6, R5-F2) — never an overwrite-in-place.
+      const { r2Key: approvedKey, character: updated } = await promoteCharacterReferenceRevision({
+        characterId, referenceType, buffer: png, width: guard.width, height: guard.height,
+        sourceCandidateId: candidateId, identityScore: cand.identityScore ?? null, createdBy: req.session?.adminEmail || "admin",
+      });
       await vqStorage.markArtworkCandidateStatusById(candidateId, "approved").catch(() => {});
       res.json({ character: updated, key: approvedKey, referenceType, locked: updated.locked, packCompleteness: vqPackCompleteness(updated.referencePack), width: guard.width, height: guard.height });
     } catch (err) {
@@ -1086,10 +1144,14 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         toApprove.push({ ch, candidateId, referenceType: parseReferenceType(cand.referenceType), identityScore: cand.identityScore ?? null, png: await (await import("sharp")).default(buf).png().toBuffer() });
       }
       const approved: { characterId: string; stageNumber: number; referenceType: string; key: string }[] = [];
+      const familyActor = req.session?.adminEmail || "admin";
       for (const { ch, candidateId, referenceType, identityScore, png } of toApprove) {
-        const approvedKey = assertVqWriteKey(vqCharacterApprovedKey(ch.characterId, referenceType));
-        await uploadToR2(approvedKey, png, "image/png");
-        await vqStorage.setCharacterReferencePack(ch.characterId, referenceType, approvedKey, candidateId, "admin", identityScore);
+        // Atomic immutable revision per stage (Phase 10A-6, R5-F2) — never an
+        // overwrite-in-place; a failure on one stage leaves earlier-approved stages
+        // (already committed in their own transaction) and later stages untouched.
+        const { r2Key: approvedKey } = await promoteCharacterReferenceRevision({
+          characterId: ch.characterId, referenceType, buffer: png, sourceCandidateId: candidateId, identityScore, createdBy: familyActor,
+        });
         await vqStorage.markArtworkCandidateStatusById(candidateId, "approved").catch(() => {});
         approved.push({ characterId: ch.characterId, stageNumber: ch.stageNumber, referenceType, key: approvedKey });
       }
@@ -1223,14 +1285,29 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // full workflow gate. This prevents bypassing canTransition via the save route.
       const art = await fetchArt(body);
       const { qa } = await renderCard(body, art, "preview");
-      const promotedMain = await promoteArtworkCandidate(body.cardId, "main", body.artCandidateKey);
-      const promotedPrev = await promoteArtworkCandidate(body.cardId, "prev", body.prevArtCandidateKey);
+      const actor = req.session?.adminEmail || "admin";
+      const promotedMain = await promoteArtworkCandidate(body.cardId, "main", body.artCandidateKey, actor);
+      const promotedPrev = await promoteArtworkCandidate(body.cardId, "prev", body.prevArtCandidateKey, actor);
       const existing = await vqStorage.getCard(body.cardId);
       const keepStatus = existing ? existing.status : "draft";
+      // Phase 10A-6 (R5-F1): fall back to SERVER-authoritative sources ONLY, never the
+      // client-echoed body.artR2Key. Otherwise a save with no NEW candidate this round
+      // (a plain gameplay edit) would either (a) trust an unvalidated client string, or
+      // (b) previously re-derive the legacy flat key and silently revert a real
+      // revisioned pointer back to a stale/non-existent path.
+      //   1. promotedMain/Prev — a candidate was promoted THIS save (fresh, just written).
+      //   2. existing.artR2Key — the card already existed; already correct (a direct
+      //      upload via /cards/:cardId/art already wrote this column itself).
+      //   3. the ledger's own active-revision key — covers a BRAND-NEW card whose art
+      //      was uploaded via the direct-upload route before the card's first Save (no
+      //      `existing` row yet for that route's pointer-update to have landed on).
+      const [ledgerMain, ledgerPrev] = existing
+        ? [null, null] // existing already reflects the truth; skip the extra reads
+        : await Promise.all([getActiveRevisionKey("card", body.cardId, "main"), getActiveRevisionKey("card", body.cardId, "prev")]);
       const saveBody = {
         ...body,
-        artR2Key: promotedMain ?? body.artR2Key,
-        prevArtR2Key: promotedPrev ?? body.prevArtR2Key,
+        artR2Key: promotedMain ?? existing?.artR2Key ?? ledgerMain ?? null,
+        prevArtR2Key: promotedPrev ?? existing?.prevArtR2Key ?? ledgerPrev ?? null,
         status: keepStatus,
       };
       const saved = await vqStorage.saveCard(toInsert(saveBody), "admin");
@@ -1728,8 +1805,12 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (!validVqCardId(cardId)) return res.status(400).json({ error: "Card ID can only use letters, numbers, dots, dashes, and underscores." });
         const slot = (req.query.slot as string) === "prev" ? "prev" : "main";
         const png = await (await import("sharp")).default(file.buffer).png().toBuffer();
-        const key = assertVqWriteKey(vqArtKey(cardId, slot));
-        await uploadToR2(key, png, "image/png");
+        // Atomic immutable revision (Phase 10A-6, R5-F2) — a manual admin upload gets
+        // the SAME durability guarantee as an AI-generated candidate promotion. If the
+        // card row doesn't exist yet (a brand-new card, art uploaded before first Save),
+        // the pointer-column update is a harmless no-op — the /cards save route picks
+        // the key up from the ledger itself (getActiveRevisionKey) on first save.
+        const { r2Key: key } = await promoteCardArtRevision({ cardId, slot, buffer: png, width: guard.width, height: guard.height, createdBy: req.session?.adminEmail || "admin" });
         res.json({ key, slot, width: guard.width, height: guard.height });
       } catch (err) {
         res.status(500).json({ error: err instanceof Error ? err.message : "upload failed" });
@@ -1737,14 +1818,21 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     },
   );
 
-  // ---- serve stored artwork BY CARD ID (never the raw R2 key) ----
+  // ---- serve stored artwork BY CARD ID (admin preview thumbnail; never the raw R2 key) ----
   app.get("/api/admin/vault-quest/cards/:cardId/art/:slot", requireAdmin, async (req: Request, res: Response) => {
     try {
       const cardId = String(req.params.cardId);
       if (!validVqCardId(cardId)) return res.status(400).json({ error: "invalid card id" });
       const slot = String(req.params.slot) === "prev" ? "prev" : "main";
-      const key = `vq/art/${cardId}/${slot}.png`;
-      const buf = await getR2Buffer(key);
+      // Phase 10A-6 (R5-F1): resolve the STORED pointer — the card's own column is
+      // authoritative for both legacy flat keys and new revisioned keys; the ledger's
+      // active-revision key is the fallback for a brand-new, not-yet-saved card whose
+      // art was just uploaded directly. Never re-derive the deterministic flat path.
+      const card = await vqStorage.getCard(cardId).catch(() => undefined);
+      const storedKey = slot === "main" ? card?.artR2Key : card?.prevArtR2Key;
+      const key = storedKey || (await getActiveRevisionKey("card", cardId, slot));
+      if (!key) return res.status(404).json({ error: "no artwork on file" });
+      const buf = await getR2Buffer(assertVqReadKey(key));
       if (!buf) return res.status(404).json({ error: "no artwork on file" });
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Cache-Control", "private, max-age=60");

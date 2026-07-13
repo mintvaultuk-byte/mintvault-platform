@@ -59,13 +59,21 @@ export async function fetchArt(input: {
   if (!cardId) return { mainArt: undefined, prevArt: undefined };
   const mainCandidate = (input.artCandidateKey ?? "").trim();
   const prevCandidate = (input.prevArtCandidateKey ?? "").trim();
+  // Phase 10A-6 (R5-F1): resolve the STORED pointer value, never re-derive it. A
+  // re-derived vqArtKey(cardId, slot) is only correct by coincidence for a legacy
+  // flat-keyed card — it silently breaks the instant a card is promoted to an
+  // immutable revisioned key (vq/art/{cardId}/{slot}/{revisionId}.png), since that
+  // key can never be reconstructed from cardId+slot alone. Reading input.artR2Key
+  // directly is ALSO exactly correct for legacy records: the column already holds
+  // the old flat key, so there is no reader-side special case for "before revision
+  // support" — the stored value IS the fallback.
   const [mainArt, prevArt] = await Promise.all([
     mainCandidate && isCandidateKeyForCard(mainCandidate, cardId)
       ? getR2Buffer(assertVqReadKey(mainCandidate))
-      : input.artR2Key ? getR2Buffer(assertVqReadKey(vqArtKey(cardId, "main"))) : Promise.resolve(null),
+      : input.artR2Key ? getR2Buffer(assertVqReadKey(input.artR2Key)) : Promise.resolve(null),
     prevCandidate && isCandidateKeyForCard(prevCandidate, cardId)
       ? getR2Buffer(assertVqReadKey(prevCandidate))
-      : input.prevArtR2Key ? getR2Buffer(assertVqReadKey(vqArtKey(cardId, "prev"))) : Promise.resolve(null),
+      : input.prevArtR2Key ? getR2Buffer(assertVqReadKey(input.prevArtR2Key)) : Promise.resolve(null),
   ]);
   return { mainArt: mainArt ?? undefined, prevArt: prevArt ?? undefined };
 }
