@@ -6,7 +6,7 @@ import { AdminButton } from "@/components/admin";
 import { Loader2, Upload, Save, History, FileImage, FileText, FileCode, Plus, AlertCircle, CheckCircle2, LayoutGrid, ArrowLeft, ShieldCheck, RotateCcw, XCircle, PackageCheck, Archive, Wand2, Sparkles, ChevronDown, BookOpen, Lock, Unlock } from "lucide-react";
 import { STATUS_META, allowedTargets, type VqStatus } from "@shared/vq-workflow";
 import { ReusePanel, fetchReuseCheck, useAdvancedMode, type ReuseCheck, type ReusableAsset } from "@/components/vault-quest/workflow";
-import { characterHealth, traitsFromBreakdown, matchBand, scoreBand, STATE_CLS, type IdentityBreakdown, type HealthState } from "@/components/vault-quest/quality";
+import { characterHealth, traitsFromBreakdown, matchBand, scoreBand, poseDiversityBand, STATE_CLS, type IdentityBreakdown, type HealthState } from "@/components/vault-quest/quality";
 import { getOrCreateIdempotencyKey, clearIdempotencyKey } from "@/lib/vq-idempotency";
 
 // AI Cost Mode — founder-friendly quality tiers that map to real image models.
@@ -1751,6 +1751,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                               {actionCands.map((c) => {
                                 const band = scoreBand(c.identityScore);
                                 const traits = traitsFromBreakdown(c.identityBreakdown);
+                                const pose = poseDiversityBand(c.identityBreakdown?.poseDiversity);
+                                const poseFailed = pose.state === "fail";
                                 return (
                                   <div key={c.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-2">
                                     <div className="flex items-start gap-2">
@@ -1758,7 +1760,13 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                       <span className="mt-8 text-slate-600">→</span>
                                       <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="action candidate" onClick={() => setZoomId(c.id)} className="h-24 w-24 cursor-zoom-in rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Action Candidate</div></div>
                                       <div className="ml-1 flex-1">
-                                        <div className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-bold ${STATE_CLS[band.state]}`}>Identity {c.identityScore ?? "—"} · {band.label}</div>
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                          <div className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-bold ${STATE_CLS[band.state]}`}>Identity {c.identityScore ?? "—"} · {band.label}</div>
+                                          {pose.label !== "—" && (
+                                            <div className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-bold ${STATE_CLS[pose.state]}`} title="Measures how different this pose is from the approved Master — independent of identity.">Pose Diversity · {pose.label}</div>
+                                          )}
+                                        </div>
+                                        {poseFailed && <p className="mt-1 text-[10px] text-red-400">Too similar to the Master's pose — cannot be approved. Generate another.</p>}
                                         <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px]">
                                           {[...traits, { label: "Background", score: 100 }].map((t) => {
                                             const mb = t.label === "Background" ? { label: "Pass", state: "pass" as HealthState } : matchBand(t.score);
@@ -1766,7 +1774,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                           })}
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
-                                          <button type="button" disabled={!!busy} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve Action Pose</button>
+                                          <button type="button" disabled={!!busy || poseFailed} title={poseFailed ? "Blocked — pose is too similar to the Master Reference" : undefined} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve Action Pose</button>
                                           <button type="button" disabled={!!busy} onClick={() => rejectCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400 disabled:opacity-40">Reject</button>
                                           <button type="button" onClick={() => setZoomId(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200">Zoom</button>
                                         </div>

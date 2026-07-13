@@ -35,7 +35,18 @@ export function matchBand(n: number | null | undefined): { label: string; state:
 export type IdentityBreakdown = Partial<Record<
   "bodyShape" | "colours" | "markings" | "eyes" | "silhouette" | "accessories" | "familyTraits" | "stageTraits",
   number
->> & { notes?: string };
+>> & {
+  notes?: string;
+  /** Action Reference only — independent of identity above (see server/vault-quest/ai/pose-diversity.ts). */
+  poseDiversity?: { difference?: number; verdict?: "pass" | "fail"; threshold?: number };
+};
+
+/** Founder-facing Pass/Fail for the Action Reference pose-diversity gate. Absent
+ *  (non-action-pose candidates, or scorer unavailable) renders as unscored, not a fail. */
+export function poseDiversityBand(pd: IdentityBreakdown["poseDiversity"] | null | undefined): { label: string; state: HealthState } {
+  if (!pd || pd.verdict == null) return { label: "—", state: "grey" };
+  return pd.verdict === "pass" ? { label: "Pass", state: "pass" } : { label: "Fail", state: "fail" };
+}
 
 /** Map the raw breakdown to the founder-facing trait rows (only traits that exist). */
 export function traitsFromBreakdown(bd: IdentityBreakdown | null | undefined): { label: string; score: number | null }[] {

@@ -261,7 +261,7 @@ const REFERENCE_PROMPT_STYLES: Record<VqReferenceType, string> = {
   master_portrait:
     "Reference type: MASTER REFERENCE — permanent studio character reference on a plain background.",
   action_pose:
-    "Reference type: ACTION POSE — the SAME character in a dynamic action pose, mid-motion and energetic, with the full body still completely visible, plain background.",
+    "Reference type: ACTION POSE — the SAME character caught mid-action: genuinely running, leaping, attacking, dodging, crouching to pounce, roaring, or twisting through the air. The body pose, limb positions, head angle, camera angle, weight distribution and silhouette MUST be SUBSTANTIALLY AND UNMISTAKABLY different from a neutral standing reference pose — this is NOT a standing pose with a slightly different camera angle, it is a completely different physical action. The full body must still be completely visible, plain background.",
   face_closeup:
     "Reference type: FACE CLOSE-UP — head and face only, filling the frame: clear eyes, ears, facial markings and a characterful expression.",
   colour_sheet:
@@ -363,6 +363,30 @@ const IDENTITY_LOCK_PROMPT =
 const EVOLUTION_REF_PROMPT =
   " The attached reference images show the PREVIOUS evolution stage of this creature line. Design THIS stage as a clear evolution of that same creature — same family visual language, same core colours and markings, grown larger and more mature. Never a different species.";
 
+// Action Reference pose-diversity fix: IDENTITY_LOCK_PROMPT above is deliberately
+// permissive about pose ("ONLY the pose ... may differ") — correct for identity,
+// but on its own it gives the generator no PRESSURE to actually change the pose, so
+// it kept defaulting to a near-duplicate of the Master's neutral stance. This mandate
+// is appended ONLY for action_pose generations, on top of the identity lock, so
+// identity stays non-negotiable while pose variation becomes an explicit requirement
+// rather than an afterthought.
+const POSE_DIVERSITY_MANDATE =
+  " CRITICAL POSE REQUIREMENT: this image's pose MUST be substantially and unmistakably different from the character's neutral standing Master Reference — different limb positions, different head/camera angle, different weight distribution, different silhouette. A pose that merely repeats a standing/neutral stance with only minor rotation is UNACCEPTABLE. Show the character genuinely captured in motion or an active stance — running, jumping, attacking, landing, roaring, dodging, charging, celebrating, crouching, a defensive stance, looking backwards, casting an ability, interacting with an object — never a near-duplicate of a standing reference.";
+// Appended on a retry after the pose-diversity check fails (mirrors STRICTER_BG_SUFFIX).
+const STRICTER_POSE_SUFFIX =
+  " CRITICAL: the previous attempt was rejected for looking too similar to the neutral standing Master Reference. Go further — pick a clearly dynamic, energetic action (mid-run, mid-leap, mid-attack, airborne, twisting) with an obviously different silhouette and camera angle, not a minor variation on standing still.";
+
+// Whether generateCharacterCandidate's pose-diversity gate can actually retry (and
+// therefore make a 2nd paid provider call) for this request — mirrors the exact
+// `poseGateActive` condition inside generateCharacterCandidate. Spend estimation
+// MUST price for this worst case BEFORE the first provider call, not just the
+// common case where the pose passes first try — otherwise the pre-flight ceiling
+// check and the D10 reservation's authorised-spend cap would both under-price an
+// action_pose request by up to half of its real possible cost.
+function actionPoseCanRetry(character: VqCharacter, referenceType: VqReferenceType): boolean {
+  return referenceType === "action_pose" && !!character.referencePack?.master_portrait?.r2Key;
+}
+
 // Score a generated image against the character's OWN approved references; persist
 // the score and auto-reject below threshold (stored for audit, never shown as a pick).
 async function scoreAndGateCandidate(candidateId: number, generatedPng: Buffer, ownRefs: Buffer[], character: VqCharacter): Promise<{ identity: IdentityResult | null; autoRejected: boolean }> {
@@ -394,27 +418,61 @@ async function generateCharacterCandidate(character: VqCharacter, referenceType:
   const idLock = ownRefCount > 0 ? IDENTITY_LOCK_PROMPT : used.length > 0 ? EVOLUTION_REF_PROMPT : "";
   const model = vqValidImageModel(opts?.model);
 
-  // MASTER REFERENCE: after each generation, validate the studio background; if it fails,
-  // retry ONCE with a stricter prompt before giving up. Only a passing image is kept.
+  // Action Reference pose-diversity gate: only meaningful when we actually have the
+  // Master's own image to compare against (a bootstrap generation with no approved
+  // Master yet has nothing to diff pose against — falls through to the unchanged
+  // single-attempt path below, same as every other non-master reference type).
   const isMaster = referenceType === "master_portrait";
-  const maxAttempts = isMaster ? 2 : 1;
+  const isActionPose = referenceType === "action_pose";
+  const masterIdx = used.indexOf("own:master_portrait");
+  const masterPng = masterIdx >= 0 ? buffers[masterIdx] : undefined;
+  const poseGateActive = isActionPose && !!masterPng;
+
+  // MASTER REFERENCE: validate the studio background after each generation, retrying
+  // ONCE with a stricter prompt before giving up. ACTION POSE (when pose-gated): score
+  // identity+pose in the SAME vision call pre-upload, retrying ONCE with a stricter
+  // pose prompt if the pose is too similar to the Master — never spends a 3rd credit
+  // chasing diversity, and never uploads/shows a near-duplicate pose for approval
+  // when a genuinely different one was reachable in 2 tries. Only a passing (or
+  // attempts-exhausted) image is kept; either way the LAST attempt is what's charged.
+  const maxAttempts = isMaster ? 2 : poseGateActive ? 2 : 1;
   let artwork: HiggsfieldArtworkResult | null = null;
   let prompt = "";
   let bgReason: string | undefined;
   let providerCalls = 0; // every generateHiggsfieldArtwork below is a PAID create
+  let preScored: IdentityResult | null = null; // action_pose: reused after upload so scoring isn't done twice
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    prompt = basePrompt + idLock + (attempt > 1 ? STRICTER_BG_SUFFIX : "");
+    const poseSuffix = isActionPose ? POSE_DIVERSITY_MANDATE + (attempt > 1 ? STRICTER_POSE_SUFFIX : "") : "";
+    prompt = basePrompt + idLock + poseSuffix + (isMaster && attempt > 1 ? STRICTER_BG_SUFFIX : "");
     providerCalls++;
     const generated = await generateHiggsfieldArtwork({ prompt, mode: "main", slot: "main", imageReferences: buffers.length ? buffers : undefined, model });
-    if (!isMaster) { artwork = generated; break; }
-    const bg = await validateStudioBackground(generated.png);
-    if (bg.ok) { artwork = generated; break; }
-    bgReason = bg.reason;
-    if (attempt === maxAttempts) {
-      // Background never passed — reject WITHOUT uploading/recording (don't clutter R2/gallery,
-      // don't consume the approval workflow). The image is discarded — but it WAS charged.
-      return { rejected: true, reason: `studio background rejected (${bg.reason})`, providerCalls };
+
+    if (isMaster) {
+      const bg = await validateStudioBackground(generated.png);
+      if (bg.ok) { artwork = generated; break; }
+      bgReason = bg.reason;
+      if (attempt === maxAttempts) {
+        // Background never passed — reject WITHOUT uploading/recording (don't clutter
+        // R2/gallery, don't consume the approval workflow). The image is discarded —
+        // but it WAS charged.
+        return { rejected: true, reason: `studio background rejected (${bg.reason})`, providerCalls };
+      }
+      continue;
     }
+
+    if (poseGateActive) {
+      const ownRefs = buffers.slice(0, ownRefCount);
+      const scored = await scoreCharacterIdentity(generated.png, ownRefs, character, { masterPng });
+      if (scored?.poseDiversity?.verdict === "fail" && attempt < maxAttempts) {
+        continue; // too similar to the Master's pose — discard, retry once with a stricter prompt
+      }
+      artwork = generated;
+      preScored = scored;
+      break;
+    }
+
+    artwork = generated;
+    break;
   }
   if (!artwork) return { rejected: true, reason: bgReason ? `studio background rejected (${bgReason})` : "no image produced", providerCalls };
 
@@ -429,8 +487,35 @@ async function generateCharacterCandidate(character: VqCharacter, referenceType:
     cardId: character.cardId, kind: "character-artwork", mode: referenceType, provider: artwork.provider,
     model: artwork.model, generatedBy: "admin", prompt, output: { characterId: character.characterId, candidateKey: key, referenceType, referencesUsed: used }, applied: false,
   }).catch(() => {});
+
   const ownRefs = buffers.slice(0, ownRefCount);
-  const { identity, autoRejected } = await scoreAndGateCandidate(candidate.id, artwork.png, ownRefs, character);
+  let identity: IdentityResult | null;
+  let autoRejected: boolean;
+  if (poseGateActive) {
+    // Already scored (identity AND pose, one vision call) inside the retry loop above —
+    // reuse it rather than scoring a second time.
+    //
+    // The two gates are independent but NOT symmetric in how a failure is handled:
+    //   - identity failure ⇒ existing behaviour, UNCHANGED: mark auto_rejected, hidden
+    //     from the candidate list entirely (the list route filters auto_rejected out).
+    //   - pose-diversity failure (identity still passing) ⇒ NEW, and deliberately
+    //     stays VISIBLE as a normal candidate (status stays "candidate") so the founder
+    //     can see the "Pose Diversity: Fail" badge and understand why the retry budget
+    //     was spent, rather than it silently vanishing. Approval is blocked instead,
+    //     both client-side (button disabled) and server-side (approve-candidate route).
+    // A candidate that fails BOTH gates follows the identity path (existing, hidden).
+    identity = preScored;
+    if (identity) {
+      await vqStorage.setArtworkCandidateIdentity(
+        candidate.id, identity.score,
+        { ...identity.breakdown, poseDiversity: identity.poseDiversity } as unknown as Record<string, unknown>,
+      ).catch(() => {});
+    }
+    autoRejected = identity ? identity.verdict === "reject" : false;
+    if (autoRejected) await vqStorage.markArtworkCandidateStatusById(candidate.id, "auto_rejected").catch(() => {});
+  } else {
+    ({ identity, autoRejected } = await scoreAndGateCandidate(candidate.id, artwork.png, ownRefs, character));
+  }
   return { candidate, artwork, key, identity, autoRejected, referencesUsed: used, providerCalls };
 }
 
@@ -742,7 +827,14 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // the ceiling BEFORE any paid provider call.
       const isMaster = referenceType === "master_portrait";
       const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
-      const spend = await checkGenerationSpend({ requestedImages: isMaster ? 3 : 1, perImageCredits: perImage, scope: "single", nowMs: Date.now() });
+      // Price for the WORST CASE, not the common case: an action_pose request with an
+      // approved Master can retry once on a failed pose-diversity check (up to 2 paid
+      // calls) — see actionPoseCanRetry. The image COUNT requested is still 1 (this is
+      // still one candidate), only the per-image credit estimate doubles, so the
+      // separate maxImagesPerRequest check is untouched.
+      const poseRetryPossible = actionPoseCanRetry(character, referenceType);
+      const perImageForSpend = poseRetryPossible ? perImage * 2 : perImage;
+      const spend = await checkGenerationSpend({ requestedImages: isMaster ? 3 : 1, perImageCredits: perImageForSpend, scope: "single", nowMs: Date.now() });
       if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
 
       // Double-pay protection (Phase 10A D10): reserve BEFORE any provider call. A
@@ -789,6 +881,9 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const { candidate, artwork, key, identity, autoRejected, referencesUsed } = r;
       if (autoRejected) {
         // Identity drifted below threshold — candidate stored for audit, never shown.
+        // (A pose-diversity failure alone does NOT hit this branch — see the comment
+        // in generateCharacterCandidate: it stays visible with a Pose Diversity badge
+        // and is blocked from approval instead, not hidden like an identity failure.)
         await finishOk(r.providerCalls * perImage, candidate.id, artwork.model);
         return res.status(422).json({
           error: `Identity Score ${identity?.score}/${identity?.threshold} — the generated image drifted from the approved references, so it was auto-rejected. Generate again.`,
@@ -801,7 +896,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       await finishOk(r.providerCalls * perImage, candidate.id, artwork.model);
       res.status(201).json({
         candidateId: candidate.id, key, referenceType, width: artwork.width, height: artwork.height,
-        identityScore: identity?.score ?? null, model: artwork.model, referencesUsed,
+        identityScore: identity?.score ?? null, poseDiversity: identity?.poseDiversity ?? null, model: artwork.model, referencesUsed,
         preview: `data:image/png;base64,${thumb.toString("base64")}`,
         idempotencyKey,
       });
@@ -838,7 +933,12 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
       // Spend gate (Phase 10A-2) BEFORE any paid provider call.
       const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
-      const spend = await checkGenerationSpend({ requestedImages: count, perImageCredits: perImage, scope: "batch", nowMs: Date.now() });
+      // Price for the worst case: EACH of the `count` action_pose candidates can
+      // independently retry once on a failed pose-diversity check — see
+      // actionPoseCanRetry / the matching comment on the single-generate route.
+      const poseRetryPossible = actionPoseCanRetry(character, referenceType);
+      const perImageForSpend = poseRetryPossible ? perImage * 2 : perImage;
+      const spend = await checkGenerationSpend({ requestedImages: count, perImageCredits: perImageForSpend, scope: "batch", nowMs: Date.now() });
       if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
 
       // Double-pay protection (Phase 10A D10) — reserve BEFORE any provider call.
@@ -997,6 +1097,14 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       }
       if (cand.status === "rejected" || cand.status === "auto_rejected") {
         return res.status(422).json({ error: "This candidate was rejected — it cannot be approved as a reference." });
+      }
+      // Pose-diversity gate (Action Reference fix): a candidate that fails this stays
+      // visible (unlike an identity failure) so the founder can see why, but must never
+      // be approvable as the reference. This is the REAL guard — the client-side
+      // disabled button is UX only, this is what actually blocks it.
+      const poseDiversity = (cand.identityBreakdown as { poseDiversity?: { verdict?: string } } | null)?.poseDiversity;
+      if (poseDiversity?.verdict === "fail") {
+        return res.status(422).json({ error: "This candidate's pose is too similar to the Master Reference (Pose Diversity: Fail) — it cannot be approved. Generate another." });
       }
       const buf = await getR2Buffer(cand.r2Key);
       if (!buf) return res.status(404).json({ error: "candidate image not found" });

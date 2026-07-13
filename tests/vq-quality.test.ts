@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 // quality.ts is pure derivation (no React) — loads cleanly in the node environment.
-import { scoreBand, matchBand, traitsFromBreakdown, characterHealth, type HealthCharacter } from "@/components/vault-quest/quality";
+import { scoreBand, matchBand, traitsFromBreakdown, characterHealth, poseDiversityBand, type HealthCharacter } from "@/components/vault-quest/quality";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const pack = (master?: number | null, action?: number | null): HealthCharacter["referencePack"] => ({
@@ -42,6 +42,18 @@ describe("matchBand boundaries", () => {
     expect(matchBand(70).state).toBe("review");
     expect(matchBand(69)).toEqual({ label: "Fail", state: "fail" });
     expect(matchBand(null).state).toBe("grey");
+  });
+});
+
+describe("poseDiversityBand (Action Reference pose-diversity fix)", () => {
+  it("renders Pass/Fail from the stored verdict, not the raw difference number", () => {
+    expect(poseDiversityBand({ verdict: "pass", difference: 82, threshold: 55 })).toEqual({ label: "Pass", state: "pass" });
+    expect(poseDiversityBand({ verdict: "fail", difference: 15, threshold: 55 })).toEqual({ label: "Fail", state: "fail" });
+  });
+  it("absent (non-action-pose candidates, or scorer unavailable) renders unscored, never a fail", () => {
+    expect(poseDiversityBand(undefined)).toEqual({ label: "—", state: "grey" });
+    expect(poseDiversityBand(null)).toEqual({ label: "—", state: "grey" });
+    expect(poseDiversityBand({})).toEqual({ label: "—", state: "grey" });
   });
 });
 
