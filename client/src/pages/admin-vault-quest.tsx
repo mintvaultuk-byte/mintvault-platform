@@ -320,6 +320,10 @@ function AiAssist({ context, onApply, onUseArtwork, imageProviders, textConnecte
 }) {
   const { toast } = useToast();
   const [tab, setTab] = useState("names");
+  // Card-art model choice — mirrors the Character Bible's selector (same VQ_IMAGE_MODELS
+  // list) so card art isn't stuck on the server's env default. Defaults to nano_banana:
+  // cheapest model that still supports reference-image identity lock.
+  const [imgModel, setImgModel] = useState<VqImageModel>("nano_banana");
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<AiResp | null>(null);
   const [last, setLast] = useState<{ kind: string; mode: string } | null>(null);
@@ -392,10 +396,10 @@ function AiAssist({ context, onApply, onUseArtwork, imageProviders, textConnecte
       }
     }
     setHidden(new Set()); setApplied(new Set()); setRes(null); setArtwork(null); setArtworkUsed(false); setUsingArtwork(false);
-    const cardScopeKey = `card:${cardId || "new"}:${mode}:${slot}`;
+    const cardScopeKey = `card:${cardId || "new"}:${mode}:${slot}:${imgModel || "default"}`;
     const cardIdempotencyKey = getOrCreateIdempotencyKey(cardScopeKey);
     try {
-      const r = await apiRequest("POST", "/api/admin/vault-quest/ai/artwork", { mode, slot, context, idempotencyKey: cardIdempotencyKey });
+      const r = await apiRequest("POST", "/api/admin/vault-quest/ai/artwork", { mode, slot, context, model: imgModel, idempotencyKey: cardIdempotencyKey });
       const data = await r.json() as ArtworkResp & { pending?: boolean; message?: string };
       if (data.pending) { toast({ title: "Already generating", description: data.message ?? "This is already running — please wait." }); return; }
       clearIdempotencyKey(cardScopeKey);
@@ -436,6 +440,12 @@ function AiAssist({ context, onApply, onUseArtwork, imageProviders, textConnecte
         <div className="mb-2 rounded border border-slate-700 bg-slate-900/60 p-1.5 text-[10px] leading-relaxed text-slate-400">
           Artwork provider: <span className={higgsfield?.connected ? "text-emerald-400" : "text-amber-400"}>{higgsfield?.connected ? "Higgsfield connected" : "Higgsfield not connected"}</span>
           {higgsfield?.note && <span className="ml-1 text-slate-500">· {higgsfield.note}</span>}
+          <div className="mt-1 flex items-center gap-1">
+            <span>Model:</span>
+            <select value={imgModel} onChange={(e) => setImgModel(e.target.value as VqImageModel)} className="rounded border border-slate-700 bg-slate-900 px-1 py-0.5 text-[10px] text-slate-200">
+              {VQ_IMAGE_MODELS.map((m) => <option key={m.value} value={m.value}>{m.label} — ~{m.creditsPerImage} cr/image{m.refCapable ? "" : " · no identity lock"}</option>)}
+            </select>
+          </div>
         </div>
       )}
       {busy && <p className="flex items-center gap-2 text-xs text-slate-400"><Loader2 className="h-3 w-3 animate-spin" />Generating…</p>}
