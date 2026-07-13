@@ -12,9 +12,16 @@
  */
 import { db } from "../server/db";
 import { listR2Objects } from "../server/r2";
-import { vqArtworkCandidates, vqCharacters, vqCards } from "../shared/vq-schema";
-import { reconcile, type ReconcilePackRef, type ReconcileCandidateRow, type ReconcileR2Object } from "../server/vault-quest/lib/reconcile-logic";
+import { vqArtworkCandidates, vqCharacters, vqCards, vqArtworkRevisions } from "../shared/vq-schema";
+import {
+  reconcile,
+  type ReconcilePackRef,
+  type ReconcileCandidateRow,
+  type ReconcileR2Object,
+  type ReconcileRevisionRow,
+} from "../server/vault-quest/lib/reconcile-logic";
 import { checkR2Identity, r2IdentityMessage } from "../server/vault-quest/lib/r2-identity";
+import { isUndefinedTableOrColumn } from "../server/vault-quest/production-storage";
 
 function parseDuration(s: string | undefined, fallbackMs: number): number {
   if (!s) return fallbackMs;
@@ -55,7 +62,11 @@ async function main(): Promise<number> {
   // R2 IDENTITY GUARD (Phase 10A): a staging DB does NOT imply staging R2. Refuse to
   // list R2 unless the operator names the expected bucket via --r2=<bucket> and it
   // matches R2_BUCKET_NAME. Fail-closed; never prints credentials/signed URLs.
-  const r2id = checkR2Identity({ expectedBucket: arg("r2"), actualBucket: process.env.R2_BUCKET_NAME, actualEndpoint: process.env.R2_ENDPOINT });
+  const r2id = checkR2Identity({
+    expectedBucket: arg("r2"),
+    actualBucket: process.env.R2_BUCKET_NAME,
+    actualEndpoint: process.env.R2_ENDPOINT,
+  });
   if (!r2id.ok) {
     console.error(r2IdentityMessage(r2id));
     return 2;
@@ -96,14 +107,50 @@ async function main(): Promise<number> {
     for (const [referenceType, slot] of Object.entries(pack)) {
       if (!slot) continue;
       if (slot.r2Key) referencedKeys.add(slot.r2Key);
-      packRefs.push({ characterId: ch.characterId, referenceType, candidateId: slot.candidateId ?? null, r2Key: slot.r2Key ?? null });
+      packRefs.push({
+        characterId: ch.characterId,
+        referenceType,
+        candidateId: slot.candidateId ?? null,
+        r2Key: slot.r2Key ?? null,
+      });
     }
   }
   for (const cd of cardRows) {
     for (const k of [cd.artR2Key, cd.prevArtR2Key, cd.renderR2Key]) if (k) referencedKeys.add(k);
   }
 
-  const report = reconcile({ candidates, objects, referencedKeys, packRefs, nowMs, retentionTtlMs: ttlMs, minAgeMs });
+  // vq_artwork_revisions (Phase 10A-6) — degrades to undefined on an unmigrated DB
+  // (42P01), in which case reconcile() simply skips the backup/active-object checks
+  // and every other check still runs.
+  let revisions: ReconcileRevisionRow[] | undefined;
+  try {
+    const revRows = await db.select().from(vqArtworkRevisions);
+    revisions = revRows
+      .filter((r) => !setFilter || r.entityId.startsWith(setFilter))
+      .map((r) => ({
+        id: r.id,
+        entityType: r.entityType,
+        entityId: r.entityId,
+        slot: r.slot,
+        r2Key: r.r2Key,
+        isActive: r.isActive,
+        backupState: r.backupState,
+      }));
+  } catch (err) {
+    if (!isUndefinedTableOrColumn(err)) throw err;
+    revisions = undefined;
+  }
+
+  const report = reconcile({
+    candidates,
+    objects,
+    referencedKeys,
+    packRefs,
+    revisions,
+    nowMs,
+    retentionTtlMs: ttlMs,
+    minAgeMs,
+  });
 
   const out = {
     mode: "dry-run",
