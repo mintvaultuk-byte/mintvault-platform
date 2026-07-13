@@ -39,6 +39,9 @@ export type IdentityBreakdown = Partial<Record<
   notes?: string;
   /** Action Reference only — independent of identity above (see server/vault-quest/ai/pose-diversity.ts). */
   poseDiversity?: { difference?: number; verdict?: "pass" | "fail"; threshold?: number };
+  /** Stage 2/3 Master Reference only — independent of identity above (see
+   *  server/vault-quest/ai/evolution-diversity.ts). */
+  evolutionDifference?: { difference?: number; verdict?: "pass" | "fail"; threshold?: number; stageNumber?: number };
 };
 
 /** Founder-facing Pass/Fail for the Action Reference pose-diversity gate. Absent
@@ -46,6 +49,13 @@ export type IdentityBreakdown = Partial<Record<
 export function poseDiversityBand(pd: IdentityBreakdown["poseDiversity"] | null | undefined): { label: string; state: HealthState } {
   if (!pd || pd.verdict == null) return { label: "—", state: "grey" };
   return pd.verdict === "pass" ? { label: "Pass", state: "pass" } : { label: "Fail", state: "fail" };
+}
+
+/** Founder-facing Pass/Fail for the Stage 2/3 evolution-difference gate. Absent
+ *  (Stage 1, non-master candidates, or scorer unavailable) renders as unscored, not a fail. */
+export function evolutionDifferenceBand(ed: IdentityBreakdown["evolutionDifference"] | null | undefined): { label: string; state: HealthState } {
+  if (!ed || ed.verdict == null) return { label: "—", state: "grey" };
+  return ed.verdict === "pass" ? { label: "Pass", state: "pass" } : { label: "Fail", state: "fail" };
 }
 
 /** Map the raw breakdown to the founder-facing trait rows (only traits that exist). */

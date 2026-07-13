@@ -6,7 +6,7 @@ import { AdminButton } from "@/components/admin";
 import { Loader2, Upload, Save, History, FileImage, FileText, FileCode, Plus, AlertCircle, CheckCircle2, LayoutGrid, ArrowLeft, ShieldCheck, RotateCcw, XCircle, PackageCheck, Archive, Wand2, Sparkles, ChevronDown, BookOpen, Lock, Unlock } from "lucide-react";
 import { STATUS_META, allowedTargets, type VqStatus } from "@shared/vq-workflow";
 import { ReusePanel, fetchReuseCheck, useAdvancedMode, type ReuseCheck, type ReusableAsset } from "@/components/vault-quest/workflow";
-import { characterHealth, traitsFromBreakdown, matchBand, scoreBand, poseDiversityBand, STATE_CLS, type IdentityBreakdown, type HealthState } from "@/components/vault-quest/quality";
+import { characterHealth, traitsFromBreakdown, matchBand, scoreBand, poseDiversityBand, evolutionDifferenceBand, STATE_CLS, type IdentityBreakdown, type HealthState } from "@/components/vault-quest/quality";
 import { getOrCreateIdempotencyKey, clearIdempotencyKey } from "@/lib/vq-idempotency";
 import { runGenerationWithRecovery, type GenerationPhase } from "@/lib/vq-generation-lifecycle";
 
@@ -1045,7 +1045,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
           await candQuery.refetch();
           return;
         }
-        // Master Reference always produces THREE strict studio candidates (enforced server-side).
+        // Master Reference always produces TWO strict studio candidates (enforced server-side).
         await candQuery.refetch();
         setArtNonce((n) => n + 1);
         const made = data.created?.length ?? 0;
@@ -1708,8 +1708,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                         })}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 rounded-lg bg-slate-900/60 px-3 py-2 text-[11px] text-slate-400">
-                        {/* Master ALWAYS generates 3 candidates (server-enforced, incl. Replace); Action generates 1. */}
-                        <span>Master: <b className="text-slate-200">3 images (~{3 * creditsPerImage} cr)</b></span>
+                        {/* Master ALWAYS generates 2 candidates (server-enforced, incl. Replace); Action generates 1. */}
+                        <span>Master: <b className="text-slate-200">2 images (~{2 * creditsPerImage} cr)</b></span>
                         <span>Action: <b className="text-slate-200">1 image (~{creditsPerImage} cr)</b></span>
                         <span>Approved assets: <b className="text-slate-200">{(masterOk ? 1 : 0) + (actionOk ? 1 : 0)}</b></span>
                         <span className="text-emerald-400">Reuse-first always checks these before generating.</span>
@@ -1742,25 +1742,79 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                       {/* Candidate chooser renders in BOTH branches: after "Replace Master" the
                           approved image stays on file, but the new (paid) candidates must be
                           reviewable — previously they were generated and then hidden. */}
-                      {masterCands.length > 0 && (
-                        <div className="mt-3">
-                          <div className="mb-1.5 text-[11px] font-semibold text-slate-400">{masterOk ? "Replacement candidates — approving one replaces the current Master:" : "Choose your favourite:"}</div>
-                          <div className="grid grid-cols-3 gap-2">
-                            {masterCands.map((c) => (
-                              <div key={c.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-1.5">
-                                <img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="master candidate" className="aspect-square w-full rounded bg-slate-950 object-contain" />
-                                <div className="mt-1 flex items-center justify-between">
-                                  <span className="text-[10px] text-slate-500">{c.identityScore != null ? `Match ${c.identityScore}` : ""}</span>
-                                  <div className="flex gap-1">
-                                    <button type="button" disabled={!!busy} onClick={() => rejectCandidate(c.id)} className="rounded p-0.5 text-slate-500 hover:text-red-400 disabled:opacity-40"><XCircle className="h-4 w-4" /></button>
-                                    <button type="button" disabled={!!busy} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve</button>
+                      {masterCands.length > 0 && (() => {
+                        // Stage 2/3 evolution-differentiation fix: when this character
+                        // evolves from a previous stage that already has an approved
+                        // Master, show a Previous Stage → New Candidate comparison with
+                        // independent Identity / Evolution Difference badges, and block
+                        // Approve when evolution-difference fails — mirroring the Action
+                        // Pose section's pose-diversity comparison exactly. Stage 1 (no
+                        // evolvesFromCharacterId) always falls through to the original,
+                        // unchanged simple grid below.
+                        const prevStageChar = selected.evolvesFromCharacterId
+                          ? characters.find((c) => c.characterId === selected.evolvesFromCharacterId)
+                          : undefined;
+                        const prevMasterOk = !!prevStageChar?.referencePack?.master_portrait?.r2Key;
+                        if (selected.stageNumber > 1 && prevMasterOk) {
+                          return (
+                            <div className="mt-3 space-y-2">
+                              <div className="text-[11px] font-semibold text-slate-400">{masterOk ? "Replacement candidates — approving one replaces the current Master:" : `Compare each candidate to Stage ${prevStageChar!.stageNumber}:`}</div>
+                              {masterCands.map((c) => {
+                                const band = scoreBand(c.identityScore);
+                                const traits = traitsFromBreakdown(c.identityBreakdown);
+                                const evo = evolutionDifferenceBand(c.identityBreakdown?.evolutionDifference);
+                                const evoFailed = evo.state === "fail";
+                                return (
+                                  <div key={c.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-2">
+                                    <div className="flex items-start gap-2">
+                                      <div className="text-center"><img src={`/api/admin/vault-quest/characters/${encodeURIComponent(prevStageChar!.characterId)}/pack/master_portrait?v=${artNonce}`} alt="previous stage" className="h-24 w-24 rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Stage {prevStageChar!.stageNumber} (approved)</div></div>
+                                      <span className="mt-8 text-slate-600">→</span>
+                                      <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="master candidate" onClick={() => setZoomId(c.id)} className="h-24 w-24 cursor-zoom-in rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Stage {selected.stageNumber} Candidate</div></div>
+                                      <div className="ml-1 flex-1">
+                                        <div className="flex flex-wrap items-center gap-1.5">
+                                          <div className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-bold ${STATE_CLS[band.state]}`}>Identity {c.identityScore ?? "—"} · {band.label}</div>
+                                          <div className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-bold ${STATE_CLS[evo.state]}`} title="Measures how much this candidate has evolved from the previous stage — independent of identity.">Evolution Difference · {evo.label}</div>
+                                        </div>
+                                        {evoFailed && <p className="mt-1 text-[10px] text-red-400">Too similar to the previous stage — cannot be approved. Generate another.</p>}
+                                        <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px]">
+                                          {traits.map((t) => {
+                                            const mb = matchBand(t.score);
+                                            return <div key={t.label} className="flex items-center justify-between"><span className="text-slate-500">{t.label}</span><span className={mb.state === "pass" ? "text-emerald-400" : mb.state === "review" ? "text-amber-400" : mb.state === "fail" ? "text-red-400" : "text-slate-600"}>{mb.label}</span></div>;
+                                          })}
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                          <button type="button" disabled={!!busy || evoFailed} title={evoFailed ? "Blocked — too similar to the previous evolution stage" : undefined} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve</button>
+                                          <button type="button" disabled={!!busy} onClick={() => rejectCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400 disabled:opacity-40">Reject</button>
+                                          <button type="button" onClick={() => setZoomId(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200">Zoom</button>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="mt-3">
+                            <div className="mb-1.5 text-[11px] font-semibold text-slate-400">{masterOk ? "Replacement candidates — approving one replaces the current Master:" : "Choose your favourite:"}</div>
+                            <div className="grid grid-cols-3 gap-2">
+                              {masterCands.map((c) => (
+                                <div key={c.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-1.5">
+                                  <img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="master candidate" className="aspect-square w-full rounded bg-slate-950 object-contain" />
+                                  <div className="mt-1 flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-500">{c.identityScore != null ? `Match ${c.identityScore}` : ""}</span>
+                                    <div className="flex gap-1">
+                                      <button type="button" disabled={!!busy} onClick={() => rejectCandidate(c.id)} className="rounded p-0.5 text-slate-500 hover:text-red-400 disabled:opacity-40"><XCircle className="h-4 w-4" /></button>
+                                      <button type="button" disabled={!!busy} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve</button>
+                                    </div>
                                   </div>
                                 </div>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        );
+                      })()}
                     </div>
 
                     {/* STEP 2 · ACTION REFERENCE — disabled until Master approved */}

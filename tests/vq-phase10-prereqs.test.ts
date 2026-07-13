@@ -12,6 +12,11 @@ describe("resolveVqCeilings — safe defaults + safe parse (D4)", () => {
     expect(resolveVqCeilings(null)).toEqual(VQ_CONFIG_DEFAULTS);
     expect(resolveVqCeilings({})).toEqual(VQ_CONFIG_DEFAULTS);
   });
+  it("daily spend ceiling is 1000 (founder decision, raised from 50) — the vq_config table has no override row, so this code default is the sole authoritative value", () => {
+    expect(VQ_CONFIG_DEFAULTS.maxCreditsPerDay).toBe(1000);
+    expect(resolveVqCeilings({}).maxCreditsPerDay).toBe(1000);
+    expect(resolveVqCeilings(null).maxCreditsPerDay).toBe(1000);
+  });
   it("parses provided values", () => {
     const r = resolveVqCeilings({ "spend.max_images_per_request": "5", "spend.max_credits_per_day": "100" });
     expect(r.maxImagesPerRequest).toBe(5);

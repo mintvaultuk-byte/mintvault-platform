@@ -343,7 +343,7 @@ export const vqStorage = {
     await db.update(vqArtworkCandidates).set({ status, updatedAt: new Date() }).where(eq(vqArtworkCandidates.id, id));
   },
 
-  async setArtworkCandidateIdentity(id: number, identityScore: number, identityBreakdown: Record<string, unknown>): Promise<void> {
+  async setArtworkCandidateIdentity(id: number, identityScore: number | null, identityBreakdown: Record<string, unknown>): Promise<void> {
     await db.update(vqArtworkCandidates).set({ identityScore, identityBreakdown, updatedAt: new Date() }).where(eq(vqArtworkCandidates.id, id));
   },
 

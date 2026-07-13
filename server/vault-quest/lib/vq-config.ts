@@ -20,15 +20,21 @@ export interface VqSpendCeilings {
 
 /** Conservative defaults used when a vq_config row is absent or unparseable.
  *  maxCreditsPerRequest is 8 (owner decision D9, Phase 10A-2) so a premium
- *  3-candidate master (3 × 2cr = 6cr) is not blocked, while still capping an
- *  accidental large single spend. maxCreditsPerBatch (12) governs the family
- *  "generate for every character" path (D8) instead of the per-request image cap. */
+ *  2-candidate master (2 x worst-case 2cr = 4cr) is not blocked, while still
+ *  capping an accidental large single spend. maxCreditsPerBatch (12) governs the
+ *  family "generate for every character" path (D8) instead of the per-request
+ *  image cap. maxCreditsPerDay raised 50 -> 1000 (founder decision) — this is the
+ *  ONLY place the daily ceiling is defined: the vq_config table has no
+ *  `spend.max_credits_per_day` row in staging/prod (verified empty), so this code
+ *  default is the sole authoritative source today. Do not also add a vq_config
+ *  row for this key — that would create a second source of truth that silently
+ *  overrides this default the next time someone reads only this file. */
 export const VQ_CONFIG_DEFAULTS: VqSpendCeilings = {
   maxImagesPerRequest: 3,
   maxCreditsPerRequest: 8,
   maxCreditsPerBatch: 12,
   maxRequestsPerHour: 30,
-  maxCreditsPerDay: 50,
+  maxCreditsPerDay: 1000,
   providerPollMaxAttempts: 40,
 };
 

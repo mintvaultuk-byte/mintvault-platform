@@ -83,6 +83,7 @@ import {
 } from "@shared/vq-schema";
 import { scoreCharacterIdentity, identityThreshold, type IdentityResult } from "../vault-quest/ai/identity";
 import { validateStudioBackground } from "../vault-quest/ai/bg-validate";
+import { scoreEvolutionDifference, type EvolutionDifferenceVerdict } from "../vault-quest/ai/evolution-diversity";
 import { VQ_IMAGE_MODELS, vqValidImageModel, vqCreditsPerImage } from "@shared/vq-schema";
 
 type VqEditorPayload = RenderCardInput & {
@@ -319,6 +320,13 @@ const REFERENCE_PROMPT_STYLES: Record<VqReferenceType, string> = {
     "Reference type: TURNAROUND SHEET — model-sheet style turnaround of the same character: front view, side view and back view side by side, consistent proportions, plain background.",
 };
 const VALID_REFERENCE_TYPES = new Set<string>(VQ_REFERENCE_TYPES.map((t) => t.value));
+// Master Reference candidate count (founder decision) — ALWAYS this many, enforced
+// server-side regardless of what a client requests. Every candidate independently
+// passes the SAME identity/background/evolution-difference gates either way, so
+// fewer candidates does not mean lower quality, only fewer choices to review.
+// The ONLY place this count is defined — spend estimate, D10 payload count and the
+// generation loop below all read this constant, so it can never drift out of sync.
+const MASTER_CANDIDATE_COUNT = 2;
 function parseReferenceType(v: unknown): VqReferenceType {
   const s = String(v ?? "").trim();
   return (VALID_REFERENCE_TYPES.has(s) ? s : "master_portrait") as VqReferenceType;
@@ -473,15 +481,36 @@ const POSE_DIVERSITY_MANDATE =
 const STRICTER_POSE_SUFFIX =
   " CRITICAL: the previous attempt was rejected for looking too similar to the neutral standing Master Reference. Go further — pick a clearly dynamic, energetic action (mid-run, mid-leap, mid-attack, airborne, twisting) with an obviously different silhouette and camera angle, not a minor variation on standing still.";
 
+// Evolution-differentiation fix: the existing EVOLUTION_REF_PROMPT is deliberately
+// gentle ("grown larger and more mature") — correct as a soft base framing, but on
+// its own it gave the model no real pressure to differentiate, so Stage 2/3 Master
+// References kept coming back as near-duplicates of the previous stage with only a
+// minor appendage/accessory change. This mandate is appended ONLY for stage>1 Master
+// Reference generations, on top of the existing evolution-continuity framing, so
+// family identity stays locked (same colours/eyes/markings/element/art style) while a
+// SUBSTANTIAL visual evolution becomes an explicit, unambiguous requirement.
+function evolutionDiversityMandate(stageNumber: number): string {
+  const stageDesc =
+    stageNumber >= 3
+      ? "This is the FINAL and most powerful form — the strongest proportions and most developed anatomy of the whole line, a mature face and body, expanded elemental features, armour, markings or silhouette, unmistakably more advanced than the previous stage."
+      : "This is a visibly older and more capable stage — a larger body and stronger proportions, more developed limbs, fins, wings, tail, horns, armour or elemental features, a more confident expression and stance, a clearly different silhouette.";
+  return (
+    ` CRITICAL EVOLUTION REQUIREMENT: this image MUST be a SUBSTANTIAL visual evolution from the previous stage reference, not a cosmetic variant. ${stageDesc} It must remain recognisably descended from the previous stage — same core colour palette, eye design, key markings, elemental identity and art style — but the overall scale, body proportions, limb development, head-to-body ratio, silhouette, tail/fins/wings/horns, maturity, posture, elemental features and detail complexity must all visibly change. ` +
+    `Do NOT produce: the same body with only a small appendage or accessory change; a creature that is merely larger with an otherwise identical silhouette; a version that differs only in wings, fins or tail; a pose variation of the same form; or a colour variant. The previous stage and this stage must look unmistakably like two different points in a growth sequence, not the same creature redrawn.`
+  );
+}
+// Appended on a retry after the evolution-difference check fails (mirrors STRICTER_POSE_SUFFIX).
+const STRICTER_EVOLUTION_SUFFIX =
+  " CRITICAL: the previous attempt looked too similar to the previous evolution stage — it read as a duplicate pose or a minor cosmetic variant, not a genuine evolution. Go further: substantially change the body proportions, silhouette, limb development and maturity. A bigger version of the exact same shape is NOT acceptable — the overall form itself must read as a clearly later stage in the growth sequence.";
+
 // Whether generateCharacterCandidate can actually retry (and therefore make a 2nd paid
-// provider call) for this request — mirrors generateCharacterCandidate's maxAttempts.
-// Action Reference can now retry for TWO independent reasons: a failed studio-
-// background check (always possible, even with no Master yet to diff pose against) or
-// a failed pose-diversity check (only possible once a Master exists) — either way the
-// worst case is still capped at 2 total attempts, so spend estimation just needs to
-// know "can this reference type ever need a 2nd attempt", not which check triggered it.
-function actionPoseCanRetry(_character: VqCharacter, referenceType: VqReferenceType): boolean {
-  return referenceType === "action_pose";
+// provider call) for this request — mirrors generateCharacterCandidate's maxAttempts,
+// which allows a 2nd attempt for EVERY Master Reference (studio-background retry, and
+// for stage>1 also an evolution-difference retry) and for Action Reference (background
+// and/or pose-diversity retry). Spend estimation just needs to know "can this reference
+// type ever need a 2nd attempt", not which check triggered it.
+function generationCanRetry(referenceType: VqReferenceType): boolean {
+  return referenceType === "action_pose" || referenceType === "master_portrait";
 }
 
 // Score a generated image against the character's OWN approved references; persist
@@ -536,11 +565,25 @@ async function generateCharacterCandidate(
   const { buffers, used, ownRefCount } = await collectReferenceImages(character, prev);
   const isMaster = referenceType === "master_portrait";
   const isActionPose = referenceType === "action_pose";
+  // Evolution-differentiation fix: only meaningful for a stage>1 Master Reference
+  // with a resolvable previous-stage reference image. Deliberately independent of
+  // ownRefCount — this stays active even after the stage's OWN Master is approved
+  // (e.g. "Replace Master"), so a regeneration that's ALSO too-similar to the
+  // previous stage keeps getting caught, not just the very first bootstrap attempt.
+  const prevMasterIdx = used.indexOf("prev:master_portrait");
+  const prevPng = prevMasterIdx >= 0 ? buffers[prevMasterIdx] : undefined;
+  const evolutionGateActive = isMaster && character.stageNumber > 1 && !!prevPng;
   // Action Reference's identity lock must ALSO forbid drifting background/lighting/
   // framing away from the references (the general IDENTITY_LOCK_PROMPT explicitly
   // permits that, which is correct for face/colour/turnaround but wrong here).
-  const idLock =
-    ownRefCount > 0
+  // Evolution-gated Master generations NEVER use the standard identity lock, even
+  // once the stage has its own approved reference — "reproduce identical
+  // proportions" would just re-lock onto whatever under-evolved form is already
+  // approved; EVOLUTION_REF_PROMPT (evolve from the PREVIOUS stage) stays correct
+  // in every case here.
+  const idLock = evolutionGateActive
+    ? EVOLUTION_REF_PROMPT
+    : ownRefCount > 0
       ? isActionPose
         ? ACTION_IDENTITY_LOCK_PROMPT
         : IDENTITY_LOCK_PROMPT
@@ -565,21 +608,26 @@ async function generateCharacterCandidate(
   // judgment call), retrying ONCE with a stricter prompt before giving up, then
   // discarding without ever uploading/recording (mirrors the Master's existing
   // precedent exactly). ACTION POSE that clears the background check (when pose-
-  // gated) additionally scores identity+pose in the SAME vision call pre-upload,
-  // retrying ONCE more with a stricter pose prompt if the pose is too similar to the
-  // Master — never spends a 3rd credit chasing diversity, and never uploads/shows a
-  // near-duplicate pose for approval when a genuinely different one was reachable in
-  // 2 tries. Only a passing (or attempts-exhausted) image is kept; either way the
-  // LAST attempt is what's charged.
+  // gated) additionally scores identity+pose in the SAME vision call pre-upload;
+  // an evolution-gated MASTER that clears the background check instead scores
+  // evolution-difference against the previous stage. Either way this retries ONCE
+  // more with a stricter prompt on failure — never spends a 3rd credit chasing
+  // diversity, and never uploads/shows a near-duplicate for approval when a
+  // genuinely different one was reachable in 2 tries. Only a passing (or attempts-
+  // exhausted) image is kept; either way the LAST attempt is what's charged.
   const maxAttempts = isMaster || isActionPose ? 2 : 1;
   let artwork: HiggsfieldArtworkResult | null = null;
   let prompt = "";
   let bgReason: string | undefined;
   let providerCalls = 0; // every generateHiggsfieldArtwork below is a PAID create
-  let preScored: IdentityResult | null = null; // action_pose: reused after upload so scoring isn't done twice
+  let preScored: IdentityResult | null = null; // action_pose/evolution: reused after upload so scoring isn't done twice
+  let preScoredEvolution: EvolutionDifferenceVerdict | null = null; // evolution: reused after upload
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const poseSuffix = isActionPose ? POSE_DIVERSITY_MANDATE + (attempt > 1 ? STRICTER_POSE_SUFFIX : "") : "";
-    prompt = basePrompt + idLock + poseSuffix + (bgCheckActive && attempt > 1 ? STRICTER_BG_SUFFIX : "");
+    const evoSuffix = evolutionGateActive
+      ? evolutionDiversityMandate(character.stageNumber) + (attempt > 1 ? STRICTER_EVOLUTION_SUFFIX : "")
+      : "";
+    prompt = basePrompt + idLock + poseSuffix + evoSuffix + (bgCheckActive && attempt > 1 ? STRICTER_BG_SUFFIX : "");
     providerCalls++;
     const generated = await generateHiggsfieldArtwork({
       prompt,
@@ -601,12 +649,31 @@ async function generateCharacterCandidate(
         }
         continue;
       }
-      if (isMaster) {
+      if (isMaster && !evolutionGateActive) {
         artwork = generated;
         break;
       }
       // Action Reference: background passed. Fall through to the pose-diversity check
       // below (if a Master exists to diff against) rather than accepting immediately.
+      // Evolution-gated Master: background passed. Fall through to the evolution-
+      // difference check below rather than accepting immediately.
+    }
+
+    if (evolutionGateActive) {
+      const ownRefs = buffers.slice(0, ownRefCount);
+      // Own references exist (stage already has an approved Master) — score identity
+      // AND evolution-difference in the SAME vision call. Bootstrap (no own refs yet)
+      // — nothing to identity-score against, so evolution-difference alone is scored
+      // via a small standalone call.
+      const scored = ownRefs.length > 0 ? await scoreCharacterIdentity(generated.png, ownRefs, character, { evolutionPrevPng: prevPng }) : null;
+      const evoVerdict = scored?.evolutionDifference ?? (await scoreEvolutionDifference(generated.png, prevPng!, character));
+      if (evoVerdict?.verdict === "fail" && attempt < maxAttempts) {
+        continue; // too similar to the previous stage — discard, retry once with a stricter prompt
+      }
+      artwork = generated;
+      preScored = scored;
+      preScoredEvolution = evoVerdict;
+      break;
     }
 
     if (poseGateActive) {
@@ -685,6 +752,36 @@ async function generateCharacterCandidate(
           ...identity.breakdown,
           poseDiversity: identity.poseDiversity,
         } as unknown as Record<string, unknown>)
+        .catch(() => {});
+    }
+    autoRejected = identity ? identity.verdict === "reject" : false;
+    if (autoRejected) await vqStorage.markArtworkCandidateStatusById(candidate.id, "auto_rejected").catch(() => {});
+  } else if (evolutionGateActive) {
+    // Already scored (identity, when own references exist, AND evolution-difference,
+    // always) inside the retry loop above — reuse rather than scoring twice.
+    //
+    // Mirrors the pose-diversity precedent exactly: an evolution-difference failure
+    // alone (identity still passing, or no identity to score yet) does NOT hide the
+    // candidate — it stays VISIBLE with an "Evolution Difference: Fail" badge so the
+    // founder can see why the retry budget was spent, and is blocked from approval
+    // instead, both client-side (button disabled) and server-side (approve-candidate
+    // route). An identity DRIFT failure (when own references exist) still follows the
+    // existing, unchanged auto_rejected/hidden behaviour.
+    identity = preScored;
+    if (identity) {
+      await vqStorage
+        .setArtworkCandidateIdentity(candidate.id, identity.score, {
+          ...identity.breakdown,
+          evolutionDifference: preScoredEvolution,
+        } as unknown as Record<string, unknown>)
+        .catch(() => {});
+    } else if (preScoredEvolution) {
+      // Bootstrap (no own references yet) — nothing to identity-score, but still
+      // persist the evolution-difference result so it stays visible/gate-able. No
+      // identity score is claimed (stored as null, not 0 — renders as unscored "—"
+      // in the UI, never a false "Reject").
+      await vqStorage
+        .setArtworkCandidateIdentity(candidate.id, null, { evolutionDifference: preScoredEvolution } as unknown as Record<string, unknown>)
         .catch(() => {});
     }
     autoRejected = identity ? identity.verdict === "reject" : false;
@@ -1070,19 +1167,21 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             });
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
 
-        // Spend gate (Phase 10A-2): master ALWAYS makes 3 candidates, others 1. Enforce
-        // the ceiling BEFORE any paid provider call.
+        // Spend gate (Phase 10A-2): master ALWAYS makes MASTER_CANDIDATE_COUNT
+        // candidates, others 1. Enforce the ceiling BEFORE any paid provider call.
         const isMaster = referenceType === "master_portrait";
         const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
-        // Price for the WORST CASE, not the common case: an action_pose request with an
-        // approved Master can retry once on a failed pose-diversity check (up to 2 paid
-        // calls) — see actionPoseCanRetry. The image COUNT requested is still 1 (this is
-        // still one candidate), only the per-image credit estimate doubles, so the
-        // separate maxImagesPerRequest check is untouched.
-        const poseRetryPossible = actionPoseCanRetry(character, referenceType);
-        const perImageForSpend = poseRetryPossible ? perImage * 2 : perImage;
+        // Price for the WORST CASE, not the common case: a Master Reference can retry
+        // once on a failed studio-background check (and, for stage>1, also on a failed
+        // evolution-difference check), and an action_pose request with an approved
+        // Master can retry once on a failed pose-diversity check — up to 2 paid calls
+        // either way, see generationCanRetry. The image COUNT requested is still 1 (or
+        // MASTER_CANDIDATE_COUNT for master, below), only the per-image credit estimate
+        // doubles, so the separate maxImagesPerRequest check is untouched.
+        const retryPossible = generationCanRetry(referenceType);
+        const perImageForSpend = retryPossible ? perImage * 2 : perImage;
         const spend = await checkGenerationSpend({
-          requestedImages: isMaster ? 3 : 1,
+          requestedImages: isMaster ? MASTER_CANDIDATE_COUNT : 1,
           perImageCredits: perImageForSpend,
           scope: "single",
           nowMs: Date.now(),
@@ -1098,7 +1197,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           characterId,
           referenceType,
           model,
-          count: isMaster ? 3 : 1,
+          count: isMaster ? MASTER_CANDIDATE_COUNT : 1,
         };
         const reserve = await reserveOrDecide({
           idempotencyKey,
@@ -1114,8 +1213,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           reservedRowId = reserve.rowId;
         }
 
-        // Master Reference ALWAYS produces THREE studio candidates — ENFORCED server-side,
-        // so even a raw API call with referenceType=master_portrait yields 3, never 1.
+        // Master Reference ALWAYS produces MASTER_CANDIDATE_COUNT studio candidates —
+        // ENFORCED server-side, so even a raw API call with referenceType=master_portrait
+        // yields that many, never 1. Each candidate independently passes the SAME
+        // identity/background/evolution-difference gates as before.
         if (isMaster) {
           const created: {
             candidateId: number;
@@ -1128,7 +1229,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           let autoRejectedCount = 0,
             bgRejectedCount = 0,
             providerCalls = 0;
-          for (let i = 0; i < 3; i++) {
+          for (let i = 0; i < MASTER_CANDIDATE_COUNT; i++) {
             try {
               const r = await generateCharacterCandidate(character, referenceType, { model });
               providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each)
@@ -1259,11 +1360,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
         // Spend gate (Phase 10A-2) BEFORE any paid provider call.
         const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
-        // Price for the worst case: EACH of the `count` action_pose candidates can
-        // independently retry once on a failed pose-diversity check — see
-        // actionPoseCanRetry / the matching comment on the single-generate route.
-        const poseRetryPossible = actionPoseCanRetry(character, referenceType);
-        const perImageForSpend = poseRetryPossible ? perImage * 2 : perImage;
+        // Price for the worst case: EACH of the `count` candidates can independently
+        // retry once (background, pose-diversity or evolution-difference) — see
+        // generationCanRetry / the matching comment on the single-generate route.
+        const retryPossible = generationCanRetry(referenceType);
+        const perImageForSpend = retryPossible ? perImage * 2 : perImage;
         const spend = await checkGenerationSpend({
           requestedImages: count,
           perImageCredits: perImageForSpend,
@@ -1542,6 +1643,20 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             .json({
               error:
                 "This candidate's pose is too similar to the Master Reference (Pose Diversity: Fail) — it cannot be approved. Generate another.",
+            });
+        }
+        // Evolution-difference gate (Stage 2/3 differentiation fix): mirrors the
+        // pose-diversity guard exactly — a candidate that fails this stays visible so
+        // the founder can see why, but must never be approvable as the reference. This
+        // is the REAL guard — the client-side disabled button is UX only.
+        const evolutionDifference = (cand.identityBreakdown as { evolutionDifference?: { verdict?: string } } | null)
+          ?.evolutionDifference;
+        if (evolutionDifference?.verdict === "fail") {
+          return res
+            .status(422)
+            .json({
+              error:
+                "This candidate looks too similar to the previous evolution stage (Evolution Difference: Fail) — it cannot be approved. Generate another.",
             });
         }
         const buf = await getR2Buffer(cand.r2Key);

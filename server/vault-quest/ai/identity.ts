@@ -14,6 +14,7 @@ import sharp from "sharp";
 import { anthropicFetch } from "../../anthropic-fetch";
 import type { VqCharacter } from "@shared/vq-schema";
 import { evaluatePoseDiversity, type PoseDiversityVerdict } from "./pose-diversity";
+import { evaluateEvolutionDifference, evolutionDifferencePromptFragment, type EvolutionDifferenceVerdict } from "./evolution-diversity";
 
 export interface IdentityBreakdown {
   bodyShape: number;
@@ -35,6 +36,10 @@ export interface IdentityResult {
   /** Only present when `opts.masterPng` was supplied — the Action Reference
    *  pose-diversity gate (independent of the identity verdict above). */
   poseDiversity?: PoseDiversityVerdict;
+  /** Only present when `opts.evolutionPrevPng` was supplied — the Stage 2/3
+   *  evolution-difference gate (independent of the identity verdict above and of
+   *  poseDiversity — see evolution-diversity.ts). */
+  evolutionDifference?: EvolutionDifferenceVerdict;
 }
 
 const VISION_MODEL = process.env.VQ_AI_TEXT_MODEL || "claude-haiku-4-5-20251001";
@@ -71,11 +76,18 @@ export async function scoreCharacterIdentity(
      *  round trip, not a second paid/timed call) — see pose-diversity.ts. Omit for
      *  reference types that aren't pose-gated (master_portrait itself, face_closeup, etc). */
     masterPng?: Buffer;
+    /** The PREVIOUS evolution stage's approved Master Reference. When supplied, the SAME
+     *  vision call also scores evolution-difference against THIS specific image (one
+     *  round trip) — see evolution-diversity.ts. Only meaningful for stage 2/3 Master
+     *  Reference generation; omit otherwise. Completely independent of the identity
+     *  breakdown above, which still compares against the character's OWN referencePngs. */
+    evolutionPrevPng?: Buffer;
   },
 ): Promise<IdentityResult | null> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey || referencePngs.length === 0) return null;
   const masterPng = opts?.masterPng;
+  const evolutionPrevPng = opts?.evolutionPrevPng;
   try {
     const refs = referencePngs.slice(0, 2); // primary references are enough to judge identity
     const content: unknown[] = [
@@ -85,12 +97,16 @@ export async function scoreCharacterIdentity(
         { type: "text", text: "MASTER REFERENCE — this is the character's canonical neutral standing pose. Compare the NEW image's POSE (not identity) against THIS specific image:" },
         { type: "image", source: { type: "base64", media_type: "image/jpeg", data: await toJpegBase64(masterPng) } },
       ] : []),
+      ...(evolutionPrevPng ? [
+        { type: "text", text: "PREVIOUS EVOLUTION STAGE reference — the character's approved form immediately before this stage. Compare the NEW image's EVOLUTION (not identity against the approved references above) against THIS specific image:" },
+        { type: "image", source: { type: "base64", media_type: "image/jpeg", data: await toJpegBase64(evolutionPrevPng) } },
+      ] : []),
       { type: "text", text: "NEWLY GENERATED image to judge:" },
       { type: "image", source: { type: "base64", media_type: "image/jpeg", data: await toJpegBase64(generatedPng) } },
       {
         type: "text",
         text: `Locked DNA (authoritative): body shape: ${character.bodyShape ?? "-"}; colours: ${character.colours ?? "-"}; markings: ${character.markings ?? "-"}; eyes: ${character.eyes ?? "-"}; accessories: ${character.tailAccessories ?? "-"}.
-Score how faithfully the NEW image preserves the SAME character as the approved reference(s). Pose, camera angle, lighting, background, expression and action are ALLOWED to change — do not penalise them. Score 0-100 for each locked trait (100 = identical trait, 0 = different creature): bodyShape, colours, markings, eyes, silhouette, accessories, familyTraits (element/family visual language), stageTraits (maturity level fits stage ${character.stageNumber}).${masterPng ? ` Additionally, and completely SEPARATELY from the identity traits above, score "poseDifference": how different is the NEW image's body pose, limb positions, head/camera angle, weight distribution and silhouette compared to the MASTER REFERENCE's neutral standing pose — 0 = essentially the same pose (only minor rotation/framing changes, e.g. still standing with feet/body-angle/head-rotation/tail nearly unchanged), 100 = a genuinely different action or pose (e.g. running, leaping, crouching, twisting, attacking, airborne, dynamic balance shift). This score must NOT affect or be averaged into the identity trait scores — a wildly different pose with perfect identity preservation should still score full marks on every identity trait above.` : ""} Return STRICT JSON only: {"bodyShape":0,"colours":0,"markings":0,"eyes":0,"silhouette":0,"accessories":0,"familyTraits":0,"stageTraits":0,"overall":0${masterPng ? ',"poseDifference":0' : ""},"notes":"one short sentence"}`,
+Score how faithfully the NEW image preserves the SAME character as the approved reference(s). Pose, camera angle, lighting, background, expression and action are ALLOWED to change — do not penalise them. Score 0-100 for each locked trait (100 = identical trait, 0 = different creature): bodyShape, colours, markings, eyes, silhouette, accessories, familyTraits (element/family visual language), stageTraits (maturity level fits stage ${character.stageNumber}).${masterPng ? ` Additionally, and completely SEPARATELY from the identity traits above, score "poseDifference": how different is the NEW image's body pose, limb positions, head/camera angle, weight distribution and silhouette compared to the MASTER REFERENCE's neutral standing pose — 0 = essentially the same pose (only minor rotation/framing changes, e.g. still standing with feet/body-angle/head-rotation/tail nearly unchanged), 100 = a genuinely different action or pose (e.g. running, leaping, crouching, twisting, attacking, airborne, dynamic balance shift). This score must NOT affect or be averaged into the identity trait scores — a wildly different pose with perfect identity preservation should still score full marks on every identity trait above.` : ""}${evolutionPrevPng ? ` Additionally, and completely SEPARATELY from the identity traits above and from the approved reference(s) (which are NOT relevant to this next score), compare the NEW image against the PREVIOUS EVOLUTION STAGE reference: ${evolutionDifferencePromptFragment(character.stageNumber)} This score must NOT affect or be averaged into the identity trait scores above.` : ""} Return STRICT JSON only: {"bodyShape":0,"colours":0,"markings":0,"eyes":0,"silhouette":0,"accessories":0,"familyTraits":0,"stageTraits":0,"overall":0${masterPng ? ',"poseDifference":0' : ""}${evolutionPrevPng ? ',"evolutionDifference":0' : ""},"notes":"one short sentence"}`,
       },
     ];
     const res = await anthropicFetch(
@@ -120,7 +136,11 @@ Score how faithfully the NEW image preserves the SAME character as the approved 
     );
     const threshold = identityThreshold();
     const poseDiversity = masterPng && parsed.poseDifference != null ? evaluatePoseDiversity(Number(parsed.poseDifference)) : undefined;
-    return { score: overall, breakdown, verdict: overall >= threshold ? "pass" : "reject", threshold, poseDiversity };
+    const evolutionDifference =
+      evolutionPrevPng && parsed.evolutionDifference != null
+        ? evaluateEvolutionDifference(Number(parsed.evolutionDifference), character.stageNumber)
+        : undefined;
+    return { score: overall, breakdown, verdict: overall >= threshold ? "pass" : "reject", threshold, poseDiversity, evolutionDifference };
   } catch {
     return null; // scoring unavailable — never block the pipeline on the scorer itself
   }

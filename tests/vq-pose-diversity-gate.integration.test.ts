@@ -355,11 +355,11 @@ run("Action Reference pose-diversity gate — route wiring", () => {
       model: "nano_banana",
       idempotencyKey: `master-unaffected-${keyCounter}`,
     });
-    // Master always makes 3 candidates (route-enforced) — just confirm it completes and
+    // Master always makes 2 candidates (route-enforced) — just confirm it completes and
     // the pose gate was never exercised: no call ever received a masterPng option.
     expect(res.status).toBe(201);
     const body = res.json as { created: unknown[]; bgRejected: number };
-    expect(body.created.length).toBe(3); // all 3 passed the (real, unmocked) background check
+    expect(body.created.length).toBe(2); // both passed the (real, unmocked) background check
     expect(body.bgRejected).toBe(0);
     expect(scoreSpy.mock.calls.length).toBeGreaterThan(0);
     for (const call of scoreSpy.mock.calls) {

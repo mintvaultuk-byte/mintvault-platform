@@ -386,7 +386,7 @@ run("Action Reference background gate — route wiring", () => {
     });
     expect(res.status).toBe(201);
     const body = res.json as { created: unknown[]; bgRejected: number };
-    expect(body.created.length).toBe(3);
+    expect(body.created.length).toBe(2); // Master now produces 2 candidates (founder decision)
     expect(body.bgRejected).toBe(0);
   });
 });

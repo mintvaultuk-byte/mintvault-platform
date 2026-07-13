@@ -88,8 +88,9 @@ run("generation spend gate — local Postgres", () => {
   });
 
   it("live daily credit window binds after enough recorded spend", async () => {
-    // one big recorded spend pushes creditsThisDay over the 50 default ceiling
-    await recordGenerationAttempt({ generationType: "card-artwork", scope: "single", imagesProduced: 60, perImageCredits: 1, model: "nano_banana", cardId: "BIG", nowMs: NOW });
+    // one big recorded spend pushes creditsThisDay over the 1000 default ceiling
+    // (founder decision, raised from 50 — see vq-config.ts).
+    await recordGenerationAttempt({ generationType: "card-artwork", scope: "single", imagesProduced: 1100, perImageCredits: 1, model: "nano_banana", cardId: "BIG", nowMs: NOW });
     const v = await checkGenerationSpend({ requestedImages: 1, perImageCredits: 1, scope: "single", nowMs: NOW });
     expect(v.allow).toBe(false);
     expect(v.reason).toBe("daily_ceiling");
