@@ -7,7 +7,7 @@
  * card and optional R2 artwork, so they work before the vq_ tables are pushed.
  * List/get/save require the vq_ tables (staging push, gated behind the deploy hold).
  */
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { requireAdmin } from "../auth";
 import { uploadToR2, getR2Buffer } from "../r2";
 import { toolsUpload } from "../lib/multer-configs";
@@ -25,6 +25,7 @@ import { startExport, getExportStatusView, resolveExportDownload } from "../vaul
 import { getR2ObjectStream } from "../r2";
 import { checkGenerationSpend } from "../vault-quest/lib/generation-guard";
 import { reserveOrDecide, finalizeSuccess, finalizeFailure, classifyAndMapThrown, idempotencyResponseFor } from "../vault-quest/lib/generation-idempotency-store";
+import { checkVqFeature } from "../vault-quest/lib/vq-feature-flags-store";
 import type { GenerationPayload } from "../vault-quest/lib/generation-idempotency";
 import { randomUUID } from "crypto";
 import { generate, type GenerateReq } from "../vault-quest/generate";
@@ -443,7 +444,39 @@ function artworkErrorResponse(res: Response, err: unknown): void {
   }
 }
 
+// Phase 10A-4 — the "writes" emergency kill switch (env hard-off > DB toggle >
+// default-on; see lib/vq-feature-state.ts) applied to every MUTATING VQ admin
+// route in one place, so an operator flips ONE switch to freeze all writes
+// instead of hunting down every route. Reads (GET) are always allowed — this is
+// a maintenance/emergency gate, not an outage; existing exports/candidates/status
+// stay viewable. Runs BEFORE requireAdmin is even reached on each individual
+// route, so a frozen VQ never touches the DB for a write attempt.
+function vqWritesGate(req: Request, res: Response, next: NextFunction): void {
+  if (req.method === "GET") { next(); return; }
+  checkVqFeature("writes")
+    .then((check) => {
+      if (check.ok) return next();
+      res.setHeader("Retry-After", String(check.response.retryAfterSeconds));
+      res.status(check.response.status).json(check.response.body);
+    })
+    .catch(next);
+}
+
+/** Feature-specific gate for a single route (generation/exports) — narrower than
+ *  the global writes gate, so an operator can pause JUST paid generation or JUST
+ *  exports without freezing card edits/approvals. Call and `return` on `!ok`
+ *  BEFORE any spend check, reservation, or provider/R2 call. */
+async function vqFeatureGateOrRespond(res: Response, feature: "generation" | "exports"): Promise<boolean> {
+  const check = await checkVqFeature(feature);
+  if (check.ok) return true;
+  res.setHeader("Retry-After", String(check.response.retryAfterSeconds));
+  res.status(check.response.status).json(check.response.body);
+  return false;
+}
+
 export function registerVaultQuestAdminRoutes(app: Express): void {
+  app.use("/api/admin/vault-quest", vqWritesGate);
+
   // ---- editor helpers ----
   app.get("/api/admin/vault-quest/config", requireAdmin, async (_req: Request, res: Response) => {
     try {
@@ -647,6 +680,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       }
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
+      if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
 
       // Spend gate (Phase 10A-2): master ALWAYS makes 3 candidates, others 1. Enforce
       // the ceiling BEFORE any paid provider call.
@@ -745,6 +779,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       }
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
+      if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
       // Spend gate (Phase 10A-2) BEFORE any paid provider call.
       const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
       const spend = await checkGenerationSpend({ requestedImages: count, perImageCredits: perImage, scope: "batch", nowMs: Date.now() });
@@ -924,6 +959,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const model = String((req.body as { model?: string })?.model ?? "").trim() || undefined;
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
+      if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
       // Spend gate (Phase 10A-2): family generates one image per eligible character in ONE
       // press, so it is capped by the per-BATCH credit ceiling (D8), not the per-image count.
       const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
@@ -1286,6 +1322,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // AI or Save Draft (those are independent routes).
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
+      if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
 
       // Spend gate (Phase 10A-2): card artwork is a single paid image — cap BEFORE the call.
       // Price the EFFECTIVE (upgraded) model so a z_image+references request isn't undercounted (F-2).
@@ -1536,7 +1573,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         const eff = c.effects;
         if (Array.isArray(eff)) (eff as unknown[]).forEach((e) => typeof e === "string" && e && effects.add(e));
       }
-      res.json({ keywords: [...keywords].sort(), effects: [...effects].sort(), providers: providerStatuses() });
+      res.json({ keywords: [...keywords].sort(), effects: [...effects].sort(), providers: await providerStatuses() });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : "taxonomy failed" });
     }
@@ -1856,6 +1893,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   function startBatch(kind: "pack" | "proxy") {
     return async (req: Request, res: Response) => {
       try {
+        if (!(await vqFeatureGateOrRespond(res, "exports"))) return; // emergency kill switch (Phase 10A-4)
         const ids = await resolveCardIds(req.body as Selector);
         if (!ids.length) return res.status(400).json({ error: "no cards selected" });
         const ownerAdminId = req.session?.adminEmail || "admin";

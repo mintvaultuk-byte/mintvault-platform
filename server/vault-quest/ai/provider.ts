@@ -10,6 +10,7 @@
 import { anthropicFetch } from "../../anthropic-fetch";
 import { higgsfieldConnection } from "./higgsfield";
 import { deriveHiggsfieldStatus, getLastHiggsfieldOutcome, type HiggsfieldStatus } from "./provider-status";
+import { checkVqFeature } from "../lib/vq-feature-flags-store";
 
 export type ProviderKind = "text" | "image";
 
@@ -67,12 +68,14 @@ export function getTextProvider(): TextProvider | null {
 }
 
 /** Image providers shown in Card Studio. Higgsfield is the active artwork path.
- *  `status` is derived from a REAL observed outcome (Phase 10A-3) — an env var
- *  being merely present is never enough to claim `connected`. */
-export function imageProviders(): ProviderStatus[] {
+ *  `status` is derived from a REAL observed outcome (Phase 10A-3), composed with
+ *  the owner emergency kill switch (Phase 10A-4) — a generation-disabled operator
+ *  toggle reports `disabled_by_owner` rather than a confusing "looks broken". */
+export async function imageProviders(): Promise<ProviderStatus[]> {
   const has = (v: string | undefined) => !!v && v.trim().length > 0;
   const higgsfield = higgsfieldConnection();
-  const status = deriveHiggsfieldStatus({ connected: higgsfield.connected }, getLastHiggsfieldOutcome());
+  const genCheck = await checkVqFeature("generation");
+  const status = deriveHiggsfieldStatus({ connected: higgsfield.connected }, getLastHiggsfieldOutcome(), { disabledByOwner: !genCheck.ok });
   // `connected` stays true through `configured_unverified` too (key present, not yet
   // proven bad) so a fresh restart doesn't flash a scary red before the first real
   // call — it flips false only once a REAL failure (auth/rate/provider) is observed.
@@ -86,7 +89,7 @@ export function imageProviders(): ProviderStatus[] {
 }
 
 /** All provider statuses (text + image) for the Studio settings/AI panel. */
-export function providerStatuses(): ProviderStatus[] {
+export async function providerStatuses(): Promise<ProviderStatus[]> {
   const text = getTextProvider();
   return [
     {
@@ -96,6 +99,6 @@ export function providerStatuses(): ProviderStatus[] {
       connected: !!text,
       note: text ? `model ${text.model}` : "ANTHROPIC_API_KEY not set",
     },
-    ...imageProviders(),
+    ...(await imageProviders()),
   ];
 }
