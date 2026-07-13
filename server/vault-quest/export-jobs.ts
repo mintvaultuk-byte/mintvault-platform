@@ -46,6 +46,10 @@ import {
 } from "./lib/export-job-store";
 import type { ExportCounts } from "./lib/export-job-state";
 import type { VqExportJob } from "@shared/vq-export-schema";
+import { sql } from "drizzle-orm";
+import { db } from "../db";
+import { vqExportJobs } from "@shared/vq-export-schema";
+import { isUndefinedTableOrColumn } from "./production-storage";
 
 export type JobKind = "pack" | "proxy";
 export type JobState = "running" | "done" | "error";
@@ -467,4 +471,28 @@ async function runProxy(job: ExportJob, ids: string[], onProgress?: () => void):
   job.fileName = `VQ_proxy_${placed}cards.pdf`;
   job.contentType = "application/pdf";
   job.bytes = fs.statSync(tmp).size;
+}
+
+// ── ops observability (Phase 10A-5) ─────────────────────────────────────────
+
+export interface ExportJobCounts {
+  /** Grouped counts from the shared, cross-machine durable table — visible from
+   *  ANY Fly machine. `null` when the table is unavailable (degrade-safe). */
+  durable: Record<string, number> | null;
+  /** The size of the LEGACY in-memory Map — THIS MACHINE ONLY. Never meaningful
+   *  as a fleet-wide total; surfaced only so an operator doesn't mistake a
+   *  per-machine number for the real total. */
+  legacyInMemoryThisMachineOnly: number;
+}
+
+/** Bounded aggregate (GROUP BY state, not a row dump) for the ops status endpoint. */
+export async function getExportJobCounts(): Promise<ExportJobCounts> {
+  let durable: Record<string, number> | null = null;
+  try {
+    const rows = await db.select({ state: vqExportJobs.state, n: sql<number>`count(*)` }).from(vqExportJobs).groupBy(vqExportJobs.state);
+    durable = Object.fromEntries(rows.map((r) => [r.state, Number(r.n)]));
+  } catch (err) {
+    if (!isUndefinedTableOrColumn(err)) throw err;
+  }
+  return { durable, legacyInMemoryThisMachineOnly: JOBS.size };
 }

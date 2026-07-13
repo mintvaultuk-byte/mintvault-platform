@@ -25,7 +25,9 @@ import { startExport, getExportStatusView, resolveExportDownload } from "../vaul
 import { getR2ObjectStream } from "../r2";
 import { checkGenerationSpend } from "../vault-quest/lib/generation-guard";
 import { reserveOrDecide, finalizeSuccess, finalizeFailure, classifyAndMapThrown, idempotencyResponseFor } from "../vault-quest/lib/generation-idempotency-store";
-import { checkVqFeature } from "../vault-quest/lib/vq-feature-flags-store";
+import { checkVqFeature, setVqFeatureFlag } from "../vault-quest/lib/vq-feature-flags-store";
+import { getVqOpsStatus } from "../vault-quest/lib/vq-ops-status";
+import type { VqFeature } from "../vault-quest/lib/vq-feature-state";
 import type { GenerationPayload } from "../vault-quest/lib/generation-idempotency";
 import { randomUUID } from "crypto";
 import { generate, type GenerateReq } from "../vault-quest/generate";
@@ -451,8 +453,17 @@ function artworkErrorResponse(res: Response, err: unknown): void {
 // a maintenance/emergency gate, not an outage; existing exports/candidates/status
 // stay viewable. Runs BEFORE requireAdmin is even reached on each individual
 // route, so a frozen VQ never touches the DB for a write attempt.
+// Relative to the app.use("/api/admin/vault-quest", ...) mount point — Express
+// strips the matched prefix from req.path inside a prefix-mounted middleware, so
+// this must NOT be the full absolute path (that silently never matches — caught
+// by tests/vq-ops-route-spy.integration.test.ts's escape-hatch proof).
+const VQ_WRITES_GATE_BYPASS = "/ops/feature-flags";
 function vqWritesGate(req: Request, res: Response, next: NextFunction): void {
   if (req.method === "GET") { next(); return; }
+  // The toggle route itself (Phase 10A-5, R4-F4) is the ONE deliberate, audited
+  // exception — an emergency writes-freeze must never trap the owner unable to
+  // un-freeze it. Every other mutation is gated.
+  if (req.path.startsWith(VQ_WRITES_GATE_BYPASS)) { next(); return; }
   checkVqFeature("writes")
     .then((check) => {
       if (check.ok) return next();
@@ -474,8 +485,40 @@ async function vqFeatureGateOrRespond(res: Response, feature: "generation" | "ex
   return false;
 }
 
+const VQ_TOGGLEABLE_FEATURES: readonly VqFeature[] = ["generation", "exports", "writes"];
+
 export function registerVaultQuestAdminRoutes(app: Express): void {
   app.use("/api/admin/vault-quest", vqWritesGate);
+
+  // ---- ops observability (Phase 10A-5) ----
+  // Read-only, bounded-aggregate operational snapshot: feature-flag state, honest
+  // provider status, current spend ceilings/windows, export job counts. Never
+  // calls a paid provider, never dumps unbounded rows.
+  app.get("/api/admin/vault-quest/ops/status", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      res.json(await getVqOpsStatus(Date.now()));
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "ops status failed" });
+    }
+  });
+
+  // The owner's emergency toggle (R4-F4) — deliberately exempt from vqWritesGate
+  // (see VQ_WRITES_GATE_BYPASS above) so a writes-freeze can always be undone.
+  app.post("/api/admin/vault-quest/ops/feature-flags/:feature", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const feature = String(req.params.feature) as VqFeature;
+      if (!VQ_TOGGLEABLE_FEATURES.includes(feature)) {
+        return res.status(400).json({ error: `unknown feature — must be one of ${VQ_TOGGLEABLE_FEATURES.join(", ")}` });
+      }
+      const body = (req.body ?? {}) as { enabled?: unknown; reason?: unknown };
+      if (typeof body.enabled !== "boolean") return res.status(400).json({ error: "enabled (boolean) is required" });
+      const reason = typeof body.reason === "string" ? body.reason.slice(0, 500) : undefined;
+      await setVqFeatureFlag(feature, body.enabled, req.session?.adminEmail || "admin", reason);
+      res.json({ ok: true, feature, enabled: body.enabled });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "failed to set feature flag" });
+    }
+  });
 
   // ---- editor helpers ----
   app.get("/api/admin/vault-quest/config", requireAdmin, async (_req: Request, res: Response) => {

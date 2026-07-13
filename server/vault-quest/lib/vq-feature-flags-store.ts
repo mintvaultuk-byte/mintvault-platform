@@ -53,3 +53,22 @@ export async function checkVqFeature(feature: VqFeature): Promise<
   if (state.enabled) return { ok: true };
   return { ok: false, response: vqDisabledResponse(feature, state) };
 }
+
+/**
+ * The owner's toggle (Phase 10A-5, R4-F4): upsert a DB flag row with an audit
+ * trail (who, when, why). This is the ONLY write allowed to bypass the global
+ * `vqWritesGate` — an emergency writes-freeze must never trap the owner unable
+ * to un-freeze it. Cannot set an env hard-off (those are Fly secrets, deliberately
+ * out of DB/API reach) — this only ever affects the DB-toggle layer.
+ *
+ * Deliberately NOT wrapped in the read-side `safe()` degrade: a write must fail
+ * LOUDLY if the table is missing (the owner needs to know their toggle did
+ * nothing), whereas a read safely defaulting to "enabled" is the correct fail-open
+ * behaviour for every other caller.
+ */
+export async function setVqFeatureFlag(feature: VqFeature, enabled: boolean, updatedBy: string, reason?: string): Promise<void> {
+  await db
+    .insert(vqFeatureFlags)
+    .values({ feature, enabled, reason: reason ?? null, updatedBy, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: vqFeatureFlags.feature, set: { enabled, reason: reason ?? null, updatedBy, updatedAt: new Date() } });
+}

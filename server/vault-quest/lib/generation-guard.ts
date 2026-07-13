@@ -95,6 +95,18 @@ function messageFor(reason: SpendReason, est: number, c: VqSpendCeilings): strin
 }
 
 /**
+ * Read-only snapshot of the current ceilings + live windows (Phase 10A-5 ops
+ * status) — reuses the exact same DB reads/degrade path as the real gate, so the
+ * numbers an operator sees are always the numbers the gate is actually using.
+ * Never denies anything; purely for display.
+ */
+export async function getSpendSnapshot(nowMs: number): Promise<{ ceilings: VqSpendCeilings; requestsThisHour: number; creditsThisDay: number }> {
+  const ceilings = await loadCeilings();
+  const windows = await loadWindows(nowMs);
+  return { ceilings, ...windows };
+}
+
+/**
  * The pre-provider spend gate. Resolves ceilings + live windows and runs the pure
  * spendDecision for the given scope. Call this and, on `!allow`, return
  * `res.status(verdict.http).json({ error: verdict.message, reason: verdict.reason })`
