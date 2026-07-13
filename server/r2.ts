@@ -101,6 +101,26 @@ export async function getR2Buffer(key: string): Promise<Buffer | null> {
   }
 }
 
+/** Stream an R2 object (null on missing / any error) WITHOUT buffering it whole in
+ *  memory. Used by the durable VQ export download so a finished pack/proxy can be
+ *  streamed back same-origin (behind admin auth) from any machine — the bytes live
+ *  in shared R2, not on the machine that rendered them. */
+export async function getR2ObjectStream(
+  key: string,
+): Promise<{ body: NodeJS.ReadableStream; contentLength?: number; contentType?: string } | null> {
+  try {
+    const out = await getClient().send(new GetObjectCommand({ Bucket: getBucket(), Key: key }));
+    if (!out.Body) return null;
+    return {
+      body: out.Body as NodeJS.ReadableStream,
+      contentLength: out.ContentLength,
+      contentType: out.ContentType,
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** List object keys under a prefix — used to locate raw_front.* / raw_back.*
  *  whose extension varies (.tif/.jpg/.png). */
 export async function listR2Keys(prefix: string): Promise<string[]> {
@@ -110,6 +130,32 @@ export async function listR2Keys(prefix: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+/** List objects under a prefix WITH metadata (key + size + last-modified), paged.
+ *  Read-only; used by the VQ orphan reconciler, whose age filter needs
+ *  LastModified (which listR2Keys drops). Returns [] on any error. */
+export async function listR2Objects(
+  prefix: string,
+): Promise<{ key: string; sizeBytes: number | null; lastModified: Date | null }[]> {
+  const out: { key: string; sizeBytes: number | null; lastModified: Date | null }[] = [];
+  try {
+    const client = getClient();
+    const bucket = getBucket();
+    let continuationToken: string | undefined;
+    do {
+      const page = await client.send(
+        new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: continuationToken }),
+      );
+      for (const o of page.Contents ?? []) {
+        if (o.Key) out.push({ key: o.Key, sizeBytes: o.Size ?? null, lastModified: o.LastModified ?? null });
+      }
+      continuationToken = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (continuationToken);
+  } catch {
+    return [];
+  }
+  return out;
 }
 
 /**

@@ -105,7 +105,9 @@ function Tile({ label, value, sub, accent }: { label: string; value: React.React
   );
 }
 function StatePill({ status }: { status: StageState }) {
-  const m = STATE_META[status];
+  // Defensive: an unknown status string (script-written row, future server value)
+  // must degrade to a pill, not white-screen the whole section.
+  const m = STATE_META[status] ?? STATE_META.in_progress;
   const Icon = m.icon;
   return <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${m.cls}`}><Icon className="h-3 w-3" />{m.label}</span>;
 }
@@ -223,13 +225,20 @@ export default function VaultQuestStudioPage() {
         <main className="min-w-0 flex-1 p-8">
           {prod.isLoading && <div className="text-sm text-slate-500">Loading production status…</div>}
           {prod.isError && <div className="rounded-lg border border-red-900 bg-red-950/40 p-4 text-sm text-red-300">Failed to load — are you signed in as admin?</div>}
+          {/* A 401 does NOT error the query (it resolves null) — without this branch an
+              expired session rendered a blank main pane with no explanation. */}
+          {!prod.isLoading && !prod.isError && !status && (
+            <div className="rounded-lg border border-amber-800 bg-amber-950/30 p-4 text-sm text-amber-200">
+              Your admin session has expired — <a href="/admin/login" className="font-semibold underline">log in again</a> to load the studio.
+            </div>
+          )}
           {section === "home" && !advanced && (
             <SectionShell title="Genesis Vault" desc="Work from top to bottom — the studio always knows your next step.">
-              <GuidedHome feed={workflow.data} counts={status?.counts} loading={workflow.isLoading} openStep={openStep} />
+              <GuidedHome feed={workflow.data} counts={status?.counts} loading={workflow.isLoading} openStep={openStep} goSection={goSection} />
             </SectionShell>
           )}
           {(section === "step1" || section === "step2" || section === "step3" || section === "step4") && (
-            <GuidedStep n={Number(section.slice(4)) as 1 | 2 | 3 | 4} feed={workflow.data} counts={status?.counts} back={() => setSection("home")} />
+            <GuidedStep n={Number(section.slice(4)) as 1 | 2 | 3 | 4} feed={workflow.data} counts={status?.counts} back={() => setSection("home")} goSection={goSection} />
           )}
           {section === "home" && advanced && (
             <SectionShell title="Home" desc="The system always knows the next production task — pick up exactly where you left off.">
@@ -352,7 +361,12 @@ function SetSettings() {
   const save = async (extra: Record<string, unknown> = {}) => {
     try {
       const payload: Record<string, unknown> = { ...form, ...extra };
-      ["releaseYear", "cardCount", "boosterSize", "cardsPerPack"].forEach((k) => { if (payload[k] != null && payload[k] !== "") payload[k] = Number(payload[k]); });
+      // "" must become null (clearing a field), not travel as "" — Postgres rejects
+      // '' for integer columns (22P02) and the whole save failed with a raw DB error.
+      ["releaseYear", "cardCount", "boosterSize", "cardsPerPack"].forEach((k) => {
+        if (payload[k] === "") payload[k] = null;
+        else if (payload[k] != null) { const n = Number(payload[k]); payload[k] = Number.isFinite(n) ? n : null; }
+      });
       const r = await apiRequest("PUT", `/api/admin/vault-quest/sets/${SET_CODE}/settings`, payload);
       if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error || "save failed"); }
       toast({ title: "Set settings saved" });
@@ -429,7 +443,7 @@ function CharactersView({ status, founderMode }: { status: ProductionStatus; fou
       <div className="mb-5 max-w-xl"><div className="mb-1 text-xs text-slate-400">Character approval progress</div><Bar pct={stage?.progress ?? 0} gold /></div>
 
       <Collapse id="characters-list" title={`Characters (${chars.length})`} badge={founderMode && selected.length ? <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">{selected.length} selected</span> : undefined}>
-        {chars.length === 0 ? <p className="text-xs text-slate-600">No characters loaded.</p> : (
+        {q.isLoading ? <p className="text-xs text-slate-600">Loading characters…</p> : chars.length === 0 ? <p className="text-xs text-slate-600">No characters loaded.</p> : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[560px] text-left text-xs">
               <thead><tr className="text-[10px] uppercase tracking-wider text-slate-600">
@@ -540,25 +554,39 @@ function PackagingStudio() {
   const { toast } = useToast();
   const q = useQuery<PackagingItem[]>({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/packaging`], retry: false });
   const items = q.data ?? [];
+  const [busy, setBusy] = useState(false);
   const refresh = () => { qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/packaging`] }); qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/production`] }); };
 
   const add = async (type: string, label: string) => {
+    // Guards matter here: rows have no unique constraint and no delete route, so a
+    // double-click (or clicking "Start" while the list hadn't loaded and every type
+    // looked "Not started") created permanent duplicate rows.
+    if (busy || !q.isSuccess) return;
+    if (items.some((i) => i.type === type)) { toast({ title: `${label} already exists` }); return; }
+    setBusy(true);
     try {
       const r = await apiRequest("POST", `/api/admin/vault-quest/sets/${SET_CODE}/packaging`, { type, name: label, status: "in_progress" });
       if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error || "failed"); }
       toast({ title: `${label} created` }); refresh();
     } catch (e) { toast({ title: "Could not create", description: (e as Error).message, variant: "destructive" }); }
+    finally { setBusy(false); }
   };
   const patch = async (id: number, body: Record<string, unknown>, msg: string) => {
+    if (busy) return;
+    setBusy(true);
     try {
       const r = await apiRequest("PATCH", `/api/admin/vault-quest/sets/${SET_CODE}/packaging/${id}`, body);
       if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error || "failed"); }
       toast({ title: msg }); refresh();
     } catch (e) { toast({ title: "Could not update", description: (e as Error).message, variant: "destructive" }); }
+    finally { setBusy(false); }
   };
 
   return (
     <SectionShell title="Packaging Studio" desc="Physical packaging — wrappers, boxes, decks & cartons. Wrapper artwork uses ONLY approved canonical characters; never unfinished art.">
+      {/* Never render "Start" buttons against unloaded data — with rows undeletable,
+          a Start clicked while loading/errored created a permanent duplicate. */}
+      {!q.isSuccess ? <p className="text-sm text-slate-500">{q.isLoading ? "Loading packaging…" : "Couldn't load packaging — check you're signed in as admin, then refresh."}</p> : (
       <div className="space-y-4">
         {PACKAGING_TYPES.map(({ type, label }) => {
           const item = items.find((i) => i.type === type);
@@ -600,6 +628,7 @@ function PackagingStudio() {
           );
         })}
       </div>
+      )}
     </SectionShell>
   );
 }
@@ -611,8 +640,17 @@ function PrintStudio() {
   const q = useQuery<{ id: number; type: string; status: string }[]>({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/print`], retry: false });
   const rows = q.data ?? [];
   const TYPES = ["cards", "wrappers", "boxes", "rule_books", "tokens", "stickers", "posters"];
-  const refresh = () => qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/print`] });
-  const add = async (type: string) => { try { const r = await apiRequest("POST", `/api/admin/vault-quest/sets/${SET_CODE}/print`, { type, status: "draft" }); if (!r.ok) throw new Error((await r.json()).error); toast({ title: `${type} export added` }); refresh(); } catch (e) { toast({ title: "Failed", description: (e as Error).message, variant: "destructive" }); } };
+  const [busy, setBusy] = useState(false);
+  // New rows change the print_files stage denominator — production must refresh too
+  // (it has staleTime:Infinity, so a missed invalidation is stale FOREVER, not 60s).
+  const refresh = () => { qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/print`] }); qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/production`] }); };
+  const add = async (type: string) => {
+    if (busy || q.isLoading) return; // no double-create; no creates against unloaded data
+    setBusy(true);
+    try { const r = await apiRequest("POST", `/api/admin/vault-quest/sets/${SET_CODE}/print`, { type, status: "draft" }); if (!r.ok) throw new Error((await r.json()).error); toast({ title: `${type} export added` }); refresh(); }
+    catch (e) { toast({ title: "Failed", description: (e as Error).message, variant: "destructive" }); }
+    finally { setBusy(false); }
+  };
   const setStatus = async (id: number, status: string) => { try { const r = await apiRequest("PATCH", `/api/admin/vault-quest/sets/${SET_CODE}/print/${id}`, { status }); if (!r.ok) throw new Error((await r.json()).error); refresh(); qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/production`] }); } catch (e) { toast({ title: "Failed", description: (e as Error).message, variant: "destructive" }); } };
   const STAGES = ["draft", "approved", "print_ready", "exported"];
   return (
@@ -639,25 +677,44 @@ function QaStudio() {
   const q = useQuery<{ id: number; assetType: string; assetRef: string; status: string; checklist: Record<string, boolean> | null }[]>({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/qa`], retry: false });
   const rows = q.data ?? [];
   const [ref, setRef] = useState("");
+  const [busy, setBusy] = useState(false);
   const refresh = () => { qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/qa`] }); qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/production`] }); };
-  const add = async () => { if (!ref.trim()) return; try { const r = await apiRequest("POST", `/api/admin/vault-quest/sets/${SET_CODE}/qa`, { assetType: "card", assetRef: ref.trim(), status: "in_progress", checklist: {} }); if (!r.ok) throw new Error((await r.json()).error); setRef(""); toast({ title: "QA check created" }); refresh(); } catch (e) { toast({ title: "Failed", description: (e as Error).message, variant: "destructive" }); } };
+  const add = async () => {
+    if (!ref.trim() || busy || !q.isSuccess) return; // rows are undeletable — no double-create, no creates against unloaded data
+    setBusy(true);
+    try { const r = await apiRequest("POST", `/api/admin/vault-quest/sets/${SET_CODE}/qa`, { assetType: "card", assetRef: ref.trim(), status: "in_progress", checklist: {} }); if (!r.ok) throw new Error((await r.json()).error); setRef(""); toast({ title: "QA check created" }); refresh(); }
+    catch (e) { toast({ title: "Failed", description: (e as Error).message, variant: "destructive" }); }
+    finally { setBusy(false); }
+  };
   const toggle = async (row: { id: number; checklist: Record<string, boolean> | null }, item: string) => {
+    // Serialize toggles: each PATCH writes the FULL checklist built from the cached
+    // row, so two rapid ticks raced and the second (built from the pre-first cache)
+    // silently erased the first — lost QA checks feeding the release gate.
+    if (busy) return;
+    setBusy(true);
     const next = { ...(row.checklist ?? {}), [item]: !row.checklist?.[item] };
     const allPass = QA_ITEMS.every((i) => next[i]);
-    try { const r = await apiRequest("PATCH", `/api/admin/vault-quest/sets/${SET_CODE}/qa/${row.id}`, { checklist: next, status: allPass ? "approved" : "in_progress" }); if (!r.ok) throw new Error((await r.json()).error); refresh(); } catch (e) { toast({ title: "Failed", description: (e as Error).message, variant: "destructive" }); }
+    try {
+      const r = await apiRequest("PATCH", `/api/admin/vault-quest/sets/${SET_CODE}/qa/${row.id}`, { checklist: next, status: allPass ? "approved" : "in_progress" });
+      if (!r.ok) throw new Error((await r.json()).error);
+      // Await the refetch so the next click builds from FRESH data, not the stale cache.
+      await qc.refetchQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/qa`] });
+      qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/production`] });
+    } catch (e) { toast({ title: "Failed", description: (e as Error).message, variant: "destructive" }); }
+    finally { setBusy(false); }
   };
   return (
     <SectionShell title="QA Studio" desc="Every asset passes an 11-point checklist. Only assets that pass all checks become exportable.">
       <div className="mb-4 flex gap-2">
         <input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="Asset ref (e.g. GNV-001)" className="w-64 rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-slate-500" />
-        <AdminButton variant="gold" onClick={add}>Add QA Check</AdminButton>
+        <AdminButton variant="gold" onClick={add} disabled={busy || !q.isSuccess}>Add QA Check</AdminButton>
       </div>
       {rows.length === 0 ? <p className="text-sm text-slate-500">No QA checks yet.</p> : (
         <div className="space-y-3">{rows.map((row) => (
           <div key={row.id} className="rounded-xl border border-slate-800 bg-slate-900/60 p-4" style={new URLSearchParams(window.location.search).get("ref") === row.assetRef ? { outline: `2px solid ${GOLD}`, outlineOffset: 2 } : undefined}>
             <div className="mb-3 flex items-center justify-between"><span className="text-sm font-bold text-slate-100">{row.assetRef} <span className="text-slate-500">· {row.assetType}</span></span><StatePill status={row.status as StageState} /></div>
             <div className="flex flex-wrap gap-1.5">{QA_ITEMS.map((item) => { const on = !!row.checklist?.[item]; return (
-              <button key={item} onClick={() => toggle(row, item)} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium capitalize transition ${on ? "border-emerald-700 bg-emerald-950/50 text-emerald-300" : "border-slate-700 bg-slate-800/40 text-slate-400 hover:text-slate-200"}`}>
+              <button key={item} disabled={busy} onClick={() => toggle(row, item)} className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-medium capitalize transition ${on ? "border-emerald-700 bg-emerald-950/50 text-emerald-300" : "border-slate-700 bg-slate-800/40 text-slate-400 hover:text-slate-200"}`}>
                 {on ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}{item.replace("_", " ")}
               </button>); })}</div>
           </div>
@@ -680,14 +737,25 @@ function ReleaseManager({ status, feed }: { status: ProductionStatus; feed: Work
     { label: "Cards Complete", ok: rel.cardsComplete }, { label: "Packaging Complete", ok: rel.packagingComplete },
     { label: "QA Passed", ok: rel.qaPassed }, { label: "Print Ready", ok: rel.printReady },
   ];
+  const [saving, setSaving] = useState(false);
   const save = async (extra: Record<string, unknown> = {}) => {
+    if (saving) return; // double-submit guard (Archive double-PUT etc.)
+    setSaving(true);
     try {
       const payload: Record<string, unknown> = { ...form, ...extra };
-      if (payload.printQuantity) payload.printQuantity = Number(payload.printQuantity);
+      // "" → null: Postgres rejects '' for integer columns (22P02).
+      if (payload.printQuantity === "") payload.printQuantity = null;
+      else if (payload.printQuantity != null) { const n = Number(payload.printQuantity); payload.printQuantity = Number.isFinite(n) ? n : null; }
       const res = await apiRequest("PUT", `/api/admin/vault-quest/sets/${SET_CODE}/release`, payload);
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "failed");
-      toast({ title: "Release updated" }); qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/release`] });
+      toast({ title: "Release updated" });
+      qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/release`] });
+      // Release state feeds the production pipeline + workflow feed — without these,
+      // Overview's Release tile/stage stayed "Pending" indefinitely after archiving.
+      qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/production`] });
+      qc.invalidateQueries({ queryKey: [`/api/admin/vault-quest/sets/${SET_CODE}/workflow`] });
     } catch (e) { toast({ title: "Failed", description: (e as Error).message, variant: "destructive" }); }
+    finally { setSaving(false); }
   };
   return (
     <SectionShell title="Release Manager" desc="Final production stage. All gates must pass before a set can be released.">
@@ -708,8 +776,8 @@ function ReleaseManager({ status, feed }: { status: ProductionStatus; feed: Work
         <div className="text-xs text-slate-500 md:col-span-2">Revision {(r.revisionNumber as number) ?? 1}</div>
       </div>
       <div className="mt-4 flex gap-2">
-        <AdminButton variant="ghost" onClick={() => save()}>Save</AdminButton>
-        <AdminButton variant="gold" onClick={() => save({ archived: true })} disabled={!rel.releaseReady || warningCount > 0}>Archive Final Release</AdminButton>
+        <AdminButton variant="ghost" onClick={() => save()} disabled={saving}>Save</AdminButton>
+        <AdminButton variant="gold" onClick={() => save({ archived: true })} disabled={saving || !rel.releaseReady || warningCount > 0}>Archive Final Release</AdminButton>
       </div>
     </SectionShell>
   );
@@ -793,7 +861,9 @@ function FounderDashboard({ status, go }: { status: ProductionStatus; go: (s: Se
         <Tile label="QA remaining" value={f.qaRemaining} />
         <Tile label="AI generations today" value={f.aiGenerationsToday} sub={`${f.aiGenerationsTotal} all-time`} />
         <Tile label="Credits used today" value={f.aiGenerationsToday} sub="≈ 1 credit / generation" />
-        <Tile label="Queue" value="Idle" sub="no active batch" />
+        {/* Batch queue state lives inside the Character Bible page — a hardcoded "Idle"
+            here lied whenever a batch was running. Point at the real surface instead. */}
+        <Tile label="Queue" value="—" sub="see Character Bible batch panel" />
         <Tile label="Release" value={status.release.releaseReady ? "Ready" : "Pending"} accent={status.release.releaseReady} />
       </div>
       <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-400">Recent activity</h2>

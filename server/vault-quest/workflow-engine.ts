@@ -19,7 +19,7 @@ import { vqStorage } from "./storage";
 import { vqAiGenerations, vqCharacterRevisions, vqCardRevisions, type VqCharacter, type VqCardRow } from "@shared/vq-schema";
 import { STATUS_META, type VqStatus } from "@shared/vq-workflow";
 import { higgsfieldCreditsPerImage, vqArtworkCandidateKey } from "./ai/higgsfield";
-import { vqCharacterCandidateKey, assertVqWriteKey } from "./render-saved";
+import { vqCharacterCandidateKey, assertVqWriteKey, assertVqReadKey } from "./render-saved";
 import { getR2Buffer, uploadToR2 } from "../r2";
 import { productionStorage, isUndefinedTable } from "./production-storage";
 
@@ -394,10 +394,15 @@ export async function checkReuse(setCode: string, opts: { characterId?: string; 
 export async function applyReuse(opts: { characterId?: string; cardId?: string; sourceR2Key: string; referenceType?: string }) {
   const source = (opts.sourceR2Key ?? "").trim();
   if (!source.startsWith("vq/")) throw new Error("reuse source must be an existing Vault Quest asset (vq/…)");
+  assertVqReadKey(source); // reject `..` / backslash / control-char traversal within the vq/ keyspace
   const buf = await getR2Buffer(source);
   if (!buf) throw new Error("source asset not found in storage");
 
   if (opts.characterId) {
+    // Validate the target parent exists — recordArtworkCandidate is a bare insert
+    // with no FK, so an unknown characterId would mint an orphaned candidate.
+    const character = await vqStorage.getCharacter(opts.characterId);
+    if (!character) throw new Error("target character not found");
     const targetKey = assertVqWriteKey(vqCharacterCandidateKey(opts.characterId));
     await uploadToR2(targetKey, buf, "image/png");
     const candidate = await vqStorage.recordArtworkCandidate({
@@ -412,6 +417,8 @@ export async function applyReuse(opts: { characterId?: string; cardId?: string; 
     return { targetKey, candidateId: candidate.id, creditsSpent: 0 };
   }
   if (opts.cardId) {
+    const card = await vqStorage.getCard(opts.cardId);
+    if (!card) throw new Error("target card not found");
     const targetKey = assertVqWriteKey(vqArtworkCandidateKey(opts.cardId));
     await uploadToR2(targetKey, buf, "image/png");
     return { targetKey, candidateId: null, creditsSpent: 0 };

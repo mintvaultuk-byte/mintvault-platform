@@ -97,7 +97,9 @@ export const vqCards = pgTable(
     language: text("language").notNull().default("EN"),
     year: integer("year").notNull().default(2026),
     edition: text("edition").notNull().default("FIRST EDITION"),
-    // draft -> approved (QA clean) -> published (reaches exports/public)
+    // Workflow status — the authoritative vocabulary is VQ_STATUSES in
+    // shared/vq-workflow.ts (draft → … → export_ready/printed_proxy); every write
+    // goes through setCardStatusAudited, gated by isVqStatus + canTransition.
     status: text("status").notNull().default("draft"),
     notes: text("notes"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -266,6 +268,22 @@ export function vqCreditsPerImage(model: string): number {
 export function vqModelRefCapable(model: string): boolean {
   return VQ_IMAGE_MODELS.find((m) => m.value === model)?.refCapable ?? true;
 }
+/**
+ * Display-estimate of the credits a generate response actually cost.
+ * Counts EVERY billed image — auto-rejected (identity drift) and bg-rejected images
+ * were generated and charged too — at the model the server ACTUALLY used (an attached
+ * reference silently upgrades z_image → nano_banana), falling back to the requested
+ * model. Prevents the on-screen spend tiles from under-reporting real spend.
+ */
+export function vqChargedCredits(
+  resp: { created?: { model?: string | null }[] | null; autoRejected?: number | null; bgRejected?: number | null },
+  fallbackModel: string,
+): number {
+  const made = resp.created?.length ?? 0;
+  const billedImages = made + (resp.autoRejected ?? 0) + (resp.bgRejected ?? 0);
+  const effModel = resp.created?.[0]?.model ?? fallbackModel;
+  return billedImages * vqCreditsPerImage(effModel);
+}
 export function vqValidImageModel(model: string | undefined): VqImageModel | undefined {
   return VQ_IMAGE_MODELS.find((m) => m.value === model)?.value;
 }
@@ -405,3 +423,22 @@ export type InsertVqSet = z.infer<typeof insertVqSetSchema>;
 export type InsertVqCharacter = z.infer<typeof insertVqCharacterSchema>;
 export type InsertVqArtworkCandidate = z.infer<typeof insertVqArtworkCandidateSchema>;
 export type InsertVqFamilyRule = z.infer<typeof insertVqFamilyRuleSchema>;
+
+// ── Operational + production tables — RE-EXPORTED so the VQ drizzle surface is COMPLETE ──
+// These tables live in their own files (Phases 4 + 7–10) but drizzle-vq.config.ts reads
+// ONLY this barrel. Without these re-exports, `drizzle-kit push --config drizzle-vq.config.ts`
+// would diff them as "present in DB, absent from schema" and propose DROPPING all 13 —
+// destroying durable export state, spend config, generation audit, artwork backups, and the
+// production pipeline (Reviewer 3 F-1, Phase 10A). They are managed EXCLUSIVELY by
+// hand-applied migrations-vq/*.sql (never generate/push); this re-export makes push
+// non-destructive as defence-in-depth. Table objects only — insert schemas/types stay in
+// their own modules to avoid duplicate-symbol churn.
+export {
+  vqSetSettings, vqProductionStages, vqPackagingItems, vqPackConfig,
+  vqPrintExports, vqQaChecks, vqReleaseState, vqAssetLibrary,
+} from "./vq-production-schema";
+export { vqExportJobs } from "./vq-export-schema";
+export { vqConfig } from "./vq-config-schema";
+export { vqGenerationRequests } from "./vq-generation-schema";
+export { vqArtworkRevisions, vqArtworkRevisionEvents } from "./vq-artwork-schema";
+export { vqFeatureFlags } from "./vq-feature-flags-schema";

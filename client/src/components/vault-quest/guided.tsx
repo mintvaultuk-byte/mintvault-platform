@@ -18,7 +18,6 @@ const cardDone = (status: string) => STATUS_META[status as VqStatus]?.tone === "
 
 // Which engine task kinds belong to each of the four big steps.
 const STEP1_KINDS = new Set(["description", "approve_description", "master_reference", "action_pose", "approve_references", "lock_character"]);
-const STEP2_KINDS = new Set(["generate_cards"]);
 const STEP4_KINDS = new Set(["qa", "packaging", "release"]);
 
 type DashCard = { cardId: string; cardType: string; stageNumber: number | null; variantTier: string | null; baseCardId: string | null; status: string };
@@ -32,9 +31,21 @@ export interface GuidedCounts {
 
 const fmtMins = (m: number) => (m >= 60 ? `~${Math.floor(m / 60)}h ${m % 60 ? `${m % 60}m` : ""}`.trim() : m > 0 ? `~${m}m` : "done");
 
-function stepTasks(feed: WorkflowFeed | undefined, kinds: Set<string>, variantOnly?: boolean): WorkflowTask[] {
+/**
+ * Section for a studio-INTERNAL target URL, else null. Guided components render
+ * inside the studio; a wouter <Link> to the same route only rewrites the address
+ * bar (the section lives in component state), so these targets must switch the
+ * section via callback instead of navigating.
+ */
+const STUDIO_PATH = "/admin/vault-quest/studio";
+export function studioSectionOf(url: string | null): string | null {
+  if (!url || !url.startsWith(STUDIO_PATH)) return null;
+  return new URLSearchParams(url.split("?")[1] ?? "").get("section");
+}
+
+function stepTasks(feed: WorkflowFeed | undefined, kinds: Set<string>): WorkflowTask[] {
   if (!feed) return [];
-  return feed.queue.filter((t) => kinds.has(t.kind) && (variantOnly === undefined || true));
+  return feed.queue.filter((t) => kinds.has(t.kind));
 }
 
 /** One friendly checklist row inside a step. */
@@ -73,7 +84,10 @@ interface StepModel {
 
 /** Build the four big steps from live data. */
 export function useGuidedSteps(feed: WorkflowFeed | undefined, counts: GuidedCounts | undefined) {
-  const dash = useQuery<{ cards: DashCard[] }>({ queryKey: ["/api/admin/vault-quest/dashboard"], retry: false });
+  // Refetch on the same cadence as the workflow feed — with the app-wide
+  // staleTime:Infinity default and no invalidator, this data was otherwise frozen
+  // for the whole SPA session and Steps 2/3 never moved.
+  const dash = useQuery<{ cards: DashCard[] }>({ queryKey: ["/api/admin/vault-quest/dashboard"], retry: false, refetchInterval: 60_000 });
   return useMemo<StepModel[]>(() => {
     const cards = dash.data?.cards ?? [];
     const base = cards.filter((c) => !c.baseCardId);
@@ -86,7 +100,6 @@ export function useGuidedSteps(feed: WorkflowFeed | undefined, counts: GuidedCou
     const doneOf = (list: DashCard[]) => list.filter((c) => cardDone(c.status)).length;
 
     const t1 = stepTasks(feed, STEP1_KINDS);
-    const t2 = stepTasks(feed, STEP2_KINDS);
     const t4 = stepTasks(feed, STEP4_KINDS);
     const q = feed?.queue ?? [];
     const firstUrl = (tasks: WorkflowTask[]) => tasks[0]?.target?.url ?? null;
@@ -123,21 +136,31 @@ export function useGuidedSteps(feed: WorkflowFeed | undefined, counts: GuidedCou
     const step3Done = doneOf(variants) + doneOf(collectors);
     const step3Pct = step3Total ? Math.round((step3Done / step3Total) * 100) : 0;
 
+    // Step 4 completion derived from the live feed: the engine drops each set-level
+    // task (qa / packaging / release) from the queue once complete, so absence =
+    // done. Rows were previously hardcoded 0 and Step 4 could never finish.
+    const t4Open = (kind: string) => t4.some((t) => t.kind === kind);
     const step4Rows = [
-      { label: "Packaging", done: 0, total: 3 },
-      { label: "Quality Check", done: 0, total: 1 },
-      { label: "Print Ready", done: 0, total: 1 },
-      { label: "Release", done: 0, total: 1 },
+      { label: "Packaging", done: t4Open("packaging") ? 0 : 1, total: 1 },
+      { label: "Quality Check", done: t4Open("qa") ? 0 : 1, total: 1 },
+      { label: "Release", done: t4Open("release") ? 0 : 1, total: 1 },
     ];
-    const step4Pct = 0;
+    const step4Pct = Math.round((step4Rows.filter((r) => r.done >= r.total).length / step4Rows.length) * 100);
 
-    // First variant card that still needs work → step-3 continue target.
-    const firstVariantOpen = variants.find((c) => !cardDone(c.status));
-    const step3Url = firstVariantOpen ? `/admin/vault-quest?card=${encodeURIComponent(firstVariantOpen.cardId)}&step=generate_cards` : null;
+    // Step 2 targets BASE cards only. The engine's generate_cards tasks bundle
+    // base + variant work per character, so using them here double-counted every
+    // open variant with Step 3 and could deep-link "Continue Cards" to a variant.
+    const step2Open = step2Total - step2Done;
+    const firstBaseOpen = [...creatures, ...support].find((c) => !cardDone(c.status));
+    const step2Url = firstBaseOpen ? `/admin/vault-quest?card=${encodeURIComponent(firstBaseOpen.cardId)}&step=generate_cards` : null;
+
+    // Step 3 continue target covers variants AND collector cards (both counted in its rows).
+    const firstRareOpen = [...variants, ...collectors].find((c) => !cardDone(c.status));
+    const step3Url = firstRareOpen ? `/admin/vault-quest?card=${encodeURIComponent(firstRareOpen.cardId)}&step=generate_cards` : null;
 
     const models: StepModel[] = [
       { n: 1, title: "Create Characters", icon: Users, pct: step1Pct, state: "future", estMinutes: t1.reduce((a, t) => a + t.estMinutes, 0), estCredits: t1.reduce((a, t) => a + t.estCredits, 0), rows: step1Rows, continueUrl: firstUrl(t1), continueLabel: "Continue Characters" },
-      { n: 2, title: "Create Cards", icon: Layers, pct: step2Pct, state: "future", estMinutes: t2.reduce((a, t) => a + t.estMinutes, 0), estCredits: t2.reduce((a, t) => a + t.estCredits, 0), rows: step2Rows, continueUrl: firstUrl(t2), continueLabel: "Continue Cards" },
+      { n: 2, title: "Create Cards", icon: Layers, pct: step2Pct, state: "future", estMinutes: step2Open * 4, estCredits: step2Open, rows: step2Rows, continueUrl: step2Url, continueLabel: "Continue Cards" },
       { n: 3, title: "Create Rare Cards", icon: Sparkles, pct: step3Pct, state: "future", estMinutes: (step3Total - step3Done) * 4, estCredits: step3Total - step3Done, rows: step3Rows, continueUrl: step3Url, continueLabel: "Continue Rare Cards" },
       { n: 4, title: "Packaging & Print", icon: Package, pct: step4Pct, state: "future", estMinutes: t4.reduce((a, t) => a + t.estMinutes, 0), estCredits: 0, rows: step4Rows, continueUrl: "/admin/vault-quest/studio?section=packaging", continueLabel: "Continue Packaging" },
     ];
@@ -154,9 +177,10 @@ export function useGuidedSteps(feed: WorkflowFeed | undefined, counts: GuidedCou
 }
 
 // ── the guided home: 4 large steps + AUTO BUILD + save-credits strip ──
-export function GuidedHome({ feed, counts, loading, openStep }: {
+export function GuidedHome({ feed, counts, loading, openStep, goSection }: {
   feed: WorkflowFeed | undefined;
   counts: GuidedCounts | undefined;
+  goSection: (section: string) => void;
   loading: boolean;
   openStep: (n: 1 | 2 | 3 | 4) => void;
 }) {
@@ -173,7 +197,11 @@ export function GuidedHome({ feed, counts, loading, openStep }: {
             <div className="text-2xl font-black text-slate-100">{feed?.current?.label ?? current?.title ?? "All finished 🎉"}</div>
             {feed?.current?.characterName && <div className="mt-0.5 text-sm text-slate-400">{feed.current.characterName}</div>}
           </div>
-          {feed?.current?.target?.url ? (
+          {studioSectionOf(feed?.current?.target?.url ?? null) ? (
+            // Set-level task (qa/packaging/release): the target is THIS studio page —
+            // a Link would only change the address bar; switch the section instead.
+            <button onClick={() => goSection(studioSectionOf(feed!.current!.target.url)!)} className="inline-flex items-center gap-2 rounded-xl px-8 py-3.5 text-base font-bold text-black transition hover:brightness-110" style={{ background: GOLD }}><Play className="h-5 w-5" />Continue</button>
+          ) : feed?.current?.target?.url ? (
             <Link href={feed.current.target.url}>
               <span className="inline-flex cursor-pointer items-center gap-2 rounded-xl px-8 py-3.5 text-base font-bold text-black transition hover:brightness-110" style={{ background: GOLD }}><Play className="h-5 w-5" />Continue</span>
             </Link>
@@ -224,7 +252,7 @@ export function GuidedHome({ feed, counts, loading, openStep }: {
 }
 
 // ── one step, opened: friendly checklist + ONE primary Continue button ──
-export function GuidedStep({ n, feed, counts, back }: { n: 1 | 2 | 3 | 4; feed: WorkflowFeed | undefined; counts: GuidedCounts | undefined; back: () => void }) {
+export function GuidedStep({ n, feed, counts, back, goSection }: { n: 1 | 2 | 3 | 4; feed: WorkflowFeed | undefined; counts: GuidedCounts | undefined; back: () => void; goSection: (section: string) => void }) {
   const steps = useGuidedSteps(feed, counts);
   const s = steps.find((x) => x.n === n);
   if (!s) return null;
@@ -252,6 +280,10 @@ export function GuidedStep({ n, feed, counts, back }: { n: 1 | 2 | 3 | 4; feed: 
         <div className="mt-5 flex justify-end">
           {!feed ? (
             <span className="text-xs text-slate-600">Loading your progress…</span>
+          ) : studioSectionOf(s.continueUrl) ? (
+            // Studio-internal target (Step 4): a Link to the same route is a no-op —
+            // switch the studio section via callback instead.
+            <button onClick={() => goSection(studioSectionOf(s.continueUrl)!)} className="inline-flex items-center gap-2 rounded-xl px-8 py-3.5 text-base font-bold text-black transition hover:brightness-110" style={{ background: GOLD }}><Play className="h-5 w-5" />{s.continueLabel}</button>
           ) : s.continueUrl ? (
             <Link href={s.continueUrl}>
               <span className="inline-flex cursor-pointer items-center gap-2 rounded-xl px-8 py-3.5 text-base font-bold text-black transition hover:brightness-110" style={{ background: GOLD }}><Play className="h-5 w-5" />{s.continueLabel}</span>

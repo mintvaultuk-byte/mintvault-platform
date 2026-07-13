@@ -279,7 +279,7 @@ export interface ImportReport {
  */
 export async function importMaster(
   csvPath: string,
-  opts: { commit?: boolean; editedBy?: string } = {},
+  opts: { commit?: boolean; editedBy?: string; force?: boolean } = {},
 ): Promise<ImportReport> {
   const cards = loadCards(csvPath);
   const familyStages = buildFamilyStageMap(cards);
@@ -363,9 +363,34 @@ export async function importMaster(
     if (rejects.length > 0) {
       throw new Error(`Refusing to commit: ${rejects.length} card(s) fail validation. Run without --commit to see them.`);
     }
+    // Prod-host safety: refuse the production DB unless explicitly allowed, mirroring
+    // scripts/seed-vq-character-bible.mjs. A --commit run writes to whatever
+    // MINTVAULT_DATABASE_URL points at; this stops an accidental prod overwrite.
+    try {
+      const host = new URL(process.env.MINTVAULT_DATABASE_URL ?? "").hostname;
+      if (host.includes("ep-wispy-morning") && process.env.ALLOW_PROD !== "1") {
+        throw new Error("[vq-seed] Refusing to commit against the production DB host. Set ALLOW_PROD=1 to override.");
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith("[vq-seed]")) throw e;
+      // URL parse failure (unset/odd var) is non-fatal here — the DB pool import below surfaces it.
+    }
     // storage (and the DB pool) is only imported in commit mode, so dry runs
     // never require a database connection.
     const { vqStorage } = await import("./storage");
+    // Guard: a re-run against a populated set upserts every card back to `draft`
+    // and overwrites stats/names — silently wiping approved/published state and
+    // any grader edits. Refuse unless --force is passed explicitly.
+    if (!opts.force) {
+      const setCode = setFromCards(cards, VQ_GAME_CONFIG_V0_1.rules_version).setCode;
+      const existingCards = await vqStorage.listCards({ setCode }).catch(() => []);
+      if (existingCards.length > 0) {
+        throw new Error(
+          `Refusing to commit: set "${setCode}" already has ${existingCards.length} card(s). ` +
+          `A re-seed overwrites card status/stats/names (approved → draft). Re-run with --force if you really intend to overwrite.`,
+        );
+      }
+    }
     await vqStorage.upsertSet(setFromCards(cards, VQ_GAME_CONFIG_V0_1.rules_version));
     for (const f of families) await vqStorage.upsertFamily(f);
     for (const [key, value] of Object.entries(VQ_GAME_CONFIG_V0_1)) await vqStorage.setConfig(key, value);
@@ -386,11 +411,12 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const csvPath = args.find((a) => !a.startsWith("--"));
   const commit = args.includes("--commit");
+  const force = args.includes("--force");
   if (!csvPath) {
-    console.error("usage: tsx server/vault-quest/seed.ts <master.csv|json> [--commit]");
+    console.error("usage: tsx server/vault-quest/seed.ts <master.csv|json> [--commit] [--force]");
     process.exit(1);
   }
-  const report = await importMaster(csvPath, { commit });
+  const report = await importMaster(csvPath, { commit, force });
   const { rejects, ...summary } = report;
   console.log(JSON.stringify(summary, null, 2));
   if (rejects.length) {

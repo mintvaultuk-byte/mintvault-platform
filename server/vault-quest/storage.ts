@@ -36,9 +36,9 @@ import {
   type VqElementRow,
   type VqCharacter,
   type VqArtworkCandidate,
-  type VqReferencePack,
   type VqReferenceType,
 } from "@shared/vq-schema";
+import { referencePackMergeJson } from "./lib/write-sanitize";
 
 export interface CardFilter {
   setCode?: string;
@@ -315,17 +315,21 @@ export const vqStorage = {
       editedBy,
       reason: `reference pack: ${referenceType} approved`,
     });
-    const pack: VqReferencePack = {
-      ...(existing.referencePack ?? {}),
-      [referenceType]: { r2Key: key, candidateId, approvedAt: new Date().toISOString(), identityScore: identityScore ?? null },
-    };
-    const patch: Partial<typeof vqCharacters.$inferInsert> = { referencePack: pack, updatedAt: new Date() };
-    if (referenceType === "master_portrait") {
-      patch.referenceArtworkR2Key = key;
-      patch.approvedArtworkR2Key = key;
-      patch.approvalStatus = "artwork_approved";
-    }
-    const [updated] = await db.update(vqCharacters).set(patch).where(eq(vqCharacters.characterId, characterId)).returning();
+    // ATOMIC top-level jsonb merge — approve only ever sets ONE reference-type key,
+    // so a concurrent approval of a DIFFERENT type can't clobber this slot (the old
+    // read-modify-write of the whole referencePack column lost the sibling slot).
+    // `||` is a documented shallow merge; verified on the engine. Sibling keys survive.
+    const slotJson = referencePackMergeJson(referenceType, key, candidateId, identityScore, new Date().toISOString());
+    const mergeExpr = sql`coalesce(${vqCharacters.referencePack}, '{}'::jsonb) || ${slotJson}::jsonb`;
+    const [updated] = await db
+      .update(vqCharacters)
+      .set(
+        referenceType === "master_portrait"
+          ? { referencePack: mergeExpr, referenceArtworkR2Key: key, approvedArtworkR2Key: key, approvalStatus: "artwork_approved", updatedAt: new Date() }
+          : { referencePack: mergeExpr, updatedAt: new Date() },
+      )
+      .where(eq(vqCharacters.characterId, characterId))
+      .returning();
     if (!updated) throw new Error("reference pack update failed");
     return updated;
   },
@@ -508,10 +512,6 @@ export const vqStorage = {
         if (r.length === 0) throw new Error(`card ${card.cardId} already exists — generate is create-only`);
       }
     });
-  },
-
-  async setCardStatus(cardId: string, status: "draft" | "approved" | "published"): Promise<void> {
-    await db.update(vqCards).set({ status, updatedAt: new Date() }).where(eq(vqCards.cardId, cardId));
   },
 
   async listRevisions(cardId: string) {

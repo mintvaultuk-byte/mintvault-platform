@@ -7,20 +7,30 @@
  * card and optional R2 artwork, so they work before the vq_ tables are pushed.
  * List/get/save require the vq_ tables (staging push, gated behind the deploy hold).
  */
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { requireAdmin } from "../auth";
 import { uploadToR2, getR2Buffer } from "../r2";
 import { toolsUpload } from "../lib/multer-configs";
 import { vqStorage, type CharacterBibleContext, type CharacterBiblePatch } from "../vault-quest/storage";
 import { validateArtwork } from "../vault-quest/upload-guard";
+import { intOrNull, isCandidateReferencedInPack } from "../vault-quest/lib/write-sanitize";
 import { renderCard, type RenderCardInput } from "../vault-quest/render-service";
 import { evaluateCard } from "../vault-quest/qa-engine";
-import { vqArtKey, vqCharacterArtworkKey, vqCharacterCandidateKey, vqCharacterApprovedKey, fetchArt, renderSavedFromStudio, assertVqWriteKey } from "../vault-quest/render-saved";
+import { vqCharacterArtworkKey, vqCharacterCandidateKey, fetchArt, renderSavedFromStudio, assertVqWriteKey, assertVqReadKey } from "../vault-quest/render-saved";
 import { normalizePdf } from "../vault-quest/pdf-normalize";
 import { VQ_ELEMENTS, VQ_ELEMENTS_NEEDS_APPROVAL } from "../vault-quest/lib/vq-constants";
 import { canTransition, isVqStatus } from "@shared/vq-workflow";
 import { setIntegrity, cardMetadata } from "../vault-quest/qa-set";
-import { startExportJob, getExportJob, jobStatus } from "../vault-quest/export-jobs";
+import { startExport, getExportStatusView, resolveExportDownload } from "../vault-quest/export-jobs";
+import { getR2ObjectStream } from "../r2";
+import { checkGenerationSpend } from "../vault-quest/lib/generation-guard";
+import { reserveOrDecide, finalizeSuccess, finalizeFailure, classifyAndMapThrown, idempotencyResponseFor } from "../vault-quest/lib/generation-idempotency-store";
+import { checkVqFeature, setVqFeatureFlag } from "../vault-quest/lib/vq-feature-flags-store";
+import { getVqOpsStatus } from "../vault-quest/lib/vq-ops-status";
+import { promoteCardArtRevision, promoteCharacterReferenceRevision, listRevisionHistory, restoreArtworkRevision, getActiveRevisionKey } from "../vault-quest/lib/vq-artwork-revisions-store";
+import type { VqFeature } from "../vault-quest/lib/vq-feature-state";
+import type { GenerationPayload } from "../vault-quest/lib/generation-idempotency";
+import { randomUUID } from "crypto";
 import { generate, type GenerateReq } from "../vault-quest/generate";
 import { runGenerator, generateFullCard, generateCharacterDescription, DESCRIPTION_FIELD_KEYS, type GenKind, type CardContext } from "../vault-quest/ai/generators";
 import { providerStatuses } from "../vault-quest/ai/provider";
@@ -30,6 +40,7 @@ import {
   generateHiggsfieldArtwork,
   higgsfieldConnection,
   higgsfieldCreditsPerImage,
+  effectiveCreditsPerImage,
   isCandidateKeyForCard,
   validVqCardId,
   vqArtworkCandidateKey,
@@ -75,36 +86,48 @@ function toInsert(body: VqEditorPayload): InsertVqCard {
     element: body.element,
     rarity: body.rarity ?? null,
     familyId: body.familyId ?? null,
-    stageNumber: body.stageNumber ?? null,
+    stageNumber: intOrNull(body.stageNumber),
     lifeStage: body.lifeStage ?? null,
-    health: body.health ?? null,
-    guard: body.guard ?? null,
-    shift: body.shift ?? null,
+    health: intOrNull(body.health),
+    guard: intOrNull(body.guard),
+    shift: intOrNull(body.shift),
     attack1Name: body.attack1Name ?? null,
-    attack1Cost: body.attack1Cost ?? null,
-    attack1Damage: body.attack1Damage ?? null,
+    attack1Cost: intOrNull(body.attack1Cost),
+    attack1Damage: intOrNull(body.attack1Damage),
     attack1Effect: body.attack1Effect ?? null,
     attack2Name: body.attack2Name ?? null,
-    attack2Cost: body.attack2Cost ?? null,
-    attack2Damage: body.attack2Damage ?? null,
+    attack2Cost: intOrNull(body.attack2Cost),
+    attack2Damage: intOrNull(body.attack2Damage),
     attack2Effect: body.attack2Effect ?? null,
     vulnerability: body.vulnerability ?? null,
     keywords: body.keywords ?? [],
     effects: body.effects ?? null,
-    // Store only the DERIVED key (gated on the client's "art present" flag) — never
-    // a client-supplied key.
-    artR2Key: (body.artR2Key || body.artCandidateKey) ? vqArtKey(body.cardId, "main") : null,
-    prevArtR2Key: (body.prevArtR2Key || body.prevArtCandidateKey) ? vqArtKey(body.cardId, "prev") : null,
+    // Phase 10A-6 (R5-F1): pass through VERBATIM — the caller (the /cards route) has
+    // ALREADY resolved this to a safe, server-known value (a freshly promoted revision
+    // key, or the card's own existing DB value) before calling toInsert. Re-deriving
+    // vqArtKey(cardId, slot) here would silently discard a real immutable revisioned
+    // pointer and reset display to the legacy flat key on every save without a new
+    // candidate — never trust a raw client-supplied string directly, but toInsert is
+    // never handed one; the route resolves it first (see promoteArtworkCandidate below).
+    artR2Key: body.artR2Key ?? null,
+    prevArtR2Key: body.prevArtR2Key ?? null,
     setCode: body.setCode ?? "GNV",
     language: body.language ?? "EN",
-    year: body.year ?? 2026,
+    year: intOrNull(body.year) ?? 2026,
     edition: body.edition ?? "FIRST EDITION",
     status: body.status ?? "draft",
     notes: body.notes ?? null,
   };
 }
 
-async function promoteArtworkCandidate(cardId: string, slot: ArtworkSlot, candidateKey?: string | null): Promise<string | null> {
+/**
+ * Promote a generated candidate into the card's DRAFT art slot as an immutable
+ * revision (Phase 10A-6, R5-F1/F2) — replaces the old overwrite-in-place
+ * `uploadToR2(vqArtKey(cardId,slot), ...)`. The upload+ledger+pointer swap is
+ * atomic (see vq-artwork-revisions-store.ts): if anything fails, the card's
+ * CURRENT art is completely untouched.
+ */
+async function promoteArtworkCandidate(cardId: string, slot: ArtworkSlot, candidateKey?: string | null, actor?: string | null): Promise<string | null> {
   const key = String(candidateKey ?? "").trim();
   if (!key) return null;
   if (!validVqCardId(cardId)) throw new Error("Card ID can only use letters, numbers, dots, dashes, and underscores.");
@@ -114,13 +137,12 @@ async function promoteArtworkCandidate(cardId: string, slot: ArtworkSlot, candid
   const guard = await validateArtwork(buf);
   if (!guard.ok) throw new Error(guard.error ?? "Artwork candidate failed validation.");
   const png = await (await import("sharp")).default(buf).png().toBuffer();
-  const draftKey = assertVqWriteKey(vqArtKey(cardId, slot));
-  await uploadToR2(draftKey, png, "image/png");
+  const { r2Key } = await promoteCardArtRevision({ cardId, slot, buffer: png, width: guard.width, height: guard.height, createdBy: actor ?? null });
   // The candidate is now actually promoted into draft art — flip the audit flag
   // here (on Save Draft), not on Use. Best-effort: never fail the save.
   await vqStorage.markAiGenerationAppliedByCandidate(key).catch(() => {});
   await vqStorage.markArtworkCandidateStatusByKey(key, "draft_saved").catch(() => {});
-  return draftKey;
+  return r2Key;
 }
 
 const CHARACTER_PATCH_KEYS: (keyof CharacterBiblePatch)[] = [
@@ -136,9 +158,12 @@ const CHARACTER_PATCH_KEYS: (keyof CharacterBiblePatch)[] = [
   "elementIdentity",
   "negativePrompt",
   "masterArtworkPrompt",
-  "referenceArtworkR2Key",
-  "approvedArtworkR2Key",
-  "approvalStatus",
+  // NOTE: referenceArtworkR2Key / approvedArtworkR2Key / approvalStatus are
+  // deliberately NOT client-writable here. They are set only by the dedicated
+  // artwork/approve routes (which re-derive + prefix-guard the R2 key). Allowing
+  // them via the free-form Bible PATCH let a crafted call store an arbitrary key
+  // or fake `approvalStatus` (spoofing the Full-Card "has master portrait" gate).
+  // The client Bible save only ever sends the text/DNA fields + `locked`.
   "locked",
 ];
 
@@ -357,8 +382,11 @@ async function scoreAndGateCandidate(candidateId: number, generatedPng: Buffer, 
 // reuses the exact character; the result is identity-scored and auto-rejected on drift.
 // Throws on provider errors (mapped by artworkErrorResponse). Reused by the single /
 // "3 more" / family generate routes. Never approves, locks, or touches cards.
-interface GenCandidateResult { candidate: VqArtworkCandidate; artwork: HiggsfieldArtworkResult; key: string; identity: IdentityResult | null; autoRejected: boolean; referencesUsed: string[] }
-async function generateCharacterCandidate(character: VqCharacter, referenceType: VqReferenceType = "master_portrait", opts?: { model?: string }): Promise<GenCandidateResult | { rejected: true; reason: string }> {
+// providerCalls = actual number of paid Higgsfield creates this made (a master can
+// retry once on studio-background failure → up to 2), so the caller records ACTUAL
+// spend, not just candidate count (Reviewer 1 F-1 / financial accuracy).
+interface GenCandidateResult { candidate: VqArtworkCandidate; artwork: HiggsfieldArtworkResult; key: string; identity: IdentityResult | null; autoRejected: boolean; referencesUsed: string[]; providerCalls: number }
+async function generateCharacterCandidate(character: VqCharacter, referenceType: VqReferenceType = "master_portrait", opts?: { model?: string }): Promise<GenCandidateResult | { rejected: true; reason: string; providerCalls: number }> {
   const prev = character.evolvesFromCharacterId ? (await vqStorage.getCharacter(character.evolvesFromCharacterId)) ?? null : null;
   const basePrompt = characterMasterArtworkPrompt(character, prev, referenceType);
   if (basePrompt.length < 20) throw new Error("Character Bible has no master artwork prompt or DNA yet — fill the Bible first.");
@@ -373,8 +401,10 @@ async function generateCharacterCandidate(character: VqCharacter, referenceType:
   let artwork: HiggsfieldArtworkResult | null = null;
   let prompt = "";
   let bgReason: string | undefined;
+  let providerCalls = 0; // every generateHiggsfieldArtwork below is a PAID create
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     prompt = basePrompt + idLock + (attempt > 1 ? STRICTER_BG_SUFFIX : "");
+    providerCalls++;
     const generated = await generateHiggsfieldArtwork({ prompt, mode: "main", slot: "main", imageReferences: buffers.length ? buffers : undefined, model });
     if (!isMaster) { artwork = generated; break; }
     const bg = await validateStudioBackground(generated.png);
@@ -382,11 +412,11 @@ async function generateCharacterCandidate(character: VqCharacter, referenceType:
     bgReason = bg.reason;
     if (attempt === maxAttempts) {
       // Background never passed — reject WITHOUT uploading/recording (don't clutter R2/gallery,
-      // don't consume the approval workflow). The image is discarded.
-      return { rejected: true, reason: `studio background rejected (${bg.reason})` };
+      // don't consume the approval workflow). The image is discarded — but it WAS charged.
+      return { rejected: true, reason: `studio background rejected (${bg.reason})`, providerCalls };
     }
   }
-  if (!artwork) return { rejected: true, reason: bgReason ? `studio background rejected (${bgReason})` : "no image produced" };
+  if (!artwork) return { rejected: true, reason: bgReason ? `studio background rejected (${bgReason})` : "no image produced", providerCalls };
 
   const key = assertVqWriteKey(vqCharacterCandidateKey(character.characterId));
   await uploadToR2(key, artwork.png, "image/png");
@@ -401,7 +431,19 @@ async function generateCharacterCandidate(character: VqCharacter, referenceType:
   }).catch(() => {});
   const ownRefs = buffers.slice(0, ownRefCount);
   const { identity, autoRejected } = await scoreAndGateCandidate(candidate.id, artwork.png, ownRefs, character);
-  return { candidate, artwork, key, identity, autoRejected, referencesUsed: used };
+  return { candidate, artwork, key, identity, autoRejected, referencesUsed: used, providerCalls };
+}
+
+// Phase 10A D10 — read the client-persisted idempotency key (the browser mints + stores
+// it per action-context across reloads/tabs; see admin-vault-quest.tsx). Falls back to a
+// server-minted key so an older/raw client caller still works, though a fallback key gives
+// NO cross-request dedup (a fresh key every call) — real protection needs the client to
+// resend the SAME key for the SAME logical action. Never trust a client-sent key blindly
+// for anything beyond dedup: it only ever gates OUR OWN reservation row, never auth/data.
+function readIdempotencyKey(req: Request): string {
+  const raw = (req.body as { idempotencyKey?: unknown })?.idempotencyKey ?? req.header("Idempotency-Key");
+  const s = String(raw ?? "").trim();
+  return s.length >= 8 && s.length <= 200 ? s : randomUUID();
 }
 
 // Map a Higgsfield failure to a clean status: 503 not-connected, 402 plan/credit, else 500.
@@ -416,7 +458,80 @@ function artworkErrorResponse(res: Response, err: unknown): void {
   }
 }
 
+// Phase 10A-4 — the "writes" emergency kill switch (env hard-off > DB toggle >
+// default-on; see lib/vq-feature-state.ts) applied to every MUTATING VQ admin
+// route in one place, so an operator flips ONE switch to freeze all writes
+// instead of hunting down every route. Reads (GET) are always allowed — this is
+// a maintenance/emergency gate, not an outage; existing exports/candidates/status
+// stay viewable. Runs BEFORE requireAdmin is even reached on each individual
+// route, so a frozen VQ never touches the DB for a write attempt.
+// Relative to the app.use("/api/admin/vault-quest", ...) mount point — Express
+// strips the matched prefix from req.path inside a prefix-mounted middleware, so
+// this must NOT be the full absolute path (that silently never matches — caught
+// by tests/vq-ops-route-spy.integration.test.ts's escape-hatch proof).
+const VQ_WRITES_GATE_BYPASS = "/ops/feature-flags";
+function vqWritesGate(req: Request, res: Response, next: NextFunction): void {
+  if (req.method === "GET") { next(); return; }
+  // The toggle route itself (Phase 10A-5, R4-F4) is the ONE deliberate, audited
+  // exception — an emergency writes-freeze must never trap the owner unable to
+  // un-freeze it. Every other mutation is gated.
+  if (req.path.startsWith(VQ_WRITES_GATE_BYPASS)) { next(); return; }
+  checkVqFeature("writes")
+    .then((check) => {
+      if (check.ok) return next();
+      res.setHeader("Retry-After", String(check.response.retryAfterSeconds));
+      res.status(check.response.status).json(check.response.body);
+    })
+    .catch(next);
+}
+
+/** Feature-specific gate for a single route (generation/exports) — narrower than
+ *  the global writes gate, so an operator can pause JUST paid generation or JUST
+ *  exports without freezing card edits/approvals. Call and `return` on `!ok`
+ *  BEFORE any spend check, reservation, or provider/R2 call. */
+async function vqFeatureGateOrRespond(res: Response, feature: "generation" | "exports"): Promise<boolean> {
+  const check = await checkVqFeature(feature);
+  if (check.ok) return true;
+  res.setHeader("Retry-After", String(check.response.retryAfterSeconds));
+  res.status(check.response.status).json(check.response.body);
+  return false;
+}
+
+const VQ_TOGGLEABLE_FEATURES: readonly VqFeature[] = ["generation", "exports", "writes"];
+
 export function registerVaultQuestAdminRoutes(app: Express): void {
+  app.use("/api/admin/vault-quest", vqWritesGate);
+
+  // ---- ops observability (Phase 10A-5) ----
+  // Read-only, bounded-aggregate operational snapshot: feature-flag state, honest
+  // provider status, current spend ceilings/windows, export job counts. Never
+  // calls a paid provider, never dumps unbounded rows.
+  app.get("/api/admin/vault-quest/ops/status", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      res.json(await getVqOpsStatus(Date.now()));
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "ops status failed" });
+    }
+  });
+
+  // The owner's emergency toggle (R4-F4) — deliberately exempt from vqWritesGate
+  // (see VQ_WRITES_GATE_BYPASS above) so a writes-freeze can always be undone.
+  app.post("/api/admin/vault-quest/ops/feature-flags/:feature", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const feature = String(req.params.feature) as VqFeature;
+      if (!VQ_TOGGLEABLE_FEATURES.includes(feature)) {
+        return res.status(400).json({ error: `unknown feature — must be one of ${VQ_TOGGLEABLE_FEATURES.join(", ")}` });
+      }
+      const body = (req.body ?? {}) as { enabled?: unknown; reason?: unknown };
+      if (typeof body.enabled !== "boolean") return res.status(400).json({ error: "enabled (boolean) is required" });
+      const reason = typeof body.reason === "string" ? body.reason.slice(0, 500) : undefined;
+      await setVqFeatureFlag(feature, body.enabled, req.session?.adminEmail || "admin", reason);
+      res.json({ ok: true, feature, enabled: body.enabled });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "failed to set feature flag" });
+    }
+  });
+
   // ---- editor helpers ----
   app.get("/api/admin/vault-quest/config", requireAdmin, async (_req: Request, res: Response) => {
     try {
@@ -572,6 +687,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
       const character = await vqStorage.getCharacter(characterId);
       if (!character) return res.status(404).json({ error: "character not found" });
+      if (character.locked) return res.status(423).json({ error: "Character is locked — unlock before changing its reference pack." });
       const sourceKey = character.referenceArtworkR2Key;
       if (!sourceKey || !sourceKey.startsWith("vq/characters/")) {
         return res.status(400).json({ error: "Upload reference artwork before approving this character." });
@@ -581,10 +697,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const guard = await validateArtwork(buf);
       if (!guard.ok) return res.status(422).json({ error: guard.error ?? "reference artwork failed validation" });
       const png = await (await import("sharp")).default(buf).png().toBuffer();
-      // Manual reference upload approves as the MASTER PORTRAIT pack slot.
-      const approvedKey = assertVqWriteKey(vqCharacterApprovedKey(characterId, "master_portrait"));
-      await uploadToR2(approvedKey, png, "image/png");
-      const updated = await vqStorage.setCharacterReferencePack(characterId, "master_portrait", approvedKey, null, "admin");
+      // Manual reference upload approves as the MASTER PORTRAIT pack slot — atomic
+      // immutable revision (Phase 10A-6, R5-F2), never an overwrite-in-place.
+      const { r2Key: approvedKey, character: updated } = await promoteCharacterReferenceRevision({
+        characterId, referenceType: "master_portrait", buffer: png, width: guard.width, height: guard.height, createdBy: req.session?.adminEmail || "admin",
+      });
       await vqStorage.markArtworkCandidateStatusByKey(sourceKey, "approved").catch(() => {});
       res.json({ character: updated, key: approvedKey, packCompleteness: vqPackCompleteness(updated.referencePack), width: guard.width, height: guard.height });
     } catch (err) {
@@ -596,6 +713,15 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // candidate from Character Bible DNA — allowed WITHOUT approved artwork (this is
   // how the first reference is created). Never approves/locks/creates cards. ──
   app.post("/api/admin/vault-quest/characters/:characterId/generate-artwork", requireAdmin, async (req: Request, res: Response) => {
+    // Declared OUTSIDE the try so the outer catch (a thrown provider error) can still
+    // finalize the reservation — see readIdempotencyKey's doc comment for the design.
+    let reservedRowId: number | null = null;
+    const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
+      if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+    };
+    const finishErr = async (err: unknown) => {
+      if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
+    };
     try {
       const characterId = String(req.params.characterId);
       if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
@@ -610,31 +736,60 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       }
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
+      if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
+
+      // Spend gate (Phase 10A-2): master ALWAYS makes 3 candidates, others 1. Enforce
+      // the ceiling BEFORE any paid provider call.
+      const isMaster = referenceType === "master_portrait";
+      const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
+      const spend = await checkGenerationSpend({ requestedImages: isMaster ? 3 : 1, perImageCredits: perImage, scope: "single", nowMs: Date.now() });
+      if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
+
+      // Double-pay protection (Phase 10A D10): reserve BEFORE any provider call. A
+      // duplicate (reload / 2nd tab / retry / 2nd Fly machine) reusing the SAME client-
+      // persisted key gets replayed, told to wait, or refused — never a second charge.
+      const idempotencyKey = readIdempotencyKey(req);
+      const payload: GenerationPayload = { generationType: "character-artwork-single", characterId, referenceType, model, count: isMaster ? 3 : 1 };
+      const reserve = await reserveOrDecide({ idempotencyKey, payload, adminId: req.session?.adminEmail, maxAuthorisedSpend: spend.estimatedCredits });
+      if (reserve.durable) {
+        if (!reserve.proceed) {
+          const r = idempotencyResponseFor(reserve.action, reserve.row);
+          return res.status(r.status).json(r.body);
+        }
+        reservedRowId = reserve.rowId;
+      }
 
       // Master Reference ALWAYS produces THREE studio candidates — ENFORCED server-side,
       // so even a raw API call with referenceType=master_portrait yields 3, never 1.
-      if (referenceType === "master_portrait") {
+      if (isMaster) {
         const created: { candidateId: number; key: string; width: number; height: number; identityScore: number | null; model: string }[] = [];
-        let autoRejectedCount = 0, bgRejectedCount = 0;
+        let autoRejectedCount = 0, bgRejectedCount = 0, providerCalls = 0;
         for (let i = 0; i < 3; i++) {
           try {
             const r = await generateCharacterCandidate(character, referenceType, { model });
+            providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each)
             if ("rejected" in r) { bgRejectedCount++; continue; } // studio background failed
             if (r.autoRejected) { autoRejectedCount++; continue; }
             created.push({ candidateId: r.candidate.id, key: r.key, width: r.artwork.width, height: r.artwork.height, identityScore: r.identity?.score ?? null, model: r.artwork.model });
           } catch (e) {
-            if (!created.length && !autoRejectedCount && !bgRejectedCount) return artworkErrorResponse(res, e);
+            if (!created.length && !autoRejectedCount && !bgRejectedCount) { await finishErr(e); return artworkErrorResponse(res, e); }
             break;
           }
         }
-        return res.status(201).json({ referenceType, created, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, count: created.length });
+        // Finalize on ACTUAL paid creates (incl. bg-retries + auto/bg-rejected, which still billed).
+        await finishOk(providerCalls * perImage, created[0]?.candidateId ?? null, model ?? null);
+        return res.status(201).json({ referenceType, created, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, count: created.length, idempotencyKey });
       }
 
       const r = await generateCharacterCandidate(character, referenceType, { model });
-      if ("rejected" in r) return res.status(422).json({ error: r.reason, rejected: true });
+      if ("rejected" in r) {
+        await finishOk(r.providerCalls * perImage, null, model ?? null);
+        return res.status(422).json({ error: r.reason, rejected: true });
+      }
       const { candidate, artwork, key, identity, autoRejected, referencesUsed } = r;
       if (autoRejected) {
         // Identity drifted below threshold — candidate stored for audit, never shown.
+        await finishOk(r.providerCalls * perImage, candidate.id, artwork.model);
         return res.status(422).json({
           error: `Identity Score ${identity?.score}/${identity?.threshold} — the generated image drifted from the approved references, so it was auto-rejected. Generate again.`,
           autoRejected: true,
@@ -643,12 +798,15 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         });
       }
       const thumb = await (await import("sharp")).default(artwork.png).resize(320, 320, { fit: "inside" }).png().toBuffer();
+      await finishOk(r.providerCalls * perImage, candidate.id, artwork.model);
       res.status(201).json({
         candidateId: candidate.id, key, referenceType, width: artwork.width, height: artwork.height,
         identityScore: identity?.score ?? null, model: artwork.model, referencesUsed,
         preview: `data:image/png;base64,${thumb.toString("base64")}`,
+        idempotencyKey,
       });
     } catch (err) {
+      await finishErr(err);
       artworkErrorResponse(res, err);
     }
   });
@@ -656,6 +814,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // Generate N more candidates (default 3, max 3) for THIS character only. Partial-tolerant:
   // if a later image fails (e.g. credits), the ones already created are still returned.
   app.post("/api/admin/vault-quest/characters/:characterId/generate-artwork/batch", requireAdmin, async (req: Request, res: Response) => {
+    let reservedRowId: number | null = null;
+    const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
+      if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+    };
+    const finishErr = async (err: unknown) => {
+      if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
+    };
     try {
       const characterId = String(req.params.characterId);
       if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
@@ -670,21 +835,42 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       }
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
+      if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
+      // Spend gate (Phase 10A-2) BEFORE any paid provider call.
+      const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
+      const spend = await checkGenerationSpend({ requestedImages: count, perImageCredits: perImage, scope: "batch", nowMs: Date.now() });
+      if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
+
+      // Double-pay protection (Phase 10A D10) — reserve BEFORE any provider call.
+      const idempotencyKey = readIdempotencyKey(req);
+      const payload: GenerationPayload = { generationType: "character-artwork-batch", characterId, referenceType, model, count };
+      const reserve = await reserveOrDecide({ idempotencyKey, payload, adminId: req.session?.adminEmail, maxAuthorisedSpend: spend.estimatedCredits });
+      if (reserve.durable) {
+        if (!reserve.proceed) {
+          const r = idempotencyResponseFor(reserve.action, reserve.row);
+          return res.status(r.status).json(r.body);
+        }
+        reservedRowId = reserve.rowId;
+      }
+
       const created: { candidateId: number; key: string; width: number; height: number; identityScore: number | null; model: string }[] = [];
-      let autoRejectedCount = 0, bgRejectedCount = 0;
+      let autoRejectedCount = 0, bgRejectedCount = 0, providerCalls = 0;
       for (let i = 0; i < count; i++) {
         try {
           const r = await generateCharacterCandidate(character, referenceType, { model });
+          providerCalls += r.providerCalls; // ACTUAL paid creates
           if ("rejected" in r) { bgRejectedCount++; continue; }
           if (r.autoRejected) { autoRejectedCount++; continue; } // stored for audit, never shown
           created.push({ candidateId: r.candidate.id, key: r.key, width: r.artwork.width, height: r.artwork.height, identityScore: r.identity?.score ?? null, model: r.artwork.model });
         } catch (e) {
-          if (!created.length && !autoRejectedCount && !bgRejectedCount) return artworkErrorResponse(res, e); // first one failed → clean error
+          if (!created.length && !autoRejectedCount && !bgRejectedCount) { await finishErr(e); return artworkErrorResponse(res, e); } // first one failed → clean error
           break; // a later one failed → return the ones that succeeded
         }
       }
-      res.status(201).json({ characterId, referenceType, created, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount });
+      await finishOk(providerCalls * perImage, created[0]?.candidateId ?? null, model ?? null);
+      res.status(201).json({ characterId, referenceType, created, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, idempotencyKey });
     } catch (err) {
+      await finishErr(err);
       artworkErrorResponse(res, err);
     }
   });
@@ -698,6 +884,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!Number.isInteger(candidateId)) return res.status(400).json({ error: "candidateId required" });
       const cand = await vqStorage.getArtworkCandidate(candidateId);
       if (!cand || cand.characterId !== characterId) return res.status(404).json({ error: "candidate not found for this character" });
+      // Don't reject/delete a candidate that is the SOURCE of an approved reference-
+      // pack slot — it would leave reference_pack.<type>.candidateId dangling.
+      // (Real occurrence found in staging: GNV-F03-S2 master_portrait → deleted cand.)
+      const character = await vqStorage.getCharacter(characterId);
+      if (isCandidateReferencedInPack(character?.referencePack, candidateId)) {
+        return res.status(409).json({ error: "This candidate is the approved reference for this character — replace or re-approve a different one before rejecting it." });
+      }
       // "delete" only hides it from the gallery (status flag) — the R2 object is kept.
       const action = String((req.body as { action?: string })?.action) === "delete" ? "deleted" : "rejected";
       await vqStorage.markArtworkCandidateStatusById(candidateId, action); // R2 object intentionally kept
@@ -743,6 +936,49 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     }
   });
 
+  // Full revision history for one artwork slot (Phase 10A-6) — founder-facing
+  // "what changed, when, by whom" view. Read-only; works for either entity type.
+  app.get("/api/admin/vault-quest/artwork-revisions", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const entityType = String(req.query.entityType) === "card" ? "card" : "character";
+      const entityId = String(req.query.entityId ?? "").trim();
+      const slot = String(req.query.slot ?? "").trim();
+      if (!entityId || !slot || !validVqCardId(entityId)) return res.status(400).json({ error: "entityId and slot are required" });
+      const history = await listRevisionHistory(entityType, entityId, slot);
+      res.json({
+        entityType, entityId, slot,
+        revisions: history.map((r) => ({
+          id: r.id, r2Key: r.r2Key, isActive: r.isActive, backupState: r.backupState,
+          width: r.width, height: r.height, createdBy: r.createdBy, createdAt: r.createdAt, archivedAt: r.archivedAt,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "failed to load revision history" });
+    }
+  });
+
+  // Roll back to a previous revision (Phase 10A-6) — a RECOVERY action, not a new
+  // upload. Fails safely (no pointer change) if the target asset is missing or
+  // its stored hash no longer matches what's actually in R2.
+  app.post("/api/admin/vault-quest/artwork-revisions/:revisionId/restore", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const revisionId = Number(req.params.revisionId);
+      if (!Number.isInteger(revisionId)) return res.status(400).json({ error: "invalid revisionId" });
+      const outcome = await restoreArtworkRevision(revisionId, req.session?.adminEmail || "admin");
+      if (!outcome.ok) {
+        const messages: Record<string, string> = {
+          not_found: "That revision no longer exists.",
+          asset_missing: "That revision's image is no longer in storage — cannot restore it.",
+          integrity_mismatch: "That revision's stored image no longer matches its recorded checksum — refusing to restore a possibly-corrupted asset.",
+        };
+        return res.status(422).json({ error: messages[outcome.reason] ?? "restore failed", reason: outcome.reason });
+      }
+      res.json({ ok: true, revisionId: outcome.revision.id, r2Key: outcome.revision.r2Key, previousKey: outcome.previousKey });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "failed to restore revision" });
+    }
+  });
+
   // Approve a candidate as the character's reference/approved artwork. Promotes to the
   // approved/ folder + stores the key on the Bible. Does NOT touch vq_cards or its status.
   app.post("/api/admin/vault-quest/characters/:characterId/approve-candidate", requireAdmin, async (req: Request, res: Response) => {
@@ -754,6 +990,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!Number.isInteger(candidateId)) return res.status(400).json({ error: "candidateId required" });
       const character = await vqStorage.getCharacter(characterId);
       if (!character) return res.status(404).json({ error: "character not found" });
+      if (character.locked) return res.status(423).json({ error: "Character is locked — unlock before changing its reference pack." });
       const cand = await vqStorage.getArtworkCandidate(candidateId);
       if (!cand || cand.characterId !== characterId || !cand.r2Key.startsWith("vq/characters/")) {
         return res.status(404).json({ error: "candidate not found for this character" });
@@ -770,9 +1007,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const guard = await validateArtwork(buf);
       if (!guard.ok) return res.status(422).json({ error: guard.error ?? "candidate failed validation" });
       const png = await (await import("sharp")).default(buf).png().toBuffer();
-      const approvedKey = assertVqWriteKey(vqCharacterApprovedKey(characterId, referenceType));
-      await uploadToR2(approvedKey, png, "image/png");
-      const updated = await vqStorage.setCharacterReferencePack(characterId, referenceType, approvedKey, candidateId, "admin", cand.identityScore ?? null);
+      // Atomic immutable revision (Phase 10A-6, R5-F2) — never an overwrite-in-place.
+      const { r2Key: approvedKey, character: updated } = await promoteCharacterReferenceRevision({
+        characterId, referenceType, buffer: png, width: guard.width, height: guard.height,
+        sourceCandidateId: candidateId, identityScore: cand.identityScore ?? null, createdBy: req.session?.adminEmail || "admin",
+      });
       await vqStorage.markArtworkCandidateStatusById(candidateId, "approved").catch(() => {});
       res.json({ character: updated, key: approvedKey, referenceType, locked: updated.locked, packCompleteness: vqPackCompleteness(updated.referencePack), width: guard.width, height: guard.height });
     } catch (err) {
@@ -804,6 +1043,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // DNA, with each later stage referencing the previous stage's DNA for continuity.
   // Sequential (spends Higgsfield credits per stage). No approval/lock/card changes.
   app.post("/api/admin/vault-quest/characters/family/:familyId/generate-artwork", requireAdmin, async (req: Request, res: Response) => {
+    let reservedRowId: number | null = null;
+    const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
+      if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+    };
+    const finishErr = async (err: unknown) => {
+      if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
+    };
     try {
       const familyId = String(req.params.familyId);
       if (!validVqCardId(familyId)) return res.status(400).json({ error: "invalid family id" });
@@ -814,24 +1060,47 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const model = String((req.body as { model?: string })?.model ?? "").trim() || undefined;
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
+      if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
+      // Spend gate (Phase 10A-2): family generates one image per eligible character in ONE
+      // press, so it is capped by the per-BATCH credit ceiling (D8), not the per-image count.
+      const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
+      const eligible = fam.filter((c) => c.descriptionStatus === "approved").length;
+      const spend = await checkGenerationSpend({ requestedImages: Math.max(1, eligible), perImageCredits: perImage, scope: "family", nowMs: Date.now() });
+      if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
+
+      // Double-pay protection (Phase 10A D10) — reserve BEFORE any provider call.
+      const idempotencyKey = readIdempotencyKey(req);
+      const payload: GenerationPayload = { generationType: "character-artwork-family", familyId, model, count: eligible };
+      const reserve = await reserveOrDecide({ idempotencyKey, payload, adminId: req.session?.adminEmail, maxAuthorisedSpend: spend.estimatedCredits });
+      if (reserve.durable) {
+        if (!reserve.proceed) {
+          const r = idempotencyResponseFor(reserve.action, reserve.row);
+          return res.status(r.status).json(r.body);
+        }
+        reservedRowId = reserve.rowId;
+      }
+
       const generated: { characterId: string; stageNumber: number; candidateId: number; key: string; identityScore: number | null }[] = [];
-      let autoRejectedCount = 0, bgRejectedCount = 0, descSkipped = 0;
+      let autoRejectedCount = 0, bgRejectedCount = 0, descSkipped = 0, providerCalls = 0;
       for (const ch of fam) {
         // Each stage references the previous stage's DNA + approved pack (evolution anchor,
         // handled inside generateCharacterCandidate → collectReferenceImages).
         if (ch.descriptionStatus !== "approved") { descSkipped++; continue; } // text before pixels
         try {
           const r = await generateCharacterCandidate(ch, "master_portrait", { model });
+          providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each)
           if ("rejected" in r) { bgRejectedCount++; continue; }
           if (r.autoRejected) { autoRejectedCount++; continue; }
           generated.push({ characterId: ch.characterId, stageNumber: ch.stageNumber, candidateId: r.candidate.id, key: r.key, identityScore: r.identity?.score ?? null });
         } catch (e) {
-          if (!generated.length && !autoRejectedCount && !bgRejectedCount) return artworkErrorResponse(res, e);
+          if (!generated.length && !autoRejectedCount && !bgRejectedCount) { await finishErr(e); return artworkErrorResponse(res, e); }
           break; // a later stage failed → return the ones that succeeded
         }
       }
-      res.status(201).json({ familyId, generated, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, descriptionSkipped: descSkipped });
+      await finishOk(providerCalls * perImage, generated[0]?.candidateId ?? null, model ?? null);
+      res.status(201).json({ familyId, generated, autoRejected: autoRejectedCount, bgRejected: bgRejectedCount, descriptionSkipped: descSkipped, idempotencyKey });
     } catch (err) {
+      await finishErr(err);
       artworkErrorResponse(res, err);
     }
   });
@@ -854,6 +1123,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         return res.status(400).json({ error: `All ${fam.length} stages need a selected candidate first — missing ${missing.map((m) => `Stage ${m.stageNumber}`).join(", ")}.` });
       }
       // Pre-validate EVERY selection before mutating anything (atomic-ish).
+      const lockedStage = fam.find((c) => c.locked);
+      if (lockedStage) {
+        return res.status(423).json({ error: `Stage ${lockedStage.stageNumber} is locked — unlock it before changing the family's reference pack.` });
+      }
       const toApprove: { ch: VqCharacter; candidateId: number; referenceType: VqReferenceType; identityScore: number | null; png: Buffer }[] = [];
       for (const ch of fam) {
         const candidateId = selByChar.get(ch.characterId) as number;
@@ -871,10 +1144,14 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         toApprove.push({ ch, candidateId, referenceType: parseReferenceType(cand.referenceType), identityScore: cand.identityScore ?? null, png: await (await import("sharp")).default(buf).png().toBuffer() });
       }
       const approved: { characterId: string; stageNumber: number; referenceType: string; key: string }[] = [];
+      const familyActor = req.session?.adminEmail || "admin";
       for (const { ch, candidateId, referenceType, identityScore, png } of toApprove) {
-        const approvedKey = assertVqWriteKey(vqCharacterApprovedKey(ch.characterId, referenceType));
-        await uploadToR2(approvedKey, png, "image/png");
-        await vqStorage.setCharacterReferencePack(ch.characterId, referenceType, approvedKey, candidateId, "admin", identityScore);
+        // Atomic immutable revision per stage (Phase 10A-6, R5-F2) — never an
+        // overwrite-in-place; a failure on one stage leaves earlier-approved stages
+        // (already committed in their own transaction) and later stages untouched.
+        const { r2Key: approvedKey } = await promoteCharacterReferenceRevision({
+          characterId: ch.characterId, referenceType, buffer: png, sourceCandidateId: candidateId, identityScore, createdBy: familyActor,
+        });
         await vqStorage.markArtworkCandidateStatusById(candidateId, "approved").catch(() => {});
         approved.push({ characterId: ch.characterId, stageNumber: ch.stageNumber, referenceType, key: approvedKey });
       }
@@ -988,20 +1265,49 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (!body.cardId || !body.name || !body.cardType || !body.element) {
         return res.status(400).json({ error: "cardId, name, cardType and element are required" });
       }
+      // Relational fields have no FK — validate the parents exist and share this
+      // card's set, so a save can't mint a dangling variant/family reference or a
+      // cross-set inheritance link (the columns are otherwise trusted verbatim).
+      const cardSet = body.setCode ?? "GNV";
+      if (body.baseCardId) {
+        const base = await vqStorage.getCard(String(body.baseCardId));
+        if (!base) return res.status(400).json({ error: "baseCardId does not reference an existing card" });
+        if (base.setCode !== cardSet) return res.status(400).json({ error: "a variant and its base card must be in the same set" });
+      }
+      if (body.familyId) {
+        const fam = await vqStorage.getFamily(String(body.familyId));
+        if (!fam) return res.status(400).json({ error: "familyId does not reference an existing family" });
+        if (fam.setCode !== cardSet) return res.status(400).json({ error: "a card and its family must be in the same set" });
+      }
       // Single-door status: SAVE never sets a forward workflow status. A new card is
       // a draft; an existing card keeps its current status. Forward transitions
       // (ready/approved/export_ready/…) happen ONLY through /status, which runs the
       // full workflow gate. This prevents bypassing canTransition via the save route.
       const art = await fetchArt(body);
       const { qa } = await renderCard(body, art, "preview");
-      const promotedMain = await promoteArtworkCandidate(body.cardId, "main", body.artCandidateKey);
-      const promotedPrev = await promoteArtworkCandidate(body.cardId, "prev", body.prevArtCandidateKey);
+      const actor = req.session?.adminEmail || "admin";
+      const promotedMain = await promoteArtworkCandidate(body.cardId, "main", body.artCandidateKey, actor);
+      const promotedPrev = await promoteArtworkCandidate(body.cardId, "prev", body.prevArtCandidateKey, actor);
       const existing = await vqStorage.getCard(body.cardId);
       const keepStatus = existing ? existing.status : "draft";
+      // Phase 10A-6 (R5-F1): fall back to SERVER-authoritative sources ONLY, never the
+      // client-echoed body.artR2Key. Otherwise a save with no NEW candidate this round
+      // (a plain gameplay edit) would either (a) trust an unvalidated client string, or
+      // (b) previously re-derive the legacy flat key and silently revert a real
+      // revisioned pointer back to a stale/non-existent path.
+      //   1. promotedMain/Prev — a candidate was promoted THIS save (fresh, just written).
+      //   2. existing.artR2Key — the card already existed; already correct (a direct
+      //      upload via /cards/:cardId/art already wrote this column itself).
+      //   3. the ledger's own active-revision key — covers a BRAND-NEW card whose art
+      //      was uploaded via the direct-upload route before the card's first Save (no
+      //      `existing` row yet for that route's pointer-update to have landed on).
+      const [ledgerMain, ledgerPrev] = existing
+        ? [null, null] // existing already reflects the truth; skip the extra reads
+        : await Promise.all([getActiveRevisionKey("card", body.cardId, "main"), getActiveRevisionKey("card", body.cardId, "prev")]);
       const saveBody = {
         ...body,
-        artR2Key: promotedMain ?? body.artR2Key,
-        prevArtR2Key: promotedPrev ?? body.prevArtR2Key,
+        artR2Key: promotedMain ?? existing?.artR2Key ?? ledgerMain ?? null,
+        prevArtR2Key: promotedPrev ?? existing?.prevArtR2Key ?? ledgerPrev ?? null,
         status: keepStatus,
       };
       const saved = await vqStorage.saveCard(toInsert(saveBody), "admin");
@@ -1053,6 +1359,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   });
 
   app.post("/api/admin/vault-quest/ai/artwork", requireAdmin, async (req: Request, res: Response) => {
+    let reservedRowId: number | null = null;
+    const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
+      if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+    };
+    const finishErr = async (err: unknown) => {
+      if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
+    };
     try {
       const body = req.body as { context?: CardContext & { cardId?: string }; mode?: string; slot?: string; promptOverride?: string; model?: string };
       const ctx = (body.context ?? {}) as CardContext & { cardId?: string };
@@ -1129,6 +1442,25 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // AI or Save Draft (those are independent routes).
       const conn = higgsfieldConnection();
       if (!conn.connected) return res.status(503).json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
+      if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
+
+      // Spend gate (Phase 10A-2): card artwork is a single paid image — cap BEFORE the call.
+      // Price the EFFECTIVE (upgraded) model so a z_image+references request isn't undercounted (F-2).
+      const perImage = effectiveCreditsPerImage(String(body.model ?? "").trim() || undefined);
+      const spend = await checkGenerationSpend({ requestedImages: 1, perImageCredits: perImage, scope: "single", nowMs: Date.now() });
+      if (!spend.allow) return res.status(spend.http).json({ error: spend.message, reason: spend.reason });
+
+      // Double-pay protection (Phase 10A D10) — reserve BEFORE any provider call.
+      const idempotencyKey = readIdempotencyKey(req);
+      const payload: GenerationPayload = { generationType: "card-artwork", cardId, model: String(body.model ?? "").trim() || undefined, count: 1 };
+      const reserve = await reserveOrDecide({ idempotencyKey, payload, adminId: req.session?.adminEmail, maxAuthorisedSpend: spend.estimatedCredits });
+      if (reserve.durable) {
+        if (!reserve.proceed) {
+          const rr = idempotencyResponseFor(reserve.action, reserve.row);
+          return res.status(rr.status).json(rr.body);
+        }
+        reservedRowId = reserve.rowId;
+      }
 
       // Phase 2 visual identity lock: attach the character's APPROVED references
       // (a variant's bible resolves to its BASE character, so variants reuse the
@@ -1197,6 +1529,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         const gate = await scoreAndGateCandidate(candRow.id, artwork.png, referenceBuffers.slice(0, ownRefCount), bible.character);
         cardIdentity = gate.identity;
         if (gate.autoRejected) {
+          await finishOk(perImage, candRow?.id ?? null, artwork.model);
           return res.status(422).json({
             error: `Identity Score ${gate.identity?.score}/${gate.identity?.threshold} — the artwork drifted from the approved character, so it was auto-rejected. Generate again.`,
             autoRejected: true,
@@ -1206,6 +1539,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         }
       }
 
+      await finishOk(perImage, candRow?.id ?? null, artwork.model);
       res.status(201).json({
         identityScore: cardIdentity?.score ?? null,
         referencesUsed,
@@ -1222,8 +1556,10 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         height: artwork.height,
         preview: `data:image/png;base64,${artwork.png.toString("base64")}`,
         disclaimer: AI_DISCLAIMER,
+        idempotencyKey,
       });
     } catch (err) {
+      await finishErr(err);
       // Expired/invalid token → clean 503 "provider not connected" (not a crash).
       // Higgsfield plan/credit limits → clean 402 with an actionable message.
       // Real generation faults stay 500. Text AI + Save Draft are unaffected either way.
@@ -1357,7 +1693,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         const eff = c.effects;
         if (Array.isArray(eff)) (eff as unknown[]).forEach((e) => typeof e === "string" && e && effects.add(e));
       }
-      res.json({ keywords: [...keywords].sort(), effects: [...effects].sort(), providers: providerStatuses() });
+      res.json({ keywords: [...keywords].sort(), effects: [...effects].sort(), providers: await providerStatuses() });
     } catch (err) {
       res.status(500).json({ error: err instanceof Error ? err.message : "taxonomy failed" });
     }
@@ -1469,8 +1805,12 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (!validVqCardId(cardId)) return res.status(400).json({ error: "Card ID can only use letters, numbers, dots, dashes, and underscores." });
         const slot = (req.query.slot as string) === "prev" ? "prev" : "main";
         const png = await (await import("sharp")).default(file.buffer).png().toBuffer();
-        const key = assertVqWriteKey(vqArtKey(cardId, slot));
-        await uploadToR2(key, png, "image/png");
+        // Atomic immutable revision (Phase 10A-6, R5-F2) — a manual admin upload gets
+        // the SAME durability guarantee as an AI-generated candidate promotion. If the
+        // card row doesn't exist yet (a brand-new card, art uploaded before first Save),
+        // the pointer-column update is a harmless no-op — the /cards save route picks
+        // the key up from the ledger itself (getActiveRevisionKey) on first save.
+        const { r2Key: key } = await promoteCardArtRevision({ cardId, slot, buffer: png, width: guard.width, height: guard.height, createdBy: req.session?.adminEmail || "admin" });
         res.json({ key, slot, width: guard.width, height: guard.height });
       } catch (err) {
         res.status(500).json({ error: err instanceof Error ? err.message : "upload failed" });
@@ -1478,14 +1818,21 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     },
   );
 
-  // ---- serve stored artwork BY CARD ID (never the raw R2 key) ----
+  // ---- serve stored artwork BY CARD ID (admin preview thumbnail; never the raw R2 key) ----
   app.get("/api/admin/vault-quest/cards/:cardId/art/:slot", requireAdmin, async (req: Request, res: Response) => {
     try {
       const cardId = String(req.params.cardId);
       if (!validVqCardId(cardId)) return res.status(400).json({ error: "invalid card id" });
       const slot = String(req.params.slot) === "prev" ? "prev" : "main";
-      const key = `vq/art/${cardId}/${slot}.png`;
-      const buf = await getR2Buffer(key);
+      // Phase 10A-6 (R5-F1): resolve the STORED pointer — the card's own column is
+      // authoritative for both legacy flat keys and new revisioned keys; the ledger's
+      // active-revision key is the fallback for a brand-new, not-yet-saved card whose
+      // art was just uploaded directly. Never re-derive the deterministic flat path.
+      const card = await vqStorage.getCard(cardId).catch(() => undefined);
+      const storedKey = slot === "main" ? card?.artR2Key : card?.prevArtR2Key;
+      const key = storedKey || (await getActiveRevisionKey("card", cardId, slot));
+      if (!key) return res.status(404).json({ error: "no artwork on file" });
+      const buf = await getR2Buffer(assertVqReadKey(key));
       if (!buf) return res.status(404).json({ error: "no artwork on file" });
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Cache-Control", "private, max-age=60");
@@ -1589,7 +1936,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const card = await vqStorage.setCardStatusAudited(cardId, body.to, body.note, "admin", from);
       res.json({ card, evaluation: { ...evaluation, status: body.to } });
     } catch (err) {
-      res.status(500).json({ error: err instanceof Error ? err.message : "transition failed" });
+      const msg = err instanceof Error ? err.message : "transition failed";
+      // A lost compare-and-set (another tab changed the status first) is a conflict,
+      // not a server fault — tell the client to reload, don't surface a 500.
+      if (/concurrently|status changed/i.test(msg)) return res.status(409).json({ error: msg });
+      res.status(500).json({ error: msg });
     }
   });
 
@@ -1673,12 +2024,21 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   function startBatch(kind: "pack" | "proxy") {
     return async (req: Request, res: Response) => {
       try {
+        if (!(await vqFeatureGateOrRespond(res, "exports"))) return; // emergency kill switch (Phase 10A-4)
         const ids = await resolveCardIds(req.body as Selector);
         if (!ids.length) return res.status(400).json({ error: "no cards selected" });
-        const { id } = startExportJob(kind, ids);
-        res.status(202).json({ jobId: id, count: ids.length });
+        const ownerAdminId = req.session?.adminEmail || "admin";
+        const { jobId, count } = await startExport(kind, ownerAdminId, ids);
+        res.status(202).json({ jobId, count });
       } catch (err) {
-        res.status(500).json({ error: err instanceof Error ? err.message : `${kind} failed to start` });
+        const status = (err as { status?: number }).status;
+        const msg = err instanceof Error ? err.message : `${kind} failed to start`;
+        // Concurrency back-pressure ("too many exports") is our own safe text → surface it.
+        if (status === 429 || /too many exports/i.test(msg)) return res.status(429).json({ error: msg });
+        // Otherwise return a GENERIC 500 — never echo err.message, which could carry raw
+        // Postgres text (e.g. "column \"ids\" does not exist") on an unexpected DB error.
+        console.error(`[vq-export] ${kind} start failed:`, msg);
+        res.status(500).json({ error: `${kind} failed to start` });
       }
     };
   }
@@ -1688,33 +2048,55 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // export pack (.zip): svg/png/pdf + per-card metadata + manifest + checksums — background job
   app.post("/api/admin/vault-quest/export/pack", requireAdmin, startBatch("pack"));
 
-  // job progress (poll)
-  app.get("/api/admin/vault-quest/export/jobs/:id", requireAdmin, (req: Request, res: Response) => {
-    const job = getExportJob(String(req.params.id));
-    if (!job) return res.status(404).json({ error: "job not found or expired" });
-    res.json(jobStatus(job));
+  // job progress (poll) — durable (Postgres) first, legacy in-memory fallback, so a
+  // poll that lands on a different Fly machine than the POST still finds the job.
+  app.get("/api/admin/vault-quest/export/jobs/:id", requireAdmin, async (req: Request, res: Response) => {
+    const view = await getExportStatusView(String(req.params.id));
+    if (!view) return res.status(404).json({ error: "job not found or expired" });
+    res.json(view);
   });
 
-  // download the finished file (streamed from the temp file; kept until TTL so it
-  // can be re-downloaded)
+  // download the finished file. Durable jobs stream from shared R2 (same-origin,
+  // behind admin auth) so any machine can serve it; legacy jobs stream the temp file.
   app.get("/api/admin/vault-quest/export/jobs/:id/file", requireAdmin, async (req: Request, res: Response) => {
-    const job = getExportJob(String(req.params.id));
-    if (!job) return res.status(404).json({ error: "job not found or expired" });
-    if (job.state === "running") return res.status(409).json({ error: "export still running" });
-    if (job.state === "error") return res.status(422).json({ error: job.error ?? "export failed" });
-    if (!job.filePath) return res.status(410).json({ error: "export file no longer available" });
-    const fs = await import("fs");
-    if (!fs.existsSync(job.filePath)) return res.status(410).json({ error: "export file no longer available" });
-    res.setHeader("Content-Type", job.contentType ?? "application/octet-stream");
-    res.setHeader("Content-Disposition", `attachment; filename="${job.fileName ?? "export.bin"}"`);
-    if (job.bytes) res.setHeader("Content-Length", String(job.bytes));
-    const stream = fs.createReadStream(job.filePath);
-    stream.on("error", () => {
-      if (!res.headersSent) res.status(500).json({ error: "failed to read export file" });
-      else res.destroy();
-    });
-    // if the client disconnects mid-download, tear the read stream down (no fd leak)
-    res.on("close", () => stream.destroy());
-    stream.pipe(res);
+    const plan = await resolveExportDownload(String(req.params.id));
+    switch (plan.kind) {
+      case "not_found":
+        return res.status(404).json({ error: "job not found or expired" });
+      case "running":
+        return res.status(409).json({ error: "export still running" });
+      case "failed":
+        return res.status(422).json({ error: plan.message });
+      case "gone":
+        return res.status(410).json({ error: "export file no longer available" });
+      case "r2": {
+        const obj = await getR2ObjectStream(plan.outputKey);
+        if (!obj) return res.status(410).json({ error: "export file no longer available" });
+        res.setHeader("Content-Type", plan.contentType);
+        res.setHeader("Content-Disposition", `attachment; filename="${plan.fileName}"`);
+        const len = plan.bytes ?? obj.contentLength;
+        if (len) res.setHeader("Content-Length", String(len));
+        res.on("close", () => (obj.body as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.());
+        obj.body.on("error", () => {
+          if (!res.headersSent) res.status(500).json({ error: "failed to read export file" });
+          else res.destroy();
+        });
+        return obj.body.pipe(res);
+      }
+      case "file": {
+        const fs = await import("fs");
+        if (!fs.existsSync(plan.filePath)) return res.status(410).json({ error: "export file no longer available" });
+        res.setHeader("Content-Type", plan.contentType);
+        res.setHeader("Content-Disposition", `attachment; filename="${plan.fileName}"`);
+        if (plan.bytes) res.setHeader("Content-Length", String(plan.bytes));
+        const stream = fs.createReadStream(plan.filePath);
+        stream.on("error", () => {
+          if (!res.headersSent) res.status(500).json({ error: "failed to read export file" });
+          else res.destroy();
+        });
+        res.on("close", () => stream.destroy());
+        return stream.pipe(res);
+      }
+    }
   });
 }

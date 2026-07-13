@@ -19,6 +19,7 @@
 import { vqStorage } from "./storage";
 import { STAT_SCALE } from "./seed";
 import { VQ_ELEMENTS } from "./lib/vq-constants";
+import { nextCardNumFrom } from "./lib/write-sanitize";
 import { VQ_CARD_TYPES } from "@shared/vq-validate";
 import type { InsertVqCard, InsertVqFamily, VqCardRow, VqFamily } from "@shared/vq-schema";
 
@@ -45,14 +46,7 @@ export interface GenerateResult {
 const pad3 = (n: number) => String(n).padStart(3, "0");
 const RARITY_LADDER: Record<number, string> = { 1: "C", 2: "U", 3: "RR" };
 
-function nextCardNum(cards: VqCardRow[]): number {
-  let max = 0;
-  for (const c of cards) {
-    const m = /^GNV-(\d+)$/.exec(c.cardId);
-    if (m) max = Math.max(max, Number(m[1]));
-  }
-  return max + 1;
-}
+const nextCardNum = nextCardNumFrom;
 
 function nextCollector(cards: VqCardRow[], count: number): { start: number; denom: number } {
   let maxN = 0;
@@ -123,7 +117,7 @@ export async function generate(req: GenerateReq): Promise<GenerateResult> {
   if (!/^[A-Za-z0-9]{1,8}$/.test(setCode)) throw new Error(`invalid setCode "${setCode}"`);
 
   const cards = await vqStorage.listCards({ setCode });
-  const num0 = nextCardNum(cards);
+  const num0 = nextCardNum(cards, setCode);
 
   if (req.mode === "card") {
     const cardType = (req.cardType ?? "Creature").trim() || "Creature";

@@ -85,11 +85,20 @@ npm start            # NODE_ENV=production node dist/index.cjs
 # Type checking
 npm run check        # tsc (no emit)
 
+# Tests & lint (these DO exist — Vitest + ESLint + Prettier, via Husky/lint-staged)
+npm test             # vitest run (full suite; includes protected MVGS regression tests)
+npm run lint         # eslint .
+npm run format       # prettier --write .
+
 # Database
-npm run db:push      # Push schema changes via drizzle-kit
+npm run db:push      # Push schema changes via drizzle-kit (PROTECTED — owner approval)
 ```
 
-There are no test or lint scripts defined.
+Test/lint/build scripts DO exist: `test` (vitest), `lint` (eslint), `format` (prettier),
+`build` (`tsx script/build.ts`), plus a Husky pre-commit `lint-staged` (`eslint --fix` +
+`prettier --write`). The grading system has protected regression coverage under `tests/`
+(`mvgs-scoring.test.ts`, `pristine.test.ts`, `centering.test.ts`, `mvgs-input-builder.test.ts`).
+Run the full suite for any grading-adjacent change.
 
 ### Request flow
 
@@ -387,3 +396,58 @@ Before starting any Claude Code work session, make sure:
 4. **Check the dev server.** Run `npm run dev` — if it starts, the app still works.
 5. **Check TypeScript.** Run `npm run check` — if it passes, the code is structurally sound.
 6. **Ask Claude** (in a new chat if needed): "Something broke after [describe what was changed]. Help me fix it without changing anything else."
+
+---
+
+## 🧩 Governance skill — controlled-code-lead
+
+Added 2026-07-11. This is the standing process Claude Code follows for coding
+work in this repo — it doesn't change any of the Golden Rules above, it
+formalises the workflow around them so nothing gets skipped in a long session.
+
+**What it is, in plain English:** for any task touching code, debugging,
+review, architecture, databases, migrations, infrastructure, storage,
+providers, deployment, CI/CD, staging, or production, the main Claude session
+acts as a "Lead Engineer" who is the only one allowed to decide scope, approve
+edits, and approve anything risky (migrations, deploys, secrets, infra). If
+the task is big enough to split up, Claude can spawn read-only "reviewer"
+helpers that are only allowed to look and report back — they can never edit
+files, commit, deploy, or touch a database themselves. The Lead checks their
+work before acting on it.
+
+- **Full detail:** [`.claude/skills/controlled-code-lead/SKILL.md`](.claude/skills/controlled-code-lead/SKILL.md)
+- **Reviewer helper definition:** [`.claude/agents/controlled-reviewer.md`](.claude/agents/controlled-reviewer.md)
+- **Templates** (reviewer report, change manifest, rollout, rollback, issue
+  register, task ledger, deployment state, protected systems):
+  [`.claude/skills/controlled-code-lead/templates/`](.claude/skills/controlled-code-lead/templates/)
+- **Live protected-systems reference:** [`.claude/controlled-code-lead/protected-systems.md`](.claude/controlled-code-lead/protected-systems.md)
+- **Advisory guard hook:** `.claude/hooks/protected-action-guard.sh`, wired via
+  `.claude/settings.json`. It prints a warning when a command matches a
+  protected-action pattern (git push, deploy, migration, destructive SQL,
+  live Stripe key, prod DB host, secret/env writes, storage deletion). It is
+  advisory only — it does not block execution, so it can't accidentally
+  override the pre-approvals already in `.claude/settings.local.json`. The
+  actual gate is still: Claude asks you before any protected action, per the
+  Golden Rules at the top of this file.
+
+This skill does not loosen any Golden Rule above — protected actions still
+require your explicit go-ahead every time, exactly as rules 2-6 already say.
+
+**Version 1.1 (2026-07-11, additive only):** governance is now versioned —
+current version and history live in [`.claude/governance-version.md`](.claude/governance-version.md)
+and [`.claude/governance-changelog.md`](.claude/governance-changelog.md).
+New in 1.1: a permanent engineering knowledge file at
+[`.claude/project-memory.md`](.claude/project-memory.md) that Claude must
+read at the start of every coding session (along with restating branch,
+commit, active task, and next authorised action before continuing); a
+self-test suite at `.claude/governance-tests/` (run:
+`bash .claude/governance-tests/run-all.sh`) that checks the reviewers are
+read-only and the warning hook still detects dangerous commands; a
+"Definition of Proof" so nothing is called *fixed* unless it was actually
+verified beyond Claude's own machine; ten specialist read-only reviewers
+(frontend, backend, database, security, storage, infrastructure,
+deployment, provider, performance, UI); and before/after architecture
+diagrams plus an implementation budget for risky work. The warning hook is
+still warn-only — the plan for making it blocking (not enabled) is written
+down in `.claude/hooks/HOOK-UPGRADE-ROADMAP.md`. Everything from 1.0 still
+applies unchanged.

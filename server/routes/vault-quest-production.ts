@@ -10,9 +10,28 @@ import type { Express, Request, Response } from "express";
 import { requireAdmin } from "../auth";
 import { productionStorage, isUndefinedTable } from "../vault-quest/production-storage";
 import { getWorkflow, searchAll, checkReuse, applyReuse } from "../vault-quest/workflow-engine";
+import { vqStorage } from "../vault-quest/storage";
+import { PRODUCTION_STAGES, PRODUCTION_STAGE_STATES } from "@shared/vq-production-schema";
+
+const STAGE_KEYS = new Set<string>(PRODUCTION_STAGES.map((s) => s.key));
+const STAGE_STATES = new Set<string>(PRODUCTION_STAGE_STATES);
 
 function isMissingTable(err: unknown): boolean {
   return isUndefinedTable(err);
+}
+/** Parse a `:id` path param as a positive integer, or null if malformed
+ *  (a bare Number("abc") → NaN reaches Postgres as an integer and 500s). */
+function parseId(raw: string): number | null {
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+/** Guard: the production tables have no FK to vq_sets, so a create for an unknown
+ *  set would mint phantom-set rows that getProductionStatus then aggregates as a
+ *  real pipeline. Reject writes whose set doesn't exist. Returns true if OK. */
+async function requireSet(setCode: string, res: Response): Promise<boolean> {
+  const set = await vqStorage.getSet(setCode).catch(() => undefined);
+  if (!set) { res.status(404).json({ error: `unknown set "${setCode}"` }); return false; }
+  return true;
 }
 function handleWriteError(res: Response, err: unknown) {
   if (isMissingTable(err)) {
@@ -96,6 +115,7 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
   });
   app.put(`${base}/settings`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
     try {
+      if (!(await requireSet(req.params.setCode, res))) return;
       const existing = await productionStorage.getSettings(req.params.setCode);
       if (existing?.locked && !req.body?.__unlock) return res.status(409).json({ error: "Set settings are locked. Unlock before editing." });
       res.json(await productionStorage.upsertSettings(req.params.setCode, req.body ?? {}));
@@ -111,6 +131,7 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
   app.post(`${base}/packaging`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
     try {
       if (!req.body?.type || !req.body?.name) return res.status(400).json({ error: "type and name required" });
+      if (!(await requireSet(req.params.setCode, res))) return;
       res.status(201).json(await productionStorage.createPackaging(req.params.setCode, req.body));
     } catch (err) {
       handleWriteError(res, err);
@@ -118,7 +139,11 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
   });
   app.patch(`${base}/packaging/:id`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
     try {
-      res.json(await productionStorage.updatePackaging(Number(req.params.id), req.body ?? {}));
+      const id = parseId(req.params.id);
+      if (id == null) return res.status(400).json({ error: "invalid id" });
+      const row = await productionStorage.updatePackaging(id, req.params.setCode, req.body ?? {});
+      if (!row) return res.status(404).json({ error: "packaging item not found for this set" });
+      res.json(row);
     } catch (err) {
       handleWriteError(res, err);
     }
@@ -130,6 +155,7 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
   });
   app.put(`${base}/pack-config`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
     try {
+      if (!(await requireSet(req.params.setCode, res))) return;
       res.json(await productionStorage.upsertPackConfig(req.params.setCode, req.body ?? {}));
     } catch (err) {
       handleWriteError(res, err);
@@ -143,6 +169,7 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
   app.post(`${base}/print`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
     try {
       if (!req.body?.type) return res.status(400).json({ error: "type required" });
+      if (!(await requireSet(req.params.setCode, res))) return;
       res.status(201).json(await productionStorage.createPrint(req.params.setCode, req.body));
     } catch (err) {
       handleWriteError(res, err);
@@ -150,7 +177,11 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
   });
   app.patch(`${base}/print/:id`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
     try {
-      res.json(await productionStorage.updatePrint(Number(req.params.id), req.body ?? {}));
+      const id = parseId(req.params.id);
+      if (id == null) return res.status(400).json({ error: "invalid id" });
+      const row = await productionStorage.updatePrint(id, req.params.setCode, req.body ?? {});
+      if (!row) return res.status(404).json({ error: "print export not found for this set" });
+      res.json(row);
     } catch (err) {
       handleWriteError(res, err);
     }
@@ -163,6 +194,7 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
   app.post(`${base}/qa`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
     try {
       if (!req.body?.assetType || !req.body?.assetRef) return res.status(400).json({ error: "assetType and assetRef required" });
+      if (!(await requireSet(req.params.setCode, res))) return;
       res.status(201).json(await productionStorage.createQa(req.params.setCode, req.body));
     } catch (err) {
       handleWriteError(res, err);
@@ -170,7 +202,11 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
   });
   app.patch(`${base}/qa/:id`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
     try {
-      res.json(await productionStorage.updateQa(Number(req.params.id), req.body ?? {}));
+      const id = parseId(req.params.id);
+      if (id == null) return res.status(400).json({ error: "invalid id" });
+      const row = await productionStorage.updateQa(id, req.params.setCode, req.body ?? {});
+      if (!row) return res.status(404).json({ error: "QA check not found for this set" });
+      res.json(row);
     } catch (err) {
       handleWriteError(res, err);
     }
@@ -182,9 +218,22 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
   });
   app.put(`${base}/release`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
     try {
-      // HARD GATE: a release can never be archived/finalised while smart warnings exist.
+      if (!(await requireSet(req.params.setCode, res))) return;
+      // HARD GATE: a release can never be archived/finalised unless every upstream
+      // stage is actually ready AND there are no smart warnings. The warnings check
+      // alone is insufficient — an empty/incomplete set produces zero warnings, so
+      // it must also satisfy the positive readiness test (cards+packaging+QA+print).
       if (req.body?.archived === true) {
-        const wf = await getWorkflow(String(req.params.setCode));
+        const [wf, status] = await Promise.all([
+          getWorkflow(String(req.params.setCode)),
+          productionStorage.getProductionStatus(String(req.params.setCode)),
+        ]);
+        if (!status.release.releaseReady) {
+          return res.status(409).json({
+            error: "Release blocked — the set is not ready yet (cards, packaging, QA and print files must all be complete).",
+            release: status.release,
+          });
+        }
         if (wf.warnings.length > 0) {
           return res.status(409).json({
             error: `Release blocked — ${wf.warnings.length} warning(s) must be resolved first`,
@@ -205,6 +254,7 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
   app.post(`${base}/assets`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
     try {
       if (!req.body?.category || !req.body?.name) return res.status(400).json({ error: "category and name required" });
+      if (!(await requireSet(req.params.setCode, res))) return;
       res.status(201).json(await productionStorage.createAsset(String(req.params.setCode), req.body));
     } catch (err) {
       handleWriteError(res, err);
@@ -215,6 +265,12 @@ export function registerVaultQuestProductionRoutes(app: Express): void {
   app.post(`${base}/stage/:stageKey`, requireAdmin, async (req: Request<Record<string, string>>, res: Response) => {
     try {
       if (!req.body?.status) return res.status(400).json({ error: "status required" });
+      // stageKey/status are free-text columns with no DB CHECK — validate against
+      // the known vocab so a typo can't poison the pipeline with a dead override row
+      // or a status derive() will silently ignore.
+      if (!STAGE_KEYS.has(String(req.params.stageKey))) return res.status(400).json({ error: "unknown stage key" });
+      if (!STAGE_STATES.has(String(req.body.status))) return res.status(400).json({ error: "invalid stage status" });
+      if (!(await requireSet(req.params.setCode, res))) return;
       res.json(await productionStorage.setStageStatus(String(req.params.setCode), String(req.params.stageKey), String(req.body.status), req.body.note));
     } catch (err) {
       handleWriteError(res, err);

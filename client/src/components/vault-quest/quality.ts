@@ -90,7 +90,10 @@ export function characterHealth(ch: HealthCharacter): CharacterHealth {
   // Background = bg-validated at master generation, so an approved master implies a pass.
   // Colour/Style consistency are derived from the identity analysis (which scores colour,
   // markings and shape) — presented honestly as "from identity analysis", no new classifier.
-  const consistencyState: HealthState = !masterOk ? "grey" : identityState;
+  // Uses the WORST approved-reference score, not the average: a 95 master must not
+  // smooth over a 72 action pose that actually needs review.
+  const worstScore = scores.length ? Math.min(...scores) : null;
+  const consistencyState: HealthState = !masterOk || worstScore == null ? "grey" : worstScore >= 80 ? "pass" : worstScore >= IDENTITY_OK ? "review" : "fail";
   const bandLabel = (s: HealthState) => (s === "pass" ? "PASS" : s === "review" ? "REVIEW" : s === "fail" ? "FAIL" : "—");
 
   const items: HealthItem[] = [
@@ -104,11 +107,16 @@ export function characterHealth(ch: HealthCharacter): CharacterHealth {
     { label: "Character Locked", state: locked ? "pass" : "grey", value: locked ? "YES" : "NO" },
   ];
 
+  // The engine's canonical order includes a reference-approval review step between
+  // the pack being filled and locking — surface it instead of skipping to "Lock".
+  const refsApproved = ch.approvalStatus === "approved";
+
   const missing: string[] = [];
   if (!descOk) missing.push("Approve Description");
   if (!masterOk) missing.push("Approve Master Reference");
   if (masterOk && !actionOk) missing.push("Approve Action Pose");
   if (failedIdentity) missing.push("Identity score too low — regenerate a closer match");
+  if (descOk && masterOk && actionOk && !failedIdentity && !refsApproved && !locked) missing.push("Approve References");
   if (!locked && descOk && masterOk && actionOk && !failedIdentity) missing.push("Lock Character");
 
   const readyForCards = descOk && masterOk && actionOk && !failedIdentity && locked;

@@ -10,7 +10,13 @@ import { renderCard, type RenderFormat, type RenderResult } from "./render-servi
 import { resolveVariant, cardRowToRenderInput } from "./qa-engine";
 import { normalizePdf } from "./pdf-normalize";
 import { isCandidateKeyForCard } from "./ai/higgsfield";
+import { assertVqWriteKey, assertVqReadKey, VQ_WRITE_PREFIXES } from "./lib/vq-keys";
 import type { VqCardRow } from "@shared/vq-schema";
+
+// Re-exported so existing call-sites (workflow-engine, routes/vault-quest-admin)
+// keep importing the R2 key-space guards from render-saved. The pure logic now
+// lives in ./lib/vq-keys so it is unit-testable without the render engine.
+export { assertVqWriteKey, assertVqReadKey, VQ_WRITE_PREFIXES };
 
 /** Deterministic VQ artwork key — derived from the card id, never client-supplied. */
 export function vqArtKey(cardId: string, slot: "main" | "prev"): string {
@@ -37,28 +43,6 @@ export function vqCharacterApprovedKey(characterId: string, referenceType = "mas
 }
 
 /**
- * HARD prefix guard for every Vault Quest R2 WRITE. VQ may only ever write inside
- * its own isolated prefixes — it must never be able to touch MintVault grading /
- * customer paths (images/, certificates/, labels/, scans/, uploads/, …). Called
- * at every VQ upload site; throws on anything outside the allowlist or any key
- * that could be normalised elsewhere (`..`, backslash, leading slash, control
- * chars). R2 keys are literal strings, so this is defence-in-depth — but it makes
- * the isolation a hard invariant instead of a convention.
- */
-export const VQ_WRITE_PREFIXES = ["vq/art-candidates/", "vq/art/", "vq/characters/"] as const;
-export function assertVqWriteKey(key: string): string {
-  const ok =
-    VQ_WRITE_PREFIXES.some((p) => key.startsWith(p)) &&
-    !key.includes("..") &&
-    !key.includes("\\") &&
-    !key.startsWith("/") &&
-    // eslint-disable-next-line no-control-regex
-    !/[\x00-\x1f]/.test(key);
-  if (!ok) throw new Error(`blocked R2 write outside Vault Quest prefixes: "${key.slice(0, 80)}"`);
-  return key;
-}
-
-/**
  * Fetch artwork buffers by CARD ID only (keys are derived, never taken from the
  * request body). Skips the R2 round-trip entirely when the card carries no
  * art-present flag, and fetches the two slots in parallel when it does — so an
@@ -75,13 +59,21 @@ export async function fetchArt(input: {
   if (!cardId) return { mainArt: undefined, prevArt: undefined };
   const mainCandidate = (input.artCandidateKey ?? "").trim();
   const prevCandidate = (input.prevArtCandidateKey ?? "").trim();
+  // Phase 10A-6 (R5-F1): resolve the STORED pointer value, never re-derive it. A
+  // re-derived vqArtKey(cardId, slot) is only correct by coincidence for a legacy
+  // flat-keyed card — it silently breaks the instant a card is promoted to an
+  // immutable revisioned key (vq/art/{cardId}/{slot}/{revisionId}.png), since that
+  // key can never be reconstructed from cardId+slot alone. Reading input.artR2Key
+  // directly is ALSO exactly correct for legacy records: the column already holds
+  // the old flat key, so there is no reader-side special case for "before revision
+  // support" — the stored value IS the fallback.
   const [mainArt, prevArt] = await Promise.all([
     mainCandidate && isCandidateKeyForCard(mainCandidate, cardId)
-      ? getR2Buffer(mainCandidate)
-      : input.artR2Key ? getR2Buffer(vqArtKey(cardId, "main")) : Promise.resolve(null),
+      ? getR2Buffer(assertVqReadKey(mainCandidate))
+      : input.artR2Key ? getR2Buffer(assertVqReadKey(input.artR2Key)) : Promise.resolve(null),
     prevCandidate && isCandidateKeyForCard(prevCandidate, cardId)
-      ? getR2Buffer(prevCandidate)
-      : input.prevArtR2Key ? getR2Buffer(vqArtKey(cardId, "prev")) : Promise.resolve(null),
+      ? getR2Buffer(assertVqReadKey(prevCandidate))
+      : input.prevArtR2Key ? getR2Buffer(assertVqReadKey(input.prevArtR2Key)) : Promise.resolve(null),
   ]);
   return { mainArt: mainArt ?? undefined, prevArt: prevArt ?? undefined };
 }

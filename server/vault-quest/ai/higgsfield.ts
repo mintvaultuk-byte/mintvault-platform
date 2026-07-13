@@ -1,7 +1,9 @@
 import { randomUUID } from "crypto";
 import sharp from "sharp";
+import { MAX_PIXELS } from "../upload-guard";
 import { vqCreditsPerImage } from "@shared/vq-schema";
 import type { CardContext } from "./generators";
+import { classifyHiggsfieldStatus, recordHiggsfieldOutcome } from "./provider-status";
 
 export type ArtworkSlot = "main" | "prev";
 
@@ -43,6 +45,21 @@ function env(name: string): string {
 // Per-image credit estimate (display only) — sourced from the shared model table.
 export function higgsfieldCreditsPerImage(model?: string): number {
   return vqCreditsPerImage(model ?? higgsfieldConnection().model);
+}
+
+/**
+ * Per-image credits priced at the EFFECTIVE model (Phase 10A-2 fix, Reviewer 1 F-2).
+ * generateHiggsfieldArtwork silently upgrades a non-ref-capable model (e.g. the cheap
+ * z_image, 0.15cr) to nano_banana (1cr) the moment references are attached — which is
+ * the standard identity-lock path for character/card art. Pricing the ceiling and the
+ * spend record against the REQUESTED model therefore undercounts real spend by up to
+ * ~6.67×. This prices non-ref-capable models at their nano_banana upgrade floor so the
+ * cap and the daily window never undercount. It over-estimates only the rare
+ * z_image-WITHOUT-references case — the SAFE direction for a spend ceiling.
+ */
+export function effectiveCreditsPerImage(model?: string): number {
+  const m = model ?? higgsfieldConnection().model;
+  return vqCreditsPerImage(REF_CAPABLE_MODELS.test(m) ? m : "nano_banana");
 }
 
 export function higgsfieldConnection(): HiggsfieldConnection {
@@ -145,7 +162,10 @@ export function safeVqCardId(cardId: string): string {
 }
 
 export function validVqCardId(cardId: string): boolean {
-  return /^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$/.test(cardId);
+  // Reject `..` so a card/character id can never contribute a path-traversal
+  // segment to a derived R2 key (defence-in-depth alongside assertVqWriteKey /
+  // assertVqReadKey). Legitimate ids (GNV-001, GNV-F03-S2) never contain `..`.
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{1,79}$/.test(cardId) && !cardId.includes("..");
 }
 
 export function vqArtworkCandidateKey(cardId: string): string {
@@ -154,7 +174,14 @@ export function vqArtworkCandidateKey(cardId: string): string {
 
 export function isCandidateKeyForCard(key: string, cardId: string): boolean {
   const safe = safeVqCardId(cardId);
-  return key.startsWith(`vq/art-candidates/${safe}/`) && /^[A-Za-z0-9/._:-]+\.png$/.test(key);
+  // `..` is explicitly rejected: the char class below permits `.` and `/`, so a
+  // key like `vq/art-candidates/{safe}/../../images/MV1/front.png` would satisfy
+  // the prefix + regex — the `!includes("..")` guard closes that traversal.
+  return (
+    key.startsWith(`vq/art-candidates/${safe}/`) &&
+    !key.includes("..") &&
+    /^[A-Za-z0-9/._:-]+\.png$/.test(key)
+  );
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -243,7 +270,9 @@ export async function uploadHiggsfieldMedia(png: Buffer, opts: { baseUrl: string
 }
 
 async function normaliseGeneratedImage(raw: Buffer): Promise<{ png: Buffer; width: number; height: number }> {
-  const png = await sharp(raw)
+  // Provider bytes are decoded here WITHOUT the validateArtwork gate — bound the
+  // decode so a hostile/corrupt provider response can't be a decompression bomb.
+  const png = await sharp(raw, { limitInputPixels: MAX_PIXELS })
     .rotate()
     .resize({ width: 1800, height: 1800, fit: "inside", withoutEnlargement: true })
     .png()
@@ -307,6 +336,9 @@ export async function generateHiggsfieldArtwork(input: {
   );
   if (!createRes.ok) {
     const errBody = await createRes.text().catch(() => "");
+    // Observability (10A-3): record the REAL outcome so the admin status display is
+    // honest (never "connected" off an env var alone) — never affects the response.
+    recordHiggsfieldOutcome({ ok: false, kind: classifyHiggsfieldStatus(createRes.status) });
     if (createRes.status === 401) throw new Error("Higgsfield rejected the token (401) — it has likely expired. Run `higgsfield auth token` and update HIGGSFIELD_API_KEY in .env.");
     if (createRes.status === 402) throw new Error("Higgsfield: not enough credits to generate an image.");
     throw new Error(`Higgsfield create failed (${createRes.status})${errBody ? `: ${errBody.slice(0, 220)}` : ""}`);
@@ -327,12 +359,16 @@ export async function generateHiggsfieldArtwork(input: {
     try {
       pollRes = await fetchWithTimeout(`${conn.baseUrl}/developer/v2alpha/jobs/${encodeURIComponent(jobId)}`, { headers }, 30_000);
     } catch {
-      if (++pollFailures >= 5) throw new Error("Higgsfield poll kept timing out — the job may still finish; try Regenerate in a moment.");
+      if (++pollFailures >= 5) {
+        recordHiggsfieldOutcome({ ok: false, kind: "unknown" }); // network-level; the create already succeeded/charged
+        throw new Error("Higgsfield poll kept timing out — the job may still finish; try Regenerate in a moment.");
+      }
       continue;
     }
     if (!pollRes.ok) {
       const errBody = await pollRes.text().catch(() => "");
       if (++pollFailures >= 5) {
+        recordHiggsfieldOutcome({ ok: false, kind: classifyHiggsfieldStatus(pollRes.status) });
         throw new Error(`Higgsfield poll failed (${pollRes.status})${errBody ? `: ${errBody.slice(0, 180)}` : ""}`);
       }
       continue;
@@ -341,17 +377,28 @@ export async function generateHiggsfieldArtwork(input: {
     const data = (await readJson(pollRes)) as HfJob;
     const status = (data.status ?? "").toLowerCase();
     if (["failed", "failure", "error", "errored", "cancelled", "canceled"].includes(status)) {
+      // The provider itself resolved the job to a failure state — the create call
+      // succeeded (charged), so this is a job-level outcome, not a connectivity one;
+      // 'unknown' is the closest existing kind (→ provider_unavailable for display).
+      recordHiggsfieldOutcome({ ok: false, kind: "unknown" });
       throw new Error(`Higgsfield generation ${status}`);
     }
     if (status === "completed" && data.result_url) { job = data; break; }
   }
-  if (!job?.result_url) throw new Error("Higgsfield did not finish in time — try Regenerate in a moment.");
+  if (!job?.result_url) {
+    recordHiggsfieldOutcome({ ok: false, kind: "unknown" });
+    throw new Error("Higgsfield did not finish in time — try Regenerate in a moment.");
+  }
 
   // Download the result (CDN URL — no auth header; don't leak the token to the CDN).
   const dl = await fetchWithTimeout(job.result_url, {}, 45_000);
-  if (!dl.ok) throw new Error(`Higgsfield image download failed (${dl.status})`);
+  if (!dl.ok) {
+    recordHiggsfieldOutcome({ ok: false, kind: classifyHiggsfieldStatus(dl.status) });
+    throw new Error(`Higgsfield image download failed (${dl.status})`);
+  }
   const raw = Buffer.from(await dl.arrayBuffer());
 
   const image = await normaliseGeneratedImage(raw);
+  recordHiggsfieldOutcome({ ok: true }); // the ONLY path that marks the provider genuinely connected
   return { provider: "higgsfield", model, jobId, ...image };
 }
