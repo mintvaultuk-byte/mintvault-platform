@@ -8,6 +8,7 @@ import { STATUS_META, allowedTargets, type VqStatus } from "@shared/vq-workflow"
 import { ReusePanel, fetchReuseCheck, useAdvancedMode, type ReuseCheck, type ReusableAsset } from "@/components/vault-quest/workflow";
 import { characterHealth, traitsFromBreakdown, matchBand, scoreBand, poseDiversityBand, STATE_CLS, type IdentityBreakdown, type HealthState } from "@/components/vault-quest/quality";
 import { getOrCreateIdempotencyKey, clearIdempotencyKey } from "@/lib/vq-idempotency";
+import { runGenerationWithRecovery, type GenerationPhase } from "@/lib/vq-generation-lifecycle";
 
 // AI Cost Mode — founder-friendly quality tiers that map to real image models.
 // Simple Mode shows only these; Advanced Mode still exposes the model dropdown.
@@ -642,6 +643,20 @@ const STEP_TO_ANCHOR: Record<string, string> = {
   lock_character: "lock_character",
 };
 
+// Raw POST that inspects status + body directly (202 pending / 200 replayed / terminal)
+// rather than throwing on non-2xx like apiRequest — runGenerationWithRecovery's
+// classifier needs to see all three shapes to decide "keep polling" vs "done".
+async function postJson(url: string, body: unknown): Promise<{ status: number; json: unknown }> {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => ({}));
+  return { status: res.status, json };
+}
+
 function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => void; onAuthError: (e: unknown, fallbackTitle: string) => void; deepLink?: BibleDeepLink | null }) {
   const { toast } = useToast();
   const chars = useQuery<{ characters: VqCharacterRow[] } | null>({ queryKey: ["/api/admin/vault-quest/characters"], retry: false });
@@ -933,6 +948,12 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   // only updates on re-render, leaving a window during the reuse-check round-trip.
   const genInFlight = useRef(false);
 
+  // Live request-lifecycle phase for the single-reference generate buttons — drives
+  // "Generating…" / "Still processing…" text so the page never just looks frozen
+  // while a real (sometimes 15-60s) generation is in flight. Null when idle.
+  const [genPhase, setGenPhase] = useState<GenerationPhase | null>(null);
+  const genPhaseLabel = genPhase === "still-processing" ? "Still processing…" : genPhase === "generating" ? "Generating…" : null;
+
   async function generateMasterArtwork(typeOverride?: VqRefType) {
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
     if (genInFlight.current) return; // re-entrancy guard (double-click during reuse-check)
@@ -989,16 +1010,42 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     setBusy("gen-art");
     // Double-pay protection (D10): reuse the SAME key across a reload/2nd tab for this
     // exact character+type+model; cleared below on any TERMINAL outcome so a deliberate
-    // next click (new roll, or a retry after a real failure) gets a fresh one.
+    // next click (new roll, or a retry after a real failure) gets a fresh one. A
+    // client-side timeout is NOT terminal — see runGenerationWithRecovery below — so it
+    // must never clear this key, or a re-click would mint a fresh one and risk a
+    // second paid attempt while the first is still genuinely running server-side.
     const scopeKey = `character:${selected.characterId}:${type}:${imgModel || "default"}`;
     const idempotencyKey = getOrCreateIdempotencyKey(scopeKey);
+    const url = `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`;
+    const body = { referenceType: type, model: imgModel, idempotencyKey };
     try {
+      // Bounded client wait, then safe re-polling on the SAME idempotencyKey — the
+      // server's D10 guard makes a repeat POST free (202 pending / 200 replayed), so
+      // "recovery" here is just asking the same question again, never a new charge.
+      const outcome = await runGenerationWithRecovery({ post: () => postJson(url, body), onPhase: setGenPhase });
+
+      if (outcome.phase === "still-processing") {
+        // Timed out AND the poll budget is exhausted with no terminal answer yet.
+        // The reservation is still valid server-side — keep the key so the founder's
+        // next click (now, or after a refresh) safely re-asks instead of re-charging.
+        toast({ title: "Still processing", description: "This is taking longer than usual but is still running on the server. Check back shortly — trying again now won't charge twice." });
+        return;
+      }
+      if (outcome.phase === "failed") {
+        clearIdempotencyKey(scopeKey); // terminal (error) response — a deliberate retry should charge again
+        artworkError(outcome.error, `Generate ${typeLabel} failed`);
+        return;
+      }
+      // completed or replayed — both terminal, safe to clear.
+      clearIdempotencyKey(scopeKey);
       if (type === "master_portrait") {
+        const data = outcome.data as { created?: { model?: string }[]; autoRejected?: number; bgRejected?: number; message?: string };
+        if (outcome.phase === "replayed") {
+          toast({ title: "Already generated", description: data.message ?? "This exact request already completed. Refresh the gallery to see it." });
+          await candQuery.refetch();
+          return;
+        }
         // Master Reference always produces THREE strict studio candidates (enforced server-side).
-        const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: type, model: imgModel, idempotencyKey });
-        const data = (await res.json()) as { created?: { model?: string }[]; autoRejected?: number; bgRejected?: number; pending?: boolean; message?: string };
-        if (data.pending) { toast({ title: "Already generating", description: data.message ?? "This is already running — please wait." }); return; }
-        clearIdempotencyKey(scopeKey);
         await candQuery.refetch();
         setArtNonce((n) => n + 1);
         const made = data.created?.length ?? 0;
@@ -1006,21 +1053,21 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
         trackCredits(vqChargedCredits(data, imgModel)); // counts billed rejects at the model actually used
         toast({ title: `Master Reference — ${made} candidate${made === 1 ? "" : "s"}`, description: rejected ? `${rejected} auto-rejected for identity drift. Choose one below.` : "Studio references generated — choose one below." });
       } else {
-        const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`, { referenceType: type, model: imgModel, idempotencyKey });
-        const data = (await res.json()) as { width: number; height: number; model?: string; pending?: boolean; message?: string };
-        if (data.pending) { toast({ title: "Already generating", description: data.message ?? "This is already running — please wait." }); return; }
-        clearIdempotencyKey(scopeKey);
+        const data = outcome.data as { width: number; height: number; model?: string; message?: string };
+        if (outcome.phase === "replayed") {
+          toast({ title: "Already generated", description: data.message ?? "This exact request already completed. Refresh the gallery to see it." });
+          await candQuery.refetch();
+          return;
+        }
         await candQuery.refetch();
         trackCredits(vqCreditsPerImage(data.model ?? imgModel)); // model the server actually used (refs may upgrade it)
         setArtNonce((n) => n + 1);
         toast({ title: `${typeLabel} generated`, description: `${data.width}x${data.height} — review below, then Approve.` });
       }
-    } catch (e) {
-      clearIdempotencyKey(scopeKey); // terminal (error) response — a deliberate retry should charge again
-      artworkError(e, `Generate ${typeLabel} failed`);
     } finally {
       genInFlight.current = false;
       setBusy(null);
+      setGenPhase(null);
     }
   }
 
@@ -1687,7 +1734,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                         <>
                           <button type="button" onClick={() => generateMasterArtwork("master_portrait")} disabled={busyGen || !descOk || selected.locked} title={!descOk ? "Approve the description first" : undefined}
                             className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40" style={{ background: gold }}>
-                            {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}Generate Master Reference
+                            {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}{busyGen ? (genPhaseLabel ?? "Generating…") : "Generate Master Reference"}
                           </button>
                           {!descOk && <p className="mt-2 text-center text-[11px] text-slate-500">Approve the character description above to unlock this.</p>}
                         </>
@@ -1737,7 +1784,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                           {actionCands.length === 0 && (
                             <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked}
                               className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>
-                              {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}Generate Matching Action Pose
+                              {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}{busyGen ? (genPhaseLabel ?? "Generating…") : "Generate Matching Action Pose"}
                             </button>
                           )}
                           <p className="mt-2 text-center text-[11px] text-slate-500">Always built from your approved Master — face, colours, markings, ears, tail, accessories &amp; shape stay the same. Only pose, expression, camera angle and movement change.</p>
@@ -1783,7 +1830,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                   </div>
                                 );
                               })}
-                              <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked} className="w-full rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-500 disabled:opacity-40">{busyGen ? "Generating…" : "Generate Another Matching Pose"}</button>
+                              <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked} className="w-full rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-500 disabled:opacity-40">{busyGen ? (genPhaseLabel ?? "Generating…") : "Generate Another Matching Pose"}</button>
                             </div>
                           )}
                     </div>

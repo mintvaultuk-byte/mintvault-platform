@@ -436,6 +436,10 @@ export function ReusePanel({ check, providerLabel, onReuse, onGenerateWithRefs, 
   onClose: () => void;
   busy: boolean;
 }) {
+  // NOTE: no window.confirm() here (on purpose). A native confirm() blocks the whole
+  // page/render thread until answered, shows no progress feedback, and is redundant
+  // with the credit-spend warning already visible as plain text below — the founder
+  // has already made an explicit choice by opening this panel and picking a button.
   const [picked, setPicked] = useState<ReusableAsset | null>(check.assets[0] ?? null);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
@@ -463,7 +467,7 @@ export function ReusePanel({ check, providerLabel, onReuse, onGenerateWithRefs, 
         <div className="flex flex-wrap gap-2 border-t border-slate-800 p-4">
           <AdminButton variant="gold" disabled={busy || !picked} onClick={() => picked && onReuse(picked)}>Reuse Approved Asset (0 cr)</AdminButton>
           <AdminButton variant="ghost" disabled={busy} onClick={() => onGenerateWithRefs()}>Use as Reference &amp; Generate New</AdminButton>
-          <AdminButton variant="ghost" disabled={busy} onClick={() => { if (window.confirm(`Generate new artwork anyway?\n\nThis spends ≈${check.creditsSaved || check.perImage} credits even though ${check.assets.length} approved asset(s) already exist.`)) onGenerateAnyway(); }}>Generate New Anyway</AdminButton>
+          <AdminButton variant="ghost" disabled={busy} onClick={() => onGenerateAnyway()}>Generate New Anyway</AdminButton>
         </div>
       </div>
     </div>
