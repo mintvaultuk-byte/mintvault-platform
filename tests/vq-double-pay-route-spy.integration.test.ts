@@ -19,8 +19,14 @@ vi.mock("../server/db", () => {
   const url = process.env.TEST_DATABASE_URL || "";
   if (!url) return { db: {}, pool: { end: () => Promise.resolve(), query: () => Promise.resolve({ rows: [] }) } };
   const u = new URL(url);
-  const ok = (u.hostname === "127.0.0.1" || u.hostname === "localhost") && u.port === "55432" && u.pathname === "/mintvault_vq_phase10_local";
-  if (!ok) throw new Error(`REFUSED: TEST_DATABASE_URL must be the local throwaway DB, got ${u.hostname}:${u.port}${u.pathname}`);
+  const ok =
+    (u.hostname === "127.0.0.1" || u.hostname === "localhost") &&
+    u.port === "55432" &&
+    u.pathname === "/mintvault_vq_phase10_local";
+  if (!ok)
+    throw new Error(
+      `REFUSED: TEST_DATABASE_URL must be the local throwaway DB, got ${u.hostname}:${u.port}${u.pathname}`
+    );
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pg = require("pg");
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -35,26 +41,49 @@ vi.mock("../server/auth", () => ({
 
 // Spy the paid provider create. A small artificial delay widens the concurrency
 // window so all N requests genuinely overlap in-flight (proves the race, not just
-// "requests happened to be sequential"). Returns a REAL tiny PNG (the route thumbnails
-// it with sharp, which rejects a fake byte buffer).
-const TINY_PNG = vi.hoisted(() => Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-  "base64",
-));
-const createSpy = vi.hoisted(() => vi.fn(async () => {
-  await new Promise((r) => setTimeout(r, 120));
-  return { provider: "higgsfield", model: "nano_banana", png: TINY_PNG, width: 512, height: 512, jobId: "job-spy-1" };
-}));
+// "requests happened to be sequential"). Returns a REAL plain-white 200x200 PNG —
+// action_pose now runs the REAL (unmocked) validateStudioBackground just like the
+// Master Reference always has, so the spy's image must actually clear that gate or
+// every request would be background-rejected rather than exercising the D10 race.
+const WHITE_PNG = vi.hoisted(() =>
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAIAAAAiOjnJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAACD0lEQVR4nO3UMQ0AAAzDsPEnvaHIMckG0CvqLASmGAVhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYSEs/vBYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSExRYOwsoGniuviZgAAAAASUVORK5CYII=",
+    "base64"
+  )
+);
+const createSpy = vi.hoisted(() =>
+  vi.fn(async () => {
+    await new Promise((r) => setTimeout(r, 120));
+    return {
+      provider: "higgsfield",
+      model: "nano_banana",
+      png: WHITE_PNG,
+      width: 200,
+      height: 200,
+      jobId: "job-spy-1",
+    };
+  })
+);
 vi.mock("../server/vault-quest/ai/higgsfield", async (orig) => {
   const actual = (await orig()) as Record<string, unknown>;
-  return { ...actual, generateHiggsfieldArtwork: createSpy, higgsfieldConnection: () => ({ connected: true, model: "nano_banana", note: "" }) };
+  return {
+    ...actual,
+    generateHiggsfieldArtwork: createSpy,
+    higgsfieldConnection: () => ({ connected: true, model: "nano_banana", note: "" }),
+  };
 });
 
 vi.mock("../server/vault-quest/storage", () => {
   const character = {
-    characterId: "GNV-F01-S1", familyId: "GNV-F01", stageNumber: 1, cardId: "GNV-001",
-    descriptionStatus: "approved", evolvesFromCharacterId: null, referencePack: null,
-    characterName: "Spy Subject", characterDna: "a small spark creature",
+    characterId: "GNV-F01-S1",
+    familyId: "GNV-F01",
+    stageNumber: 1,
+    cardId: "GNV-001",
+    descriptionStatus: "approved",
+    evolvesFromCharacterId: null,
+    referencePack: null,
+    characterName: "Spy Subject",
+    characterDna: "a small spark creature",
   };
   let nextCandidateId = 1;
   return {
@@ -79,13 +108,18 @@ const run = TEST_URL ? describe : describe.skip;
 import { registerVaultQuestAdminRoutes } from "../server/routes/vault-quest-admin";
 import { pool } from "../server/db";
 
-const q = (s: string, a: unknown[] = []) => (pool as unknown as { query: (s: string, a: unknown[]) => Promise<{ rows: unknown[] }> }).query(s, a);
+const q = (s: string, a: unknown[] = []) =>
+  (pool as unknown as { query: (s: string, a: unknown[]) => Promise<{ rows: unknown[] }> }).query(s, a);
 
 let server: Server;
 let base = "";
 
 async function post(path: string, body: unknown) {
-  const res = await fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await fetch(`${base}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   return { status: res.status, json: await res.json().catch(() => ({})) };
 }
 
@@ -119,7 +153,9 @@ run("double-pay protection — true-parallel identical requests hit ONE real rou
   it("6 concurrent IDENTICAL requests (same idempotencyKey) → exactly ONE provider create call", async () => {
     const idempotencyKey = "spy-shared-key-1";
     const body = { referenceType: "action_pose", model: "nano_banana", idempotencyKey };
-    const results = await Promise.all(Array.from({ length: 6 }, () => post("/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", body)));
+    const results = await Promise.all(
+      Array.from({ length: 6 }, () => post("/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", body))
+    );
 
     expect(createSpy).toHaveBeenCalledTimes(1); // the headline proof
 
@@ -131,8 +167,16 @@ run("double-pay protection — true-parallel identical requests hit ONE real rou
   });
 
   it("a DIFFERENT idempotencyKey for the SAME character is an independent request — its own provider call", async () => {
-    const first = await post("/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", model: "nano_banana", idempotencyKey: "spy-key-A" });
-    const second = await post("/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", model: "nano_banana", idempotencyKey: "spy-key-B" });
+    const first = await post("/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", {
+      referenceType: "action_pose",
+      model: "nano_banana",
+      idempotencyKey: "spy-key-A",
+    });
+    const second = await post("/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", {
+      referenceType: "action_pose",
+      model: "nano_banana",
+      idempotencyKey: "spy-key-B",
+    });
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
     expect(createSpy).toHaveBeenCalledTimes(2); // two distinct deliberate requests — both legitimately charge
@@ -140,11 +184,19 @@ run("double-pay protection — true-parallel identical requests hit ONE real rou
 
   it("REPLAY: resending the SAME key after completion returns the stored result, makes NO new provider call", async () => {
     const idempotencyKey = "spy-replay-key";
-    const first = await post("/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", model: "nano_banana", idempotencyKey });
+    const first = await post("/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", {
+      referenceType: "action_pose",
+      model: "nano_banana",
+      idempotencyKey,
+    });
     expect(first.status).toBe(201);
     expect(createSpy).toHaveBeenCalledTimes(1);
 
-    const replay = await post("/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", model: "nano_banana", idempotencyKey });
+    const replay = await post("/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", {
+      referenceType: "action_pose",
+      model: "nano_banana",
+      idempotencyKey,
+    });
     expect(replay.status).toBe(200);
     expect((replay.json as { replayed?: boolean }).replayed).toBe(true);
     expect(createSpy).toHaveBeenCalledTimes(1); // still 1 — the replay did not charge again
