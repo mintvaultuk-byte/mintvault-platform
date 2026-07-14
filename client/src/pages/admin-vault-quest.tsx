@@ -726,6 +726,15 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   const [imgModel, setImgModel] = useState<VqImageModel>("z_image");
   const creditsPerImage = vqCreditsPerImage(imgModel);
   const [advanced] = useAdvancedMode(); // Simple founder workflow is the default; Advanced reveals technical controls.
+  // Auto-progression (Phase 1, Simple mode only): after an approval, gently scroll the
+  // NEXT step into view so the founder never has to hunt for it. No-op in Advanced mode.
+  // Deferred a beat so the list refetch has re-rendered the target section first.
+  const scrollToStep = useCallback((step: "master" | "action" | "lock") => {
+    if (advanced) return;
+    setTimeout(() => {
+      document.querySelector(`[data-vq-step="${step}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 300);
+  }, [advanced]);
   const imagesPerItem = refType === "master_portrait" ? (cost.data?.masterImagesPerItem ?? 3) : 1;
   const higgsProvider = cost.data?.providers?.find((p) => p.id === "higgsfield");
   const openaiProvider = cost.data?.providers?.find((p) => p.id === "openai");
@@ -850,6 +859,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/approve-description`, {});
       await chars.refetch();
       if (lockedOverride) setEditingLocked(false);
+      scrollToStep("master"); // auto-progress the founder to the next step
       toast({ title: "Description approved", description: "Artwork generation is now unlocked for this character." });
     } catch (e) {
       onAuthError(e, "Approve description failed");
@@ -1013,14 +1023,20 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       // Guard: only accept a real ref-type string; never a forwarded MouseEvent.
       const type: VqRefType = isVqRefType(typeOverride) ? typeOverride : refType;
       if (isVqRefType(typeOverride) && typeOverride !== refType) setRefType(typeOverride); // keep gallery + approved-image in sync
-      // Check for approved reusable assets FIRST — reuse must be an explicit choice.
-      const check = await fetchReuseCheck({ characterId: selected.characterId, referenceType: type });
-      if (check === null) {
-        // Fail OPEN but never SILENTLY: the reuse endpoint errored, so we can't rule
-        // out existing approved assets — tell the founder before spending credits.
-        toast({ title: "Reuse check unavailable", description: "Couldn't verify existing approved assets — generating new artwork." });
+      // Reuse popup is an ADVANCED-only affordance (Phase 1): Simple mode keeps the
+      // founder in the plain Generate → Approve flow and never shows the cross-asset
+      // "Reuse / Reference / Generate Anyway" chooser — reuse-first still happens
+      // server-side, this only hides the implementation-detail popup.
+      if (advanced) {
+        // Check for approved reusable assets FIRST — reuse must be an explicit choice.
+        const check = await fetchReuseCheck({ characterId: selected.characterId, referenceType: type });
+        if (check === null) {
+          // Fail OPEN but never SILENTLY: the reuse endpoint errored, so we can't rule
+          // out existing approved assets — tell the founder before spending credits.
+          toast({ title: "Reuse check unavailable", description: "Couldn't verify existing approved assets — generating new artwork." });
+        }
+        if (check && check.assets.length > 0) { setReuseType(type); setReuseCheck(check); setBusy(null); return; }
       }
-      if (check && check.assets.length > 0) { setReuseType(type); setReuseCheck(check); setBusy(null); return; }
       // Release before delegating — doGenerateReference acquires the latch itself
       // (it is also called directly by the ReusePanel buttons). Same synchronous
       // frame, so no click can interleave between release and re-acquire.
@@ -1178,12 +1194,17 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     // never destroyed (promoteCharacterReferenceRevision), and stays in Archive/History.
     const lockedOverride = selected.locked;
     if (lockedOverride && !window.confirm(`${selected.characterName} is locked as canonical.\n\nApproving this candidate will archive the current approved reference image and make this the new one. The replaced image stays available in Archive/History and can be restored at any time.\n\nContinue?`)) return;
+    // Which step did we just complete? Drives auto-progression to the next one.
+    const approvedType = candidates.find((c) => c.id === candidateId)?.referenceType;
     setBusy(`${lock ? "lock" : "approve"}-${candidateId}`);
     try {
       await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/approve-candidate`, { candidateId, lock, ...(lockedOverride ? { confirmReplaceLocked: true } : {}) });
       await chars.refetch();
       await candQuery.refetch();
       setArtNonce((n) => n + 1);
+      // Auto-progress: Master approved → Action step; Action approved → Lock step.
+      if (approvedType === "master_portrait") scrollToStep("action");
+      else if (approvedType === "action_pose") scrollToStep("lock");
       toast({ title: lock ? "Approved + locked" : "Approved as reference", description: lock ? "Approved artwork set; character locked." : "This is now the approved Character Bible artwork." });
     } catch (e) {
       onAuthError(e, "Approve candidate failed");
@@ -1586,26 +1607,69 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                 </div>
               </div>
 
-              {/* ═══ Character workflow timeline — the permanent 8-step pipeline ═══ */}
+              {/* ═══ Production tracker ═══
+                  Simple mode: the founder-facing creature asset progression (Description →
+                  Master → Action → Card Artwork → Reference Pack → future asset slots →
+                  Family Complete). Advanced mode keeps the full production pipeline. */}
               {(() => {
-                const steps = [
-                  { label: "Create Character", done: descStatus(selected) === "approved" && packApproved(selected, "master_portrait") },
-                  { label: "Create Battle Pose", done: packApproved(selected, "action_pose") },
-                  { label: "Lock Character", done: selected.locked },
-                  { label: "Create Cards", done: false },
-                  { label: "Create Rare Cards", done: false },
-                  { label: "Packaging", done: false },
-                  { label: "QA", done: false },
-                  { label: "Release", done: false },
+                if (advanced) {
+                  const steps = [
+                    { label: "Create Character", done: descStatus(selected) === "approved" && packApproved(selected, "master_portrait") },
+                    { label: "Create Battle Pose", done: packApproved(selected, "action_pose") },
+                    { label: "Lock Character", done: selected.locked },
+                    { label: "Create Cards", done: false },
+                    { label: "Create Rare Cards", done: false },
+                    { label: "Packaging", done: false },
+                    { label: "QA", done: false },
+                    { label: "Release", done: false },
+                  ];
+                  const active = steps.findIndex((s) => !s.done);
+                  return (
+                    <div className="flex flex-wrap items-center gap-1 rounded-md border border-slate-800 bg-slate-950/60 p-2 text-[10px]">
+                      {steps.map((s, i) => (
+                        <span key={s.label} className="flex items-center gap-1">
+                          {i > 0 && <span className="text-slate-700">→</span>}
+                          <span className={`rounded px-1.5 py-0.5 font-semibold ${s.done ? "bg-emerald-950 text-emerald-300" : i === active ? "border border-amber-500 bg-amber-500/15 text-amber-200" : "bg-slate-900 text-slate-600"}`}>
+                            {s.done ? "✅" : i === active ? "▶" : `${i + 1}.`} {s.label}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  );
+                }
+                // Simple mode — asset-centric tracker. `future` slots are roadmap-only.
+                const descDone = descStatus(selected) === "approved";
+                const masterDone = packApproved(selected, "master_portrait");
+                const actionDone = packApproved(selected, "action_pose");
+                const refPackDone = requiredComplete(selected);
+                const steps: { label: string; done: boolean; future?: boolean }[] = [
+                  { label: "Description", done: descDone },
+                  { label: "Master", done: masterDone },
+                  { label: "Action", done: actionDone },
+                  { label: "Card Artwork", done: false },
+                  { label: "Reference Pack", done: refPackDone },
+                  { label: "Animations", done: false, future: true },
+                  { label: "3D Model", done: false, future: true },
+                  { label: "Voice", done: false, future: true },
+                  { label: "Family Complete", done: familyLockedCount === 3 },
                 ];
-                const active = steps.findIndex((s) => !s.done);
+                // The current step is the first non-done, non-future step.
+                const active = steps.findIndex((s) => !s.done && !s.future);
                 return (
                   <div className="flex flex-wrap items-center gap-1 rounded-md border border-slate-800 bg-slate-950/60 p-2 text-[10px]">
                     {steps.map((s, i) => (
                       <span key={s.label} className="flex items-center gap-1">
                         {i > 0 && <span className="text-slate-700">→</span>}
-                        <span className={`rounded px-1.5 py-0.5 font-semibold ${s.done ? "bg-emerald-950 text-emerald-300" : i === active ? "border border-amber-500 bg-amber-500/15 text-amber-200" : "bg-slate-900 text-slate-600"}`}>
-                          {s.done ? "✅" : i === active ? "▶" : `${i + 1}.`} {s.label}
+                        <span
+                          className={`rounded px-1.5 py-0.5 font-semibold ${
+                            s.future ? "border border-slate-800 bg-slate-900/60 text-slate-600"
+                              : s.done ? "bg-emerald-950 text-emerald-300"
+                                : i === active ? "border border-amber-500 bg-amber-500/15 text-amber-200"
+                                  : "bg-slate-900 text-slate-600"
+                          }`}
+                          title={s.future ? "Coming soon" : undefined}
+                        >
+                          {s.future ? "🔒" : s.done ? "✅" : i === active ? "▶" : "•"} {s.label}{s.future ? " (soon)" : ""}
                         </span>
                       </span>
                     ))}
@@ -1717,13 +1781,19 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                 const actionCands = candidates.filter((c) => c.referenceType === "action_pose" && c.status === "candidate");
                 const packPct = (masterOk ? 50 : 0) + (actionOk ? 50 : 0);
                 const health = characterHealth(selected);
+                // Evolution relabeling (Phase 1): stage 2/3 aren't a fresh "Master" — they
+                // are evolutions of the previous stage. Founder-facing wording only; the
+                // underlying master_portrait slot + generation are unchanged.
+                const stageNum = selected.stageNumber;
+                const masterNoun = stageNum >= 3 ? "Final Evolution" : stageNum === 2 ? "Stage 2 Evolution" : "Master Reference";
+                const masterVerb = stageNum >= 3 ? "Create Final Evolution" : stageNum === 2 ? "Create Stage 2 Evolution" : "Generate Master Reference";
                 const next = !descOk ? { now: "Write & approve the description", do: "Approve Description first (above)" }
                   // Candidates-pending check must come BEFORE the generate nudge, or the
                   // banner tells the founder to (re)generate while approvals are waiting.
-                  : !masterOk && masterCands.length > 0 ? { now: "Master candidates ready", do: "Approve a Master Reference" }
-                    : !masterOk ? { now: "Description approved", do: "Generate Master Reference" }
+                  : !masterOk && masterCands.length > 0 ? { now: `${masterNoun} candidates ready`, do: `Approve a ${masterNoun}` }
+                    : !masterOk ? { now: "Description approved", do: masterVerb }
                       : !actionOk && actionCands.length > 0 ? { now: "Action candidates ready", do: "Approve an Action Pose" }
-                        : !actionOk ? { now: "Master approved", do: "Generate Matching Action Pose" }
+                        : !actionOk ? { now: `${masterNoun} approved`, do: "Generate Matching Action Pose" }
                           : health.identityScore != null && health.identityScore < 70 ? { now: "Identity too low", do: "Generate a closer Action Pose" }
                             : !selected.locked ? { now: "Action approved", do: "Lock Character" }
                               : { now: "Character locked", do: "Generate Cards" };
@@ -1795,10 +1865,10 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                       </div>
                     </div>
 
-                    {/* STEP 1 · MASTER REFERENCE */}
-                    <div className={`rounded-xl border p-4 ${masterOk ? "border-emerald-800/50 bg-emerald-950/10" : "border-slate-800 bg-slate-900/40"}`}>
+                    {/* STEP 1 · MASTER REFERENCE (relabeled "…Evolution" for stage 2/3) */}
+                    <div data-vq-step="master" className={`rounded-xl border p-4 ${masterOk ? "border-emerald-800/50 bg-emerald-950/10" : "border-slate-800 bg-slate-900/40"}`}>
                       <div className="mb-3 flex items-center justify-between">
-                        <span className="flex items-center gap-2 text-sm font-bold text-slate-100"><span className="flex h-6 w-6 items-center justify-center rounded-lg bg-slate-800 text-xs font-bold text-slate-300">1</span>Master Reference{masterOk && <CheckCircle2 className="h-4 w-4 text-emerald-400" />}</span>
+                        <span className="flex items-center gap-2 text-sm font-bold text-slate-100"><span className="flex h-6 w-6 items-center justify-center rounded-lg bg-slate-800 text-xs font-bold text-slate-300">1</span>{masterNoun}{masterOk && <CheckCircle2 className="h-4 w-4 text-emerald-400" />}</span>
                       </div>
                       {masterOk ? (
                         <div className="flex items-center gap-3">
@@ -1817,7 +1887,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                         <>
                           <button type="button" onClick={() => generateMasterArtwork("master_portrait")} disabled={busyGen || !descOk || selected.locked} title={!descOk ? "Approve the description first" : undefined}
                             className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40" style={{ background: gold }}>
-                            {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}{busyGen ? (genPhaseLabel ?? "Generating…") : "Generate Master Reference"}
+                            {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}{busyGen ? (genPhaseLabel ?? "Generating…") : masterVerb}
                           </button>
                           {!descOk && <p className="mt-2 text-center text-[11px] text-slate-500">Approve the character description above to unlock this.</p>}
                         </>
@@ -1903,7 +1973,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                     </div>
 
                     {/* STEP 2 · ACTION REFERENCE — disabled until Master approved */}
-                    <div className={`relative rounded-xl border p-4 ${!masterOk ? "border-slate-800 bg-slate-950/60" : actionOk ? "border-emerald-800/50 bg-emerald-950/10" : "border-slate-800 bg-slate-900/40"}`}>
+                    <div data-vq-step="action" className={`relative rounded-xl border p-4 ${!masterOk ? "border-slate-800 bg-slate-950/60" : actionOk ? "border-emerald-800/50 bg-emerald-950/10" : "border-slate-800 bg-slate-900/40"}`}>
                       <div className="mb-3 flex items-center justify-between">
                         <span className="flex items-center gap-2 text-sm font-bold text-slate-100"><span className="flex h-6 w-6 items-center justify-center rounded-lg bg-slate-800 text-xs font-bold text-slate-300">2</span>Action Reference{actionOk && <CheckCircle2 className="h-4 w-4 text-emerald-400" />}</span>
                         {!masterOk && <span className="inline-flex items-center gap-1 text-[11px] text-slate-500"><Lock className="h-3 w-3" />Locked until Master approved</span>}
@@ -2021,7 +2091,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
 
                     {/* Lock explanation + Continue */}
                     {!selected.locked && (
-                      <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+                      <div data-vq-step="lock" className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
                         {requiredComplete(selected) ? (
                           <button type="button" onClick={toggleLock} disabled={busy === "lock"} className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>
                             {busy === "lock" ? <Loader2 className="h-5 w-5 animate-spin" /> : <Lock className="h-5 w-5" />}Lock Character
