@@ -49,6 +49,8 @@ import {
   getRevisionById,
 } from "../vault-quest/lib/vq-artwork-revisions-store";
 import type { VqFeature } from "../vault-quest/lib/vq-feature-state";
+import { VQ_GENERATION_TYPE_FEATURES, AUTO_RETRY_FEATURE, generationTypeFeatureFor, isAutomaticPaidRetryEnabled } from "../vault-quest/lib/vq-feature-state";
+import { loadVqDbFlags } from "../vault-quest/lib/vq-feature-flags-store";
 import type { GenerationPayload } from "../vault-quest/lib/generation-idempotency";
 import { randomUUID } from "crypto";
 import { generate, type GenerateReq } from "../vault-quest/generate";
@@ -602,7 +604,7 @@ interface GenCandidateResult {
 async function generateCharacterCandidate(
   character: VqCharacter,
   referenceType: VqReferenceType = "master_portrait",
-  opts?: { model?: string; actionCategory?: string | null }
+  opts?: { model?: string; actionCategory?: string | null; autoRetryEnabled?: boolean }
 ): Promise<GenCandidateResult | { rejected: true; reason: string; providerCalls: number }> {
   const prev = character.evolvesFromCharacterId
     ? ((await vqStorage.getCharacter(character.evolvesFromCharacterId)) ?? null)
@@ -700,7 +702,14 @@ async function generateCharacterCandidate(
   // diversity, and never uploads/shows a near-duplicate for approval when a
   // genuinely different one was reachable in 2 tries. Only a passing (or attempts-
   // exhausted) image is kept; either way the LAST attempt is what's charged.
-  const maxAttempts = isMaster || isActionPose ? 2 : 1;
+  // Automatic paid retry (spend-guard hardening, item E) defaults OFF: unless the
+  // owner has explicitly turned on `auto_paid_retry` (see vq-feature-state.ts),
+  // every generation gets AT MOST ONE paid provider call, full stop — a background/
+  // pose/identity/evolution failure is recorded as rejected/auto_rejected but never
+  // automatically retried. This is a DELIBERATE reduction from the previous
+  // always-on "retry once" behaviour; the founder must manually press Generate
+  // again. When explicitly enabled, the existing retry-once behaviour is unchanged.
+  const maxAttempts = (isMaster || isActionPose) && opts?.autoRetryEnabled ? 2 : 1;
   let artwork: HiggsfieldArtworkResult | null = null;
   let prompt = "";
   let bgReason: string | undefined;
@@ -998,11 +1007,13 @@ function vqWritesGate(req: Request, res: Response, next: NextFunction): void {
     .catch(next);
 }
 
-/** Feature-specific gate for a single route (generation/exports) — narrower than
- *  the global writes gate, so an operator can pause JUST paid generation or JUST
- *  exports without freezing card edits/approvals. Call and `return` on `!ok`
- *  BEFORE any spend check, reservation, or provider/R2 call. */
-async function vqFeatureGateOrRespond(res: Response, feature: "generation" | "exports"): Promise<boolean> {
+/** Feature-specific gate for a single route (generation/exports/a per-generation-
+ *  type toggle) — narrower than the global writes gate, so an operator can pause
+ *  JUST paid generation, JUST exports, or JUST ONE generation type (Master, Action
+ *  Reference, etc.) without freezing card edits/approvals or every other type.
+ *  Call and `return` on `!ok` BEFORE any spend check, reservation, or provider/R2
+ *  call. */
+async function vqFeatureGateOrRespond(res: Response, feature: VqFeature): Promise<boolean> {
   const check = await checkVqFeature(feature);
   if (check.ok) return true;
   res.setHeader("Retry-After", String(check.response.retryAfterSeconds));
@@ -1010,7 +1021,11 @@ async function vqFeatureGateOrRespond(res: Response, feature: "generation" | "ex
   return false;
 }
 
-const VQ_TOGGLEABLE_FEATURES: readonly VqFeature[] = ["generation", "exports", "writes"];
+// Spend-guard hardening: per-generation-type toggles (item B) + the automatic
+// paid-retry toggle (item E) share the SAME owner-facing on/off route as the
+// existing "generation"/"exports"/"writes" switches — no new endpoint needed,
+// just widening what this one already-audited route accepts.
+const VQ_TOGGLEABLE_FEATURES: readonly VqFeature[] = ["generation", "exports", "writes", ...VQ_GENERATION_TYPE_FEATURES, AUTO_RETRY_FEATURE];
 
 export function registerVaultQuestAdminRoutes(app: Express): void {
   app.use("/api/admin/vault-quest", vqWritesGate);
@@ -1322,6 +1337,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
               connected: false,
             });
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
+        // Per-generation-type toggle (spend-guard hardening, item B): lets an owner
+        // pause JUST this reference type (e.g. Action Reference) without touching
+        // the master "generation" switch or any other type. Checked BEFORE spend/
+        // reservation/provider — a disabled type must never reach Higgsfield.
+        if (!(await vqFeatureGateOrRespond(res, generationTypeFeatureFor(referenceType)))) return;
+        // Automatic paid retry (item E) — defaults OFF; see generateCharacterCandidate.
+        const autoRetryEnabled = isAutomaticPaidRetryEnabled(await loadVqDbFlags());
 
         // Spend gate (Phase 10A-2): master ALWAYS makes MASTER_CANDIDATE_COUNT
         // candidates, others 1. Enforce the ceiling BEFORE any paid provider call.
@@ -1387,8 +1409,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             providerCalls = 0;
           for (let i = 0; i < MASTER_CANDIDATE_COUNT; i++) {
             try {
-              const r = await generateCharacterCandidate(character, referenceType, { model });
-              providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each)
+              const r = await generateCharacterCandidate(character, referenceType, { model, autoRetryEnabled });
+              providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each, only when auto-retry is enabled)
               if ("rejected" in r) {
                 bgRejectedCount++;
                 continue;
@@ -1427,7 +1449,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             });
         }
 
-        const r = await generateCharacterCandidate(character, referenceType, { model, actionCategory });
+        const r = await generateCharacterCandidate(character, referenceType, { model, actionCategory, autoRetryEnabled });
         if ("rejected" in r) {
           await finishOk(r.providerCalls * perImage, null, model ?? null);
           return res.status(422).json({ error: r.reason, rejected: true });
@@ -1514,6 +1536,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
               connected: false,
             });
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
+        if (!(await vqFeatureGateOrRespond(res, generationTypeFeatureFor(referenceType)))) return; // per-type toggle (item B)
+        const autoRetryEnabled = isAutomaticPaidRetryEnabled(await loadVqDbFlags()); // item E — defaults OFF
         // Spend gate (Phase 10A-2) BEFORE any paid provider call.
         const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
         // Price for the worst case: EACH of the `count` candidates can independently
@@ -1565,7 +1589,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           providerCalls = 0;
         for (let i = 0; i < count; i++) {
           try {
-            const r = await generateCharacterCandidate(character, referenceType, { model });
+            const r = await generateCharacterCandidate(character, referenceType, { model, autoRetryEnabled });
             providerCalls += r.providerCalls; // ACTUAL paid creates
             if ("rejected" in r) {
               bgRejectedCount++;
@@ -1984,6 +2008,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
               connected: false,
             });
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
+        if (!(await vqFeatureGateOrRespond(res, generationTypeFeatureFor("master_portrait")))) return; // per-type toggle (item B) — family generation is always Master artwork
+        const autoRetryEnabled = isAutomaticPaidRetryEnabled(await loadVqDbFlags()); // item E — defaults OFF
         // Spend gate (Phase 10A-2): family generates one image per eligible character in ONE
         // press, so it is capped by the per-BATCH credit ceiling (D8), not the per-image count.
         const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
@@ -2037,8 +2063,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             continue;
           } // text before pixels
           try {
-            const r = await generateCharacterCandidate(ch, "master_portrait", { model });
-            providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each)
+            const r = await generateCharacterCandidate(ch, "master_portrait", { model, autoRetryEnabled });
+            providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each, only when auto-retry is enabled)
             if ("rejected" in r) {
               bgRejectedCount++;
               continue;
@@ -2610,6 +2636,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           .status(503)
           .json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
       if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
+      if (!(await vqFeatureGateOrRespond(res, "gen_card_artwork"))) return; // per-type toggle (item B)
 
       // Spend gate (Phase 10A-2): card artwork is a single paid image — cap BEFORE the call.
       // Price the EFFECTIVE (upgraded) model so a z_image+references request isn't undercounted (F-2).

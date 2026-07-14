@@ -252,6 +252,8 @@ run("Action Reference background gate — route wiring", () => {
     keyCounter++;
     await q("DELETE FROM vq_generation_requests", []);
     await q("DELETE FROM vq_config", []);
+    await q("DELETE FROM vq_feature_flags WHERE feature = 'auto_paid_retry'", []);
+    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('auto_paid_retry', true, 'test') ON CONFLICT (feature) DO UPDATE SET enabled = true", []); // item E: these tests exercise the EXISTING retry-on-failure mechanics, which now require the toggle explicitly ON
   });
   afterAll(async () => {
     await q("DELETE FROM vq_generation_requests", []);
