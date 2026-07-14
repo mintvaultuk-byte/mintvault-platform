@@ -6,9 +6,10 @@ import { AdminButton } from "@/components/admin";
 import { Loader2, Upload, Save, History, FileImage, FileText, FileCode, Plus, AlertCircle, CheckCircle2, LayoutGrid, ArrowLeft, ShieldCheck, RotateCcw, XCircle, PackageCheck, Archive, Wand2, Sparkles, ChevronDown, BookOpen, Lock, Unlock } from "lucide-react";
 import { STATUS_META, allowedTargets, type VqStatus } from "@shared/vq-workflow";
 import { ReusePanel, fetchReuseCheck, useAdvancedMode, type ReuseCheck, type ReusableAsset } from "@/components/vault-quest/workflow";
-import { characterHealth, traitsFromBreakdown, matchBand, scoreBand, poseDiversityBand, evolutionDifferenceBand, STATE_CLS, type IdentityBreakdown, type HealthState } from "@/components/vault-quest/quality";
+import { characterHealth, traitsFromBreakdown, matchBand, scoreBand, poseDiversityBand, evolutionDifferenceBand, actionNoveltyBand, STATE_CLS, type IdentityBreakdown, type HealthState } from "@/components/vault-quest/quality";
 import { getOrCreateIdempotencyKey, clearIdempotencyKey } from "@/lib/vq-idempotency";
 import { runGenerationWithRecovery, type GenerationPhase } from "@/lib/vq-generation-lifecycle";
+import { VQ_ACTION_CATEGORY_OPTIONS, findActionCategory } from "@shared/vq-action-categories";
 
 // AI Cost Mode — founder-friendly quality tiers that map to real image models.
 // Simple Mode shows only these; Advanced Mode still exposes the model dropdown.
@@ -704,6 +705,9 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   // locked while this is true — it only unblocks the Bible/description controls for
   // one deliberate, confirmed edit session. Reset whenever the selected character changes.
   const [editingLocked, setEditingLocked] = useState(false);
+  // Action Reference replacement: founder-selected action category ("auto" excludes the
+  // existing action's category server-side). Threaded into the action generation body.
+  const [actionCategory, setActionCategory] = useState<string>("auto");
   // Card-level stats for the founder dashboard (same endpoint as the board).
   const bibleDash = useQuery<Dashboard>({ queryKey: ["/api/admin/vault-quest/dashboard"], retry: false });
   // Session/today credit tracking (client-side ESTIMATE of spend, persisted per day).
@@ -775,6 +779,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     setZoomId(null);
     setEditingLocked(false);
     setHistoryFor(null);
+    setActionCategory("auto");
   }, [selected?.characterId]);
 
   async function seedCharacters() {
@@ -1059,10 +1064,14 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     // client-side timeout is NOT terminal — see runGenerationWithRecovery below — so it
     // must never clear this key, or a re-click would mint a fresh one and risk a
     // second paid attempt while the first is still genuinely running server-side.
-    const scopeKey = `character:${selected.characterId}:${type}:${imgModel || "default"}`;
+    // Action Reference only: include the chosen action category. It's part of the
+    // idempotency scope so a DIFFERENT category is a distinct paid request (a fresh
+    // key), while a reload with the SAME category still safely replays (D10 unchanged).
+    const catForBody = type === "action_pose" ? actionCategory : undefined;
+    const scopeKey = `character:${selected.characterId}:${type}:${imgModel || "default"}${catForBody ? `:${catForBody}` : ""}`;
     const idempotencyKey = getOrCreateIdempotencyKey(scopeKey);
     const url = `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`;
-    const body = { referenceType: type, model: imgModel, idempotencyKey };
+    const body = { referenceType: type, model: imgModel, idempotencyKey, ...(catForBody ? { actionCategory: catForBody } : {}) };
     try {
       // Bounded client wait, then safe re-polling on the SAME idempotencyKey — the
       // server's D10 guard makes a repeat POST free (202 pending / 200 replayed), so
@@ -1899,6 +1908,15 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                         <span className="flex items-center gap-2 text-sm font-bold text-slate-100"><span className="flex h-6 w-6 items-center justify-center rounded-lg bg-slate-800 text-xs font-bold text-slate-300">2</span>Action Reference{actionOk && <CheckCircle2 className="h-4 w-4 text-emerald-400" />}</span>
                         {!masterOk && <span className="inline-flex items-center gap-1 text-[11px] text-slate-500"><Lock className="h-3 w-3" />Locked until Master approved</span>}
                       </div>
+                      {masterOk && (
+                        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/40 p-2">
+                          <label className="text-[11px] font-semibold text-slate-400">Action</label>
+                          <select value={actionCategory} onChange={(e) => setActionCategory(e.target.value)} className={`${inputCls} w-auto text-xs`}>
+                            {VQ_ACTION_CATEGORY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                          <span className="text-[10px] text-slate-500">{actionCategory === "auto" ? (actionOk ? "Auto picks a clearly different action from the current one." : "Auto picks a dynamic action.") : "This exact action will be generated."}</span>
+                        </div>
+                      )}
                       {!masterOk ? (
                         <p className="text-[11px] text-slate-600">Approve a Master Reference first — the Action Pose is built from it so the character stays identical.</p>
                       ) : actionOk ? (
@@ -1933,21 +1951,39 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                 const band = scoreBand(c.identityScore);
                                 const traits = traitsFromBreakdown(c.identityBreakdown);
                                 const pose = poseDiversityBand(c.identityBreakdown?.poseDiversity);
+                                const novelty = actionNoveltyBand(c.identityBreakdown?.actionNovelty);
                                 const poseFailed = pose.state === "fail";
+                                const noveltyFailed = novelty.state === "fail";
+                                const blocked = poseFailed || noveltyFailed;
+                                const catLabel = findActionCategory(c.identityBreakdown?.actionCategory)?.label;
+                                // When replacing, the "before" is the EXISTING approved Action (what
+                                // this must differ from). For a first Action there's nothing to
+                                // replace, so keep the Master as the comparison anchor.
                                 return (
                                   <div key={c.id} className="rounded-lg border border-slate-800 bg-slate-950/60 p-2">
                                     <div className="flex items-start gap-2">
-                                      <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}`} alt="master" onClick={() => setZoomId("master")} className="h-24 w-24 cursor-zoom-in rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Approved Master</div></div>
+                                      {actionOk ? (
+                                        <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/pack/action_pose?v=${artNonce}`} alt="existing action" onClick={() => setZoomId("action")} className="h-24 w-24 cursor-zoom-in rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Existing Action</div></div>
+                                      ) : (
+                                        <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/pack/master_portrait?v=${artNonce}`} alt="master" onClick={() => setZoomId("master")} className="h-24 w-24 cursor-zoom-in rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Approved Master</div></div>
+                                      )}
                                       <span className="mt-8 text-slate-600">→</span>
-                                      <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="action candidate" onClick={() => setZoomId(c.id)} className="h-24 w-24 cursor-zoom-in rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">Action Candidate</div></div>
+                                      <div className="text-center"><img src={`/api/admin/vault-quest/characters/${cid}/candidate/${c.id}?v=${artNonce}`} alt="action candidate" onClick={() => setZoomId(c.id)} className="h-24 w-24 cursor-zoom-in rounded bg-slate-950 object-contain" /><div className="mt-0.5 text-[9px] uppercase text-slate-600">New Candidate</div></div>
                                       <div className="ml-1 flex-1">
                                         <div className="flex flex-wrap items-center gap-1.5">
                                           <div className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-bold ${STATE_CLS[band.state]}`}>Identity {c.identityScore ?? "—"} · {band.label}</div>
                                           {pose.label !== "—" && (
-                                            <div className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-bold ${STATE_CLS[pose.state]}`} title="Measures how different this pose is from the approved Master — independent of identity.">Pose Diversity · {pose.label}</div>
+                                            <div className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-bold ${STATE_CLS[pose.state]}`} title="How different this pose is from the neutral approved Master — independent of identity.">Pose Diff · Master {pose.label}</div>
+                                          )}
+                                          {novelty.label !== "—" && (
+                                            <div className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs font-bold ${STATE_CLS[novelty.state]}`} title="How different this pose is from the EXISTING approved Action it replaces — independent of identity.">Pose Diff · Existing Action {novelty.label}</div>
+                                          )}
+                                          {catLabel && (
+                                            <div className="inline-flex items-center gap-1.5 rounded-md border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs font-semibold text-slate-300" title="The action category this candidate was generated for.">Action · {catLabel}</div>
                                           )}
                                         </div>
                                         {poseFailed && <p className="mt-1 text-[10px] text-red-400">Too similar to the Master's pose — cannot be approved. Generate another.</p>}
+                                        {noveltyFailed && <p className="mt-1 text-[10px] text-red-400">Too similar to the existing approved Action — cannot be approved. Pick a different action and generate again.</p>}
                                         <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px]">
                                           {[...traits, { label: "Background", score: 100 }].map((t) => {
                                             const mb = t.label === "Background" ? { label: "Pass", state: "pass" as HealthState } : matchBand(t.score);
@@ -1955,7 +1991,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                           })}
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
-                                          <button type="button" disabled={!!busy || poseFailed} title={poseFailed ? "Blocked — pose is too similar to the Master Reference" : undefined} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve Action Pose</button>
+                                          <button type="button" disabled={!!busy || blocked} title={poseFailed ? "Blocked — pose is too similar to the Master Reference" : noveltyFailed ? "Blocked — too similar to the existing approved Action" : undefined} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve Action Pose</button>
                                           <button type="button" disabled={!!busy} onClick={() => rejectCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400 disabled:opacity-40">Reject</button>
                                           <button type="button" disabled={busy === `del-${c.id}`} onClick={() => deleteCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400 disabled:opacity-40">{busy === `del-${c.id}` ? "…" : "Delete"}</button>
                                           <button type="button" onClick={() => setZoomId(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200">Zoom</button>

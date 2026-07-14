@@ -85,6 +85,7 @@ import {
 import { scoreCharacterIdentity, identityThreshold, type IdentityResult } from "../vault-quest/ai/identity";
 import { validateStudioBackground } from "../vault-quest/ai/bg-validate";
 import { scoreEvolutionDifference, type EvolutionDifferenceVerdict } from "../vault-quest/ai/evolution-diversity";
+import { chooseActionCategory } from "@shared/vq-action-categories";
 import { VQ_IMAGE_MODELS, vqValidImageModel, vqCreditsPerImage } from "@shared/vq-schema";
 
 type VqEditorPayload = RenderCardInput & {
@@ -425,12 +426,21 @@ function characterMasterArtworkPrompt(
 const PREV_STAGE_ANCHOR_TYPES: VqReferenceType[] = ["master_portrait", "action_pose", "colour_sheet"];
 async function collectReferenceImages(
   character: VqCharacter,
-  prevCharacter?: VqCharacter | null
+  prevCharacter?: VqCharacter | null,
+  // Reference type to EXCLUDE from the PROVIDER reference array (Action-replacement
+  // fix). When generating a new Action pose, the character's currently-approved
+  // Action pose must NOT be fed back to the generator as a reference — that made the
+  // model reproduce the same pose. We pass excludeReferenceType="action_pose" so the
+  // existing Action is dropped from both the own pack and the previous-stage anchor;
+  // the Master (identity) and other identity references stay. The existing Action is
+  // still fetched SEPARATELY (comparison-only) for the novelty gate, never sent here.
+  excludeReferenceType?: VqReferenceType
 ): Promise<{ buffers: Buffer[]; used: string[]; ownRefCount: number }> {
   const buffers: Buffer[] = [];
   const used: string[] = [];
   let ownRefCount = 0;
   for (const t of VQ_REFERENCE_TYPES) {
+    if (t.value === excludeReferenceType) continue;
     const key = character.referencePack?.[t.value]?.r2Key;
     if (!key || !key.startsWith("vq/characters/")) continue;
     const buf = await getR2Buffer(key);
@@ -442,6 +452,7 @@ async function collectReferenceImages(
   }
   if (prevCharacter) {
     for (const t of PREV_STAGE_ANCHOR_TYPES) {
+      if (t === excludeReferenceType) continue;
       const key = prevCharacter.referencePack?.[t]?.r2Key;
       if (!key || !key.startsWith("vq/characters/")) continue;
       const buf = await getR2Buffer(key);
@@ -481,6 +492,20 @@ const POSE_DIVERSITY_MANDATE =
 // Appended on a retry after the pose-diversity check fails (mirrors STRICTER_BG_SUFFIX).
 const STRICTER_POSE_SUFFIX =
   " CRITICAL: the previous attempt was rejected for looking too similar to the neutral standing Master Reference. Go further — pick a clearly dynamic, energetic action (mid-run, mid-leap, mid-attack, airborne, twisting) with an obviously different silhouette and camera angle, not a minor variation on standing still.";
+// Action Reference REPLACEMENT: appended (in addition to POSE_DIVERSITY_MANDATE) only
+// when the character ALREADY has an approved Action pose being replaced. Forces a
+// genuinely different action from BOTH the neutral Master and the existing Action.
+const ACTION_REPLACEMENT_MANDATE =
+  " REPLACEMENT REQUIREMENT: this character already has an approved Action Reference and you are creating a REPLACEMENT. Do not recreate the pose, silhouette, limb positions or movement direction of the existing approved Action Reference. The result must look like the same character performing a COMPLETELY DIFFERENT action — a different action category, a different body silhouette, a different limb arrangement, a different head direction, body rotation, centre of gravity and tail position. Do not default to a forward-running or forward-leaping pose unless that category was explicitly selected. Use the approved Master only for identity and anatomy, never to copy its pose.";
+// The founder-selected (or auto-rotated) action category, injected so the generator
+// aims at a specific, named action rather than defaulting to running/leaping.
+function actionCategoryPromptFragment(categoryPrompt: string): string {
+  return ` SELECTED ACTION: depict the character ${categoryPrompt}. This specific action is the required subject of the pose.`;
+}
+// Appended on a retry after the action-novelty check fails (too similar to the EXISTING
+// approved Action). The retry also rotates to a different action category (see loop).
+const STRICTER_ACTION_NOVELTY_SUFFIX =
+  " CRITICAL: the previous attempt was too similar to the EXISTING approved Action pose it is meant to replace. Switch to the newly selected, clearly different action category and produce an obviously different silhouette, limb arrangement and movement direction from the existing Action.";
 
 // Evolution-differentiation fix: the existing EVOLUTION_REF_PROMPT is deliberately
 // gentle ("grown larger and more mature") — correct as a soft base framing, but on
@@ -555,7 +580,7 @@ interface GenCandidateResult {
 async function generateCharacterCandidate(
   character: VqCharacter,
   referenceType: VqReferenceType = "master_portrait",
-  opts?: { model?: string }
+  opts?: { model?: string; actionCategory?: string | null }
 ): Promise<GenCandidateResult | { rejected: true; reason: string; providerCalls: number }> {
   const prev = character.evolvesFromCharacterId
     ? ((await vqStorage.getCharacter(character.evolvesFromCharacterId)) ?? null)
@@ -563,9 +588,36 @@ async function generateCharacterCandidate(
   const basePrompt = characterMasterArtworkPrompt(character, prev, referenceType);
   if (basePrompt.length < 20)
     throw new Error("Character Bible has no master artwork prompt or DNA yet — fill the Bible first.");
-  const { buffers, used, ownRefCount } = await collectReferenceImages(character, prev);
   const isMaster = referenceType === "master_portrait";
   const isActionPose = referenceType === "action_pose";
+  // Action-replacement fix: when generating a new Action pose, EXCLUDE the character's
+  // currently-approved Action pose from the PROVIDER reference array (feeding it back
+  // made the model reproduce the same pose). The existing Action is fetched separately
+  // below (comparison-only) for the novelty gate — never sent to the generator.
+  const { buffers, used, ownRefCount } = await collectReferenceImages(
+    character,
+    prev,
+    isActionPose ? "action_pose" : undefined
+  );
+  // The EXISTING approved Action pose (comparison-only) — only for an Action
+  // REPLACEMENT (the character already has one). Used solely by the novelty gate.
+  let existingActionPng: Buffer | undefined;
+  let existingActionCategory: string | undefined;
+  if (isActionPose) {
+    const existingActionKey = character.referencePack?.action_pose?.r2Key;
+    if (existingActionKey && existingActionKey.startsWith("vq/characters/")) {
+      existingActionPng = (await getR2Buffer(existingActionKey)) ?? undefined;
+      // Best-effort: read the existing Action candidate's stored action category so an
+      // "Auto" choice can exclude it. Legacy actions (generated before this feature)
+      // have no stored category → undefined → Auto picks any category.
+      const existingCandidateId = character.referencePack?.action_pose?.candidateId;
+      if (existingCandidateId != null) {
+        const existingCand = await vqStorage.getArtworkCandidate(existingCandidateId).catch(() => null);
+        const cat = (existingCand?.identityBreakdown as { actionCategory?: string } | null)?.actionCategory;
+        if (cat) existingActionCategory = cat;
+      }
+    }
+  }
   // Evolution-differentiation fix: only meaningful for a stage>1 Master Reference
   // with a resolvable previous-stage reference image. Deliberately independent of
   // ownRefCount — this stays active even after the stage's OWN Master is approved
@@ -623,8 +675,26 @@ async function generateCharacterCandidate(
   let providerCalls = 0; // every generateHiggsfieldArtwork below is a PAID create
   let preScored: IdentityResult | null = null; // action_pose/evolution: reused after upload so scoring isn't done twice
   let preScoredEvolution: EvolutionDifferenceVerdict | null = null; // evolution: reused after upload
+  let selectedActionCategory: string | undefined; // action_pose: the category actually used (stored + audited)
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const poseSuffix = isActionPose ? POSE_DIVERSITY_MANDATE + (attempt > 1 ? STRICTER_POSE_SUFFIX : "") : "";
+    // Action Reference: choose the action category for THIS attempt. An explicit
+    // founder choice is honoured; "auto" (or blank) rotates through the list and
+    // excludes the existing approved Action's category. A retry (attempt 2) always
+    // rotates to a different category than attempt 1.
+    let poseSuffix = "";
+    if (isActionPose) {
+      const chosen = chooseActionCategory({
+        requested: opts?.actionCategory,
+        excludeCategory: existingActionCategory,
+        attempt,
+      });
+      selectedActionCategory = chosen.value;
+      poseSuffix =
+        POSE_DIVERSITY_MANDATE +
+        actionCategoryPromptFragment(chosen.prompt) +
+        (existingActionPng ? ACTION_REPLACEMENT_MANDATE : "") +
+        (attempt > 1 ? STRICTER_POSE_SUFFIX + (existingActionPng ? STRICTER_ACTION_NOVELTY_SUFFIX : "") : "");
+    }
     const evoSuffix = evolutionGateActive
       ? evolutionDiversityMandate(character.stageNumber) + (attempt > 1 ? STRICTER_EVOLUTION_SUFFIX : "")
       : "";
@@ -679,9 +749,16 @@ async function generateCharacterCandidate(
 
     if (poseGateActive) {
       const ownRefs = buffers.slice(0, ownRefCount);
-      const scored = await scoreCharacterIdentity(generated.png, ownRefs, character, { masterPng });
-      if (scored?.poseDiversity?.verdict === "fail" && attempt < maxAttempts) {
-        continue; // too similar to the Master's pose — discard, retry once with a stricter prompt
+      // Score identity + pose-vs-Master AND (for a replacement) pose-vs-existing-Action
+      // in the SAME vision call. Two independent pose gates:
+      //   - poseDiversity: different enough from the neutral MASTER (threshold 55)
+      //   - actionNovelty: different enough from the EXISTING approved Action (65),
+      //     only when replacing (existingActionPng present).
+      const scored = await scoreCharacterIdentity(generated.png, ownRefs, character, { masterPng, existingActionPng });
+      const poseFail = scored?.poseDiversity?.verdict === "fail";
+      const noveltyFail = !!existingActionPng && scored?.actionNovelty?.verdict === "fail";
+      if ((poseFail || noveltyFail) && attempt < maxAttempts) {
+        continue; // too similar to the Master's pose OR the existing Action — discard, retry with a rotated category + stricter prompt
       }
       artwork = generated;
       preScored = scored;
@@ -725,7 +802,13 @@ async function generateCharacterCandidate(
       model: artwork.model,
       generatedBy: "admin",
       prompt,
-      output: { characterId: character.characterId, candidateKey: key, referenceType, referencesUsed: used },
+      output: {
+        characterId: character.characterId,
+        candidateKey: key,
+        referenceType,
+        referencesUsed: used,
+        ...(selectedActionCategory ? { actionCategory: selectedActionCategory } : {}),
+      },
       applied: false,
     })
     .catch(() => {});
@@ -752,6 +835,11 @@ async function generateCharacterCandidate(
         .setArtworkCandidateIdentity(candidate.id, identity.score, {
           ...identity.breakdown,
           poseDiversity: identity.poseDiversity,
+          // actionNovelty present only for a REPLACEMENT (existing Action was compared
+          // against); actionCategory is the category actually generated (audit + Auto
+          // exclusion for the NEXT replacement).
+          ...(identity.actionNovelty ? { actionNovelty: identity.actionNovelty } : {}),
+          ...(selectedActionCategory ? { actionCategory: selectedActionCategory } : {}),
         } as unknown as Record<string, unknown>)
         .catch(() => {});
     }
@@ -1144,9 +1232,15 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
         const character = await vqStorage.getCharacter(characterId);
         if (!character) return res.status(404).json({ error: "character not found" });
-        const body0 = (req.body ?? {}) as { referenceType?: string; model?: string };
+        const body0 = (req.body ?? {}) as { referenceType?: string; model?: string; actionCategory?: string };
         const referenceType = parseReferenceType(body0.referenceType);
         const model = String(body0.model ?? "").trim() || undefined;
+        // Action Reference only: the founder-selected action category ("auto" or a
+        // specific value from VQ_ACTION_CATEGORIES); ignored for other reference types.
+        const actionCategory =
+          referenceType === "action_pose" && typeof body0.actionCategory === "string"
+            ? body0.actionCategory
+            : undefined;
         // Text before pixels: reference artwork may only be generated from an APPROVED description.
         if (character.descriptionStatus !== "approved") {
           return res
@@ -1273,7 +1367,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             });
         }
 
-        const r = await generateCharacterCandidate(character, referenceType, { model });
+        const r = await generateCharacterCandidate(character, referenceType, { model, actionCategory });
         if ("rejected" in r) {
           await finishOk(r.providerCalls * perImage, null, model ?? null);
           return res.status(422).json({ error: r.reason, rejected: true });
@@ -1688,6 +1782,20 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             .json({
               error:
                 "This candidate's pose is too similar to the Master Reference (Pose Diversity: Fail) — it cannot be approved. Generate another.",
+            });
+        }
+        // Action-novelty gate (Action Reference REPLACEMENT fix): present only when the
+        // candidate was scored against an EXISTING approved Action. Mirrors the
+        // pose-diversity guard — a candidate too similar to the CURRENT Action stays
+        // visible with the badge but can never be approved. Real server-side guard.
+        const actionNovelty = (cand.identityBreakdown as { actionNovelty?: { verdict?: string } } | null)
+          ?.actionNovelty;
+        if (actionNovelty?.verdict === "fail") {
+          return res
+            .status(422)
+            .json({
+              error:
+                "This candidate is too similar to the existing approved Action pose (Pose Difference From Existing Action: Fail) — it cannot be approved. Generate a different action.",
             });
         }
         // Evolution-difference gate (Stage 2/3 differentiation fix): mirrors the

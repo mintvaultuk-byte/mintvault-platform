@@ -39,6 +39,11 @@ export type IdentityBreakdown = Partial<Record<
   notes?: string;
   /** Action Reference only — independent of identity above (see server/vault-quest/ai/pose-diversity.ts). */
   poseDiversity?: { difference?: number; verdict?: "pass" | "fail"; threshold?: number };
+  /** Action Reference REPLACEMENT only — pose difference from the EXISTING approved
+   *  Action, independent of identity + poseDiversity (see server/vault-quest/ai/action-novelty.ts). */
+  actionNovelty?: { difference?: number; verdict?: "pass" | "fail"; threshold?: number };
+  /** Action Reference only — the action category actually generated. */
+  actionCategory?: string;
   /** Stage 2/3 Master Reference only — independent of identity above (see
    *  server/vault-quest/ai/evolution-diversity.ts). */
   evolutionDifference?: { difference?: number; verdict?: "pass" | "fail"; threshold?: number; stageNumber?: number };
@@ -56,6 +61,14 @@ export function poseDiversityBand(pd: IdentityBreakdown["poseDiversity"] | null 
 export function evolutionDifferenceBand(ed: IdentityBreakdown["evolutionDifference"] | null | undefined): { label: string; state: HealthState } {
   if (!ed || ed.verdict == null) return { label: "—", state: "grey" };
   return ed.verdict === "pass" ? { label: "Pass", state: "pass" } : { label: "Fail", state: "fail" };
+}
+
+/** Founder-facing Pass/Fail for the Action Reference REPLACEMENT novelty gate (pose
+ *  difference from the EXISTING approved Action). Absent (a first Action with nothing
+ *  to replace, non-action candidates, or scorer unavailable) renders as unscored. */
+export function actionNoveltyBand(an: IdentityBreakdown["actionNovelty"] | null | undefined): { label: string; state: HealthState } {
+  if (!an || an.verdict == null) return { label: "—", state: "grey" };
+  return an.verdict === "pass" ? { label: "Pass", state: "pass" } : { label: "Fail", state: "fail" };
 }
 
 /** Map the raw breakdown to the founder-facing trait rows (only traits that exist). */
