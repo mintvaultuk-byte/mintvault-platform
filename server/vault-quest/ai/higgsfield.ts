@@ -381,6 +381,17 @@ export async function generateHiggsfieldArtwork(input: {
       // succeeded (charged), so this is a job-level outcome, not a connectivity one;
       // 'unknown' is the closest existing kind (→ provider_unavailable for display).
       recordHiggsfieldOutcome({ ok: false, kind: "unknown" });
+      // Log Higgsfield's OWN failure reason (its poll body carries it in `detail`)
+      // so a "Higgsfield generation failed" is diagnosable next time — the poll
+      // RESPONSE never contains our auth token (that's request-header only), so this
+      // is safe to log. Bounded to avoid flooding.
+      let reason: string;
+      try {
+        reason = JSON.stringify(data.detail ?? data).slice(0, 400);
+      } catch {
+        reason = String(data.detail ?? "");
+      }
+      console.error(`[higgsfield] job ${jobId} resolved to "${status}" — provider detail: ${reason}`);
       throw new Error(`Higgsfield generation ${status}`);
     }
     if (status === "completed" && data.result_url) { job = data; break; }
