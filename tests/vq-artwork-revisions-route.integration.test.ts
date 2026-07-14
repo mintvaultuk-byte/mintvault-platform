@@ -77,12 +77,14 @@ run("artwork revisions — real router + real vqStorage + local Postgres", () =>
     r2Store.clear();
     await q("DELETE FROM vq_artwork_revision_events", []);
     await q("DELETE FROM vq_artwork_revisions", []);
+    await q("DELETE FROM vq_artwork_candidates WHERE character_id LIKE 'RT-%'", []);
     await q("DELETE FROM vq_cards WHERE card_id LIKE 'RT-%'", []);
     await q("DELETE FROM vq_characters WHERE character_id LIKE 'RT-%'", []);
   });
   afterAll(async () => {
     await q("DELETE FROM vq_artwork_revision_events", []);
     await q("DELETE FROM vq_artwork_revisions", []);
+    await q("DELETE FROM vq_artwork_candidates WHERE character_id LIKE 'RT-%'", []);
     await q("DELETE FROM vq_cards WHERE card_id LIKE 'RT-%'", []);
     await q("DELETE FROM vq_characters WHERE character_id LIKE 'RT-%'", []);
     await new Promise<void>((resolve) => server.close(() => resolve()));
