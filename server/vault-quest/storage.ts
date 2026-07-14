@@ -517,6 +517,35 @@ export const vqStorage = {
     });
   },
 
+  /**
+   * AI Creature Designer (Phase 2): create a whole family + its 3 stage cards + 3
+   * stage characters + an audit row in ONE create-only transaction. If ANYTHING
+   * already exists (family id, any card id, any character id), the entire transaction
+   * rolls back and NOTHING is created — so a family can never be partially built and an
+   * existing family is never overwritten or attached to. Characters carry their
+   * description fields from the approved concept (text before pixels — no images here).
+   */
+  async createFamilyFromConcept(
+    family: InsertVqFamily,
+    cards: InsertVqCard[],
+    characters: InsertVqCharacter[],
+    audit: InsertVqAiGeneration,
+  ): Promise<void> {
+    await db.transaction(async (tx) => {
+      const f = await tx.insert(vqFamilies).values(family).onConflictDoNothing().returning();
+      if (f.length === 0) throw new Error(`family ${family.familyId} already exists`);
+      for (const card of cards) {
+        const r = await tx.insert(vqCards).values(card).onConflictDoNothing().returning();
+        if (r.length === 0) throw new Error(`card ${card.cardId} already exists`);
+      }
+      for (const character of characters) {
+        const r = await tx.insert(vqCharacters).values(character).onConflictDoNothing().returning();
+        if (r.length === 0) throw new Error(`character ${character.characterId} already exists`);
+      }
+      await tx.insert(vqAiGenerations).values(audit);
+    });
+  },
+
   async listRevisions(cardId: string) {
     return db.select().from(vqCardRevisions).where(eq(vqCardRevisions.cardId, cardId)).orderBy(desc(vqCardRevisions.editedAt));
   },

@@ -10,6 +10,7 @@ import { characterHealth, traitsFromBreakdown, matchBand, scoreBand, poseDiversi
 import { getOrCreateIdempotencyKey, clearIdempotencyKey } from "@/lib/vq-idempotency";
 import { runGenerationWithRecovery, type GenerationPhase } from "@/lib/vq-generation-lifecycle";
 import { VQ_ACTION_CATEGORY_OPTIONS, findActionCategory } from "@shared/vq-action-categories";
+import { CreatureDesigner } from "@/components/vault-quest/creature-designer";
 
 // AI Cost Mode — founder-friendly quality tiers that map to real image models.
 // Simple Mode shows only these; Advanced Mode still exposes the model dropdown.
@@ -708,6 +709,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   // Action Reference replacement: founder-selected action category ("auto" excludes the
   // existing action's category server-side). Threaded into the action generation body.
   const [actionCategory, setActionCategory] = useState<string>("auto");
+  // AI Creature Designer (Phase 2): the idea → concept → create modal.
+  const [designerOpen, setDesignerOpen] = useState(false);
   // Card-level stats for the founder dashboard (same endpoint as the board).
   const bibleDash = useQuery<Dashboard>({ queryKey: ["/api/admin/vault-quest/dashboard"], retry: false });
   // Session/today credit tracking (client-side ESTIMATE of spend, persisted per day).
@@ -1475,9 +1478,21 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
         </div>
         <div className="flex gap-2">
           <AdminButton variant="ghost" onClick={onBack}><ArrowLeft className="mr-1 h-4 w-4" />Board</AdminButton>
-          <AdminButton variant="gold" onClick={seedCharacters} disabled={busy === "seed"}>{busy === "seed" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <BookOpen className="mr-1 h-4 w-4" />}Seed missing</AdminButton>
+          <AdminButton variant="gold" onClick={() => setDesignerOpen(true)}><Sparkles className="mr-1 h-4 w-4" />Create New Creature</AdminButton>
+          {advanced && <AdminButton variant="ghost" onClick={seedCharacters} disabled={busy === "seed"}>{busy === "seed" ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <BookOpen className="mr-1 h-4 w-4" />}Seed missing</AdminButton>}
         </div>
       </div>
+      {designerOpen && (
+        <CreatureDesigner
+          onClose={() => setDesignerOpen(false)}
+          onCreated={async (_familyId, stage1CharacterId) => {
+            setDesignerOpen(false);
+            await chars.refetch();
+            setSelectedId(stage1CharacterId); // open the new Stage 1 (description already approved)
+            scrollToStep("master");
+          }}
+        />
+      )}
 
       {/* ═══ Founder production dashboard (live) ═══ */}
       {characters.length > 0 && (() => {

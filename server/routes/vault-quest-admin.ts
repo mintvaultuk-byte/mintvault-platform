@@ -56,10 +56,15 @@ import {
   runGenerator,
   generateFullCard,
   generateCharacterDescription,
+  generateFamilyConcept,
+  generateFieldSuggestions,
   DESCRIPTION_FIELD_KEYS,
   type GenKind,
   type CardContext,
+  type FieldSuggestContext,
 } from "../vault-quest/ai/generators";
+import { createFamilyFromConcept, deriveAlternativeNames } from "../vault-quest/creature-designer";
+import { validateFamilyConcept, SUGGEST_FIELDS, type CreatureIdeaInput, type FamilyConcept, type SuggestField } from "@shared/vq-creature-concept";
 import { providerStatuses } from "../vault-quest/ai/provider";
 import { AI_DISCLAIMER, guardInput, guardOutput } from "../vault-quest/ai/guardrails";
 import {
@@ -2299,6 +2304,97 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       res.status(201).json(result);
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : "generate failed" });
+    }
+  });
+
+  // ---- AI Creature Designer (Phase 2): idea → full 3-stage family concept ----
+  // TEXT AI ONLY. No Higgsfield, no R2, no records created here — just a concept the
+  // founder edits/approves before anything is saved.
+  app.post("/api/admin/vault-quest/creature-concept", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as CreatureIdeaInput;
+      const result = await generateFamilyConcept({
+        idea: String(body.idea ?? ""),
+        element: body.element ? String(body.element) : undefined,
+        temperament: body.temperament ? String(body.temperament) : undefined,
+        colours: body.colours ? String(body.colours) : undefined,
+        habitat: body.habitat ? String(body.habitat) : undefined,
+        size: body.size ? String(body.size) : undefined,
+        specialTrait: body.specialTrait ? String(body.specialTrait) : undefined,
+      });
+      if (!result.concept) return res.status(result.note?.includes("not connected") ? 503 : 422).json({ error: result.note ?? "concept generation failed" });
+      res.json({ concept: result.concept, provider: result.provider, model: result.model });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "concept generation failed" });
+    }
+  });
+
+  // Create the family from an APPROVED (edited) concept — one create-only transaction.
+  app.post("/api/admin/vault-quest/families/from-concept", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as { concept?: FamilyConcept; founderInput?: CreatureIdeaInput; provider?: string; model?: string; setCode?: string };
+      if (!body.concept) return res.status(400).json({ error: "concept is required" });
+      const valid = validateFamilyConcept(body.concept);
+      if (!valid.ok) return res.status(400).json({ error: `Concept is incomplete — fill: ${valid.missing.slice(0, 8).join(", ")}` });
+      const result = await createFamilyFromConcept(body.concept, {
+        setCode: body.setCode ? String(body.setCode) : undefined,
+        founderInput: body.founderInput ?? { idea: "" },
+        provider: body.provider ? String(body.provider) : "anthropic",
+        model: body.model ? String(body.model) : "unknown",
+        createdBy: req.session?.adminEmail || "admin",
+      });
+      if (!result.ok) {
+        // 409 Conflict: a name/id collision or a concurrent create — nothing was created.
+        return res.status(409).json(result);
+      }
+      res.status(201).json(result);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "family creation failed" });
+    }
+  });
+
+  // Suggest non-colliding alternative names for a proposed family (used by the
+  // "Generate alternative names" option on a collision). No records created.
+  app.post("/api/admin/vault-quest/creature-concept/alt-names", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as { familyName?: string; stageNames?: string[]; setCode?: string };
+      const familyName = String(body.familyName ?? "").trim();
+      const stageNames = Array.isArray(body.stageNames) ? body.stageNames.map((n) => String(n)) : [];
+      if (!familyName || stageNames.length !== 3) return res.status(400).json({ error: "familyName and 3 stageNames are required" });
+      const setCode = body.setCode ? String(body.setCode) : "GNV";
+      const [families, characters] = await Promise.all([vqStorage.listFamilies(setCode), vqStorage.listCharacters(setCode)]);
+      const existing = {
+        familyNames: families.map((f) => f.name).filter((n): n is string => !!n),
+        characterNames: characters.map((c) => c.characterName).filter((n): n is string => !!n),
+        familyIds: families.map((f) => f.familyId),
+      };
+      const suggestion = deriveAlternativeNames(familyName, stageNames, existing);
+      if (!suggestion) return res.status(422).json({ error: "Couldn't find non-colliding names — edit the names manually." });
+      res.json(suggestion);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "alt-names failed" });
+    }
+  });
+
+  // Per-field creative suggestions (Rev 2): the founder picks from options instead of
+  // inventing. ONE small text-AI request per field — never Higgsfield, never R2. The
+  // client applies a chosen value to a single field (field isolation).
+  app.post("/api/admin/vault-quest/creature-concept/suggest", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const body = (req.body ?? {}) as { field?: string; style?: string; context?: FieldSuggestContext; n?: number };
+      if (!body.field || !SUGGEST_FIELDS.includes(body.field as SuggestField)) {
+        return res.status(400).json({ error: `field must be one of ${SUGGEST_FIELDS.join(", ")}` });
+      }
+      const result = await generateFieldSuggestions({
+        field: body.field as SuggestField,
+        style: body.style ? String(body.style) : undefined,
+        context: body.context ?? {},
+        n: body.n,
+      });
+      if (!result.suggestions.length) return res.status(result.note?.includes("not connected") ? 503 : 422).json({ error: result.note ?? "no suggestions" });
+      res.json({ field: body.field, suggestions: result.suggestions });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "suggestions failed" });
     }
   });
 

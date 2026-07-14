@@ -51,18 +51,31 @@ function isNegatedUse(text: string, at: number): boolean {
   return /\b(no|not|never|without|avoid|forbid|forbids|forbidden)\s+(?:a\s+|an\s+|the\s+)?$/i.test(prefix);
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Whole-word / clear-phrase match only — \b anchors require a non-word character (or
+ *  the start/end of the string) immediately outside the term, so "luffy" cannot match
+ *  inside "fluffy" but still matches "Luffy" standalone, comma/period-separated, or as
+ *  part of a longer banned PHRASE (the term itself may contain internal spaces/hyphens,
+ *  e.g. "one piece", "blue-eyes" — only the two outer edges are boundary-checked). */
+function wholeTermRegex(term: string): RegExp {
+  return new RegExp(`\\b${escapeRegExp(term.trim())}\\b`, "g");
+}
+
 function hardHits(text: string, terms: string[]): string[] {
   const lower = text.toLowerCase();
   const found: string[] = [];
   for (const term of terms) {
-    const needle = term.toLowerCase();
-    let at = lower.indexOf(needle);
-    while (at >= 0) {
-      if (!isNegatedUse(lower, at)) {
+    const re = wholeTermRegex(term.toLowerCase());
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(lower))) {
+      if (!isNegatedUse(lower, m.index)) {
         found.push(term.trim());
         break;
       }
-      at = lower.indexOf(needle, at + needle.length);
+      if (re.lastIndex === m.index) re.lastIndex++; // guard against zero-length-match loops
     }
   }
   return found;

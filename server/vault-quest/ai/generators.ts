@@ -6,6 +6,15 @@
  */
 import { getTextProvider } from "./provider";
 import { guardInput, guardOutput } from "./guardrails";
+import {
+  CONCEPT_STAGE_DRAWABLE_KEYS,
+  LORE_STYLES,
+  type CreatureIdeaInput,
+  type FamilyConcept,
+  type StageConcept,
+  type SuggestField,
+  type LoreStyle,
+} from "@shared/vq-creature-concept";
 
 export interface CardContext {
   name?: string;
@@ -554,4 +563,187 @@ Return JSON EXACTLY: {"characterDna":"","visualDescription":"","bodyShape":"","c
     fields.negativePrompt = DESCRIPTION_UNIVERSAL_NEGATIVE; // safe canonical negative, no named franchises
   }
   return { fields, provider: provider.id, model: provider.model };
+}
+
+// ── AI Creature Designer (Phase 2) — one idea → a full 3-stage FAMILY concept ──
+export interface FamilyConceptResult {
+  concept: FamilyConcept | null;
+  provider: string;
+  model: string;
+  note?: string;
+}
+
+/**
+ * Turn a plain founder idea ("pink fluffy monster that loves flowers") into a full,
+ * coherent, editable 3-stage FAMILY concept. TEXT ONLY — never contacts Higgsfield,
+ * never writes R2. Every stage's 12 drawable fields mirror generateCharacterDescription
+ * so an approved concept drops straight onto vq_characters and is immediately
+ * artwork-ready. Stage 2/3 must explicitly describe how they visually evolve from the
+ * previous stage (stageProgressionNotes). Fails soft (null + note) if the provider is
+ * absent, the JSON is malformed, or the guardrails reject content.
+ */
+export async function generateFamilyConcept(input: CreatureIdeaInput): Promise<FamilyConceptResult> {
+  const provider = getTextProvider();
+  if (!provider) return { concept: null, provider: "none", model: "none", note: "Provider not connected — set ANTHROPIC_API_KEY." };
+
+  const idea = (input.idea ?? "").trim();
+  if (!idea) return { concept: null, provider: provider.id, model: provider.model, note: "Describe a creature idea first." };
+  // Screen the founder's free-text idea before it reaches the model.
+  const inGuard = guardInput(idea);
+  if (inGuard.violations.length) {
+    return { concept: null, provider: provider.id, model: provider.model, note: `That idea can't be used: ${inGuard.violations.join("; ")}.` };
+  }
+
+  const hint = (label: string, v?: string) => (v && v.trim() ? ` ${label}: ${v.trim().slice(0, 120)}.` : "");
+  const constraints =
+    hint("Preferred element", input.element) +
+    hint("Temperament", input.temperament) +
+    hint("Main colours", input.colours) +
+    hint("Habitat", input.habitat) +
+    hint("Size", input.size) +
+    hint("Special trait", input.specialTrait);
+
+  const stageFields = `"name":"","shortDescription":"","characterDna":"","visualDescription":"","bodyShape":"","colours":"","markings":"","eyes":"","tailAccessories":"","personality":"","stageProgressionNotes":"","elementIdentity":"","negativePrompt":"","masterArtworkPrompt":"","signatureAbility":"","flavourText":""`;
+
+  const system = `You design COMPLETE, original, family-friendly 3-stage evolution CREATURE FAMILIES for Vault Quest, a collectible card game. Text only — never artwork. ${NAME_RULES} Every field must be concrete and drawable (an artist should reproduce the exact creature from it). The three stages are ONE creature line that visibly grows (Baby → Teen → Final): same species, same core colour palette, same marking language, same eye character, same signature accessories — but each later stage is CLEARLY more evolved, never a copy. Reply with STRICT JSON only, no prose.`;
+
+  const user = `Founder idea: "${idea}".${constraints}
+Design a coherent 3-stage family. Choose ONE Vault Quest element that best fits the idea unless a preferred element is given.
+For the FAMILY provide: name (short evocative family working title), element, theme (the family's core concept), evolutionDirection (how the line grows across the 3 stages), palette (shared colour palette), sharedTraits (identity traits every stage keeps), lore (2-3 sentences of family lore).
+For EACH of the 3 stages provide all of: name; shortDescription (one line); characterDna (the permanent identity contract — species, colours, markings, eyes, accessories, what may NEVER change); visualDescription (drawable); bodyShape; colours; markings; eyes; tailAccessories; personality; stageProgressionNotes; elementIdentity (how the element shows visually); negativePrompt (MUST include: ${DESCRIPTION_UNIVERSAL_NEGATIVE}); masterArtworkPrompt (standalone character-artwork description — subject + pose + palette, plain background, never mention a card/frame/text/logo); signatureAbility (a short signature ability name + effect); flavourText (one evocative sentence).
+Stage 1 is the establishing baby form. Stage 2 and Stage 3 stageProgressionNotes MUST explicitly LIST the visual changes from the previous stage that an artist must draw (larger body, developed silhouette, grown horns/mane/tail, more mature bearing) — never identical, never a redesign.
+Return JSON EXACTLY: {"family":{"name":"","element":"","theme":"","evolutionDirection":"","palette":"","sharedTraits":"","lore":""},"stages":[{"stageNumber":1,${stageFields}},{"stageNumber":2,${stageFields}},{"stageNumber":3,${stageFields}}]}`;
+
+  const raw = await provider.complete(system, user, 4000);
+  let parsed: { family?: Record<string, unknown>; stages?: Record<string, unknown>[] };
+  try {
+    parsed = parseJson(raw) as typeof parsed;
+  } catch {
+    return { concept: null, provider: provider.id, model: provider.model, note: "AI returned malformed output — try again." };
+  }
+  if (!parsed.family || !Array.isArray(parsed.stages) || parsed.stages.length !== 3) {
+    return { concept: null, provider: provider.id, model: provider.model, note: "AI did not return a complete 3-stage family — try again." };
+  }
+  const famStr = (k: string) => String(parsed.family?.[k] ?? "").trim();
+  const family = {
+    name: famStr("name"),
+    element: famStr("element"),
+    theme: famStr("theme"),
+    evolutionDirection: famStr("evolutionDirection"),
+    palette: famStr("palette"),
+    sharedTraits: famStr("sharedTraits"),
+    lore: famStr("lore"),
+  };
+  const stages: StageConcept[] = parsed.stages.map((s, i) => {
+    const drawable = Object.fromEntries(CONCEPT_STAGE_DRAWABLE_KEYS.map((k) => [k, String(s[k] ?? "").trim()]));
+    return {
+      stageNumber: (i + 1) as 1 | 2 | 3,
+      name: String(s.name ?? "").trim(),
+      shortDescription: String(s.shortDescription ?? "").trim(),
+      signatureAbility: String(s.signatureAbility ?? "").trim(),
+      flavourText: String(s.flavourText ?? "").trim(),
+      ...(drawable as Record<(typeof CONCEPT_STAGE_DRAWABLE_KEYS)[number], string>),
+    } as StageConcept;
+  });
+  // Fill/repair the negative prompt with the safe canonical clause when empty or when
+  // the model listed franchises in a way the IP screen would flag (same handling as
+  // generateCharacterDescription).
+  for (const s of stages) {
+    if (!s.negativePrompt || guardOutput("name", s.negativePrompt).hard.length) s.negativePrompt = DESCRIPTION_UNIVERSAL_NEGATIVE;
+  }
+  const concept: FamilyConcept = { family, stages };
+
+  // IP / franchise screen across everything EXCEPT the (franchise-naming) negative prompts.
+  const screenable = [
+    ...Object.values(family),
+    ...stages.flatMap((s) => [s.name, s.shortDescription, s.signatureAbility, s.flavourText, ...CONCEPT_STAGE_DRAWABLE_KEYS.filter((k) => k !== "negativePrompt").map((k) => s[k])]),
+  ].join(" ");
+  const ip = guardOutput("name", screenable).hard;
+  if (ip.length) return { concept: null, provider: provider.id, model: provider.model, note: `AI produced disallowed content (${[...new Set(ip)].join(", ")}) — try again.` };
+
+  return { concept, provider: provider.id, model: provider.model };
+}
+
+// ── Per-field creative suggestions (Phase 2 Rev 2) ──
+export interface FieldSuggestContext {
+  idea?: string;
+  familyName?: string;
+  element?: string;
+  theme?: string;
+  stageName?: string;
+  stageNumber?: number;
+  previousStageName?: string;
+}
+export interface FieldSuggestionsResult {
+  suggestions: string[];
+  provider: string;
+  model: string;
+  note?: string;
+}
+
+// Per-field prompt spec: what to ask for, how many, and whether output is a "name"
+// (short, IP-screened, medieval-word-averse) vs a phrase.
+const SUGGEST_SPEC: Record<SuggestField, { ask: (c: FieldSuggestContext, style?: LoreStyle) => string; n: number; isName: boolean }> = {
+  family_name: { ask: () => "short, evocative, invented FAMILY names (one word preferred)", n: 8, isName: true },
+  stage_name: { ask: (c) => `short, evocative creature NAMES for stage ${c.stageNumber ?? 1} of the "${c.familyName ?? "creature"}" line${c.previousStageName ? ` (it evolves from "${c.previousStageName}", so the name should sound related)` : ""}`, n: 8, isName: true },
+  family_theme: { ask: () => "one-line FAMILY THEME ideas (the creature line's core concept)", n: 5, isName: false },
+  family_palette: { ask: () => "shared COLOUR PALETTE options (each a short comma-list of colours)", n: 5, isName: false },
+  family_lore: { ask: (_c, style) => `2-3 sentence FAMILY LORE options in a ${style ?? "Cute"} tone`, n: 4, isName: false },
+  family_evolution: { ask: () => "one-line EVOLUTION DIRECTION options (how the line grows across its 3 stages)", n: 5, isName: false },
+  family_traits: { ask: () => "SHARED IDENTITY TRAIT options (traits every stage keeps — colours, markings, eyes, silhouette)", n: 5, isName: false },
+  signature_ability: { ask: (c) => `SIGNATURE ABILITY options for ${c.stageName ?? "the creature"} (each a short ability name + a brief effect)`, n: 6, isName: false },
+  flavour_text: { ask: (c) => `one-sentence FLAVOUR TEXT options for ${c.stageName ?? "the creature"}`, n: 5, isName: false },
+  stage_colours: { ask: (c) => `COLOUR options for ${c.stageName ?? "this stage"} (each a short comma-list of colours)`, n: 5, isName: false },
+  stage_personality: { ask: (c) => `PERSONALITY options for ${c.stageName ?? "this stage"} (short trait phrases)`, n: 5, isName: false },
+};
+
+/**
+ * Suggest values for ONE creative field — a small, fast, text-only request so the
+ * founder picks from options instead of inventing. Returns a short list; name fields
+ * are screened for other-IP and deduped. Never touches Higgsfield or R2. `style` only
+ * applies to family_lore. Fails soft (empty + note).
+ */
+export async function generateFieldSuggestions(input: {
+  field: SuggestField;
+  style?: string;
+  context?: FieldSuggestContext;
+  n?: number;
+}): Promise<FieldSuggestionsResult> {
+  const provider = getTextProvider();
+  if (!provider) return { suggestions: [], provider: "none", model: "none", note: "Provider not connected — set ANTHROPIC_API_KEY." };
+  const spec = SUGGEST_SPEC[input.field];
+  if (!spec) return { suggestions: [], provider: provider.id, model: provider.model, note: "unknown field" };
+  const ctx = input.context ?? {};
+  const style = LORE_STYLES.includes(input.style as LoreStyle) ? (input.style as LoreStyle) : undefined;
+  const count = Math.max(3, Math.min(12, Number(input.n) || spec.n));
+
+  const ctxLine = [
+    ctx.idea ? `Founder idea: "${ctx.idea.slice(0, 200)}".` : "",
+    ctx.familyName ? `Family: "${ctx.familyName}".` : "",
+    ctx.element ? `Element: ${ctx.element}.` : "",
+    ctx.theme ? `Theme: ${ctx.theme.slice(0, 160)}.` : "",
+  ].filter(Boolean).join(" ");
+
+  const system = `You are a creative director for Vault Quest, a family-friendly collectible card game. ${spec.isName ? NAME_RULES + " " : ""}Offer several distinct, high-quality options that fit the creature. Reply with STRICT JSON only: {"suggestions":["…"]}.`;
+  const user = `${ctxLine}\nSuggest ${count} ${spec.ask(ctx, style)}. Make them varied and distinct from each other. Return JSON EXACTLY: {"suggestions":[${Array.from({ length: count }).map(() => '""').join(",")}]}`;
+
+  const raw = await provider.complete(system, user, 700);
+  let parsed: { suggestions?: unknown };
+  try {
+    parsed = parseJson(raw) as { suggestions?: unknown };
+  } catch {
+    return { suggestions: [], provider: provider.id, model: provider.model, note: "AI returned malformed output — try again." };
+  }
+  let list = Array.isArray(parsed.suggestions) ? parsed.suggestions.map((s) => String(s ?? "").trim()).filter(Boolean) : [];
+  // De-dupe (case-insensitive), and IP-screen name suggestions (drop franchise hits).
+  const seen = new Set<string>();
+  list = list.filter((s) => {
+    const key = s.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    if (spec.isName && guardOutput("name", s).hard.length) return false;
+    return true;
+  });
+  if (!list.length) return { suggestions: [], provider: provider.id, model: provider.model, note: "No usable suggestions — try again." };
+  return { suggestions: list.slice(0, count), provider: provider.id, model: provider.model };
 }
