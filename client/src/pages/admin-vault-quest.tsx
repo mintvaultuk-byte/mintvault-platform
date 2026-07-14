@@ -12,6 +12,7 @@ import { runGenerationWithRecovery, type GenerationPhase } from "@/lib/vq-genera
 import { VQ_ACTION_CATEGORY_OPTIONS, findActionCategory } from "@shared/vq-action-categories";
 import { CreatureDesigner } from "@/components/vault-quest/creature-designer";
 import { FounderSpendControlPanel } from "@/components/vault-quest/FounderSpendControlPanel";
+import { ProviderConnectionPanel } from "@/components/vault-quest/ProviderConnectionPanel";
 import { VqStoredImage } from "@/components/vault-quest/VqStoredImage";
 import {
   batchConfirmationButtonText,
@@ -19,11 +20,13 @@ import {
   canSubmitGeneration,
   expectedResolvedModel,
   featureForReferenceType,
-  generationBlockedReason,
+  generationBlockedReasonWithProvider,
   isPremiumModel,
+  providerGenerationBlockedReason,
   resolveFounderFeatureMap,
   type FounderFeatureKey,
   type FounderFeatureMap,
+  type ProviderConnection,
 } from "@/components/vault-quest/spend-control";
 
 // AI Cost Mode — founder-friendly quality tiers that map to real image models.
@@ -765,6 +768,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   };
   const cost = useQuery<{ model: string; connected: boolean; creditsPerImage: number; masterImagesPerItem: number; providers: { id: string; label: string; enabled: boolean; note: string }[] }>({ queryKey: ["/api/admin/vault-quest/artwork-cost"], retry: false });
   const [founderFlags, setFounderFlags] = useState<FounderFeatureMap>(() => resolveFounderFeatureMap(undefined, false));
+  const [providerConnection, setProviderConnection] = useState<ProviderConnection | null>(null);
+  const [providerStatusLoaded, setProviderStatusLoaded] = useState(false);
   // Image model / quality — default DRAFT/CHEAP (never the expensive model unless chosen).
   const [imgModel, setImgModel] = useState<VqImageModel>("z_image");
   const [premiumConfirmed, setPremiumConfirmed] = useState(false);
@@ -791,8 +796,11 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     isPremiumModel(model)
       ? { premiumModel: model, premiumConfirmed: true, premiumReason: reason.trim() }
       : {};
-  const generationDisabledTitle = (feature: FounderFeatureKey) => generationBlockedReason(founderFlags, feature) ?? undefined;
-  const referenceGenerationBlocked = (type: VqRefType) => !canSubmitGeneration(founderFlags, featureForReferenceType(type)) || !!premiumBlockReason;
+  const generationDisabledTitle = (feature: FounderFeatureKey) => generationBlockedReasonWithProvider(founderFlags, feature, providerConnection, providerStatusLoaded) ?? undefined;
+  const referenceGenerationBlocked = (type: VqRefType) =>
+    !canSubmitGeneration(founderFlags, featureForReferenceType(type)) ||
+    !!providerGenerationBlockedReason(providerConnection, providerStatusLoaded) ||
+    !!premiumBlockReason;
   const referenceGenerationTitle = (type: VqRefType, fallback?: string) => generationDisabledTitle(featureForReferenceType(type)) ?? premiumBlockReason ?? fallback;
 
   const characters = chars.data?.characters ?? [];
@@ -1076,7 +1084,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     try {
       // Guard: only accept a real ref-type string; never a forwarded MouseEvent.
       const type: VqRefType = isVqRefType(typeOverride) ? typeOverride : refType;
-      const blocked = generationBlockedReason(founderFlags, featureForReferenceType(type));
+      const blocked = generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(type), providerConnection, providerStatusLoaded);
       if (blocked) {
         toast({ title: "Generation unavailable", description: blocked, variant: "destructive" });
         return;
@@ -1130,7 +1138,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     // Guard: only a real ref-type string; never a forwarded MouseEvent (would put a
     // DOM node into the JSON body → "Converting circular structure to JSON").
     const type: VqRefType = isVqRefType(typeOverride) ? typeOverride : refType;
-    const blocked = generationBlockedReason(founderFlags, featureForReferenceType(type));
+    const blocked = generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(type), providerConnection, providerStatusLoaded);
     if (blocked) {
       toast({ title: "Generation unavailable", description: blocked, variant: "destructive" });
       genInFlight.current = false;
@@ -1209,7 +1217,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
 
   async function generateFamilyArtwork() {
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
-    const blocked = generationBlockedReason(founderFlags, "gen_master_portrait");
+    const blocked = generationBlockedReasonWithProvider(founderFlags, "gen_master_portrait", providerConnection, providerStatusLoaded);
     if (blocked) { toast({ title: "Generation unavailable", description: blocked, variant: "destructive" }); return; }
     if (!window.confirm(`Generate Stage 1/2/3 master artwork for family ${selected.familyId}? This spends Higgsfield credits (up to 3 images).`)) return;
     setBusy("gen-family");
@@ -1234,7 +1242,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
 
   async function generate3More() {
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
-    const blocked = generationBlockedReason(founderFlags, featureForReferenceType(refType));
+    const blocked = generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(refType), providerConnection, providerStatusLoaded);
     if (blocked) { toast({ title: "Generation unavailable", description: blocked, variant: "destructive" }); return; }
     if (!window.confirm(`Generate 3 more ${refTypeMeta.label} candidates for ${selected.characterName}? This spends Higgsfield credits (3 images).`)) return;
     setBusy("gen-3more");
@@ -1325,9 +1333,9 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   function openBatchItems(work: { characterId: string; name: string; stage: number; referenceType: VqRefType }[], label: string) {
     if (batchRunning) return;
     if (work.length === 0) { toast({ title: "Nothing to generate", description: `Everything for “${label}” is already approved / locked / complete — 0 credits.` }); return; }
-    const disabledType = work.find((w) => generationBlockedReason(founderFlags, featureForReferenceType(w.referenceType)));
+    const disabledType = work.find((w) => generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(w.referenceType), providerConnection, providerStatusLoaded));
     if (disabledType) {
-      toast({ title: "Generation unavailable", description: generationBlockedReason(founderFlags, featureForReferenceType(disabledType.referenceType)) ?? "This generation type is Off.", variant: "destructive" });
+      toast({ title: "Generation unavailable", description: generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(disabledType.referenceType), providerConnection, providerStatusLoaded) ?? "This generation type is Off.", variant: "destructive" });
       return;
     }
     const items: BatchItem[] = work.map((w) => ({ ...w, status: "queued" }));
@@ -1356,9 +1364,9 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     if (!batch || batchRunning) return;
     const work = batch.filter((b) => statuses.includes(b.status)).map((b) => ({ characterId: b.characterId, name: b.name, stage: b.stage, referenceType: b.referenceType, kind: b.kind }));
     if (!work.length) { toast({ title: "Nothing to retry" }); return; }
-    const disabledType = work.find((w) => generationBlockedReason(founderFlags, featureForReferenceType(w.referenceType)));
+    const disabledType = work.find((w) => generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(w.referenceType), providerConnection, providerStatusLoaded));
     if (disabledType) {
-      toast({ title: "Generation unavailable", description: generationBlockedReason(founderFlags, featureForReferenceType(disabledType.referenceType)) ?? "This generation type is Off.", variant: "destructive" });
+      toast({ title: "Generation unavailable", description: generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(disabledType.referenceType), providerConnection, providerStatusLoaded) ?? "This generation type is Off.", variant: "destructive" });
       return;
     }
     const images = work.reduce((a, w) => a + (w.kind === "description" ? 0 : imagesForType(w.referenceType)), 0);
@@ -1373,9 +1381,9 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       toast({ title: "Type the confirmation to proceed", description: `Type: ${TYPED_PHRASE}`, variant: "destructive" });
       return;
     }
-    const disabledType = estimate.items.find((item) => item.kind !== "description" && generationBlockedReason(founderFlags, featureForReferenceType(item.referenceType)));
+    const disabledType = estimate.items.find((item) => item.kind !== "description" && generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(item.referenceType), providerConnection, providerStatusLoaded));
     if (disabledType) {
-      toast({ title: "Generation unavailable", description: generationBlockedReason(founderFlags, featureForReferenceType(disabledType.referenceType)) ?? "This generation type is Off.", variant: "destructive" });
+      toast({ title: "Generation unavailable", description: generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(disabledType.referenceType), providerConnection, providerStatusLoaded) ?? "This generation type is Off.", variant: "destructive" });
       return;
     }
     const items = estimate.items.map((i) => ({ ...i, status: "queued" as BatchStatus }));
@@ -1622,7 +1630,10 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       })()}
 
       {characters.length > 0 && (
-        <FounderSpendControlPanel onStatusChange={setFounderFlags} />
+        <div className="space-y-3">
+          <FounderSpendControlPanel onStatusChange={setFounderFlags} />
+          <ProviderConnectionPanel onStatusChange={(provider, loaded) => { setProviderConnection(provider); setProviderStatusLoaded(loaded); }} />
+        </div>
       )}
 
       {chars.isLoading && <p className="flex items-center gap-2 text-sm text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />Loading Character Bible...</p>}
@@ -2642,7 +2653,7 @@ export default function AdminVaultQuest() {
   const dash = useQuery<Dashboard>({ queryKey: ["/api/admin/vault-quest/dashboard"], retry: false });
   const cfg = useQuery<{ elements: Record<string, unknown>; needsApproval: string[] }>({ queryKey: ["/api/admin/vault-quest/config"], retry: false });
   const fams = useQuery<{ families: { familyId: string; name: string | null; element?: string; stage1Name?: string | null; stage2Name?: string | null; stage3Name?: string | null }[] }>({ queryKey: ["/api/admin/vault-quest/families"], retry: false });
-  const opsStatus = useQuery<{ features: { feature: string; enabled: boolean }[] } | null>({ queryKey: ["/api/admin/vault-quest/ops/status"], retry: false });
+  const opsStatus = useQuery<{ features: { feature: string; enabled: boolean }[]; provider?: ProviderConnection } | null>({ queryKey: ["/api/admin/vault-quest/ops/status"], retry: false });
   const editorFounderFlags = resolveFounderFeatureMap(opsStatus.data?.features, !opsStatus.isError && !!opsStatus.data);
   const lastAutoPrev = useRef<string>("");
 
@@ -2671,7 +2682,7 @@ export default function AdminVaultQuest() {
   const editorChar = form.cardType === "Creature"
     ? (editorChars.data?.characters ?? []).find((c) => c.cardId === (form.baseCardId || form.cardId))
     : undefined;
-  const cardArtworkBlockReason = generationBlockedReason(editorFounderFlags, "gen_card_artwork");
+  const cardArtworkBlockReason = generationBlockedReasonWithProvider(editorFounderFlags, "gen_card_artwork", opsStatus.data?.provider, !opsStatus.isError && !!opsStatus.data);
   const fullCardBlockReason = editorChar && !editorChar.locked ? "Lock the canonical character before generating cards." : cardArtworkBlockReason;
 
   // Apply an AI suggestion's fields to the form (never auto — only on click), then run QA.

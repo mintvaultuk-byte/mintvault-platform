@@ -8,9 +8,9 @@
  * absent — clicks surface a provider-not-connected state instead.
  */
 import { anthropicFetch } from "../../anthropic-fetch";
-import { higgsfieldConnection } from "./higgsfield";
-import { deriveHiggsfieldStatus, getLastHiggsfieldOutcome, type HiggsfieldStatus } from "./provider-status";
+import { type HiggsfieldStatus } from "./provider-status";
 import { checkVqFeature } from "../lib/vq-feature-flags-store";
+import { getHiggsfieldProviderConnection, type VqProviderConnectionSnapshot } from "../lib/vq-provider-connection";
 
 export type ProviderKind = "text" | "image";
 
@@ -24,16 +24,19 @@ export interface ProviderStatus {
    *  the simple boolean the existing UI reads; this is the honest detail behind it —
    *  see the note field for a human-readable reason when not fully `connected`. */
   status?: HiggsfieldStatus;
+  providerStatus?: VqProviderConnectionSnapshot["status"];
+  generationAllowed?: boolean;
+  remoteVerified?: boolean;
 }
 
-const STATUS_NOTE: Record<HiggsfieldStatus, string> = {
+const STATUS_NOTE: Record<VqProviderConnectionSnapshot["status"], string> = {
   connected: "connected",
-  configured_unverified: "key configured — not yet verified by a real call",
-  not_configured: "HIGGSFIELD_API_KEY not set",
-  authentication_invalid: "token invalid or expired — run `higgsfield auth token` and update HIGGSFIELD_API_KEY",
-  provider_unavailable: "provider had a problem on the last attempt — try again shortly",
-  rate_limited: "rate limited — try again shortly",
-  disabled_by_owner: "turned off by the owner",
+  token_expiring: "token expires soon",
+  token_expired: "token expired",
+  not_configured: "not configured",
+  disconnected: "disconnected",
+  unknown: "status unknown",
+  checking: "checking connection",
 };
 
 // Text model is overridable via env; defaults to the model the rest of the app uses.
@@ -73,15 +76,29 @@ export function getTextProvider(): TextProvider | null {
  *  toggle reports `disabled_by_owner` rather than a confusing "looks broken". */
 export async function imageProviders(): Promise<ProviderStatus[]> {
   const has = (v: string | undefined) => !!v && v.trim().length > 0;
-  const higgsfield = higgsfieldConnection();
   const genCheck = await checkVqFeature("generation");
-  const status = deriveHiggsfieldStatus({ connected: higgsfield.connected }, getLastHiggsfieldOutcome(), { disabledByOwner: !genCheck.ok });
-  // `connected` stays true through `configured_unverified` too (key present, not yet
-  // proven bad) so a fresh restart doesn't flash a scary red before the first real
-  // call — it flips false only once a REAL failure (auth/rate/provider) is observed.
-  const connected = status === "connected" || status === "configured_unverified";
+  const provider = await getHiggsfieldProviderConnection();
+  const connected = genCheck.ok && provider.generationAllowed;
+  const legacyStatus: HiggsfieldStatus =
+    provider.status === "connected" || provider.status === "token_expiring"
+      ? "connected"
+      : provider.status === "not_configured"
+        ? "not_configured"
+        : provider.status === "token_expired"
+          ? "authentication_invalid"
+          : "provider_unavailable";
   return [
-    { id: "higgsfield", kind: "image", label: "Higgsfield", connected, note: STATUS_NOTE[status], status },
+    {
+      id: "higgsfield",
+      kind: "image",
+      label: "Higgsfield",
+      connected,
+      note: genCheck.ok ? (provider.message || STATUS_NOTE[provider.status]) : "turned off by the owner",
+      status: legacyStatus,
+      providerStatus: provider.status,
+      generationAllowed: connected,
+      remoteVerified: provider.remoteVerified,
+    },
     { id: "openai-images", kind: "image", label: "OpenAI Images", connected: false, note: has(process.env.OPENAI_API_KEY) ? "configured elsewhere; out of scope for Vault Quest artwork" : "out of scope for this pass" },
     { id: "nano-banana", kind: "image", label: "Nano Banana", connected: false, note: "out of scope for this pass" },
     { id: "nano-banana-pro", kind: "image", label: "Nano Banana Pro", connected: false, note: "out of scope for this pass" },

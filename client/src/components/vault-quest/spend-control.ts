@@ -18,6 +18,30 @@ export type FounderFeatureStatus = {
   reason?: string;
 };
 
+export type ProviderConnectionStatus =
+  | "connected"
+  | "token_expiring"
+  | "token_expired"
+  | "not_configured"
+  | "disconnected"
+  | "unknown"
+  | "checking";
+
+export type ProviderConnection = {
+  status: ProviderConnectionStatus;
+  generationAllowed: boolean;
+  providerPathLabel?: string;
+  connectionMode?: string;
+  remoteVerified?: boolean;
+  tokenExpiryAt?: string | null;
+  warningLevel?: "none" | "under_24h" | "under_1h" | "expired" | "unavailable";
+  lastCheckedAt?: string | null;
+  lastSuccessAt?: string | null;
+  lastAuthFailureAt?: string | null;
+  message?: string;
+  reconnectRequired?: boolean;
+};
+
 export const FOUNDER_GENERATION_CONTROLS: readonly { feature: FounderFeatureKey; label: string; offLabel: string; onLabel: string; warning?: string }[] = [
   { feature: "generation", label: "AI Generation", offLabel: "Locked", onLabel: "Enabled" },
   { feature: "gen_master_portrait", label: "Master artwork", offLabel: "Off", onLabel: "On" },
@@ -58,6 +82,20 @@ export function generationBlockedReason(flags: FounderFeatureMap, feature: Found
   return null;
 }
 
+export function providerGenerationBlockedReason(provider: ProviderConnection | null | undefined, statusLoaded = true): string | null {
+  if (!statusLoaded || !provider) return "Reconnect provider first";
+  return provider.generationAllowed && (provider.status === "connected" || provider.status === "token_expiring") ? null : "Reconnect provider first";
+}
+
+export function generationBlockedReasonWithProvider(
+  flags: FounderFeatureMap,
+  feature: FounderFeatureKey,
+  provider: ProviderConnection | null | undefined,
+  statusLoaded = true,
+): string | null {
+  return generationBlockedReason(flags, feature) ?? providerGenerationBlockedReason(provider, statusLoaded);
+}
+
 export function featureForReferenceType(referenceType: string): FounderFeatureKey {
   return FEATURE_FOR_REFERENCE_TYPE[referenceType] ?? "gen_replacement";
 }
@@ -84,4 +122,3 @@ export function batchConfirmationButtonText(images: number, maxCredits: number):
 export function isPremiumModel(model: VqImageModel): boolean {
   return model === VQ_QUALITY_MODEL.premium;
 }
-

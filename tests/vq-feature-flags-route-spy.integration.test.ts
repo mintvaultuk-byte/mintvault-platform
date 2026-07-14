@@ -130,6 +130,21 @@ run("emergency feature kill switches — real router", () => {
     expect(r.status).not.toBe(503);
   });
 
+  it("shared provider token_expired state blocks the next generation before provider contact", async () => {
+    await q(
+      "INSERT INTO vq_config(key, value, updated_by) VALUES ($1,$2,$3),($4,$5,$6)",
+      [
+        "provider.higgsfield.last_status", "token_expired", "machine-a",
+        "provider.higgsfield.last_auth_failure_at", "2026-07-14T12:00:00.000Z", "machine-a",
+      ],
+    );
+    const r = await req("POST", "/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", model: "nano_banana", idempotencyKey: "provider-locked-1" });
+    expect(r.status).toBe(503);
+    expect((r.json as { message?: string; providerStatus?: string }).message).toBe("Reconnect provider first");
+    expect((r.json as { providerStatus?: string }).providerStatus).toBe("token_expired");
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
   it("writes DB-disabled → ANY mutating VQ route is frozen (global kill switch)", async () => {
     await q("INSERT INTO vq_feature_flags(feature, enabled, reason) VALUES ($1,$2,$3)", ["writes", false, "emergency freeze"]);
     const r = await req("POST", "/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", idempotencyKey: "writes-off-1" });

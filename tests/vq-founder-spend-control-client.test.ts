@@ -6,6 +6,8 @@ import {
   expectedResolvedModel,
   featureForReferenceType,
   generationBlockedReason,
+  generationBlockedReasonWithProvider,
+  providerGenerationBlockedReason,
   resolveFounderFeatureMap,
 } from "../client/src/components/vault-quest/spend-control";
 
@@ -38,6 +40,26 @@ describe("founder spend-control client state", () => {
     expect(canSubmitGeneration(flags, "gen_action_pose")).toBe(false);
     expect(featureForReferenceType("action_pose")).toBe("gen_action_pose");
   });
+
+  it("provider status load failure fails closed with the reconnect reason", () => {
+    const flags = resolveFounderFeatureMap([{ feature: "generation", enabled: true }, { feature: "gen_action_pose", enabled: true }]);
+    expect(providerGenerationBlockedReason(null, false)).toBe("Reconnect provider first");
+    expect(generationBlockedReasonWithProvider(flags, "gen_action_pose", null, false)).toBe("Reconnect provider first");
+  });
+
+  it("expired, not-configured and unknown provider states disable paid generation", () => {
+    const states = ["token_expired", "not_configured", "unknown"] as const;
+    for (const status of states) {
+      expect(providerGenerationBlockedReason({ status, generationAllowed: false })).toBe("Reconnect provider first");
+    }
+  });
+
+  it("connected or expiring provider enables generation only when flags also allow it", () => {
+    const flags = resolveFounderFeatureMap([{ feature: "generation", enabled: true }, { feature: "gen_action_pose", enabled: true }]);
+    expect(generationBlockedReasonWithProvider(flags, "gen_action_pose", { status: "connected", generationAllowed: true })).toBeNull();
+    expect(generationBlockedReasonWithProvider(flags, "gen_action_pose", { status: "token_expiring", generationAllowed: true })).toBeNull();
+    expect(generationBlockedReasonWithProvider({ ...flags, generation: false }, "gen_action_pose", { status: "connected", generationAllowed: true })).toBe("AI Generation is Locked.");
+  });
 });
 
 describe("client batch/family confirmation math", () => {
@@ -59,4 +81,3 @@ describe("client batch/family confirmation math", () => {
     expect(batchMaximumCredits(3, "nano_banana_pro", false)).toBe(6);
   });
 });
-

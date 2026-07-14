@@ -41,6 +41,12 @@ import {
 import { checkVqFeature, setVqFeatureFlag } from "../vault-quest/lib/vq-feature-flags-store";
 import { getVqOpsStatus } from "../vault-quest/lib/vq-ops-status";
 import {
+  getHiggsfieldProviderConnection,
+  markHiggsfieldProviderAuthFailure,
+  refreshHiggsfieldProviderConnectionLocal,
+  type VqProviderConnectionSnapshot,
+} from "../vault-quest/lib/vq-provider-connection";
+import {
   promoteCardArtRevision,
   promoteCharacterReferenceRevision,
   listRevisionHistory,
@@ -96,7 +102,7 @@ import { validateStudioBackground } from "../vault-quest/ai/bg-validate";
 import { validateImageIntegrity, type ImageIntegrityCode } from "../vault-quest/ai/image-integrity";
 import { scoreEvolutionDifference, type EvolutionDifferenceVerdict } from "../vault-quest/ai/evolution-diversity";
 import { chooseActionCategory } from "@shared/vq-action-categories";
-import { VQ_IMAGE_MODELS, vqValidImageModel, vqCreditsPerImage } from "@shared/vq-schema";
+import { VQ_IMAGE_MODELS, vqValidImageModel } from "@shared/vq-schema";
 import { resolveRequestedModel, type PremiumOverrideRequest } from "@shared/vq-model-policy";
 
 type VqEditorPayload = RenderCardInput & {
@@ -1018,12 +1024,39 @@ function readIdempotencyKey(req: Request): string {
 // Map a Higgsfield failure to a clean status: 503 not-connected, 402 plan/credit, else 500.
 function artworkErrorResponse(res: Response, err: unknown): void {
   const msg = err instanceof Error ? err.message : "artwork generation failed";
-  if (/not connected|rejected the token|401|Invalid credentials/i.test(msg)) {
+  if (/not connected|rejected the token|401|403|Invalid credentials/i.test(msg)) {
     res.status(503).json({ error: "Artwork provider not connected — token missing or expired", connected: false });
-  } else if (/minimum_basic_plan|plan_required|basic_plan|not enough credits|insufficient|402|\b403\b/i.test(msg)) {
+  } else if (/minimum_basic_plan|plan_required|basic_plan|not enough credits|insufficient|402/i.test(msg)) {
     res.status(402).json({ error: "Higgsfield needs a higher plan or more credits.", planLimit: true });
   } else {
     res.status(500).json({ error: msg });
+  }
+}
+
+async function providerGateOrRespond(res: Response): Promise<VqProviderConnectionSnapshot | null> {
+  const provider = await getHiggsfieldProviderConnection(Date.now());
+  const routeConn = higgsfieldConnection();
+  const localConfiguredAllowed =
+    routeConn.connected &&
+    provider.status !== "token_expired" &&
+    provider.status !== "disconnected" &&
+    provider.status !== "unknown";
+  if (provider.generationAllowed || localConfiguredAllowed) return provider;
+  res.status(503).json({
+    error: "Artwork provider not connected",
+    provider: "higgsfield",
+    providerStatus: provider.status,
+    connected: false,
+    generationAllowed: false,
+    message: "Reconnect provider first",
+  });
+  return null;
+}
+
+async function recordProviderFailureForError(err: unknown): Promise<void> {
+  const mapped = classifyAndMapThrown(err);
+  if (mapped.errorClass === "auth") {
+    await markHiggsfieldProviderAuthFailure();
   }
 }
 
@@ -1113,6 +1146,20 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     }
   });
 
+  app.post("/api/admin/vault-quest/ops/provider/test-connection", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const provider = await refreshHiggsfieldProviderConnectionLocal(req.session?.adminEmail || "admin", Date.now());
+      res.json({
+        ok: true,
+        provider,
+        remoteVerified: false,
+        message: "Credentials are configured, but a free remote connection test is not available.",
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "provider connection check failed" });
+    }
+  });
+
   // ---- editor helpers ----
   app.get("/api/admin/vault-quest/config", requireAdmin, async (_req: Request, res: Response) => {
     try {
@@ -1140,11 +1187,12 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // Image provider/model catalogue + per-image credit estimate. Display only, never billed.
   // Higgsfield is the wired provider; OpenAI Images is surfaced ONLY as availability (key
   // presence) — image generation for OpenAI is intentionally NOT wired into VQ.
-  app.get("/api/admin/vault-quest/artwork-cost", requireAdmin, (_req: Request, res: Response) => {
+  app.get("/api/admin/vault-quest/artwork-cost", requireAdmin, async (_req: Request, res: Response) => {
     const conn = higgsfieldConnection();
+    const provider = await getHiggsfieldProviderConnection(Date.now());
     res.json({
       model: conn.model,
-      connected: conn.connected,
+      connected: provider.generationAllowed,
       creditsPerImage: higgsfieldCreditsPerImage(),
       masterImagesPerItem: 3,
       models: VQ_IMAGE_MODELS,
@@ -1152,9 +1200,9 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         {
           id: "higgsfield",
           label: "Higgsfield",
-          connected: conn.connected,
+          connected: provider.generationAllowed,
           enabled: true,
-          note: conn.connected ? `model ${conn.model}` : "not connected",
+          note: provider.message || (provider.generationAllowed ? `model ${conn.model}` : "not connected"),
         },
         {
           id: "openai",
@@ -1353,6 +1401,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed, providerJobId });
       };
       const finishErr = async (err: unknown) => {
+        await recordProviderFailureForError(err);
         if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
       };
       try {
@@ -1385,16 +1434,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
               descriptionStatus: character.descriptionStatus,
             });
         }
-        const conn = higgsfieldConnection();
-        if (!conn.connected)
-          return res
-            .status(503)
-            .json({
-              error: "Artwork provider not connected",
-              provider: "higgsfield",
-              note: conn.note,
-              connected: false,
-            });
+        if (!(await providerGateOrRespond(res))) return;
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
         // Per-generation-type toggle (spend-guard hardening, item B): lets an owner
         // pause JUST this reference type (e.g. Action Reference) without touching
@@ -1588,6 +1628,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed, providerJobId });
       };
       const finishErr = async (err: unknown) => {
+        await recordProviderFailureForError(err);
         if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
       };
       try {
@@ -1625,16 +1666,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
               descriptionStatus: character.descriptionStatus,
             });
         }
-        const conn = higgsfieldConnection();
-        if (!conn.connected)
-          return res
-            .status(503)
-            .json({
-              error: "Artwork provider not connected",
-              provider: "higgsfield",
-              note: conn.note,
-              connected: false,
-            });
+        if (!(await providerGateOrRespond(res))) return;
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
         if (!(await vqFeatureGateOrRespond(res, generationTypeFeatureFor(referenceType)))) return; // per-type toggle (item B)
         const autoRetryEnabled = isAutomaticPaidRetryEnabled(await loadVqDbFlags()); // item E — defaults OFF
@@ -2100,6 +2132,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed, providerJobId });
       };
       const finishErr = async (err: unknown) => {
+        await recordProviderFailureForError(err);
         if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
       };
       try {
@@ -2116,16 +2149,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (fam.length > VQ_FAMILY_MAX_JOBS) {
           return res.status(400).json({ error: `That family has more than the ${VQ_FAMILY_MAX_JOBS}-stage limit for one press.`, maxJobs: VQ_FAMILY_MAX_JOBS });
         }
-        const conn = higgsfieldConnection();
-        if (!conn.connected)
-          return res
-            .status(503)
-            .json({
-              error: "Artwork provider not connected",
-              provider: "higgsfield",
-              note: conn.note,
-              connected: false,
-            });
+        if (!(await providerGateOrRespond(res))) return;
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
         if (!(await vqFeatureGateOrRespond(res, generationTypeFeatureFor("master_portrait")))) return; // per-type toggle (item B) — family generation is always Master artwork
         const autoRetryEnabled = isAutomaticPaidRetryEnabled(await loadVqDbFlags()); // item E — defaults OFF
@@ -2676,6 +2700,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed, providerJobId });
     };
     const finishErr = async (err: unknown) => {
+      await recordProviderFailureForError(err);
       if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
     };
     try {
@@ -2774,11 +2799,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // Clean provider-not-connected response (503) BEFORE attempting generation —
       // so a missing Higgsfield key on prod reports cleanly and never blocks text
       // AI or Save Draft (those are independent routes).
-      const conn = higgsfieldConnection();
-      if (!conn.connected)
-        return res
-          .status(503)
-          .json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
+      if (!(await providerGateOrRespond(res))) return;
       if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
       if (!(await vqFeatureGateOrRespond(res, "gen_card_artwork"))) return; // per-type toggle (item B)
 
@@ -2971,8 +2992,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // Higgsfield plan/credit limits → clean 402 with an actionable message.
       // Real generation faults stay 500. Text AI + Save Draft are unaffected either way.
       const msg = err instanceof Error ? err.message : "Artwork generation failed";
-      const notConnected = /not connected|rejected the token|401|Invalid credentials/i.test(msg);
-      const planLimit = /minimum_basic_plan|plan_required|basic_plan|not enough credits|insufficient|402|\b403\b/i.test(
+      const notConnected = /not connected|rejected the token|401|403|Invalid credentials/i.test(msg);
+      const planLimit = /minimum_basic_plan|plan_required|basic_plan|not enough credits|insufficient|402/i.test(
         msg
       );
       if (notConnected) {
