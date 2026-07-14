@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 // quality.ts is pure derivation (no React) — loads cleanly in the node environment.
-import { scoreBand, matchBand, traitsFromBreakdown, characterHealth, poseDiversityBand, evolutionDifferenceBand, type HealthCharacter } from "@/components/vault-quest/quality";
+import { scoreBand, matchBand, traitsFromBreakdown, characterHealth, poseDiversityBand, evolutionDifferenceBand, identityFullyPassing, type HealthCharacter } from "@/components/vault-quest/quality";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const pack = (master?: number | null, action?: number | null): HealthCharacter["referencePack"] => ({
@@ -78,6 +78,25 @@ describe("traitsFromBreakdown", () => {
   });
   it("handles null breakdown", () => {
     expect(traitsFromBreakdown(null).every((x) => x.score === null)).toBe(true);
+  });
+});
+
+// ── identityFullyPassing — client-side mirror of the server strict identity gate ──
+describe("identityFullyPassing (client mirror of server/vault-quest/ai/identity-gate.ts)", () => {
+  const ALL_PASS = { bodyShape: 95, colours: 95, markings: 95, eyes: 95, accessories: 95, silhouette: 95 };
+  it("overall 75 (Needs Review) is not fully passing, even with all traits high", () => {
+    expect(identityFullyPassing(75, ALL_PASS)).toBe(false);
+  });
+  it("overall above threshold but one critical trait fails is not fully passing", () => {
+    expect(identityFullyPassing(88, { ...ALL_PASS, markings: 55 })).toBe(false);
+    expect(identityFullyPassing(88, { ...ALL_PASS, silhouette: 60 })).toBe(false);
+  });
+  it("all traits pass + overall pass → fully passing", () => {
+    expect(identityFullyPassing(92, ALL_PASS)).toBe(true);
+  });
+  it("missing breakdown is never a silent pass", () => {
+    expect(identityFullyPassing(92, null)).toBe(false);
+    expect(identityFullyPassing(92, undefined)).toBe(false);
   });
 });
 

@@ -6,7 +6,7 @@ import { AdminButton } from "@/components/admin";
 import { Loader2, Upload, Save, History, FileImage, FileText, FileCode, Plus, AlertCircle, CheckCircle2, LayoutGrid, ArrowLeft, ShieldCheck, RotateCcw, XCircle, PackageCheck, Archive, Wand2, Sparkles, ChevronDown, BookOpen, Lock, Unlock } from "lucide-react";
 import { STATUS_META, allowedTargets, type VqStatus } from "@shared/vq-workflow";
 import { ReusePanel, fetchReuseCheck, useAdvancedMode, type ReuseCheck, type ReusableAsset } from "@/components/vault-quest/workflow";
-import { characterHealth, traitsFromBreakdown, matchBand, scoreBand, poseDiversityBand, evolutionDifferenceBand, actionNoveltyBand, STATE_CLS, type IdentityBreakdown, type HealthState } from "@/components/vault-quest/quality";
+import { characterHealth, traitsFromBreakdown, matchBand, scoreBand, poseDiversityBand, evolutionDifferenceBand, actionNoveltyBand, identityFullyPassing, STATE_CLS, type IdentityBreakdown, type HealthState } from "@/components/vault-quest/quality";
 import { getOrCreateIdempotencyKey, clearIdempotencyKey } from "@/lib/vq-idempotency";
 import { runGenerationWithRecovery, type GenerationPhase } from "@/lib/vq-generation-lifecycle";
 import { VQ_ACTION_CATEGORY_OPTIONS, findActionCategory } from "@shared/vq-action-categories";
@@ -2039,7 +2039,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                 const novelty = actionNoveltyBand(c.identityBreakdown?.actionNovelty);
                                 const poseFailed = pose.state === "fail";
                                 const noveltyFailed = novelty.state === "fail";
-                                const blocked = poseFailed || noveltyFailed;
+                                const identityBlocked = !identityFullyPassing(c.identityScore, c.identityBreakdown);
+                                const blocked = poseFailed || noveltyFailed || identityBlocked;
                                 const catLabel = findActionCategory(c.identityBreakdown?.actionCategory)?.label;
                                 // When replacing, the "before" is the EXISTING approved Action (what
                                 // this must differ from). For a first Action there's nothing to
@@ -2069,6 +2070,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                         </div>
                                         {poseFailed && <p className="mt-1 text-[10px] text-red-400">Too similar to the Master's pose — cannot be approved. Generate another.</p>}
                                         {noveltyFailed && <p className="mt-1 text-[10px] text-red-400">Too similar to the existing approved Action — cannot be approved. Pick a different action and generate again.</p>}
+                                        {identityBlocked && !poseFailed && !noveltyFailed && <p className="mt-1 text-[10px] text-red-400">This candidate changed the approved character identity and cannot be approved.</p>}
                                         <div className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px]">
                                           {[...traits, { label: "Background", score: 100 }].map((t) => {
                                             const mb = t.label === "Background" ? { label: "Pass", state: "pass" as HealthState } : matchBand(t.score);
@@ -2076,7 +2078,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                           })}
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-1.5">
-                                          <button type="button" disabled={!!busy || blocked} title={poseFailed ? "Blocked — pose is too similar to the Master Reference" : noveltyFailed ? "Blocked — too similar to the existing approved Action" : undefined} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve Action Pose</button>
+                                          <button type="button" disabled={!!busy || blocked} title={poseFailed ? "Blocked — pose is too similar to the Master Reference" : noveltyFailed ? "Blocked — too similar to the existing approved Action" : identityBlocked ? "Blocked — this candidate changed the approved character identity" : undefined} onClick={() => approveCandidate(c.id)} className="rounded bg-emerald-600 px-3 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-40">Approve Action Pose</button>
                                           <button type="button" disabled={!!busy} onClick={() => rejectCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400 disabled:opacity-40">Reject</button>
                                           <button type="button" disabled={busy === `del-${c.id}`} onClick={() => deleteCandidate(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-red-400 disabled:opacity-40">{busy === `del-${c.id}` ? "…" : "Delete"}</button>
                                           <button type="button" onClick={() => setZoomId(c.id)} className="rounded border border-slate-600 px-2 py-1 text-[11px] text-slate-400 hover:text-slate-200">Zoom</button>

@@ -88,6 +88,7 @@ import {
   type VqReferenceType,
 } from "@shared/vq-schema";
 import { scoreCharacterIdentity, identityThreshold, type IdentityResult } from "../vault-quest/ai/identity";
+import { evaluateIdentityGate, type IdentityGateBreakdown } from "../vault-quest/ai/identity-gate";
 import { validateStudioBackground } from "../vault-quest/ai/bg-validate";
 import { scoreEvolutionDifference, type EvolutionDifferenceVerdict } from "../vault-quest/ai/evolution-diversity";
 import { chooseActionCategory } from "@shared/vq-action-categories";
@@ -480,8 +481,15 @@ const IDENTITY_LOCK_PROMPT =
 // fine), the Action Reference must NOT vary background, lighting or framing from the
 // Master — those are part of its locked identity too. Only pose-related attributes may
 // change. See studioReferencePrompt/ACTION_POSE_SECTION for the matching base prompt.
+//
+// STRENGTHENED (identity-drift fix): the original wording was correct in INTENT but
+// too soft in practice — a real approved candidate scored Markings: Fail and Style:
+// Fail while still passing pose/background/the old averaged-overall gate. This spells
+// out EXACTLY what "exact character model sheet" means and explicitly forbids
+// redesigning/simplifying/embellishing any feature, rather than just describing the
+// desired end state.
 const ACTION_IDENTITY_LOCK_PROMPT =
-  " The attached reference images ARE this exact character — its permanent locked visual identity, including its exact plain studio background, lighting and camera framing. Reproduce the SAME creature with identical proportions, markings, colours, eyes, ears, tail, body shape and silhouette, on the SAME plain background with the SAME lighting and framing as the Master Reference. The ONLY things that may differ from the references are the pose, movement, expression, limb positions, body rotation, head angle and tail position — nothing else.";
+  " Use the approved Master Reference as an EXACT character model sheet, not inspiration or a starting point — this is the character's permanent, locked visual identity, including its exact plain studio background, lighting and camera framing. Copy the exact face, eye shape, eye colour, markings, fins, wings, tail, body proportions, accessories and rendering style from the Master Reference. Do not redesign, simplify, embellish or reinterpret any feature. Do not add or remove markings. Do not change fin shape, wing shape, body mass or silhouette except as naturally required by articulation of the new pose. Do not change linework, shading style, texture style or visual medium. Reproduce the SAME creature on the SAME plain background, lighting and framing as the Master Reference. The ONLY allowed changes are pose, limb position, head angle, expression and movement — nothing else. The result must look like the same production model placed into a new pose, not a new illustration inspired by it.";
 const EVOLUTION_REF_PROMPT =
   " The attached reference images show the PREVIOUS evolution stage of this creature line. Design THIS stage as a clear evolution of that same creature — same family visual language, same core colours and markings, grown larger and more mature. Never a different species.";
 
@@ -511,6 +519,15 @@ function actionCategoryPromptFragment(categoryPrompt: string): string {
 // approved Action). The retry also rotates to a different action category (see loop).
 const STRICTER_ACTION_NOVELTY_SUFFIX =
   " CRITICAL: the previous attempt was too similar to the EXISTING approved Action pose it is meant to replace. Switch to the newly selected, clearly different action category and produce an obviously different silhouette, limb arrangement and movement direction from the existing Action.";
+// Appended on a retry after the STRICT identity gate fails (a per-trait drift — e.g.
+// Markings/Style/Body Shape) — names the exact traits that drifted so the retry has
+// maximum, specific pressure to fix them. Mirrors STRICTER_POSE_SUFFIX/
+// STRICTER_ACTION_NOVELTY_SUFFIX/STRICTER_EVOLUTION_SUFFIX. Unlike those, this does
+// NOT imply the pose itself was wrong — the retry loop keeps the SAME action category
+// when identity was the only failure (see poseOrNoveltyFailedOnce below).
+function stricterIdentitySuffix(failReasons: string[]): string {
+  return ` CRITICAL IDENTITY CORRECTION: the previous attempt changed the approved character's identity — specifically: ${failReasons.join(", ")}. This is NOT acceptable under any circumstances. Return to copying the approved Master Reference EXACTLY for every one of these features — do not reinterpret, simplify, redesign or embellish them.`;
+}
 
 // Evolution-differentiation fix: the existing EVOLUTION_REF_PROMPT is deliberately
 // gentle ("grown larger and more mature") — correct as a soft base framing, but on
@@ -599,9 +616,19 @@ async function generateCharacterCandidate(
   // currently-approved Action pose from the PROVIDER reference array (feeding it back
   // made the model reproduce the same pose). The existing Action is fetched separately
   // below (comparison-only) for the novelty gate — never sent to the generator.
+  //
+  // Identity-drift fix: Action Reference generation must NEVER be anchored on the
+  // PREVIOUS evolution stage's images. Evolution stages are DELIBERATELY different-
+  // looking creatures (that's the whole point of an evolution) — passing `prev` here
+  // fed the previous stage's own Master/Colour Sheet in ALONGSIDE this stage's own
+  // Master as extra "identity" references, actively confusing the vision model about
+  // which creature's markings/proportions/style to copy. Confirmed contributor to
+  // reported identity drift (Markings/Style/Body Shape). Only Master Reference
+  // generation for stage>1 (the evolution-gate) legitimately needs the previous stage
+  // as an anchor — Action Reference must only ever reference the character's OWN pack.
   const { buffers, used, ownRefCount } = await collectReferenceImages(
     character,
-    prev,
+    isActionPose ? null : prev,
     isActionPose ? "action_pose" : undefined
   );
   // The EXISTING approved Action pose (comparison-only) — only for an Action
@@ -681,24 +708,35 @@ async function generateCharacterCandidate(
   let preScored: IdentityResult | null = null; // action_pose/evolution: reused after upload so scoring isn't done twice
   let preScoredEvolution: EvolutionDifferenceVerdict | null = null; // evolution: reused after upload
   let selectedActionCategory: string | undefined; // action_pose: the category actually used (stored + audited)
+  // Identity-drift fix: only rotate to a DIFFERENT action category when the POSE
+  // itself was the problem on a previous attempt. A pure identity failure (markings/
+  // style drifted, pose was fine) must retain the same category per the founder's
+  // explicit instruction — retrying with a different pose as well would confound
+  // whether the fix actually worked, and the pose wasn't the thing that was wrong.
+  let poseOrNoveltyFailedOnce = false;
+  // Names the exact traits that drifted on the previous attempt, driving the stricter
+  // identity-lock retry suffix (see stricterIdentitySuffix). Undefined until an
+  // identity-drift retry is actually needed.
+  let lastIdentityFailReasons: string[] | undefined;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // Action Reference: choose the action category for THIS attempt. An explicit
     // founder choice is honoured; "auto" (or blank) rotates through the list and
-    // excludes the existing approved Action's category. A retry (attempt 2) always
-    // rotates to a different category than attempt 1.
+    // excludes the existing approved Action's category. Only rotates further on a
+    // retry that was CAUSED by a pose/novelty failure (see poseOrNoveltyFailedOnce).
     let poseSuffix = "";
     if (isActionPose) {
       const chosen = chooseActionCategory({
         requested: opts?.actionCategory,
         excludeCategory: existingActionCategory,
-        attempt,
+        attempt: poseOrNoveltyFailedOnce ? attempt : 1,
       });
       selectedActionCategory = chosen.value;
       poseSuffix =
         POSE_DIVERSITY_MANDATE +
         actionCategoryPromptFragment(chosen.prompt) +
         (existingActionPng ? ACTION_REPLACEMENT_MANDATE : "") +
-        (attempt > 1 ? STRICTER_POSE_SUFFIX + (existingActionPng ? STRICTER_ACTION_NOVELTY_SUFFIX : "") : "");
+        (poseOrNoveltyFailedOnce ? STRICTER_POSE_SUFFIX + (existingActionPng ? STRICTER_ACTION_NOVELTY_SUFFIX : "") : "") +
+        (lastIdentityFailReasons ? stricterIdentitySuffix(lastIdentityFailReasons) : "");
     }
     const evoSuffix = evolutionGateActive
       ? evolutionDiversityMandate(character.stageNumber) + (attempt > 1 ? STRICTER_EVOLUTION_SUFFIX : "")
@@ -755,15 +793,32 @@ async function generateCharacterCandidate(
     if (poseGateActive) {
       const ownRefs = buffers.slice(0, ownRefCount);
       // Score identity + pose-vs-Master AND (for a replacement) pose-vs-existing-Action
-      // in the SAME vision call. Two independent pose gates:
+      // in the SAME vision call. Independent gates:
       //   - poseDiversity: different enough from the neutral MASTER (threshold 55)
       //   - actionNovelty: different enough from the EXISTING approved Action (65),
       //     only when replacing (existingActionPng present).
+      //   - STRICT identity gate (this fix): every critical trait (body shape, colour,
+      //     markings, eyes, accessories, style) must be a genuine Pass, not just an
+      //     acceptable AVERAGE — a good pose never compensates for a changed creature.
+      //     Only evaluated when scoring actually ran (fail-open on scorer outage,
+      //     matching the pose/novelty checks above — no retry is spent chasing a
+      //     verdict we can't compute).
       const scored = await scoreCharacterIdentity(generated.png, ownRefs, character, { masterPng, existingActionPng });
       const poseFail = scored?.poseDiversity?.verdict === "fail";
       const noveltyFail = !!existingActionPng && scored?.actionNovelty?.verdict === "fail";
-      if ((poseFail || noveltyFail) && attempt < maxAttempts) {
-        continue; // too similar to the Master's pose OR the existing Action — discard, retry with a rotated category + stricter prompt
+      const gate = scored ? evaluateIdentityGate(scored.score, scored.breakdown) : null;
+      // Only a DRIFT retry — the AVERAGED score already cleared the existing
+      // auto-reject floor (scored.verdict === "pass") but a critical trait still
+      // didn't (this is exactly the founder's reported bug: overall 75, Markings/Style
+      // Fail). A genuine hard reject (verdict === "reject", e.g. score 40 with every
+      // trait failing) is UNCHANGED — it still goes straight to the existing
+      // auto_rejected/hidden path below without spending a 2nd call chasing a result
+      // that was never going to be approval-ready anyway.
+      const identityDrift = !!scored && scored.verdict === "pass" && !!gate && !gate.approvalReady;
+      if ((poseFail || noveltyFail || identityDrift) && attempt < maxAttempts) {
+        if (poseFail || noveltyFail) poseOrNoveltyFailedOnce = true;
+        if (identityDrift) lastIdentityFailReasons = gate!.failReasons;
+        continue; // discard — retry once with a rotated category (pose/novelty) and/or a stricter identity-lock prompt (identity drift)
       }
       artwork = generated;
       preScored = scored;
@@ -1774,6 +1829,24 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         }
         if (cand.status === "rejected" || cand.status === "auto_rejected") {
           return res.status(422).json({ error: "This candidate was rejected — it cannot be approved as a reference." });
+        }
+        // STRICT identity gate (identity-drift fix): a per-trait drift (Markings, Style,
+        // Body Shape, etc.) must block approval even when the OVERALL averaged score
+        // cleared the old auto-reject threshold — one bad trait can hide behind others
+        // in an average. This is the REAL, mandatory guard — the client-side disabled
+        // button is UX only. Recomputed fresh from the candidate's already-stored
+        // identityScore/identityBreakdown, so this applies retroactively to ANY Action
+        // Reference candidate, including ones generated before this fix shipped.
+        // Scoped to Action Reference only, per the founder's explicit ask — Master and
+        // other reference types are unaffected.
+        if (cand.referenceType === "action_pose") {
+          const gate = evaluateIdentityGate(cand.identityScore, cand.identityBreakdown as IdentityGateBreakdown | null);
+          if (!gate.approvalReady) {
+            return res.status(422).json({
+              error: "This candidate changed the approved character identity and cannot be approved.",
+              reasons: gate.failReasons,
+            });
+          }
         }
         // Pose-diversity gate (Action Reference fix): a candidate that fails this stays
         // visible (unlike an identity failure) so the founder can see why, but must never

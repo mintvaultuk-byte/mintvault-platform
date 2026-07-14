@@ -84,6 +84,21 @@ export function traitsFromBreakdown(bd: IdentityBreakdown | null | undefined): {
   ];
 }
 
+/** The founder-visible critical identity traits that must ALL be a genuine Pass
+ *  (>=80, matching scoreBand/matchBand's existing Pass band — not merely "not
+ *  auto-rejected") before an Action Reference can be approved. A single AVERAGED
+ *  overall score can hide one drifted trait (e.g. Markings/Style scoring low while
+ *  others compensate) — this is the client-side mirror of the server's real,
+ *  mandatory identity-gate guard (server/vault-quest/ai/identity-gate.ts). The client
+ *  check is UX only; the server recomputes and enforces the same rule independently. */
+export function identityFullyPassing(overallScore: number | null | undefined, breakdown: IdentityBreakdown | null | undefined): boolean {
+  const overallOk = scoreBand(overallScore).state === "pass";
+  const b = (breakdown ?? {}) as IdentityBreakdown;
+  const criticalKeys = ["bodyShape", "colours", "markings", "eyes", "accessories", "silhouette"] as const;
+  const traitsOk = criticalKeys.every((k) => matchBand(b[k]).state === "pass");
+  return overallOk && traitsOk;
+}
+
 /** Minimal character shape the health check needs (subset of VqCharacterRow). */
 export interface HealthCharacter {
   characterId: string;
