@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties, type MouseEventHandler, type SyntheticEvent } from "react";
 import { RotateCcw } from "lucide-react";
-import { storedImageReloadSrc } from "./vq-stored-image-utils";
+import { storedImageFailureClassName, storedImageReloadSrc } from "./vq-stored-image-utils";
 
 type StoredImageKind = "candidate" | "reference" | "revision" | "artwork" | "image";
 
@@ -41,7 +41,7 @@ export function VqStoredImage({
   if (state === "failed") {
     return (
       <div
-        className={`flex flex-col items-center justify-center border border-slate-700 bg-slate-800/80 p-2 text-center ${className}`}
+        className={storedImageFailureClassName(className)}
         style={style}
         role="img"
         aria-label={`${alt}. Image failed to load${idText ? ` for ${idText}` : ""}.`}

@@ -10,3 +10,6 @@ export function storedImageReloadSrc(src: string, reloadNonce: number, paramName
   }
 }
 
+export function storedImageFailureClassName(className = ""): string {
+  return `${className} flex flex-col items-center justify-center border border-slate-700 bg-slate-800/80 p-2 text-center`.trim();
+}

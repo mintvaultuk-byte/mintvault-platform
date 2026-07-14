@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { storedImageReloadSrc } from "../client/src/components/vault-quest/vq-stored-image-utils";
+import { storedImageFailureClassName, storedImageReloadSrc } from "../client/src/components/vault-quest/vq-stored-image-utils";
 
 describe("VqStoredImage client helpers", () => {
   it("manual reload retries the same authenticated proxy route with a local nonce", () => {
@@ -18,5 +18,9 @@ describe("VqStoredImage client helpers", () => {
     expect(storedImageReloadSrc("/api/admin/vault-quest/characters/c/pack/master_portrait", 0))
       .toBe("/api/admin/vault-quest/characters/c/pack/master_portrait");
   });
-});
 
+  it("failure placeholder keeps its non-black background after caller image classes", () => {
+    const classes = storedImageFailureClassName("h-24 w-24 rounded bg-slate-950 object-contain");
+    expect(classes.lastIndexOf("bg-slate-800/80")).toBeGreaterThan(classes.lastIndexOf("bg-slate-950"));
+  });
+});
