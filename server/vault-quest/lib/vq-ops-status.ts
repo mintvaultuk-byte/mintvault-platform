@@ -6,7 +6,7 @@
  * rows — every number here is either a fixed-size config read or a GROUP BY
  * count. Per-machine numbers are explicitly labeled as such (P10-R4-F8).
  */
-import { vqFeatureState, type VqFeature, type VqFeatureState } from "./vq-feature-state";
+import { AUTO_RETRY_FEATURE, VQ_GENERATION_TYPE_FEATURES, vqFeatureState, type VqFeature, type VqFeatureState } from "./vq-feature-state";
 import { loadVqDbFlags } from "./vq-feature-flags-store";
 import { getSpendSnapshot } from "./generation-guard";
 import { getExportJobCounts, type ExportJobCounts } from "../export-jobs";
@@ -29,7 +29,7 @@ export interface VqOpsStatus {
   generatedAt: string;
 }
 
-const FEATURES: VqFeature[] = ["generation", "exports", "writes"];
+const FEATURES: VqFeature[] = ["generation", "exports", "writes", ...VQ_GENERATION_TYPE_FEATURES, AUTO_RETRY_FEATURE];
 
 function envSnapshot() {
   return {

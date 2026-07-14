@@ -47,19 +47,34 @@ vi.mock("../server/auth", () => ({ requireAdmin: (_req: unknown, _res: unknown, 
 
 // A real solid-white 200x200 PNG — every generated candidate must clear the REAL
 // (unmocked) validateStudioBackground before the novelty gate is reached.
-const WHITE_PNG = vi.hoisted(() =>
-  Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAIAAAAiOjnJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAACD0lEQVR4nO3UMQ0AAAzDsPEnvaHIMckG0CvqLASmGAVhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYSEs/vBYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSExRYOwsoGniuviZgAAAAASUVORK5CYII=",
-    "base64"
-  )
-);
+const WHITE_PNG = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sharp = require("sharp");
+  const width = 200, height = 200;
+  const buf = Buffer.alloc(width * height * 3);
+  const border = 24;
+  let seed = 42;
+  const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 3;
+      const inBorder = x < border || x >= width - border || y < border || y >= height - border;
+      if (inBorder) { buf[i] = 245; buf[i + 1] = 245; buf[i + 2] = 245; }
+      else {
+        const v = Math.max(150, Math.min(250, 200 + Math.round((rand() - 0.5) * 100)));
+        buf[i] = v; buf[i + 1] = Math.max(0, Math.min(255, v - 15)); buf[i + 2] = Math.max(0, Math.min(255, v - 30));
+      }
+    }
+  }
+  return sharp(buf, { raw: { width, height, channels: 3 } }).png().toBuffer();
+});
 // Distinct byte buffers for the approved Master vs Action so we can PROVE which is
 // passed where. Content only matters for identity here (both mocked), never processed.
 const MASTER_BUF = vi.hoisted(() => Buffer.from("MASTER-REFERENCE-IMAGE-BYTES"));
 const ACTION_BUF = vi.hoisted(() => Buffer.from("EXISTING-ACTION-POSE-IMAGE-BYTES"));
 
 const createSpy = vi.hoisted(() =>
-  vi.fn(async () => ({ provider: "higgsfield" as const, model: "nano_banana", png: WHITE_PNG, width: 200, height: 200, jobId: "job-action" }))
+  vi.fn(async () => ({ provider: "higgsfield" as const, model: "nano_banana", png: await WHITE_PNG, width: 200, height: 200, jobId: "job-action" }))
 );
 vi.mock("../server/vault-quest/ai/higgsfield", async (orig) => {
   const actual = (await orig()) as Record<string, unknown>;
@@ -164,7 +179,7 @@ run("Action Reference replacement gate — route wiring", () => {
   });
   beforeEach(async () => {
     createSpy.mockReset();
-    createSpy.mockResolvedValue({ provider: "higgsfield" as const, model: "nano_banana", png: WHITE_PNG, width: 200, height: 200, jobId: "job-action" });
+    createSpy.mockResolvedValue({ provider: "higgsfield" as const, model: "nano_banana", png: await WHITE_PNG, width: 200, height: 200, jobId: "job-action" });
     scoreSpy.mockReset();
     candidateStore.clear();
     nextCandidateId.value = 1;

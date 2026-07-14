@@ -60,18 +60,33 @@ const TINY_PNG = vi.hoisted(() =>
 // the pose-diversity mock ever gets exercised. TINY_PNG stays in use for the approved
 // Master's OWN reference image fed back in as an image_reference (never itself
 // background-validated — only freshly generated output is).
-const WHITE_PNG = vi.hoisted(() =>
-  Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAIAAAAiOjnJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAACD0lEQVR4nO3UMQ0AAAzDsPEnvaHIMckG0CvqLASmGAVhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYSEs/vBYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSExRYOwsoGniuviZgAAAAASUVORK5CYII=",
-    "base64"
-  )
-);
+const WHITE_PNG = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sharp = require("sharp");
+  const width = 200, height = 200;
+  const buf = Buffer.alloc(width * height * 3);
+  const border = 24;
+  let seed = 42;
+  const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 3;
+      const inBorder = x < border || x >= width - border || y < border || y >= height - border;
+      if (inBorder) { buf[i] = 245; buf[i + 1] = 245; buf[i + 2] = 245; }
+      else {
+        const v = Math.max(150, Math.min(250, 200 + Math.round((rand() - 0.5) * 100)));
+        buf[i] = v; buf[i + 1] = Math.max(0, Math.min(255, v - 15)); buf[i + 2] = Math.max(0, Math.min(255, v - 30));
+      }
+    }
+  }
+  return sharp(buf, { raw: { width, height, channels: 3 } }).png().toBuffer();
+});
 
 const createSpy = vi.hoisted(() =>
   vi.fn(async () => ({
     provider: "higgsfield" as const,
     model: "nano_banana",
-    png: WHITE_PNG,
+    png: await WHITE_PNG,
     width: 200,
     height: 200,
     jobId: "job-pose-gate",
@@ -208,7 +223,7 @@ run("Action Reference pose-diversity gate — route wiring", () => {
     createSpy.mockResolvedValue({
       provider: "higgsfield" as const,
       model: "nano_banana",
-      png: WHITE_PNG,
+      png: await WHITE_PNG,
       width: 200,
       height: 200,
       jobId: "job-pose-gate",

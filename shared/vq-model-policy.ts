@@ -51,37 +51,69 @@ export function defaultModelFor(generationType: Exclude<VqPolicyGenerationType, 
 export interface PremiumOverrideRequest {
   /** Must be an actually-supported model (checked against VQ_IMAGE_MODELS). */
   model?: string;
-  /** Explicit confirmation marker — a checkbox/confirm click, never implied. */
+  /** Explicit confirmation marker — a checkbox/confirm click, never implied. Must
+   *  apply to THIS prepared payload only — a caller must never persist/reuse a
+   *  previous request's confirmation across a new one (each server call gets a
+   *  fresh, independent PremiumOverrideRequest — this module holds no state). */
   confirmed?: boolean;
-  /** A non-empty founder-supplied reason for choosing the expensive tier. */
+  /** A non-empty, non-whitespace founder-supplied reason for choosing the
+   *  expensive tier. Trimmed and length-capped below. */
   reason?: string;
 }
+
+/** Reasonable cap so a founder-typed reason can't become an unbounded blob in
+ *  the audit trail — long enough for a real sentence, short enough to stay a
+ *  reason rather than an essay. */
+export const MAX_PREMIUM_REASON_LENGTH = 300;
 
 export interface ResolvedModelDecision {
   ok: boolean;
   model?: VqImageModel;
   isPremium: boolean;
+  /** The trimmed reason, only present when a premium override was accepted. */
+  premiumReason?: string;
   error?: string;
 }
 
 /**
  * Resolve the model to actually use for a generation request.
- *  - No model requested → the type's default (draft) tier. Never premium.
+ *  - No model requested → the type's default (draft) tier, UPGRADED to the
+ *    cheapest reference-capable model (nano_banana) when `hasReferences` is true
+ *    and the default tier's model can't support references (mirrors the
+ *    EXISTING effectiveCreditsPerImage upgrade path — never invents a new one).
+ *    Never premium.
  *  - A model requested that ISN'T in VQ_IMAGE_MODELS → rejected (ok:false) BEFORE
  *    any provider contact — no silent fallback, no guessing.
+ *  - A requested model that IS supported, is NOT ref-capable, and `hasReferences`
+ *    is true → silently resolved UP to nano_banana (same upgrade rule as above;
+ *    a caller asking for the cheap model when references are required gets the
+ *    cheapest model that can actually do the job, not a rejection).
  *  - A requested model that IS supported but is the premium tier
  *    (nano_banana_pro) → requires an explicit PremiumOverrideRequest with
- *    confirmed===true and a non-empty reason; otherwise rejected.
- *  - A requested model that is supported and NOT premium (z_image/nano_banana) →
- *    always allowed, no override needed (only the MOST expensive tier is gated).
+ *    confirmed===true and a non-empty (post-trim), not-overlong reason;
+ *    otherwise rejected. This check ALWAYS applies to premium regardless of
+ *    hasReferences (premium is always ref-capable already).
+ *  - A requested model that is supported and NOT premium (z_image/nano_banana),
+ *    once past the reference-capability upgrade above → always allowed, no
+ *    override needed (only the MOST expensive tier is gated).
  */
 export function resolveRequestedModel(
   generationType: Exclude<VqPolicyGenerationType, "replacement">,
   requestedModel: string | undefined,
-  premium?: PremiumOverrideRequest,
+  opts?: { hasReferences?: boolean; premium?: PremiumOverrideRequest },
 ): ResolvedModelDecision {
+  const hasReferences = opts?.hasReferences ?? false;
+  const premium = opts?.premium;
+
+  const upgradeIfNeeded = (model: VqImageModel): VqImageModel => {
+    if (hasReferences && !VQ_IMAGE_MODELS.find((m) => m.value === model)?.refCapable) {
+      return VQ_QUALITY_MODEL.standard; // nano_banana — cheapest ref-capable model
+    }
+    return model;
+  };
+
   if (!requestedModel) {
-    return { ok: true, model: defaultModelFor(generationType), isPremium: false };
+    return { ok: true, model: upgradeIfNeeded(defaultModelFor(generationType)), isPremium: false };
   }
   const valid = vqValidImageModel(requestedModel);
   if (!valid) {
@@ -93,17 +125,23 @@ export function resolveRequestedModel(
   }
   const isPremium = valid === VQ_QUALITY_MODEL.premium;
   if (!isPremium) {
-    return { ok: true, model: valid, isPremium: false };
+    return { ok: true, model: upgradeIfNeeded(valid), isPremium: false };
   }
-  // Premium requires an explicit, confirmed, reasoned override — never implicit.
+  // Premium requires an explicit, confirmed, reasoned override — never implicit,
+  // and never inherited from a previous request (the caller passes a fresh
+  // `opts.premium` per call; this function is pure and stateless).
   if (!premium?.confirmed) {
     return { ok: false, isPremium: true, error: "Premium Final quality requires explicit confirmation before generating." };
   }
-  if (!premium.reason || !premium.reason.trim()) {
+  const trimmedReason = (premium.reason ?? "").trim();
+  if (!trimmedReason) {
     return { ok: false, isPremium: true, error: "Premium Final quality requires a reason." };
+  }
+  if (trimmedReason.length > MAX_PREMIUM_REASON_LENGTH) {
+    return { ok: false, isPremium: true, error: `Premium reason is too long (max ${MAX_PREMIUM_REASON_LENGTH} characters).` };
   }
   if (premium.model && premium.model !== valid) {
     return { ok: false, isPremium: true, error: "Premium override model mismatch." };
   }
-  return { ok: true, model: valid, isPremium: true };
+  return { ok: true, model: valid, isPremium: true, premiumReason: trimmedReason };
 }

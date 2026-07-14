@@ -58,24 +58,58 @@ vi.mock("../server/auth", () => ({
 }));
 
 // A real solid-white 200x200 PNG — clears the REAL (unmocked) validateStudioBackground.
-const WHITE_PNG = vi.hoisted(() =>
-  Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAIAAAAiOjnJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAACD0lEQVR4nO3UMQ0AAAzDsPEnvaHIMckG0CvqLASmGAVhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYSEs/vBYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSExRYOwsoGniuviZgAAAAASUVORK5CYII=",
-    "base64"
-  )
-);
-// A real 1x1 PNG whose single pixel is black — validateStudioBackground rejects it
-// outright (not a plain white/cream/light-grey backdrop). Stands in for a generated
-// image with a scenic/environmental background for these tests.
-const BAD_BG_PNG = vi.hoisted(() =>
-  Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64")
-);
+const WHITE_PNG = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sharp = require("sharp");
+  const width = 200, height = 200;
+  const buf = Buffer.alloc(width * height * 3);
+  const border = 24;
+  let seed = 42;
+  const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 3;
+      const inBorder = x < border || x >= width - border || y < border || y >= height - border;
+      if (inBorder) { buf[i] = 245; buf[i + 1] = 245; buf[i + 2] = 245; }
+      else {
+        const v = Math.max(150, Math.min(250, 200 + Math.round((rand() - 0.5) * 100)));
+        buf[i] = v; buf[i + 1] = Math.max(0, Math.min(255, v - 15)); buf[i + 2] = Math.max(0, Math.min(255, v - 30));
+      }
+    }
+  }
+  return sharp(buf, { raw: { width, height, channels: 3 } }).png().toBuffer();
+});
+// A real 200x200 PNG with a saturated green edge band (fails validateStudioBackground's
+// "plain white/cream/light-grey" check) but plenty of interior variance (passes the
+// image-integrity check, which runs before the background check in the pipeline).
+// Stands in for a generated image with a scenic/environmental background for these tests.
+const BAD_BG_PNG = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sharp = require("sharp");
+  const width = 200, height = 200;
+  const buf = Buffer.alloc(width * height * 3);
+  const border = 24;
+  let seed = 7;
+  const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 3;
+      const inBorder = x < border || x >= width - border || y < border || y >= height - border;
+      if (inBorder) { buf[i] = 40; buf[i + 1] = 130; buf[i + 2] = 50; }
+      else {
+        const v = Math.max(150, Math.min(250, 200 + Math.round((rand() - 0.5) * 100)));
+        buf[i] = v; buf[i + 1] = Math.max(0, Math.min(255, v - 15)); buf[i + 2] = Math.max(0, Math.min(255, v - 30));
+      }
+    }
+  }
+  return sharp(buf, { raw: { width, height, channels: 3 } }).png().toBuffer();
+});
 
 const createSpy = vi.hoisted(() =>
   vi.fn(async () => ({
     provider: "higgsfield" as const,
     model: "nano_banana",
-    png: WHITE_PNG,
+    png: await WHITE_PNG,
     width: 200,
     height: 200,
     jobId: "job-bg-gate",
@@ -240,7 +274,7 @@ run("Action Reference background gate — route wiring", () => {
     createSpy.mockResolvedValue({
       provider: "higgsfield" as const,
       model: "nano_banana",
-      png: WHITE_PNG,
+      png: await WHITE_PNG,
       width: 200,
       height: 200,
       jobId: "job-bg-gate",
@@ -296,7 +330,7 @@ run("Action Reference background gate — route wiring", () => {
     createSpy.mockResolvedValue({
       provider: "higgsfield" as const,
       model: "nano_banana",
-      png: BAD_BG_PNG,
+      png: await BAD_BG_PNG,
       width: 1,
       height: 1,
       jobId: "job-bad-bg",
@@ -318,7 +352,7 @@ run("Action Reference background gate — route wiring", () => {
     createSpy.mockResolvedValueOnce({
       provider: "higgsfield" as const,
       model: "nano_banana",
-      png: BAD_BG_PNG,
+      png: await BAD_BG_PNG,
       width: 1,
       height: 1,
       jobId: "job-bad-bg",
@@ -326,7 +360,7 @@ run("Action Reference background gate — route wiring", () => {
     createSpy.mockResolvedValueOnce({
       provider: "higgsfield" as const,
       model: "nano_banana",
-      png: WHITE_PNG,
+      png: await WHITE_PNG,
       width: 200,
       height: 200,
       jobId: "job-good-bg",
@@ -349,7 +383,7 @@ run("Action Reference background gate — route wiring", () => {
     createSpy.mockResolvedValue({
       provider: "higgsfield" as const,
       model: "nano_banana",
-      png: BAD_BG_PNG,
+      png: await BAD_BG_PNG,
       width: 1,
       height: 1,
       jobId: "job-bad-bg-master",

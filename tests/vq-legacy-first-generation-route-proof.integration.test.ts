@@ -49,13 +49,32 @@ vi.mock("../server/auth", () => ({
   requireAdmin: (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 
-// A real (tiny, valid) PNG — the route thumbnails/reads it with sharp, which
-// rejects a fake byte buffer. Used both as the "generated" result and as the
-// mocked reference-image bytes read back from R2.
-const TINY_PNG = vi.hoisted(() => Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-  "base64",
-));
+// A real, DETAILED (non-flat) PNG — the route thumbnails/reads it with sharp,
+// which rejects a fake byte buffer, and the generated result must now ALSO clear
+// the real (unmocked) validateImageIntegrity check (Phase 3B item 2) before it's
+// used both as the "generated" result and as the mocked reference-image bytes
+// read back from R2. A flat/tiny placeholder no longer passes either check.
+const TINY_PNG = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sharp = require("sharp");
+  const width = 200, height = 200;
+  const buf = Buffer.alloc(width * height * 3);
+  const border = 24;
+  let seed = 42;
+  const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 3;
+      const inBorder = x < border || x >= width - border || y < border || y >= height - border;
+      if (inBorder) { buf[i] = 245; buf[i + 1] = 245; buf[i + 2] = 245; }
+      else {
+        const v = Math.max(150, Math.min(250, 200 + Math.round((rand() - 0.5) * 100)));
+        buf[i] = v; buf[i + 1] = Math.max(0, Math.min(255, v - 15)); buf[i + 2] = Math.max(0, Math.min(255, v - 30));
+      }
+    }
+  }
+  return sharp(buf, { raw: { width, height, channels: 3 } }).png().toBuffer();
+});
 
 // Spy the ONLY generation entry point the card-art route calls. This IS the
 // Legacy path (server/vault-quest/ai/higgsfield.ts) — there is no Cloud client
@@ -64,9 +83,9 @@ const TINY_PNG = vi.hoisted(() => Buffer.from(
 const createSpy = vi.hoisted(() => vi.fn(async (opts: { prompt: string; mode: string; slot: string; model?: string; imageReferences?: Buffer[] }) => ({
   provider: "higgsfield" as const,
   model: opts.model || "nano_banana",
-  png: TINY_PNG,
-  width: 512,
-  height: 512,
+  png: await TINY_PNG,
+  width: 200,
+  height: 200,
   jobId: "job-stage3-proof",
 })));
 vi.mock("../server/vault-quest/ai/higgsfield", async (orig) => {
@@ -184,7 +203,7 @@ run("Legacy first-generation — non-spending route proof (Stage 3)", () => {
     createSpy.mockClear();
     uploadSpy.mockClear();
     r2Store.clear();
-    r2Store.set("vq/characters/T-STAGE3-CHAR/approved/master_portrait/x.png", TINY_PNG);
+    r2Store.set("vq/characters/T-STAGE3-CHAR/approved/master_portrait/x.png", await TINY_PNG);
     await q("DELETE FROM vq_generation_requests WHERE card_id LIKE 'T-STAGE3-%'", []);
     await q("DELETE FROM vq_config", []);
     // Phase 2 correction A: gen_* now defaults OFF. This file tests the card-artwork

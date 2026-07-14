@@ -6,10 +6,10 @@
 -- Existing rows ('generation','exports','writes') are untouched. New feature keys:
 --   gen_master_portrait, gen_action_pose, gen_face_closeup, gen_turnaround_sheet,
 --   gen_colour_sheet, gen_card_artwork, gen_replacement, auto_paid_retry
--- Same "row absent = default-on" contract for the gen_* keys as the existing three
--- (see server/vault-quest/lib/vq-feature-state.ts). auto_paid_retry is the one
--- exception: its OWN application-level default is OFF when absent — enforced in
--- code (isAutomaticPaidRetryEnabled), not by this constraint or a DB default.
+-- Unlike the original three flags, gen_* rows are application-level default-OFF
+-- when absent (see server/vault-quest/lib/vq-feature-state.ts). auto_paid_retry
+-- also defaults OFF when absent — enforced in code (isAutomaticPaidRetryEnabled),
+-- not by this constraint or a DB default.
 --
 -- Rollback: re-run the OLD CHECK (only safe if no row currently uses a new key —
 -- see the DELETE guard commented below, run manually first if needed):
