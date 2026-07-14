@@ -50,6 +50,7 @@ import {
 } from "../vault-quest/lib/vq-artwork-revisions-store";
 import type { VqFeature } from "../vault-quest/lib/vq-feature-state";
 import { VQ_GENERATION_TYPE_FEATURES, AUTO_RETRY_FEATURE, generationTypeFeatureFor, isAutomaticPaidRetryEnabled } from "../vault-quest/lib/vq-feature-state";
+import { validateSingleImageCount } from "../vault-quest/lib/vq-image-count";
 import { loadVqDbFlags } from "../vault-quest/lib/vq-feature-flags-store";
 import type { GenerationPayload } from "../vault-quest/lib/generation-idempotency";
 import { randomUUID } from "crypto";
@@ -1296,8 +1297,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // Declared OUTSIDE the try so the outer catch (a thrown provider error) can still
       // finalize the reservation — see readIdempotencyKey's doc comment for the design.
       let reservedRowId: number | null = null;
-      const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
-        if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+      const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null, providerJobId?: string | null) => {
+        if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed, providerJobId });
       };
       const finishErr = async (err: unknown) => {
         if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
@@ -1307,7 +1308,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
         const character = await vqStorage.getCharacter(characterId);
         if (!character) return res.status(404).json({ error: "character not found" });
-        const body0 = (req.body ?? {}) as { referenceType?: string; model?: string; actionCategory?: string };
+        const body0 = (req.body ?? {}) as { referenceType?: string; model?: string; actionCategory?: string; count?: unknown };
+        // One-image-per-request enforcement (spend-guard Phase 3A, item 1): this is
+        // a SINGLE-generation route — reject any explicit count other than 1 before
+        // any spend/reservation/provider work. Absent count still normalizes to 1
+        // (no change for the existing client, which never sends this field).
+        const countCheck = validateSingleImageCount(body0.count);
+        if (!countCheck.ok) return res.status(400).json({ error: countCheck.error, count: countCheck.count });
         const referenceType = parseReferenceType(body0.referenceType);
         const model = String(body0.model ?? "").trim() || undefined;
         // Action Reference only: the founder-selected action category ("auto" or a
@@ -1349,14 +1356,19 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         // candidates, others 1. Enforce the ceiling BEFORE any paid provider call.
         const isMaster = referenceType === "master_portrait";
         const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
-        // Price for the WORST CASE, not the common case: a Master Reference can retry
-        // once on a failed studio-background check (and, for stage>1, also on a failed
-        // evolution-difference check), and an action_pose request with an approved
-        // Master can retry once on a failed pose-diversity check — up to 2 paid calls
-        // either way, see generationCanRetry. The image COUNT requested is still 1 (or
-        // MASTER_CANDIDATE_COUNT for master, below), only the per-image credit estimate
-        // doubles, so the separate maxImagesPerRequest check is untouched.
-        const retryPossible = generationCanRetry(referenceType);
+        // Price for the WORST CASE the code can ACTUALLY do, not a hypothetical one
+        // (spend-guard Phase 3A item 2 correction): a Master/Action generation can
+        // only make a 2nd paid call when BOTH (a) the reference type has a retry
+        // path at all (generationCanRetry) AND (b) the owner has explicitly turned
+        // auto_paid_retry ON — see the maxAttempts fix in generateCharacterCandidate.
+        // Reserving 2× whenever retryPossible alone was true (the previous formula)
+        // over-reserved by up to 2× for every request while auto_paid_retry stays at
+        // its OFF default — harmless to the ceiling itself (conservative direction)
+        // but it wastes headroom other concurrent requests could have used. The
+        // image COUNT requested is still 1 (or MASTER_CANDIDATE_COUNT for master,
+        // below), only the per-image credit estimate doubles when a 2nd call is
+        // genuinely possible.
+        const retryPossible = generationCanRetry(referenceType) && autoRetryEnabled;
         const perImageForSpend = retryPossible ? perImage * 2 : perImage;
         const spend = await checkGenerationSpend({
           requestedImages: isMaster ? MASTER_CANDIDATE_COUNT : 1,
@@ -1403,6 +1415,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             height: number;
             identityScore: number | null;
             model: string;
+            jobId: string | null;
           }[] = [];
           let autoRejectedCount = 0,
             bgRejectedCount = 0,
@@ -1426,6 +1439,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
                 height: r.artwork.height,
                 identityScore: r.identity?.score ?? null,
                 model: r.artwork.model,
+                jobId: r.artwork.jobId ?? null,
               });
             } catch (e) {
               if (!created.length && !autoRejectedCount && !bgRejectedCount) {
@@ -1436,7 +1450,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             }
           }
           // Finalize on ACTUAL paid creates (incl. bg-retries + auto/bg-rejected, which still billed).
-          await finishOk(providerCalls * perImage, created[0]?.candidateId ?? null, model ?? null);
+          await finishOk(providerCalls * perImage, created[0]?.candidateId ?? null, model ?? null, created[0]?.jobId ?? null);
           return res
             .status(201)
             .json({
@@ -1451,7 +1465,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
 
         const r = await generateCharacterCandidate(character, referenceType, { model, actionCategory, autoRetryEnabled });
         if ("rejected" in r) {
-          await finishOk(r.providerCalls * perImage, null, model ?? null);
+          await finishOk(r.providerCalls * perImage, null, model ?? null); // r.rejected has no artwork/jobId (never created)
           return res.status(422).json({ error: r.reason, rejected: true });
         }
         const { candidate, artwork, key, identity, autoRejected, referencesUsed } = r;
@@ -1460,7 +1474,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           // (A pose-diversity failure alone does NOT hit this branch — see the comment
           // in generateCharacterCandidate: it stays visible with a Pose Diversity badge
           // and is blocked from approval instead, not hidden like an identity failure.)
-          await finishOk(r.providerCalls * perImage, candidate.id, artwork.model);
+          await finishOk(r.providerCalls * perImage, candidate.id, artwork.model, artwork.jobId ?? null);
           return res.status(422).json({
             error: `Identity Score ${identity?.score}/${identity?.threshold} — the generated image drifted from the approved references, so it was auto-rejected. Generate again.`,
             autoRejected: true,
@@ -1473,7 +1487,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           .resize(320, 320, { fit: "inside" })
           .png()
           .toBuffer();
-        await finishOk(r.providerCalls * perImage, candidate.id, artwork.model);
+        await finishOk(r.providerCalls * perImage, candidate.id, artwork.model, artwork.jobId ?? null);
         res.status(201).json({
           candidateId: candidate.id,
           key,
@@ -1501,8 +1515,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     requireAdmin,
     async (req: Request, res: Response) => {
       let reservedRowId: number | null = null;
-      const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
-        if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+      const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null, providerJobId?: string | null) => {
+        if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed, providerJobId });
       };
       const finishErr = async (err: unknown) => {
         if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
@@ -1540,10 +1554,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         const autoRetryEnabled = isAutomaticPaidRetryEnabled(await loadVqDbFlags()); // item E — defaults OFF
         // Spend gate (Phase 10A-2) BEFORE any paid provider call.
         const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
-        // Price for the worst case: EACH of the `count` candidates can independently
-        // retry once (background, pose-diversity or evolution-difference) — see
-        // generationCanRetry / the matching comment on the single-generate route.
-        const retryPossible = generationCanRetry(referenceType);
+        // Price for the worst case the code can ACTUALLY do (Phase 3A item 2
+        // correction — see the matching comment on the single-generate route): a
+        // 2nd paid call per candidate is only possible when the type has a retry
+        // path at all AND auto_paid_retry is explicitly ON.
+        const retryPossible = generationCanRetry(referenceType) && autoRetryEnabled;
         const perImageForSpend = retryPossible ? perImage * 2 : perImage;
         const spend = await checkGenerationSpend({
           requestedImages: count,
@@ -1583,6 +1598,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           height: number;
           identityScore: number | null;
           model: string;
+          jobId: string | null;
         }[] = [];
         let autoRejectedCount = 0,
           bgRejectedCount = 0,
@@ -1606,6 +1622,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
               height: r.artwork.height,
               identityScore: r.identity?.score ?? null,
               model: r.artwork.model,
+              jobId: r.artwork.jobId ?? null,
             });
           } catch (e) {
             if (!created.length && !autoRejectedCount && !bgRejectedCount) {
@@ -1615,7 +1632,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             break; // a later one failed → return the ones that succeeded
           }
         }
-        await finishOk(providerCalls * perImage, created[0]?.candidateId ?? null, model ?? null);
+        await finishOk(providerCalls * perImage, created[0]?.candidateId ?? null, model ?? null, created[0]?.jobId ?? null);
         res
           .status(201)
           .json({
@@ -1983,8 +2000,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     requireAdmin,
     async (req: Request, res: Response) => {
       let reservedRowId: number | null = null;
-      const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
-        if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+      const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null, providerJobId?: string | null) => {
+        if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed, providerJobId });
       };
       const finishErr = async (err: unknown) => {
         if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
@@ -2013,10 +2030,17 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         // Spend gate (Phase 10A-2): family generates one image per eligible character in ONE
         // press, so it is capped by the per-BATCH credit ceiling (D8), not the per-image count.
         const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
+        // Phase 3A item 2 correction: each character's master generation can itself
+        // retry once (background/evolution-difference) when auto_paid_retry is ON —
+        // this route was reserving only 1× per character even then, an
+        // UNDER-reservation (the unsafe direction) rather than the previous
+        // single/batch routes' opposite mistake (over-reserving when OFF).
+        const familyRetryPossible = generationCanRetry("master_portrait") && autoRetryEnabled;
+        const perImageForSpend = familyRetryPossible ? perImage * 2 : perImage;
         const eligible = fam.filter((c) => c.descriptionStatus === "approved").length;
         const spend = await checkGenerationSpend({
           requestedImages: Math.max(1, eligible),
-          perImageCredits: perImage,
+          perImageCredits: perImageForSpend,
           scope: "family",
           nowMs: Date.now(),
         });
@@ -2049,6 +2073,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           stageNumber: number;
           candidateId: number;
           key: string;
+          jobId: string | null;
           identityScore: number | null;
         }[] = [];
         let autoRejectedCount = 0,
@@ -2078,6 +2103,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
               stageNumber: ch.stageNumber,
               candidateId: r.candidate.id,
               key: r.key,
+              jobId: r.artwork.jobId ?? null,
               identityScore: r.identity?.score ?? null,
             });
           } catch (e) {
@@ -2088,7 +2114,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             break; // a later stage failed → return the ones that succeeded
           }
         }
-        await finishOk(providerCalls * perImage, generated[0]?.candidateId ?? null, model ?? null);
+        await finishOk(providerCalls * perImage, generated[0]?.candidateId ?? null, model ?? null, generated[0]?.jobId ?? null);
         res
           .status(201)
           .json({
@@ -2534,8 +2560,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
 
   app.post("/api/admin/vault-quest/ai/artwork", requireAdmin, async (req: Request, res: Response) => {
     let reservedRowId: number | null = null;
-    const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
-      if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+    const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null, providerJobId?: string | null) => {
+      if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed, providerJobId });
     };
     const finishErr = async (err: unknown) => {
       if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
@@ -2547,7 +2573,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         slot?: string;
         promptOverride?: string;
         model?: string;
+        count?: unknown;
       };
+      // One-image-per-request enforcement (spend-guard Phase 3A, item 1) — card
+      // artwork is a SINGLE-generation route; reject any explicit count other than
+      // 1 before any spend/reservation/provider work.
+      const countCheck = validateSingleImageCount(body.count);
+      if (!countCheck.ok) return res.status(400).json({ error: countCheck.error, count: countCheck.count });
       const ctx = (body.context ?? {}) as CardContext & { cardId?: string };
       const cardId = String(ctx.cardId ?? "").trim();
       if (!cardId) return res.status(400).json({ error: "Set a Card ID before generating artwork." });
@@ -2753,7 +2785,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         );
         cardIdentity = gate.identity;
         if (gate.autoRejected) {
-          await finishOk(perImage, candRow?.id ?? null, artwork.model);
+          await finishOk(perImage, candRow?.id ?? null, artwork.model, artwork.jobId ?? null);
           return res.status(422).json({
             error: `Identity Score ${gate.identity?.score}/${gate.identity?.threshold} — the artwork drifted from the approved character, so it was auto-rejected. Generate again.`,
             autoRejected: true,
@@ -2763,7 +2795,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         }
       }
 
-      await finishOk(perImage, candRow?.id ?? null, artwork.model);
+      await finishOk(perImage, candRow?.id ?? null, artwork.model, artwork.jobId ?? null);
       res.status(201).json({
         identityScore: cardIdentity?.score ?? null,
         referencesUsed,

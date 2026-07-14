@@ -157,13 +157,44 @@ run("Vault Quest spend-guard Phase 2 — per-type toggle + automatic-retry-off d
     expect(createSpy).not.toHaveBeenCalled();
   });
 
-  it("item B: disabling gen_action_pose does NOT block Master Reference generation (per-type, not global)", async () => {
+  it("item B: disabling gen_action_pose does NOT block Master Reference generation (per-type, not global) — Master explicitly enabled", async () => {
     scoreSpy.mockResolvedValueOnce(identityPass);
-    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('gen_action_pose', false, 'test')", []);
+    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('gen_action_pose', false, 'test'), ('gen_master_portrait', true, 'test')", []);
     const res = await post(`/api/admin/vault-quest/characters/${CHAR.characterId}/generate-artwork`, {
       referenceType: "master_portrait", model: "nano_banana", idempotencyKey: `p2-type-off-other-ok-${keyCounter}`,
     });
     expect(res.status).toBe(201);
+  });
+
+  it("correction A: a newly deployed generation type with NO DB row is OFF by default (not merely 'not yet touched')", async () => {
+    // No INSERT at all — the absent-row case for a type nobody has configured yet.
+    const res = await post(`/api/admin/vault-quest/characters/${CHAR.characterId}/generate-artwork`, {
+      referenceType: "action_pose", model: "nano_banana", idempotencyKey: `p2-absent-row-off-${keyCounter}`,
+    });
+    expect(res.status).toBe(503);
+    expect((res.json as { disabled?: boolean; reason?: string }).disabled).toBe(true);
+    expect((res.json as { reason?: string }).reason).toBe("not_yet_enabled");
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  it("correction A: explicitly enabling ONE type does not enable any other type (each still absent → still OFF)", async () => {
+    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('gen_master_portrait', true, 'test')", []);
+    // gen_action_pose has NO row — must still be OFF even though a sibling type is ON.
+    const res = await post(`/api/admin/vault-quest/characters/${CHAR.characterId}/generate-artwork`, {
+      referenceType: "action_pose", model: "nano_banana", idempotencyKey: `p2-sibling-still-off-${keyCounter}`,
+    });
+    expect(res.status).toBe(503);
+    expect(createSpy).not.toHaveBeenCalled();
+  });
+
+  it("correction A: the global 'generation' lock still overrides an explicitly-enabled type", async () => {
+    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('gen_action_pose', true, 'test'), ('generation', false, 'test')", []);
+    const res = await post(`/api/admin/vault-quest/characters/${CHAR.characterId}/generate-artwork`, {
+      referenceType: "action_pose", model: "nano_banana", idempotencyKey: `p2-global-overrides-type-${keyCounter}`,
+    });
+    expect(res.status).toBe(503);
+    expect((res.json as { feature?: string }).feature).toBe("generation");
+    expect(createSpy).not.toHaveBeenCalled();
   });
 
   it("item B: the toggle route accepts every new per-type + auto-retry feature key", async () => {
@@ -180,6 +211,7 @@ run("Vault Quest spend-guard Phase 2 — per-type toggle + automatic-retry-off d
     // colour (WHITE_PNG) actually passes validateStudioBackground, so instead prove
     // the retry-count contract directly: identity/pose scoring is only ever invoked
     // ONCE regardless of its verdict when auto_paid_retry is absent (default OFF).
+    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('gen_action_pose', true, 'test')", []);
     scoreSpy.mockResolvedValueOnce({ ...identityPass, poseDiversity: { difference: 0, verdict: "fail" as const, threshold: 55 } });
     const res = await post(`/api/admin/vault-quest/characters/${CHAR.characterId}/generate-artwork`, {
       referenceType: "action_pose", model: "nano_banana", idempotencyKey: `p2-retry-off-${keyCounter}`,
@@ -190,6 +222,7 @@ run("Vault Quest spend-guard Phase 2 — per-type toggle + automatic-retry-off d
   });
 
   it("item E: explicitly enabling auto_paid_retry restores the retry-once behaviour (2 provider calls)", async () => {
+    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('gen_action_pose', true, 'test')", []);
     scoreSpy.mockResolvedValueOnce({ ...identityPass, poseDiversity: { difference: 0, verdict: "fail" as const, threshold: 55 } });
     scoreSpy.mockResolvedValueOnce({ ...identityPass, poseDiversity: { difference: 90, verdict: "pass" as const, threshold: 55 } });
     await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('auto_paid_retry', true, 'test')", []);
@@ -201,6 +234,7 @@ run("Vault Quest spend-guard Phase 2 — per-type toggle + automatic-retry-off d
   });
 
   it("item E: provider_call_count charged reflects only the actual attempt(s) made (1 by default)", async () => {
+    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('gen_action_pose', true, 'test')", []);
     scoreSpy.mockResolvedValueOnce({ ...identityPass, poseDiversity: { difference: 0, verdict: "fail" as const, threshold: 55 } });
     const idempotencyKey = `p2-retry-off-charge-${keyCounter}`;
     const res = await post(`/api/admin/vault-quest/characters/${CHAR.characterId}/generate-artwork`, {

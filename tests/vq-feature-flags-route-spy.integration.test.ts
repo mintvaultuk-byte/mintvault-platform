@@ -87,6 +87,11 @@ run("emergency feature kill switches — real router", () => {
   beforeEach(async () => {
     createSpy.mockClear();
     await q("DELETE FROM vq_feature_flags", []);
+    // Phase 2 correction A: gen_* now defaults OFF. This file tests the ORIGINAL
+    // three flags (generation/exports/writes) and their independence from each
+    // other — not the per-type toggle itself (see vq-spend-guard-phase2 for that)
+    // — so pre-enable the type this file's tests actually generate.
+    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('gen_action_pose', true, 'test')", []);
     await q("DELETE FROM vq_config", []);
     await q("DELETE FROM vq_generation_requests", []);
   });

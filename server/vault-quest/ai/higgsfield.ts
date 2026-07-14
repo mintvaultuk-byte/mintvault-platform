@@ -23,6 +23,25 @@ export interface HiggsfieldArtworkResult {
   height: number;
 }
 
+/**
+ * Thrown instead of a plain Error for any failure AFTER the provider `create` call
+ * has already succeeded (poll timeout/failure, provider-resolved job failure,
+ * download failure) — i.e. every case where a real paid job exists even though
+ * generation ultimately failed. Carries the job id so the ROUTE layer can persist
+ * `provider_job_id` on the failed request row (diagnostic/reconciliation only —
+ * never used to trigger an automatic retry). A plain `create`-time failure (401,
+ * 402, non-2xx before a job id exists) still throws a bare Error — there is no
+ * job id to attach.
+ */
+export class HiggsfieldJobError extends Error {
+  readonly jobId: string;
+  constructor(message: string, jobId: string) {
+    super(message);
+    this.name = "HiggsfieldJobError";
+    this.jobId = jobId;
+  }
+}
+
 // Live API gateway — extracted from the official `higgsfield` CLI binary and
 // VERIFIED against the real API (2026-07-09):
 //   auth      Bearer <oat_… access token from `higgsfield auth token`> + hf-workspace-id header
@@ -361,7 +380,7 @@ export async function generateHiggsfieldArtwork(input: {
     } catch {
       if (++pollFailures >= 5) {
         recordHiggsfieldOutcome({ ok: false, kind: "unknown" }); // network-level; the create already succeeded/charged
-        throw new Error("Higgsfield poll kept timing out — the job may still finish; try Regenerate in a moment.");
+        throw new HiggsfieldJobError("Higgsfield poll kept timing out — the job may still finish; try Regenerate in a moment.", jobId);
       }
       continue;
     }
@@ -369,7 +388,7 @@ export async function generateHiggsfieldArtwork(input: {
       const errBody = await pollRes.text().catch(() => "");
       if (++pollFailures >= 5) {
         recordHiggsfieldOutcome({ ok: false, kind: classifyHiggsfieldStatus(pollRes.status) });
-        throw new Error(`Higgsfield poll failed (${pollRes.status})${errBody ? `: ${errBody.slice(0, 180)}` : ""}`);
+        throw new HiggsfieldJobError(`Higgsfield poll failed (${pollRes.status})${errBody ? `: ${errBody.slice(0, 180)}` : ""}`, jobId);
       }
       continue;
     }
@@ -392,20 +411,20 @@ export async function generateHiggsfieldArtwork(input: {
         reason = String(data.detail ?? "");
       }
       console.error(`[higgsfield] job ${jobId} resolved to "${status}" — provider detail: ${reason}`);
-      throw new Error(`Higgsfield generation ${status}`);
+      throw new HiggsfieldJobError(`Higgsfield generation ${status}`, jobId);
     }
     if (status === "completed" && data.result_url) { job = data; break; }
   }
   if (!job?.result_url) {
     recordHiggsfieldOutcome({ ok: false, kind: "unknown" });
-    throw new Error("Higgsfield did not finish in time — try Regenerate in a moment.");
+    throw new HiggsfieldJobError("Higgsfield did not finish in time — try Regenerate in a moment.", jobId);
   }
 
   // Download the result (CDN URL — no auth header; don't leak the token to the CDN).
   const dl = await fetchWithTimeout(job.result_url, {}, 45_000);
   if (!dl.ok) {
     recordHiggsfieldOutcome({ ok: false, kind: classifyHiggsfieldStatus(dl.status) });
-    throw new Error(`Higgsfield image download failed (${dl.status})`);
+    throw new HiggsfieldJobError(`Higgsfield image download failed (${dl.status})`, jobId);
   }
   const raw = Buffer.from(await dl.arrayBuffer());
 

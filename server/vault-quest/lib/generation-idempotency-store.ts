@@ -184,6 +184,11 @@ export interface FinalizeFailureInput {
   toState: VqGenerationState;
   errorClass: string;
   message: string;
+  /** Provider job id, when the failure happened AFTER `create` already succeeded
+   *  (poll timeout/failure, provider-resolved failure, download failure) — see
+   *  HiggsfieldJobError. Diagnostic/reconciliation only; never read to trigger a
+   *  retry. `undefined` for a create-time failure where no job ever existed. */
+  providerJobId?: string | null;
 }
 
 /** Terminal (or semi-terminal) failure — best-effort, same reasoning as finalizeSuccess. */
@@ -191,7 +196,13 @@ export async function finalizeFailure(rowId: number, input: FinalizeFailureInput
   await guard(async () => {
     await db
       .update(vqGenerationRequests)
-      .set({ state: input.toState, errorClass: input.errorClass, lastError: input.message.slice(0, 500), completedAt: new Date() })
+      .set({
+        state: input.toState,
+        errorClass: input.errorClass,
+        lastError: input.message.slice(0, 500),
+        completedAt: new Date(),
+        ...(input.providerJobId ? { providerJobId: input.providerJobId } : {}),
+      })
       .where(eq(vqGenerationRequests.id, rowId));
   }).catch(() => undefined);
 }
@@ -219,11 +230,22 @@ export function classifyThrownGenerationError(err: unknown): { httpStatus: numbe
   return { httpStatus, phase: "create", networkLost: false };
 }
 
-/** Map a caught route-level exception straight to a finalizeFailure() call. */
+/** Map a caught route-level exception straight to a finalizeFailure() call. Pulls
+ *  the provider job id off a HiggsfieldJobError (a failure AFTER create already
+ *  succeeded) so it's preserved on the request row even though generation failed —
+ *  duck-typed on `.jobId` rather than importing higgsfield.ts's class directly, to
+ *  avoid a circular import between the ai/ and lib/ layers. */
 export function classifyAndMapThrown(err: unknown): FinalizeFailureInput {
   const c = classifyThrownGenerationError(err);
   const mapped = classifyProviderError({ httpStatus: c.httpStatus, phase: c.phase, networkLost: c.networkLost });
-  return { toState: mapped.nextState, errorClass: mapped.errorClass, message: err instanceof Error ? err.message : String(err) };
+  const jobIdCandidate = err instanceof Error ? (err as unknown as { jobId?: unknown }).jobId : undefined;
+  const jobId = typeof jobIdCandidate === "string" ? jobIdCandidate : null;
+  return {
+    toState: mapped.nextState,
+    errorClass: mapped.errorClass,
+    message: err instanceof Error ? err.message : String(err),
+    providerJobId: jobId,
+  };
 }
 
 /** Pure — the HTTP response for every non-proceed idempotency outcome. No DB. */

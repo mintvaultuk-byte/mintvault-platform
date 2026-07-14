@@ -187,6 +187,9 @@ run("Legacy first-generation — non-spending route proof (Stage 3)", () => {
     r2Store.set("vq/characters/T-STAGE3-CHAR/approved/master_portrait/x.png", TINY_PNG);
     await q("DELETE FROM vq_generation_requests WHERE card_id LIKE 'T-STAGE3-%'", []);
     await q("DELETE FROM vq_config", []);
+    // Phase 2 correction A: gen_* now defaults OFF. This file tests the card-artwork
+    // provider payload/idempotency behaviour, not the per-type toggle itself.
+    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('gen_card_artwork', true, 'test') ON CONFLICT (feature) DO UPDATE SET enabled = true", []);
   });
   afterAll(async () => {
     await q("DELETE FROM vq_generation_requests WHERE card_id LIKE 'T-STAGE3-%'", []);

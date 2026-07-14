@@ -31,20 +31,49 @@ describe("generationTypeFeatureFor", () => {
   });
 });
 
-describe("a per-generation-type toggle follows the SAME default-on precedent as the existing 'generation' switch", () => {
-  it("missing row → enabled (never blocks a type nobody has touched)", () => {
-    expect(vqFeatureState("gen_action_pose", {}, {}).enabled).toBe(true);
+describe("a per-generation-type toggle defaults OFF (correction A) — DELIBERATELY the inverse of 'generation'/'exports'/'writes'", () => {
+  it("missing row → DISABLED (a newly deployed type is unavailable until an owner explicitly turns it on)", () => {
+    const state = vqFeatureState("gen_action_pose", {}, {});
+    expect(state.enabled).toBe(false);
+    expect(state.reason).toBe("not_yet_enabled");
   });
-  it("explicit DB flag off → disabled", () => {
+  it("explicit DB flag off → still disabled", () => {
     expect(vqFeatureState("gen_action_pose", {}, { gen_action_pose: false }).enabled).toBe(false);
   });
-  it("explicit DB flag on → enabled", () => {
-    expect(vqFeatureState("gen_action_pose", {}, { gen_action_pose: false, gen_master_portrait: true }).enabled).toBe(false);
+  it("explicit DB flag on → enabled (the owner's opt-in is respected)", () => {
+    expect(vqFeatureState("gen_action_pose", {}, { gen_action_pose: true }).enabled).toBe(true);
   });
-  it("one type's flag never affects another type's flag", () => {
-    const db = { gen_action_pose: false };
+  it("enabling ONE type does not enable any other type — a sibling with no row stays OFF", () => {
+    const db = { gen_action_pose: true };
+    expect(vqFeatureState("gen_action_pose", {}, db).enabled).toBe(true);
+    expect(vqFeatureState("gen_master_portrait", {}, db).enabled).toBe(false);
+  });
+  it("disabling one type explicitly does not touch a sibling that IS explicitly enabled", () => {
+    const db = { gen_action_pose: false, gen_master_portrait: true };
     expect(vqFeatureState("gen_action_pose", {}, db).enabled).toBe(false);
     expect(vqFeatureState("gen_master_portrait", {}, db).enabled).toBe(true);
+  });
+});
+
+describe("correction A does NOT touch the original three flags — they remain default-ON, unaffected", () => {
+  it("'generation' with no row → still enabled", () => {
+    expect(vqFeatureState("generation", {}, {}).enabled).toBe(true);
+  });
+  it("'exports' with no row → still enabled", () => {
+    expect(vqFeatureState("exports", {}, {}).enabled).toBe(true);
+  });
+  it("'writes' with no row → still enabled", () => {
+    expect(vqFeatureState("writes", {}, {}).enabled).toBe(true);
+  });
+  it("the global 'generation' flag still overrides an explicitly-enabled type when checked independently by the route (each check is independent; both must pass)", () => {
+    // vqFeatureState itself only evaluates ONE feature at a time — the route layer
+    // calls it twice (generation, then the specific gen_* type) and requires BOTH
+    // to be ok. This test proves each half's own state is correct in isolation;
+    // the AND-of-both-gates behaviour is proven end-to-end in
+    // vq-spend-guard-phase2.integration.test.ts.
+    const db = { generation: false, gen_action_pose: true };
+    expect(vqFeatureState("generation", {}, db).enabled).toBe(false);
+    expect(vqFeatureState("gen_action_pose", {}, db).enabled).toBe(true);
   });
 });
 

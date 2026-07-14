@@ -74,7 +74,7 @@ export interface VqFlagEnv {
 /** DB runtime toggles. true=enabled, false=disabled, absent=no opinion (→ default-on). */
 export type VqDbFlags = Partial<Record<VqFeature, boolean>>;
 
-export type VqDisableReason = "env_hard_off" | "env_readonly" | "env_provider_outage" | "db_flag_off";
+export type VqDisableReason = "env_hard_off" | "env_readonly" | "env_provider_outage" | "db_flag_off" | "not_yet_enabled";
 export interface VqFeatureState {
   enabled: boolean;
   source: "env" | "db" | "default";
@@ -105,7 +105,19 @@ export function vqFeatureState(feature: VqFeature, env: VqFlagEnv, db?: VqDbFlag
   if (dbVal === false) return { enabled: false, source: "db", reason: "db_flag_off" };
   if (dbVal === true) return { enabled: true, source: "db", reason: "db_flag_on" };
 
-  // 3) default-ON (a missing flag never disables VQ)
+  // 3) default — for the ORIGINAL three flags (generation/exports/writes), a
+  // missing row never disables VQ (default-ON, unchanged, per the header above).
+  //
+  // Per-generation-type toggles (spend-guard hardening, Phase 2 correction A) are
+  // the deliberate EXCEPTION: a newly deployed generation type must be UNAVAILABLE
+  // until an owner explicitly turns it on — a missing gen_* row means the type
+  // does not yet exist as a reviewed, owner-approved capability, so it defaults
+  // OFF, not on. This does NOT touch "generation"/"exports"/"writes" (still
+  // default-ON) and does NOT retroactively disable any type an owner has already
+  // explicitly enabled (an explicit true row still wins at step 2 above).
+  if ((VQ_GENERATION_TYPE_FEATURES as readonly string[]).includes(feature)) {
+    return { enabled: false, source: "default", reason: "not_yet_enabled" };
+  }
   return { enabled: true, source: "default", reason: "default_on" };
 }
 
@@ -121,6 +133,7 @@ export function vqDisabledResponse(feature: VqFeature, state: VqFeatureState): {
     env_readonly: `Vault Quest is in read-only maintenance — ${feature} is disabled.`,
     env_provider_outage: `Vault Quest generation is paused (provider-outage mode).`,
     db_flag_off: `Vault Quest ${feature} is temporarily disabled.`,
+    not_yet_enabled: `This generation type is not yet enabled — an owner must turn it on first.`,
   };
   return {
     status: 503,
