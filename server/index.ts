@@ -135,33 +135,6 @@ app.use(
   })
 );
 
-const loginRateLimit = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  validate: false,
-  message: { error: "Too many login attempts, please try again later" },
-  skip: (req) => req.method !== "POST",
-  keyGenerator: (req) => {
-    const forwarded = req.headers["x-forwarded-for"];
-    if (forwarded) {
-      const first = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(",")[0];
-      return first.trim();
-    }
-    return req.ip || req.socket.remoteAddress || "unknown";
-  },
-});
-
-const credentialLoginRateLimit: express.RequestHandler = (req, res, next) => {
-  if (req.method !== "POST") return next();
-  return loginRateLimit(req, res, next);
-};
-
-app.use("/api/admin/login", credentialLoginRateLimit);
-app.use("/api/admin/session", credentialLoginRateLimit);
-app.use("/api/admin/pin", credentialLoginRateLimit);
-
 const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
   max: 5,

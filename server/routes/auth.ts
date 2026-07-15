@@ -52,8 +52,25 @@ import {
 } from "../lib/admin-auth-session";
 
 export function registerAuthRoutes(app: Express): void {
+  const adminCredentialRateLimit = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: false,
+    message: { error: "Too many login attempts, please try again later" },
+    keyGenerator: (req) => {
+      const forwarded = req.headers["x-forwarded-for"];
+      if (forwarded) {
+        const first = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(",")[0];
+        return first.trim();
+      }
+      return req.ip || req.socket.remoteAddress || "unknown";
+    },
+  });
+
   // ── Admin login ────────────────────────────────────────────────────────────
-  app.post("/api/admin/login", async (req, res) => {
+  app.post("/api/admin/login", adminCredentialRateLimit, async (req, res) => {
     try {
       if (isLoginRateLimited(req)) {
         return res.status(429).json({ error: "Too many login attempts, please try again later" });
@@ -84,7 +101,7 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/admin/session", async (req, res) => {
+  app.post("/api/admin/session", adminCredentialRateLimit, async (req, res) => {
     try {
       if (isLoginRateLimited(req)) {
         return res.status(429).json({ error: "Too many login attempts, please try again later" });
@@ -115,7 +132,7 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/admin/pin", async (req, res) => {
+  app.post("/api/admin/pin", adminCredentialRateLimit, async (req, res) => {
     try {
       if (isPinRateLimited(req)) {
         return res.status(429).json({ error: "Too many attempts, please try again later" });
