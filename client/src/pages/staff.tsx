@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { Image as ImageIcon } from "lucide-react";
 import { useLocation } from "wouter";
 import GradingPanel from "../components/grading/grading-panel";
@@ -119,7 +119,48 @@ type GCard = {
   frontUrl: string | null;
   backUrl: string | null;
 };
-type GItem = { submissionRef: string; cards: GCard[] };
+type GItem = { submissionRef: string; submissionCreatedAt: string | null; cards: GCard[] };
+type StaffQueueSort =
+  | "queue-oldest"
+  | "queue-newest"
+  | "cert-asc"
+  | "cert-desc"
+  | "submission-oldest"
+  | "submission-newest";
+
+const STAFF_QUEUE_SORT_KEY = "mv.staff.queueSort";
+const STAFF_QUEUE_SORT_DEFAULT: StaffQueueSort = "queue-oldest";
+const STAFF_QUEUE_SORT_OPTIONS: { value: StaffQueueSort; label: string }[] = [
+  { value: "queue-oldest", label: "Queue Order (Oldest First)" },
+  { value: "queue-newest", label: "Queue Order (Newest First)" },
+  { value: "cert-asc", label: "Certificate Number (Lowest \u2192 Highest)" },
+  { value: "cert-desc", label: "Certificate Number (Highest \u2192 Lowest)" },
+  { value: "submission-oldest", label: "Submission Date (Oldest \u2192 Newest)" },
+  { value: "submission-newest", label: "Submission Date (Newest \u2192 Oldest)" },
+];
+
+function loadStaffQueueSort(): StaffQueueSort {
+  try {
+    const saved = localStorage.getItem(STAFF_QUEUE_SORT_KEY);
+    return STAFF_QUEUE_SORT_OPTIONS.some((o) => o.value === saved)
+      ? (saved as StaffQueueSort)
+      : STAFF_QUEUE_SORT_DEFAULT;
+  } catch {
+    return STAFF_QUEUE_SORT_DEFAULT;
+  }
+}
+
+function numericCertValue(certId: string): number {
+  const match = certId.match(/\d+/g);
+  if (!match) return Number.MAX_SAFE_INTEGER;
+  return Number(match.join(""));
+}
+
+function timestampValue(value: string | null): number {
+  if (!value) return Number.MAX_SAFE_INTEGER;
+  const time = new Date(value).getTime();
+  return Number.isFinite(time) ? time : Number.MAX_SAFE_INTEGER;
+}
 
 type Analytics = {
   rate: number;
@@ -251,6 +292,7 @@ function GradeTab() {
   const [active, setActive] = useState<{ ref: string; card: GCard } | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [aLoading, setALoading] = useState(true);
+  const [queueSort, setQueueSort] = useState<StaffQueueSort>(loadStaffQueueSort);
   const load = useCallback(async () => {
     const r = await fetch("/api/grader/queue", { credentials: "include" });
     if (r.ok) setQueue((await r.json()).items || []);
@@ -268,6 +310,69 @@ function GradeTab() {
   useEffect(() => {
     load();
   }, [load]);
+
+  function updateQueueSort(next: StaffQueueSort) {
+    setQueueSort(next);
+    try {
+      localStorage.setItem(STAFF_QUEUE_SORT_KEY, next);
+    } catch {
+      /* preference persistence is best-effort */
+    }
+  }
+
+  // Flatten the grader's own cards (every state) and segment by workflow stage so
+  // both outstanding and finished work are visible. A card the grader only SCANNED
+  // (assigned to someone else / not yet assigned) is read-only here.
+  const all = useMemo(
+    () =>
+      queue.flatMap((it, submissionIndex) =>
+        it.cards.map((card, cardIndex) => ({
+          card,
+          ref: it.submissionRef,
+          submissionCreatedAt: it.submissionCreatedAt,
+          queueIndex: submissionIndex,
+          cardIndex,
+        }))
+      ),
+    [queue]
+  );
+  const sortRows = useCallback(
+    (
+      items: {
+        card: GCard;
+        ref: string;
+        submissionCreatedAt: string | null;
+        queueIndex: number;
+        cardIndex: number;
+      }[]
+    ) =>
+      [...items].sort((a, b) => {
+        const stableCompare = a.queueIndex - b.queueIndex || a.cardIndex - b.cardIndex;
+        const queueCompare =
+          timestampValue(a.submissionCreatedAt) - timestampValue(b.submissionCreatedAt) || stableCompare;
+        const certCompare =
+          numericCertValue(a.card.certIdStr) - numericCertValue(b.card.certIdStr) ||
+          a.card.certIdStr.localeCompare(b.card.certIdStr) ||
+          queueCompare;
+
+        switch (queueSort) {
+          case "queue-newest":
+            return -queueCompare;
+          case "cert-asc":
+            return certCompare;
+          case "cert-desc":
+            return -certCompare;
+          case "submission-oldest":
+            return queueCompare;
+          case "submission-newest":
+            return -queueCompare;
+          case "queue-oldest":
+          default:
+            return queueCompare;
+        }
+      }),
+    [queueSort]
+  );
 
   if (active) {
     const c = active.card;
@@ -317,10 +422,6 @@ function GradeTab() {
       </div>
     );
   }
-  // Flatten the grader's own cards (every state) and segment by workflow stage so
-  // both outstanding and finished work are visible. A card the grader only SCANNED
-  // (assigned to someone else / not yet assigned) is read-only here.
-  const all = queue.flatMap((it) => it.cards.map((card) => ({ card, ref: it.submissionRef })));
   const toGrade = all.filter((x) => x.card.gradingStatus === "assigned" || x.card.gradingStatus === "unassigned");
   const inReview = all.filter((x) => x.card.gradingStatus === "pending_review");
   const done = all.filter((x) => x.card.gradingStatus === "approved");
@@ -329,10 +430,7 @@ function GradeTab() {
   );
 
   const renderRow = ({ card, ref }: { card: GCard; ref: string }) => (
-    <li
-      key={card.certId}
-      className="border border-[#D4AF37]/20 rounded-lg p-4 flex items-center justify-between gap-4"
-    >
+    <li key={card.certId} className="border border-[#D4AF37]/20 rounded-lg p-4 flex items-center justify-between gap-4">
       <div className="flex items-center gap-3 min-w-0">
         {/* Front/back card thumbnails — reuses the grader image source (signed R2
             URLs now returned by /api/grader/queue) and mirrors the admin card-thumb
@@ -340,7 +438,12 @@ function GradeTab() {
             scanned, so it reads as needs-scanning, not a broken image. */}
         {card.frontUrl || card.backUrl ? (
           <div className="flex items-center gap-1.5 shrink-0">
-            {([["Front", card.frontUrl], ["Back", card.backUrl]] as const).map(([label, url]) => (
+            {(
+              [
+                ["Front", card.frontUrl],
+                ["Back", card.backUrl],
+              ] as const
+            ).map(([label, url]) => (
               <div
                 key={label}
                 title={label}
@@ -414,17 +517,13 @@ function GradeTab() {
     </li>
   );
 
-  const section = (title: string, items: { card: GCard; ref: string }[]) =>
+  const section = (title: string, items: typeof all) =>
     items.length === 0 ? null : (
-      <section
-        key={title}
-        className="mb-5"
-        data-testid={`grade-section-${title.toLowerCase().replace(/\s+/g, "-")}`}
-      >
+      <section key={title} className="mb-5" data-testid={`grade-section-${title.toLowerCase().replace(/\s+/g, "-")}`}>
         <h2 className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/50 font-bold mb-2">
           {title} · {items.length}
         </h2>
-        <ul className="space-y-2">{items.map(renderRow)}</ul>
+        <ul className="space-y-2">{sortRows(items).map(renderRow)}</ul>
       </section>
     );
 
@@ -432,9 +531,28 @@ function GradeTab() {
     <main className="max-w-3xl mx-auto px-4 py-5">
       <GradeAnalytics a={analytics} loading={aLoading} />
       {all.length === 0 ? (
-        <p className="text-[#E8E4DC]/60 text-sm text-center py-12">No cards yet — scan or get assigned a card to begin.</p>
+        <p className="text-[#E8E4DC]/60 text-sm text-center py-12">
+          No cards yet — scan or get assigned a card to begin.
+        </p>
       ) : (
         <>
+          <div className="mb-4 flex items-center justify-end gap-2">
+            <label htmlFor="staff-queue-sort" className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/50">
+              Sort
+            </label>
+            <select
+              id="staff-queue-sort"
+              value={queueSort}
+              onChange={(e) => updateQueueSort(e.target.value as StaffQueueSort)}
+              className="rounded border border-[#D4AF37]/30 bg-black px-2 py-1 text-xs text-[#E8E4DC] outline-none hover:bg-[#D4AF37]/10 focus:border-[#D4AF37]"
+            >
+              {STAFF_QUEUE_SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value} className="bg-black text-[#E8E4DC]">
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
           {section("To grade", toGrade)}
           {section("In review", inReview)}
           {section("Other", other)}

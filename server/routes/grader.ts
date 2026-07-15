@@ -47,6 +47,7 @@ import {
 } from "../grader";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { graderEditSubmissionRateLimit } from "../lib/rate-limiters";
 
 const graderLoginLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -148,7 +149,7 @@ export function registerGraderRoutes(app: Express): void {
                cert.assigned_grader_id, cert.scanned_by, cert.graded_by, cert.grade_approved_at,
                cert.grading_front_display, cert.grading_front_cropped, cert.front_image_path,
                cert.grading_back_display, cert.grading_back_cropped, cert.back_image_path,
-               c.submission_id, s.tracking_number AS submission_ref, s.service_tier
+               c.submission_id, s.tracking_number AS submission_ref, s.service_tier, s.created_at AS submission_created_at
         FROM certificates cert
         -- LEFT JOIN: a cert assigned at the cert level can have a NULL card_id (no
         -- linked card row). getGraderAnalytics counts certs directly with no join,
@@ -173,6 +174,7 @@ export function registerGraderRoutes(app: Express): void {
           bySub.set(key, {
             submissionId: Number(r.submission_id),
             submissionRef: r.submission_ref,
+            submissionCreatedAt: r.submission_created_at ?? null,
             serviceTier: r.service_tier ?? null,
             cards: [],
           });
@@ -210,12 +212,14 @@ export function registerGraderRoutes(app: Express): void {
       // these are only this grader's cards, so no cross-grader image leak.
       const items = Array.from(bySub.values());
       await Promise.all(
-        items.flatMap((sub: any) => sub.cards).map(async (card: any) => {
-          card.frontUrl = card._frontKey ? await getR2SignedUrl(card._frontKey, 3600).catch(() => null) : null;
-          card.backUrl = card._backKey ? await getR2SignedUrl(card._backKey, 3600).catch(() => null) : null;
-          delete card._frontKey;
-          delete card._backKey;
-        })
+        items
+          .flatMap((sub: any) => sub.cards)
+          .map(async (card: any) => {
+            card.frontUrl = card._frontKey ? await getR2SignedUrl(card._frontKey, 3600).catch(() => null) : null;
+            card.backUrl = card._backKey ? await getR2SignedUrl(card._backKey, 3600).catch(() => null) : null;
+            delete card._frontKey;
+            delete card._backKey;
+          })
       );
       return res.json({ items });
     } catch (e: any) {
@@ -362,9 +366,8 @@ export function registerGraderRoutes(app: Express): void {
       }
 
       // Read back exactly what we just snapshotted + the gate inputs.
-      const gateRow = (
-        await db.execute(sql`SELECT operator_grade, card_name FROM certificates WHERE id = ${certId}`)
-      ).rows[0] as any;
+      const gateRow = (await db.execute(sql`SELECT operator_grade, card_name FROM certificates WHERE id = ${certId}`))
+        .rows[0] as any;
       const operatorGrade = gateRow?.operator_grade;
       const cardName = gateRow?.card_name;
       // Hard overrides — never auto-approve: no grade to promote to final, or an
@@ -435,37 +438,41 @@ export function registerGraderRoutes(app: Express): void {
   // faces the review gate. We only re-assert review state + re-snapshot the
   // operator's submission so the reviewer sees the corrected values. Registered
   // BEFORE the :action catch-all below so it isn't swallowed by the proxy.
-  app.post("/api/grader/certificates/:id/edit-submission", requireCapability("grade"), async (req: Request, res: Response) => {
-    try {
-      const certId = parseInt(String(req.params.id), 10);
-      const auth = await authorizeGraderCert(req, certId);
-      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-      if (auth.gradingStatus !== "pending_review") {
-        return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not an editable submission` });
-      }
-      const graderId = (req.session as any).graderId as string;
-      const graderEmail = (req.session as any).graderEmail as string;
+  app.post(
+    "/api/grader/certificates/:id/edit-submission",
+    requireCapability("grade"),
+    graderEditSubmissionRateLimit,
+    async (req: Request, res: Response) => {
+      try {
+        const certId = parseInt(String(req.params.id), 10);
+        const auth = await authorizeGraderCert(req, certId);
+        if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+        if (auth.gradingStatus !== "pending_review") {
+          return res.status(409).json({ error: `Card is '${auth.gradingStatus}', not an editable submission` });
+        }
+        const graderId = (req.session as any).graderId as string;
+        const graderEmail = (req.session as any).graderEmail as string;
 
-      // Ownership: only the grader who actually graded it (graded_by) may edit —
-      // keeps graded_by attribution honest if the cert was later reassigned.
-      const before = (
-        await db.execute(sql`
+        // Ownership: only the grader who actually graded it (graded_by) may edit —
+        // keeps graded_by attribution honest if the cert was later reassigned.
+        const before = (
+          await db.execute(sql`
           SELECT graded_by, card_name, set_name, card_number_display, year_text, variant,
                  grade, centering_score, corners_score, edges_score, surface_score
           FROM certificates WHERE id = ${certId}`)
-      ).rows[0] as any;
-      if (!before) return res.status(404).json({ error: "Certificate not found" });
-      if (before.graded_by && String(before.graded_by) !== String(graderId)) {
-        return res.status(403).json({ error: "Only the grader who submitted this card can edit it" });
-      }
+        ).rows[0] as any;
+        if (!before) return res.status(404).json({ error: "Certificate not found" });
+        if (before.graded_by && String(before.graded_by) !== String(graderId)) {
+          return res.status(403).json({ error: "Only the grader who submitted this card can edit it" });
+        }
 
-      // Persist identity + grade as a DRAFT (grade_approved_at stays NULL).
-      if (req.body && Object.keys(req.body).length) await applyCertGradeDraft(certId, req.body);
+        // Persist identity + grade as a DRAFT (grade_approved_at stays NULL).
+        if (req.body && Object.keys(req.body).length) await applyCertGradeDraft(certId, req.body);
 
-      // Re-assert the review gate + re-snapshot the operator's submission from the
-      // freshly-written grade columns, so the reviewer sees the corrected grade.
-      // NEVER set grade_approved_at/by, status, grader_status='approved', or graded_by.
-      const reSnapshot = await db.execute(sql`
+        // Re-assert the review gate + re-snapshot the operator's submission from the
+        // freshly-written grade columns, so the reviewer sees the corrected grade.
+        // NEVER set grade_approved_at/by, status, grader_status='approved', or graded_by.
+        const reSnapshot = await db.execute(sql`
         UPDATE certificates SET
           grader_status = 'pending_review',
           review_required = true,
@@ -477,36 +484,46 @@ export function registerGraderRoutes(app: Express): void {
         WHERE id = ${certId} AND grader_status = 'pending_review' AND graded_by = ${graderId}
         RETURNING id
       `);
-      if (reSnapshot.rows.length === 0) {
-        return res.status(409).json({ error: "Card status changed; refresh and try again" });
-      }
+        if (reSnapshot.rows.length === 0) {
+          return res.status(409).json({ error: "Card status changed; refresh and try again" });
+        }
 
-      // Audit — record what changed (before → after) for the locked schema.
-      const after = (
-        await db.execute(sql`
+        // Audit — record what changed (before → after) for the locked schema.
+        const after = (
+          await db.execute(sql`
           SELECT card_name, set_name, card_number_display, year_text, variant,
                  grade, centering_score, corners_score, edges_score, surface_score
           FROM certificates WHERE id = ${certId}`)
-      ).rows[0] as any;
-      const fields = [
-        "card_name", "set_name", "card_number_display", "year_text", "variant",
-        "grade", "centering_score", "corners_score", "edges_score", "surface_score",
-      ];
-      const changed: Record<string, { from: unknown; to: unknown }> = {};
-      for (const f of fields) {
-        if (String(before[f] ?? "") !== String(after[f] ?? "")) changed[f] = { from: before[f] ?? null, to: after[f] ?? null };
-      }
-      await storage.writeAuditLog("certificate", String(certId), "grader_edit_submission", graderEmail, {
-        graded_by: before.graded_by ?? null,
-        changed,
-      });
+        ).rows[0] as any;
+        const fields = [
+          "card_name",
+          "set_name",
+          "card_number_display",
+          "year_text",
+          "variant",
+          "grade",
+          "centering_score",
+          "corners_score",
+          "edges_score",
+          "surface_score",
+        ];
+        const changed: Record<string, { from: unknown; to: unknown }> = {};
+        for (const f of fields) {
+          if (String(before[f] ?? "") !== String(after[f] ?? ""))
+            changed[f] = { from: before[f] ?? null, to: after[f] ?? null };
+        }
+        await storage.writeAuditLog("certificate", String(certId), "grader_edit_submission", graderEmail, {
+          graded_by: before.graded_by ?? null,
+          changed,
+        });
 
-      return res.json({ ok: true, gradingStatus: "pending_review", changed: Object.keys(changed) });
-    } catch (e: any) {
-      console.error("[grader] edit-submission error:", e.message);
-      return sendServerError(res, e);
+        return res.json({ ok: true, gradingStatus: "pending_review", changed: Object.keys(changed) });
+      } catch (e: any) {
+        console.error("[grader] edit-submission error:", e.message);
+        return sendServerError(res, e);
+      }
     }
-  });
+  );
 
   // ── Grader panel-action DELEGATION PROXY ────────────────────────────────────
   // Verify grader OWNERSHIP, then re-dispatch to the unchanged admin handler
@@ -562,7 +579,10 @@ export function registerGraderRoutes(app: Express): void {
     try {
       // Normalise the code the same way the picker does (no spaces, lowercase),
       // so dedup + the UNIQUE index on set_id see a stable key.
-      const setId = (typeof req.body?.setId === "string" ? req.body.setId : "").replace(/\s+/g, "").toLowerCase().trim();
+      const setId = (typeof req.body?.setId === "string" ? req.body.setId : "")
+        .replace(/\s+/g, "")
+        .toLowerCase()
+        .trim();
       const setName = (typeof req.body?.setName === "string" ? req.body.setName : "").trim();
       if (!setId || !setName) return res.status(400).json({ error: "Set code and set name are both required" });
       if (setId.length > 64 || setName.length > 200) return res.status(400).json({ error: "Set code/name too long" });
@@ -602,7 +622,13 @@ export function registerGraderRoutes(app: Express): void {
       } catch (e: any) {
         // UNIQUE(set_id) race — another request inserted the same code first.
         if ((e.code || e.cause?.code) === "23505") {
-          return res.json({ ok: true, duplicate: true, setId, setName, message: `Set "${setId}" already exists — selected it.` });
+          return res.json({
+            ok: true,
+            duplicate: true,
+            setId,
+            setName,
+            message: `Set "${setId}" already exists — selected it.`,
+          });
         }
         throw e;
       }
@@ -663,11 +689,18 @@ export function registerGraderRoutes(app: Express): void {
         await db.execute(sql`SELECT label FROM custom_variants WHERE normalized_key = ${normalizedKey} LIMIT 1`)
       ).rows[0] as any;
       if (dup) {
-        return res.json({ ok: true, duplicate: true, label: dup.label, message: `"${dup.label}" already exists — selected it.` });
+        return res.json({
+          ok: true,
+          duplicate: true,
+          label: dup.label,
+          message: `"${dup.label}" already exists — selected it.`,
+        });
       }
 
       try {
-        await db.execute(sql`INSERT INTO custom_variants (label, normalized_key, created_by) VALUES (${label}, ${normalizedKey}, ${auth.who})`);
+        await db.execute(
+          sql`INSERT INTO custom_variants (label, normalized_key, created_by) VALUES (${label}, ${normalizedKey}, ${auth.who})`
+        );
       } catch (e: any) {
         if ((e.code || e.cause?.code) === "23505") {
           return res.json({ ok: true, duplicate: true, label, message: `"${label}" already exists — selected it.` });
@@ -709,7 +742,9 @@ export function registerGraderRoutes(app: Express): void {
     try {
       const code = String(req.query.code || "").trim();
       const number = String(req.query.number || "").trim();
-      const lang = String(req.query.lang || "en").trim().toLowerCase();
+      const lang = String(req.query.lang || "en")
+        .trim()
+        .toLowerCase();
       if (!code || !number) return res.status(400).json({ error: "code and number are required" });
       if (!STAFF_CODE_RE.test(code)) return res.status(400).json({ error: "Invalid set code format" });
       if (!STAFF_NUMBER_RE.test(number)) return res.status(400).json({ error: "Invalid card number format" });
