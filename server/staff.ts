@@ -19,6 +19,12 @@ import { storage } from "./storage";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
 import { uploadToR2 } from "./r2";
 import { invalidateGraderSessionCache } from "./grader";
+import {
+  STAFF_ABSOLUTE_SESSION_MS,
+  credentialVersionOf,
+  destroySessionAndClearCookie,
+  isAbsoluteSessionExpired,
+} from "./lib/auth-security";
 
 export type Capability = "grade" | "scan" | "print";
 export interface Caps {
@@ -86,6 +92,7 @@ interface CachedStaff {
   capGrade: boolean;
   capScan: boolean;
   capPrint: boolean;
+  credentialVersion: number;
   expiry: number;
 }
 const staffSessionCache = new Map<string, CachedStaff>();
@@ -98,7 +105,7 @@ async function validateStaffSession(staffId: string): Promise<CachedStaff> {
   const cached = staffSessionCache.get(staffId);
   if (cached && Date.now() < cached.expiry) return cached;
   const r = await db.execute(sql`
-    SELECT deleted_at, can_grade, can_scan, can_print FROM users WHERE id = ${staffId} LIMIT 1
+    SELECT deleted_at, can_grade, can_scan, can_print, credential_version FROM users WHERE id = ${staffId} LIMIT 1
   `);
   const row = r.rows[0] as any;
   const live = !!row && !row.deleted_at;
@@ -107,6 +114,7 @@ async function validateStaffSession(staffId: string): Promise<CachedStaff> {
     capGrade: live && !!row.can_grade,
     capScan: live && !!row.can_scan,
     capPrint: live && !!row.can_print,
+    credentialVersion: live ? credentialVersionOf(row) : 1,
     expiry: Date.now() + 60_000,
   };
   staffSessionCache.set(staffId, v);
@@ -119,8 +127,16 @@ export async function requireStaff(req: Request, res: Response, next: NextFuncti
   const s = req.session as any;
   if (!(s && s.isStaff && s.staffId && !s.isAdmin)) return res.status(401).json({ error: "Unauthorized" });
   try {
+    if (isAbsoluteSessionExpired(req, STAFF_ABSOLUTE_SESSION_MS)) {
+      await destroySessionAndClearCookie(req, res);
+      return res.status(401).json({ error: "Unauthorized" });
+    }
     const live = await validateStaffSession(String(s.staffId));
     if (!live.exists) return res.status(401).json({ error: "Unauthorized" });
+    if (Number(s.credentialVersion ?? 1) !== live.credentialVersion) {
+      await destroySessionAndClearCookie(req, res);
+      return res.status(401).json({ error: "Unauthorized" });
+    }
     return next();
   } catch {
     return res.status(500).json({ error: "Internal server error" }); // fail-closed
@@ -137,8 +153,16 @@ export function requireCapability(cap: Capability) {
     if (!(s && s.isStaff && s.staffId && !s.isAdmin)) return res.status(401).json({ error: "Unauthorized" });
     if (!s[key]) return res.status(403).json({ error: `Forbidden: missing '${cap}' capability` });
     try {
+      if (isAbsoluteSessionExpired(req, STAFF_ABSOLUTE_SESSION_MS)) {
+        await destroySessionAndClearCookie(req, res);
+        return res.status(401).json({ error: "Unauthorized" });
+      }
       const live = await validateStaffSession(String(s.staffId));
       if (!live.exists) return res.status(401).json({ error: "Unauthorized" });
+      if (Number(s.credentialVersion ?? 1) !== live.credentialVersion) {
+        await destroySessionAndClearCookie(req, res);
+        return res.status(401).json({ error: "Unauthorized" });
+      }
       const liveCap = cap === "grade" ? live.capGrade : cap === "scan" ? live.capScan : live.capPrint;
       if (!liveCap) return res.status(403).json({ error: `Forbidden: missing '${cap}' capability` });
       return next();
@@ -154,23 +178,67 @@ export function requireCapability(cap: Capability) {
 export async function authenticateStaff(
   email: string,
   password: string
-): Promise<{ ok: true; id: string; email: string; displayName: string | null; caps: Caps } | { ok: false }> {
+): Promise<
+  | { ok: true; id: string; email: string; displayName: string | null; caps: Caps; credentialVersion: number }
+  | { ok: false }
+> {
   const cleanEmail = String(email || "")
     .toLowerCase()
     .trim();
   if (!cleanEmail || !password) return { ok: false };
   const r = await db.execute(sql`
-    SELECT id, email, display_name, password_hash, role, deleted_at, can_grade, can_scan, can_print
+    SELECT id, email, display_name, password_hash, role, deleted_at, can_grade, can_scan, can_print,
+           failed_login_count, locked_until, credential_version
     FROM users WHERE LOWER(email) = ${cleanEmail} LIMIT 1
   `);
   const u = r.rows[0] as any;
   if (!u || u.deleted_at || u.role === "admin" || !u.password_hash) return { ok: false };
+  const lockedUntil = u.locked_until ? new Date(u.locked_until) : null;
+  if (lockedUntil && lockedUntil > new Date()) return { ok: false };
+  if (lockedUntil && lockedUntil <= new Date()) {
+    await db.execute(sql`
+      UPDATE users
+      SET failed_login_count = 0,
+          locked_until = NULL,
+          last_failed_login_at = NULL
+      WHERE id = ${u.id}
+    `);
+    u.failed_login_count = 0;
+    u.locked_until = null;
+  }
   const caps: Caps = { grade: !!u.can_grade, scan: !!u.can_scan, print: !!u.can_print };
   if (!caps.grade && !caps.scan && !caps.print) return { ok: false };
   const valid = await verifyPassword(password, u.password_hash);
-  if (!valid) return { ok: false };
-  await db.execute(sql`UPDATE users SET last_login_at = NOW() WHERE id = ${u.id}`);
-  return { ok: true, id: u.id, email: u.email, displayName: u.display_name ?? null, caps };
+  if (!valid) {
+    await db.execute(sql`
+      UPDATE users
+      SET failed_login_count = failed_login_count + 1,
+          last_failed_login_at = NOW(),
+          locked_until = CASE
+            WHEN failed_login_count + 1 >= 5 THEN NOW() + INTERVAL '15 minutes'
+            ELSE locked_until
+          END,
+          updated_at = NOW()
+      WHERE id = ${u.id}
+    `);
+    return { ok: false };
+  }
+  await db.execute(sql`
+    UPDATE users
+    SET last_login_at = NOW(),
+        failed_login_count = 0,
+        locked_until = NULL,
+        last_failed_login_at = NULL
+    WHERE id = ${u.id}
+  `);
+  return {
+    ok: true,
+    id: u.id,
+    email: u.email,
+    displayName: u.display_name ?? null,
+    caps,
+    credentialVersion: credentialVersionOf(u),
+  };
 }
 
 // ── Admin: staff accounts + capability toggles ────────────────────────────────
@@ -179,6 +247,7 @@ export async function authenticateStaff(
 export async function listStaffWithCounts() {
   const r = await db.execute(sql`
     SELECT u.id, u.email, u.display_name, u.can_grade, u.can_scan, u.can_print, u.review_rate,
+      u.deleted_at, u.failed_login_count, u.locked_until,
       (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'assigned')::int AS grade_assigned,
       (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'pending_review')::int AS grade_pending,
       (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'approved')::int AS grade_approved,
@@ -193,6 +262,9 @@ export async function listStaffWithCounts() {
     email: u.email,
     displayName: u.display_name ?? null,
     caps: { grade: !!u.can_grade, scan: !!u.can_scan, print: !!u.can_print },
+    enabled: !u.deleted_at,
+    failedLoginCount: Number(u.failed_login_count || 0),
+    lockedUntil: u.locked_until ? new Date(u.locked_until).toISOString() : null,
     reviewRate: u.review_rate == null ? 100 : Number(u.review_rate),
     gradeAssigned: Number(u.grade_assigned || 0),
     gradePending: Number(u.grade_pending || 0),
@@ -410,12 +482,39 @@ export async function resetStaffPassword(
   if (!pw.valid) return { ok: false, status: 400, error: pw.message || "Weak password" };
   const hash = await hashPassword(password);
   const upd = await db.execute(
-    sql`UPDATE users SET password_hash = ${hash}, updated_at = NOW()
+    sql`UPDATE users SET password_hash = ${hash},
+        credential_version = credential_version + 1,
+        failed_login_count = 0,
+        locked_until = NULL,
+        last_failed_login_at = NULL,
+        updated_at = NOW()
         WHERE id = ${userId} AND deleted_at IS NULL AND role <> 'admin' RETURNING id`
   );
   if (!upd.rows.length) return { ok: false, status: 409, error: "Password not updated" };
   // details is intentionally empty — NEVER the password (plain OR hash).
   await storage.writeAuditLog("user", userId, "staff_password_reset", adminUser, {});
+  invalidateStaffSessionCache(userId);
+  invalidateGraderSessionCache(userId);
+  return { ok: true };
+}
+
+export async function revokeStaffSessions(
+  userId: string,
+  adminUser: string
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const guard = await loadStaffForEdit(userId);
+  if (!guard.ok) return guard;
+  const upd = await db.execute(sql`
+    UPDATE users
+    SET credential_version = credential_version + 1,
+        updated_at = NOW()
+    WHERE id = ${userId} AND deleted_at IS NULL AND role <> 'admin'
+    RETURNING id
+  `);
+  if (!upd.rows.length) return { ok: false, status: 409, error: "Sessions not revoked" };
+  await storage.writeAuditLog("user", userId, "staff_sessions_revoked", adminUser, {});
+  invalidateStaffSessionCache(userId);
+  invalidateGraderSessionCache(userId);
   return { ok: true };
 }
 
@@ -441,7 +540,9 @@ export async function deleteStaffAccount(staffId: string, adminUser: string) {
   if (n > 0) return { ok: false as const, status: 400, error: `Reassign ${n} card(s) before deleting.` };
 
   const r = await db.execute(
-    sql`UPDATE users SET deleted_at = NOW(), updated_at = NOW()
+    sql`UPDATE users SET deleted_at = NOW(),
+        credential_version = credential_version + 1,
+        updated_at = NOW()
         WHERE id = ${staffId} AND role <> 'admin' AND deleted_at IS NULL RETURNING id`
   );
   if (!r.rows.length) return { ok: false as const, status: 409, error: "Account is not deletable or already deleted" };

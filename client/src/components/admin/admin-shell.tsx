@@ -23,6 +23,7 @@ import {
   Tag,
   Users,
   Sparkles,
+  ShieldCheck,
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
 import InstallAppButton from "../install-app-button";
@@ -77,6 +78,7 @@ const NAV: NavSection[] = [
       { key: "certs", label: "Certificates", icon: List },
       { key: "printing", label: "Printing", icon: Printer },
       { href: "/admin/staff", label: "Staff", icon: Users },
+      { href: "/admin/security", label: "Security", icon: ShieldCheck },
     ],
   },
   {

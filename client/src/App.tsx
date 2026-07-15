@@ -35,6 +35,7 @@ const AdminGradersPage = lazy(() => import("@/pages/admin-graders"));
 const StaffLoginPage = lazy(() => import("@/pages/staff-login"));
 const StaffPage = lazy(() => import("@/pages/staff"));
 const AdminStaffPage = lazy(() => import("@/pages/admin-staff"));
+const AdminSecurityPage = lazy(() => import("@/pages/admin-security"));
 const AdminOperatorStatsPage = lazy(() => import("@/pages/admin-operator-stats"));
 const AdminInstagramPage = lazy(() => import("@/pages/admin-instagram"));
 const AdminWeeklyReelPage = lazy(() => import("@/pages/admin-weekly-reel"));
@@ -222,6 +223,7 @@ function Router() {
           <Route path="/admin/promotions" component={AdminPage} />
           <Route path="/admin/graders" component={AdminStaffPage} />
           <Route path="/admin/staff" component={AdminStaffPage} />
+          <Route path="/admin/security" component={AdminSecurityPage} />
           <Route path="/admin/operator-stats" component={AdminOperatorStatsPage} />
           <Route path="/grader/login">
             <GraderLoginPage />

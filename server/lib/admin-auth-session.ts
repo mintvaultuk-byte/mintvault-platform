@@ -1,6 +1,5 @@
 import type { Request, Response } from "express";
-
-const SESSION_COOKIE_NAME = "mv.sid";
+import { clearSessionCookie, SESSION_COOKIE_NAME } from "./auth-security";
 
 type AdminAuthReason =
   | "admin_login_pending"
@@ -37,12 +36,7 @@ function logAdminAuth(req: Request, reason: AdminAuthReason, extra: Record<strin
 }
 
 function clearAdminCookie(res: Response) {
-  res.clearCookie(SESSION_COOKIE_NAME, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-  });
+  clearSessionCookie(res);
 }
 
 export function adminSessionSave(req: Request): Promise<void> {

@@ -76,7 +76,8 @@ export const users = pgTable("users", {
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-  // Account auth fields — added by migrateAccountSchema() at startup
+  // Account auth fields — base fields from migrateAccountSchema(); Phase 1
+  // hardening columns from migrations/add-auth-security-hardening-phase1.sql.
   passwordHash: text("password_hash"),
   displayName: text("display_name"),
   emailVerified: boolean("email_verified").notNull().default(false),
@@ -85,6 +86,9 @@ export const users = pgTable("users", {
   lastLoginIp: text("last_login_ip"),
   failedLoginCount: integer("failed_login_count").notNull().default(0),
   lockedUntil: timestamp("locked_until"),
+  lastFailedLoginAt: timestamp("last_failed_login_at"),
+  credentialVersion: integer("credential_version").notNull().default(1),
+  adminPassphraseHash: text("admin_passphrase_hash"),
   // PIN auth (v1 launch) — separate lockout state from password above so
   // cert-owner PIN failures don't share counters with account-holder password.
   pinHash: text("pin_hash"),

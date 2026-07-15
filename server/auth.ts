@@ -1,5 +1,14 @@
 import type { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
+import { storage } from "./storage";
+import { verifyPassword } from "./account-auth";
+import {
+  ADMIN_ABSOLUTE_SESSION_MS,
+  clearSessionCookie,
+  credentialVersionOf,
+  destroySessionAndClearCookie,
+  isAbsoluteSessionExpired,
+} from "./lib/auth-security";
 
 // Aligned 2026-05-04 with the user row migrated to role='admin' by
 // migrateAccountSchema(). PIN auth flow uses storage.getUserByEmail(ADMIN_EMAIL)
@@ -100,10 +109,19 @@ export function clearPinAttempts(req: Request): void {
   pinAttempts.delete(ip);
 }
 
-export async function verifyAdminPassword(password: string): Promise<boolean> {
+export type AdminPasswordVerification =
+  | { valid: true; source: "db_hash" | "break_glass"; adminUser?: unknown }
+  | { valid: false; source: "db_hash" | "break_glass" | "missing"; adminUser?: unknown };
+
+export async function verifyAdminPassword(password: string, adminUser?: unknown): Promise<AdminPasswordVerification> {
+  const user = adminUser ?? (await storage.getUserByEmail(ADMIN_EMAIL));
+  const hash = (user as any)?.adminPassphraseHash ?? (user as any)?.admin_passphrase_hash;
+  if (hash) {
+    return { valid: await verifyPassword(password, String(hash)), source: "db_hash", adminUser: user };
+  }
   const raw = process.env.ADMIN_PASSWORD;
-  if (!raw) return false;
-  return timingSafeEqual(password.trim(), raw.trim());
+  if (!raw) return { valid: false, source: "missing", adminUser: user };
+  return { valid: timingSafeEqual(password.trim(), raw.trim()), source: "break_glass", adminUser: user };
 }
 
 // verifyAdminPin removed 2026-05-04 — admin PIN is now bcrypt-hashed on
@@ -125,7 +143,7 @@ export function clearPendingAdmin(req: Request): void {
   }
 }
 
-export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   // Internal grader→admin delegation: the grader proxy (server/routes/grader.ts)
   // sets this request-local flag ONLY after verifying grader OWNERSHIP of the
   // cert, then re-dispatches to the unchanged admin handler. Not settable by any
@@ -134,7 +152,25 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
     return next();
   }
   if (req.session && req.session.isAdmin) {
-    return next();
+    try {
+      if (isAbsoluteSessionExpired(req, ADMIN_ABSOLUTE_SESSION_MS)) {
+        await destroySessionAndClearCookie(req, res);
+        return res.status(401).json({ error: "Session expired" });
+      }
+      const adminUser = await storage.getUserByEmail(ADMIN_EMAIL);
+      if (!adminUser || (adminUser as any).deletedAt) {
+        await destroySessionAndClearCookie(req, res);
+        return res.status(401).json({ error: "Unauthorized" });
+      }
+      const sessionVersion = Number((req.session as any).credentialVersion ?? 1);
+      if (sessionVersion !== credentialVersionOf(adminUser)) {
+        await destroySessionAndClearCookie(req, res);
+        return res.status(401).json({ error: "Session expired" });
+      }
+      return next();
+    } catch {
+      return res.status(500).json({ error: "Internal server error" });
+    }
   }
   // A logged-in GRADER must NEVER reach an admin route — explicit 403 (not 401)
   // so it's unambiguous this is a role denial, not a missing session.
@@ -142,6 +178,10 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
     return res.status(403).json({ error: "Forbidden: graders cannot access admin endpoints" });
   }
   return res.status(401).json({ error: "Unauthorized" });
+}
+
+export function clearAuthCookie(res: Response) {
+  clearSessionCookie(res);
 }
 
 export function adminIpAllowlist(req: Request, res: Response, next: NextFunction) {
@@ -170,6 +210,10 @@ declare module "express-session" {
     pendingAdmin: boolean;
     pendingAdminAt: number | undefined;
     pinFailures: number;
+    authUserId: string;
+    authRole: string;
+    credentialVersion: number;
+    authenticatedAt: number;
     // Legacy customer magic link auth (dashboard)
     customerEmail: string;
     // Unified account auth
