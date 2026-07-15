@@ -36,11 +36,18 @@ type FactoryCard = {
   attack1Name?: string | null;
   attack1Cost?: number | null;
   attack1Damage?: number | null;
+  attack1Effect?: string | null;
+  attack2Name?: string | null;
+  attack2Cost?: number | null;
+  attack2Damage?: number | null;
+  attack2Effect?: string | null;
   vulnerability?: string | null;
   rarity?: string | null;
   edition?: string | null;
   year?: number | null;
   prevArtR2Key?: string | null;
+  notes?: string | null;
+  effects?: Record<string, unknown> | null;
 };
 type FactoryRow = {
   spec: VqCardFactorySpec;
@@ -65,6 +72,7 @@ type FactoryRow = {
   placement: VqCardFactoryPlacement;
   approvalState: "missing" | "current" | "stale";
   approvalStaleReason: string | null;
+  previousStagePortraitStatus: "not_required" | "missing" | "linked";
 };
 type Dashboard = {
   rows: FactoryRow[];
@@ -99,6 +107,52 @@ const QUEUE_SORTS = [
   ["ready_for_review", "Ready for review"],
 ] as const;
 type QueueSort = (typeof QUEUE_SORTS)[number][0];
+type CardDataDraft = {
+  health: string;
+  guard: string;
+  shift: string;
+  vulnerability: string;
+  rarity: string;
+  attack1Name: string;
+  attack1Cost: string;
+  attack1Damage: string;
+  attack1Effect: string;
+  attack2Name: string;
+  attack2Cost: string;
+  attack2Damage: string;
+  attack2Effect: string;
+  flavourText: string;
+  edition: string;
+  year: string;
+  footerCopyright: string;
+};
+
+function metadataText(card: FactoryCard | null, key: "flavourText" | "footerCopyright"): string {
+  const meta = card?.effects?.cardFactory;
+  return meta && typeof meta === "object" && key in meta ? String((meta as Record<string, unknown>)[key] ?? "") : "";
+}
+
+function draftFromRow(row: FactoryRow | null): CardDataDraft {
+  return {
+    health: row?.card?.health == null ? "" : String(row.card.health),
+    guard: row?.card?.guard == null ? "" : String(row.card.guard),
+    shift: row?.card?.shift == null ? "" : String(row.card.shift),
+    vulnerability: row?.card?.vulnerability ?? "",
+    rarity: row?.card?.rarity ?? "",
+    attack1Name: row?.card?.attack1Name ?? "",
+    attack1Cost: row?.card?.attack1Cost == null ? "" : String(row.card.attack1Cost),
+    attack1Damage: row?.card?.attack1Damage == null ? "" : String(row.card.attack1Damage),
+    attack1Effect: row?.card?.attack1Effect ?? "",
+    attack2Name: row?.card?.attack2Name ?? "",
+    attack2Cost: row?.card?.attack2Cost == null ? "" : String(row.card.attack2Cost),
+    attack2Damage: row?.card?.attack2Damage == null ? "" : String(row.card.attack2Damage),
+    attack2Effect: row?.card?.attack2Effect ?? "",
+    flavourText: metadataText(row?.card ?? null, "flavourText") || row?.card?.notes || "",
+    edition: row?.card?.edition ?? "First Edition",
+    year: row?.card?.year == null ? "2026" : String(row.card.year),
+    footerCopyright: metadataText(row?.card ?? null, "footerCopyright"),
+  };
+}
 
 function statusTone(status: FactoryRow["completionStatus"]) {
   if (status === "approved_for_print") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-100";
@@ -234,6 +288,7 @@ export default function AdminVaultQuestCardFactoryPage() {
   const [showTrim, setShowTrim] = useState(true);
   const [showSafe, setShowSafe] = useState(false);
   const [placementDraft, setPlacementDraft] = useState<VqCardFactoryPlacement>(VQ_CARD_FACTORY_PLACEMENT_DEFAULT);
+  const [dataDraft, setDataDraft] = useState<CardDataDraft>(() => draftFromRow(null));
 
   const dashboardQ = useQuery<Dashboard>({
     queryKey: ["/api/admin/vault-quest/card-factory/dashboard"],
@@ -246,9 +301,21 @@ export default function AdminVaultQuestCardFactoryPage() {
 
   const rows = dashboardQ.data?.rows ?? [];
   const selected = rows.find((row) => row.spec.collectorNumber === selectedNumber) ?? rows[0] ?? null;
+  const savedDataDraft = useMemo(() => draftFromRow(selected), [selected]);
+  const dataDirty = JSON.stringify(dataDraft) !== JSON.stringify(savedDataDraft);
   useEffect(() => {
     setPlacementDraft(normalizeVqFactoryPlacement(selected?.placement));
-  }, [selected?.spec.collectorNumber, selected?.placement]);
+    setDataDraft(draftFromRow(selected));
+  }, [selected?.spec.collectorNumber, selected?.placement, savedDataDraft]);
+  useEffect(() => {
+    if (!dataDirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dataDirty]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((row) => {
@@ -313,6 +380,10 @@ export default function AdminVaultQuestCardFactoryPage() {
   };
 
   const selectedIndex = VQ_STANDARD_CARD_SPECS.findIndex((spec) => spec.collectorNumber === selectedNumber);
+  const selectCard = (collectorNumber: string) => {
+    if (dataDirty && !window.confirm("Discard unsaved card data changes?")) return;
+    setSelectedNumber(collectorNumber);
+  };
   const savePlacement = async () => {
     if (!selected) return;
     await runAction("Saved placement", async () => {
@@ -326,11 +397,25 @@ export default function AdminVaultQuestCardFactoryPage() {
     });
   };
 
+  const saveCardData = async () => {
+    if (!selected) return;
+    await runAction("Saved card data", async () => {
+      const res = await fetch(`/api/admin/vault-quest/card-factory/cards/${selected.spec.collectorNumber}/data`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...dataDraft, expectedUpdatedAt: selected.card?.updatedAt ?? null }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Card data save failed");
+    });
+  };
+
   const go = (delta: number) => {
     const next =
       VQ_STANDARD_CARD_SPECS[Math.max(0, Math.min(VQ_STANDARD_CARD_SPECS.length - 1, selectedIndex + delta))];
-    if (next) setSelectedNumber(next.collectorNumber);
+    if (next) selectCard(next.collectorNumber);
   };
+  const scrollToFactoryStep = (id: string) => document.getElementById(id)?.scrollIntoView({ block: "start" });
 
   return (
     <div className="min-h-screen bg-[#081A3D] text-zinc-100">
@@ -368,7 +453,7 @@ export default function AdminVaultQuestCardFactoryPage() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => nextBlocked && setSelectedNumber(nextBlocked.spec.collectorNumber)}
+                  onClick={() => nextBlocked && selectCard(nextBlocked.spec.collectorNumber)}
                   disabled={!nextBlocked}
                   className="inline-flex items-center gap-1 rounded bg-amber-300 px-3 py-2 text-xs font-black text-[#081A3D] disabled:opacity-40"
                 >
@@ -394,7 +479,7 @@ export default function AdminVaultQuestCardFactoryPage() {
                   <button
                     key={`queue-${row.spec.collectorNumber}`}
                     type="button"
-                    onClick={() => setSelectedNumber(row.spec.collectorNumber)}
+                    onClick={() => selectCard(row.spec.collectorNumber)}
                     className="flex w-full items-center justify-between gap-2 rounded border border-white/10 bg-[#06142F] px-3 py-2 text-left text-xs hover:border-amber-300/60"
                   >
                     <span className="font-bold">
@@ -435,7 +520,7 @@ export default function AdminVaultQuestCardFactoryPage() {
                   <button
                     key={row.spec.collectorNumber}
                     type="button"
-                    onClick={() => setSelectedNumber(row.spec.collectorNumber)}
+                    onClick={() => selectCard(row.spec.collectorNumber)}
                     className={`w-full rounded border p-3 text-left transition ${selectedNumber === row.spec.collectorNumber ? "border-amber-300 bg-amber-300/10" : "border-white/10 bg-[#06142F] hover:border-amber-300/60"}`}
                   >
                     <span className="flex items-center justify-between gap-2">
@@ -510,7 +595,7 @@ export default function AdminVaultQuestCardFactoryPage() {
                           <td className="py-2 pr-3">
                             <button
                               type="button"
-                              onClick={() => setSelectedNumber(row.spec.collectorNumber)}
+                              onClick={() => selectCard(row.spec.collectorNumber)}
                               className="font-bold text-amber-100 hover:underline"
                             >
                               {row.spec.collectorNumber} {row.spec.character}
@@ -578,32 +663,69 @@ export default function AdminVaultQuestCardFactoryPage() {
                     </div>
                   ))}
                 </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {[
+                    ["Edit Data", "factory-card-data"],
+                    ["Select Approved Artwork", "factory-artwork"],
+                    ["Link Previous Stage", "factory-artwork"],
+                    ["Fix Placement", "factory-artwork"],
+                    ["Review Preview", "factory-preview"],
+                    ["Approve", "factory-approve"],
+                  ].map(([action, target]) => (
+                    <button
+                      key={action}
+                      type="button"
+                      onClick={() => scrollToFactoryStep(target)}
+                      className="rounded border border-white/10 bg-[#06142F] px-3 py-2 text-xs font-bold text-zinc-200"
+                    >
+                      {action}
+                    </button>
+                  ))}
+                </div>
               </section>
 
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
                 <section className="space-y-4">
-                  <div className="rounded border border-white/10 bg-white/5 p-4">
-                    <p className="mb-3 text-sm font-bold text-amber-300">Step 2 - Card Data</p>
-                    <div className="grid gap-2 md:grid-cols-2">
+                  <div id="factory-card-data" className="scroll-mt-4 rounded border border-white/10 bg-white/5 p-4">
+                    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-amber-300">Step 2 - Card Data</p>
+                        <p className="text-xs text-zinc-400">
+                          Draft edits save to the selected Standard card only. Approved snapshots become stale after a
+                          material edit.
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        {dataDirty && (
+                          <button
+                            type="button"
+                            onClick={() => setDataDraft(savedDataDraft)}
+                            className="rounded border border-white/10 px-3 py-2 text-xs"
+                          >
+                            Discard
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={saveCardData}
+                          disabled={!!busy || !dataDirty}
+                          className="rounded bg-amber-300 px-3 py-2 text-xs font-black text-[#081A3D] disabled:opacity-40"
+                        >
+                          {busy === "Saved card data" ? "Saving..." : "Save Draft Data"}
+                        </button>
+                      </div>
+                    </div>
+                    {dataDirty && (
+                      <p className="mb-3 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-100">
+                        Unsaved changes. Preview, validation and export use the last saved draft.
+                      </p>
+                    )}
+                    <div className="mb-3 grid gap-2 md:grid-cols-4">
                       {[
-                        ["Card name", selected.card?.name ?? "Missing"],
-                        ["Stage", selected.card?.stageNumber ?? selected.spec.stage],
-                        ["Element", selected.card?.element ?? "Missing"],
-                        ["Health", selected.card?.health ?? "Missing"],
-                        ["Guard", selected.card?.guard ?? "Missing"],
-                        ["Shift", selected.card?.shift ?? "Missing"],
+                        ["Card name", selected.spec.character],
+                        ["Stage", selected.spec.stage],
+                        ["Element", selected.spec.element],
                         ["Evolves From", selected.spec.expectedPreviousName ?? "None"],
-                        ["Attack 1", selected.card?.attack1Name ?? "Missing"],
-                        [
-                          "Core / Damage",
-                          `${selected.card?.attack1Cost ?? "Missing"} / ${selected.card?.attack1Damage ?? "Missing"}`,
-                        ],
-                        ["Vulnerability", selected.card?.vulnerability ?? "Missing"],
-                        ["Rarity", selected.card?.rarity ?? "Missing"],
-                        [
-                          "Edition / Year",
-                          `${selected.card?.edition ?? "Missing"} / ${selected.card?.year ?? "Missing"}`,
-                        ],
                       ].map(([label, value]) => (
                         <div key={label} className="rounded border border-white/10 bg-[#06142F] p-3">
                           <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">{label}</p>
@@ -611,9 +733,54 @@ export default function AdminVaultQuestCardFactoryPage() {
                         </div>
                       ))}
                     </div>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      {[
+                        ["Health", "health", "number"],
+                        ["Guard", "guard", "number"],
+                        ["Shift", "shift", "number"],
+                        ["Vulnerability", "vulnerability", "text"],
+                        ["Rarity", "rarity", "text"],
+                        ["Edition", "edition", "text"],
+                        ["Year", "year", "number"],
+                        ["Attack 1 name", "attack1Name", "text"],
+                        ["Attack 1 Core cost", "attack1Cost", "number"],
+                        ["Attack 1 damage", "attack1Damage", "number"],
+                        ["Attack 2 name", "attack2Name", "text"],
+                        ["Attack 2 Core cost", "attack2Cost", "number"],
+                        ["Attack 2 damage", "attack2Damage", "number"],
+                        ["Footer/copyright", "footerCopyright", "text"],
+                      ].map(([label, key, type]) => (
+                        <label key={key} className="text-xs font-semibold text-zinc-300">
+                          {label}
+                          <input
+                            type={type}
+                            value={dataDraft[key as keyof CardDataDraft]}
+                            onChange={(event) => setDataDraft((prev) => ({ ...prev, [key]: event.target.value }))}
+                            className="mt-1 h-9 w-full rounded border border-white/10 bg-[#06142F] px-3 text-sm outline-none focus:border-amber-300"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      {[
+                        ["Attack 1 effect", "attack1Effect"],
+                        ["Attack 2 effect", "attack2Effect"],
+                        ["Flavour text", "flavourText"],
+                      ].map(([label, key]) => (
+                        <label key={key} className="text-xs font-semibold text-zinc-300">
+                          {label}
+                          <textarea
+                            value={dataDraft[key as keyof CardDataDraft]}
+                            onChange={(event) => setDataDraft((prev) => ({ ...prev, [key]: event.target.value }))}
+                            rows={3}
+                            className="mt-1 w-full rounded border border-white/10 bg-[#06142F] px-3 py-2 text-sm outline-none focus:border-amber-300"
+                          />
+                        </label>
+                      ))}
+                    </div>
                   </div>
 
-                  <div className="rounded border border-white/10 bg-white/5 p-4">
+                  <div id="factory-artwork" className="scroll-mt-4 rounded border border-white/10 bg-white/5 p-4">
                     <p className="mb-3 text-sm font-bold text-amber-300">Step 3 - Artwork</p>
                     <div className="grid gap-3 md:grid-cols-3">
                       <div className="rounded border border-white/10 bg-[#06142F] p-3">
@@ -623,10 +790,10 @@ export default function AdminVaultQuestCardFactoryPage() {
                       <div className="rounded border border-white/10 bg-[#06142F] p-3">
                         <p className="text-xs text-zinc-400">Previous-stage portrait</p>
                         <p className="mt-1 font-bold">
-                          {selected.spec.stage === 1
+                          {selected.previousStagePortraitStatus === "not_required"
                             ? "Not required"
-                            : selected.card?.prevArtR2Key
-                              ? "Present"
+                            : selected.previousStagePortraitStatus === "linked"
+                              ? "Linked"
                               : "Missing"}
                         </p>
                       </div>
@@ -704,7 +871,7 @@ export default function AdminVaultQuestCardFactoryPage() {
                     </div>
                   </div>
 
-                  <div className="rounded border border-white/10 bg-white/5 p-4">
+                  <div id="factory-preview" className="scroll-mt-4 rounded border border-white/10 bg-white/5 p-4">
                     <p className="mb-3 text-sm font-bold text-amber-300">Step 4 - Preview & QA</p>
                     <div className="mb-3 flex flex-wrap gap-2">
                       <label className="inline-flex items-center gap-2 rounded border border-white/10 px-3 py-1 text-xs">
@@ -761,7 +928,7 @@ export default function AdminVaultQuestCardFactoryPage() {
                 </section>
 
                 <aside className="space-y-4">
-                  <div className="rounded border border-white/10 bg-white/5 p-4">
+                  <div id="factory-approve" className="scroll-mt-4 rounded border border-white/10 bg-white/5 p-4">
                     <div className="mb-3 flex items-center justify-between">
                       <p className="text-sm font-bold text-amber-300">Exact Preview</p>
                       <span className="text-xs text-zinc-400">{zoom}%</span>

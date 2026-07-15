@@ -10,15 +10,18 @@ import {
   getVqStandardSpec,
   normalizeVqFactoryPlacement,
   normalizeVqCollectorNumber,
+  normalizeVqFactoryElement,
+  normalizeVqFactoryName,
   validateVqFactoryCard,
   vqFactoryFilename,
   type VqCardFactoryApprovalSnapshot,
+  type VqFactoryCardDataDraft,
   type VqCardFactoryPlacement,
   type VqCardFactorySpec,
   type VqFactoryValidationInput,
   type VqFactoryValidationIssue,
 } from "@shared/vq-card-factory";
-import type { VqCardRow, VqCharacter, VqFamily } from "@shared/vq-schema";
+import type { InsertVqCard, VqCardRow, VqCharacter, VqFamily } from "@shared/vq-schema";
 import { vqStorage } from "./storage";
 import { fetchArt } from "./render-saved";
 import { renderCard, type RenderCardInput } from "./render-service";
@@ -65,6 +68,7 @@ export interface VqFactoryCardRow {
   approval: VqCardFactoryApprovalSnapshot | null;
   approvalState: "missing" | "current" | "stale";
   approvalStaleReason: string | null;
+  previousStagePortraitStatus: "not_required" | "missing" | "linked";
 }
 
 function sha256(buf: Buffer | string): string {
@@ -113,10 +117,12 @@ export function cardFactoryDataChecksum(card: VqCardRow): string {
       attack2Effect: card.attack2Effect,
       vulnerability: card.vulnerability,
       keywords: card.keywords,
+      effects: card.effects,
       setCode: card.setCode,
       language: card.language,
       year: card.year,
       edition: card.edition,
+      notes: card.notes,
     })
   );
 }
@@ -133,7 +139,8 @@ function factoryInput(
   spec: VqCardFactorySpec,
   card: VqCardRow | null,
   character: VqCharacter | null,
-  family: VqFamily | null
+  family: VqFamily | null,
+  previousStagePortraitKey: string | null = null
 ): VqFactoryValidationInput | null {
   if (!card) return null;
   const previousStage =
@@ -165,10 +172,31 @@ function factoryInput(
     edition: card.edition,
     year: card.year,
     artR2Key: card.artR2Key || character?.approvedArtworkR2Key || null,
-    prevArtR2Key: card.prevArtR2Key || null,
+    prevArtR2Key: card.prevArtR2Key || previousStagePortraitKey || null,
     artworkApproved: !!(card.artR2Key || character?.approvedArtworkR2Key),
     status: card.status,
   };
+}
+
+function approvedCharacterPortraitKey(character: VqCharacter | null | undefined): string | null {
+  return (
+    character?.approvedArtworkR2Key ||
+    character?.referenceArtworkR2Key ||
+    character?.referencePack?.master_portrait?.r2Key ||
+    null
+  );
+}
+
+function previousCharacterForSpec(spec: VqCardFactorySpec, characters: VqCharacter[]): VqCharacter | null {
+  if (!spec.expectedPreviousName) return null;
+  return (
+    characters.find(
+      (character) =>
+        character.familyId === spec.familyId &&
+        character.stageNumber === spec.stage - 1 &&
+        normalizeVqFactoryName(character.characterName) === spec.expectedPreviousName
+    ) ?? null
+  );
 }
 
 function findCardForSpec(spec: VqCardFactorySpec, cards: VqCardRow[]): VqCardRow | null {
@@ -250,11 +278,15 @@ export async function getFactoryRows(): Promise<VqFactoryCardRow[]> {
   const config = await vqStorage.getConfig();
   const inputs = VQ_STANDARD_CARD_SPECS.map((spec) => {
     const card = findCardForSpec(spec, cards);
-    return factoryInput(spec, card, null, familyForSpec(spec, families, card));
+    const previousCharacter = previousCharacterForSpec(spec, characters);
+    const previousStagePortraitKey = approvedCharacterPortraitKey(previousCharacter);
+    return factoryInput(spec, card, null, familyForSpec(spec, families, card), previousStagePortraitKey);
   }).filter(Boolean) as VqFactoryValidationInput[];
   return VQ_STANDARD_CARD_SPECS.map((spec) => {
     const card = findCardForSpec(spec, cards);
     const character = characterForSpec(spec, characters, card);
+    const previousCharacter = previousCharacterForSpec(spec, characters);
+    const previousStagePortraitKey = approvedCharacterPortraitKey(previousCharacter);
     const family = familyForSpec(spec, families, card);
     const placement = normalizeVqFactoryPlacement(
       card ? jsonParse(config[configKey("placement", card.cardId)], VQ_CARD_FACTORY_PLACEMENT_DEFAULT) : null
@@ -263,7 +295,7 @@ export async function getFactoryRows(): Promise<VqFactoryCardRow[]> {
       ? jsonParse<VqCardFactoryApprovalSnapshot | null>(config[configKey("approval", card.cardId)], null)
       : null;
     const approvalView = resolveFactoryApprovalState(card, placement, approval);
-    const input = factoryInput(spec, card, character, family);
+    const input = factoryInput(spec, card, character, family, previousStagePortraitKey);
     const validation = validateVqFactoryCard(spec, input, inputs);
     if (approvalView.approvalState === "stale") {
       validation.push({
@@ -327,6 +359,7 @@ export async function getFactoryRows(): Promise<VqFactoryCardRow[]> {
       approval,
       approvalState: approvalView.approvalState,
       approvalStaleReason: approvalView.approvalStaleReason,
+      previousStagePortraitStatus: spec.stage === 1 ? "not_required" : input?.prevArtR2Key ? "linked" : "missing",
     };
   });
 }
@@ -419,6 +452,89 @@ function renderInput(spec: VqCardFactorySpec, card: VqCardRow): RenderCardInput 
     year: card.year,
     edition: card.edition,
   };
+}
+
+function intOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isInteger(n) ? n : null;
+}
+
+function textOrNull(value: unknown, max = 500): string | null {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
+
+function factoryDraftToCard(
+  spec: VqCardFactorySpec,
+  existing: VqCardRow | null,
+  draft: VqFactoryCardDataDraft
+): InsertVqCard {
+  const effects = {
+    ...((existing?.effects && typeof existing.effects === "object" && !Array.isArray(existing.effects)
+      ? existing.effects
+      : {}) as Record<string, unknown>),
+    cardFactory: {
+      flavourText: textOrNull(draft.flavourText, 1000),
+      footerCopyright: textOrNull(draft.footerCopyright, 200),
+    },
+  };
+  return {
+    cardId: existing?.cardId ?? spec.cardId,
+    collectorNumber: `${spec.collectorNumber}/036`,
+    name:
+      normalizeVqFactoryName(existing?.name) === spec.character ? (existing?.name ?? spec.character) : spec.character,
+    displayName: spec.character,
+    cardType: "Creature",
+    element:
+      normalizeVqFactoryElement(existing?.element) === spec.element
+        ? (existing?.element ?? spec.element)
+        : spec.element,
+    rarity: textOrNull(draft.rarity, 80),
+    familyId: spec.familyId,
+    stageNumber: spec.stage,
+    lifeStage: spec.stage === 1 ? "BABY" : spec.stage === 2 ? "TEEN" : "FINAL",
+    health: intOrNull(draft.health),
+    guard: intOrNull(draft.guard),
+    shift: intOrNull(draft.shift),
+    attack1Name: textOrNull(draft.attack1Name, 80),
+    attack1Cost: intOrNull(draft.attack1Cost),
+    attack1Damage: intOrNull(draft.attack1Damage),
+    attack1Effect: textOrNull(draft.attack1Effect, 500),
+    attack2Name: textOrNull(draft.attack2Name, 80),
+    attack2Cost: intOrNull(draft.attack2Cost),
+    attack2Damage: intOrNull(draft.attack2Damage),
+    attack2Effect: textOrNull(draft.attack2Effect, 500),
+    vulnerability: textOrNull(draft.vulnerability, 80),
+    keywords: existing?.keywords ?? [],
+    effects,
+    artR2Key: existing?.artR2Key ?? null,
+    prevArtR2Key: existing?.prevArtR2Key ?? null,
+    renderR2Key: existing?.renderR2Key ?? null,
+    variantTier: existing?.variantTier ?? "STANDARD",
+    baseCardId: existing?.baseCardId ?? null,
+    setCode: "GNV",
+    language: existing?.language ?? "EN",
+    year: intOrNull(draft.year) ?? 2026,
+    edition: textOrNull(draft.edition, 80) ?? "First Edition",
+    status: existing?.status ?? "draft",
+    notes: textOrNull(draft.flavourText, 1000),
+  };
+}
+
+export async function saveFactoryCardData(
+  collectorNumber: string,
+  draft: VqFactoryCardDataDraft,
+  editedBy = "admin"
+): Promise<VqFactoryCardRow> {
+  const row = await requiredFactoryRow(collectorNumber);
+  if (row.card && draft.expectedUpdatedAt && row.card.updatedAt?.toISOString() !== draft.expectedUpdatedAt) {
+    throw new Error("Card data changed since this editor opened — reload before saving.");
+  }
+  const card = factoryDraftToCard(row.spec, row.card, draft);
+  await vqStorage.saveCard(card, editedBy);
+  return requiredFactoryRow(row.spec.collectorNumber);
 }
 
 export async function applyFactoryPlacementToMainArt(

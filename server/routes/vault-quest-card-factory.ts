@@ -13,6 +13,7 @@ import {
   renderFactoryBack,
   renderFactoryFront,
   requiredFactoryRow,
+  saveFactoryCardData,
   saveFactoryPlacement,
   validateFactoryRender,
 } from "../vault-quest/card-factory";
@@ -36,9 +37,11 @@ function handleFactoryError(res: Response, err: unknown) {
   const message = err instanceof Error ? err.message : "Card Factory action failed";
   const status = /unknown|not found/i.test(message)
     ? 404
-    : /not export-ready|missing|required|blocked|No card/i.test(message)
-      ? 422
-      : 500;
+    : /changed since|reload before saving|concurrently/i.test(message)
+      ? 409
+      : /not export-ready|missing|required|blocked|No card/i.test(message)
+        ? 422
+        : 500;
   res.status(status).json({ error: message });
 }
 
@@ -118,6 +121,18 @@ export function registerVaultQuestCardFactoryRoutes(app: Express): void {
       const input = normalizeVqFactoryPlacement(req.body ?? {});
       const placement = await saveFactoryPlacement(row.card.cardId, input);
       res.json({ placement, providerGeneration: false });
+    } catch (err) {
+      handleFactoryError(res, err);
+    }
+  });
+
+  app.put(`${base}/cards/:collectorNumber/data`, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      if (JSON.stringify(req.body ?? {}).length > 12000)
+        return res.status(413).json({ error: "Card data payload too large." });
+      const actor = req.session?.adminEmail || "admin";
+      const row = await saveFactoryCardData(String(req.params.collectorNumber), req.body ?? {}, actor);
+      res.json({ row, providerGeneration: false });
     } catch (err) {
       handleFactoryError(res, err);
     }
