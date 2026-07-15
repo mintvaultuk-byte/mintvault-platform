@@ -7,7 +7,7 @@ import { VariantPicker, TcgCardSearch, type TcgCardPick } from "@/components/ide
 
 /**
  * Admin staff hub (evolves admin-graders). One staff account list with per-person
- * capability toggles (grade/scan/print); GRADE assignment is cert-level, SCAN
+ * capability toggles (grade/scan/print/edit sets); GRADE assignment is cert-level, SCAN
  * assignment is submission-level; per-person counts. All admin-gated.
  */
 type Staff = {
@@ -17,7 +17,7 @@ type Staff = {
   enabled: boolean;
   failedLoginCount: number;
   lockedUntil: string | null;
-  caps: { grade: boolean; scan: boolean; print: boolean };
+  caps: { grade: boolean; scan: boolean; print: boolean; editSets: boolean };
   reviewRate: number;
   gradeAssigned: number;
   gradePending: number;
@@ -121,7 +121,7 @@ export default function AdminStaffPage() {
   const [nEmail, setNEmail] = useState("");
   const [nPw, setNPw] = useState("");
   const [nName, setNName] = useState("");
-  const [nCaps, setNCaps] = useState({ grade: true, scan: false, print: false });
+  const [nCaps, setNCaps] = useState({ grade: true, scan: false, print: false, editSets: false });
   async function createStaff(e: React.FormEvent) {
     e.preventDefault();
     setMsg(null);
@@ -137,6 +137,7 @@ export default function AdminStaffPage() {
         can_grade: nCaps.grade,
         can_scan: nCaps.scan,
         can_print: nCaps.print,
+        can_edit_sets: nCaps.editSets,
       }),
     });
     const d = await res.json().catch(() => ({}));
@@ -237,11 +238,13 @@ export default function AdminStaffPage() {
     load();
   }
 
-  async function toggleCap(id: string, cap: "grade" | "scan" | "print", value: boolean) {
+  async function toggleCap(id: string, cap: "grade" | "scan" | "print" | "editSets", value: boolean) {
     setMsg(null);
     setErr(null);
-    const body: any = {};
-    body[cap === "grade" ? "can_grade" : cap === "scan" ? "can_scan" : "can_print"] = value;
+    const body: Record<string, boolean> = {};
+    body[
+      cap === "grade" ? "can_grade" : cap === "scan" ? "can_scan" : cap === "print" ? "can_print" : "can_edit_sets"
+    ] = value;
     const res = await fetch(`/api/admin/staff/${id}/capabilities`, {
       method: "POST",
       credentials: "include",
@@ -651,14 +654,14 @@ export default function AdminStaffPage() {
               />
             </div>
             <div className="flex items-center gap-4 text-sm">
-              {(["grade", "scan", "print"] as const).map((c) => (
+              {(["grade", "scan", "print", "editSets"] as const).map((c) => (
                 <label key={c} className="flex items-center gap-1">
                   <input
                     type="checkbox"
-                    checked={(nCaps as any)[c]}
+                    checked={nCaps[c]}
                     onChange={(e) => setNCaps((p) => ({ ...p, [c]: e.target.checked }))}
                   />{" "}
-                  can {c}
+                  {c === "editSets" ? "can edit sets" : `can ${c}`}
                 </label>
               ))}
               <button className="bg-[#D4AF37] text-[#1A1400] font-bold py-1.5 px-4 rounded text-sm hover:bg-[#B8960C] ml-auto">
@@ -917,6 +920,7 @@ export default function AdminStaffPage() {
                   <th>Grade</th>
                   <th>Scan</th>
                   <th>Print</th>
+                  <th>Edit Sets</th>
                   <th title="Percent of this operator's submissions that are manually reviewed (rest auto-approve)">
                     Review %
                   </th>
@@ -932,7 +936,7 @@ export default function AdminStaffPage() {
                       <td className="py-1.5">
                         {s.displayName || "—"} <span className="text-[#E8E4DC]/50 text-xs">{s.email}</span>
                       </td>
-                      {(["grade", "scan", "print"] as const).map((cap) => (
+                      {(["grade", "scan", "print", "editSets"] as const).map((cap) => (
                         <td key={cap}>
                           <input
                             type="checkbox"
@@ -1152,6 +1156,7 @@ export default function AdminStaffPage() {
                         setIdoSetCode(id || "");
                       }}
                       allowAddSet
+                      allowEditSet
                       createEndpoint="/api/staff/custom-sets"
                       prefill={{ setName: idoSet, setCode: idoSetCode }}
                       testId="input-override-set"

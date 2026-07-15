@@ -1852,10 +1852,12 @@ export default function GradingPanel({
           className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-amber-300"
           data-testid="grader-edit-banner"
         >
-          <div className="text-[11px] font-bold uppercase tracking-wider">Submitted · editing (stays pending review)</div>
+          <div className="text-[11px] font-bold uppercase tracking-wider">
+            Submitted · editing (stays pending review)
+          </div>
           <div className="text-[11px] text-amber-200/80">
-            You&apos;re correcting an already-submitted card with the full tools. Saving keeps it pending review —
-            it never publishes; an admin still approves it.
+            You&apos;re correcting an already-submitted card with the full tools. Saving keeps it pending review — it
+            never publishes; an admin still approves it.
           </div>
         </div>
       )}
@@ -1972,6 +1974,7 @@ export default function GradingPanel({
                     setIdSetCode(id || "");
                   }}
                   allowAddSet
+                  allowEditSet
                   createEndpoint="/api/staff/custom-sets"
                   prefill={{ setName: idSet, setCode: idSetCode }}
                   testId="input-identity-set"
@@ -2120,7 +2123,6 @@ export default function GradingPanel({
           <span className="text-[10px] text-[var(--admin-ink-dim)] ml-auto">Required before approve</span>
         </label>
       )}
-
 
       {/* AI Panel + Reprocess — HIDDEN in admin-review (every AI/CV action hits
           /api/admin, would burn credits + overwrite the grader's work) AND HIDDEN

@@ -85,6 +85,7 @@ export function registerStaffRoutes(app: Express): void {
       s.capGrade = r.caps.grade;
       s.capScan = r.caps.scan;
       s.capPrint = r.caps.print;
+      s.capEditSets = r.caps.editSets;
       // Back-compat: the grade routes + delegation proxy read graderId/graderEmail
       // and gate on the 'grade' capability — alias them to the staff identity so
       // the grader machinery is reused unchanged.
@@ -136,7 +137,7 @@ export function registerStaffRoutes(app: Express): void {
       return res.json({
         authenticated: true,
         email: s.staffEmail,
-        caps: { grade: !!s.capGrade, scan: !!s.capScan, print: !!s.capPrint },
+        caps: { grade: !!s.capGrade, scan: !!s.capScan, print: !!s.capPrint, editSets: !!s.capEditSets },
       });
     }
     return res.json({ authenticated: false });
@@ -264,13 +265,13 @@ export function registerStaffRoutes(app: Express): void {
   });
 
   app.post("/api/admin/staff", requireAdmin, async (req: Request, res: Response) => {
-    const { email, password, display_name, can_grade, can_scan, can_print } = req.body || {};
+    const { email, password, display_name, can_grade, can_scan, can_print, can_edit_sets } = req.body || {};
     const adminUser = (req.session as any).adminEmail || "admin";
     const result = await createStaffAccount(
       email,
       password,
       display_name ?? null,
-      { grade: !!can_grade, scan: !!can_scan, print: !!can_print },
+      { grade: !!can_grade, scan: !!can_scan, print: !!can_print, editSets: !!can_edit_sets },
       adminUser
     );
     if (!result.ok) return res.status(result.status).json({ error: result.error });
@@ -281,11 +282,12 @@ export function registerStaffRoutes(app: Express): void {
 
   app.post("/api/admin/staff/:id/capabilities", requireAdmin, async (req: Request, res: Response) => {
     const adminUser = (req.session as any).adminEmail || "admin";
-    const { can_grade, can_scan, can_print } = req.body || {};
-    const caps: { grade?: boolean; scan?: boolean; print?: boolean } = {};
+    const { can_grade, can_scan, can_print, can_edit_sets } = req.body || {};
+    const caps: { grade?: boolean; scan?: boolean; print?: boolean; editSets?: boolean } = {};
     if (typeof can_grade === "boolean") caps.grade = can_grade;
     if (typeof can_scan === "boolean") caps.scan = can_scan;
     if (typeof can_print === "boolean") caps.print = can_print;
+    if (typeof can_edit_sets === "boolean") caps.editSets = can_edit_sets;
     const r = await setStaffCapabilities(String(req.params.id), caps, adminUser);
     if (!r.ok) return res.status(r.status).json({ error: r.error });
     return res.json({ ok: true });

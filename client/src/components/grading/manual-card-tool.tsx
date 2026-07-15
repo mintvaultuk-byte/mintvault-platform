@@ -163,6 +163,20 @@ const LINE_PALETTES: LinePalette[] = [
   { id: "white", label: "White — high contrast on dark / holo art", outer: "#FFFFFF", inner: "#AEB4BC" },
 ];
 
+export const CENTERING_GUIDE_VISUALS = {
+  crosshairHaloStrokeWidth: 2.25,
+  crosshairColorStrokeWidth: 1.25,
+  centroidStrokeWidth: 1.2,
+  placedHaloStrokeWidth: 3.5,
+  placedColorStrokeWidth: 2,
+  railHaloStrokeWidth: 4,
+  railColorStrokeWidth: 2.25,
+  liveHaloStrokeWidth: 3.75,
+  liveColorStrokeWidth: 2.25,
+  haloStroke: "rgba(0,0,0,0.72)",
+  lightOutlineStroke: "rgba(255,255,255,0.82)",
+} as const;
+
 type DotPass = "outer" | "inner";
 
 function clamp(v: number, min = 0, max = 100) {
@@ -177,7 +191,7 @@ function centroid(pts: Point[]): Point {
 }
 
 /**
- * Thin two-tone crosshair marker: a dark halo underlay (contrast on light
+ * Two-tone crosshair marker: a dark halo underlay (contrast on light
  * cards) plus a coloured "+" with an open centre and ring (contrast on dark
  * cards). Shared by every placed dot AND the live cursor reticle so they read
  * as one family. No solid fill — the artwork and the exact centre stay visible.
@@ -185,19 +199,25 @@ function centroid(pts: Point[]): Point {
 function Crosshair({ color }: { color: string }) {
   return (
     <svg className="absolute inset-0 pointer-events-none" width={44} height={44} viewBox="0 0 44 44" aria-hidden="true">
-      {/* Stroke widths halved from the original 1.75/1 so the line itself
-          doesn't obscure the exact border pixel the operator is aiming at —
-          critical at high zoom (16×) where a 2px line covers ~8 source pixels.
-          Halo stays a touch wider than the colour stroke for contrast. */}
       <g fill="none" strokeLinecap="round">
-        <g stroke="rgba(0,0,0,0.5)" strokeWidth={1}>
+        <g stroke={CENTERING_GUIDE_VISUALS.haloStroke} strokeWidth={CENTERING_GUIDE_VISUALS.crosshairHaloStrokeWidth}>
           <line x1={22} y1={15} x2={22} y2={19} />
           <line x1={22} y1={25} x2={22} y2={29} />
           <line x1={15} y1={22} x2={19} y2={22} />
           <line x1={25} y1={22} x2={29} y2={22} />
           <circle cx={22} cy={22} r={2} />
         </g>
-        <g stroke={color} strokeWidth={0.5}>
+        <g
+          stroke={CENTERING_GUIDE_VISUALS.lightOutlineStroke}
+          strokeWidth={CENTERING_GUIDE_VISUALS.crosshairColorStrokeWidth + 0.7}
+        >
+          <line x1={22} y1={15} x2={22} y2={19} />
+          <line x1={22} y1={25} x2={22} y2={29} />
+          <line x1={15} y1={22} x2={19} y2={22} />
+          <line x1={25} y1={22} x2={29} y2={22} />
+          <circle cx={22} cy={22} r={2} />
+        </g>
+        <g stroke={color} strokeWidth={CENTERING_GUIDE_VISUALS.crosshairColorStrokeWidth}>
           <line x1={22} y1={15} x2={22} y2={19} />
           <line x1={22} y1={25} x2={22} y2={29} />
           <line x1={15} y1={22} x2={19} y2={22} />
@@ -1498,160 +1518,160 @@ export default function ManualCardTool({
                 the card rotates under it (Cornelius: "stay straight and centred
                 with the panel, not the card"). */}
             <div className="relative flex-shrink-0">
-            {/* Capture container — shrink-wraps the (scaled) image, so its box
+              {/* Capture container — shrink-wraps the (scaled) image, so its box
                 == the visible card. Dots are absolute children (same box). */}
-            <div
-              ref={containerRef}
-              className="relative rounded-lg bg-[var(--admin-panel2)] flex-shrink-0"
-              // STEP 2 — live straighten preview. Rotating the STAGE CONTAINER
-              // (not the <img> alone) rotates the card image, the SVG crop/edge
-              // overlay AND the 8 dots together as one layer about the centre,
-              // so placed dots stay glued to the card and relative geometry is
-              // preserved. Capture phase only (defects shows the already-
-              // straightened crop). The pointer→image mapping inverse-rotates
-              // about this same centre, so clicks/drags land in source coords.
-              style={
-                phase === "capture" && rotation !== 0
-                  ? { transform: `rotate(${rotation}deg)`, transformOrigin: "center center" }
-                  : undefined
-              }
-              onMouseDown={onContainerMouseDown}
-              onMouseMove={onContainerMouseMove}
-              onMouseLeave={() => {
-                onContainerMouseUp();
-                onContainerMouseLeave();
-              }}
-              onMouseUp={onContainerMouseUp}
-              onTouchStart={onContainerTouchStart}
-              onTouchMove={onContainerTouchMove}
-              onTouchEnd={onContainerTouchEnd}
-              onTouchCancel={() => {
-                // OS took the gesture (scroll/zoom) → abandon the candidate tap.
-                touchTapRef.current = null;
-              }}
-            >
-              {phase === "defects" && localPreview && !croppedDisplayUrl ? (
-                // ── Optimistic local crop preview ──────────────────────────
-                // A CSS-only reconstruction of the server crop (rotate-expand
-                // the already-loaded raw <img>, then clip to the crop rect in
-                // an overflow:hidden frame). Display-only — no canvas, so no
-                // CORS taint. The frame is sized exactly like the R2 crop will
-                // be (renderW × renderH, driven by the crop aspect we fed into
-                // imgDims), so when croppedDisplayUrl arrives and this swaps to
-                // the <img> below, nothing shifts — and defect pins, being
-                // %-of-frame, stay pinned to the same spot.
-                <div
-                  className="block cursor-crosshair"
-                  style={{
-                    width: renderW ?? localPreview.cw,
-                    height: renderH ?? localPreview.ch,
-                    position: "relative",
-                    overflow: "hidden",
-                  }}
-                >
+              <div
+                ref={containerRef}
+                className="relative rounded-lg bg-[var(--admin-panel2)] flex-shrink-0"
+                // STEP 2 — live straighten preview. Rotating the STAGE CONTAINER
+                // (not the <img> alone) rotates the card image, the SVG crop/edge
+                // overlay AND the 8 dots together as one layer about the centre,
+                // so placed dots stay glued to the card and relative geometry is
+                // preserved. Capture phase only (defects shows the already-
+                // straightened crop). The pointer→image mapping inverse-rotates
+                // about this same centre, so clicks/drags land in source coords.
+                style={
+                  phase === "capture" && rotation !== 0
+                    ? { transform: `rotate(${rotation}deg)`, transformOrigin: "center center" }
+                    : undefined
+                }
+                onMouseDown={onContainerMouseDown}
+                onMouseMove={onContainerMouseMove}
+                onMouseLeave={() => {
+                  onContainerMouseUp();
+                  onContainerMouseLeave();
+                }}
+                onMouseUp={onContainerMouseUp}
+                onTouchStart={onContainerTouchStart}
+                onTouchMove={onContainerTouchMove}
+                onTouchEnd={onContainerTouchEnd}
+                onTouchCancel={() => {
+                  // OS took the gesture (scroll/zoom) → abandon the candidate tap.
+                  touchTapRef.current = null;
+                }}
+              >
+                {phase === "defects" && localPreview && !croppedDisplayUrl ? (
+                  // ── Optimistic local crop preview ──────────────────────────
+                  // A CSS-only reconstruction of the server crop (rotate-expand
+                  // the already-loaded raw <img>, then clip to the crop rect in
+                  // an overflow:hidden frame). Display-only — no canvas, so no
+                  // CORS taint. The frame is sized exactly like the R2 crop will
+                  // be (renderW × renderH, driven by the crop aspect we fed into
+                  // imgDims), so when croppedDisplayUrl arrives and this swaps to
+                  // the <img> below, nothing shifts — and defect pins, being
+                  // %-of-frame, stay pinned to the same spot.
                   <div
+                    className="block cursor-crosshair"
                     style={{
-                      position: "absolute",
-                      width: localPreview.RW,
-                      height: localPreview.RH,
-                      transformOrigin: "0 0",
-                      // scale natural-crop px → on-screen px, then shift the
-                      // crop rect's top-left to the frame origin.
-                      transform: `scale(${(renderW ?? localPreview.cw) / localPreview.cw}) translate(${-localPreview.cl}px, ${-localPreview.ct}px)`,
+                      width: renderW ?? localPreview.cw,
+                      height: renderH ?? localPreview.ch,
+                      position: "relative",
+                      overflow: "hidden",
                     }}
                   >
-                    <img
-                      src={rawImageUrl}
-                      alt={`${side} cropped preview`}
-                      draggable={false}
+                    <div
                       style={{
                         position: "absolute",
-                        // Centre the raw image inside the rotated-expanded box,
-                        // then rotate by the same deskew /recrop applies — this
-                        // reproduces sharp's rotate-with-expand exactly.
-                        left: (localPreview.RW - localPreview.rawW) / 2,
-                        top: (localPreview.RH - localPreview.rawH) / 2,
-                        width: localPreview.rawW,
-                        height: localPreview.rawH,
-                        transform: `rotate(${localPreview.d}deg)`,
-                        transformOrigin: "center center",
+                        width: localPreview.RW,
+                        height: localPreview.RH,
+                        transformOrigin: "0 0",
+                        // scale natural-crop px → on-screen px, then shift the
+                        // crop rect's top-left to the frame origin.
+                        transform: `scale(${(renderW ?? localPreview.cw) / localPreview.cw}) translate(${-localPreview.cl}px, ${-localPreview.ct}px)`,
                       }}
-                    />
+                    >
+                      <img
+                        src={rawImageUrl}
+                        alt={`${side} cropped preview`}
+                        draggable={false}
+                        style={{
+                          position: "absolute",
+                          // Centre the raw image inside the rotated-expanded box,
+                          // then rotate by the same deskew /recrop applies — this
+                          // reproduces sharp's rotate-with-expand exactly.
+                          left: (localPreview.RW - localPreview.rawW) / 2,
+                          top: (localPreview.RH - localPreview.rawH) / 2,
+                          width: localPreview.rawW,
+                          height: localPreview.rawH,
+                          transform: `rotate(${localPreview.d}deg)`,
+                          transformOrigin: "center center",
+                        }}
+                      />
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <img
-                  // In defects phase, swap to the freshly-cropped display image
-                  // returned by /recrop. imgDims re-measures via onLoad so
-                  // coordinate capture stays accurate against the new image's
-                  // natural pixels (same aspect as the preview → no pin shift).
-                  src={phase === "defects" && croppedDisplayUrl ? croppedDisplayUrl : rawImageUrl}
-                  alt={`${side} ${phase === "defects" ? "cropped" : "raw"}`}
-                  className="block cursor-crosshair"
-                  style={
-                    renderW != null && renderH != null
-                      ? { width: renderW, height: renderH }
-                      : { maxWidth: fitBox?.w ?? "100vw", maxHeight: fitBox?.h ?? "80vh", width: "auto" }
-                  }
-                  draggable={false}
-                  onLoad={(e) => setImgDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-                />
-              )}
+                ) : (
+                  <img
+                    // In defects phase, swap to the freshly-cropped display image
+                    // returned by /recrop. imgDims re-measures via onLoad so
+                    // coordinate capture stays accurate against the new image's
+                    // natural pixels (same aspect as the preview → no pin shift).
+                    src={phase === "defects" && croppedDisplayUrl ? croppedDisplayUrl : rawImageUrl}
+                    alt={`${side} ${phase === "defects" ? "cropped" : "raw"}`}
+                    className="block cursor-crosshair"
+                    style={
+                      renderW != null && renderH != null
+                        ? { width: renderW, height: renderH }
+                        : { maxWidth: fitBox?.w ?? "100vw", maxHeight: fitBox?.h ?? "80vh", width: "auto" }
+                    }
+                    draggable={false}
+                    onLoad={(e) => setImgDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
+                  />
+                )}
 
-              {/* Non-interactive overlay: crop box, quads, crosshair. preserve-
+                {/* Non-interactive overlay: crop box, quads, crosshair. preserve-
                 AspectRatio="none" is safe here — pointer-events:none, never
                 hit-tested. Capture-phase only — defects phase replaces these
                 visuals with pin markers and skips the crop/edge geometry. */}
-              {phase === "capture" && (
-                <svg
-                  className="absolute inset-0 w-full h-full"
-                  viewBox="0 0 100 100"
-                  preserveAspectRatio="none"
-                  style={{ pointerEvents: "none", zIndex: 10 }}
-                >
-                  {/* Crop box preview (outer bbox + margin) */}
-                  {previewCrop && (
-                    <rect
-                      x={previewCrop.left_pct}
-                      y={previewCrop.top_pct}
-                      width={previewCrop.width_pct}
-                      height={previewCrop.height_pct}
-                      fill="none"
-                      stroke="#1A1A1A"
-                      strokeWidth="0.25"
-                      strokeDasharray="1,0.8"
-                      opacity="0.4"
-                    />
-                  )}
-                  {/* Outer edge rectangle — the card-edge bounds (left = LEFT-outer
+                {phase === "capture" && (
+                  <svg
+                    className="absolute inset-0 w-full h-full"
+                    viewBox="0 0 100 100"
+                    preserveAspectRatio="none"
+                    style={{ pointerEvents: "none", zIndex: 10 }}
+                  >
+                    {/* Crop box preview (outer bbox + margin) */}
+                    {previewCrop && (
+                      <rect
+                        x={previewCrop.left_pct}
+                        y={previewCrop.top_pct}
+                        width={previewCrop.width_pct}
+                        height={previewCrop.height_pct}
+                        fill="none"
+                        stroke="#1A1A1A"
+                        strokeWidth="0.25"
+                        strokeDasharray="1,0.8"
+                        opacity="0.4"
+                      />
+                    )}
+                    {/* Outer edge rectangle — the card-edge bounds (left = LEFT-outer
                   x, right = RIGHT-outer x, top = TOP-outer y, bottom = BOTTOM-
                   outer y), drawn once all four outer edge points are down. */}
-                  {outerEdgeRect && (
-                    <rect
-                      x={outerEdgeRect.left}
-                      y={outerEdgeRect.top}
-                      width={outerEdgeRect.right - outerEdgeRect.left}
-                      height={outerEdgeRect.bottom - outerEdgeRect.top}
-                      fill="none"
-                      stroke={palette.outer}
-                      strokeWidth="0.4"
-                      opacity="0.9"
-                    />
-                  )}
-                  {/* Inner edge rectangle — the border→artwork bounds (full mode). */}
-                  {mode === "full" && innerEdgeRect && (
-                    <rect
-                      x={innerEdgeRect.left}
-                      y={innerEdgeRect.top}
-                      width={innerEdgeRect.right - innerEdgeRect.left}
-                      height={innerEdgeRect.bottom - innerEdgeRect.top}
-                      fill="none"
-                      stroke={palette.inner}
-                      strokeWidth="0.4"
-                      opacity="0.9"
-                    />
-                  )}
-                  {/* The alignment GUIDES (outer-centroid crosshair, per-placed-
+                    {outerEdgeRect && (
+                      <rect
+                        x={outerEdgeRect.left}
+                        y={outerEdgeRect.top}
+                        width={outerEdgeRect.right - outerEdgeRect.left}
+                        height={outerEdgeRect.bottom - outerEdgeRect.top}
+                        fill="none"
+                        stroke={palette.outer}
+                        strokeWidth="0.4"
+                        opacity="0.9"
+                      />
+                    )}
+                    {/* Inner edge rectangle — the border→artwork bounds (full mode). */}
+                    {mode === "full" && innerEdgeRect && (
+                      <rect
+                        x={innerEdgeRect.left}
+                        y={innerEdgeRect.top}
+                        width={innerEdgeRect.right - innerEdgeRect.left}
+                        height={innerEdgeRect.bottom - innerEdgeRect.top}
+                        fill="none"
+                        stroke={palette.inner}
+                        strokeWidth="0.4"
+                        opacity="0.9"
+                      />
+                    )}
+                    {/* The alignment GUIDES (outer-centroid crosshair, per-placed-
                       point rails, inner locked-axis rail and the live cursor
                       sniper guides) used to live HERE, inside the rotated stage,
                       which tilted them with the card. They now render screen-level
@@ -1660,16 +1680,16 @@ export default function ManualCardTool({
                       the same card points while staying horizontal/vertical. The
                       crop box + edge rectangles stay here: they trace the card and
                       must rotate with it. */}
-                </svg>
-              )}
+                  </svg>
+                )}
 
-              {/* Hit-tested dots — HTML, %-positioned against the SAME box as the
+                {/* Hit-tested dots — HTML, %-positioned against the SAME box as the
                 capture container. Capture phase only; defects phase replaces
                 these with defect pins below. */}
-              {phase === "capture" && renderDots(outerPts, "outer", palette.outer)}
-              {phase === "capture" && mode === "full" && renderDots(innerPts, "inner", palette.inner)}
+                {phase === "capture" && renderDots(outerPts, "outer", palette.outer)}
+                {phase === "capture" && mode === "full" && renderDots(innerPts, "inner", palette.inner)}
 
-              {/* ── Defect pins (defects phase) ─────────────────────────────
+                {/* ── Defect pins (defects phase) ─────────────────────────────
                   Both committed and pending pins render as TRANSPARENT rings
                   so the defect underneath stays visible. Visual parity with
                   image-viewer.tsx's marker pattern (see :770-873): tier-
@@ -1681,110 +1701,162 @@ export default function ManualCardTool({
                   only the VISIBLE marker is see-through. pointer-events:none
                   so clicks fall through to the defect-area handler (drop next
                   pin / open picker on double-click). */}
-              {phase === "defects" && (
-                <>
-                  {/* MVGS v2.1 — whitening + crease line overlays (current
+                {phase === "defects" && (
+                  <>
+                    {/* MVGS v2.1 — whitening + crease line overlays (current
                       side only) plus in-progress drag preview. pointer-events
                       :none so the drawing handlers receive clicks. */}
-                  {(whiteningLines.length > 0 || creaseLines.length > 0 || lineStart) && (
-                    <svg
-                      className="absolute inset-0 w-full h-full pointer-events-none"
-                      viewBox="0 0 100 100"
-                      preserveAspectRatio="none"
-                    >
-                      {whiteningLines
-                        .filter((l) => l.side === side && l.start && l.end)
-                        .map((l, i) => (
-                          <g key={`wl-${l.id ?? i}`}>
-                            <line
-                              x1={l.start!.x}
-                              y1={l.start!.y}
-                              x2={l.end!.x}
-                              y2={l.end!.y}
-                              stroke="rgba(0,0,0,0.55)"
-                              strokeWidth={3}
-                              vectorEffect="non-scaling-stroke"
-                            />
-                            <line
-                              x1={l.start!.x}
-                              y1={l.start!.y}
-                              x2={l.end!.x}
-                              y2={l.end!.y}
-                              stroke={l.color ?? "#FFD400"}
-                              strokeWidth={1.5}
-                              vectorEffect="non-scaling-stroke"
-                            />
-                          </g>
-                        ))}
-                      {creaseLines
-                        .filter((l) => l.side === side)
-                        .map((l) => (
-                          <g key={`cl-${l.id}`}>
-                            <line
-                              x1={l.start.x}
-                              y1={l.start.y}
-                              x2={l.end.x}
-                              y2={l.end.y}
-                              stroke="rgba(0,0,0,0.55)"
-                              strokeWidth={3}
-                              vectorEffect="non-scaling-stroke"
-                            />
-                            <line
-                              x1={l.start.x}
-                              y1={l.start.y}
-                              x2={l.end.x}
-                              y2={l.end.y}
-                              stroke={l.color ?? "#00CCFF"}
-                              strokeWidth={1.5}
-                              vectorEffect="non-scaling-stroke"
-                            />
-                          </g>
-                        ))}
-                      {lineStart && lineEnd && (
-                        <line
-                          x1={lineStart.x}
-                          y1={lineStart.y}
-                          x2={lineEnd.x}
-                          y2={lineEnd.y}
-                          stroke={lineColor}
-                          strokeWidth={1.5}
-                          vectorEffect="non-scaling-stroke"
-                          strokeDasharray="2 2"
-                        />
-                      )}
-                    </svg>
-                  )}
-                  {committedDefects.map((d) => {
-                    // Tier-coloured ring, matching image-viewer.tsx:785-791
-                    // — D1 red / D2 amber / D3 green. Undefined-tier pins
-                    // (legacy or AI-promoted without classification) fall back
-                    // to red as a "needs review" cue.
-                    const col = d.tier === "D2" ? "#F59E0B" : d.tier === "D3" ? "#16A34A" : "#DC2626";
-                    return (
+                    {(whiteningLines.length > 0 || creaseLines.length > 0 || lineStart) && (
+                      <svg
+                        className="absolute inset-0 w-full h-full pointer-events-none"
+                        viewBox="0 0 100 100"
+                        preserveAspectRatio="none"
+                      >
+                        {whiteningLines
+                          .filter((l) => l.side === side && l.start && l.end)
+                          .map((l, i) => (
+                            <g key={`wl-${l.id ?? i}`}>
+                              <line
+                                x1={l.start!.x}
+                                y1={l.start!.y}
+                                x2={l.end!.x}
+                                y2={l.end!.y}
+                                stroke="rgba(0,0,0,0.55)"
+                                strokeWidth={3}
+                                vectorEffect="non-scaling-stroke"
+                              />
+                              <line
+                                x1={l.start!.x}
+                                y1={l.start!.y}
+                                x2={l.end!.x}
+                                y2={l.end!.y}
+                                stroke={l.color ?? "#FFD400"}
+                                strokeWidth={1.5}
+                                vectorEffect="non-scaling-stroke"
+                              />
+                            </g>
+                          ))}
+                        {creaseLines
+                          .filter((l) => l.side === side)
+                          .map((l) => (
+                            <g key={`cl-${l.id}`}>
+                              <line
+                                x1={l.start.x}
+                                y1={l.start.y}
+                                x2={l.end.x}
+                                y2={l.end.y}
+                                stroke="rgba(0,0,0,0.55)"
+                                strokeWidth={3}
+                                vectorEffect="non-scaling-stroke"
+                              />
+                              <line
+                                x1={l.start.x}
+                                y1={l.start.y}
+                                x2={l.end.x}
+                                y2={l.end.y}
+                                stroke={l.color ?? "#00CCFF"}
+                                strokeWidth={1.5}
+                                vectorEffect="non-scaling-stroke"
+                              />
+                            </g>
+                          ))}
+                        {lineStart && lineEnd && (
+                          <line
+                            x1={lineStart.x}
+                            y1={lineStart.y}
+                            x2={lineEnd.x}
+                            y2={lineEnd.y}
+                            stroke={lineColor}
+                            strokeWidth={1.5}
+                            vectorEffect="non-scaling-stroke"
+                            strokeDasharray="2 2"
+                          />
+                        )}
+                      </svg>
+                    )}
+                    {committedDefects.map((d) => {
+                      // Tier-coloured ring, matching image-viewer.tsx:785-791
+                      // — D1 red / D2 amber / D3 green. Undefined-tier pins
+                      // (legacy or AI-promoted without classification) fall back
+                      // to red as a "needs review" cue.
+                      const col = d.tier === "D2" ? "#F59E0B" : d.tier === "D3" ? "#16A34A" : "#DC2626";
+                      return (
+                        <div
+                          key={`committed-${d.id}`}
+                          className="absolute pointer-events-none"
+                          style={{
+                            left: `${d.x_percent}%`,
+                            top: `${d.y_percent}%`,
+                            transform: "translate(-50%, -50%)",
+                            width: 28,
+                            height: 28,
+                            zIndex: 28,
+                          }}
+                          aria-hidden="true"
+                        >
+                          <div
+                            className="w-full h-full rounded-full"
+                            style={{
+                              border: `2px solid ${col}`,
+                              background: "transparent",
+                              boxShadow: "0 0 0 1px rgba(0,0,0,0.45)",
+                            }}
+                          />
+                          {/* Centre dot — 4 px in the tier colour so the exact
+                            captured pixel stays identifiable through the
+                            otherwise-empty ring. */}
+                          <span
+                            className="absolute pointer-events-none rounded-full"
+                            style={{
+                              left: "50%",
+                              top: "50%",
+                              transform: "translate(-50%, -50%)",
+                              width: 4,
+                              height: 4,
+                              background: col,
+                            }}
+                          />
+                          {/* Number badge sits OUTSIDE the ring (above-right) so
+                            it doesn't cover the defect pixel. Coloured fill +
+                            dark halo for legibility on every card. */}
+                          <span
+                            className="absolute -top-1 -right-1 text-[9px] font-black px-1 rounded-full leading-none py-0.5 pointer-events-none"
+                            style={{
+                              background: col,
+                              color: "#fff",
+                              boxShadow: "0 0 0 1px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3)",
+                            }}
+                          >
+                            {d.id}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {defectBatch.map((p, i) => (
                       <div
-                        key={`committed-${d.id}`}
+                        key={`batch-${i}`}
                         className="absolute pointer-events-none"
                         style={{
-                          left: `${d.x_percent}%`,
-                          top: `${d.y_percent}%`,
+                          left: `${p.x}%`,
+                          top: `${p.y}%`,
                           transform: "translate(-50%, -50%)",
                           width: 28,
                           height: 28,
-                          zIndex: 28,
+                          zIndex: 29,
                         }}
                         aria-hidden="true"
                       >
+                        {/* Pending pins use a dashed gold ring (still untiered)
+                          + the same transparent centre so the defect under the
+                          pin is visible BEFORE it's even labelled. */}
                         <div
                           className="w-full h-full rounded-full"
                           style={{
-                            border: `2px solid ${col}`,
+                            border: "2px dashed #D4AF37",
                             background: "transparent",
                             boxShadow: "0 0 0 1px rgba(0,0,0,0.45)",
                           }}
                         />
-                        {/* Centre dot — 4 px in the tier colour so the exact
-                            captured pixel stays identifiable through the
-                            otherwise-empty ring. */}
                         <span
                           className="absolute pointer-events-none rounded-full"
                           style={{
@@ -1793,79 +1865,26 @@ export default function ManualCardTool({
                             transform: "translate(-50%, -50%)",
                             width: 4,
                             height: 4,
-                            background: col,
+                            background: "#D4AF37",
                           }}
                         />
-                        {/* Number badge sits OUTSIDE the ring (above-right) so
-                            it doesn't cover the defect pixel. Coloured fill +
-                            dark halo for legibility on every card. */}
                         <span
                           className="absolute -top-1 -right-1 text-[9px] font-black px-1 rounded-full leading-none py-0.5 pointer-events-none"
                           style={{
-                            background: col,
-                            color: "#fff",
+                            background: "#D4AF37",
+                            color: "#1A1400",
                             boxShadow: "0 0 0 1px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3)",
                           }}
                         >
-                          {d.id}
+                          {i + 1}
                         </span>
                       </div>
-                    );
-                  })}
-                  {defectBatch.map((p, i) => (
-                    <div
-                      key={`batch-${i}`}
-                      className="absolute pointer-events-none"
-                      style={{
-                        left: `${p.x}%`,
-                        top: `${p.y}%`,
-                        transform: "translate(-50%, -50%)",
-                        width: 28,
-                        height: 28,
-                        zIndex: 29,
-                      }}
-                      aria-hidden="true"
-                    >
-                      {/* Pending pins use a dashed gold ring (still untiered)
-                          + the same transparent centre so the defect under the
-                          pin is visible BEFORE it's even labelled. */}
-                      <div
-                        className="w-full h-full rounded-full"
-                        style={{
-                          border: "2px dashed #D4AF37",
-                          background: "transparent",
-                          boxShadow: "0 0 0 1px rgba(0,0,0,0.45)",
-                        }}
-                      />
-                      <span
-                        className="absolute pointer-events-none rounded-full"
-                        style={{
-                          left: "50%",
-                          top: "50%",
-                          transform: "translate(-50%, -50%)",
-                          width: 4,
-                          height: 4,
-                          background: "#D4AF37",
-                        }}
-                      />
-                      <span
-                        className="absolute -top-1 -right-1 text-[9px] font-black px-1 rounded-full leading-none py-0.5 pointer-events-none"
-                        style={{
-                          background: "#D4AF37",
-                          color: "#1A1400",
-                          boxShadow: "0 0 0 1px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.3)",
-                        }}
-                      >
-                        {i + 1}
-                      </span>
-                    </div>
-                  ))}
-                </>
-              )}
+                    ))}
+                  </>
+                )}
+              </div>
 
-            </div>
-
-            {/* ── LEVEL guide overlay — sibling of the rotated stage ───────────
+              {/* ── LEVEL guide overlay — sibling of the rotated stage ───────────
                 Renders the alignment guides in screen/viewport space so they stay
                 horizontal/vertical while the card rotates underneath. Each guide
                 is anchored through a card-space point forward-rotated to screen
@@ -1874,101 +1893,243 @@ export default function ManualCardTool({
                 preserveAspectRatio + non-scaling strokes as the in-stage overlay,
                 so at rotation 0 (imagePctToScreenPct = identity) it's visually
                 identical to before. Capture phase only. */}
-            {phase === "capture" && (
-              <svg
-                className="absolute inset-0 w-full h-full"
-                viewBox="0 0 100 100"
-                preserveAspectRatio="none"
-                style={{ pointerEvents: "none", zIndex: 20 }}
-              >
-                {/* Crosshair at outer centroid */}
-                {outerCentroid &&
-                  (() => {
-                    const c = imagePctToScreenPct(outerCentroid);
-                    return (
-                      <g stroke="#D4AF37" strokeWidth="0.3" opacity="0.6">
-                        <line x1={0} y1={c.y} x2={100} y2={c.y} />
-                        <line x1={c.x} y1={0} x2={c.x} y2={100} />
-                      </g>
-                    );
-                  })()}
-                {/* Full-length guides through each placed point in the ACTIVE pass. */}
-                {placing &&
-                  activeArr.map((p0, i) => {
-                    const p = imagePctToScreenPct(p0);
-                    return (
-                      <g key={`pguide-${activePass}-${i}`} strokeDasharray="4,4">
-                        <g stroke="rgba(0,0,0,0.3)">
-                          <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                          <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+              {phase === "capture" && (
+                <svg
+                  className="absolute inset-0 w-full h-full"
+                  viewBox="0 0 100 100"
+                  preserveAspectRatio="none"
+                  style={{ pointerEvents: "none", zIndex: 20 }}
+                >
+                  {/* Crosshair at outer centroid */}
+                  {outerCentroid &&
+                    (() => {
+                      const c = imagePctToScreenPct(outerCentroid);
+                      return (
+                        <g stroke="#D4AF37" strokeWidth={CENTERING_GUIDE_VISUALS.centroidStrokeWidth} opacity="0.72">
+                          <line x1={0} y1={c.y} x2={100} y2={c.y} />
+                          <line x1={c.x} y1={0} x2={c.x} y2={100} />
                         </g>
-                        <g stroke={activeColor} opacity={0.4}>
-                          <line x1={0} y1={p.y} x2={100} y2={p.y} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
-                          <line x1={p.x} y1={0} x2={p.x} y2={100} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+                      );
+                    })()}
+                  {/* Full-length guides through each placed point in the ACTIVE pass. */}
+                  {placing &&
+                    activeArr.map((p0, i) => {
+                      const p = imagePctToScreenPct(p0);
+                      return (
+                        <g key={`pguide-${activePass}-${i}`} strokeDasharray="4,4">
+                          <g stroke={CENTERING_GUIDE_VISUALS.haloStroke}>
+                            <line
+                              x1={0}
+                              y1={p.y}
+                              x2={100}
+                              y2={p.y}
+                              strokeWidth={CENTERING_GUIDE_VISUALS.placedHaloStrokeWidth}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <line
+                              x1={p.x}
+                              y1={0}
+                              x2={p.x}
+                              y2={100}
+                              strokeWidth={CENTERING_GUIDE_VISUALS.placedHaloStrokeWidth}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                          </g>
+                          <g stroke={CENTERING_GUIDE_VISUALS.lightOutlineStroke} opacity={0.9}>
+                            <line
+                              x1={0}
+                              y1={p.y}
+                              x2={100}
+                              y2={p.y}
+                              strokeWidth={CENTERING_GUIDE_VISUALS.placedColorStrokeWidth + 0.7}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <line
+                              x1={p.x}
+                              y1={0}
+                              x2={p.x}
+                              y2={100}
+                              strokeWidth={CENTERING_GUIDE_VISUALS.placedColorStrokeWidth + 0.7}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                          </g>
+                          <g stroke={activeColor} opacity={0.78}>
+                            <line
+                              x1={0}
+                              y1={p.y}
+                              x2={100}
+                              y2={p.y}
+                              strokeWidth={CENTERING_GUIDE_VISUALS.placedColorStrokeWidth}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <line
+                              x1={p.x}
+                              y1={0}
+                              x2={p.x}
+                              y2={100}
+                              strokeWidth={CENTERING_GUIDE_VISUALS.placedColorStrokeWidth}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                          </g>
                         </g>
-                      </g>
-                    );
-                  })}
-                {/* Locked-axis rail through the outer point (inner placement). */}
-                {innerLockOuter &&
-                  (() => {
-                    const o = imagePctToScreenPct(innerLockOuter);
-                    return innerPts.length % 2 === 0 ? (
-                      <g>
-                        <line x1={o.x} y1={0} x2={o.x} y2={100} stroke="rgba(0,0,0,0.4)" strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
-                        <line x1={o.x} y1={0} x2={o.x} y2={100} stroke={palette.inner} strokeWidth={0.8} vectorEffect="non-scaling-stroke" />
-                      </g>
-                    ) : (
-                      <g>
-                        <line x1={0} y1={o.y} x2={100} y2={o.y} stroke="rgba(0,0,0,0.4)" strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
-                        <line x1={0} y1={o.y} x2={100} y2={o.y} stroke={palette.inner} strokeWidth={0.8} vectorEffect="non-scaling-stroke" />
-                      </g>
-                    );
-                  })()}
-                {/* Live cursor sniper guides through the (snapped) cursor. */}
-                {placing &&
-                  lockedHover &&
-                  !drag &&
-                  (() => {
-                    const h = imagePctToScreenPct(lockedHover);
-                    return (
-                      <g strokeDasharray="5,4">
-                        <g stroke="rgba(0,0,0,0.4)">
-                          <line x1={0} y1={h.y} x2={100} y2={h.y} strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                          <line x1={h.x} y1={0} x2={h.x} y2={100} strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                      );
+                    })}
+                  {/* Locked-axis rail through the outer point (inner placement). */}
+                  {innerLockOuter &&
+                    (() => {
+                      const o = imagePctToScreenPct(innerLockOuter);
+                      return innerPts.length % 2 === 0 ? (
+                        <g>
+                          <line
+                            x1={o.x}
+                            y1={0}
+                            x2={o.x}
+                            y2={100}
+                            stroke={CENTERING_GUIDE_VISUALS.haloStroke}
+                            strokeWidth={CENTERING_GUIDE_VISUALS.railHaloStrokeWidth}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                          <line
+                            x1={o.x}
+                            y1={0}
+                            x2={o.x}
+                            y2={100}
+                            stroke={CENTERING_GUIDE_VISUALS.lightOutlineStroke}
+                            strokeWidth={CENTERING_GUIDE_VISUALS.railColorStrokeWidth + 0.7}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                          <line
+                            x1={o.x}
+                            y1={0}
+                            x2={o.x}
+                            y2={100}
+                            stroke={palette.inner}
+                            strokeWidth={CENTERING_GUIDE_VISUALS.railColorStrokeWidth}
+                            vectorEffect="non-scaling-stroke"
+                          />
                         </g>
-                        <g stroke={activeColor} opacity={0.7}>
-                          <line x1={0} y1={h.y} x2={100} y2={h.y} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
-                          <line x1={h.x} y1={0} x2={h.x} y2={100} strokeWidth={0.5} vectorEffect="non-scaling-stroke" />
+                      ) : (
+                        <g>
+                          <line
+                            x1={0}
+                            y1={o.y}
+                            x2={100}
+                            y2={o.y}
+                            stroke={CENTERING_GUIDE_VISUALS.haloStroke}
+                            strokeWidth={CENTERING_GUIDE_VISUALS.railHaloStrokeWidth}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                          <line
+                            x1={0}
+                            y1={o.y}
+                            x2={100}
+                            y2={o.y}
+                            stroke={CENTERING_GUIDE_VISUALS.lightOutlineStroke}
+                            strokeWidth={CENTERING_GUIDE_VISUALS.railColorStrokeWidth + 0.7}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                          <line
+                            x1={0}
+                            y1={o.y}
+                            x2={100}
+                            y2={o.y}
+                            stroke={palette.inner}
+                            strokeWidth={CENTERING_GUIDE_VISUALS.railColorStrokeWidth}
+                            vectorEffect="non-scaling-stroke"
+                          />
                         </g>
-                      </g>
-                    );
-                  })()}
-              </svg>
-            )}
+                      );
+                    })()}
+                  {/* Live cursor sniper guides through the (snapped) cursor. */}
+                  {placing &&
+                    lockedHover &&
+                    !drag &&
+                    (() => {
+                      const h = imagePctToScreenPct(lockedHover);
+                      return (
+                        <g strokeDasharray="5,4">
+                          <g stroke={CENTERING_GUIDE_VISUALS.haloStroke}>
+                            <line
+                              x1={0}
+                              y1={h.y}
+                              x2={100}
+                              y2={h.y}
+                              strokeWidth={CENTERING_GUIDE_VISUALS.liveHaloStrokeWidth}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <line
+                              x1={h.x}
+                              y1={0}
+                              x2={h.x}
+                              y2={100}
+                              strokeWidth={CENTERING_GUIDE_VISUALS.liveHaloStrokeWidth}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                          </g>
+                          <g stroke={CENTERING_GUIDE_VISUALS.lightOutlineStroke} opacity={0.9}>
+                            <line
+                              x1={0}
+                              y1={h.y}
+                              x2={100}
+                              y2={h.y}
+                              strokeWidth={CENTERING_GUIDE_VISUALS.liveColorStrokeWidth + 0.7}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <line
+                              x1={h.x}
+                              y1={0}
+                              x2={h.x}
+                              y2={100}
+                              strokeWidth={CENTERING_GUIDE_VISUALS.liveColorStrokeWidth + 0.7}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                          </g>
+                          <g stroke={activeColor} opacity={0.9}>
+                            <line
+                              x1={0}
+                              y1={h.y}
+                              x2={100}
+                              y2={h.y}
+                              strokeWidth={CENTERING_GUIDE_VISUALS.liveColorStrokeWidth}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                            <line
+                              x1={h.x}
+                              y1={0}
+                              x2={h.x}
+                              y2={100}
+                              strokeWidth={CENTERING_GUIDE_VISUALS.liveColorStrokeWidth}
+                              vectorEffect="non-scaling-stroke"
+                            />
+                          </g>
+                        </g>
+                      );
+                    })()}
+                </svg>
+              )}
 
-            {/* Live targeting reticle — SCREEN-LEVEL (sibling of the stage), so the
+              {/* Live targeting reticle — SCREEN-LEVEL (sibling of the stage), so the
                 crosshair stays upright while the card rotates. Follows the cursor
                 in placement AND defects; anchored via imagePctToScreenPct (identity
                 at rotation 0 / defects). pointer-events:none so clicks fall through
                 to the capture container. */}
-            {((placing && phase === "capture") || phase === "defects") &&
-              lockedHover &&
-              !drag &&
-              (() => {
-                const h = imagePctToScreenPct(lockedHover);
-                return (
-                  <div
-                    className="absolute pointer-events-none"
-                    style={{ left: `${h.x}%`, top: `${h.y}%`, zIndex: 25 }}
-                    aria-hidden="true"
-                  >
-                    <div style={{ position: "relative", width: 44, height: 44, transform: "translate(-50%, -50%)" }}>
-                      <Crosshair color={phase === "defects" ? palette.outer : activeColor} />
+              {((placing && phase === "capture") || phase === "defects") &&
+                lockedHover &&
+                !drag &&
+                (() => {
+                  const h = imagePctToScreenPct(lockedHover);
+                  return (
+                    <div
+                      className="absolute pointer-events-none"
+                      style={{ left: `${h.x}%`, top: `${h.y}%`, zIndex: 25 }}
+                      aria-hidden="true"
+                    >
+                      <div style={{ position: "relative", width: 44, height: 44, transform: "translate(-50%, -50%)" }}>
+                        <Crosshair color={phase === "defects" ? palette.outer : activeColor} />
+                      </div>
                     </div>
-                  </div>
-                );
-              })()}
+                  );
+                })()}
             </div>
           </div>
         </div>

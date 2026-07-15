@@ -232,5 +232,6 @@ declare module "express-session" {
     capGrade: boolean;
     capScan: boolean;
     capPrint: boolean;
+    capEditSets: boolean;
   }
 }

@@ -40,7 +40,6 @@ import {
 import { DESIGNATION_OPTIONS, getDesignationLabel } from "@/lib/designationOptions";
 import GradientButton from "@/components/ui/gradient-button";
 
-
 interface Props {
   certificate: CertificateRecord | null;
   onSuccess: (newCert?: any) => void;
@@ -997,8 +996,7 @@ export default function CertificateForm({
   // handleSubmit's own check) so a transiently-blank field — e.g. mid-retype
   // of the card name — is never silently persisted; the save is simply
   // deferred until the field is filled in again.
-  const hasRequiredFields =
-    !!form.cardGame && !!form.setName && !!form.cardName && !!form.cardNumber && !!form.year;
+  const hasRequiredFields = !!form.cardGame && !!form.setName && !!form.cardName && !!form.cardNumber && !!form.year;
   useEffect(() => {
     if (!autoSaveEligible || !hasRequiredFields) return;
     if (!hydratedOnceRef.current) {
@@ -1461,6 +1459,7 @@ export default function CertificateForm({
                   updateField("setName", name);
                   if (id) setSetId(id);
                 }}
+                allowEditSet
                 testId="input-set-name"
               />
               <div className="mt-1.5">
@@ -2505,11 +2504,7 @@ export default function CertificateForm({
             data-testid="button-save-cert"
           >
             <Save size={16} />
-            {mutation.isPending
-              ? "Saving..."
-              : isEdit
-                ? "Save Changes to Published Certificate"
-                : "Save Certificate"}
+            {mutation.isPending ? "Saving..." : isEdit ? "Save Changes to Published Certificate" : "Save Certificate"}
           </GradientButton>
         )}
       </form>
@@ -2740,7 +2735,9 @@ export function PokemonSetPicker({
   onChange,
   testId,
   allowAddSet = true,
+  allowEditSet = false,
   createEndpoint = "/api/admin/custom-sets",
+  editEndpoint,
   prefill,
 }: {
   value: string;
@@ -2750,9 +2747,13 @@ export function PokemonSetPicker({
    *  graders pass allowAddSet + createEndpoint="/api/staff/custom-sets" so they can
    *  add a set whose name isn't in the picker rather than being blocked. */
   allowAddSet?: boolean;
+  /** Show set editing for authorised admin/staff surfaces. Only custom sets are editable. */
+  allowEditSet?: boolean;
   /** Where the add-set form POSTs. Default admin; graders override to the
    *  staff endpoint (admin-or-grade auth + dedup). */
   createEndpoint?: string;
+  /** Where the edit-set form PATCHes. Defaults to the add-set endpoint base. */
+  editEndpoint?: string;
   /** Seed the add-set form (e.g. from the AI identification) so the operator just
    *  confirms. setCode → Set Code, setName → Set Name. */
   prefill?: { setName?: string; setCode?: string };
@@ -2764,7 +2765,12 @@ export function PokemonSetPicker({
   const [showAddForm, setShowAddForm] = useState(false);
   const [addForm, setAddForm] = useState({ setId: "", setName: "", series: "Promo", releaseYear: "", totalCards: "" });
   const [addSaving, setAddSaving] = useState(false);
+  const [editingSet, setEditingSet] = useState<PokemonSet | null>(null);
+  const [editForm, setEditForm] = useState({ setId: "", setName: "", series: "", releaseYear: "", totalCards: "" });
+  const [editSaving, setEditSaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  const errorMessage = (error: unknown) => (error instanceof Error ? error.message : "Unexpected error");
 
   useEffect(() => {
     setQuery(value);
@@ -2806,6 +2812,24 @@ export function PokemonSetPicker({
         .slice(0, 12)
     : sets.slice(0, 12);
 
+  const selectedSet = sets.find(
+    (s) => s.source === "custom" && (s.name === query || s.name === value || s.id === query)
+  );
+  const canEditSelectedSet = allowEditSet && !!selectedSet;
+
+  function openEditSet(set: PokemonSet) {
+    setEditingSet(set);
+    setEditForm({
+      setId: set.id,
+      setName: set.name,
+      series: set.series || "",
+      releaseYear: set.releaseDate ? set.releaseDate.split("-")[0] : "",
+      totalCards: set.total ? String(set.total) : "",
+    });
+    setOpen(false);
+    setShowAddForm(false);
+  }
+
   async function saveNewSet() {
     if (!addForm.setId || !addForm.setName) return;
     setAddSaving(true);
@@ -2837,10 +2861,66 @@ export function PokemonSetPicker({
       setQuery(d.setName || addForm.setName);
       setShowAddForm(false);
       setOpen(false);
-    } catch (e: any) {
-      toast({ title: "Failed to add set", description: e.message, variant: "destructive" });
+    } catch (e: unknown) {
+      toast({ title: "Failed to add set", description: errorMessage(e), variant: "destructive" });
     } finally {
       setAddSaving(false);
+    }
+  }
+
+  async function saveEditedSet() {
+    if (!editingSet) return;
+    const nextCode = editForm.setId.replace(/\s+/g, "").toLowerCase().trim();
+    const nextName = editForm.setName.trim();
+    if (!nextCode || !nextName) {
+      toast({ title: "Set code and set name are required", variant: "destructive" });
+      return;
+    }
+
+    const changedName = nextName !== editingSet.name;
+    const changedCode = nextCode !== editingSet.id;
+    if (
+      (changedName || changedCode) &&
+      !window.confirm("Changing a set name or code updates the existing set record. Continue?")
+    ) {
+      return;
+    }
+
+    setEditSaving(true);
+    try {
+      const r = await fetch(`${editEndpoint || createEndpoint}/${encodeURIComponent(editingSet.id)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          setId: nextCode,
+          setName: nextName,
+          series: editForm.series || null,
+          releaseYear: editForm.releaseYear ? parseInt(editForm.releaseYear, 10) : null,
+          totalCards: editForm.totalCards ? parseInt(editForm.totalCards, 10) : null,
+        }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Could not update set");
+
+      const updated: PokemonSet = {
+        id: d.setId || nextCode,
+        name: d.setName || nextName,
+        series: d.series || "Custom",
+        ptcgoCode: editingSet.ptcgoCode || null,
+        releaseDate: d.releaseYear ? `${d.releaseYear}-01-01` : "",
+        total: d.totalCards || 0,
+        source: "custom",
+      };
+      setSets((current) => [updated, ...current.filter((s) => s.id !== editingSet.id && s.id !== updated.id)]);
+      onChange(updated.name, updated.id);
+      setQuery(updated.name);
+      setEditingSet(null);
+      toast({ title: "Set updated", description: `${updated.name} (${updated.id})` });
+    } catch (e: unknown) {
+      toast({ title: "Failed to update set", description: errorMessage(e), variant: "destructive" });
+    } finally {
+      setEditSaving(false);
     }
   }
 
@@ -2860,6 +2940,15 @@ export function PokemonSetPicker({
         data-testid={testId}
         className="w-full bg-[var(--admin-panel)] border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-sm text-[var(--admin-ink)] placeholder:text-[var(--admin-ink-faint)] focus:outline-none focus:border-[var(--admin-gold)]"
       />
+      {canEditSelectedSet && (
+        <button
+          type="button"
+          onClick={() => openEditSet(selectedSet)}
+          className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)] hover:text-[var(--admin-gold-bright)]"
+        >
+          <Pencil size={11} /> Edit Set
+        </button>
+      )}
       {open && (
         <div className="absolute z-30 left-0 right-0 mt-1 bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-lg shadow-lg max-h-72 overflow-y-auto">
           {filtered.map((s) => (
@@ -2980,6 +3069,78 @@ export function PokemonSetPicker({
                 className="flex-1 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-50"
               >
                 {addSaving ? "Saving…" : "Add Set"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {allowEditSet && editingSet && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+          onClick={() => setEditingSet(null)}
+        >
+          <div className="bg-[var(--admin-panel)] rounded-lg p-5 w-96 space-y-3" onClick={(e) => e.stopPropagation()}>
+            <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">Edit Set</p>
+            <div>
+              <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Set Code *</label>
+              <input
+                value={editForm.setId}
+                onChange={(e) => setEditForm((f) => ({ ...f, setId: e.target.value }))}
+                className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
+              />
+            </div>
+            <div>
+              <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Set Name *</label>
+              <input
+                value={editForm.setName}
+                onChange={(e) => setEditForm((f) => ({ ...f, setName: e.target.value }))}
+                className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
+              />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Series</label>
+                <input
+                  value={editForm.series}
+                  onChange={(e) => setEditForm((f) => ({ ...f, series: e.target.value }))}
+                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
+                />
+              </div>
+              <div>
+                <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Year</label>
+                <input
+                  type="number"
+                  value={editForm.releaseYear}
+                  onChange={(e) => setEditForm((f) => ({ ...f, releaseYear: e.target.value }))}
+                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
+                />
+              </div>
+              <div>
+                <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Card Count</label>
+                <input
+                  type="number"
+                  value={editForm.totalCards}
+                  onChange={(e) => setEditForm((f) => ({ ...f, totalCards: e.target.value }))}
+                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setEditingSet(null)}
+                className="flex-1 border border-[var(--admin-line)] text-[var(--admin-ink-faint)] text-xs py-2 rounded hover:bg-[var(--admin-panel2)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveEditedSet}
+                disabled={editSaving || !editForm.setId.trim() || !editForm.setName.trim()}
+                className="flex-1 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-50"
+              >
+                {editSaving ? "Saving…" : "Save"}
               </button>
             </div>
           </div>
