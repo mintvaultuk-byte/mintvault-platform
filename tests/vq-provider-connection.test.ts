@@ -24,11 +24,13 @@ vi.mock("../server/db", () => ({
 
 describe("Vault Quest provider connection state", () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
     rows.clear();
     writes.length = 0;
     process.env.HIGGSFIELD_API_KEY = "test-token";
     delete process.env.HIGGSFIELD_TOKEN_EXPIRES_AT;
     delete process.env.HIGGSFIELD_API_KEY_EXPIRES_AT;
+    delete process.env.HIGGSFIELD_WORKSPACE_ID;
   });
 
   it("reports not_configured when no server-side token is configured", async () => {
@@ -52,7 +54,8 @@ describe("Vault Quest provider connection state", () => {
   });
 
   it("successful authenticated provider response is the only path to connected", async () => {
-    const { markHiggsfieldProviderSuccess, getHiggsfieldProviderConnection } = await import("../server/vault-quest/lib/vq-provider-connection");
+    const { markHiggsfieldProviderSuccess, getHiggsfieldProviderConnection } =
+      await import("../server/vault-quest/lib/vq-provider-connection");
     await markHiggsfieldProviderSuccess(Date.parse("2026-07-14T12:00:00Z"));
     process.env.HIGGSFIELD_TOKEN_EXPIRES_AT = "2026-07-16T12:00:00Z";
     const s = await getHiggsfieldProviderConnection(Date.parse("2026-07-14T12:05:00Z"));
@@ -63,7 +66,8 @@ describe("Vault Quest provider connection state", () => {
   });
 
   it("under 24 hours and under 1 hour surface warning states only after remote success", async () => {
-    const { markHiggsfieldProviderSuccess, getHiggsfieldProviderConnection } = await import("../server/vault-quest/lib/vq-provider-connection");
+    const { markHiggsfieldProviderSuccess, getHiggsfieldProviderConnection } =
+      await import("../server/vault-quest/lib/vq-provider-connection");
     await markHiggsfieldProviderSuccess(Date.parse("2026-07-14T11:00:00Z"));
     process.env.HIGGSFIELD_TOKEN_EXPIRES_AT = "2026-07-15T11:59:59Z";
     const under24 = await getHiggsfieldProviderConnection(Date.parse("2026-07-14T12:00:00Z"));
@@ -95,7 +99,8 @@ describe("Vault Quest provider connection state", () => {
   });
 
   it("shared auth failure overrides local configuration and blocks generation", async () => {
-    const { markHiggsfieldProviderAuthFailure, getHiggsfieldProviderConnection } = await import("../server/vault-quest/lib/vq-provider-connection");
+    const { markHiggsfieldProviderAuthFailure, getHiggsfieldProviderConnection } =
+      await import("../server/vault-quest/lib/vq-provider-connection");
     await markHiggsfieldProviderAuthFailure(Date.parse("2026-07-14T12:00:00Z"), "test-machine-a");
     const machineB = await getHiggsfieldProviderConnection(Date.parse("2026-07-14T12:01:00Z"));
     expect(machineB.status).toBe("token_expired");
@@ -103,23 +108,67 @@ describe("Vault Quest provider connection state", () => {
     expect(machineB.generationAllowed).toBe(false);
   });
 
-  it("test connection is local-only, records last checked, and never verifies remote", async () => {
-    const { refreshHiggsfieldProviderConnectionLocal } = await import("../server/vault-quest/lib/vq-provider-connection");
-    const s = await refreshHiggsfieldProviderConnectionLocal("admin@example.test", Date.parse("2026-07-14T12:00:00Z"));
-    expect(s.lastCheckedAt).toBe("2026-07-14T12:00:00.000Z");
-    expect(s.remoteVerified).toBe(false);
-    expect(s.message).toMatch(/free remote connection test is not available/i);
+  it("valid token verification uses only the account workspace endpoint and unblocks generation", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: "workspace-1" }]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { verifyHiggsfieldProviderConnection } = await import("../server/vault-quest/lib/vq-provider-connection");
+    const result = await verifyHiggsfieldProviderConnection("admin@example.test", Date.parse("2026-07-14T12:00:00Z"));
+    expect(result.ok).toBe(true);
+    expect(result.endpoint).toBe("account_workspaces");
+    expect(result.provider.status).toBe("connected");
+    expect(result.provider.remoteVerified).toBe(true);
+    expect(result.provider.generationAllowed).toBe(true);
+    expect(result.provider.lastSuccessAt).toBe("2026-07-14T12:00:00.000Z");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/developer\/v2alpha\/account\/workspaces$/);
+    expect(String(fetchMock.mock.calls[0][0])).not.toMatch(/generations|jobs\/[^/]+\/cost|media/);
     expect(writes.some((w) => w.value.includes("test-token"))).toBe(false);
   });
 
-  it("local test connection does not clear a known auth lock merely because credentials exist", async () => {
-    const { markHiggsfieldProviderAuthFailure, refreshHiggsfieldProviderConnectionLocal } = await import("../server/vault-quest/lib/vq-provider-connection");
+  it("invalid token verification stays blocked and records no provider job or artwork calls", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "invalid" }), { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { verifyHiggsfieldProviderConnection } = await import("../server/vault-quest/lib/vq-provider-connection");
+    const result = await verifyHiggsfieldProviderConnection("admin@example.test", Date.parse("2026-07-14T12:00:00Z"));
+    expect(result.ok).toBe(false);
+    expect(result.provider.status).toBe("token_expired");
+    expect(result.provider.generationAllowed).toBe(false);
+    expect(result.provider.remoteVerified).toBe(false);
+    expect(result.provider.lastAuthFailureAt).toBe("2026-07-14T12:00:00.000Z");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toMatch(/\/developer\/v2alpha\/account\/workspaces$/);
+    expect(String(fetchMock.mock.calls[0][0])).not.toMatch(/generations|jobs\/[^/]+\/cost|media/);
+  });
+
+  it("expired token stays blocked even when verification would otherwise succeed", async () => {
+    process.env.HIGGSFIELD_TOKEN_EXPIRES_AT = "2026-07-14T12:00:00Z";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: "workspace-1" }]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { verifyHiggsfieldProviderConnection } = await import("../server/vault-quest/lib/vq-provider-connection");
+    const result = await verifyHiggsfieldProviderConnection("admin@example.test", Date.parse("2026-07-14T12:05:00Z"));
+    expect(result.ok).toBe(true);
+    expect(result.provider.status).toBe("token_expired");
+    expect(result.provider.generationAllowed).toBe(false);
+    expect(result.provider.remoteVerified).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).not.toMatch(/generations|jobs\/[^/]+\/cost|media/);
+  });
+
+  it("verification does not clear a known auth lock unless the token is accepted remotely", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify({ error: "still expired" }), { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { markHiggsfieldProviderAuthFailure, verifyHiggsfieldProviderConnection } =
+      await import("../server/vault-quest/lib/vq-provider-connection");
     await markHiggsfieldProviderAuthFailure(Date.parse("2026-07-14T12:00:00Z"), "machine-a");
     process.env.HIGGSFIELD_TOKEN_EXPIRES_AT = "2026-07-15T12:00:00Z";
-    const refreshed = await refreshHiggsfieldProviderConnectionLocal("admin@example.test", Date.parse("2026-07-14T12:05:00Z"));
+    const refreshed = (
+      await verifyHiggsfieldProviderConnection("admin@example.test", Date.parse("2026-07-14T12:05:00Z"))
+    ).provider;
     expect(refreshed.status).toBe("token_expired");
     expect(refreshed.generationAllowed).toBe(false);
     expect(refreshed.remoteVerified).toBe(false);
-    expect(refreshed.lastAuthFailureAt).toBe("2026-07-14T12:00:00.000Z");
+    expect(refreshed.lastAuthFailureAt).toBe("2026-07-14T12:05:00.000Z");
   });
 });
