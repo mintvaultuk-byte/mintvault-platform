@@ -38,6 +38,7 @@ const COST_MODES: { key: "cheapest" | "balanced" | "highest"; label: string; hin
 ];
 const costModeFor = (m: VqImageModel) => COST_MODES.find((c) => c.model === m)?.key ?? "balanced";
 import { VQ_IMAGE_MODELS, VQ_QUALITY_MODEL, vqCreditsPerImage, vqChargedCredits, type VqImageModel } from "@shared/vq-schema";
+import { estimatedCreditsForGenerateWith, requestModelForGenerateWith, resetGenerateWithAfterAttempt, type VqGenerateWith } from "@shared/vq-ai-provider";
 
 // Vault Quest Studio — production control centre: dashboard board + card editor
 // with the full status workflow. Renders via the shared (locked) engine.
@@ -771,10 +772,12 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   const [providerConnection, setProviderConnection] = useState<ProviderConnection | null>(null);
   const [providerStatusLoaded, setProviderStatusLoaded] = useState(false);
   // Image model / quality — default DRAFT/CHEAP (never the expensive model unless chosen).
-  const [imgModel, setImgModel] = useState<VqImageModel>("z_image");
+  const [imgModel, setImgModel] = useState<VqGenerateWith>("auto");
+  const resetGenerateWith = useCallback(() => setImgModel(resetGenerateWithAfterAttempt()), []);
   const [premiumConfirmed, setPremiumConfirmed] = useState(false);
   const [premiumReason, setPremiumReason] = useState("");
-  const creditsPerImage = vqCreditsPerImage(imgModel);
+  const requestedImgModel = requestModelForGenerateWith(imgModel);
+  const creditsPerImage = imgModel === "auto" ? estimatedCreditsForGenerateWith("auto", refType) : vqCreditsPerImage(imgModel);
   const [advanced] = useAdvancedMode(); // Simple founder workflow is the default; Advanced reveals technical controls.
   // Auto-progression (Phase 1, Simple mode only): after an approval, gently scroll the
   // NEXT step into view so the founder never has to hunt for it. No-op in Advanced mode.
@@ -787,13 +790,12 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   }, [advanced]);
   const imagesPerItem = refType === "master_portrait" ? (cost.data?.masterImagesPerItem ?? 3) : 1;
   const higgsProvider = cost.data?.providers?.find((p) => p.id === "higgsfield");
-  const openaiProvider = cost.data?.providers?.find((p) => p.id === "openai");
   const BATCH_IMAGE_LIMIT = 3; // default max images before the typed confirmation is required
   const TYPED_PHRASE = "I understand this will spend credits";
   const autoPaidRetryEnabled = founderFlags.auto_paid_retry;
-  const premiumBlockReason = isPremiumModel(imgModel) && (!premiumConfirmed || !premiumReason.trim()) ? "Premium Final needs a checked confirmation and reason." : null;
-  const premiumRequest = (model: VqImageModel, reason = premiumReason) =>
-    isPremiumModel(model)
+  const premiumBlockReason = requestedImgModel && isPremiumModel(requestedImgModel) && (!premiumConfirmed || !premiumReason.trim()) ? "Premium Final needs a checked confirmation and reason." : null;
+  const premiumRequest = (model: VqGenerateWith, reason = premiumReason) =>
+    model !== "auto" && isPremiumModel(model)
       ? { premiumModel: model, premiumConfirmed: true, premiumReason: reason.trim() }
       : {};
   const generationDisabledTitle = (feature: FounderFeatureKey) => generationBlockedReasonWithProvider(founderFlags, feature, providerConnection, providerStatusLoaded) ?? undefined;
@@ -1077,8 +1079,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   const genPhaseLabel = genPhase === "still-processing" ? "Still processing…" : genPhase === "generating" ? "Generating…" : null;
 
   async function generateMasterArtwork(typeOverride?: VqRefType) {
-    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
-    if (genInFlight.current) return; // re-entrancy guard (double-click during reuse-check)
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); resetGenerateWith(); return; }
+    if (genInFlight.current) { resetGenerateWith(); return; } // re-entrancy guard (double-click during reuse-check)
     genInFlight.current = true;
     setBusy("gen-art");
     try {
@@ -1087,6 +1089,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       const blocked = generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(type), providerConnection, providerStatusLoaded);
       if (blocked) {
         toast({ title: "Generation unavailable", description: blocked, variant: "destructive" });
+        resetGenerateWith();
         return;
       }
       if (isVqRefType(typeOverride) && typeOverride !== refType) setRefType(typeOverride); // keep gallery + approved-image in sync
@@ -1102,7 +1105,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
           // out existing approved assets — tell the founder before spending credits.
           toast({ title: "Reuse check unavailable", description: "Couldn't verify existing approved assets — generating new artwork." });
         }
-        if (check && check.assets.length > 0) { setReuseType(type); setReuseCheck(check); setBusy(null); return; }
+        if (check && check.assets.length > 0) { setReuseType(type); setReuseCheck(check); setBusy(null); resetGenerateWith(); return; }
       }
       // Release before delegating — doGenerateReference acquires the latch itself
       // (it is also called directly by the ReusePanel buttons). Same synchronous
@@ -1132,8 +1135,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   }
 
   async function doGenerateReference(typeOverride?: VqRefType) {
-    if (!selected) return;
-    if (genInFlight.current) return; // double-click guard for the ReusePanel entry points too
+    if (!selected) { resetGenerateWith(); return; }
+    if (genInFlight.current) { resetGenerateWith(); return; } // double-click guard for the ReusePanel entry points too
     genInFlight.current = true;
     // Guard: only a real ref-type string; never a forwarded MouseEvent (would put a
     // DOM node into the JSON body → "Converting circular structure to JSON").
@@ -1143,6 +1146,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       toast({ title: "Generation unavailable", description: blocked, variant: "destructive" });
       genInFlight.current = false;
       setBusy(null);
+      resetGenerateWith();
       return;
     }
     const typeLabel = REF_TYPES.find((t) => t.value === type)?.label ?? "reference";
@@ -1158,10 +1162,12 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     // idempotency scope so a DIFFERENT category is a distinct paid request (a fresh
     // key), while a reload with the SAME category still safely replays (D10 unchanged).
     const catForBody = type === "action_pose" ? actionCategory : undefined;
-    const scopeKey = `character:${selected.characterId}:${type}:${imgModel || "default"}${catForBody ? `:${catForBody}` : ""}`;
+    const requestModel = requestModelForGenerateWith(imgModel);
+    const fallbackModel = requestModel ?? VQ_QUALITY_MODEL.draft;
+    const scopeKey = `character:${selected.characterId}:${type}:${imgModel}${catForBody ? `:${catForBody}` : ""}`;
     const idempotencyKey = getOrCreateIdempotencyKey(scopeKey);
     const url = `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork`;
-    const body = { referenceType: type, model: imgModel, idempotencyKey, ...(catForBody ? { actionCategory: catForBody } : {}), ...premiumRequest(imgModel) };
+    const body = { referenceType: type, ...(requestModel ? { model: requestModel } : {}), idempotencyKey, ...(catForBody ? { actionCategory: catForBody } : {}), ...premiumRequest(imgModel) };
     try {
       // Bounded client wait, then safe re-polling on the SAME idempotencyKey — the
       // server's D10 guard makes a repeat POST free (202 pending / 200 replayed), so
@@ -1194,7 +1200,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
         setArtNonce((n) => n + 1);
         const made = data.created?.length ?? 0;
         const rejected = data.autoRejected ?? 0;
-        trackCredits(vqChargedCredits(data, imgModel)); // counts billed rejects at the model actually used
+        trackCredits(vqChargedCredits(data, fallbackModel)); // counts billed rejects at the model actually used
         toast({ title: `Master Reference — ${made} candidate${made === 1 ? "" : "s"}`, description: rejected ? `${rejected} auto-rejected for identity drift. Choose one below.` : "Studio references generated — choose one below." });
       } else {
         const data = outcome.data as { width: number; height: number; model?: string; message?: string };
@@ -1204,7 +1210,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
           return;
         }
         await candQuery.refetch();
-        trackCredits(vqCreditsPerImage(data.model ?? imgModel)); // model the server actually used (refs may upgrade it)
+        trackCredits(vqCreditsPerImage(data.model ?? fallbackModel)); // model the server actually used (refs may upgrade it)
         setArtNonce((n) => n + 1);
         toast({ title: `${typeLabel} generated`, description: `${data.width}x${data.height} — review below, then Approve.` });
       }
@@ -1212,56 +1218,63 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       genInFlight.current = false;
       setBusy(null);
       setGenPhase(null);
+      resetGenerateWith();
     }
   }
 
   async function generateFamilyArtwork() {
-    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); resetGenerateWith(); return; }
     const blocked = generationBlockedReasonWithProvider(founderFlags, "gen_master_portrait", providerConnection, providerStatusLoaded);
-    if (blocked) { toast({ title: "Generation unavailable", description: blocked, variant: "destructive" }); return; }
-    if (!window.confirm(`Generate Stage 1/2/3 master artwork for family ${selected.familyId}? This spends Higgsfield credits (up to 3 images).`)) return;
+    if (blocked) { toast({ title: "Generation unavailable", description: blocked, variant: "destructive" }); resetGenerateWith(); return; }
+    if (!window.confirm(`Generate Stage 1/2/3 master artwork for family ${selected.familyId}? This spends Higgsfield credits (up to 3 images).`)) { resetGenerateWith(); return; }
     setBusy("gen-family");
-    const familyScopeKey = `family:${selected.familyId}:${imgModel || "default"}`;
+    const requestModel = requestModelForGenerateWith(imgModel);
+    const fallbackModel = requestModel ?? VQ_QUALITY_MODEL.draft;
+    const familyScopeKey = `family:${selected.familyId}:${imgModel}`;
     const familyIdempotencyKey = getOrCreateIdempotencyKey(familyScopeKey);
     try {
-      const res = await apiRequest("POST", `/api/admin/vault-quest/characters/family/${encodeURIComponent(selected.familyId)}/generate-artwork`, { model: imgModel, idempotencyKey: familyIdempotencyKey, ...premiumRequest(imgModel) });
+      const res = await apiRequest("POST", `/api/admin/vault-quest/characters/family/${encodeURIComponent(selected.familyId)}/generate-artwork`, { ...(requestModel ? { model: requestModel } : {}), idempotencyKey: familyIdempotencyKey, ...premiumRequest(imgModel) });
       const data = (await res.json()) as { generated?: unknown[]; pending?: boolean; message?: string };
       if (data.pending) { toast({ title: "Already generating", description: data.message ?? "This is already running — please wait." }); return; }
       clearIdempotencyKey(familyScopeKey);
       await candQuery.refetch();
       setArtNonce((n) => n + 1);
-      trackCredits((data.generated?.length ?? 0) * creditsPerImage); // paid images — keep the spend counters honest
+      trackCredits((data.generated?.length ?? 0) * vqCreditsPerImage(fallbackModel)); // paid images — keep the spend counters honest
       toast({ title: "Family master artwork generated", description: `${data.generated?.length ?? 0} stage candidate(s). Select each stage to review + approve.` });
     } catch (e) {
       clearIdempotencyKey(familyScopeKey);
       artworkError(e, "Generate family artwork failed");
     } finally {
       setBusy(null);
+      resetGenerateWith();
     }
   }
 
   async function generate3More() {
-    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); resetGenerateWith(); return; }
     const blocked = generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(refType), providerConnection, providerStatusLoaded);
-    if (blocked) { toast({ title: "Generation unavailable", description: blocked, variant: "destructive" }); return; }
-    if (!window.confirm(`Generate 3 more ${refTypeMeta.label} candidates for ${selected.characterName}? This spends Higgsfield credits (3 images).`)) return;
+    if (blocked) { toast({ title: "Generation unavailable", description: blocked, variant: "destructive" }); resetGenerateWith(); return; }
+    if (!window.confirm(`Generate 3 more ${refTypeMeta.label} candidates for ${selected.characterName}? This spends Higgsfield credits (3 images).`)) { resetGenerateWith(); return; }
     setBusy("gen-3more");
-    const batchScopeKey = `character:${selected.characterId}:batch:${refType}:${imgModel || "default"}`;
+    const requestModel = requestModelForGenerateWith(imgModel);
+    const fallbackModel = requestModel ?? VQ_QUALITY_MODEL.draft;
+    const batchScopeKey = `character:${selected.characterId}:batch:${refType}:${imgModel}`;
     const batchIdempotencyKey = getOrCreateIdempotencyKey(batchScopeKey);
     try {
-      const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork/batch`, { count: 3, referenceType: refType, model: imgModel, idempotencyKey: batchIdempotencyKey, ...premiumRequest(imgModel) });
+      const res = await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/generate-artwork/batch`, { count: 3, referenceType: refType, ...(requestModel ? { model: requestModel } : {}), idempotencyKey: batchIdempotencyKey, ...premiumRequest(imgModel) });
       const data = (await res.json()) as { created?: { model?: string }[]; autoRejected?: number; bgRejected?: number; pending?: boolean; message?: string };
       if (data.pending) { toast({ title: "Already generating", description: data.message ?? "This is already running — please wait." }); return; }
       clearIdempotencyKey(batchScopeKey);
       await candQuery.refetch();
       setArtNonce((n) => n + 1);
-      trackCredits(vqChargedCredits(data, imgModel)); // counts billed rejects at the model actually used
+      trackCredits(vqChargedCredits(data, fallbackModel)); // counts billed rejects at the model actually used
       toast({ title: "Generated more candidates", description: `${data.created?.length ?? 0} new candidate(s).` });
     } catch (e) {
       clearIdempotencyKey(batchScopeKey);
       artworkError(e, "Generate 3 more failed");
     } finally {
       setBusy(null);
+      resetGenerateWith();
     }
   }
 
@@ -1331,16 +1344,18 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   const imagesForType = (rt: VqRefType) => (rt === "master_portrait" ? masterImages : 1);
   // Build the estimate for an explicit list of (character, referenceType) work items.
   function openBatchItems(work: { characterId: string; name: string; stage: number; referenceType: VqRefType }[], label: string) {
-    if (batchRunning) return;
-    if (work.length === 0) { toast({ title: "Nothing to generate", description: `Everything for “${label}” is already approved / locked / complete — 0 credits.` }); return; }
+    if (batchRunning) { resetGenerateWith(); return; }
+    if (work.length === 0) { toast({ title: "Nothing to generate", description: `Everything for “${label}” is already approved / locked / complete — 0 credits.` }); resetGenerateWith(); return; }
     const disabledType = work.find((w) => generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(w.referenceType), providerConnection, providerStatusLoaded));
     if (disabledType) {
       toast({ title: "Generation unavailable", description: generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(disabledType.referenceType), providerConnection, providerStatusLoaded) ?? "This generation type is Off.", variant: "destructive" });
+      resetGenerateWith();
       return;
     }
     const items: BatchItem[] = work.map((w) => ({ ...w, status: "queued" }));
     const images = work.reduce((a, w) => a + imagesForType(w.referenceType), 0);
-    const resolvedModel = expectedResolvedModel(imgModel, work.some((w) => w.referenceType !== "master_portrait" || !!characters.find((c) => c.characterId === w.characterId)?.referencePack));
+    const baseModel = requestModelForGenerateWith(imgModel) ?? VQ_QUALITY_MODEL.draft;
+    const resolvedModel = expectedResolvedModel(baseModel, work.some((w) => w.referenceType !== "master_portrait" || !!characters.find((c) => c.characterId === w.characterId)?.referencePack));
     const maxCredits = batchMaximumCredits(images, resolvedModel, autoPaidRetryEnabled);
     setTypedConfirm("");
     setEstimate({ items, images, credits: maxCredits, needTyped: images > BATCH_IMAGE_LIMIT, label, model: resolvedModel, premiumReason: isPremiumModel(resolvedModel) ? premiumReason.trim() : undefined });
@@ -1355,35 +1370,39 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     openBatchItems(eligible.map((c) => ({ characterId: c.characterId, name: c.characterName, stage: c.stageNumber, referenceType: refType })), label);
   }
 
-  function stopBatch() { stopRef.current = true; pauseRef.current = false; setQueuePaused(false); }
+  function stopBatch() { stopRef.current = true; pauseRef.current = false; setQueuePaused(false); resetGenerateWith(); }
   function pauseQueue() { pauseRef.current = true; setQueuePaused(true); }
   function resumeQueue() { pauseRef.current = false; setQueuePaused(false); }
   function skipCurrent() { skipRef.current = true; }
   // Re-queue failed / rejected items from the finished batch as a fresh estimate.
   function retryBatch(statuses: BatchStatus[]) {
-    if (!batch || batchRunning) return;
+    if (!batch || batchRunning) { resetGenerateWith(); return; }
     const work = batch.filter((b) => statuses.includes(b.status)).map((b) => ({ characterId: b.characterId, name: b.name, stage: b.stage, referenceType: b.referenceType, kind: b.kind }));
-    if (!work.length) { toast({ title: "Nothing to retry" }); return; }
+    if (!work.length) { toast({ title: "Nothing to retry" }); resetGenerateWith(); return; }
     const disabledType = work.find((w) => generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(w.referenceType), providerConnection, providerStatusLoaded));
     if (disabledType) {
       toast({ title: "Generation unavailable", description: generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(disabledType.referenceType), providerConnection, providerStatusLoaded) ?? "This generation type is Off.", variant: "destructive" });
+      resetGenerateWith();
       return;
     }
     const images = work.reduce((a, w) => a + (w.kind === "description" ? 0 : imagesForType(w.referenceType)), 0);
-    const maxCredits = batchMaximumCredits(images, imgModel, autoPaidRetryEnabled);
+    const baseModel = requestModelForGenerateWith(imgModel) ?? VQ_QUALITY_MODEL.draft;
+    const maxCredits = batchMaximumCredits(images, baseModel, autoPaidRetryEnabled);
     setTypedConfirm("");
-    setEstimate({ items: work.map((w) => ({ ...w, status: "queued" as BatchStatus })), images, credits: maxCredits, needTyped: images > BATCH_IMAGE_LIMIT, label: `Retry ${statuses.join("/")}`, model: imgModel, premiumReason: isPremiumModel(imgModel) ? premiumReason.trim() : undefined });
+    setEstimate({ items: work.map((w) => ({ ...w, status: "queued" as BatchStatus })), images, credits: maxCredits, needTyped: images > BATCH_IMAGE_LIMIT, label: `Retry ${statuses.join("/")}`, model: baseModel, premiumReason: isPremiumModel(baseModel) ? premiumReason.trim() : undefined });
   }
 
   async function runBatch() {
-    if (!estimate || batchRunning) return;
+    if (!estimate || batchRunning) { resetGenerateWith(); return; }
     if (estimate.needTyped && typedConfirm.trim() !== TYPED_PHRASE) {
       toast({ title: "Type the confirmation to proceed", description: `Type: ${TYPED_PHRASE}`, variant: "destructive" });
+      resetGenerateWith();
       return;
     }
     const disabledType = estimate.items.find((item) => item.kind !== "description" && generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(item.referenceType), providerConnection, providerStatusLoaded));
     if (disabledType) {
       toast({ title: "Generation unavailable", description: generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(disabledType.referenceType), providerConnection, providerStatusLoaded) ?? "This generation type is Off.", variant: "destructive" });
+      resetGenerateWith();
       return;
     }
     const items = estimate.items.map((i) => ({ ...i, status: "queued" as BatchStatus }));
@@ -1392,6 +1411,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     const batchCreditsPerImage = vqCreditsPerImage(batchModel);
     setBatch(items);
     setEstimate(null);
+    resetGenerateWith();
     setBatchRunning(true);
     stopRef.current = false; pauseRef.current = false; skipRef.current = false; setQueuePaused(false);
     const setItem = (idx: number, patch: Partial<BatchItem>) => setBatch((prev) => (prev ? prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)) : prev));
@@ -1405,7 +1425,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
         setItem(i, { status: "paused" });
         await new Promise((r) => setTimeout(r, 400));
       }
-      if (!alive.current) return; // unmounted: no further requests, no toast, no refetch
+      if (!alive.current) { resetGenerateWith(); return; } // unmounted: no further requests, no toast, no refetch
       if (stopRef.current) {
         setBatch((prev) => (prev ? prev.map((it) => (it.status === "queued" || it.status === "generating" || it.status === "paused" ? { ...it, status: "skipped" as BatchStatus } : it)) : prev));
         skipped = items.length - i;
@@ -1463,6 +1483,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       }
     }
     setBatchRunning(false);
+    resetGenerateWith();
     stopRef.current = false; pauseRef.current = false; setQueuePaused(false);
     await candQuery.refetch();
     await chars.refetch();
@@ -1478,9 +1499,10 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       // NOT regenerated — this button previously clobbered manual unapproved drafts.
       .filter((c) => !c.locked && !isCanonical(c) && c.descriptionStatus !== "approved" && !dnaComplete(c))
       .map((c) => ({ characterId: c.characterId, name: c.characterName, stage: c.stageNumber, referenceType: "master_portrait" as VqRefType, kind: "description" as const }));
-    if (!work.length) { toast({ title: "Nothing to generate", description: "Every unlocked character already has an approved description." }); return; }
+    if (!work.length) { toast({ title: "Nothing to generate", description: "Every unlocked character already has an approved description." }); resetGenerateWith(); return; }
     setTypedConfirm("");
-    setEstimate({ items: work.map((w) => ({ ...w, status: "queued" as BatchStatus })), images: 0, credits: 0, needTyped: false, label: `Missing descriptions (${work.length}) — Anthropic text, 0 Higgsfield credits`, model: imgModel });
+    setEstimate({ items: work.map((w) => ({ ...w, status: "queued" as BatchStatus })), images: 0, credits: 0, needTyped: false, label: `Missing descriptions (${work.length}) — Anthropic text, 0 Higgsfield credits`, model: requestModelForGenerateWith(imgModel) ?? VQ_QUALITY_MODEL.draft });
+    resetGenerateWith();
   }
 
   // ── Family actions ─────────────────────────────────────────────────────────
@@ -1561,7 +1583,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
           onReuse={applyReuseAsset}
           onGenerateWithRefs={() => void doGenerateReference()}
           onGenerateAnyway={() => void doGenerateReference()}
-          onClose={() => setReuseCheck(null)}
+          onClose={() => { setReuseCheck(null); resetGenerateWith(); }}
         />
       )}
       <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/40 p-3">
@@ -1957,8 +1979,15 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                     <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
                       <div className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">AI Cost Mode</div>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                        <button type="button" onClick={() => setImgModel("auto")} className={`rounded-lg border p-2.5 text-left ${imgModel === "auto" ? "border-amber-500 bg-amber-500/15" : "border-slate-700 hover:border-slate-500"}`}>
+                          <div className="flex items-center gap-2">
+                            <span className={`h-3 w-3 rounded-full border-2 ${imgModel === "auto" ? "border-amber-400 bg-amber-400" : "border-slate-600"}`} />
+                            <span className={`text-sm font-semibold ${imgModel === "auto" ? "text-amber-200" : "text-slate-300"}`}>Auto</span>
+                          </div>
+                          <div className="mt-1 text-[10px] text-slate-500">Uses the current safe server policy for this generation</div>
+                        </button>
                         {COST_MODES.map((cm) => {
-                          const active = costModeFor(imgModel) === cm.key;
+                          const active = imgModel !== "auto" && costModeFor(imgModel) === cm.key;
                           const blurb = cm.key === "cheapest" ? "Fast drafts and testing" : cm.key === "balanced" ? "Best value for most reference generation" : "Use for final canonical artwork";
                           return (
                             <button key={cm.key} type="button" onClick={() => setImgModel(cm.model)} className={`rounded-lg border p-2.5 text-left ${active ? "border-amber-500 bg-amber-500/15" : "border-slate-700 hover:border-slate-500"}`}>
@@ -1973,12 +2002,13 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                       </div>
                       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 rounded-lg bg-slate-900/60 px-3 py-2 text-[11px] text-slate-400">
                         {/* Master ALWAYS generates 2 candidates (server-enforced, incl. Replace); Action generates 1. */}
+                        <span>Generate With: <b className="text-slate-200">{imgModel === "auto" ? "Auto" : VQ_IMAGE_MODELS.find((m) => m.value === imgModel)?.label ?? imgModel}</b></span>
                         <span>Master: <b className="text-slate-200">2 images (~{2 * creditsPerImage} cr)</b></span>
                         <span>Action: <b className="text-slate-200">1 image (~{creditsPerImage} cr)</b></span>
                         <span>Approved assets: <b className="text-slate-200">{(masterOk ? 1 : 0) + (actionOk ? 1 : 0)}</b></span>
                         <span className="text-emerald-400">Reuse-first always checks these before generating.</span>
                       </div>
-                      {isPremiumModel(imgModel) && (
+                      {requestedImgModel && isPremiumModel(requestedImgModel) && (
                         <div className="mt-2 rounded-lg border border-amber-700/60 bg-amber-950/20 p-2">
                           <label className="flex items-center gap-2 text-[11px] font-semibold text-amber-200">
                             <input type="checkbox" className="h-3.5 w-3.5 accent-amber-500" checked={premiumConfirmed} onChange={(e) => setPremiumConfirmed(e.target.checked)} />
@@ -2371,8 +2401,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Image engine</span>
                     <button type="button" disabled className="rounded border border-amber-500 bg-amber-500/15 px-2 py-1 text-[11px] text-amber-200" title={higgsProvider?.note ?? "Higgsfield"}>Higgsfield</button>
-                    <button type="button" disabled className="rounded border border-slate-800 px-2 py-1 text-[11px] text-slate-600" title={openaiProvider?.note}>OpenAI Images — {openaiProvider?.note ?? "unavailable"}</button>
                     <div className="ml-auto flex gap-1">
+                      <button type="button" onClick={() => setImgModel("auto")} className={`rounded px-2 py-1 text-[11px] font-semibold ${imgModel === "auto" ? "border border-amber-500 bg-amber-500/15 text-amber-200" : "border border-slate-700 text-slate-400 hover:border-slate-500"}`}>Auto</button>
                       {(["draft", "standard", "premium"] as const).map((q) => {
                         const m = VQ_QUALITY_MODEL[q];
                         const active = imgModel === m;
@@ -2384,12 +2414,13 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                     </div>
                   </div>
                   <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                    <select value={imgModel} onChange={(e) => setImgModel(e.target.value as VqImageModel)} className={`${inputCls} w-auto text-xs`}>
+                    <select value={imgModel} onChange={(e) => setImgModel(e.target.value as VqGenerateWith)} className={`${inputCls} w-auto text-xs`}>
+                      <option value="auto">Auto — current safe default</option>
                       {VQ_IMAGE_MODELS.map((m) => <option key={m.value} value={m.value}>{m.label} — ~{m.creditsPerImage} cr/image{m.refCapable ? "" : " · no identity lock"}</option>)}
                     </select>
-                    <span className="text-[10px] text-slate-500">~{creditsPerImage} credit{creditsPerImage === 1 ? "" : "s"}/image · Master Reference = {imagesPerItem} image{imagesPerItem === 1 ? "" : "s"}/character{imgModel === "z_image" ? " · cheap model auto-upgrades to Nano Banana when identity references are needed" : ""}</span>
+                    <span className="text-[10px] text-slate-500">~{creditsPerImage} credit{creditsPerImage === 1 ? "" : "s"}/image · Master Reference = {imagesPerItem} image{imagesPerItem === 1 ? "" : "s"}/character{(imgModel === "auto" || imgModel === "z_image") ? " · Auto/cheap model auto-upgrades to Nano Banana when identity references are needed" : ""}</span>
                   </div>
-                  {isPremiumModel(imgModel) && (
+                  {requestedImgModel && isPremiumModel(requestedImgModel) && (
                     <div className="mt-2 rounded border border-amber-700/60 bg-amber-950/20 p-2">
                       <label className="flex items-center gap-2 text-[11px] font-semibold text-amber-200">
                         <input type="checkbox" className="h-3.5 w-3.5 accent-amber-500" checked={premiumConfirmed} onChange={(e) => setPremiumConfirmed(e.target.checked)} />
@@ -2446,7 +2477,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                       )}
                       <div className="mt-2 flex gap-1.5">
                         <button type="button" onClick={runBatch} disabled={estimate.needTyped && typedConfirm.trim() !== TYPED_PHRASE} className="rounded bg-amber-500 px-2.5 py-1 text-[11px] font-semibold text-slate-900 hover:bg-amber-400 disabled:opacity-40">{batchConfirmationButtonText(estimate.images, estimate.credits)}</button>
-                        <button type="button" onClick={() => { setEstimate(null); setTypedConfirm(""); }} className="rounded border border-slate-600 px-2.5 py-1 text-[11px] text-slate-300 hover:border-slate-400">Cancel</button>
+                        <button type="button" onClick={() => { setEstimate(null); setTypedConfirm(""); resetGenerateWith(); }} className="rounded border border-slate-600 px-2.5 py-1 text-[11px] text-slate-300 hover:border-slate-400">Cancel</button>
                       </div>
                     </div>
                   )}
