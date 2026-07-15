@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
-import session, { MemoryStore } from "express-session";
+import session, { MemoryStore, type SessionData } from "express-session";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import rateLimit from "express-rate-limit";
@@ -15,6 +15,7 @@ const adminUserState = vi.hoisted(() => ({
     adminPassphraseHash: null as string | null,
   },
 }));
+const dbExecute = vi.hoisted(() => vi.fn(async () => ({ rows: [] })));
 
 vi.mock("../server/storage", () => ({
   storage: {
@@ -24,7 +25,7 @@ vi.mock("../server/storage", () => ({
 }));
 
 vi.mock("../server/db", () => ({
-  db: { execute: vi.fn(async () => ({ rows: [] })) },
+  db: { execute: dbExecute },
 }));
 
 vi.mock("../server/customer-auth", () => ({
@@ -60,6 +61,9 @@ vi.mock("../server/email", () => ({
 
 vi.mock("../server/pin", () => ({
   verifyPin: vi.fn(async (pin: string) => pin === "123456"),
+  hashPin: vi.fn(async () => "new-pin-hash"),
+  validatePinStrength: vi.fn(() => true),
+  WeakPinError: class WeakPinError extends Error {},
   checkLockout: vi.fn(async () => ({ locked: false })),
   registerFailure: vi.fn(async () => ({ locked: false })),
   resetFailures: vi.fn(async () => {}),
@@ -164,6 +168,8 @@ async function login(base: string) {
 
 describe("admin auth reliability", () => {
   beforeEach(() => {
+    dbExecute.mockReset();
+    dbExecute.mockResolvedValue({ rows: [] });
     adminUserState.user = {
       id: "admin-user-1",
       email: "mintvaultuk@gmail.com",
@@ -341,5 +347,197 @@ describe("admin auth reliability", () => {
       expect(await refresh.json()).toMatchObject({ authenticated: false, reason: "session_expired" });
       expect(refresh.headers.getSetCookie().join("\\n")).toContain("mv.sid=");
     });
+  });
+
+  it("reports admin credential status without hashes, env values, or session identifiers", async () => {
+    await withAuthApp(async ({ base }) => {
+      const cookies = await login(base);
+      const res = await request(base, "/api/admin/credentials/status", {}, cookies);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toEqual({
+        adminPassphraseHashConfigured: false,
+        breakGlassFallbackActive: true,
+        credentialVersion: 1,
+      });
+      expect(JSON.stringify(body)).not.toContain("correct-passphrase");
+      expect(JSON.stringify(body)).not.toContain("hash");
+      expect(JSON.stringify(body)).not.toContain("mv.sid");
+    });
+  });
+
+  it("requires admin authentication and PIN confirmation for passphrase changes", async () => {
+    await withAuthApp(async ({ base }) => {
+      const unauthenticated = await request(base, "/api/admin/credentials/passphrase", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          currentPassphrase: "correct-passphrase",
+          newPassphrase: "new-db-passphrase-1",
+          confirmPassphrase: "new-db-passphrase-1",
+          pin: "123456",
+        }),
+      });
+      expect(unauthenticated.status).toBe(401);
+
+      const cookies = await login(base);
+      const wrongPin = await request(
+        base,
+        "/api/admin/credentials/passphrase",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            currentPassphrase: "correct-passphrase",
+            newPassphrase: "new-db-passphrase-1",
+            confirmPassphrase: "new-db-passphrase-1",
+            pin: "000000",
+          }),
+        },
+        cookies
+      );
+      expect(wrongPin.status).toBe(401);
+    });
+  });
+
+  it("rejects wrong current and mismatched new admin passphrases", async () => {
+    await withAuthApp(async ({ base }) => {
+      const cookies = await login(base);
+      const wrongCurrent = await request(
+        base,
+        "/api/admin/credentials/passphrase",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            currentPassphrase: "wrong",
+            newPassphrase: "new-db-passphrase-1",
+            confirmPassphrase: "new-db-passphrase-1",
+            pin: "123456",
+          }),
+        },
+        cookies
+      );
+      expect(wrongCurrent.status).toBe(401);
+
+      const mismatch = await request(
+        base,
+        "/api/admin/credentials/passphrase",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            currentPassphrase: "correct-passphrase",
+            newPassphrase: "new-db-passphrase-1",
+            confirmPassphrase: "different-db-passphrase-1",
+            pin: "123456",
+          }),
+        },
+        cookies
+      );
+      expect(mismatch.status).toBe(400);
+    });
+  });
+
+  it("successful admin passphrase change stores the hash and invalidates older sessions", async () => {
+    await withAuthApp(async ({ base }) => {
+      const oldCookies = await login(base);
+      const secondCookies = await login(base);
+      dbExecute.mockResolvedValueOnce({ rows: [{ id: "admin-user-1", credential_version: 2 }] });
+
+      const changed = await request(
+        base,
+        "/api/admin/credentials/passphrase",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            currentPassphrase: "correct-passphrase",
+            newPassphrase: "new-db-passphrase-1",
+            confirmPassphrase: "new-db-passphrase-1",
+            pin: "123456",
+          }),
+        },
+        secondCookies
+      );
+      expect(changed.status).toBe(200);
+      adminUserState.user = { ...adminUserState.user, credentialVersion: 2, adminPassphraseHash: "hash" };
+
+      const currentStillValid = await request(base, "/api/admin/session", {}, mergeCookies(secondCookies, changed));
+      expect(currentStillValid.status).toBe(200);
+      expect(await currentStillValid.json()).toMatchObject({ authenticated: true });
+
+      const oldInvalid = await request(base, "/api/admin/session", {}, oldCookies);
+      expect(oldInvalid.status).toBe(401);
+    });
+  });
+
+  it("successful PIN change rotates credential_version and old PIN stops working", async () => {
+    await withAuthApp(async ({ base }) => {
+      const cookies = await login(base);
+      dbExecute.mockResolvedValueOnce({ rows: [{ id: "admin-user-1", credential_version: 2 }] });
+      const changed = await request(
+        base,
+        "/api/admin/credentials/pin",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ currentPin: "123456", newPin: "654321", confirmPin: "654321" }),
+        },
+        cookies
+      );
+      expect(changed.status).toBe(200);
+      adminUserState.user = { ...adminUserState.user, credentialVersion: 2 };
+
+      const oldSessionValid = await request(base, "/api/admin/session", {}, mergeCookies(cookies, changed));
+      expect(oldSessionValid.status).toBe(200);
+    });
+  });
+
+  it("revoke-all increments credential_version and invalidates previous admin sessions", async () => {
+    await withAuthApp(async ({ base }) => {
+      const oldCookies = await login(base);
+      const currentCookies = await login(base);
+      dbExecute.mockResolvedValueOnce({ rows: [{ id: "admin-user-1", credential_version: 2 }] });
+      const revoked = await request(
+        base,
+        "/api/admin/credentials/revoke-sessions",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ pin: "123456" }),
+        },
+        currentCookies
+      );
+      expect(revoked.status).toBe(200);
+      adminUserState.user = { ...adminUserState.user, credentialVersion: 2 };
+
+      const oldInvalid = await request(base, "/api/admin/session", {}, oldCookies);
+      expect(oldInvalid.status).toBe(401);
+
+      const currentValid = await request(base, "/api/admin/session", {}, mergeCookies(currentCookies, revoked));
+      expect(currentValid.status).toBe(200);
+    });
+  });
+
+  it("graders cannot reach admin security endpoints", async () => {
+    const store = new MemoryStore();
+    await withAuthApp(async ({ base }) => {
+      await new Promise<void>((resolve, reject) => {
+        store.set(
+          "grader-session",
+          {
+            cookie: { originalMaxAge: 60_000, expires: new Date(Date.now() + 60_000), httpOnly: true, path: "/" },
+            isGrader: true,
+            graderId: "grader-1",
+          } as SessionData,
+          (err) => (err ? reject(err) : resolve())
+        );
+      });
+      const denied = await request(base, "/api/admin/credentials/status", {}, [
+        "mv.sid=s%3Agrader-session.fake-signature; Path=/; HttpOnly",
+      ]);
+      expect([401, 403]).toContain(denied.status);
+    }, store);
   });
 });

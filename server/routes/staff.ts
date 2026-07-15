@@ -33,6 +33,7 @@ import {
   setStaffReviewRate,
   updateStaffEmail,
   resetStaffPassword,
+  revokeStaffSessions,
   assignScanSubmissions,
   unassignScanSubmissions,
   getScanQueue,
@@ -312,6 +313,13 @@ export function registerStaffRoutes(app: Express): void {
     const adminUser = (req.session as any).adminEmail || "admin";
     const { password } = req.body || {};
     const r = await resetStaffPassword(String(req.params.id), String(password ?? ""), adminUser);
+    if (!r.ok) return res.status(r.status).json({ error: r.error });
+    return res.json({ ok: true });
+  });
+
+  app.post("/api/admin/staff/:id/revoke-sessions", requireAdmin, async (req: Request, res: Response) => {
+    const adminUser = (req.session as any).adminEmail || "admin";
+    const r = await revokeStaffSessions(String(req.params.id), adminUser);
     if (!r.ok) return res.status(r.status).json({ error: r.error });
     return res.json({ ok: true });
   });

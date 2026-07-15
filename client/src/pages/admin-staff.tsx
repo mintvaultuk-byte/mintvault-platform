@@ -14,6 +14,9 @@ type Staff = {
   id: string;
   email: string;
   displayName: string | null;
+  enabled: boolean;
+  failedLoginCount: number;
+  lockedUntil: string | null;
   caps: { grade: boolean; scan: boolean; print: boolean };
   reviewRate: number;
   gradeAssigned: number;
@@ -217,6 +220,20 @@ export default function AdminStaffPage() {
     if (!res.ok) return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to reset password");
     setMsg("Password reset — they sign in at /staff/login with the new password");
     cancelEdit();
+    load();
+  }
+
+  async function revokeStaffSessions(s: Staff) {
+    setMsg(null);
+    setErr(null);
+    if (!window.confirm(`Sign out active sessions for ${s.email}?`)) return;
+    const res = await fetch(`/api/admin/staff/${s.id}/revoke-sessions`, {
+      method: "POST",
+      credentials: "include",
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Failed to revoke sessions");
+    setMsg(`Sessions revoked for ${s.email}`);
     load();
   }
 
@@ -904,6 +921,7 @@ export default function AdminStaffPage() {
                     Review %
                   </th>
                   <th>Workload</th>
+                  <th>Security</th>
                   <th></th>
                 </tr>
               </thead>
@@ -947,6 +965,13 @@ export default function AdminStaffPage() {
                         {s.caps.grade && `${s.gradeAssigned}a/${s.gradePending}p/${s.gradeApproved}✓ `}
                         {s.caps.scan && `${s.scanAssigned} box`}
                       </td>
+                      <td className="text-[10px] text-[#E8E4DC]/55">
+                        <div>{s.enabled ? "Enabled" : "Disabled"}</div>
+                        <div>{s.failedLoginCount || 0} failed</div>
+                        <div>
+                          {s.lockedUntil ? `Locked until ${new Date(s.lockedUntil).toLocaleString()}` : "Not locked"}
+                        </div>
+                      </td>
                       <td className="text-right whitespace-nowrap">
                         <button
                           type="button"
@@ -970,7 +995,7 @@ export default function AdminStaffPage() {
                     </tr>
                     {editingId === s.id && (
                       <tr className="border-t border-[#D4AF37]/10 bg-[#D4AF37]/5">
-                        <td colSpan={7} className="px-2 py-3">
+                        <td colSpan={8} className="px-2 py-3">
                           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
                             <div className="flex items-center gap-2 flex-1 min-w-[220px]">
                               <input
@@ -1011,6 +1036,14 @@ export default function AdminStaffPage() {
                                 Save password
                               </button>
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => revokeStaffSessions(s)}
+                              className="border border-[#D4AF37]/40 px-3 py-1.5 rounded text-xs whitespace-nowrap hover:bg-[#D4AF37]/10"
+                              data-testid={`button-revoke-staff-sessions-${s.id}`}
+                            >
+                              Revoke sessions
+                            </button>
                             <button
                               type="button"
                               onClick={cancelEdit}
@@ -1104,7 +1137,11 @@ export default function AdminStaffPage() {
                           {idoRerunBusy ? "Re-running…" : "Re-run TCGdex"}
                         </button>
                       </div>
-                      <TcgCardSearch onPick={applyIdoCardPick} initialQuery={idoName} testId="input-override-card-search" />
+                      <TcgCardSearch
+                        onPick={applyIdoCardPick}
+                        initialQuery={idoName}
+                        testId="input-override-card-search"
+                      />
                     </div>
 
                     {/* Set name — same searchable picker (with inline add) the grader uses. */}
@@ -1172,8 +1209,8 @@ export default function AdminStaffPage() {
                       </button>
                     </div>
                     <div className="text-[10px] text-[#E8E4DC]/40">
-                      Overwrites card name / set / number / year / variant. Flows to the operator queue, the
-                      public cert page, and the slab/PDF. Logged.
+                      Overwrites card name / set / number / year / variant. Flows to the operator queue, the public cert
+                      page, and the slab/PDF. Logged.
                     </div>
                   </div>
                 )}

@@ -76,7 +76,8 @@ export const users = pgTable("users", {
   deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-  // Account auth fields — added by migrateAccountSchema() at startup
+  // Account auth fields — base fields from migrateAccountSchema(); Phase 1
+  // hardening columns from migrations/add-auth-security-hardening-phase1.sql.
   passwordHash: text("password_hash"),
   displayName: text("display_name"),
   emailVerified: boolean("email_verified").notNull().default(false),

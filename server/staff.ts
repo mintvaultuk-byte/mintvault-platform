@@ -247,6 +247,7 @@ export async function authenticateStaff(
 export async function listStaffWithCounts() {
   const r = await db.execute(sql`
     SELECT u.id, u.email, u.display_name, u.can_grade, u.can_scan, u.can_print, u.review_rate,
+      u.deleted_at, u.failed_login_count, u.locked_until,
       (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'assigned')::int AS grade_assigned,
       (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'pending_review')::int AS grade_pending,
       (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'approved')::int AS grade_approved,
@@ -261,6 +262,9 @@ export async function listStaffWithCounts() {
     email: u.email,
     displayName: u.display_name ?? null,
     caps: { grade: !!u.can_grade, scan: !!u.can_scan, print: !!u.can_print },
+    enabled: !u.deleted_at,
+    failedLoginCount: Number(u.failed_login_count || 0),
+    lockedUntil: u.locked_until ? new Date(u.locked_until).toISOString() : null,
     reviewRate: u.review_rate == null ? 100 : Number(u.review_rate),
     gradeAssigned: Number(u.grade_assigned || 0),
     gradePending: Number(u.grade_pending || 0),
@@ -489,6 +493,26 @@ export async function resetStaffPassword(
   if (!upd.rows.length) return { ok: false, status: 409, error: "Password not updated" };
   // details is intentionally empty — NEVER the password (plain OR hash).
   await storage.writeAuditLog("user", userId, "staff_password_reset", adminUser, {});
+  invalidateStaffSessionCache(userId);
+  invalidateGraderSessionCache(userId);
+  return { ok: true };
+}
+
+export async function revokeStaffSessions(
+  userId: string,
+  adminUser: string
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const guard = await loadStaffForEdit(userId);
+  if (!guard.ok) return guard;
+  const upd = await db.execute(sql`
+    UPDATE users
+    SET credential_version = credential_version + 1,
+        updated_at = NOW()
+    WHERE id = ${userId} AND deleted_at IS NULL AND role <> 'admin'
+    RETURNING id
+  `);
+  if (!upd.rows.length) return { ok: false, status: 409, error: "Sessions not revoked" };
+  await storage.writeAuditLog("user", userId, "staff_sessions_revoked", adminUser, {});
   invalidateStaffSessionCache(userId);
   invalidateGraderSessionCache(userId);
   return { ok: true };

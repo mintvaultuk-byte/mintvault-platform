@@ -75,7 +75,8 @@ export async function findUserByEmail(email: string): Promise<Record<string, unk
   const rows = await db.execute(sql`
     SELECT id, email, password_hash, display_name, email_verified,
            email_verified_at, failed_login_count, locked_until, deleted_at,
-           last_login_at, last_login_ip, role, created_at, public_name
+           last_login_at, last_login_ip, role, created_at, public_name,
+           last_failed_login_at, credential_version, admin_passphrase_hash
     FROM users
     WHERE LOWER(email) = LOWER(${email.trim()})
     LIMIT 1
@@ -87,7 +88,8 @@ export async function findUserById(id: string): Promise<Record<string, unknown> 
   const rows = await db.execute(sql`
     SELECT id, email, password_hash, display_name, email_verified,
            email_verified_at, failed_login_count, locked_until, deleted_at,
-           last_login_at, last_login_ip, role, created_at, public_name
+           last_login_at, last_login_ip, role, created_at, public_name,
+           last_failed_login_at, credential_version, admin_passphrase_hash
     FROM users
     WHERE id = ${id}
     LIMIT 1
@@ -149,10 +151,7 @@ export async function migrateAccountSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP,
       ADD COLUMN IF NOT EXISTS last_login_ip TEXT,
       ADD COLUMN IF NOT EXISTS failed_login_count INTEGER NOT NULL DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS last_failed_login_at TIMESTAMP,
-      ADD COLUMN IF NOT EXISTS credential_version INTEGER NOT NULL DEFAULT 1,
-      ADD COLUMN IF NOT EXISTS admin_passphrase_hash TEXT
+      ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP
   `);
 
   // Case-insensitive unique index on email
