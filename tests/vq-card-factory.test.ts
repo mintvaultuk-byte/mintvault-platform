@@ -9,6 +9,8 @@ import {
   VQ_CARD_FACTORY_MANUFACTURER_PROFILE_CONTRACT,
   VQ_CARD_FACTORY_TEMPLATE_VERSION,
   normalizeVqFactoryPlacement,
+  normalizeVqFactoryElement,
+  normalizeVqFactoryName,
   VQ_STANDARD_CARD_SPECS,
   detectVqBannedTerms,
   getVqStandardSpec,
@@ -18,7 +20,8 @@ import {
 } from "../shared/vq-card-factory";
 import { renderCard, type RenderCardInput } from "../server/vault-quest/render-service";
 import { VQ_ELEMENTS, VQ_LOCK } from "../server/vault-quest/lib/vq-constants";
-import type { VqCardRow } from "../shared/vq-schema";
+import { vqStorage } from "../server/vault-quest/storage";
+import type { VqCardRow, VqCharacter, VqFamily } from "../shared/vq-schema";
 
 vi.mock("../server/db", () => ({ db: {}, pool: { end: vi.fn() } }));
 
@@ -115,6 +118,45 @@ describe("Vault Quest Card Factory set plan", () => {
 });
 
 describe("Vault Quest Card Factory validation", () => {
+  it("accepts the six approved Phase 1 elements and legacy labels that map to them", () => {
+    expect(VQ_CARD_FACTORY_ELEMENTS).toEqual(["Terra", "Volt", "Tide", "Flame", "Gale", "Crystal"]);
+    expect(normalizeVqFactoryElement("Blaze")).toBe("Flame");
+    expect(normalizeVqFactoryElement("Water")).toBe("Tide");
+    expect(normalizeVqFactoryElement("Nature")).toBe("Terra");
+    expect(normalizeVqFactoryElement("Storm")).toBe("Volt");
+    expect(normalizeVqFactoryElement("Wind")).toBe("Gale");
+    for (const element of VQ_CARD_FACTORY_ELEMENTS) {
+      const spec = VQ_STANDARD_CARD_SPECS.find((card) => card.element === element)!;
+      const input = validInput({
+        collectorNumber: spec.collectorNumber,
+        name: spec.character,
+        familyId: spec.familyId,
+        stage: spec.stage,
+        previousStage: spec.expectedPreviousName,
+        prevArtR2Key: spec.stage === 1 ? null : `vq/art/${spec.collectorNumber}-prev.png`,
+        element,
+      });
+      expect(validateVqFactoryCard(spec, input, [input]).map((issue) => issue.code)).not.toContain("invalid_element");
+    }
+  });
+
+  it("accepts every locked Standard creature name, including the Breezi line", () => {
+    expect(normalizeVqFactoryName("Breezy")).toBe("Breezi");
+    expect(normalizeVqFactoryName("Breezella")).toBe("Breezelle");
+    for (const spec of VQ_STANDARD_CARD_SPECS) {
+      const input = validInput({
+        collectorNumber: spec.collectorNumber,
+        name: spec.character,
+        familyId: spec.familyId,
+        stage: spec.stage,
+        element: spec.element,
+        previousStage: spec.expectedPreviousName,
+        prevArtR2Key: spec.stage === 1 ? null : `vq/art/${spec.collectorNumber}-prev.png`,
+      });
+      expect(validateVqFactoryCard(spec, input, [input]).map((issue) => issue.code)).not.toContain("name_mismatch");
+    }
+  });
+
   it("rejects banned trading-card terms and keeps Vault Quest terminology", () => {
     expect(VQ_CARD_FACTORY_BANNED_TERMS).toEqual(["HP", "Pokémon", "Pokemon", "Weakness", "Resistance", "Retreat"]);
     expect(detectVqBannedTerms(["Health and Guard with Shift, Vulnerability, Core, and Seals"])).toEqual([]);
@@ -165,6 +207,36 @@ describe("Vault Quest Card Factory validation", () => {
     expect(issueCodes(validInput({ familyId: "GV-WRONG" }))).toContain("invalid_family");
   });
 
+  it("keeps Stage 1 portrait-free and requires genuine previous portraits for Stage 2/3", () => {
+    expect(issueCodes(validInput({ prevArtR2Key: "vq/art/prev.png" }))).toContain("stage1_prev_portrait");
+    expect(
+      issueCodes(
+        validInput({
+          collectorNumber: "005",
+          name: "Aquanix",
+          familyId: "GNV-F02",
+          stage: 2,
+          element: "Tide",
+          previousStage: "Aquabub",
+          prevArtR2Key: null,
+        })
+      )
+    ).toContain("missing_previous_portrait");
+    expect(
+      issueCodes(
+        validInput({
+          collectorNumber: "005",
+          name: "Aquanix",
+          familyId: "GNV-F02",
+          stage: 2,
+          element: "Tide",
+          previousStage: "Aquabub",
+          prevArtR2Key: "vq/characters/GNV-F02-S1/approved/master_portrait.png",
+        })
+      )
+    ).not.toContain("missing_previous_portrait");
+  });
+
   it("blocks incomplete artwork and duplicate collector numbers before approval/export", () => {
     const duplicate = validInput({ name: "Flammi Clone" });
     const issues = validateVqFactoryCard(
@@ -178,6 +250,168 @@ describe("Vault Quest Card Factory validation", () => {
 });
 
 describe("Vault Quest Card Factory render and provider safety", () => {
+  it("resolves an existing approved previous-stage portrait without requiring a copied card prevArtR2Key", async () => {
+    const { getFactoryRows } = await import("../server/vault-quest/card-factory");
+    const cards = [
+      {
+        ...validInput({
+          collectorNumber: "004/036",
+          name: "Aquabub",
+          familyId: "GNV-F02",
+          element: "Tide",
+        }),
+        cardId: "GNV-004",
+        cardType: "Creature",
+        displayName: "Aquabub",
+        lifeStage: "BABY",
+        keywords: [],
+        effects: null,
+        renderR2Key: null,
+        variantTier: "STANDARD",
+        baseCardId: null,
+        setCode: "GNV",
+        language: "EN",
+        notes: null,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+      },
+      {
+        ...validInput({
+          collectorNumber: "005/036",
+          name: "Aquanix",
+          familyId: "GNV-F02",
+          stage: 2,
+          element: "Tide",
+          previousStage: "Aquabub",
+          prevArtR2Key: null,
+        }),
+        cardId: "GNV-005",
+        cardType: "Creature",
+        displayName: "Aquanix",
+        lifeStage: "TEEN",
+        keywords: [],
+        effects: null,
+        renderR2Key: null,
+        variantTier: "STANDARD",
+        baseCardId: null,
+        setCode: "GNV",
+        language: "EN",
+        notes: null,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+      },
+    ] as VqCardRow[];
+    const families = [
+      {
+        id: 1,
+        familyId: "GNV-F02",
+        setCode: "GNV",
+        element: "Tide",
+        name: "Aquabub",
+        stage1Name: "Aquabub",
+        stage2Name: "Aquanix",
+        stage3Name: "Aquadon",
+        createdAt: new Date(0),
+      },
+    ] as VqFamily[];
+    const characters = [
+      {
+        id: 1,
+        characterId: "GNV-F02-S1",
+        setCode: "GNV",
+        familyId: "GNV-F02",
+        familyName: "Aquabub",
+        cardId: "GNV-004",
+        stageNumber: 1,
+        characterName: "Aquabub",
+        element: "Tide",
+        referencePack: { master_portrait: { r2Key: "vq/characters/GNV-F02-S1/approved/master_portrait.png" } },
+        approvedArtworkR2Key: null,
+        referenceArtworkR2Key: null,
+        variantCardIds: [],
+        gameMetadata: {},
+        descriptionStatus: "draft",
+        approvalStatus: "draft",
+        locked: false,
+        createdAt: new Date(0),
+        updatedAt: new Date(0),
+      },
+    ] as VqCharacter[];
+    vi.spyOn(vqStorage, "listCards").mockResolvedValue(cards);
+    vi.spyOn(vqStorage, "listCharacters").mockResolvedValue(characters);
+    vi.spyOn(vqStorage, "listFamilies").mockResolvedValue(families);
+    vi.spyOn(vqStorage, "getConfig").mockResolvedValue({});
+
+    const aquanix = (await getFactoryRows()).find((row) => row.spec.collectorNumber === "005")!;
+    expect(aquanix.previousStagePortraitStatus).toBe("linked");
+    expect(aquanix.validation.map((issue) => issue.code)).not.toContain("missing_previous_portrait");
+
+    vi.restoreAllMocks();
+  });
+
+  it("saves founder draft data through audited card storage and blocks double-save with stale timestamps", async () => {
+    const { saveFactoryCardData } = await import("../server/vault-quest/card-factory");
+    const updatedAt = new Date("2026-01-01T00:00:00.000Z");
+    const card = {
+      ...validInput({ collectorNumber: "004/036", name: "Aquabub", familyId: "GNV-F02", element: "Tide" }),
+      cardId: "GNV-004",
+      cardType: "Creature",
+      displayName: "Aquabub",
+      lifeStage: "BABY",
+      keywords: [],
+      effects: null,
+      renderR2Key: null,
+      variantTier: "STANDARD",
+      baseCardId: null,
+      setCode: "GNV",
+      language: "EN",
+      notes: null,
+      createdAt: new Date(0),
+      updatedAt,
+    } as VqCardRow;
+    vi.spyOn(vqStorage, "listCards").mockResolvedValue([card]);
+    vi.spyOn(vqStorage, "listCharacters").mockResolvedValue([]);
+    vi.spyOn(vqStorage, "listFamilies").mockResolvedValue([
+      {
+        id: 1,
+        familyId: "GNV-F02",
+        setCode: "GNV",
+        element: "Tide",
+        name: "Aquabub",
+        stage1Name: "Aquabub",
+        stage2Name: "Aquanix",
+        stage3Name: "Aquadon",
+        createdAt: new Date(0),
+      },
+    ] as VqFamily[]);
+    vi.spyOn(vqStorage, "getConfig").mockResolvedValue({});
+    const save = vi.spyOn(vqStorage, "saveCard").mockResolvedValue({ ...card, attack1Cost: 2 } as VqCardRow);
+
+    await saveFactoryCardData(
+      "004",
+      {
+        attack1Cost: 2,
+        attack1Damage: 3,
+        attack1Name: "Bubble Guard",
+        health: 4,
+        guard: 1,
+        shift: 1,
+        rarity: "Common",
+        vulnerability: "Volt",
+        edition: "First Edition",
+        year: 2026,
+        expectedUpdatedAt: updatedAt.toISOString(),
+      },
+      "founder"
+    );
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ cardId: "GNV-004", attack1Cost: 2 }), "founder");
+    await expect(
+      saveFactoryCardData("004", { expectedUpdatedAt: "2026-01-02T00:00:00.000Z" }, "founder")
+    ).rejects.toThrow(/changed since/i);
+
+    vi.restoreAllMocks();
+  });
+
   it("renders the front preview through the existing canonical renderer at 69mm x 94mm", async () => {
     const art = await sharp({ create: { width: 1600, height: 1100, channels: 4, background: "#d0472b" } })
       .png()
@@ -356,6 +590,7 @@ describe("Vault Quest Card Factory render and provider safety", () => {
         approval: null,
         approvalState: "missing" as const,
         approvalStaleReason: null,
+        previousStagePortraitStatus: "not_required" as const,
       },
     ];
     expect(buildFactoryCsvManifest(rows).split("\n")[0]).toContain("collectorNumber");
@@ -410,6 +645,7 @@ describe("Vault Quest Card Factory render and provider safety", () => {
       approval: null,
       approvalState: index === 0 ? ("current" as const) : ("missing" as const),
       approvalStaleReason: null,
+      previousStagePortraitStatus: spec.stage === 1 ? ("not_required" as const) : ("missing" as const),
     }));
 
     expect(rows).toHaveLength(36);

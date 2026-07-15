@@ -57,7 +57,6 @@ export const VQ_ELEMENTS: Record<string, ElementStyle> = {
  */
 export const VQ_ELEMENTS_NEEDS_APPROVAL: ReadonlySet<string> = new Set([
   "Blaze",
-  "Tide",
   "Blossom",
   "Spark",
   "Earth",
@@ -68,10 +67,6 @@ export const VQ_ELEMENTS_NEEDS_APPROVAL: ReadonlySet<string> = new Set([
   "Dark",
   "Light",
   "Brand",
-  "Crystal",
-  "Terra",
-  "Volt",
-  "Gale",
 ]);
 
 export const VQ_LOCKED_CONSTANTS = { set_code: "GNV", year: 2026, edition: "FIRST EDITION", language: "EN" } as const;

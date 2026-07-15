@@ -158,6 +158,27 @@ export interface VqFactoryValidationInput {
   status?: string | null;
 }
 
+export interface VqFactoryCardDataDraft {
+  health?: number | null;
+  guard?: number | null;
+  shift?: number | null;
+  vulnerability?: string | null;
+  rarity?: string | null;
+  attack1Name?: string | null;
+  attack1Cost?: number | null;
+  attack1Damage?: number | null;
+  attack1Effect?: string | null;
+  attack2Name?: string | null;
+  attack2Cost?: number | null;
+  attack2Damage?: number | null;
+  attack2Effect?: string | null;
+  flavourText?: string | null;
+  edition?: string | null;
+  year?: number | null;
+  footerCopyright?: string | null;
+  expectedUpdatedAt?: string | null;
+}
+
 export interface VqFactoryValidationIssue {
   code: string;
   field: string;
@@ -183,6 +204,42 @@ export function getVqStandardSpec(collectorNumber: string): VqCardFactorySpec | 
 export function findVqStandardSpecByName(name: string): VqCardFactorySpec | undefined {
   const normalized = name.trim().toLowerCase();
   return VQ_STANDARD_CARD_SPECS.find((card) => card.character.toLowerCase() === normalized);
+}
+
+const VQ_CARD_FACTORY_ELEMENT_ALIASES: Record<string, VqCardFactoryElement> = {
+  blaze: "Flame",
+  fire: "Flame",
+  water: "Tide",
+  aqua: "Tide",
+  nature: "Terra",
+  blossom: "Terra",
+  earth: "Terra",
+  storm: "Volt",
+  spark: "Volt",
+  electric: "Volt",
+  wind: "Gale",
+};
+
+const VQ_CARD_FACTORY_NAME_ALIASES: Record<string, string> = {
+  breezy: "Breezi",
+  breezie: "Breezi",
+  breezella: "Breezelle",
+  breezel: "Breezelle",
+  breezer: "Breezar",
+};
+
+export function normalizeVqFactoryElement(value: string | null | undefined): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const direct = VQ_CARD_FACTORY_ELEMENTS.find((element) => element.toLowerCase() === raw.toLowerCase());
+  return direct ?? VQ_CARD_FACTORY_ELEMENT_ALIASES[raw.toLowerCase()] ?? raw;
+}
+
+export function normalizeVqFactoryName(value: string | null | undefined): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const direct = VQ_STANDARD_CARD_SPECS.find((card) => card.character.toLowerCase() === raw.toLowerCase());
+  return direct?.character ?? VQ_CARD_FACTORY_NAME_ALIASES[raw.toLowerCase()] ?? raw;
 }
 
 export function safeVqFactoryFilenamePart(value: string, fallback = "card"): string {
@@ -265,7 +322,7 @@ export function validateVqFactoryCard(
   }
   if (!present(input.name))
     issues.push({ code: "missing_name", field: "name", message: "Card name is required.", severity: "blocker" });
-  else if (String(input.name).trim() !== spec.character) {
+  else if (normalizeVqFactoryName(input.name) !== spec.character) {
     issues.push({
       code: "name_mismatch",
       field: "name",
@@ -287,7 +344,7 @@ export function validateVqFactoryCard(
       message: `Family must be ${spec.familyId}.`,
       severity: "blocker",
     });
-  if (input.element !== spec.element)
+  if (normalizeVqFactoryElement(input.element) !== spec.element)
     issues.push({
       code: "invalid_element",
       field: "element",
