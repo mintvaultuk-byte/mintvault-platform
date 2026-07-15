@@ -25,6 +25,7 @@ import {
   Sparkles,
   ShieldCheck,
   Library,
+  PackageCheck,
   Share2,
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
@@ -88,6 +89,7 @@ const NAV: NavSection[] = [
     heading: "Insight",
     items: [
       { href: "/admin/vault-quest", label: "Vault Quest", icon: Sparkles },
+      { href: "/admin/vault-quest/card-factory", label: "Card Factory", icon: PackageCheck },
       { key: "learning", label: "AI Learning", icon: Brain },
       { key: "divergence", label: "AI Divergence", icon: TrendingUp },
       { key: "grading", label: "Grading", icon: BarChart3 },
