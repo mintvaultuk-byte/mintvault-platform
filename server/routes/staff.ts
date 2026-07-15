@@ -57,6 +57,14 @@ const staffLoginLimit = rateLimit({
   message: { error: "Too many login attempts. Please wait a few minutes and try again." },
 });
 
+const adminStaffSecurityLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many attempts. Please wait 15 minutes and try again." },
+});
+
 const scanUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 export function registerStaffRoutes(app: Express): void {
@@ -317,12 +325,17 @@ export function registerStaffRoutes(app: Express): void {
     return res.json({ ok: true });
   });
 
-  app.post("/api/admin/staff/:id/revoke-sessions", requireAdmin, async (req: Request, res: Response) => {
-    const adminUser = (req.session as any).adminEmail || "admin";
-    const r = await revokeStaffSessions(String(req.params.id), adminUser);
-    if (!r.ok) return res.status(r.status).json({ error: r.error });
-    return res.json({ ok: true });
-  });
+  app.post(
+    "/api/admin/staff/:id/revoke-sessions",
+    adminStaffSecurityLimit,
+    requireAdmin,
+    async (req: Request, res: Response) => {
+      const adminUser = (req.session as any).adminEmail || "admin";
+      const r = await revokeStaffSessions(String(req.params.id), adminUser);
+      if (!r.ok) return res.status(r.status).json({ error: r.error });
+      return res.json({ ok: true });
+    }
+  );
 
   // Soft-delete a staff account (deleted_at). Blocks admins + staffers with open
   // grading work; audited. See deleteStaffAccount.
