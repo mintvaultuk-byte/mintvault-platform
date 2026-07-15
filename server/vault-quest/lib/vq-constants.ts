@@ -44,6 +44,9 @@ export const VQ_ELEMENTS: Record<string, ElementStyle> = {
   Light: { border: "#D97706", accent: "#FDE68A", dark: "#2A1600", crest: "◆" },
   Brand: { border: "#9A6A3A", accent: "#C89B6A", dark: "#2A1A0A", crest: "◆" },
   Crystal: { border: "#3AA6A6", accent: "#7FD8D8", dark: "#06322F", crest: "◆" },
+  Terra: { border: "#5F7F3A", accent: "#A7C957", dark: "#20310F", crest: "◆" },
+  Volt: { border: "#D7A900", accent: "#FDE047", dark: "#2F2700", crest: "◆" },
+  Gale: { border: "#0F9A9A", accent: "#99F6E4", dark: "#063A3A", crest: "◆" },
 };
 
 /**
@@ -53,8 +56,22 @@ export const VQ_ELEMENTS: Record<string, ElementStyle> = {
  * elements above are intentionally omitted.
  */
 export const VQ_ELEMENTS_NEEDS_APPROVAL: ReadonlySet<string> = new Set([
-  "Blaze", "Tide", "Blossom", "Spark", "Earth", "Cosmos", "Wind",
-  "Electric", "Ice", "Dark", "Light", "Brand", "Crystal",
+  "Blaze",
+  "Tide",
+  "Blossom",
+  "Spark",
+  "Earth",
+  "Cosmos",
+  "Wind",
+  "Electric",
+  "Ice",
+  "Dark",
+  "Light",
+  "Brand",
+  "Crystal",
+  "Terra",
+  "Volt",
+  "Gale",
 ]);
 
 export const VQ_LOCKED_CONSTANTS = { set_code: "GNV", year: 2026, edition: "FIRST EDITION", language: "EN" } as const;
