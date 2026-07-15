@@ -841,8 +841,16 @@ export function registerAuthRoutes(app: Express): void {
     message: { error: "Too many login attempts. Please wait 15 minutes." },
   });
 
+  const pinSetupRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Too many PIN setup attempts. Please wait 15 minutes." },
+  });
+
   // POST /api/auth/pin/setup — set the PIN on the user's row.
-  app.post("/api/auth/pin/setup", async (req, res) => {
+  app.post("/api/auth/pin/setup", pinSetupRateLimit, async (req, res) => {
     try {
       const { hashPin, validatePinStrength, WeakPinError, logPinEvent, hashIp, resetFailures } = await import("../pin");
       const pin = String(req.body?.pin || "").trim();
