@@ -9,6 +9,7 @@ import { withAdvisoryLock } from "./lib/advisory-lock";
 import { trackInterval, trackTimeout, beginJob, endJob, isShuttingDown, runGracefulShutdown } from "./lib/lifecycle";
 import { serveStatic } from "./static";
 import { cleanupStalePreGradeImages } from "./r2";
+import { redactSensitive } from "./lib/auth-security";
 import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 import { sendVaultClubGraceExpiredEmail, sendTransferV2Completed } from "./email";
@@ -270,8 +271,7 @@ app.use((req, res, next) => {
     if (reqPath.startsWith("/api")) {
       let logLine = `${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`;
       if (capturedJsonResponse) {
-        const safeBody = { ...capturedJsonResponse };
-        delete safeBody.password;
+        const safeBody = redactSensitive(capturedJsonResponse);
         logLine += ` :: ${JSON.stringify(safeBody)}`;
       }
 

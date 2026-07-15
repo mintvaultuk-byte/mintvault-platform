@@ -48,6 +48,13 @@ import {
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { graderEditSubmissionRateLimit } from "../lib/rate-limiters";
+import {
+  STAFF_ABSOLUTE_SESSION_MS,
+  clearSessionCookie,
+  credentialVersionOf,
+  isAbsoluteSessionExpired,
+  stampAuthSession,
+} from "../lib/auth-security";
 
 const graderLoginLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -114,6 +121,7 @@ export function registerGraderRoutes(app: Express): void {
       s.userId = undefined;
       s.userEmail = undefined;
       s.customerEmail = undefined;
+      stampAuthSession(req, { userId: result.id, credentialVersion: result.credentialVersion, role: "staff" });
       await storage.writeAuditLog("staff_auth", result.id, "grader_login", result.email, { caps: result.caps });
       return res.json({ email: result.email, displayName: result.displayName, caps: result.caps });
     } catch (e: any) {
@@ -123,12 +131,33 @@ export function registerGraderRoutes(app: Express): void {
   });
 
   app.post("/api/grader/logout", (req: Request, res: Response) => {
-    req.session.destroy(() => res.json({ ok: true }));
+    req.session.destroy(() => {
+      clearSessionCookie(res);
+      res.json({ ok: true });
+    });
   });
 
-  app.get("/api/grader/session", (req: Request, res: Response) => {
+  app.get("/api/grader/session", async (req: Request, res: Response) => {
     const s = req.session as any;
-    if (s && s.isGrader && s.graderId && !s.isAdmin) return res.json({ authenticated: true, email: s.graderEmail });
+    if (s && s.isGrader && s.graderId && !s.isAdmin) {
+      if (isAbsoluteSessionExpired(req, STAFF_ABSOLUTE_SESSION_MS)) {
+        return req.session.destroy(() => {
+          clearSessionCookie(res);
+          res.status(401).json({ authenticated: false, reason: "session_expired" });
+        });
+      }
+      const live = await db.execute(
+        sql`SELECT credential_version, deleted_at FROM users WHERE id = ${String(s.graderId)} LIMIT 1`
+      );
+      const row = live.rows[0] as any;
+      if (!row || row.deleted_at || Number(s.credentialVersion ?? 1) !== credentialVersionOf(row)) {
+        return req.session.destroy(() => {
+          clearSessionCookie(res);
+          res.status(401).json({ authenticated: false, reason: "session_expired" });
+        });
+      }
+      return res.json({ authenticated: true, email: s.graderEmail });
+    }
     return res.json({ authenticated: false });
   });
 

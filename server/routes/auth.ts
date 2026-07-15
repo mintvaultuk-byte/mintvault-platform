@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import crypto from "crypto";
 import { storage } from "../storage";
@@ -50,6 +50,13 @@ import {
   logAdminSessionCreated,
   logAdminSessionValidationFailure,
 } from "../lib/admin-auth-session";
+import {
+  ADMIN_ABSOLUTE_SESSION_MS,
+  credentialVersionOf,
+  clearSessionCookie,
+  isAbsoluteSessionExpired,
+  stampAuthSession,
+} from "../lib/auth-security";
 
 export function registerAuthRoutes(app: Express): void {
   const adminCredentialRateLimit = rateLimit({
@@ -81,8 +88,8 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ error: "Invalid credentials" });
       }
 
-      const valid = await verifyAdminPassword(password);
-      if (!valid) {
+      const verification = await verifyAdminPassword(password);
+      if (!verification.valid) {
         recordFailedLogin(req);
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
         return res.status(401).json({ error: "Invalid credentials" });
@@ -112,8 +119,8 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ error: "Invalid credentials" });
       }
 
-      const valid = await verifyAdminPassword(password);
-      if (!valid) {
+      const verification = await verifyAdminPassword(password);
+      if (!verification.valid) {
         recordFailedLogin(req);
         await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
         return res.status(401).json({ error: "Invalid credentials" });
@@ -204,6 +211,11 @@ export function registerAuthRoutes(app: Express): void {
       req.session.customerEmail = undefined as unknown as string;
       req.session.isAdmin = true;
       req.session.adminEmail = ADMIN_EMAIL;
+      stampAuthSession(req, {
+        userId: String((adminUser as any).id),
+        credentialVersion: credentialVersionOf(adminUser),
+        role: "admin",
+      });
       clearPendingAdmin(req);
       await adminSessionSave(req);
       logAdminSessionCreated(req, "admin_login_success");
@@ -220,12 +232,7 @@ export function registerAuthRoutes(app: Express): void {
         logAdminSessionValidationFailure(req, "admin_session_destroy_failed");
         return res.status(500).json({ error: "Logout failed" });
       }
-      res.clearCookie("mv.sid", {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-      });
+      clearSessionCookie(res);
       logAdminSessionValidationFailure(req, "admin_logout");
       res.json({ success: true });
     });
@@ -239,6 +246,16 @@ export function registerAuthRoutes(app: Express): void {
   app.get("/api/admin/session", async (req, res) => {
     const status = classifyAdminSession(req);
     if (status.authenticated) {
+      const adminUser = await storage.getUserByEmail(ADMIN_EMAIL);
+      if (
+        !adminUser ||
+        isAbsoluteSessionExpired(req, ADMIN_ABSOLUTE_SESSION_MS) ||
+        Number((req.session as any).credentialVersion ?? 1) !== credentialVersionOf(adminUser)
+      ) {
+        logAdminSessionValidationFailure(req, "admin_session_expired");
+        await clearAdminSession(req, res, "admin_session_expired");
+        return res.status(401).json({ authenticated: false, reason: "session_expired" });
+      }
       return res.json({ authenticated: true, email: status.email });
     }
 
@@ -262,6 +279,202 @@ export function registerAuthRoutes(app: Express): void {
 
     res.json({ authenticated: false, reason: status.reason });
   });
+
+  async function verifyAdminPinConfirmation(req: Request, pin: unknown): Promise<boolean> {
+    const cleanPin = String(pin || "").trim();
+    if (!cleanPin) return false;
+    const adminUser = await storage.getUserByEmail(ADMIN_EMAIL);
+    const pinHash = (adminUser as any)?.pinHash;
+    if (!adminUser || !pinHash) return false;
+    const { verifyPin, checkLockout, registerFailure, resetFailures, logPinEvent, hashIp } = await import("../pin");
+    const ipH = hashIp(req.ip || "unknown");
+    const lockState = await checkLockout(ADMIN_EMAIL);
+    if (lockState.locked) {
+      await logPinEvent(ADMIN_EMAIL, false, "locked", ipH);
+      return false;
+    }
+    const ok = await verifyPin(cleanPin, pinHash);
+    if (!ok) {
+      const post = await registerFailure(ADMIN_EMAIL);
+      await logPinEvent(ADMIN_EMAIL, false, post.locked ? "lockout_triggered" : "wrong_pin", ipH);
+      return false;
+    }
+    await resetFailures(ADMIN_EMAIL);
+    return true;
+  }
+
+  app.get("/api/admin/credentials/status", requireAdmin, async (_req, res) => {
+    const adminUser = await storage.getUserByEmail(ADMIN_EMAIL);
+    const hasDbHash = !!((adminUser as any)?.adminPassphraseHash ?? (adminUser as any)?.admin_passphrase_hash);
+    res.json({
+      adminPassphraseHashConfigured: hasDbHash,
+      breakGlassFallbackActive: !hasDbHash && !!process.env.ADMIN_PASSWORD,
+      credentialVersion: credentialVersionOf(adminUser),
+    });
+  });
+
+  function requireSameOriginCredentialMutation(req: Request, res: Response, next: () => void) {
+    const origin = req.get("origin");
+    if (!origin) return next();
+    try {
+      const expected = `${req.protocol}://${req.get("host")}`;
+      if (new URL(origin).origin !== expected) return res.status(403).json({ error: "Forbidden" });
+    } catch {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    return next();
+  }
+
+  app.post(
+    "/api/admin/credentials/passphrase",
+    adminCredentialRateLimit,
+    requireAdmin,
+    requireSameOriginCredentialMutation,
+    async (req, res) => {
+      try {
+        const { currentPassphrase, newPassphrase, confirmPassphrase, pin } = req.body || {};
+        if (!(await verifyAdminPinConfirmation(req, pin))) {
+          await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+          return res.status(401).json({ error: "Invalid credentials" });
+        }
+        if (!newPassphrase || String(newPassphrase).length < 14 || newPassphrase !== confirmPassphrase) {
+          return res.status(400).json({ error: "Invalid credentials" });
+        }
+        const adminUser = await storage.getUserByEmail(ADMIN_EMAIL);
+        const current = await verifyAdminPassword(String(currentPassphrase || ""), adminUser);
+        if (!current.valid) {
+          await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+          return res.status(401).json({ error: "Invalid credentials" });
+        }
+        const newHash = await hashPassword(String(newPassphrase));
+        const updated = await db.execute(sql`
+        UPDATE users
+        SET admin_passphrase_hash = ${newHash},
+            credential_version = credential_version + 1,
+            updated_at = NOW()
+        WHERE LOWER(email) = LOWER(${ADMIN_EMAIL}) AND deleted_at IS NULL
+        RETURNING id, credential_version
+      `);
+        const row = updated.rows[0];
+        if (!row) return res.status(409).json({ error: "Credential update failed" });
+        stampAuthSession(req, {
+          userId: String((row as any).id),
+          credentialVersion: credentialVersionOf(row),
+          role: "admin",
+        });
+        await adminSessionSave(req);
+        await storage.writeAuditLog(
+          "auth",
+          ADMIN_EMAIL,
+          "admin_passphrase_changed",
+          (req.session as any).adminEmail || "admin",
+          {}
+        );
+        return res.json({ ok: true });
+      } catch (err: any) {
+        console.error("[admin-credentials] passphrase change failed:", err?.message ?? err);
+        return res.status(500).json({ error: "Credential update failed" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/admin/credentials/pin",
+    adminCredentialRateLimit,
+    requireAdmin,
+    requireSameOriginCredentialMutation,
+    async (req, res) => {
+      try {
+        const { currentPin, newPin, confirmPin } = req.body || {};
+        if (!(await verifyAdminPinConfirmation(req, currentPin))) {
+          await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+          return res.status(401).json({ error: "Invalid credentials" });
+        }
+        if (!newPin || newPin !== confirmPin) return res.status(400).json({ error: "Invalid credentials" });
+        const { hashPin, validatePinStrength, WeakPinError, resetFailures } = await import("../pin");
+        try {
+          validatePinStrength(String(newPin));
+        } catch (e: any) {
+          if (e instanceof WeakPinError) return res.status(422).json({ error: "Invalid credentials" });
+          throw e;
+        }
+        const newHash = await hashPin(String(newPin));
+        const updated = await db.execute(sql`
+        UPDATE users
+        SET pin_hash = ${newHash},
+            pin_set_at = NOW(),
+            pin_failed_count = 0,
+            pin_locked_until = NULL,
+            credential_version = credential_version + 1,
+            updated_at = NOW()
+        WHERE LOWER(email) = LOWER(${ADMIN_EMAIL}) AND deleted_at IS NULL
+        RETURNING id, credential_version
+      `);
+        const row = updated.rows[0];
+        if (!row) return res.status(409).json({ error: "Credential update failed" });
+        await resetFailures(ADMIN_EMAIL);
+        stampAuthSession(req, {
+          userId: String((row as any).id),
+          credentialVersion: credentialVersionOf(row),
+          role: "admin",
+        });
+        await adminSessionSave(req);
+        await storage.writeAuditLog(
+          "auth",
+          ADMIN_EMAIL,
+          "admin_pin_changed",
+          (req.session as any).adminEmail || "admin",
+          {}
+        );
+        return res.json({ ok: true });
+      } catch (err: any) {
+        console.error("[admin-credentials] pin change failed:", err?.message ?? err);
+        return res.status(500).json({ error: "Credential update failed" });
+      }
+    }
+  );
+
+  app.post(
+    "/api/admin/credentials/revoke-sessions",
+    adminCredentialRateLimit,
+    requireAdmin,
+    requireSameOriginCredentialMutation,
+    async (req, res) => {
+      try {
+        const { pin } = req.body || {};
+        if (!(await verifyAdminPinConfirmation(req, pin))) {
+          await new Promise((resolve) => setTimeout(resolve, FAILED_LOGIN_DELAY_MS));
+          return res.status(401).json({ error: "Invalid credentials" });
+        }
+        const updated = await db.execute(sql`
+        UPDATE users
+        SET credential_version = credential_version + 1,
+            updated_at = NOW()
+        WHERE LOWER(email) = LOWER(${ADMIN_EMAIL}) AND deleted_at IS NULL
+        RETURNING id, credential_version
+      `);
+        const row = updated.rows[0];
+        if (!row) return res.status(409).json({ error: "Credential update failed" });
+        stampAuthSession(req, {
+          userId: String((row as any).id),
+          credentialVersion: credentialVersionOf(row),
+          role: "admin",
+        });
+        await adminSessionSave(req);
+        await storage.writeAuditLog(
+          "auth",
+          ADMIN_EMAIL,
+          "admin_sessions_revoked",
+          (req.session as any).adminEmail || "admin",
+          {}
+        );
+        return res.json({ ok: true });
+      } catch (err: any) {
+        console.error("[admin-credentials] revoke sessions failed:", err?.message ?? err);
+        return res.status(500).json({ error: "Credential update failed" });
+      }
+    }
+  );
 
   // ── Customer magic-link auth ───────────────────────────────────────────────
   const magicLinkRateLimit = rateLimit({
@@ -665,14 +878,16 @@ export function registerAuthRoutes(app: Express): void {
       }
 
       const hash = await hashPin(pin);
-      await db.execute(sql`
+      const updatedUser = await db.execute(sql`
         UPDATE users
         SET pin_hash = ${hash},
             pin_set_at = NOW(),
             pin_failed_count = 0,
             pin_locked_until = NULL,
+            credential_version = credential_version + 1,
             updated_at = NOW()
         WHERE LOWER(email) = LOWER(${targetEmail}) AND deleted_at IS NULL
+        RETURNING id, credential_version
       `);
       await resetFailures(targetEmail);
 
@@ -695,7 +910,13 @@ export function registerAuthRoutes(app: Express): void {
         req.session.customerEmail = undefined as unknown as string;
         req.session.isAdmin = true;
         req.session.adminEmail = ADMIN_EMAIL;
+        stampAuthSession(req, {
+          userId: String((updatedUser.rows[0] as any)?.id),
+          credentialVersion: credentialVersionOf(updatedUser.rows[0]),
+          role: "admin",
+        });
         clearPendingAdmin(req);
+        await adminSessionSave(req);
         return res.json({ ok: true, redirect: "/admin" });
       }
       // customer or reset_customer
@@ -707,6 +928,13 @@ export function registerAuthRoutes(app: Express): void {
       req.session.isAdmin = false;
       req.session.adminEmail = undefined as unknown as string;
       req.session.customerEmail = targetEmail;
+      if (updatedUser.rows[0]) {
+        stampAuthSession(req, {
+          userId: String((updatedUser.rows[0] as any).id),
+          credentialVersion: credentialVersionOf(updatedUser.rows[0]),
+          role: "customer",
+        });
+      }
       return res.json({ ok: true, redirect: "/dashboard?login=success" });
     } catch (err: any) {
       console.error("[pin/setup] error:", err.message);

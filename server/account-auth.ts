@@ -107,18 +107,15 @@ export async function countRecentFailedAttempts(email: string, windowMinutes: nu
   return parseInt((rows.rows[0] as any)?.cnt ?? "0", 10);
 }
 
-export async function logLoginAttempt(
-  email: string,
-  ip: string,
-  success: boolean,
-  userAgent?: string,
-): Promise<void> {
+export async function logLoginAttempt(email: string, ip: string, success: boolean, userAgent?: string): Promise<void> {
   try {
     await db.execute(sql`
       INSERT INTO login_attempts (email, ip, success, user_agent, created_at)
       VALUES (${email.toLowerCase()}, ${ip}, ${success}, ${userAgent ?? null}, NOW())
     `);
-  } catch { /* non-critical */ }
+  } catch {
+    /* non-critical */
+  }
 }
 
 // ── Audit log ─────────────────────────────────────────────────────────────────
@@ -127,14 +124,16 @@ export async function writeAuthAudit(
   action: string,
   userId: string,
   ip: string,
-  extra: Record<string, unknown> = {},
+  extra: Record<string, unknown> = {}
 ): Promise<void> {
   try {
     await db.execute(sql`
       INSERT INTO audit_log (entity_type, entity_id, action, details)
       VALUES ('auth', ${userId}, ${action}, ${JSON.stringify({ ip, ...extra })}::jsonb)
     `);
-  } catch { /* non-critical */ }
+  } catch {
+    /* non-critical */
+  }
 }
 
 // ── Schema migration (idempotent) ────────────────────────────────────────────
@@ -150,7 +149,10 @@ export async function migrateAccountSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP,
       ADD COLUMN IF NOT EXISTS last_login_ip TEXT,
       ADD COLUMN IF NOT EXISTS failed_login_count INTEGER NOT NULL DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP
+      ADD COLUMN IF NOT EXISTS locked_until TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS last_failed_login_at TIMESTAMP,
+      ADD COLUMN IF NOT EXISTS credential_version INTEGER NOT NULL DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS admin_passphrase_hash TEXT
   `);
 
   // Case-insensitive unique index on email
@@ -288,7 +290,9 @@ export async function migrateAccountSchema(): Promise<void> {
 
   // ── v232: Add source column to certificates for scan-ingest tracking ────────
   try {
-    await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'customer_submission'`);
+    await db.execute(
+      sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'customer_submission'`
+    );
     console.log("[v232-migrate] certificates.source column ensured");
   } catch (e: any) {
     console.log("[v232-migrate] source column skipped:", e.message);

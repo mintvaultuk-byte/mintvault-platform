@@ -40,6 +40,13 @@ import {
   recordScanUpload,
 } from "../staff";
 import { stripGraderPii, getGraderAnalytics } from "../grader";
+import {
+  STAFF_ABSOLUTE_SESSION_MS,
+  clearSessionCookie,
+  credentialVersionOf,
+  isAbsoluteSessionExpired,
+  stampAuthSession,
+} from "../lib/auth-security";
 
 const staffLoginLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -82,6 +89,7 @@ export function registerStaffRoutes(app: Express): void {
       s.userId = undefined;
       s.userEmail = undefined;
       s.customerEmail = undefined;
+      stampAuthSession(req, { userId: r.id, credentialVersion: r.credentialVersion, role: "staff" });
       await storage.writeAuditLog("staff_auth", r.id, "staff_login", r.email, { caps: r.caps });
       return res.json({ email: r.email, displayName: r.displayName, caps: r.caps });
     } catch (e: any) {
@@ -91,12 +99,31 @@ export function registerStaffRoutes(app: Express): void {
   });
 
   app.post("/api/staff/logout", (req: Request, res: Response) => {
-    req.session.destroy(() => res.json({ ok: true }));
+    req.session.destroy(() => {
+      clearSessionCookie(res);
+      res.json({ ok: true });
+    });
   });
 
-  app.get("/api/staff/session", (req: Request, res: Response) => {
+  app.get("/api/staff/session", async (req: Request, res: Response) => {
     const s = req.session as any;
     if (s && s.isStaff && s.staffId && !s.isAdmin) {
+      if (isAbsoluteSessionExpired(req, STAFF_ABSOLUTE_SESSION_MS)) {
+        return req.session.destroy(() => {
+          clearSessionCookie(res);
+          res.status(401).json({ authenticated: false, reason: "session_expired" });
+        });
+      }
+      const live = await db.execute(
+        sql`SELECT credential_version, deleted_at FROM users WHERE id = ${String(s.staffId)} LIMIT 1`
+      );
+      const row = live.rows[0] as any;
+      if (!row || row.deleted_at || Number(s.credentialVersion ?? 1) !== credentialVersionOf(row)) {
+        return req.session.destroy(() => {
+          clearSessionCookie(res);
+          res.status(401).json({ authenticated: false, reason: "session_expired" });
+        });
+      }
       return res.json({
         authenticated: true,
         email: s.staffEmail,

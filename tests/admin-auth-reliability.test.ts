@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import express from "express";
 import session, { MemoryStore } from "express-session";
 import type { AddressInfo } from "node:net";
@@ -6,9 +6,20 @@ import type { Server } from "node:http";
 import rateLimit from "express-rate-limit";
 import { registerAuthRoutes } from "../server/routes/auth";
 
+const adminUserState = vi.hoisted(() => ({
+  user: {
+    id: "admin-user-1",
+    email: "mintvaultuk@gmail.com",
+    pinHash: "hash",
+    credentialVersion: 1,
+    adminPassphraseHash: null as string | null,
+  },
+}));
+
 vi.mock("../server/storage", () => ({
   storage: {
-    getUserByEmail: vi.fn(async () => ({ email: "mintvaultuk@gmail.com", pinHash: "hash" })),
+    getUserByEmail: vi.fn(async () => adminUserState.user),
+    writeAuditLog: vi.fn(async () => {}),
   },
 }));
 
@@ -24,7 +35,7 @@ vi.mock("../server/customer-auth", () => ({
 
 vi.mock("../server/account-auth", () => ({
   hashPassword: vi.fn(async () => "hash"),
-  verifyPassword: vi.fn(async () => false),
+  verifyPassword: vi.fn(async (password: string) => password === "db-passphrase"),
   validatePassword: vi.fn(() => ({ ok: true })),
   createEmailVerificationToken: vi.fn(() => "verify-token"),
   createPasswordResetToken: vi.fn(() => "reset-token"),
@@ -152,6 +163,16 @@ async function login(base: string) {
 }
 
 describe("admin auth reliability", () => {
+  beforeEach(() => {
+    adminUserState.user = {
+      id: "admin-user-1",
+      email: "mintvaultuk@gmail.com",
+      pinHash: "hash",
+      credentialVersion: 1,
+      adminPassphraseHash: null,
+    };
+  });
+
   it("does not rate-limit harmless admin session refresh checks", async () => {
     const limiter = rateLimit({ windowMs: 60_000, max: 5, validate: false, skip: (req) => req.method !== "POST" });
     const app = express();
@@ -283,6 +304,42 @@ describe("admin auth reliability", () => {
       const after = await request(base, "/api/admin/session", {}, mergeCookies(cookies, clear));
       expect(after.status).toBe(200);
       expect(await after.json()).toMatchObject({ authenticated: false, reason: "not_authenticated" });
+    });
+  });
+
+  it("uses the DB admin passphrase hash when configured", async () => {
+    adminUserState.user.adminPassphraseHash = "bcrypt-hash";
+    await withAuthApp(async ({ base }) => {
+      const ok = await request(base, "/api/admin/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "db-passphrase" }),
+      });
+      expect(ok.status).toBe(200);
+      expect(await ok.json()).toMatchObject({ step: "PIN_REQUIRED" });
+    });
+  });
+
+  it("does not fall back to ADMIN_PASSWORD after a DB hash mismatch", async () => {
+    adminUserState.user.adminPassphraseHash = "bcrypt-hash";
+    await withAuthApp(async ({ base }) => {
+      const denied = await request(base, "/api/admin/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: "correct-passphrase" }),
+      });
+      expect(denied.status).toBe(401);
+    });
+  });
+
+  it("invalidates an admin session when credential_version changes", async () => {
+    await withAuthApp(async ({ base }) => {
+      const cookies = await login(base);
+      adminUserState.user = { ...adminUserState.user, credentialVersion: 2 };
+      const refresh = await request(base, "/api/admin/session", {}, cookies);
+      expect(refresh.status).toBe(401);
+      expect(await refresh.json()).toMatchObject({ authenticated: false, reason: "session_expired" });
+      expect(refresh.headers.getSetCookie().join("\\n")).toContain("mv.sid=");
     });
   });
 });
