@@ -20,10 +20,55 @@ export const VQ_CARD_FACTORY_APPROVAL_STATES = [
   "draft",
   "ready_for_review",
   "approved_for_print",
+  "approval_stale",
   "rejected",
   "superseded",
 ] as const;
 export type VqCardFactoryApprovalState = (typeof VQ_CARD_FACTORY_APPROVAL_STATES)[number];
+
+export const VQ_CARD_FACTORY_PLACEMENT_DEFAULT = {
+  scale: 1,
+  xOffsetPct: 0,
+  yOffsetPct: 0,
+  crop: "cover",
+  locked: false,
+} as const;
+
+export interface VqCardFactoryPlacement {
+  scale: number;
+  xOffsetPct: number;
+  yOffsetPct: number;
+  crop: "cover";
+  locked: boolean;
+}
+
+export interface VqCardFactoryApprovalSnapshot {
+  version: number;
+  state: "approved_for_print";
+  templateVersion: string;
+  dataChecksum: string;
+  artworkChecksum: string;
+  placementChecksum: string;
+  renderChecksum: string;
+  validationChecksum: string;
+  approver: string;
+  approvedAt: string;
+}
+
+export const VQ_CARD_FACTORY_MANUFACTURER_PROFILE_CONTRACT = {
+  status: "pending",
+  requiredDpi: null,
+  colourProfile: null,
+  bleedMm: null,
+  trimMm: null,
+  safeZoneMm: null,
+  fileFormat: null,
+  cornerRadiusMm: null,
+  naming: null,
+  frontBackOrder: null,
+  sheetLayout: null,
+  warning: "Internal print proof — manufacturer specification pending",
+} as const;
 
 export const VQ_CARD_FACTORY_BANNED_TERMS = ["HP", "Pokémon", "Pokemon", "Weakness", "Resistance", "Retreat"] as const;
 
@@ -161,6 +206,25 @@ export function safeVqFactoryFilenamePart(value: string, fallback = "card"): str
 
 export function vqFactoryFilename(spec: VqCardFactorySpec, side: "front" | "back", version = 1, ext = "png"): string {
   return `GV_${spec.collectorNumber}_${safeVqFactoryFilenamePart(spec.character)}_Stage${spec.stage}_${side}_v${version}.${ext}`;
+}
+
+export function normalizeVqFactoryPlacement(
+  value: Partial<VqCardFactoryPlacement> | null | undefined
+): VqCardFactoryPlacement {
+  const scale = Number(value?.scale);
+  const xOffsetPct = Number(value?.xOffsetPct);
+  const yOffsetPct = Number(value?.yOffsetPct);
+  return {
+    scale: Number.isFinite(scale) ? Math.min(2, Math.max(0.5, scale)) : VQ_CARD_FACTORY_PLACEMENT_DEFAULT.scale,
+    xOffsetPct: Number.isFinite(xOffsetPct)
+      ? Math.min(100, Math.max(-100, xOffsetPct))
+      : VQ_CARD_FACTORY_PLACEMENT_DEFAULT.xOffsetPct,
+    yOffsetPct: Number.isFinite(yOffsetPct)
+      ? Math.min(100, Math.max(-100, yOffsetPct))
+      : VQ_CARD_FACTORY_PLACEMENT_DEFAULT.yOffsetPct,
+    crop: "cover",
+    locked: !!value?.locked,
+  };
 }
 
 export function detectVqBannedTerms(values: Array<string | null | undefined>): VqFactoryValidationIssue[] {

@@ -13,8 +13,11 @@ import {
 } from "lucide-react";
 import {
   VQ_CARD_FACTORY_GEOMETRY,
+  VQ_CARD_FACTORY_PLACEMENT_DEFAULT,
   VQ_CARD_FACTORY_TEMPLATE_VERSION,
   VQ_STANDARD_CARD_SPECS,
+  normalizeVqFactoryPlacement,
+  type VqCardFactoryPlacement,
   type VqCardFactorySpec,
 } from "@shared/vq-card-factory";
 import { useToast } from "@/hooks/use-toast";
@@ -48,6 +51,9 @@ type FactoryRow = {
   dataStatus: "missing" | "draft" | "approved";
   exportReady: boolean;
   lastUpdated: string | null;
+  placement: VqCardFactoryPlacement;
+  approvalState: "missing" | "current" | "stale";
+  approvalStaleReason: string | null;
 };
 type Dashboard = {
   rows: FactoryRow[];
@@ -183,6 +189,7 @@ export default function AdminVaultQuestCardFactoryPage() {
   const [showBleed, setShowBleed] = useState(true);
   const [showTrim, setShowTrim] = useState(true);
   const [showSafe, setShowSafe] = useState(false);
+  const [placementDraft, setPlacementDraft] = useState<VqCardFactoryPlacement>(VQ_CARD_FACTORY_PLACEMENT_DEFAULT);
 
   const dashboardQ = useQuery<Dashboard>({
     queryKey: ["/api/admin/vault-quest/card-factory/dashboard"],
@@ -195,6 +202,9 @@ export default function AdminVaultQuestCardFactoryPage() {
 
   const rows = dashboardQ.data?.rows ?? [];
   const selected = rows.find((row) => row.spec.collectorNumber === selectedNumber) ?? rows[0] ?? null;
+  useEffect(() => {
+    setPlacementDraft(normalizeVqFactoryPlacement(selected?.placement));
+  }, [selected?.spec.collectorNumber, selected?.placement]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return rows.filter((row) => {
@@ -234,6 +244,19 @@ export default function AdminVaultQuestCardFactoryPage() {
   };
 
   const selectedIndex = VQ_STANDARD_CARD_SPECS.findIndex((spec) => spec.collectorNumber === selectedNumber);
+  const savePlacement = async () => {
+    if (!selected) return;
+    await runAction("Saved placement", async () => {
+      const res = await fetch(`/api/admin/vault-quest/card-factory/cards/${selected.spec.collectorNumber}/placement`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(placementDraft),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || "Placement save failed");
+    });
+  };
+
   const go = (delta: number) => {
     const next =
       VQ_STANDARD_CARD_SPECS[Math.max(0, Math.min(VQ_STANDARD_CARD_SPECS.length - 1, selectedIndex + delta))];
@@ -405,29 +428,75 @@ export default function AdminVaultQuestCardFactoryPage() {
                       </div>
                       <div className="rounded border border-white/10 bg-[#06142F] p-3">
                         <p className="text-xs text-zinc-400">Placement</p>
-                        <p className="mt-1 font-bold">Non-destructive preview controls</p>
+                        <p className="mt-1 font-bold">
+                          {selected.approvalState === "stale" ? "Changed after approval" : "Stored metadata"}
+                        </p>
                       </div>
                     </div>
                     <div className="mt-3 grid gap-3 sm:grid-cols-3">
                       <label className="text-xs text-zinc-300">
-                        Zoom
+                        Artwork scale
                         <input
                           type="range"
-                          min="80"
-                          max="140"
-                          value={zoom}
-                          onChange={(event) => setZoom(Number(event.target.value))}
+                          min="50"
+                          max="200"
+                          value={Math.round(placementDraft.scale * 100)}
+                          onChange={(event) =>
+                            setPlacementDraft((prev) => ({ ...prev, scale: Number(event.target.value) / 100 }))
+                          }
                           className="mt-2 w-full"
                         />
                       </label>
                       <label className="text-xs text-zinc-300">
                         Horizontal offset
-                        <input type="range" min="-20" max="20" defaultValue="0" className="mt-2 w-full" />
+                        <input
+                          type="range"
+                          min="-100"
+                          max="100"
+                          value={placementDraft.xOffsetPct}
+                          onChange={(event) =>
+                            setPlacementDraft((prev) => ({ ...prev, xOffsetPct: Number(event.target.value) }))
+                          }
+                          className="mt-2 w-full"
+                        />
                       </label>
                       <label className="text-xs text-zinc-300">
                         Vertical offset
-                        <input type="range" min="-20" max="20" defaultValue="0" className="mt-2 w-full" />
+                        <input
+                          type="range"
+                          min="-100"
+                          max="100"
+                          value={placementDraft.yOffsetPct}
+                          onChange={(event) =>
+                            setPlacementDraft((prev) => ({ ...prev, yOffsetPct: Number(event.target.value) }))
+                          }
+                          className="mt-2 w-full"
+                        />
                       </label>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setPlacementDraft(VQ_CARD_FACTORY_PLACEMENT_DEFAULT)}
+                        className="rounded border border-white/10 px-3 py-2 text-xs"
+                      >
+                        Reset
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPlacementDraft((prev) => ({ ...prev, locked: !prev.locked }))}
+                        className="rounded border border-white/10 px-3 py-2 text-xs"
+                      >
+                        {placementDraft.locked ? "Unlock" : "Lock"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={savePlacement}
+                        disabled={!!busy || !selected.card}
+                        className="rounded bg-amber-300 px-3 py-2 text-xs font-black text-[#081A3D] disabled:opacity-40"
+                      >
+                        Save Placement
+                      </button>
                     </div>
                   </div>
 
@@ -446,6 +515,27 @@ export default function AdminVaultQuestCardFactoryPage() {
                         <input type="checkbox" checked={showSafe} onChange={(e) => setShowSafe(e.target.checked)} />{" "}
                         Safe zone
                       </label>
+                      <button
+                        type="button"
+                        onClick={() => setZoom(100)}
+                        className="rounded border border-white/10 px-3 py-1 text-xs"
+                      >
+                        Fit / 100%
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setZoom(200)}
+                        className="rounded border border-white/10 px-3 py-1 text-xs"
+                      >
+                        200%
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setZoom(100)}
+                        className="rounded border border-white/10 px-3 py-1 text-xs"
+                      >
+                        True size
+                      </button>
                     </div>
                     <div className="grid gap-2 md:grid-cols-3">
                       {selected.validation.length === 0 ? (
@@ -494,6 +584,10 @@ export default function AdminVaultQuestCardFactoryPage() {
 
                   <div className="rounded border border-white/10 bg-white/5 p-4">
                     <p className="mb-3 text-sm font-bold text-amber-300">Step 5 - Approve</p>
+                    <p className="mb-3 rounded border border-white/10 bg-[#06142F] p-3 text-xs text-zinc-300">
+                      Approval: <b>{selected.approvalState}</b>
+                      {selected.approvalStaleReason ? ` - ${selected.approvalStaleReason}` : ""}
+                    </p>
                     <button
                       type="button"
                       disabled={
@@ -578,6 +672,34 @@ export default function AdminVaultQuestCardFactoryPage() {
                       >
                         <Download className="h-4 w-4" /> Manifest JSON
                       </a>
+                      <a
+                        href="/api/admin/vault-quest/card-factory/manifest.csv"
+                        className="inline-flex items-center justify-center gap-2 rounded border border-white/10 px-3 py-2 text-sm"
+                      >
+                        <Download className="h-4 w-4" /> Manifest CSV
+                      </a>
+                      <a
+                        href="/api/admin/vault-quest/card-factory/missing-blocked-report.txt"
+                        className="inline-flex items-center justify-center gap-2 rounded border border-white/10 px-3 py-2 text-sm"
+                      >
+                        <Download className="h-4 w-4" /> Missing Report
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          runAction("Validated all 36", async () => {
+                            const res = await fetch("/api/admin/vault-quest/card-factory/validate-all", {
+                              method: "POST",
+                              credentials: "include",
+                            });
+                            if (!res.ok)
+                              throw new Error((await res.json().catch(() => ({}))).error || "Validate All failed");
+                          })
+                        }
+                        className="inline-flex items-center justify-center gap-2 rounded border border-white/10 px-3 py-2 text-sm"
+                      >
+                        <ShieldCheck className="h-4 w-4" /> Validate All
+                      </button>
                     </div>
                     <p className="mt-3 text-xs text-zinc-400">
                       Manufacturing export remains blocked until all 36 cards are approved and manufacturer specs are

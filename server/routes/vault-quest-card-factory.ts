@@ -2,16 +2,19 @@ import { createHash } from "node:crypto";
 import type { Express, Request, Response } from "express";
 import { requireAdmin } from "../auth";
 import {
+  approveFactoryCard,
+  buildFactoryCsvManifest,
   buildFactoryManifest,
+  buildFactoryMissingBlockedReport,
   buildFactoryProofPdf,
   getFactoryRows,
   renderFactoryBack,
   renderFactoryFront,
   requiredFactoryRow,
+  saveFactoryPlacement,
   validateFactoryRender,
 } from "../vault-quest/card-factory";
-import { vqStorage } from "../vault-quest/storage";
-import { getVqStandardSpec } from "@shared/vq-card-factory";
+import { getVqStandardSpec, normalizeVqFactoryPlacement } from "@shared/vq-card-factory";
 
 function sendFile(res: Response, file: { buffer: Buffer; contentType: string; filename: string; checksum: string }) {
   res.setHeader("Content-Type", file.contentType);
@@ -86,20 +89,36 @@ export function registerVaultQuestCardFactoryRoutes(app: Express): void {
     }
   });
 
+  app.post(`${base}/validate-all`, requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const rows = await getFactoryRows();
+      const checked = await Promise.all(rows.map((row) => validateFactoryRender(row)));
+      res.json({ rows: checked, count: checked.length, providerGeneration: false });
+    } catch (err) {
+      handleFactoryError(res, err);
+    }
+  });
+
+  app.put(`${base}/cards/:collectorNumber/placement`, requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const row = await requiredFactoryRow(String(req.params.collectorNumber));
+      if (!row.card) return res.status(422).json({ error: "No card data exists for this Standard slot.", row });
+      if (JSON.stringify(req.body ?? {}).length > 1000)
+        return res.status(413).json({ error: "Placement payload too large." });
+      const input = normalizeVqFactoryPlacement(req.body ?? {});
+      const placement = await saveFactoryPlacement(row.card.cardId, input);
+      res.json({ placement, providerGeneration: false });
+    } catch (err) {
+      handleFactoryError(res, err);
+    }
+  });
+
   app.post(`${base}/cards/:collectorNumber/approve`, requireAdmin, async (req: Request, res: Response) => {
     try {
-      const row = await validateFactoryRender(await requiredFactoryRow(String(req.params.collectorNumber)));
-      if (!row.card) return res.status(422).json({ error: "No card data exists for this Standard slot.", row });
-      const blocker = row.validation.find((issue) => issue.severity === "blocker");
-      if (blocker) return res.status(422).json({ error: blocker.message, row });
+      const row = await requiredFactoryRow(String(req.params.collectorNumber));
       const actor = req.session?.adminEmail || "admin";
-      const updated = await vqStorage.setCardStatusAudited(
-        row.card.cardId,
-        "approved",
-        `Card Factory print approval: template=${row.spec.collectorNumber}; requestedBy=${actor}`,
-        actor
-      );
-      res.json({ card: updated, approved: true, providerGeneration: false });
+      const approval = await approveFactoryCard(row, actor);
+      res.json({ approval, approved: true, providerGeneration: false });
     } catch (err) {
       handleFactoryError(res, err);
     }
@@ -155,6 +174,34 @@ export function registerVaultQuestCardFactoryRoutes(app: Express): void {
     }
   });
 
+  app.get(`${base}/manifest.csv`, requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const csv = buildFactoryCsvManifest(await getFactoryRows());
+      sendFile(res, {
+        buffer: Buffer.from(csv),
+        contentType: "text/csv; charset=utf-8",
+        filename: "GV_card_factory_manifest.csv",
+        checksum: sha256(Buffer.from(csv)),
+      });
+    } catch (err) {
+      handleFactoryError(res, err);
+    }
+  });
+
+  app.get(`${base}/missing-blocked-report.txt`, requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const report = buildFactoryMissingBlockedReport(await getFactoryRows());
+      sendFile(res, {
+        buffer: Buffer.from(report),
+        contentType: "text/plain; charset=utf-8",
+        filename: "GV_missing_blocked_report.txt",
+        checksum: sha256(Buffer.from(report)),
+      });
+    } catch (err) {
+      handleFactoryError(res, err);
+    }
+  });
+
   app.get(`${base}/manufacturing-readiness`, requireAdmin, async (_req: Request, res: Response) => {
     try {
       const rows = await getFactoryRows();
@@ -174,11 +221,52 @@ export function registerVaultQuestCardFactoryRoutes(app: Express): void {
           "README",
         ],
         manufacturerProfileStatus: "Manufacturer specification pending",
+        manufacturerReady: false,
+        warning: "Internal print proof — manufacturer specification pending",
         blockers: blockers.map((row) => ({
           collectorNumber: row.spec.collectorNumber,
           cardName: row.spec.character,
           reason: row.blockingReason || "Not approved for export",
         })),
+      });
+    } catch (err) {
+      handleFactoryError(res, err);
+    }
+  });
+
+  app.post(`${base}/manufacturing-export/plan`, requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const rows = await getFactoryRows();
+      const blockers = rows.filter((row) => !row.exportReady);
+      if (blockers.length > 0) {
+        return res.status(422).json({
+          error: "Final manufacturing export is blocked until all 36 cards have current Card Factory approvals.",
+          providerGeneration: false,
+          manufacturerReady: false,
+          blockers: blockers.map((row) => ({
+            collectorNumber: row.spec.collectorNumber,
+            cardName: row.spec.character,
+            reason: row.blockingReason || row.approvalStaleReason || "Not approved for export",
+          })),
+        });
+      }
+      res.json({
+        providerGeneration: false,
+        manufacturerReady: false,
+        warning: "Internal print proof — manufacturer specification pending",
+        order: rows.map((row) => row.spec.collectorNumber),
+        contents: [
+          "36 approved front PNGs",
+          "Universal back PNG",
+          "Individual front PDFs",
+          "Combined proof PDF",
+          "Manifest JSON",
+          "Manifest CSV",
+          "Checksums file",
+          "Template/version report",
+          "Missing/blocked report",
+          "README",
+        ],
       });
     } catch (err) {
       handleFactoryError(res, err);

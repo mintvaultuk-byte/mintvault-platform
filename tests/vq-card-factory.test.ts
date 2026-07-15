@@ -6,7 +6,9 @@ import {
   VQ_CARD_FACTORY_BANNED_TERMS,
   VQ_CARD_FACTORY_ELEMENTS,
   VQ_CARD_FACTORY_GEOMETRY,
+  VQ_CARD_FACTORY_MANUFACTURER_PROFILE_CONTRACT,
   VQ_CARD_FACTORY_TEMPLATE_VERSION,
+  normalizeVqFactoryPlacement,
   VQ_STANDARD_CARD_SPECS,
   detectVqBannedTerms,
   getVqStandardSpec,
@@ -16,6 +18,7 @@ import {
 } from "../shared/vq-card-factory";
 import { renderCard, type RenderCardInput } from "../server/vault-quest/render-service";
 import { VQ_ELEMENTS, VQ_LOCK } from "../server/vault-quest/lib/vq-constants";
+import type { VqCardRow } from "../shared/vq-schema";
 
 vi.mock("../server/db", () => ({ db: {}, pool: { end: vi.fn() } }));
 
@@ -72,6 +75,14 @@ describe("Vault Quest Card Factory set plan", () => {
     for (const element of VQ_CARD_FACTORY_ELEMENTS) {
       expect(VQ_ELEMENTS[element]).toBeTruthy();
     }
+  });
+
+  it("declares manufacturer readiness as pending rather than printer-certified", () => {
+    expect(VQ_CARD_FACTORY_MANUFACTURER_PROFILE_CONTRACT.warning).toBe(
+      "Internal print proof — manufacturer specification pending"
+    );
+    expect(VQ_CARD_FACTORY_MANUFACTURER_PROFILE_CONTRACT.requiredDpi).toBeNull();
+    expect(VQ_CARD_FACTORY_MANUFACTURER_PROFILE_CONTRACT.colourProfile).toBeNull();
   });
 
   it("keeps the requested manufacturing geometry and live canonical template explicit", () => {
@@ -214,6 +225,137 @@ describe("Vault Quest Card Factory render and provider safety", () => {
     expect(result.contentType).toBe("image/png");
     expect(metadata.width).toBe(815);
     expect(metadata.height).toBe(1110);
+  });
+
+  it("writes physical PDF page boxes for media, trim, bleed and crop", async () => {
+    const { renderFactoryBack } = await import("../server/vault-quest/card-factory");
+    const result = await renderFactoryBack(getVqStandardSpec("001")!, "pdf");
+    const pdf = result.buffer.toString("latin1");
+    const mmToPt = 72 / 25.4;
+    const box = (name: string) => {
+      const match = new RegExp(`/${name}\\s*\\[([^\\]]+)\\]`).exec(pdf);
+      expect(match, `${name} missing`).toBeTruthy();
+      return match![1].trim().split(/\s+/).map(Number);
+    };
+    expect(box("MediaBox").map((n) => Number(n.toFixed(3)))).toEqual([
+      0,
+      0,
+      Number((69 * mmToPt).toFixed(3)),
+      Number((94 * mmToPt).toFixed(3)),
+    ]);
+    expect(box("TrimBox").map((n) => Number(n.toFixed(3)))).toEqual([
+      Number((3 * mmToPt).toFixed(3)),
+      Number((3 * mmToPt).toFixed(3)),
+      Number((66 * mmToPt).toFixed(3)),
+      Number((91 * mmToPt).toFixed(3)),
+    ]);
+    expect(box("BleedBox")).toEqual(box("MediaBox"));
+    expect(box("CropBox")).toEqual(box("MediaBox"));
+  });
+
+  it("applies persisted placement deterministically before canonical rendering", async () => {
+    const { applyFactoryPlacementToMainArt } = await import("../server/vault-quest/card-factory");
+    const source = await sharp({ create: { width: 1000, height: 1000, channels: 4, background: "#00ff00" } })
+      .png()
+      .toBuffer();
+    const placement = normalizeVqFactoryPlacement({ scale: 1.25, xOffsetPct: 30, yOffsetPct: -20, locked: true });
+    const a = await applyFactoryPlacementToMainArt(source, placement);
+    const b = await applyFactoryPlacementToMainArt(source, placement);
+    expect(a.equals(b)).toBe(true);
+    const metadata = await sharp(a).metadata();
+    expect(metadata.width).toBe(1710);
+    expect(metadata.height).toBe(1050);
+  });
+
+  it("marks approval stale when data, artwork, placement or template change", async () => {
+    const {
+      cardFactoryArtworkChecksum,
+      cardFactoryDataChecksum,
+      cardFactoryPlacementChecksum,
+      resolveFactoryApprovalState,
+    } = await import("../server/vault-quest/card-factory");
+    const placement = normalizeVqFactoryPlacement(null);
+    const card = {
+      cardId: "GNV-001",
+      collectorNumber: "001/036",
+      name: "Flammi",
+      displayName: "Flammi",
+      cardType: "Creature",
+      element: "Flame",
+      rarity: "Common",
+      familyId: "GV-F01",
+      stageNumber: 1,
+      lifeStage: "BABY",
+      health: 4,
+      guard: 1,
+      shift: 1,
+      attack1Name: "Ember Seal",
+      attack1Cost: 1,
+      attack1Damage: 2,
+      attack1Effect: "Shift one Core Seal.",
+      attack2Name: null,
+      attack2Cost: null,
+      attack2Damage: null,
+      attack2Effect: null,
+      vulnerability: "Tide",
+      keywords: [],
+      artR2Key: "vq/art/GNV-001/main.png",
+      prevArtR2Key: null,
+      setCode: "GNV",
+      language: "EN",
+      year: 2026,
+      edition: "First Edition",
+      status: "approved",
+    } as VqCardRow;
+    const approval = {
+      version: 1,
+      state: "approved_for_print" as const,
+      templateVersion: VQ_CARD_FACTORY_TEMPLATE_VERSION,
+      dataChecksum: cardFactoryDataChecksum(card),
+      artworkChecksum: cardFactoryArtworkChecksum(card),
+      placementChecksum: cardFactoryPlacementChecksum(placement),
+      renderChecksum: "render",
+      validationChecksum: "validation",
+      approver: "admin",
+      approvedAt: new Date(0).toISOString(),
+    };
+    expect(resolveFactoryApprovalState(card, placement, approval).approvalState).toBe("current");
+    expect(resolveFactoryApprovalState({ ...card, health: 9 } as VqCardRow, placement, approval).approvalState).toBe(
+      "stale"
+    );
+    expect(
+      resolveFactoryApprovalState({ ...card, artR2Key: "vq/art/GNV-001/new.png" } as VqCardRow, placement, approval)
+        .approvalState
+    ).toBe("stale");
+    expect(resolveFactoryApprovalState(card, normalizeVqFactoryPlacement({ scale: 1.1 }), approval).approvalState).toBe(
+      "stale"
+    );
+  });
+
+  it("emits CSV and missing/blocked reports with deterministic ordering", async () => {
+    const { buildFactoryCsvManifest, buildFactoryMissingBlockedReport } =
+      await import("../server/vault-quest/card-factory");
+    const rows = [
+      {
+        spec: getVqStandardSpec("001")!,
+        card: null,
+        character: null,
+        validation: [{ code: "missing_card", field: "card", message: "Missing", severity: "blocker" as const }],
+        completionStatus: "missing" as const,
+        blockingReason: "Missing",
+        artworkStatus: "missing" as const,
+        dataStatus: "missing" as const,
+        exportReady: false,
+        lastUpdated: null,
+        placement: normalizeVqFactoryPlacement(null),
+        approval: null,
+        approvalState: "missing" as const,
+        approvalStaleReason: null,
+      },
+    ];
+    expect(buildFactoryCsvManifest(rows).split("\n")[0]).toContain("collectorNumber");
+    expect(buildFactoryCsvManifest(rows)).toContain("GV_001_Flammi_Stage1_front_v1.png");
+    expect(buildFactoryMissingBlockedReport(rows)).toContain("001 Flammi: Missing");
   });
 
   it("keeps Card Factory source VQ-only and free of generation/provider calls", () => {
