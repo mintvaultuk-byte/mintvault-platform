@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
-import { LogIn, KeyRound, Eye, EyeOff } from "lucide-react";
+import { LogIn, KeyRound, Eye, EyeOff, RotateCcw } from "lucide-react";
 import GoldShader from "@/components/admin/gold-shader";
 
 interface Props {
@@ -12,6 +12,7 @@ export default function AdminLoginPage({ onLogin }: Props) {
   const [, navigate] = useLocation();
   const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
   const nextPath = params.get("next") || "/admin";
+  const initialReason = params.get("reason") || "";
   const [step, setStep] = useState<"password" | "pin">("password");
   const [password, setPassword] = useState("");
   const [pin, setPin] = useState("");
@@ -19,6 +20,59 @@ export default function AdminLoginPage({ onLogin }: Props) {
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showPin, setShowPin] = useState(false);
+
+  useEffect(() => {
+    if (initialReason === "session_expired") {
+      setError("Session expired. Please sign in again.");
+    } else if (initialReason === "invalid_session" || initialReason === "wrong_portal") {
+      setError("Invalid session. Clear the session and sign in again.");
+    }
+  }, [initialReason]);
+
+  const errorFrom = (err: unknown, fallback: string) => {
+    const maybeErr = err as { status?: number; body?: { error?: string }; message?: string };
+    const status = maybeErr.status;
+    const bodyError = String(maybeErr.body?.error || maybeErr.message || "");
+    if (status === 401) {
+      if (bodyError.includes("expired") || bodyError.includes("start again"))
+        return "Session expired. Please sign in again.";
+      return "Incorrect password or PIN.";
+    }
+    if (status === 429) return "Authentication failed. Please wait a moment and try again.";
+    if (typeof status === "number" && status >= 500) return "Server unavailable. Please try again shortly.";
+    if (status === 400) return "Authentication failed. Check the details and try again.";
+    if (!status) return "Server unavailable. Please check your connection and try again.";
+    return fallback;
+  };
+
+  const clearAuthStorage = () => {
+    const keys = ["mv.admin.auth", "mv.admin.session", "adminAuthenticated"];
+    const removeKeys = (storage: Storage) => keys.forEach((key) => storage.removeItem(key));
+    try {
+      removeKeys(localStorage);
+    } catch {
+      // Storage can be unavailable in private browsing; cookie clearing still proceeds.
+    }
+    try {
+      removeKeys(sessionStorage);
+    } catch {
+      // Storage can be unavailable in private browsing; cookie clearing still proceeds.
+    }
+  };
+
+  const clearSession = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      await fetch("/api/admin/clear-session", { method: "POST", credentials: "include" });
+    } catch {
+      // A network failure should not stop local cleanup.
+    } finally {
+      clearAuthStorage();
+      document.cookie = "mv.sid=; Max-Age=0; path=/; SameSite=Lax";
+      window.location.href = "/admin/login";
+    }
+  };
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -32,8 +86,8 @@ export default function AdminLoginPage({ onLogin }: Props) {
         setStep("pin");
         setPassword("");
       }
-    } catch (err: any) {
-      setError("Invalid credentials");
+    } catch (err: unknown) {
+      setError(errorFrom(err, "Authentication failed. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -59,14 +113,14 @@ export default function AdminLoginPage({ onLogin }: Props) {
         onLogin?.();
         navigate(nextPath);
       }
-    } catch (err: any) {
-      const msg = err?.message || "";
-      if (msg.includes("expired") || msg.includes("start again")) {
-        setError("Session expired. Please enter your password again.");
+    } catch (err: unknown) {
+      const message = errorFrom(err, "Authentication failed. Please try again.");
+      if (message.includes("expired")) {
+        setError(message);
         setStep("password");
         setPin("");
       } else {
-        setError("Invalid credentials");
+        setError(message);
         setPin("");
       }
     } finally {
@@ -221,6 +275,17 @@ export default function AdminLoginPage({ onLogin }: Props) {
               MintVault · Staff Access
             </span>
           </div>
+          <button
+            type="button"
+            onClick={clearSession}
+            disabled={loading}
+            className="mt-4 inline-flex items-center justify-center gap-2 text-xs transition-colors"
+            style={{ color: "var(--admin-ink-faint)" }}
+            data-testid="button-clear-admin-session"
+          >
+            <RotateCcw size={13} />
+            Clear Session
+          </button>
         </div>
       </div>
     </div>

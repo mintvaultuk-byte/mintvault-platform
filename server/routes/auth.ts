@@ -43,10 +43,34 @@ import { requireAuth } from "../middleware/auth";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { APP_BASE_URL } from "../app-url";
+import {
+  adminSessionSave,
+  classifyAdminSession,
+  clearAdminSession,
+  logAdminSessionCreated,
+  logAdminSessionValidationFailure,
+} from "../lib/admin-auth-session";
 
 export function registerAuthRoutes(app: Express): void {
+  const adminCredentialRateLimit = rateLimit({
+    windowMs: 10 * 60 * 1000,
+    max: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: false,
+    message: { error: "Too many login attempts, please try again later" },
+    keyGenerator: (req) => {
+      const forwarded = req.headers["x-forwarded-for"];
+      if (forwarded) {
+        const first = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(",")[0];
+        return first.trim();
+      }
+      return req.ip || req.socket.remoteAddress || "unknown";
+    },
+  });
+
   // ── Admin login ────────────────────────────────────────────────────────────
-  app.post("/api/admin/login", async (req, res) => {
+  app.post("/api/admin/login", adminCredentialRateLimit, async (req, res) => {
     try {
       if (isLoginRateLimited(req)) {
         return res.status(429).json({ error: "Too many login attempts, please try again later" });
@@ -68,6 +92,8 @@ export function registerAuthRoutes(app: Express): void {
       req.session.pendingAdmin = true;
       req.session.pendingAdminAt = Date.now();
       req.session.pinFailures = 0;
+      await adminSessionSave(req);
+      logAdminSessionCreated(req, "admin_login_pending");
       res.json({ step: "PIN_REQUIRED" });
     } catch (error: any) {
       console.error("Login error:", error.message);
@@ -75,7 +101,7 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/admin/session", async (req, res) => {
+  app.post("/api/admin/session", adminCredentialRateLimit, async (req, res) => {
     try {
       if (isLoginRateLimited(req)) {
         return res.status(429).json({ error: "Too many login attempts, please try again later" });
@@ -97,6 +123,8 @@ export function registerAuthRoutes(app: Express): void {
       req.session.pendingAdmin = true;
       req.session.pendingAdminAt = Date.now();
       req.session.pinFailures = 0;
+      await adminSessionSave(req);
+      logAdminSessionCreated(req, "admin_login_pending");
       res.json({ step: "PIN_REQUIRED" });
     } catch (error: any) {
       console.error("Login error:", error.message);
@@ -104,7 +132,7 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
-  app.post("/api/admin/pin", async (req, res) => {
+  app.post("/api/admin/pin", adminCredentialRateLimit, async (req, res) => {
     try {
       if (isPinRateLimited(req)) {
         return res.status(429).json({ error: "Too many attempts, please try again later" });
@@ -177,6 +205,8 @@ export function registerAuthRoutes(app: Express): void {
       req.session.isAdmin = true;
       req.session.adminEmail = ADMIN_EMAIL;
       clearPendingAdmin(req);
+      await adminSessionSave(req);
+      logAdminSessionCreated(req, "admin_login_success");
       res.json({ success: true });
     } catch (error: any) {
       console.error("PIN error:", error.message);
@@ -187,17 +217,50 @@ export function registerAuthRoutes(app: Express): void {
   app.post("/api/admin/logout", (req, res) => {
     req.session.destroy((err) => {
       if (err) {
+        logAdminSessionValidationFailure(req, "admin_session_destroy_failed");
         return res.status(500).json({ error: "Logout failed" });
       }
+      res.clearCookie("mv.sid", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+      });
+      logAdminSessionValidationFailure(req, "admin_logout");
       res.json({ success: true });
     });
   });
 
-  app.get("/api/admin/session", (req, res) => {
-    if (req.session && req.session.isAdmin) {
-      return res.json({ authenticated: true, email: req.session.adminEmail });
+  app.post("/api/admin/clear-session", async (req, res) => {
+    await clearAdminSession(req, res, "admin_session_clear");
+    res.json({ success: true });
+  });
+
+  app.get("/api/admin/session", async (req, res) => {
+    const status = classifyAdminSession(req);
+    if (status.authenticated) {
+      return res.json({ authenticated: true, email: status.email });
     }
-    res.json({ authenticated: false });
+
+    if (status.reason === "session_expired") {
+      logAdminSessionValidationFailure(req, "admin_session_expired");
+      await clearAdminSession(req, res, "admin_session_expired");
+      return res.status(401).json({ authenticated: false, reason: "session_expired" });
+    }
+
+    if (status.reason === "invalid_session" && req.session?.pendingAdmin && !isPendingAdminValid(req)) {
+      clearPendingAdmin(req);
+      await adminSessionSave(req);
+      logAdminSessionValidationFailure(req, "admin_session_invalid");
+      return res.status(401).json({ authenticated: false, reason: "session_expired" });
+    }
+
+    if (status.reason === "wrong_portal") {
+      logAdminSessionValidationFailure(req, "admin_session_wrong_portal");
+      return res.status(403).json({ authenticated: false, reason: "wrong_portal" });
+    }
+
+    res.json({ authenticated: false, reason: status.reason });
   });
 
   // ── Customer magic-link auth ───────────────────────────────────────────────

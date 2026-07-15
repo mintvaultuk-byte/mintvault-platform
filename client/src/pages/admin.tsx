@@ -4,6 +4,7 @@ import AdminDashboard from "./admin-dashboard";
 
 export default function AdminPage() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
+  const [authReason, setAuthReason] = useState<string>("");
   const [location, navigate] = useLocation();
   // Deep-link: /admin/promotions opens the dashboard on the Promotions tab.
   const initialTab = location === "/admin/promotions" ? ("promotions" as const) : undefined;
@@ -15,12 +16,24 @@ export default function AdminPage() {
       try {
         const res = await fetch("/api/admin/session", { credentials: "include" });
         if (!res.ok) {
-          if (!cancelled) setAuthenticated(false);
+          let reason = "";
+          try {
+            reason = (await res.json())?.reason || "";
+          } catch {
+            reason = "";
+          }
+          if (!cancelled) {
+            setAuthReason(reason);
+            setAuthenticated(false);
+          }
           return;
         }
         const data = await res.json();
         if (!data.authenticated) {
-          if (!cancelled) setAuthenticated(false);
+          if (!cancelled) {
+            setAuthReason(data.reason || "");
+            setAuthenticated(false);
+          }
           return;
         }
 
@@ -49,9 +62,10 @@ export default function AdminPage() {
       // `location` is the pathname only, so append the live query string.
       const search = typeof window !== "undefined" ? window.location.search : "";
       const target = (location || "/admin") + search;
-      navigate(`/admin/login?next=${encodeURIComponent(target)}`, { replace: true });
+      const reason = authReason ? `&reason=${encodeURIComponent(authReason)}` : "";
+      navigate(`/admin/login?next=${encodeURIComponent(target)}${reason}`, { replace: true });
     }
-  }, [authenticated, navigate, location]);
+  }, [authenticated, navigate, location, authReason]);
 
   if (authenticated !== true) {
     return (

@@ -6,14 +6,7 @@ import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { csrfOriginCheck } from "./lib/csrf-origin";
 import { withAdvisoryLock } from "./lib/advisory-lock";
-import {
-  trackInterval,
-  trackTimeout,
-  beginJob,
-  endJob,
-  isShuttingDown,
-  runGracefulShutdown,
-} from "./lib/lifecycle";
+import { trackInterval, trackTimeout, beginJob, endJob, isShuttingDown, runGracefulShutdown } from "./lib/lifecycle";
 import { serveStatic } from "./static";
 import { cleanupStalePreGradeImages } from "./r2";
 import { db, pool } from "./db";
@@ -141,27 +134,6 @@ app.use(
     hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
   })
 );
-
-const loginRateLimit = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  validate: false,
-  message: { error: "Too many login attempts, please try again later" },
-  keyGenerator: (req) => {
-    const forwarded = req.headers["x-forwarded-for"];
-    if (forwarded) {
-      const first = Array.isArray(forwarded) ? forwarded[0] : forwarded.split(",")[0];
-      return first.trim();
-    }
-    return req.ip || req.socket.remoteAddress || "unknown";
-  },
-});
-
-app.use("/api/admin/login", loginRateLimit);
-app.use("/api/admin/session", loginRateLimit);
-app.use("/api/admin/pin", loginRateLimit);
 
 const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
