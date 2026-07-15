@@ -4,6 +4,7 @@ import { isUndefinedTableOrColumn } from "../production-storage";
 import { higgsfieldConnection } from "../ai/higgsfield";
 
 export type VqProviderConnectionStatus =
+  | "configured"
   | "connected"
   | "token_expiring"
   | "token_expired"
@@ -140,13 +141,8 @@ export async function markHiggsfieldProviderDisconnected(message = "Provider sta
 }
 
 export async function refreshHiggsfieldProviderConnectionLocal(updatedBy = "admin", nowMs = Date.now()): Promise<VqProviderConnectionSnapshot> {
-  const conn = higgsfieldConnection();
-  const expiry = parseTokenExpiry();
-  const expiryMs = expiry.iso ? Date.parse(expiry.iso) : null;
-  const canClearAuthLock = conn.connected && (expiryMs == null || expiryMs > nowMs);
   await writeProviderRows({
     [KEY_LAST_CHECKED]: new Date(nowMs).toISOString(),
-    ...(canClearAuthLock ? { [KEY_LAST_STATUS]: "connected" } : {}),
     [KEY_LAST_MESSAGE]: "Credentials are configured, but a free remote connection test is not available.",
   }, updatedBy);
   return getHiggsfieldProviderConnection(nowMs);
@@ -164,6 +160,7 @@ export async function getHiggsfieldProviderConnection(nowMs = Date.now()): Promi
   const lastAuthMs = lastAuthFailureAt ? Date.parse(lastAuthFailureAt) : 0;
   const lastSuccessMs = lastSuccessAt ? Date.parse(lastSuccessAt) : 0;
   const authFailureIsCurrent = lastStatus === "token_expired" && lastAuthMs > 0 && lastAuthMs >= lastSuccessMs;
+  const remoteSuccessIsCurrent = lastStatus === "connected" && lastSuccessMs > 0 && !authFailureIsCurrent;
   const expiryMs = tokenExpiryAt ? Date.parse(tokenExpiryAt) : null;
   const msUntilExpiry = expiryMs == null ? null : expiryMs - nowMs;
 
@@ -187,6 +184,12 @@ export async function getHiggsfieldProviderConnection(nowMs = Date.now()): Promi
     status = "token_expired";
     warningLevel = "expired";
     message = "Token expired. Refresh the server-side provider token.";
+  } else if (!remoteSuccessIsCurrent) {
+    status = "configured";
+    warningLevel = expiry.malformed || !tokenExpiryAt ? "unavailable" : "none";
+    message = expiry.malformed || !tokenExpiryAt
+      ? "Credentials configured — remote connection not yet verified. Token expiry is not available."
+      : "Credentials configured — remote connection not yet verified.";
   } else if (expiryMs != null && msUntilExpiry != null && msUntilExpiry <= 60 * 60 * 1000) {
     status = "token_expiring";
     warningLevel = "under_1h";
@@ -197,14 +200,15 @@ export async function getHiggsfieldProviderConnection(nowMs = Date.now()): Promi
     message = "Token expires soon. Refresh it before generation stops.";
   } else {
     status = "connected";
-    message = expiry.malformed || !tokenExpiryAt
-      ? "Credentials are configured, but token expiry is not available."
-      : "Provider connection is healthy.";
+    message = "Provider connection is healthy.";
   }
 
-  const remoteVerified = status !== "not_configured" && !!lastSuccessAt && !authFailureIsCurrent;
-  const generationAllowed = status === "connected" || status === "token_expiring";
+  const remoteVerified = remoteSuccessIsCurrent && (status === "connected" || status === "token_expiring");
+  const generationAllowed = remoteVerified && (status === "connected" || status === "token_expiring");
   if (generationAllowed && !remoteVerified && rows[KEY_LAST_MESSAGE]) {
+    message = rows[KEY_LAST_MESSAGE] ?? message;
+  }
+  if (status === "configured" && rows[KEY_LAST_MESSAGE]) {
     message = rows[KEY_LAST_MESSAGE] ?? message;
   }
 

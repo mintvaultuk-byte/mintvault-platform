@@ -60,6 +60,16 @@ import { pool } from "../server/db";
 
 const q = (s: string, a: unknown[] = []) => (pool as unknown as { query: (s: string, a: unknown[]) => Promise<{ rows: unknown[] }> }).query(s, a);
 
+async function markProviderRemotelyVerified() {
+  await q(
+    "INSERT INTO vq_config(key, value, updated_by) VALUES ($1,$2,$3),($4,$5,$6) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by",
+    [
+      "provider.higgsfield.last_status", "connected", "test",
+      "provider.higgsfield.last_success_at", "2026-07-14T12:00:00.000Z", "test",
+    ],
+  );
+}
+
 let server: Server;
 let base = "";
 
@@ -86,6 +96,9 @@ run("emergency feature kill switches — real router", () => {
   });
   beforeEach(async () => {
     createSpy.mockClear();
+    process.env["HIGGSFIELD_API_KEY"] = "test-token";
+    delete process.env.HIGGSFIELD_TOKEN_EXPIRES_AT;
+    delete process.env.HIGGSFIELD_API_KEY_EXPIRES_AT;
     await q("DELETE FROM vq_feature_flags", []);
     // Phase 2 correction A: gen_* now defaults OFF. This file tests the ORIGINAL
     // three flags (generation/exports/writes) and their independence from each
@@ -104,11 +117,13 @@ run("emergency feature kill switches — real router", () => {
   });
 
   it("baseline (no flags set): the paid route reaches the provider normally", async () => {
+    await markProviderRemotelyVerified();
     const r = await req("POST", "/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", model: "nano_banana", idempotencyKey: "baseline-1" });
     expect(r.status).not.toBe(503);
   });
 
   it("generation DB-disabled → 503 before spend/reservation/provider — the paid route never reaches Higgsfield", async () => {
+    await markProviderRemotelyVerified();
     await q("INSERT INTO vq_feature_flags(feature, enabled, reason) VALUES ($1,$2,$3)", ["generation", false, "owner paused"]);
     const r = await req("POST", "/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", model: "nano_banana", idempotencyKey: "gen-off-1" });
     expect(r.status).toBe(503);
@@ -125,6 +140,7 @@ run("emergency feature kill switches — real router", () => {
   });
 
   it("exports disabled does NOT block generation (features are independent)", async () => {
+    await markProviderRemotelyVerified();
     await q("INSERT INTO vq_feature_flags(feature, enabled) VALUES ($1,$2)", ["exports", false]);
     const r = await req("POST", "/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", model: "nano_banana", idempotencyKey: "gen-ok-despite-exports-off" });
     expect(r.status).not.toBe(503);

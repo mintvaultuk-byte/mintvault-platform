@@ -9,6 +9,7 @@ import type { ProviderConnection } from "./spend-control";
 type OpsStatus = { provider?: ProviderConnection };
 
 const LABELS: Record<string, string> = {
+  configured: "Configured — remote connection not verified",
   connected: "Connected",
   token_expiring: "Token expiring soon",
   token_expired: "Token expired",
@@ -28,7 +29,7 @@ function fmt(value?: string | null): string {
 function styleFor(status?: string): { box: string; text: string; icon: ReactNode } {
   if (status === "connected") return { box: "border-emerald-700/60 bg-emerald-950/15", text: "text-emerald-300", icon: <CheckCircle2 className="h-4 w-4" /> };
   if (status === "token_expiring") return { box: "border-amber-700/70 bg-amber-950/20", text: "text-amber-300", icon: <Clock3 className="h-4 w-4" /> };
-  if (status === "unknown" || status === "checking") return { box: "border-slate-700 bg-slate-900/45", text: "text-slate-300", icon: <Clock3 className="h-4 w-4" /> };
+  if (status === "configured" || status === "unknown" || status === "checking") return { box: "border-slate-700 bg-slate-900/45", text: "text-slate-300", icon: <Clock3 className="h-4 w-4" /> };
   return { box: "border-red-800/70 bg-red-950/25", text: "text-red-300", icon: <AlertCircle className="h-4 w-4" /> };
 }
 
@@ -90,7 +91,7 @@ export function ProviderConnectionPanel({ onStatusChange }: { onStatusChange?: (
         <div><div className="text-[10px] uppercase tracking-wide text-slate-500">Last successful connection</div><div className="font-semibold text-slate-200">{fmt(effective.lastSuccessAt)}</div></div>
         <div><div className="text-[10px] uppercase tracking-wide text-slate-500">Last authentication failure</div><div className="font-semibold text-slate-200">{fmt(effective.lastAuthFailureAt)}</div></div>
         <div><div className="text-[10px] uppercase tracking-wide text-slate-500">Remote verified</div><div className="font-semibold text-slate-200">{effective.remoteVerified ? "Yes" : "No"}</div></div>
-        <div><div className="text-[10px] uppercase tracking-wide text-slate-500">Generation</div><div className={`font-semibold ${effective.generationAllowed ? "text-emerald-300" : "text-red-300"}`}>{effective.generationAllowed ? "Allowed" : "Reconnect provider first"}</div></div>
+        <div><div className="text-[10px] uppercase tracking-wide text-slate-500">Generation</div><div className={`font-semibold ${effective.generationAllowed && effective.remoteVerified ? "text-emerald-300" : "text-red-300"}`}>{effective.generationAllowed && effective.remoteVerified ? "Allowed" : "Reconnect provider first"}</div></div>
       </div>
       <div className="mt-2 rounded border border-slate-800 bg-slate-950/35 px-2 py-1.5 text-[11px] text-slate-300">
         {effective.message || "Provider status could not be confirmed."}

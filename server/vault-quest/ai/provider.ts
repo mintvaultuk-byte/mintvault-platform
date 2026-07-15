@@ -30,6 +30,7 @@ export interface ProviderStatus {
 }
 
 const STATUS_NOTE: Record<VqProviderConnectionSnapshot["status"], string> = {
+  configured: "configured — remote connection not verified",
   connected: "connected",
   token_expiring: "token expires soon",
   token_expired: "token expired",

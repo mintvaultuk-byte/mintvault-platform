@@ -19,6 +19,7 @@ export type FounderFeatureStatus = {
 };
 
 export type ProviderConnectionStatus =
+  | "configured"
   | "connected"
   | "token_expiring"
   | "token_expired"
@@ -84,7 +85,7 @@ export function generationBlockedReason(flags: FounderFeatureMap, feature: Found
 
 export function providerGenerationBlockedReason(provider: ProviderConnection | null | undefined, statusLoaded = true): string | null {
   if (!statusLoaded || !provider) return "Reconnect provider first";
-  return provider.generationAllowed && (provider.status === "connected" || provider.status === "token_expiring") ? null : "Reconnect provider first";
+  return provider.generationAllowed && provider.remoteVerified === true && (provider.status === "connected" || provider.status === "token_expiring") ? null : "Reconnect provider first";
 }
 
 export function generationBlockedReasonWithProvider(
