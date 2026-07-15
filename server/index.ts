@@ -6,14 +6,7 @@ import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
 import { csrfOriginCheck } from "./lib/csrf-origin";
 import { withAdvisoryLock } from "./lib/advisory-lock";
-import {
-  trackInterval,
-  trackTimeout,
-  beginJob,
-  endJob,
-  isShuttingDown,
-  runGracefulShutdown,
-} from "./lib/lifecycle";
+import { trackInterval, trackTimeout, beginJob, endJob, isShuttingDown, runGracefulShutdown } from "./lib/lifecycle";
 import { serveStatic } from "./static";
 import { cleanupStalePreGradeImages } from "./r2";
 import { db, pool } from "./db";
@@ -149,6 +142,7 @@ const loginRateLimit = rateLimit({
   legacyHeaders: false,
   validate: false,
   message: { error: "Too many login attempts, please try again later" },
+  skip: (req) => req.method !== "POST",
   keyGenerator: (req) => {
     const forwarded = req.headers["x-forwarded-for"];
     if (forwarded) {
