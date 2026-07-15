@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  ArrowRight,
   CheckCircle2,
   Download,
   FileDown,
@@ -49,6 +50,16 @@ type FactoryRow = {
   blockingReason: string;
   artworkStatus: "missing" | "draft" | "approved";
   dataStatus: "missing" | "draft" | "approved";
+  validationStatus: "blocked" | "ready_for_review" | "approved_for_print";
+  exportStatus: "blocked" | "ready";
+  checklist: {
+    artwork: "missing" | "draft" | "approved";
+    data: "missing" | "draft" | "approved";
+    preview: "blocked" | "ready";
+    validation: "blocked" | "ready_for_review" | "approved_for_print";
+    approval: "missing" | "current" | "stale";
+    export: "blocked" | "ready";
+  };
   exportReady: boolean;
   lastUpdated: string | null;
   placement: VqCardFactoryPlacement;
@@ -66,15 +77,47 @@ type Dashboard = {
     readyForReview: number;
     readyForExport: number;
   };
+  progress: {
+    total: number;
+    cardsCompleted: number;
+    cardsAwaitingArtwork: number;
+    cardsAwaitingData: number;
+    cardsAwaitingApproval: number;
+    cardsExportReady: number;
+    percentageComplete: number;
+  };
+  workQueue: string[];
 };
 
 const STEPS = ["Select Card", "Card Data", "Artwork", "Preview & QA", "Approve", "Export"];
+const QUEUE_SORTS = [
+  ["collector", "Lowest collector number"],
+  ["family", "Family"],
+  ["stage", "Stage"],
+  ["artwork_missing", "Artwork missing"],
+  ["data_missing", "Data missing"],
+  ["ready_for_review", "Ready for review"],
+] as const;
+type QueueSort = (typeof QUEUE_SORTS)[number][0];
 
 function statusTone(status: FactoryRow["completionStatus"]) {
   if (status === "approved_for_print") return "border-emerald-500/40 bg-emerald-500/10 text-emerald-100";
   if (status === "ready_for_review") return "border-sky-500/40 bg-sky-500/10 text-sky-100";
   if (status === "blocked") return "border-amber-500/40 bg-amber-500/10 text-amber-100";
   return "border-zinc-600 bg-zinc-900/60 text-zinc-300";
+}
+
+function indicatorTone(value: string) {
+  if (["approved", "approved_for_print", "ready", "current"].includes(value))
+    return "border-emerald-500/40 bg-emerald-500/10 text-emerald-100";
+  if (["draft", "ready_for_review"].includes(value)) return "border-amber-500/40 bg-amber-500/10 text-amber-100";
+  return "border-red-500/40 bg-red-500/10 text-red-100";
+}
+
+function shortDate(value: string | null) {
+  if (!value) return "Never";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleDateString();
 }
 
 async function fetchImageBlob(collectorNumber: string, endpoint: string): Promise<Blob> {
@@ -183,6 +226,7 @@ export default function AdminVaultQuestCardFactoryPage() {
   const { toast } = useToast();
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
+  const [queueSort, setQueueSort] = useState<QueueSort>("collector");
   const [selectedNumber, setSelectedNumber] = useState("001");
   const [busy, setBusy] = useState("");
   const [zoom, setZoom] = useState(100);
@@ -217,6 +261,7 @@ export default function AdminVaultQuestCardFactoryPage() {
         return false;
       if (filter === "ready" && row.completionStatus !== "ready_for_review") return false;
       if (filter === "approved" && row.completionStatus !== "approved_for_print") return false;
+      if (filter === "ready-export" && !row.exportReady) return false;
       if (filter === "blocked" && row.completionStatus !== "blocked") return false;
       if (!q) return true;
       return [row.spec.collectorNumber, row.spec.character, row.spec.familyName, row.spec.element]
@@ -225,6 +270,30 @@ export default function AdminVaultQuestCardFactoryPage() {
         .includes(q);
     });
   }, [rows, filter, query]);
+  const workQueue = useMemo(() => {
+    const queued = rows.filter((row) => !row.exportReady);
+    return [...queued].sort((a, b) => {
+      const priority = (row: FactoryRow) => {
+        if (queueSort === "artwork_missing") return row.artworkStatus === "missing" ? 0 : 1;
+        if (queueSort === "data_missing") return row.dataStatus !== "approved" ? 0 : 1;
+        if (queueSort === "ready_for_review") return row.completionStatus === "ready_for_review" ? 0 : 1;
+        return 0;
+      };
+      const p = priority(a) - priority(b);
+      if (p !== 0) return p;
+      if (queueSort === "family") {
+        const family = a.spec.familyName.localeCompare(b.spec.familyName);
+        if (family !== 0) return family;
+      }
+      if (queueSort === "stage") {
+        const stage = a.spec.stage - b.spec.stage;
+        if (stage !== 0) return stage;
+      }
+      return a.spec.collectorNumber.localeCompare(b.spec.collectorNumber);
+    });
+  }, [rows, queueSort]);
+  const progress = dashboardQ.data?.progress;
+  const nextBlocked = rows.find((row) => !row.exportReady);
 
   const runAction = async (label: string, action: () => Promise<void>) => {
     setBusy(label);
@@ -292,6 +361,52 @@ export default function AdminVaultQuestCardFactoryPage() {
         <div className="grid gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
           <aside className="space-y-4">
             <section className="rounded border border-white/10 bg-white/5 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wide text-amber-300">Founder Work Queue</p>
+                  <p className="text-sm text-zinc-300">{workQueue.length} cards still need work</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => nextBlocked && setSelectedNumber(nextBlocked.spec.collectorNumber)}
+                  disabled={!nextBlocked}
+                  className="inline-flex items-center gap-1 rounded bg-amber-300 px-3 py-2 text-xs font-black text-[#081A3D] disabled:opacity-40"
+                >
+                  Next Card <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <label className="text-xs text-zinc-300">
+                Queue sort
+                <select
+                  value={queueSort}
+                  onChange={(event) => setQueueSort(event.target.value as QueueSort)}
+                  className="mt-1 h-9 w-full rounded border border-white/10 bg-[#06142F] px-3 text-sm"
+                >
+                  {QUEUE_SORTS.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="mt-3 max-h-56 space-y-2 overflow-y-auto pr-1">
+                {workQueue.map((row) => (
+                  <button
+                    key={`queue-${row.spec.collectorNumber}`}
+                    type="button"
+                    onClick={() => setSelectedNumber(row.spec.collectorNumber)}
+                    className="flex w-full items-center justify-between gap-2 rounded border border-white/10 bg-[#06142F] px-3 py-2 text-left text-xs hover:border-amber-300/60"
+                  >
+                    <span className="font-bold">
+                      {row.spec.collectorNumber} {row.spec.character}
+                    </span>
+                    <span className="truncate text-zinc-400">{row.blockingReason || "Needs approval"}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="rounded border border-white/10 bg-white/5 p-4">
               <div className="mb-3 flex items-center gap-2">
                 <Search className="h-4 w-4 text-amber-300" />
                 <input
@@ -312,6 +427,7 @@ export default function AdminVaultQuestCardFactoryPage() {
                 <option value="ready">Ready for Review</option>
                 <option value="approved">Approved</option>
                 <option value="blocked">Blocked</option>
+                <option value="ready-export">Ready to Export</option>
               </select>
               <div className="max-h-[560px] space-y-2 overflow-y-auto pr-1">
                 {dashboardQ.isLoading && <p className="text-sm text-zinc-300">Loading Card Factory...</p>}
@@ -346,6 +462,86 @@ export default function AdminVaultQuestCardFactoryPage() {
 
           {selected && (
             <main className="space-y-4">
+              {progress && (
+                <section className="grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+                  {[
+                    ["Cards completed", progress.cardsCompleted],
+                    ["Awaiting artwork", progress.cardsAwaitingArtwork],
+                    ["Awaiting data", progress.cardsAwaitingData],
+                    ["Awaiting approval", progress.cardsAwaitingApproval],
+                    ["Export ready", progress.cardsExportReady],
+                    ["Complete", `${progress.percentageComplete}%`],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded border border-white/10 bg-white/5 p-3">
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">{label}</p>
+                      <p className="mt-1 text-xl font-black text-amber-100">{value}</p>
+                    </div>
+                  ))}
+                </section>
+              )}
+
+              <section className="rounded border border-white/10 bg-white/5 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-sm font-bold text-amber-300">Standard Dashboard</p>
+                  <p className="text-xs text-zinc-400">001 Flammi through 036 Shardor</p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[980px] text-left text-xs">
+                    <thead className="text-[10px] uppercase tracking-wide text-zinc-400">
+                      <tr>
+                        <th className="py-2 pr-3">No.</th>
+                        <th className="py-2 pr-3">Family</th>
+                        <th className="py-2 pr-3">Stage</th>
+                        <th className="py-2 pr-3">Artwork</th>
+                        <th className="py-2 pr-3">Data</th>
+                        <th className="py-2 pr-3">Validation</th>
+                        <th className="py-2 pr-3">Approval</th>
+                        <th className="py-2 pr-3">Export</th>
+                        <th className="py-2 pr-3">Blocking reason</th>
+                        <th className="py-2">Last updated</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((row) => (
+                        <tr
+                          key={`table-${row.spec.collectorNumber}`}
+                          className="border-t border-white/10 hover:bg-white/5"
+                        >
+                          <td className="py-2 pr-3">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedNumber(row.spec.collectorNumber)}
+                              className="font-bold text-amber-100 hover:underline"
+                            >
+                              {row.spec.collectorNumber} {row.spec.character}
+                            </button>
+                          </td>
+                          <td className="py-2 pr-3">{row.spec.familyName}</td>
+                          <td className="py-2 pr-3">{row.spec.stage}</td>
+                          {[
+                            row.artworkStatus,
+                            row.dataStatus,
+                            row.validationStatus,
+                            row.approvalState,
+                            row.exportStatus,
+                          ].map((value, index) => (
+                            <td key={`${row.spec.collectorNumber}-${index}-${value}`} className="py-2 pr-3">
+                              <span className={`rounded border px-2 py-0.5 uppercase ${indicatorTone(value)}`}>
+                                {value.replaceAll("_", " ")}
+                              </span>
+                            </td>
+                          ))}
+                          <td className="max-w-[260px] truncate py-2 pr-3 text-zinc-300">
+                            {row.blockingReason || "None"}
+                          </td>
+                          <td className="py-2 text-zinc-400">{shortDate(row.lastUpdated)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
               <section className="rounded border border-white/10 bg-white/5 p-4">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div>
@@ -373,6 +569,14 @@ export default function AdminVaultQuestCardFactoryPage() {
                       Next
                     </button>
                   </div>
+                </div>
+                <div className="mt-4 grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
+                  {Object.entries(selected.checklist).map(([label, value]) => (
+                    <div key={label} className={`rounded border p-2 ${indicatorTone(value)}`}>
+                      <p className="text-[10px] font-bold uppercase tracking-wide">{label}</p>
+                      <p className="mt-1 text-xs font-black uppercase">{value.replaceAll("_", " ")}</p>
+                    </div>
+                  ))}
                 </div>
               </section>
 

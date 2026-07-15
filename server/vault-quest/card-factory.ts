@@ -18,7 +18,7 @@ import {
   type VqFactoryValidationInput,
   type VqFactoryValidationIssue,
 } from "@shared/vq-card-factory";
-import type { VqCardRow, VqCharacter } from "@shared/vq-schema";
+import type { VqCardRow, VqCharacter, VqFamily } from "@shared/vq-schema";
 import { vqStorage } from "./storage";
 import { fetchArt } from "./render-saved";
 import { renderCard, type RenderCardInput } from "./render-service";
@@ -32,6 +32,16 @@ const ART_WINDOW = { widthPx: 1710, heightPx: 1050 };
 
 export interface VqFactoryCardRow {
   spec: VqCardFactorySpec;
+  productionRecord: {
+    cardId: string;
+    collectorNumber: string;
+    familyId: string;
+    familyName: string;
+    stage: 1 | 2 | 3;
+    element: VqCardFactorySpec["element"];
+    templateVersion: string;
+    previousStageName: string | null;
+  };
   card: VqCardRow | null;
   character: VqCharacter | null;
   validation: VqFactoryValidationIssue[];
@@ -39,6 +49,16 @@ export interface VqFactoryCardRow {
   blockingReason: string;
   artworkStatus: "missing" | "draft" | "approved";
   dataStatus: "missing" | "draft" | "approved";
+  validationStatus: "blocked" | "ready_for_review" | "approved_for_print";
+  exportStatus: "blocked" | "ready";
+  checklist: {
+    artwork: "missing" | "draft" | "approved";
+    data: "missing" | "draft" | "approved";
+    preview: "blocked" | "ready";
+    validation: "blocked" | "ready_for_review" | "approved_for_print";
+    approval: "missing" | "current" | "stale";
+    export: "blocked" | "ready";
+  };
   exportReady: boolean;
   lastUpdated: string | null;
   placement: VqCardFactoryPlacement;
@@ -112,19 +132,26 @@ export function cardFactoryPlacementChecksum(placement: VqCardFactoryPlacement):
 function factoryInput(
   spec: VqCardFactorySpec,
   card: VqCardRow | null,
-  character: VqCharacter | null
+  character: VqCharacter | null,
+  family: VqFamily | null
 ): VqFactoryValidationInput | null {
   if (!card) return null;
+  const previousStage =
+    card.stageNumber === 2
+      ? (family?.stage1Name ?? null)
+      : card.stageNumber === 3
+        ? (family?.stage2Name ?? null)
+        : null;
   return {
     collectorNumber: card.collectorNumber,
     name: card.name,
     stage: card.stageNumber,
-    familyId: spec.familyId,
+    familyId: card.familyId,
     element: card.element,
     health: card.health,
     guard: card.guard,
     shift: card.shift,
-    previousStage: spec.expectedPreviousName,
+    previousStage,
     attack1Name: card.attack1Name,
     attack1Cost: card.attack1Cost,
     attack1Damage: card.attack1Damage,
@@ -168,6 +195,23 @@ function characterForSpec(
   );
 }
 
+function familyForSpec(spec: VqCardFactorySpec, families: VqFamily[], card: VqCardRow | null): VqFamily | null {
+  return families.find((family) => family.familyId === (card?.familyId ?? spec.familyId)) ?? null;
+}
+
+function productionRecordForSpec(spec: VqCardFactorySpec): VqFactoryCardRow["productionRecord"] {
+  return {
+    cardId: spec.cardId,
+    collectorNumber: spec.collectorNumber,
+    familyId: spec.familyId,
+    familyName: spec.familyName,
+    stage: spec.stage,
+    element: spec.element,
+    templateVersion: VQ_CARD_FACTORY_TEMPLATE_VERSION,
+    previousStageName: spec.expectedPreviousName,
+  };
+}
+
 export function resolveFactoryApprovalState(
   card: VqCardRow | null,
   placement: VqCardFactoryPlacement,
@@ -198,17 +242,20 @@ function rowStatus(
 }
 
 export async function getFactoryRows(): Promise<VqFactoryCardRow[]> {
-  const [cards, characters] = await Promise.all([
+  const [cards, characters, families] = await Promise.all([
     vqStorage.listCards({ setCode: "GNV" }),
     vqStorage.listCharacters("GNV"),
+    vqStorage.listFamilies("GNV"),
   ]);
   const config = await vqStorage.getConfig();
-  const inputs = VQ_STANDARD_CARD_SPECS.map((spec) => factoryInput(spec, findCardForSpec(spec, cards), null)).filter(
-    Boolean
-  ) as VqFactoryValidationInput[];
+  const inputs = VQ_STANDARD_CARD_SPECS.map((spec) => {
+    const card = findCardForSpec(spec, cards);
+    return factoryInput(spec, card, null, familyForSpec(spec, families, card));
+  }).filter(Boolean) as VqFactoryValidationInput[];
   return VQ_STANDARD_CARD_SPECS.map((spec) => {
     const card = findCardForSpec(spec, cards);
     const character = characterForSpec(spec, characters, card);
+    const family = familyForSpec(spec, families, card);
     const placement = normalizeVqFactoryPlacement(
       card ? jsonParse(config[configKey("placement", card.cardId)], VQ_CARD_FACTORY_PLACEMENT_DEFAULT) : null
     );
@@ -216,7 +263,7 @@ export async function getFactoryRows(): Promise<VqFactoryCardRow[]> {
       ? jsonParse<VqCardFactoryApprovalSnapshot | null>(config[configKey("approval", card.cardId)], null)
       : null;
     const approvalView = resolveFactoryApprovalState(card, placement, approval);
-    const input = factoryInput(spec, card, character);
+    const input = factoryInput(spec, card, character, family);
     const validation = validateVqFactoryCard(spec, input, inputs);
     if (approvalView.approvalState === "stale") {
       validation.push({
@@ -227,16 +274,32 @@ export async function getFactoryRows(): Promise<VqFactoryCardRow[]> {
       });
     }
     const completionStatus = rowStatus(card, validation, approvalView.approvalState);
-    const artworkStatus = input?.artR2Key ? "approved" : "missing";
+    const artworkStatus = input?.artR2Key
+      ? approvalView.approvalState === "current"
+        ? "approved"
+        : "draft"
+      : "missing";
     const dataStatus = !card
       ? "missing"
       : validation.some(
-            (issue) => issue.field !== "artR2Key" && issue.field !== "prevArtR2Key" && issue.code !== "missing_artwork"
+            (issue) =>
+              !["artR2Key", "prevArtR2Key", "artwork", "approval"].includes(issue.field) &&
+              issue.code !== "missing_artwork" &&
+              issue.code !== "unapproved_artwork" &&
+              issue.code !== "approval_stale"
           )
         ? "draft"
         : "approved";
+    const validationStatus =
+      completionStatus === "approved_for_print"
+        ? "approved_for_print"
+        : completionStatus === "ready_for_review"
+          ? "ready_for_review"
+          : "blocked";
+    const exportStatus = completionStatus === "approved_for_print" ? "ready" : "blocked";
     return {
       spec,
+      productionRecord: productionRecordForSpec(spec),
       card,
       character,
       validation,
@@ -244,6 +307,16 @@ export async function getFactoryRows(): Promise<VqFactoryCardRow[]> {
       blockingReason: validation.find((issue) => issue.severity === "blocker")?.message ?? "",
       artworkStatus,
       dataStatus,
+      validationStatus,
+      exportStatus,
+      checklist: {
+        artwork: artworkStatus,
+        data: dataStatus,
+        preview: validation.some((issue) => issue.severity === "blocker") ? "blocked" : "ready",
+        validation: validationStatus,
+        approval: approvalView.approvalState,
+        export: exportStatus,
+      },
       exportReady: completionStatus === "approved_for_print",
       lastUpdated: card?.updatedAt
         ? card.updatedAt.toISOString()
@@ -255,6 +328,56 @@ export async function getFactoryRows(): Promise<VqFactoryCardRow[]> {
       approvalState: approvalView.approvalState,
       approvalStaleReason: approvalView.approvalStaleReason,
     };
+  });
+}
+
+export function buildFactoryProgress(rows: VqFactoryCardRow[]) {
+  const total = rows.length;
+  const cardsCompleted = rows.filter((row) => row.completionStatus === "approved_for_print").length;
+  const cardsAwaitingArtwork = rows.filter((row) => row.artworkStatus === "missing").length;
+  const cardsAwaitingData = rows.filter((row) => row.dataStatus !== "approved").length;
+  const cardsAwaitingApproval = rows.filter((row) => row.completionStatus === "ready_for_review").length;
+  const cardsExportReady = rows.filter((row) => row.exportReady).length;
+  return {
+    total,
+    cardsCompleted,
+    cardsAwaitingArtwork,
+    cardsAwaitingData,
+    cardsAwaitingApproval,
+    cardsExportReady,
+    percentageComplete: total === 0 ? 0 : Math.round((cardsCompleted / total) * 100),
+  };
+}
+
+export type VqFactoryQueueSort =
+  | "collector"
+  | "family"
+  | "stage"
+  | "artwork_missing"
+  | "data_missing"
+  | "ready_for_review";
+
+function statusPriority(row: VqFactoryCardRow, sort: VqFactoryQueueSort): number {
+  if (sort === "artwork_missing") return row.artworkStatus === "missing" ? 0 : 1;
+  if (sort === "data_missing") return row.dataStatus !== "approved" ? 0 : 1;
+  if (sort === "ready_for_review") return row.completionStatus === "ready_for_review" ? 0 : 1;
+  return 0;
+}
+
+export function buildFactoryWorkQueue(rows: VqFactoryCardRow[], sort: VqFactoryQueueSort = "collector") {
+  const blocked = rows.filter((row) => !row.exportReady);
+  return [...blocked].sort((a, b) => {
+    const priority = statusPriority(a, sort) - statusPriority(b, sort);
+    if (priority !== 0) return priority;
+    if (sort === "family") {
+      const family = a.spec.familyName.localeCompare(b.spec.familyName);
+      if (family !== 0) return family;
+    }
+    if (sort === "stage") {
+      const stage = a.spec.stage - b.spec.stage;
+      if (stage !== 0) return stage;
+    }
+    return a.spec.collectorNumber.localeCompare(b.spec.collectorNumber);
   });
 }
 

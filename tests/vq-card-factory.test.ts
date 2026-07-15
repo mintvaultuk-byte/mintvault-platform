@@ -29,7 +29,7 @@ function validInput(overrides: Partial<VqFactoryValidationInput> = {}): VqFactor
     collectorNumber: "001",
     name: "Flammi",
     stage: 1,
-    familyId: "flammi",
+    familyId: "GNV-F01",
     element: "Flame",
     health: 4,
     guard: 1,
@@ -68,6 +68,10 @@ describe("Vault Quest Card Factory set plan", () => {
       Array.from({ length: 36 }, (_, index) => String(index + 1).padStart(3, "0"))
     );
     expect(new Set(VQ_STANDARD_CARD_SPECS.map((card) => card.character)).size).toBe(36);
+    expect(VQ_STANDARD_CARD_SPECS.at(0)?.character).toBe("Flammi");
+    expect(VQ_STANDARD_CARD_SPECS.at(-1)?.character).toBe("Shardor");
+    expect(VQ_STANDARD_CARD_SPECS.at(0)?.cardId).toBe("GNV-001");
+    expect(VQ_STANDARD_CARD_SPECS.at(0)?.familyId).toBe("GNV-F01");
     expect(VQ_STANDARD_CARD_SPECS.map((card) => card.stage)).toEqual(
       Array.from({ length: 12 }, () => [1, 2, 3]).flat()
     );
@@ -158,6 +162,7 @@ describe("Vault Quest Card Factory validation", () => {
         })
       )
     ).toContain("wrong_evolves_from");
+    expect(issueCodes(validInput({ familyId: "GV-WRONG" }))).toContain("invalid_family");
   });
 
   it("blocks incomplete artwork and duplicate collector numbers before approval/export", () => {
@@ -283,7 +288,7 @@ describe("Vault Quest Card Factory render and provider safety", () => {
       cardType: "Creature",
       element: "Flame",
       rarity: "Common",
-      familyId: "GV-F01",
+      familyId: "GNV-F01",
       stageNumber: 1,
       lifeStage: "BABY",
       health: 4,
@@ -356,6 +361,78 @@ describe("Vault Quest Card Factory render and provider safety", () => {
     expect(buildFactoryCsvManifest(rows).split("\n")[0]).toContain("collectorNumber");
     expect(buildFactoryCsvManifest(rows)).toContain("GV_001_Flammi_Stage1_front_v1.png");
     expect(buildFactoryMissingBlockedReport(rows)).toContain("001 Flammi: Missing");
+  });
+
+  it("calculates progress, queue ordering, checklist and export gates without false completion", async () => {
+    const { buildFactoryProgress, buildFactoryWorkQueue } = await import("../server/vault-quest/card-factory");
+    const rows = VQ_STANDARD_CARD_SPECS.map((spec, index) => ({
+      spec,
+      productionRecord: {
+        cardId: spec.cardId,
+        collectorNumber: spec.collectorNumber,
+        familyId: spec.familyId,
+        familyName: spec.familyName,
+        stage: spec.stage,
+        element: spec.element,
+        templateVersion: VQ_CARD_FACTORY_TEMPLATE_VERSION,
+        previousStageName: spec.expectedPreviousName,
+      },
+      card: index === 0 ? ({ cardId: "GNV-001" } as VqCardRow) : null,
+      character: null,
+      validation:
+        index === 0
+          ? []
+          : [
+              {
+                code: "missing_card",
+                field: "card",
+                message: "No draft card data exists.",
+                severity: "blocker" as const,
+              },
+            ],
+      completionStatus: index === 0 ? ("approved_for_print" as const) : ("missing" as const),
+      blockingReason: index === 0 ? "" : "No draft card data exists.",
+      artworkStatus: index === 1 ? ("draft" as const) : index === 0 ? ("approved" as const) : ("missing" as const),
+      dataStatus: index === 2 ? ("draft" as const) : index === 0 ? ("approved" as const) : ("missing" as const),
+      validationStatus: index === 0 ? ("approved_for_print" as const) : ("blocked" as const),
+      exportStatus: index === 0 ? ("ready" as const) : ("blocked" as const),
+      checklist: {
+        artwork: index === 1 ? ("draft" as const) : index === 0 ? ("approved" as const) : ("missing" as const),
+        data: index === 2 ? ("draft" as const) : index === 0 ? ("approved" as const) : ("missing" as const),
+        preview: index === 0 ? ("ready" as const) : ("blocked" as const),
+        validation: index === 0 ? ("approved_for_print" as const) : ("blocked" as const),
+        approval: index === 0 ? ("current" as const) : ("missing" as const),
+        export: index === 0 ? ("ready" as const) : ("blocked" as const),
+      },
+      exportReady: index === 0,
+      lastUpdated: null,
+      placement: normalizeVqFactoryPlacement(null),
+      approval: null,
+      approvalState: index === 0 ? ("current" as const) : ("missing" as const),
+      approvalStaleReason: null,
+    }));
+
+    expect(rows).toHaveLength(36);
+    expect(rows.map((row) => row.productionRecord.collectorNumber)).toEqual(
+      Array.from({ length: 36 }, (_, index) => String(index + 1).padStart(3, "0"))
+    );
+    expect(buildFactoryProgress(rows)).toEqual({
+      total: 36,
+      cardsCompleted: 1,
+      cardsAwaitingArtwork: 34,
+      cardsAwaitingData: 35,
+      cardsAwaitingApproval: 0,
+      cardsExportReady: 1,
+      percentageComplete: 3,
+    });
+    expect(
+      buildFactoryWorkQueue(rows, "collector")
+        .map((row) => row.spec.collectorNumber)
+        .slice(0, 3)
+    ).toEqual(["002", "003", "004"]);
+    expect(buildFactoryWorkQueue(rows, "data_missing")[0].dataStatus).not.toBe("approved");
+    expect(rows[1].checklist.export).toBe("blocked");
+    expect(rows[1].exportReady).toBe(false);
   });
 
   it("keeps Card Factory source VQ-only and free of generation/provider calls", () => {

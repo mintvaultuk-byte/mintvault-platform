@@ -7,6 +7,8 @@ import {
   buildFactoryManifest,
   buildFactoryMissingBlockedReport,
   buildFactoryProofPdf,
+  buildFactoryProgress,
+  buildFactoryWorkQueue,
   getFactoryRows,
   renderFactoryBack,
   renderFactoryFront,
@@ -46,9 +48,11 @@ export function registerVaultQuestCardFactoryRoutes(app: Express): void {
   app.get(`${base}/dashboard`, requireAdmin, async (_req: Request, res: Response) => {
     try {
       const rows = await getFactoryRows();
+      const progress = buildFactoryProgress(rows);
+      const workQueue = buildFactoryWorkQueue(rows);
       const totals = {
         total: rows.length,
-        fullyReady: rows.filter((row) => row.completionStatus === "approved_for_print").length,
+        fullyReady: progress.cardsCompleted,
         missingData: rows.filter(
           (row) =>
             row.dataStatus === "missing" ||
@@ -63,9 +67,15 @@ export function registerVaultQuestCardFactoryRoutes(app: Express): void {
           )
         ).length,
         readyForReview: rows.filter((row) => row.completionStatus === "ready_for_review").length,
-        readyForExport: rows.filter((row) => row.exportReady).length,
+        readyForExport: progress.cardsExportReady,
       };
-      res.json({ rows, totals, providerGeneration: false });
+      res.json({
+        rows,
+        totals,
+        progress,
+        workQueue: workQueue.map((row) => row.spec.collectorNumber),
+        providerGeneration: false,
+      });
     } catch (err) {
       handleFactoryError(res, err);
     }

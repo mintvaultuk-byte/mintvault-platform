@@ -80,18 +80,18 @@ export interface VqCardFactoryFamily {
 }
 
 export const VQ_CARD_FACTORY_FAMILIES: readonly VqCardFactoryFamily[] = [
-  { familyId: "GV-F01", familyName: "Flammi", element: "Flame", stages: ["Flammi", "Flammro", "Flamora"] },
-  { familyId: "GV-F02", familyName: "Aquabub", element: "Tide", stages: ["Aquabub", "Aquanix", "Aquadon"] },
-  { familyId: "GV-F03", familyName: "Leafee", element: "Terra", stages: ["Leafee", "Leafflora", "Floraven"] },
-  { familyId: "GV-F04", familyName: "Zappi", element: "Volt", stages: ["Zappi", "Zapstorm", "Zaptor"] },
-  { familyId: "GV-F05", familyName: "Breezi", element: "Gale", stages: ["Breezi", "Breezelle", "Breezar"] },
-  { familyId: "GV-F06", familyName: "Glimmi", element: "Crystal", stages: ["Glimmi", "Glimora", "Glimstar"] },
-  { familyId: "GV-F07", familyName: "Mossi", element: "Terra", stages: ["Mossi", "Mossaro", "Mossrex"] },
-  { familyId: "GV-F08", familyName: "Emberi", element: "Flame", stages: ["Emberi", "Emberon", "Emberos"] },
-  { familyId: "GV-F09", familyName: "Droppi", element: "Tide", stages: ["Droppi", "Droppon", "Droppos"] },
-  { familyId: "GV-F10", familyName: "Sparki", element: "Volt", stages: ["Sparki", "Sparkon", "Sparkos"] },
-  { familyId: "GV-F11", familyName: "Gusti", element: "Gale", stages: ["Gusti", "Guston", "Gustor"] },
-  { familyId: "GV-F12", familyName: "Shardi", element: "Crystal", stages: ["Shardi", "Shardon", "Shardor"] },
+  { familyId: "GNV-F01", familyName: "Flammi", element: "Flame", stages: ["Flammi", "Flammro", "Flamora"] },
+  { familyId: "GNV-F02", familyName: "Aquabub", element: "Tide", stages: ["Aquabub", "Aquanix", "Aquadon"] },
+  { familyId: "GNV-F03", familyName: "Leafee", element: "Terra", stages: ["Leafee", "Leafflora", "Floraven"] },
+  { familyId: "GNV-F04", familyName: "Zappi", element: "Volt", stages: ["Zappi", "Zapstorm", "Zaptor"] },
+  { familyId: "GNV-F05", familyName: "Breezi", element: "Gale", stages: ["Breezi", "Breezelle", "Breezar"] },
+  { familyId: "GNV-F06", familyName: "Glimmi", element: "Crystal", stages: ["Glimmi", "Glimora", "Glimstar"] },
+  { familyId: "GNV-F07", familyName: "Mossi", element: "Terra", stages: ["Mossi", "Mossaro", "Mossrex"] },
+  { familyId: "GNV-F08", familyName: "Emberi", element: "Flame", stages: ["Emberi", "Emberon", "Emberos"] },
+  { familyId: "GNV-F09", familyName: "Droppi", element: "Tide", stages: ["Droppi", "Droppon", "Droppos"] },
+  { familyId: "GNV-F10", familyName: "Sparki", element: "Volt", stages: ["Sparki", "Sparkon", "Sparkos"] },
+  { familyId: "GNV-F11", familyName: "Gusti", element: "Gale", stages: ["Gusti", "Guston", "Gustor"] },
+  { familyId: "GNV-F12", familyName: "Shardi", element: "Crystal", stages: ["Shardi", "Shardon", "Shardor"] },
 ] as const;
 
 export interface VqCardFactorySpec {
@@ -104,7 +104,7 @@ export interface VqCardFactorySpec {
   element: VqCardFactoryElement;
   expectedPreviousName: string | null;
   setName: "Genesis Vault";
-  setCode: "GV";
+  setCode: "GNV";
   edition: "First Edition";
   year: 2026;
 }
@@ -115,7 +115,7 @@ export const VQ_STANDARD_CARD_SPECS: readonly VqCardFactorySpec[] = VQ_CARD_FACT
       const number = familyIndex * 3 + stageIndex + 1;
       return {
         collectorNumber: String(number).padStart(3, "0"),
-        cardId: `GV-${String(number).padStart(3, "0")}`,
+        cardId: `GNV-${String(number).padStart(3, "0")}`,
         character,
         stage: (stageIndex + 1) as 1 | 2 | 3,
         familyId: family.familyId,
@@ -123,7 +123,7 @@ export const VQ_STANDARD_CARD_SPECS: readonly VqCardFactorySpec[] = VQ_CARD_FACT
         element: family.element,
         expectedPreviousName: stageIndex === 0 ? null : family.stages[stageIndex - 1],
         setName: "Genesis Vault",
-        setCode: "GV",
+        setCode: "GNV",
         edition: "First Edition",
         year: 2026,
       };
@@ -278,6 +278,13 @@ export function validateVqFactoryCard(
       code: "invalid_stage",
       field: "stage",
       message: `Stage must be ${spec.stage}.`,
+      severity: "blocker",
+    });
+  if (input.familyId !== spec.familyId)
+    issues.push({
+      code: "invalid_family",
+      field: "familyId",
+      message: `Family must be ${spec.familyId}.`,
       severity: "blocker",
     });
   if (input.element !== spec.element)
