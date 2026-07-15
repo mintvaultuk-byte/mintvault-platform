@@ -5,8 +5,16 @@ import { AlertCircle, CheckCircle2, Clock3, Loader2, RefreshCw } from "lucide-re
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { ProviderConnection } from "./spend-control";
+import type { VqAiProviderId, VqProviderDescriptor } from "@shared/vq-ai-provider";
 
-type OpsStatus = { provider?: ProviderConnection };
+type OpsStatus = {
+  provider?: ProviderConnection;
+  providerRegistry?: {
+    currentProvider: VqAiProviderId;
+    defaultProvider: VqAiProviderId;
+    availableProviders: VqProviderDescriptor[];
+  };
+};
 
 const LABELS: Record<string, string> = {
   configured: "Configured — remote connection not verified",
@@ -41,7 +49,9 @@ export function ProviderConnectionPanel({ onStatusChange }: { onStatusChange?: (
     retry: false,
   });
   const provider = status.data?.provider ?? null;
+  const registry = status.data?.providerRegistry ?? null;
   const loaded = !status.isError && !!status.data && !!provider;
+  const selectedProvider = registry?.currentProvider ?? "higgsfield";
   const effective: ProviderConnection = useMemo(() => provider ?? {
     status: status.isLoading ? "checking" : "unknown",
     generationAllowed: false,
@@ -71,6 +81,21 @@ export function ProviderConnectionPanel({ onStatusChange }: { onStatusChange?: (
     }
   }
 
+  async function selectProvider(providerId: VqAiProviderId) {
+    const target = registry?.availableProviders.find((p) => p.id === providerId);
+    if (!target?.available || providerId === selectedProvider) return;
+    if (!window.confirm(`Switch Vault Quest AI Provider to ${target.label}?\n\nThis changes only the centrally stored provider selection. Generation remains gated by the existing locks, spend controls and provider verification.`)) return;
+    try {
+      await apiRequest("POST", "/api/admin/vault-quest/ops/providers/select", { provider: providerId });
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/vault-quest/ops/status"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/vault-quest/artwork-cost"] });
+      toast({ title: "AI provider selected", description: target.label });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Provider selection failed";
+      toast({ title: "Provider selection failed", description: message, variant: "destructive" });
+    }
+  }
+
   return (
     <div className={`rounded-xl border p-3 ${tone.box}`}>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -84,8 +109,10 @@ export function ProviderConnectionPanel({ onStatusChange }: { onStatusChange?: (
         </button>
       </div>
       <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+        <div><div className="text-[10px] uppercase tracking-wide text-slate-500">Provider</div><div className="font-semibold text-slate-200">{registry?.availableProviders.find((p) => p.id === selectedProvider)?.label ?? "Higgsfield"}</div></div>
         <div><div className="text-[10px] uppercase tracking-wide text-slate-500">Status</div><div className={`font-semibold ${tone.text}`}>{LABELS[effective.status] ?? "Status unknown"}</div></div>
         <div><div className="text-[10px] uppercase tracking-wide text-slate-500">Provider path</div><div className="font-semibold text-slate-200">{effective.providerPathLabel ?? "Higgsfield OAuth / Legacy"}</div></div>
+        <div><div className="text-[10px] uppercase tracking-wide text-slate-500">Credit balance</div><div className="font-semibold text-slate-200">Unavailable</div></div>
         <div><div className="text-[10px] uppercase tracking-wide text-slate-500">Last checked</div><div className="font-semibold text-slate-200">{fmt(effective.lastCheckedAt)}</div></div>
         <div><div className="text-[10px] uppercase tracking-wide text-slate-500">Token expiry</div><div className="font-semibold text-slate-200">{fmt(effective.tokenExpiryAt)}</div></div>
         <div><div className="text-[10px] uppercase tracking-wide text-slate-500">Last successful connection</div><div className="font-semibold text-slate-200">{fmt(effective.lastSuccessAt)}</div></div>
@@ -95,6 +122,27 @@ export function ProviderConnectionPanel({ onStatusChange }: { onStatusChange?: (
       </div>
       <div className="mt-2 rounded border border-slate-800 bg-slate-950/35 px-2 py-1.5 text-[11px] text-slate-300">
         {effective.message || "Provider status could not be confirmed."}
+      </div>
+      <div className="mt-2 rounded border border-slate-800 bg-slate-950/35 p-2">
+        <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">AI Provider</div>
+        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+          {(registry?.availableProviders ?? []).map((p) => {
+            const selected = p.id === selectedProvider;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                disabled={!p.available || selected}
+                onClick={() => void selectProvider(p.id)}
+                className={`rounded border px-2 py-1.5 text-left text-[11px] disabled:cursor-not-allowed ${selected ? "border-amber-500 bg-amber-500/15 text-amber-100" : p.available ? "border-slate-600 text-slate-200 hover:border-amber-500" : "border-slate-800 text-slate-600"}`}
+                title={p.expectedCreditSource}
+              >
+                <div className="font-semibold">{p.recommended ? "★ " : ""}{p.label}{p.comingSoon ? " (Coming Soon)" : ""}</div>
+                <div className="mt-0.5 text-[10px] opacity-80">{p.expectedCreditSource}</div>
+              </button>
+            );
+          })}
+        </div>
       </div>
       <div className="mt-2 grid gap-1 text-[10px] text-slate-400 sm:grid-cols-2">
         <div>Refresh the Higgsfield server-side token, then press Test connection.</div>

@@ -12,6 +12,7 @@ import { getSpendSnapshot } from "./generation-guard";
 import { getExportJobCounts, type ExportJobCounts } from "../export-jobs";
 import { providerStatuses, type ProviderStatus } from "../ai/provider";
 import { getHiggsfieldProviderConnection, type VqProviderConnectionSnapshot } from "./vq-provider-connection";
+import { getProviderRegistryView, type VqProviderRegistryView } from "../ai/provider-registry";
 
 export interface VqFeatureStatusEntry extends VqFeatureState {
   feature: VqFeature;
@@ -21,6 +22,7 @@ export interface VqOpsStatus {
   machineId: string; // labels every per-machine-only field below
   features: VqFeatureStatusEntry[];
   providers: ProviderStatus[];
+  providerRegistry: VqProviderRegistryView;
   provider: VqProviderConnectionSnapshot;
   spend: {
     ceilings: Awaited<ReturnType<typeof getSpendSnapshot>>["ceilings"];
@@ -43,11 +45,12 @@ function envSnapshot() {
 }
 
 export async function getVqOpsStatus(nowMs: number): Promise<VqOpsStatus> {
-  const [dbFlags, spend, exports, providers, provider] = await Promise.all([
+  const [dbFlags, spend, exports, providers, providerRegistry, provider] = await Promise.all([
     loadVqDbFlags(),
     getSpendSnapshot(nowMs),
     getExportJobCounts(),
     providerStatuses(),
+    getProviderRegistryView(),
     getHiggsfieldProviderConnection(nowMs),
   ]);
   const env = envSnapshot();
@@ -56,6 +59,7 @@ export async function getVqOpsStatus(nowMs: number): Promise<VqOpsStatus> {
     machineId: process.env.FLY_MACHINE_ID || "local",
     features,
     providers,
+    providerRegistry,
     provider,
     spend,
     exports,

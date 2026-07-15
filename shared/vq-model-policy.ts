@@ -112,7 +112,7 @@ export function resolveRequestedModel(
     return model;
   };
 
-  if (!requestedModel) {
+  if (!requestedModel || requestedModel === "auto") {
     return { ok: true, model: upgradeIfNeeded(defaultModelFor(generationType)), isPremium: false };
   }
   const valid = vqValidImageModel(requestedModel);

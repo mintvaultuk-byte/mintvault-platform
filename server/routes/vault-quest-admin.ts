@@ -75,6 +75,8 @@ import {
 import { createFamilyFromConcept, deriveAlternativeNames } from "../vault-quest/creature-designer";
 import { validateFamilyConcept, SUGGEST_FIELDS, type CreatureIdeaInput, type FamilyConcept, type SuggestField } from "@shared/vq-creature-concept";
 import { providerStatuses } from "../vault-quest/ai/provider";
+import { getProviderPanelStatus, getProviderRegistryView, selectVqProvider } from "../vault-quest/ai/provider-registry";
+import { isVqAiProviderId } from "@shared/vq-ai-provider";
 import { AI_DISCLAIMER, guardInput, guardOutput } from "../vault-quest/ai/guardrails";
 import {
   buildVaultQuestArtworkPrompt,
@@ -1158,6 +1160,25 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     }
   });
 
+  app.get("/api/admin/vault-quest/ops/providers", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      res.json(await getProviderPanelStatus(Date.now()));
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "provider registry failed" });
+    }
+  });
+
+  app.post("/api/admin/vault-quest/ops/providers/select", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const provider = String((req.body as { provider?: unknown } | undefined)?.provider ?? "");
+      if (!isVqAiProviderId(provider)) return res.status(400).json({ error: "unknown provider" });
+      const registry = await selectVqProvider(provider, req.session?.adminEmail || "admin");
+      res.json({ ok: true, ...registry });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : "provider selection failed" });
+    }
+  });
+
   // ---- editor helpers ----
   app.get("/api/admin/vault-quest/config", requireAdmin, async (_req: Request, res: Response) => {
     try {
@@ -1188,12 +1209,14 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   app.get("/api/admin/vault-quest/artwork-cost", requireAdmin, async (_req: Request, res: Response) => {
     const conn = higgsfieldConnection();
     const provider = await getHiggsfieldProviderConnection(Date.now());
+    const registry = await getProviderRegistryView();
     res.json({
       model: conn.model,
       connected: provider.generationAllowed,
       creditsPerImage: higgsfieldCreditsPerImage(),
       masterImagesPerItem: 3,
       models: VQ_IMAGE_MODELS,
+      providerRegistry: registry,
       providers: [
         {
           id: "higgsfield",
