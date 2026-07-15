@@ -34,6 +34,16 @@ export interface Caps {
   editSets: boolean;
 }
 
+function isValidStaffEmail(value: string): boolean {
+  if (value.length < 3 || value.length > 254) return false;
+  if (value.includes(" ")) return false;
+  const at = value.indexOf("@");
+  if (at <= 0 || at !== value.lastIndexOf("@")) return false;
+  const domain = value.slice(at + 1);
+  const dot = domain.lastIndexOf(".");
+  return dot > 0 && dot < domain.length - 1;
+}
+
 // ── Boot migrations (idempotent, additive, collision-checked: confirmed new) ──
 
 /** users.can_grade / can_scan / can_print / can_edit_sets + backfill grader→can_grade. */
@@ -328,7 +338,7 @@ export async function createStaffAccount(
   const cleanEmail = String(email || "")
     .toLowerCase()
     .trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return { ok: false, status: 400, error: "Invalid email address" };
+  if (!isValidStaffEmail(cleanEmail)) return { ok: false, status: 400, error: "Invalid email address" };
 
   const existing = await db.execute(
     sql`SELECT id, role, deleted_at FROM users WHERE LOWER(email) = ${cleanEmail} LIMIT 1`
