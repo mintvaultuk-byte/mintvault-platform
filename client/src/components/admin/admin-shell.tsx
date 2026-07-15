@@ -24,6 +24,7 @@ import {
   Users,
   Sparkles,
   ShieldCheck,
+  Library,
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
 import InstallAppButton from "../install-app-button";
@@ -43,7 +44,8 @@ export type AdminTab =
   | "capture-health"
   | "divergence"
   | "transfers"
-  | "scans";
+  | "scans"
+  | "sets";
 
 interface DbInfo {
   env: string;
@@ -98,6 +100,7 @@ const NAV: NavSection[] = [
       { href: "/admin/mvgs-calibration", label: "MVGS Calibration", icon: SlidersHorizontal },
       { key: "transfers", label: "Transfers", icon: ArrowRightLeft },
       { key: "scans", label: "Scans", icon: History },
+      { href: "/admin/sets", label: "Sets", icon: Library },
       { key: "capacity", label: "Capacity", icon: Database },
       { href: "/admin/weekly-reel", label: "Weekly Reel", icon: Film },
       { key: "pricing", label: "Pricing", icon: DollarSign },

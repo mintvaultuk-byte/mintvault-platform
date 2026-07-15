@@ -1,5 +1,5 @@
 import { sendServerError } from "../lib/error-response";
-import type { Express } from "express";
+import type { Express, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { storage } from "../storage";
 import { requireAdmin } from "../auth";
@@ -12,6 +12,12 @@ import { resolveEnglishSetByNameAndNumber } from "../services/tcgdex-set-resolve
 import { getFeatureFlag } from "../config/feature-flags";
 import { normalizeCertId } from "../lib/cert-id";
 import { createDbCustomSetEditorStore, editCustomSetDetails, CustomSetEditError } from "../services/custom-set-editor";
+import {
+  listSetLibrary,
+  recordSetReviewDecision,
+  SetLibraryError,
+  updateSetLibraryRecord,
+} from "../services/set-library";
 
 const adminCustomSetEditLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -21,7 +27,59 @@ const adminCustomSetEditLimit = rateLimit({
   message: { error: "Too many set edit attempts. Please wait a few minutes and try again." },
 });
 
+const adminSetLibraryMutationLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 80,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many set library changes. Please wait a few minutes and try again." },
+});
+
+function sendSetLibraryError(res: Response, err: unknown): void {
+  if (err instanceof SetLibraryError) {
+    res.status(err.status).json({ error: err.message });
+    return;
+  }
+  console.error("[set-library] request failed:", err instanceof Error ? err.message : String(err));
+  res.status(500).json({ error: "Set library request failed" });
+}
+
 export function registerAdminConfigRoutes(app: Express): void {
+  app.get("/api/admin/sets", requireAdmin, async (req, res) => {
+    try {
+      res.json(await listSetLibrary(req.query));
+    } catch (err) {
+      sendSetLibraryError(res, err);
+    }
+  });
+
+  app.patch("/api/admin/sets/:source/:setId", adminSetLibraryMutationLimit, requireAdmin, async (req, res) => {
+    try {
+      const actor = { id: (req.session as { adminEmail?: string }).adminEmail || "admin", role: "admin" as const };
+      res.json(await updateSetLibraryRecord(req.params.source, req.params.setId, req.body || {}, actor));
+    } catch (err) {
+      sendSetLibraryError(res, err);
+    }
+  });
+
+  app.post("/api/admin/sets/:source/:setId/review", adminSetLibraryMutationLimit, requireAdmin, async (req, res) => {
+    try {
+      const actor = { id: (req.session as { adminEmail?: string }).adminEmail || "admin", role: "admin" as const };
+      res.json(
+        await recordSetReviewDecision(
+          req.params.source,
+          req.params.setId,
+          req.body?.suggestionKey,
+          req.body?.decision,
+          req.body?.reason,
+          actor
+        )
+      );
+    } catch (err) {
+      sendSetLibraryError(res, err);
+    }
+  });
+
   app.get("/api/admin/db-info", requireAdmin, async (_req, res) => {
     try {
       const { getDatabaseUrl } = await import("../config");

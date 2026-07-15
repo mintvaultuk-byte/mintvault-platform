@@ -48,6 +48,12 @@ import {
   isAbsoluteSessionExpired,
   stampAuthSession,
 } from "../lib/auth-security";
+import {
+  listSetLibrary,
+  recordSetReviewDecision,
+  SetLibraryError,
+  updateSetLibraryRecord,
+} from "../services/set-library";
 
 const staffLoginLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -66,6 +72,23 @@ const adminStaffSecurityLimit = rateLimit({
 });
 
 const scanUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+const staffSetLibraryMutationLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many set library changes. Please wait a few minutes and try again." },
+});
+
+function sendSetLibraryError(res: Response, err: unknown): void {
+  if (err instanceof SetLibraryError) {
+    res.status(err.status).json({ error: err.message });
+    return;
+  }
+  console.error("[staff set-library] request failed:", err instanceof Error ? err.message : String(err));
+  res.status(500).json({ error: "Set library request failed" });
+}
 
 export function registerStaffRoutes(app: Express): void {
   // ── Staff auth ──────────────────────────────────────────────────────────────
@@ -151,6 +174,54 @@ export function registerStaffRoutes(app: Express): void {
       return sendServerError(res, e);
     }
   });
+
+  // ── Set Library (can_edit_sets) — shared set review/edit surface, no grading data writes.
+  app.get("/api/staff/sets", requireCapability("editSets"), async (req: Request, res: Response) => {
+    try {
+      return res.json(await listSetLibrary(req.query));
+    } catch (err) {
+      return sendSetLibraryError(res, err);
+    }
+  });
+
+  app.patch(
+    "/api/staff/sets/:source/:setId",
+    staffSetLibraryMutationLimit,
+    requireCapability("editSets"),
+    async (req: Request, res: Response) => {
+      try {
+        const session = req.session as { staffEmail?: string; staffId?: string };
+        const actor = { id: session.staffEmail || session.staffId || "staff", role: "staff" as const };
+        return res.json(await updateSetLibraryRecord(req.params.source, req.params.setId, req.body || {}, actor));
+      } catch (err) {
+        return sendSetLibraryError(res, err);
+      }
+    }
+  );
+
+  app.post(
+    "/api/staff/sets/:source/:setId/review",
+    staffSetLibraryMutationLimit,
+    requireCapability("editSets"),
+    async (req: Request, res: Response) => {
+      try {
+        const session = req.session as { staffEmail?: string; staffId?: string };
+        const actor = { id: session.staffEmail || session.staffId || "staff", role: "staff" as const };
+        return res.json(
+          await recordSetReviewDecision(
+            req.params.source,
+            req.params.setId,
+            req.body?.suggestionKey,
+            req.body?.decision,
+            req.body?.reason,
+            actor
+          )
+        );
+      } catch (err) {
+        return sendSetLibraryError(res, err);
+      }
+    }
+  );
 
   // ── Scanner (can_scan) — PII-FREE, submission-grained ───────────────────────
   app.get("/api/staff/scan/queue", requireCapability("scan"), async (req: Request, res: Response) => {
