@@ -25,6 +25,7 @@ import {
   Sparkles,
   ShieldCheck,
   Library,
+  Share2,
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
 import InstallAppButton from "../install-app-button";
@@ -101,8 +102,9 @@ const NAV: NavSection[] = [
       { key: "transfers", label: "Transfers", icon: ArrowRightLeft },
       { key: "scans", label: "Scans", icon: History },
       { href: "/admin/sets", label: "Sets", icon: Library },
+      { href: "/admin/social-studio", label: "Social Studio", icon: Share2 },
       { key: "capacity", label: "Capacity", icon: Database },
-      { href: "/admin/weekly-reel", label: "Weekly Reel", icon: Film },
+      { href: "/admin/weekly-reel", label: "Advanced Reel Pipeline", icon: Film },
       { key: "pricing", label: "Pricing", icon: DollarSign },
       { key: "intake", label: "Intake", icon: ScanLine },
       { key: "submissions", label: "Submissions", icon: Package },

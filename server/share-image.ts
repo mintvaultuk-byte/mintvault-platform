@@ -62,6 +62,9 @@ export interface ShareCertData {
 }
 
 export type ShareFormat = "feed" | "story";
+export interface ShareRenderOptions {
+  allowProviderGeneration?: boolean;
+}
 
 // ── Background variants ──────────────────────────────────────────────────────
 // `accent` drives the keyless gradient fallback so variants stay visually
@@ -523,11 +526,17 @@ async function variantFallback(variant: VariantId): Promise<Buffer> {
  * resized to exactly 1080² and cached at q0.85. Any failure (no key, non-2xx,
  * decode) falls back to the variant gradient so a share image always returns.
  */
-async function generateBackground(variant: VariantId): Promise<Buffer> {
+async function generateBackground(variant: VariantId, options: ShareRenderOptions = {}): Promise<Buffer> {
+  const allowProviderGeneration = options.allowProviderGeneration !== false;
   const r2Key = `public/share-bg/${variant}.jpg`;
 
   const cached = await headR2(r2Key).catch(() => null);
   if (cached) return fetchR2Buffer(r2Key);
+
+  if (!allowProviderGeneration) {
+    console.warn(`[share-bg] static-only fallback for missing ${variant}`);
+    return variantFallback(variant);
+  }
 
   if (!process.env.SEGMIND_API_KEY) {
     console.warn(`[share-bg] SEGMIND_API_KEY unset — gradient fallback for ${variant}`);
@@ -551,8 +560,8 @@ async function generateBackground(variant: VariantId): Promise<Buffer> {
 }
 
 /** Public accessor for a variant background (R2-cached or freshly generated). */
-export async function getShareBackground(variant: VariantId): Promise<Buffer> {
-  return generateBackground(variant);
+export async function getShareBackground(variant: VariantId, options: ShareRenderOptions = {}): Promise<Buffer> {
+  return generateBackground(variant, options);
 }
 
 /** Pre-warm all 20 backgrounds. p-limit concurrency 3 (NOT Promise.all). */
@@ -580,8 +589,15 @@ export async function preGenerateAllBackgrounds(): Promise<{ generated: number; 
 // ── Shared layer helpers ─────────────────────────────────────────────────────
 
 /** Layer 1+2 — AI background (cover-fill) + dark overlay. */
-async function drawBackground(ctx: any, loadImage: any, variant: VariantId, W: number, H: number) {
-  const bgBuf = await generateBackground(variant);
+async function drawBackground(
+  ctx: any,
+  loadImage: any,
+  variant: VariantId,
+  W: number,
+  H: number,
+  options: ShareRenderOptions = {}
+) {
+  const bgBuf = await generateBackground(variant, options);
   const bgImg = await loadImage(await sharp(bgBuf).resize(W, H, { fit: "cover", position: "centre" }).png().toBuffer());
   ctx.drawImage(bgImg, 0, 0, W, H);
   ctx.fillStyle = "rgba(0,0,0,0.30)";
@@ -782,7 +798,12 @@ function drawCornerMarks(ctx: any, W: number, H: number) {
 
 // ── Format A: 1080×1080 feed ─────────────────────────────────────────────────
 
-async function renderFeed(cert: ShareCertData, scanBuffer: Buffer, variant: VariantId): Promise<Buffer> {
+async function renderFeed(
+  cert: ShareCertData,
+  scanBuffer: Buffer,
+  variant: VariantId,
+  options: ShareRenderOptions = {}
+): Promise<Buffer> {
   await ensureFonts();
   const { createCanvas, loadImage } = await import("canvas");
   const W = 1080;
@@ -791,7 +812,7 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer, variant: Vari
   const ctx = canvas.getContext("2d");
 
   // Layers 1 + 2
-  await drawBackground(ctx, loadImage, variant, W, H);
+  await drawBackground(ctx, loadImage, variant, W, H, options);
 
   // Layers 3 + 4 — card
   const cardImg = await loadImage(await sharp(scanBuffer).png().toBuffer());
@@ -848,7 +869,12 @@ async function renderFeed(cert: ShareCertData, scanBuffer: Buffer, variant: Vari
 
 // ── Format B: 1080×1920 story ────────────────────────────────────────────────
 
-async function renderStory(cert: ShareCertData, scanBuffer: Buffer, variant: VariantId): Promise<Buffer> {
+async function renderStory(
+  cert: ShareCertData,
+  scanBuffer: Buffer,
+  variant: VariantId,
+  options: ShareRenderOptions = {}
+): Promise<Buffer> {
   await ensureFonts();
   const { createCanvas, loadImage } = await import("canvas");
   const W = 1080;
@@ -856,7 +882,7 @@ async function renderStory(cert: ShareCertData, scanBuffer: Buffer, variant: Var
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext("2d");
 
-  await drawBackground(ctx, loadImage, variant, W, H);
+  await drawBackground(ctx, loadImage, variant, W, H, options);
 
   const cardImg = await loadImage(await sharp(scanBuffer).png().toBuffer());
   const CARD_X = 325,
@@ -914,8 +940,11 @@ export async function getOrCreateShareImage(
   cert: ShareCertData,
   scanKey: string,
   format: ShareFormat,
-  variant: VariantId = DEFAULT_VARIANT
+  variant: VariantId = DEFAULT_VARIANT,
+  options: ShareRenderOptions = {}
 ): Promise<Buffer> {
   const scanBuffer = await fetchR2Buffer(scanKey);
-  return format === "feed" ? renderFeed(cert, scanBuffer, variant) : renderStory(cert, scanBuffer, variant);
+  return format === "feed"
+    ? renderFeed(cert, scanBuffer, variant, options)
+    : renderStory(cert, scanBuffer, variant, options);
 }
