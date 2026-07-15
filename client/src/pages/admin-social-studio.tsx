@@ -5,6 +5,7 @@ import {
   SOCIAL_STUDIO_BACKGROUNDS,
   SOCIAL_STUDIO_FORMAT_DIMENSIONS,
   SOCIAL_STUDIO_FORMAT_LABELS,
+  buildSocialStudioDownloadFilename,
   buildSocialStudioCaption,
   buildSocialStudioHashtags,
   resolveAutoBackground,
@@ -48,14 +49,6 @@ interface BackgroundResponse {
 
 const FORMATS: SocialStudioFormat[] = ["feed", "story", "reel-cover", "weekly-highlights"];
 
-function renderUrl(card: SocialStudioCard, format: SocialStudioFormat, background: SocialStudioBackgroundId): string {
-  return `/api/admin/social-studio/render/${encodeURIComponent(card.certNumber)}/${format}/${background}`;
-}
-
-function safeFilename(card: SocialStudioCard, format: SocialStudioFormat): string {
-  return `mintvault_${card.certNumber}_${format}.jpg`;
-}
-
 function formatSubcopy(format: SocialStudioFormat): string {
   if (format === "feed") return "1080 x 1080 image for grid posts.";
   if (format === "story") return "1080 x 1920 image for stories.";
@@ -63,16 +56,82 @@ function formatSubcopy(format: SocialStudioFormat): string {
   return "Download individual branded assets; no stitched video.";
 }
 
-async function downloadImage(url: string, filename: string) {
-  const res = await fetch(url, { credentials: "include" });
+async function fetchSocialStudioImage(
+  card: SocialStudioCard,
+  format: SocialStudioFormat,
+  background: SocialStudioBackgroundId
+): Promise<Blob> {
+  const res = await fetch("/api/admin/social-studio/render", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ certNumber: card.certNumber, format, background }),
+  });
   if (!res.ok) throw new Error("Download failed");
-  const blob = await res.blob();
+  return res.blob();
+}
+
+async function downloadImage(card: SocialStudioCard, format: SocialStudioFormat, background: SocialStudioBackgroundId) {
+  const blob = await fetchSocialStudioImage(card, format, background);
   const objectUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = objectUrl;
-  a.download = filename;
+  a.download = buildSocialStudioDownloadFilename(card, format);
   a.click();
   setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+}
+
+function SocialStudioImage({
+  card,
+  format,
+  background,
+  alt,
+  className,
+}: {
+  card: SocialStudioCard;
+  format: SocialStudioFormat;
+  background: SocialStudioBackgroundId;
+  alt: string;
+  className: string;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl: string | null = null;
+    setSrc(null);
+    setFailed(false);
+    fetchSocialStudioImage(card, format, background)
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSrc(objectUrl);
+      })
+      .catch(() => {
+        if (active) setFailed(true);
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [card.certNumber, format, background]);
+
+  if (failed) {
+    return (
+      <div className={`${className} flex items-center justify-center text-center text-xs text-red-200`}>
+        Preview failed
+      </div>
+    );
+  }
+  if (!src) {
+    return (
+      <div className={`${className} flex items-center justify-center`}>
+        <Loader2 className="h-5 w-5 animate-spin text-[var(--admin-gold-hi)]" />
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} className={className} />;
 }
 
 export default function AdminSocialStudioPage() {
@@ -156,13 +215,10 @@ export default function AdminSocialStudioPage() {
     try {
       if (format === "weekly-highlights") {
         for (const card of selectedCards) {
-          await downloadImage(
-            renderUrl(card, "weekly-highlights", background),
-            safeFilename(card, "weekly-highlights")
-          );
+          await downloadImage(card, "weekly-highlights", background);
         }
       } else {
-        await downloadImage(renderUrl(primaryCard, format, background), safeFilename(primaryCard, format));
+        await downloadImage(primaryCard, format, background);
       }
       toast({ title: "Download ready", description: "Caption remains editable and copyable." });
     } catch {
@@ -386,8 +442,10 @@ export default function AdminSocialStudioPage() {
                 <div className="grid grid-cols-2 gap-3">
                   {selectedCards.map((card) => (
                     <div key={card.certNumber} className="rounded border border-[var(--admin-line)] bg-black/40 p-2">
-                      <img
-                        src={renderUrl(card, "weekly-highlights", background)}
+                      <SocialStudioImage
+                        card={card}
+                        format="weekly-highlights"
+                        background={background}
                         alt={`${card.cardName} weekly highlight asset`}
                         className="aspect-square w-full rounded object-cover"
                       />
@@ -402,8 +460,10 @@ export default function AdminSocialStudioPage() {
                 </div>
               ) : (
                 <div className="mx-auto max-w-[520px]">
-                  <img
-                    src={renderUrl(primaryCard, format, background)}
+                  <SocialStudioImage
+                    card={primaryCard}
+                    format={format}
+                    background={background}
                     alt={`${primaryCard.cardName} ${SOCIAL_STUDIO_FORMAT_LABELS[format]} preview`}
                     className={`w-full rounded border border-[var(--admin-line)] bg-black object-cover ${
                       format === "feed" ? "aspect-square" : "aspect-[9/16]"

@@ -105,3 +105,31 @@ export function buildSocialStudioHashtags(card: SocialStudioCardLike): string {
   }
   return tags.join(" ");
 }
+
+export function escapeSocialStudioSearchTerm(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+export function sanitizeSocialStudioFilenamePart(value: string, fallback = "asset", maxLength = 80): string {
+  const normalised = value.normalize("NFKD").replace(/[\u2044\u2215\u29f8]/g, "-");
+  const ascii = normalised
+    .split("")
+    .map((char) => {
+      const code = char.charCodeAt(0);
+      return code < 32 || code === 127 ? "-" : char;
+    })
+    .join("")
+    .replace(/["'`<>:;|?*#[\]{}()!@+$%^&,/\\\s]+/g, "-")
+    .replace(/[^A-Za-z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_.]+|[-_.]+$/g, "")
+    .slice(0, maxLength)
+    .replace(/^[-_.]+|[-_.]+$/g, "");
+  return ascii || fallback;
+}
+
+export function buildSocialStudioDownloadFilename(card: SocialStudioCardLike, format: SocialStudioFormat): string {
+  const certNumber = sanitizeSocialStudioFilenamePart(card.certNumber, "certificate", 80);
+  const formatName = sanitizeSocialStudioFilenamePart(format, "asset", 32);
+  return `mintvault_${certNumber}_${formatName}.jpg`;
+}

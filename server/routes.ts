@@ -95,8 +95,10 @@ import { centeringAxisGrade } from "@shared/centering";
 import {
   SOCIAL_STUDIO_BACKGROUNDS,
   SOCIAL_STUDIO_FORMAT_DIMENSIONS,
+  buildSocialStudioDownloadFilename,
   buildSocialStudioCaption,
   buildSocialStudioHashtags,
+  escapeSocialStudioSearchTerm,
   isSocialStudioBackground,
   isSocialStudioFormat,
   resolveAutoBackground,
@@ -1902,6 +1904,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     };
   }
 
+  const socialStudioRenderRateLimit = rateLimit({
+    windowMs: 60_000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: false,
+  });
+  const socialStudioCertificateBodySchema = z.object({
+    certNumber: z.string().trim().min(1).max(80),
+  });
+  const socialStudioRenderBodySchema = socialStudioCertificateBodySchema.extend({
+    format: z.string().refine(isSocialStudioFormat),
+    background: z.string().refine(isSocialStudioBackground),
+  });
+
   app.get("/api/admin/social-studio/backgrounds", requireAdmin, (_req, res) => {
     res.json({
       backgrounds: SOCIAL_STUDIO_BACKGROUNDS.map((bg) => ({
@@ -1938,7 +1955,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const q = String(req.query.q ?? "")
         .trim()
         .slice(0, 80);
-      const like = `%${q.replace(/[%_]/g, "\\$&")}%`;
+      const like = `%${escapeSocialStudioSearchTerm(q)}%`;
       const rows = (
         await db.execute(sql`
           SELECT
@@ -2008,9 +2025,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/admin/social-studio/certificates/:certNumber", requireAdmin, async (req, res) => {
+  app.post("/api/admin/social-studio/certificate", requireAdmin, socialStudioRenderRateLimit, async (req, res) => {
     try {
-      const loaded = await loadShareCert(String(req.params.certNumber));
+      const parsed = socialStudioCertificateBodySchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Invalid certificate request" });
+      const loaded = await loadShareCert(parsed.data.certNumber);
       if (!loaded || !loaded.scanKey) return res.status(404).json({ error: "Certificate not found" });
       res.json({ card: socialStudioCardFromLoaded(loaded), staticOnly: true });
     } catch (err: any) {
@@ -2019,9 +2038,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/admin/social-studio/certificates/:certNumber/caption", requireAdmin, async (req, res) => {
+  app.post("/api/admin/social-studio/caption", requireAdmin, socialStudioRenderRateLimit, async (req, res) => {
     try {
-      const loaded = await loadShareCert(String(req.params.certNumber));
+      const parsed = socialStudioCertificateBodySchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Invalid caption request" });
+      const loaded = await loadShareCert(parsed.data.certNumber);
       if (!loaded || !loaded.scanKey) return res.status(404).json({ error: "Certificate not found" });
       const card = socialStudioCardFromLoaded(loaded);
       res.json({ caption: card.caption, hashtags: card.hashtags, staticOnly: true });
@@ -2031,14 +2052,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.get("/api/admin/social-studio/render/:certNumber/:format/:background", requireAdmin, async (req, res) => {
+  app.post("/api/admin/social-studio/render", requireAdmin, socialStudioRenderRateLimit, async (req, res) => {
     try {
-      const format = String(req.params.format);
-      const background = String(req.params.background);
-      if (!isSocialStudioFormat(format)) return res.status(400).json({ error: "Unknown format" });
-      if (!isSocialStudioBackground(background)) return res.status(400).json({ error: "Unknown background" });
+      const parsed = socialStudioRenderBodySchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Invalid render request" });
+      const { certNumber, format, background } = parsed.data;
 
-      const loaded = await loadShareCert(String(req.params.certNumber));
+      const loaded = await loadShareCert(certNumber);
       if (!loaded || !loaded.scanKey) return res.status(404).json({ error: "Certificate not found" });
 
       const variant = resolveBackgroundVariant(background as SocialStudioBackgroundId, {
@@ -2054,7 +2074,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         allowProviderGeneration: false,
       });
       const dims = SOCIAL_STUDIO_FORMAT_DIMENSIONS[format];
-      const filename = `mintvault_${loaded.cert.certNumber}_${format}.jpg`;
+      const filename = buildSocialStudioDownloadFilename({ certNumber: loaded.cert.certNumber }, format);
       res.setHeader("Content-Type", "image/jpeg");
       res.setHeader("Cache-Control", "private, max-age=300");
       res.setHeader("Content-Disposition", `inline; filename="${filename}"`);

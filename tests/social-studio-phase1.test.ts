@@ -4,9 +4,12 @@ import {
   SOCIAL_STUDIO_BACKGROUNDS,
   SOCIAL_STUDIO_FORMAT_DIMENSIONS,
   buildSocialStudioCaption,
+  buildSocialStudioDownloadFilename,
   buildSocialStudioHashtags,
+  escapeSocialStudioSearchTerm,
   resolveAutoBackground,
   resolveBackgroundVariant,
+  sanitizeSocialStudioFilenamePart,
 } from "../shared/social-studio";
 
 const pageSource = readFileSync("client/src/pages/admin-social-studio.tsx", "utf8");
@@ -76,6 +79,34 @@ describe("Social Studio Phase 1 rules", () => {
     expect(buildSocialStudioHashtags(card)).toContain("#PokemonTCG");
     expect(buildSocialStudioHashtags(card).split(" ")).toHaveLength(7);
   });
+
+  it("escapes SQL LIKE search metacharacters completely", () => {
+    expect(escapeSocialStudioSearchTerm("MV%_\\10")).toBe("MV\\%\\_\\\\10");
+  });
+
+  it("builds deterministic safe download filenames from hostile and normal names", () => {
+    const hostileCases = [
+      ["MV/10", "MV-10"],
+      ["MV\\10", "MV-10"],
+      ["MV///10", "MV-10"],
+      ["../MV10", "MV10"],
+      ["MV%2f10", "MV-2f10"],
+      ["MV%5c10", "MV-5c10"],
+      ["MV\r\n10", "MV-10"],
+      ['"MV10"', "MV10"],
+      ["MV∕10⁄A⧸B", "MV-10-A-B"],
+      ["Pokemon Charizard 10", "Pokemon-Charizard-10"],
+    ];
+    for (const [input, expected] of hostileCases) {
+      expect(sanitizeSocialStudioFilenamePart(input)).toBe(expected);
+    }
+
+    expect(sanitizeSocialStudioFilenamePart("///...")).toBe("asset");
+    expect(sanitizeSocialStudioFilenamePart("A".repeat(120))).toHaveLength(80);
+    expect(buildSocialStudioDownloadFilename({ certNumber: "MV/10" }, "weekly-highlights")).toBe(
+      "mintvault_MV-10_weekly-highlights.jpg"
+    );
+  });
 });
 
 describe("Social Studio Phase 1 wiring", () => {
@@ -92,18 +123,21 @@ describe("Social Studio Phase 1 wiring", () => {
       '"/api/admin/social-studio/backgrounds"',
       '"/api/admin/social-studio/backgrounds/:background/preview"',
       '"/api/admin/social-studio/certificates"',
-      '"/api/admin/social-studio/certificates/:certNumber"',
-      '"/api/admin/social-studio/certificates/:certNumber/caption"',
-      '"/api/admin/social-studio/render/:certNumber/:format/:background"',
+      '"/api/admin/social-studio/certificate"',
+      '"/api/admin/social-studio/caption"',
+      '"/api/admin/social-studio/render"',
     ];
     for (const endpoint of endpoints) {
       expect(routesSource).toContain(endpoint);
     }
+    expect(routesSource).not.toContain('"/api/admin/social-studio/certificates/:certNumber"');
+    expect(routesSource).not.toContain('"/api/admin/social-studio/certificates/:certNumber/caption"');
+    expect(routesSource).not.toContain('"/api/admin/social-studio/render/:certNumber/:format/:background"');
     expect(routesSource).toMatch(/\/api\/admin\/social-studio\/backgrounds[\s\S]{0,120}requireAdmin/);
     expect(routesSource).toMatch(/\/api\/admin\/social-studio\/certificates[\s\S]{0,120}requireAdmin/);
-    expect(routesSource).toMatch(
-      /\/api\/admin\/social-studio\/render\/:certNumber\/:format\/:background[\s\S]{0,120}requireAdmin/
-    );
+    expect(routesSource).toMatch(/\/api\/admin\/social-studio\/render"[\s\S]{0,120}requireAdmin/);
+    expect(routesSource).toContain("socialStudioRenderRateLimit");
+    expect(routesSource).toContain("socialStudioRenderBodySchema.safeParse(req.body)");
     expect(routesSource).toContain("allowProviderGeneration: false");
     expect(routesSource).toContain('"X-MintVault-Static-Only", "true"');
     expect(routesSource).toContain('"X-MintVault-Provider-Generation", "false"');
@@ -127,7 +161,10 @@ describe("Social Studio Phase 1 wiring", () => {
   });
 
   it("keeps downloads predictable and strips editor controls from the exported image path", () => {
-    expect(pageSource).toContain("mintvault_${card.certNumber}_${format}.jpg");
+    expect(pageSource).toContain("buildSocialStudioDownloadFilename(card, format)");
+    expect(pageSource).toContain('fetch("/api/admin/social-studio/render"');
+    expect(pageSource).toContain('method: "POST"');
+    expect(pageSource).not.toContain("/api/admin/social-studio/render/${");
     expect(pageSource).toContain("Download {SOCIAL_STUDIO_FORMAT_LABELS[format]}");
     expect(pageSource).not.toContain("html2canvas");
   });
