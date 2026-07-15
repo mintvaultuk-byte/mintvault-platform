@@ -153,9 +153,14 @@ const loginRateLimit = rateLimit({
   },
 });
 
-app.use("/api/admin/login", loginRateLimit);
-app.use("/api/admin/session", loginRateLimit);
-app.use("/api/admin/pin", loginRateLimit);
+const credentialLoginRateLimit: express.RequestHandler = (req, res, next) => {
+  if (req.method !== "POST") return next();
+  return loginRateLimit(req, res, next);
+};
+
+app.use("/api/admin/login", credentialLoginRateLimit);
+app.use("/api/admin/session", credentialLoginRateLimit);
+app.use("/api/admin/pin", credentialLoginRateLimit);
 
 const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 min
