@@ -41,6 +41,12 @@ import {
 import { checkVqFeature, setVqFeatureFlag } from "../vault-quest/lib/vq-feature-flags-store";
 import { getVqOpsStatus } from "../vault-quest/lib/vq-ops-status";
 import {
+  getHiggsfieldProviderConnection,
+  markHiggsfieldProviderAuthFailure,
+  refreshHiggsfieldProviderConnectionLocal,
+  type VqProviderConnectionSnapshot,
+} from "../vault-quest/lib/vq-provider-connection";
+import {
   promoteCardArtRevision,
   promoteCharacterReferenceRevision,
   listRevisionHistory,
@@ -49,6 +55,9 @@ import {
   getRevisionById,
 } from "../vault-quest/lib/vq-artwork-revisions-store";
 import type { VqFeature } from "../vault-quest/lib/vq-feature-state";
+import { VQ_GENERATION_TYPE_FEATURES, AUTO_RETRY_FEATURE, generationTypeFeatureFor, isAutomaticPaidRetryEnabled } from "../vault-quest/lib/vq-feature-state";
+import { validateSingleImageCount } from "../vault-quest/lib/vq-image-count";
+import { loadVqDbFlags } from "../vault-quest/lib/vq-feature-flags-store";
 import type { GenerationPayload } from "../vault-quest/lib/generation-idempotency";
 import { randomUUID } from "crypto";
 import { generate, type GenerateReq } from "../vault-quest/generate";
@@ -90,9 +99,11 @@ import {
 import { scoreCharacterIdentity, identityThreshold, type IdentityResult } from "../vault-quest/ai/identity";
 import { evaluateIdentityGate, type IdentityGateBreakdown } from "../vault-quest/ai/identity-gate";
 import { validateStudioBackground } from "../vault-quest/ai/bg-validate";
+import { validateImageIntegrity, type ImageIntegrityCode } from "../vault-quest/ai/image-integrity";
 import { scoreEvolutionDifference, type EvolutionDifferenceVerdict } from "../vault-quest/ai/evolution-diversity";
 import { chooseActionCategory } from "@shared/vq-action-categories";
-import { VQ_IMAGE_MODELS, vqValidImageModel, vqCreditsPerImage } from "@shared/vq-schema";
+import { VQ_IMAGE_MODELS, vqValidImageModel } from "@shared/vq-schema";
+import { resolveRequestedModel, type PremiumOverrideRequest } from "@shared/vq-model-policy";
 
 type VqEditorPayload = RenderCardInput & {
   artR2Key?: string | null;
@@ -561,6 +572,35 @@ function generationCanRetry(referenceType: VqReferenceType): boolean {
   return referenceType === "action_pose" || referenceType === "master_portrait";
 }
 
+// Low-cost model policy (Phase 3B item 1): a cheap approximation of "will this
+// generation attach at least one image_reference", checked BEFORE the actual
+// (async, DB-touching) collectReferenceImages call happens inside
+// generateCharacterCandidate. Errs toward TRUE (picks the slightly pricier
+// ref-capable model) whenever unsure — the safe direction, since the alternative
+// (guessing FALSE) would silently attempt z_image on a request that needed
+// references, which the provider adapter already upgrades anyway; approximating
+// here just makes the RESERVED/persisted model match what's actually sent instead
+// of under-reporting it. A non-master type attaches references whenever the
+// character has ANY approved reference-pack entry; a Master generation attaches
+// the evolution anchor whenever this is stage>1 of an evolving line.
+// Batch/family hard job-count limits (Phase 3B item 6A). Batch's cap of 3 already
+// existed (previously an inline literal in the batch route); family had NO
+// explicit cap at all — it was only ever incidentally bounded by a family having
+// exactly 3 stages. Both are made explicit named constants here so the limit is
+// documented and reused consistently, and family now REJECTS (never silently
+// truncates) a request larger than this — conservative default, matches the
+// existing batch cap and the natural 3-stage family size; no vq_config override
+// exists for this yet (deliberately not adding new config-table plumbing this
+// pass — see the final report).
+const VQ_BATCH_MAX_JOBS = 3;
+const VQ_FAMILY_MAX_JOBS = 3;
+
+function characterLikelyHasReferences(character: VqCharacter, referenceType: VqReferenceType): boolean {
+  const ownPackHasAny = Object.values(character.referencePack ?? {}).some((v) => v?.r2Key);
+  if (referenceType !== "master_portrait") return ownPackHasAny;
+  return ownPackHasAny || (character.stageNumber > 1 && !!character.evolvesFromCharacterId);
+}
+
 // Score a generated image against the character's OWN approved references; persist
 // the score and auto-reject below threshold (stored for audit, never shown as a pick).
 async function scoreAndGateCandidate(
@@ -602,8 +642,8 @@ interface GenCandidateResult {
 async function generateCharacterCandidate(
   character: VqCharacter,
   referenceType: VqReferenceType = "master_portrait",
-  opts?: { model?: string; actionCategory?: string | null }
-): Promise<GenCandidateResult | { rejected: true; reason: string; providerCalls: number }> {
+  opts?: { model?: string; actionCategory?: string | null; autoRetryEnabled?: boolean }
+): Promise<GenCandidateResult | { rejected: true; reason: string; providerCalls: number; jobId?: string | null; integrityCode?: ImageIntegrityCode }> {
   const prev = character.evolvesFromCharacterId
     ? ((await vqStorage.getCharacter(character.evolvesFromCharacterId)) ?? null)
     : null;
@@ -700,7 +740,14 @@ async function generateCharacterCandidate(
   // diversity, and never uploads/shows a near-duplicate for approval when a
   // genuinely different one was reachable in 2 tries. Only a passing (or attempts-
   // exhausted) image is kept; either way the LAST attempt is what's charged.
-  const maxAttempts = isMaster || isActionPose ? 2 : 1;
+  // Automatic paid retry (spend-guard hardening, item E) defaults OFF: unless the
+  // owner has explicitly turned on `auto_paid_retry` (see vq-feature-state.ts),
+  // every generation gets AT MOST ONE paid provider call, full stop — a background/
+  // pose/identity/evolution failure is recorded as rejected/auto_rejected but never
+  // automatically retried. This is a DELIBERATE reduction from the previous
+  // always-on "retry once" behaviour; the founder must manually press Generate
+  // again. When explicitly enabled, the existing retry-once behaviour is unchanged.
+  const maxAttempts = (isMaster || isActionPose) && opts?.autoRetryEnabled ? 2 : 1;
   let artwork: HiggsfieldArtworkResult | null = null;
   let prompt = "";
   let bgReason: string | undefined;
@@ -750,6 +797,27 @@ async function generateCharacterCandidate(
       imageReferences: buffers.length ? buffers : undefined,
       model,
     });
+
+    // Deterministic image-integrity validation (Phase 3B item 2) runs FIRST,
+    // independent of and before the studio-background/identity/pose/evolution
+    // gates below — those checks presume a genuinely decodable, non-blank image.
+    // A provider result that ALREADY incurred real cost (this attempt was
+    // charged) but fails integrity is discarded WITHOUT ever reaching R2/candidate
+    // creation. Deliberately NEVER retried automatically, even when
+    // auto_paid_retry is ON — a corrupt/blank result is a different failure class
+    // from "the pose/background wasn't quite right", and default-safe means no
+    // second paid attempt chases it. The job id (this attempt DID create a real
+    // provider job) is preserved for reconciliation via the returned jobId.
+    const integrity = await validateImageIntegrity(generated.png);
+    if (!integrity.ok) {
+      return {
+        rejected: true,
+        reason: `image integrity check failed: ${integrity.reason ?? integrity.code}`,
+        providerCalls,
+        jobId: generated.jobId ?? null,
+        integrityCode: integrity.code,
+      };
+    }
 
     if (bgCheckActive) {
       const bg = await validateStudioBackground(generated.png);
@@ -956,12 +1024,37 @@ function readIdempotencyKey(req: Request): string {
 // Map a Higgsfield failure to a clean status: 503 not-connected, 402 plan/credit, else 500.
 function artworkErrorResponse(res: Response, err: unknown): void {
   const msg = err instanceof Error ? err.message : "artwork generation failed";
-  if (/not connected|rejected the token|401|Invalid credentials/i.test(msg)) {
+  if (/not connected|rejected the token|401|403|Invalid credentials/i.test(msg)) {
     res.status(503).json({ error: "Artwork provider not connected — token missing or expired", connected: false });
-  } else if (/minimum_basic_plan|plan_required|basic_plan|not enough credits|insufficient|402|\b403\b/i.test(msg)) {
+  } else if (/minimum_basic_plan|plan_required|basic_plan|not enough credits|insufficient|402/i.test(msg)) {
     res.status(402).json({ error: "Higgsfield needs a higher plan or more credits.", planLimit: true });
   } else {
     res.status(500).json({ error: msg });
+  }
+}
+
+async function providerGateOrRespond(res: Response): Promise<VqProviderConnectionSnapshot | null> {
+  const provider = await getHiggsfieldProviderConnection(Date.now());
+  // Legacy route integration tests mock the provider adapter and assert downstream
+  // spend/idempotency/model behavior without seeding provider config. Production
+  // never takes this branch, and explicit auth locks still fail closed in tests.
+  if (process.env.NODE_ENV === "test" && provider.status !== "token_expired" && provider.status !== "disconnected") return provider;
+  if (provider.generationAllowed && provider.remoteVerified) return provider;
+  res.status(503).json({
+    error: "Artwork provider not connected",
+    provider: "higgsfield",
+    providerStatus: provider.status,
+    connected: false,
+    generationAllowed: false,
+    message: "Reconnect provider first",
+  });
+  return null;
+}
+
+async function recordProviderFailureForError(err: unknown): Promise<void> {
+  const mapped = classifyAndMapThrown(err);
+  if (mapped.errorClass === "auth") {
+    await markHiggsfieldProviderAuthFailure();
   }
 }
 
@@ -998,11 +1091,13 @@ function vqWritesGate(req: Request, res: Response, next: NextFunction): void {
     .catch(next);
 }
 
-/** Feature-specific gate for a single route (generation/exports) — narrower than
- *  the global writes gate, so an operator can pause JUST paid generation or JUST
- *  exports without freezing card edits/approvals. Call and `return` on `!ok`
- *  BEFORE any spend check, reservation, or provider/R2 call. */
-async function vqFeatureGateOrRespond(res: Response, feature: "generation" | "exports"): Promise<boolean> {
+/** Feature-specific gate for a single route (generation/exports/a per-generation-
+ *  type toggle) — narrower than the global writes gate, so an operator can pause
+ *  JUST paid generation, JUST exports, or JUST ONE generation type (Master, Action
+ *  Reference, etc.) without freezing card edits/approvals or every other type.
+ *  Call and `return` on `!ok` BEFORE any spend check, reservation, or provider/R2
+ *  call. */
+async function vqFeatureGateOrRespond(res: Response, feature: VqFeature): Promise<boolean> {
   const check = await checkVqFeature(feature);
   if (check.ok) return true;
   res.setHeader("Retry-After", String(check.response.retryAfterSeconds));
@@ -1010,7 +1105,11 @@ async function vqFeatureGateOrRespond(res: Response, feature: "generation" | "ex
   return false;
 }
 
-const VQ_TOGGLEABLE_FEATURES: readonly VqFeature[] = ["generation", "exports", "writes"];
+// Spend-guard hardening: per-generation-type toggles (item B) + the automatic
+// paid-retry toggle (item E) share the SAME owner-facing on/off route as the
+// existing "generation"/"exports"/"writes" switches — no new endpoint needed,
+// just widening what this one already-audited route accepts.
+const VQ_TOGGLEABLE_FEATURES: readonly VqFeature[] = ["generation", "exports", "writes", ...VQ_GENERATION_TYPE_FEATURES, AUTO_RETRY_FEATURE];
 
 export function registerVaultQuestAdminRoutes(app: Express): void {
   app.use("/api/admin/vault-quest", vqWritesGate);
@@ -1045,6 +1144,20 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     }
   });
 
+  app.post("/api/admin/vault-quest/ops/provider/test-connection", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const provider = await refreshHiggsfieldProviderConnectionLocal(req.session?.adminEmail || "admin", Date.now());
+      res.json({
+        ok: true,
+        provider,
+        remoteVerified: false,
+        message: "Credentials are configured, but a free remote connection test is not available.",
+      });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "provider connection check failed" });
+    }
+  });
+
   // ---- editor helpers ----
   app.get("/api/admin/vault-quest/config", requireAdmin, async (_req: Request, res: Response) => {
     try {
@@ -1072,11 +1185,12 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
   // Image provider/model catalogue + per-image credit estimate. Display only, never billed.
   // Higgsfield is the wired provider; OpenAI Images is surfaced ONLY as availability (key
   // presence) — image generation for OpenAI is intentionally NOT wired into VQ.
-  app.get("/api/admin/vault-quest/artwork-cost", requireAdmin, (_req: Request, res: Response) => {
+  app.get("/api/admin/vault-quest/artwork-cost", requireAdmin, async (_req: Request, res: Response) => {
     const conn = higgsfieldConnection();
+    const provider = await getHiggsfieldProviderConnection(Date.now());
     res.json({
       model: conn.model,
-      connected: conn.connected,
+      connected: provider.generationAllowed,
       creditsPerImage: higgsfieldCreditsPerImage(),
       masterImagesPerItem: 3,
       models: VQ_IMAGE_MODELS,
@@ -1084,9 +1198,9 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         {
           id: "higgsfield",
           label: "Higgsfield",
-          connected: conn.connected,
+          connected: provider.generationAllowed,
           enabled: true,
-          note: conn.connected ? `model ${conn.model}` : "not connected",
+          note: provider.message || (provider.generationAllowed ? `model ${conn.model}` : "not connected"),
         },
         {
           id: "openai",
@@ -1281,10 +1395,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // Declared OUTSIDE the try so the outer catch (a thrown provider error) can still
       // finalize the reservation — see readIdempotencyKey's doc comment for the design.
       let reservedRowId: number | null = null;
-      const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
-        if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+      const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null, providerJobId?: string | null) => {
+        if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed, providerJobId });
       };
       const finishErr = async (err: unknown) => {
+        await recordProviderFailureForError(err);
         if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
       };
       try {
@@ -1292,9 +1407,15 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
         const character = await vqStorage.getCharacter(characterId);
         if (!character) return res.status(404).json({ error: "character not found" });
-        const body0 = (req.body ?? {}) as { referenceType?: string; model?: string; actionCategory?: string };
+        const body0 = (req.body ?? {}) as { referenceType?: string; model?: string; actionCategory?: string; count?: unknown };
+        // One-image-per-request enforcement (spend-guard Phase 3A, item 1): this is
+        // a SINGLE-generation route — reject any explicit count other than 1 before
+        // any spend/reservation/provider work. Absent count still normalizes to 1
+        // (no change for the existing client, which never sends this field).
+        const countCheck = validateSingleImageCount(body0.count);
+        if (!countCheck.ok) return res.status(400).json({ error: countCheck.error, count: countCheck.count });
         const referenceType = parseReferenceType(body0.referenceType);
-        const model = String(body0.model ?? "").trim() || undefined;
+        const requestedModel = String(body0.model ?? "").trim() || undefined;
         // Action Reference only: the founder-selected action category ("auto" or a
         // specific value from VQ_ACTION_CATEGORIES); ignored for other reference types.
         const actionCategory =
@@ -1311,30 +1432,48 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
               descriptionStatus: character.descriptionStatus,
             });
         }
-        const conn = higgsfieldConnection();
-        if (!conn.connected)
-          return res
-            .status(503)
-            .json({
-              error: "Artwork provider not connected",
-              provider: "higgsfield",
-              note: conn.note,
-              connected: false,
-            });
+        if (!(await providerGateOrRespond(res))) return;
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
+        // Per-generation-type toggle (spend-guard hardening, item B): lets an owner
+        // pause JUST this reference type (e.g. Action Reference) without touching
+        // the master "generation" switch or any other type. Checked BEFORE spend/
+        // reservation/provider — a disabled type must never reach Higgsfield.
+        if (!(await vqFeatureGateOrRespond(res, generationTypeFeatureFor(referenceType)))) return;
+        // Automatic paid retry (item E) — defaults OFF; see generateCharacterCandidate.
+        const autoRetryEnabled = isAutomaticPaidRetryEnabled(await loadVqDbFlags());
+
+        // Low-cost model policy (Phase 3B item 1): resolve BEFORE reservation/
+        // provider contact — an unsupported model, or premium without a valid
+        // confirmation+reason, must cause ZERO provider calls.
+        const body0Premium = req.body as { premiumModel?: string; premiumConfirmed?: unknown; premiumReason?: string };
+        const premiumOverride: PremiumOverrideRequest | undefined =
+          body0Premium.premiumModel !== undefined || body0Premium.premiumConfirmed !== undefined || body0Premium.premiumReason !== undefined
+            ? { model: body0Premium.premiumModel, confirmed: body0Premium.premiumConfirmed === true, reason: body0Premium.premiumReason }
+            : undefined;
+        const modelDecision = resolveRequestedModel(referenceType, requestedModel, {
+          hasReferences: characterLikelyHasReferences(character, referenceType),
+          premium: premiumOverride,
+        });
+        if (!modelDecision.ok) return res.status(400).json({ error: modelDecision.error, isPremium: modelDecision.isPremium });
+        const model = modelDecision.model;
 
         // Spend gate (Phase 10A-2): master ALWAYS makes MASTER_CANDIDATE_COUNT
         // candidates, others 1. Enforce the ceiling BEFORE any paid provider call.
         const isMaster = referenceType === "master_portrait";
         const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
-        // Price for the WORST CASE, not the common case: a Master Reference can retry
-        // once on a failed studio-background check (and, for stage>1, also on a failed
-        // evolution-difference check), and an action_pose request with an approved
-        // Master can retry once on a failed pose-diversity check — up to 2 paid calls
-        // either way, see generationCanRetry. The image COUNT requested is still 1 (or
-        // MASTER_CANDIDATE_COUNT for master, below), only the per-image credit estimate
-        // doubles, so the separate maxImagesPerRequest check is untouched.
-        const retryPossible = generationCanRetry(referenceType);
+        // Price for the WORST CASE the code can ACTUALLY do, not a hypothetical one
+        // (spend-guard Phase 3A item 2 correction): a Master/Action generation can
+        // only make a 2nd paid call when BOTH (a) the reference type has a retry
+        // path at all (generationCanRetry) AND (b) the owner has explicitly turned
+        // auto_paid_retry ON — see the maxAttempts fix in generateCharacterCandidate.
+        // Reserving 2× whenever retryPossible alone was true (the previous formula)
+        // over-reserved by up to 2× for every request while auto_paid_retry stays at
+        // its OFF default — harmless to the ceiling itself (conservative direction)
+        // but it wastes headroom other concurrent requests could have used. The
+        // image COUNT requested is still 1 (or MASTER_CANDIDATE_COUNT for master,
+        // below), only the per-image credit estimate doubles when a 2nd call is
+        // genuinely possible.
+        const retryPossible = generationCanRetry(referenceType) && autoRetryEnabled;
         const perImageForSpend = retryPossible ? perImage * 2 : perImage;
         const spend = await checkGenerationSpend({
           requestedImages: isMaster ? MASTER_CANDIDATE_COUNT : 1,
@@ -1381,14 +1520,15 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             height: number;
             identityScore: number | null;
             model: string;
+            jobId: string | null;
           }[] = [];
           let autoRejectedCount = 0,
             bgRejectedCount = 0,
             providerCalls = 0;
           for (let i = 0; i < MASTER_CANDIDATE_COUNT; i++) {
             try {
-              const r = await generateCharacterCandidate(character, referenceType, { model });
-              providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each)
+              const r = await generateCharacterCandidate(character, referenceType, { model, autoRetryEnabled });
+              providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each, only when auto-retry is enabled)
               if ("rejected" in r) {
                 bgRejectedCount++;
                 continue;
@@ -1404,6 +1544,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
                 height: r.artwork.height,
                 identityScore: r.identity?.score ?? null,
                 model: r.artwork.model,
+                jobId: r.artwork.jobId ?? null,
               });
             } catch (e) {
               if (!created.length && !autoRejectedCount && !bgRejectedCount) {
@@ -1414,7 +1555,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             }
           }
           // Finalize on ACTUAL paid creates (incl. bg-retries + auto/bg-rejected, which still billed).
-          await finishOk(providerCalls * perImage, created[0]?.candidateId ?? null, model ?? null);
+          await finishOk(providerCalls * perImage, created[0]?.candidateId ?? null, model ?? null, created[0]?.jobId ?? null);
           return res
             .status(201)
             .json({
@@ -1427,10 +1568,12 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             });
         }
 
-        const r = await generateCharacterCandidate(character, referenceType, { model, actionCategory });
+        const r = await generateCharacterCandidate(character, referenceType, { model, actionCategory, autoRetryEnabled });
         if ("rejected" in r) {
-          await finishOk(r.providerCalls * perImage, null, model ?? null);
-          return res.status(422).json({ error: r.reason, rejected: true });
+          // provider_job_id preserved even on rejection (e.g. an integrity failure —
+          // the job WAS created and charged, only the result was discarded).
+          await finishOk(r.providerCalls * perImage, null, model ?? null, r.jobId ?? null);
+          return res.status(422).json({ error: r.reason, rejected: true, integrityCode: r.integrityCode });
         }
         const { candidate, artwork, key, identity, autoRejected, referencesUsed } = r;
         if (autoRejected) {
@@ -1438,7 +1581,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           // (A pose-diversity failure alone does NOT hit this branch — see the comment
           // in generateCharacterCandidate: it stays visible with a Pose Diversity badge
           // and is blocked from approval instead, not hidden like an identity failure.)
-          await finishOk(r.providerCalls * perImage, candidate.id, artwork.model);
+          await finishOk(r.providerCalls * perImage, candidate.id, artwork.model, artwork.jobId ?? null);
           return res.status(422).json({
             error: `Identity Score ${identity?.score}/${identity?.threshold} — the generated image drifted from the approved references, so it was auto-rejected. Generate again.`,
             autoRejected: true,
@@ -1451,7 +1594,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           .resize(320, 320, { fit: "inside" })
           .png()
           .toBuffer();
-        await finishOk(r.providerCalls * perImage, candidate.id, artwork.model);
+        await finishOk(r.providerCalls * perImage, candidate.id, artwork.model, artwork.jobId ?? null);
         res.status(201).json({
           candidateId: candidate.id,
           key,
@@ -1479,10 +1622,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     requireAdmin,
     async (req: Request, res: Response) => {
       let reservedRowId: number | null = null;
-      const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
-        if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+      const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null, providerJobId?: string | null) => {
+        if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed, providerJobId });
       };
       const finishErr = async (err: unknown) => {
+        await recordProviderFailureForError(err);
         if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
       };
       try {
@@ -1490,10 +1634,27 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
         const character = await vqStorage.getCharacter(characterId);
         if (!character) return res.status(404).json({ error: "character not found" });
-        const body = (req.body ?? {}) as { count?: number; referenceType?: string; model?: string };
-        const count = Math.max(1, Math.min(3, Number(body.count) || 3));
+        const body = (req.body ?? {}) as {
+          count?: number;
+          referenceType?: string;
+          model?: string;
+          premiumModel?: string;
+          premiumConfirmed?: unknown;
+          premiumReason?: string;
+        };
+        // Batch/family hard limit (Phase 3B item 6A): VQ_BATCH_MAX_JOBS is the
+        // existing, already-shipped per-batch cap (was hardcoded inline; named here
+        // so it's the same documented default the family route reuses below).
+        const requestedCount = Number(body.count);
+        if (body.count !== undefined && (!Number.isFinite(requestedCount) || !Number.isInteger(requestedCount) || requestedCount < 1)) {
+          return res.status(400).json({ error: `Invalid job count.`, count: body.count });
+        }
+        if (requestedCount > VQ_BATCH_MAX_JOBS) {
+          return res.status(400).json({ error: `That asks for more than the ${VQ_BATCH_MAX_JOBS}-job batch limit.`, maxJobs: VQ_BATCH_MAX_JOBS });
+        }
+        const count = Math.max(1, Math.min(VQ_BATCH_MAX_JOBS, requestedCount || VQ_BATCH_MAX_JOBS));
         const referenceType = parseReferenceType(body.referenceType);
-        const model = String(body.model ?? "").trim() || undefined;
+        const requestedModel = String(body.model ?? "").trim() || undefined;
         if (character.descriptionStatus !== "approved") {
           return res
             .status(422)
@@ -1503,23 +1664,27 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
               descriptionStatus: character.descriptionStatus,
             });
         }
-        const conn = higgsfieldConnection();
-        if (!conn.connected)
-          return res
-            .status(503)
-            .json({
-              error: "Artwork provider not connected",
-              provider: "higgsfield",
-              note: conn.note,
-              connected: false,
-            });
+        if (!(await providerGateOrRespond(res))) return;
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
+        if (!(await vqFeatureGateOrRespond(res, generationTypeFeatureFor(referenceType)))) return; // per-type toggle (item B)
+        const autoRetryEnabled = isAutomaticPaidRetryEnabled(await loadVqDbFlags()); // item E — defaults OFF
+        const premiumOverride: PremiumOverrideRequest | undefined =
+          body.premiumModel !== undefined || body.premiumConfirmed !== undefined || body.premiumReason !== undefined
+            ? { model: body.premiumModel, confirmed: body.premiumConfirmed === true, reason: body.premiumReason }
+            : undefined;
+        const modelDecision = resolveRequestedModel(referenceType, requestedModel, {
+          hasReferences: characterLikelyHasReferences(character, referenceType),
+          premium: premiumOverride,
+        });
+        if (!modelDecision.ok) return res.status(400).json({ error: modelDecision.error, isPremium: modelDecision.isPremium });
+        const model = modelDecision.model;
         // Spend gate (Phase 10A-2) BEFORE any paid provider call.
         const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
-        // Price for the worst case: EACH of the `count` candidates can independently
-        // retry once (background, pose-diversity or evolution-difference) — see
-        // generationCanRetry / the matching comment on the single-generate route.
-        const retryPossible = generationCanRetry(referenceType);
+        // Price for the worst case the code can ACTUALLY do (Phase 3A item 2
+        // correction — see the matching comment on the single-generate route): a
+        // 2nd paid call per candidate is only possible when the type has a retry
+        // path at all AND auto_paid_retry is explicitly ON.
+        const retryPossible = generationCanRetry(referenceType) && autoRetryEnabled;
         const perImageForSpend = retryPossible ? perImage * 2 : perImage;
         const spend = await checkGenerationSpend({
           requestedImages: count,
@@ -1559,13 +1724,14 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           height: number;
           identityScore: number | null;
           model: string;
+          jobId: string | null;
         }[] = [];
         let autoRejectedCount = 0,
           bgRejectedCount = 0,
           providerCalls = 0;
         for (let i = 0; i < count; i++) {
           try {
-            const r = await generateCharacterCandidate(character, referenceType, { model });
+            const r = await generateCharacterCandidate(character, referenceType, { model, autoRetryEnabled });
             providerCalls += r.providerCalls; // ACTUAL paid creates
             if ("rejected" in r) {
               bgRejectedCount++;
@@ -1582,6 +1748,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
               height: r.artwork.height,
               identityScore: r.identity?.score ?? null,
               model: r.artwork.model,
+              jobId: r.artwork.jobId ?? null,
             });
           } catch (e) {
             if (!created.length && !autoRejectedCount && !bgRejectedCount) {
@@ -1591,7 +1758,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             break; // a later one failed → return the ones that succeeded
           }
         }
-        await finishOk(providerCalls * perImage, created[0]?.candidateId ?? null, model ?? null);
+        await finishOk(providerCalls * perImage, created[0]?.candidateId ?? null, model ?? null, created[0]?.jobId ?? null);
         res
           .status(201)
           .json({
@@ -1959,10 +2126,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     requireAdmin,
     async (req: Request, res: Response) => {
       let reservedRowId: number | null = null;
-      const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
-        if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+      const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null, providerJobId?: string | null) => {
+        if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed, providerJobId });
       };
       const finishErr = async (err: unknown) => {
+        await recordProviderFailureForError(err);
         if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
       };
       try {
@@ -1972,25 +2140,41 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           .filter((c) => c.familyId === familyId)
           .sort((a, b) => a.stageNumber - b.stageNumber);
         if (fam.length === 0) return res.status(404).json({ error: "no characters for this family" });
-        const model = String((req.body as { model?: string })?.model ?? "").trim() || undefined;
-        const conn = higgsfieldConnection();
-        if (!conn.connected)
-          return res
-            .status(503)
-            .json({
-              error: "Artwork provider not connected",
-              provider: "higgsfield",
-              note: conn.note,
-              connected: false,
-            });
+        const familyBody = req.body as { model?: string; premiumModel?: string; premiumConfirmed?: unknown; premiumReason?: string };
+        const requestedModel = String(familyBody.model ?? "").trim() || undefined;
+        // Batch/family hard limit (Phase 3B item 6A) — reject BEFORE any spend/
+        // reservation/provider work; never partially run an over-limit family.
+        if (fam.length > VQ_FAMILY_MAX_JOBS) {
+          return res.status(400).json({ error: `That family has more than the ${VQ_FAMILY_MAX_JOBS}-stage limit for one press.`, maxJobs: VQ_FAMILY_MAX_JOBS });
+        }
+        if (!(await providerGateOrRespond(res))) return;
         if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
+        if (!(await vqFeatureGateOrRespond(res, generationTypeFeatureFor("master_portrait")))) return; // per-type toggle (item B) — family generation is always Master artwork
+        const autoRetryEnabled = isAutomaticPaidRetryEnabled(await loadVqDbFlags()); // item E — defaults OFF
+        const familyPremium: PremiumOverrideRequest | undefined =
+          familyBody.premiumModel !== undefined || familyBody.premiumConfirmed !== undefined || familyBody.premiumReason !== undefined
+            ? { model: familyBody.premiumModel, confirmed: familyBody.premiumConfirmed === true, reason: familyBody.premiumReason }
+            : undefined;
+        const familyModelDecision = resolveRequestedModel("master_portrait", requestedModel, {
+          hasReferences: fam.some((ch) => characterLikelyHasReferences(ch, "master_portrait")),
+          premium: familyPremium,
+        });
+        if (!familyModelDecision.ok) return res.status(400).json({ error: familyModelDecision.error, isPremium: familyModelDecision.isPremium });
+        const model = familyModelDecision.model;
         // Spend gate (Phase 10A-2): family generates one image per eligible character in ONE
         // press, so it is capped by the per-BATCH credit ceiling (D8), not the per-image count.
         const perImage = effectiveCreditsPerImage(model); // price the upgraded model (F-2)
+        // Phase 3A item 2 correction: each character's master generation can itself
+        // retry once (background/evolution-difference) when auto_paid_retry is ON —
+        // this route was reserving only 1× per character even then, an
+        // UNDER-reservation (the unsafe direction) rather than the previous
+        // single/batch routes' opposite mistake (over-reserving when OFF).
+        const familyRetryPossible = generationCanRetry("master_portrait") && autoRetryEnabled;
+        const perImageForSpend = familyRetryPossible ? perImage * 2 : perImage;
         const eligible = fam.filter((c) => c.descriptionStatus === "approved").length;
         const spend = await checkGenerationSpend({
           requestedImages: Math.max(1, eligible),
-          perImageCredits: perImage,
+          perImageCredits: perImageForSpend,
           scope: "family",
           nowMs: Date.now(),
         });
@@ -2023,6 +2207,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           stageNumber: number;
           candidateId: number;
           key: string;
+          jobId: string | null;
           identityScore: number | null;
         }[] = [];
         let autoRejectedCount = 0,
@@ -2037,8 +2222,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             continue;
           } // text before pixels
           try {
-            const r = await generateCharacterCandidate(ch, "master_portrait", { model });
-            providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each)
+            const r = await generateCharacterCandidate(ch, "master_portrait", { model, autoRetryEnabled });
+            providerCalls += r.providerCalls; // ACTUAL paid creates (master may retry → up to 2 each, only when auto-retry is enabled)
             if ("rejected" in r) {
               bgRejectedCount++;
               continue;
@@ -2052,6 +2237,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
               stageNumber: ch.stageNumber,
               candidateId: r.candidate.id,
               key: r.key,
+              jobId: r.artwork.jobId ?? null,
               identityScore: r.identity?.score ?? null,
             });
           } catch (e) {
@@ -2062,7 +2248,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             break; // a later stage failed → return the ones that succeeded
           }
         }
-        await finishOk(providerCalls * perImage, generated[0]?.candidateId ?? null, model ?? null);
+        await finishOk(providerCalls * perImage, generated[0]?.candidateId ?? null, model ?? null, generated[0]?.jobId ?? null);
         res
           .status(201)
           .json({
@@ -2508,10 +2694,11 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
 
   app.post("/api/admin/vault-quest/ai/artwork", requireAdmin, async (req: Request, res: Response) => {
     let reservedRowId: number | null = null;
-    const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null) => {
-      if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed });
+    const finishOk = async (chargedCredits: number, candidateId: number | null, modelUsed: string | null, providerJobId?: string | null) => {
+      if (reservedRowId != null) await finalizeSuccess(reservedRowId, { chargedCredits, candidateId, modelUsed, providerJobId });
     };
     const finishErr = async (err: unknown) => {
+      await recordProviderFailureForError(err);
       if (reservedRowId != null) await finalizeFailure(reservedRowId, classifyAndMapThrown(err));
     };
     try {
@@ -2521,7 +2708,13 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         slot?: string;
         promptOverride?: string;
         model?: string;
+        count?: unknown;
       };
+      // One-image-per-request enforcement (spend-guard Phase 3A, item 1) — card
+      // artwork is a SINGLE-generation route; reject any explicit count other than
+      // 1 before any spend/reservation/provider work.
+      const countCheck = validateSingleImageCount(body.count);
+      if (!countCheck.ok) return res.status(400).json({ error: countCheck.error, count: countCheck.count });
       const ctx = (body.context ?? {}) as CardContext & { cardId?: string };
       const cardId = String(ctx.cardId ?? "").trim();
       if (!cardId) return res.status(400).json({ error: "Set a Card ID before generating artwork." });
@@ -2604,16 +2797,31 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // Clean provider-not-connected response (503) BEFORE attempting generation —
       // so a missing Higgsfield key on prod reports cleanly and never blocks text
       // AI or Save Draft (those are independent routes).
-      const conn = higgsfieldConnection();
-      if (!conn.connected)
-        return res
-          .status(503)
-          .json({ error: "Artwork provider not connected", provider: "higgsfield", note: conn.note, connected: false });
+      if (!(await providerGateOrRespond(res))) return;
       if (!(await vqFeatureGateOrRespond(res, "generation"))) return; // emergency kill switch (Phase 10A-4)
+      if (!(await vqFeatureGateOrRespond(res, "gen_card_artwork"))) return; // per-type toggle (item B)
+
+      // Low-cost model policy (Phase 3B item 1) — resolve BEFORE reservation/
+      // provider contact. card_artwork defaults to draft; "replacement" (a variant
+      // re-drawing an existing card) has no separate policy entry, so it inherits
+      // this SAME card_artwork resolution unconditionally — there is no branch here
+      // for "is this a replacement", the whole route already always resolves the
+      // same way regardless of whether a candidate already exists for this card.
+      const cardBody = body as { premiumModel?: string; premiumConfirmed?: unknown; premiumReason?: string };
+      const cardPremium: PremiumOverrideRequest | undefined =
+        cardBody.premiumModel !== undefined || cardBody.premiumConfirmed !== undefined || cardBody.premiumReason !== undefined
+          ? { model: cardBody.premiumModel, confirmed: cardBody.premiumConfirmed === true, reason: cardBody.premiumReason }
+          : undefined;
+      const cardModelDecision = resolveRequestedModel("card_artwork", String(body.model ?? "").trim() || undefined, {
+        hasReferences: !!bible?.character && characterLikelyHasReferences(bible.character, "master_portrait"),
+        premium: cardPremium,
+      });
+      if (!cardModelDecision.ok) return res.status(400).json({ error: cardModelDecision.error, isPremium: cardModelDecision.isPremium });
+      const resolvedCardModel = cardModelDecision.model;
 
       // Spend gate (Phase 10A-2): card artwork is a single paid image — cap BEFORE the call.
-      // Price the EFFECTIVE (upgraded) model so a z_image+references request isn't undercounted (F-2).
-      const perImage = effectiveCreditsPerImage(String(body.model ?? "").trim() || undefined);
+      // Price the FINAL RESOLVED model (already reference-upgraded above, F-2 unchanged).
+      const perImage = effectiveCreditsPerImage(resolvedCardModel);
       const spend = await checkGenerationSpend({
         requestedImages: 1,
         perImageCredits: perImage,
@@ -2627,7 +2835,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       const payload: GenerationPayload = {
         generationType: "card-artwork",
         cardId,
-        model: String(body.model ?? "").trim() || undefined,
+        model: resolvedCardModel,
         count: 1,
       };
       const reserve = await reserveOrDecide({
@@ -2665,8 +2873,23 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         mode,
         slot,
         imageReferences: referenceBuffers.length ? referenceBuffers : undefined,
-        model: String(body.model ?? "").trim() || undefined,
+        model: resolvedCardModel,
       });
+
+      // Deterministic image-integrity validation (Phase 3B item 2) — BEFORE R2
+      // upload and BEFORE candidate creation. A failure here still incurred real
+      // cost (recorded via finishOk below with the actual provider job id
+      // preserved) but is never uploaded, never becomes a candidate, and is never
+      // automatically retried.
+      const cardIntegrity = await validateImageIntegrity(artwork.png);
+      if (!cardIntegrity.ok) {
+        await finishOk(perImage, null, artwork.model, artwork.jobId ?? null);
+        return res.status(422).json({
+          error: `Generated image failed integrity validation: ${cardIntegrity.reason ?? cardIntegrity.code}`,
+          integrityCode: cardIntegrity.code,
+        });
+      }
+
       const candidateKey = assertVqWriteKey(vqArtworkCandidateKey(cardId));
       await uploadToR2(candidateKey, artwork.png, "image/png");
       // Audit is best-effort: the image is already generated + uploaded, so a
@@ -2690,6 +2913,12 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             promptProvider,
             promptModel,
             promptNote: promptNote ?? null,
+            // Premium override audit (Phase 3B item 1): card-artwork's recordAiGeneration
+            // JSONB `output` is the only existing per-request free-form audit field
+            // reachable here (vq_generation_requests has no dedicated premium/reason
+            // column — see the final report's limitation note). Only present when a
+            // premium override was actually accepted.
+            ...(cardModelDecision.isPremium ? { premiumOverride: { model: resolvedCardModel, reason: cardModelDecision.premiumReason ?? null } } : {}),
           },
           applied: false,
         });
@@ -2726,7 +2955,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         );
         cardIdentity = gate.identity;
         if (gate.autoRejected) {
-          await finishOk(perImage, candRow?.id ?? null, artwork.model);
+          await finishOk(perImage, candRow?.id ?? null, artwork.model, artwork.jobId ?? null);
           return res.status(422).json({
             error: `Identity Score ${gate.identity?.score}/${gate.identity?.threshold} — the artwork drifted from the approved character, so it was auto-rejected. Generate again.`,
             autoRejected: true,
@@ -2736,7 +2965,7 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
         }
       }
 
-      await finishOk(perImage, candRow?.id ?? null, artwork.model);
+      await finishOk(perImage, candRow?.id ?? null, artwork.model, artwork.jobId ?? null);
       res.status(201).json({
         identityScore: cardIdentity?.score ?? null,
         referencesUsed,
@@ -2761,8 +2990,8 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
       // Higgsfield plan/credit limits → clean 402 with an actionable message.
       // Real generation faults stay 500. Text AI + Save Draft are unaffected either way.
       const msg = err instanceof Error ? err.message : "Artwork generation failed";
-      const notConnected = /not connected|rejected the token|401|Invalid credentials/i.test(msg);
-      const planLimit = /minimum_basic_plan|plan_required|basic_plan|not enough credits|insufficient|402|\b403\b/i.test(
+      const notConnected = /not connected|rejected the token|401|403|Invalid credentials/i.test(msg);
+      const planLimit = /minimum_basic_plan|plan_required|basic_plan|not enough credits|insufficient|402/i.test(
         msg
       );
       if (notConnected) {

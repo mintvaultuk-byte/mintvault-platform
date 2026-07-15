@@ -57,13 +57,30 @@ vi.mock("../server/auth", () => ({
 // A real solid-white 200x200 PNG — clears the REAL (unmocked) validateStudioBackground,
 // used both as the generated candidate (so the background gate never interferes with
 // isolating the evolution-difference gate) and as every approved reference image.
-const WHITE_PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAMgAAADICAIAAAAiOjnJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAACD0lEQVR4nO3UMQ0AAAzDsPEnvaHIMckG0CvqLASmGAVhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYZEQFglhkRAWCWGREBYJYSEs/vBYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSERUJYJIRFQlgkhEVCWCSExRYOwsoGniuviZgAAAAASUVORK5CYII=",
-  "base64",
-);
+const WHITE_PNG = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sharp = require("sharp");
+  const width = 200, height = 200;
+  const buf = Buffer.alloc(width * height * 3);
+  const border = 24;
+  let seed = 42;
+  const rand = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 3;
+      const inBorder = x < border || x >= width - border || y < border || y >= height - border;
+      if (inBorder) { buf[i] = 245; buf[i + 1] = 245; buf[i + 2] = 245; }
+      else {
+        const v = Math.max(150, Math.min(250, 200 + Math.round((rand() - 0.5) * 100)));
+        buf[i] = v; buf[i + 1] = Math.max(0, Math.min(255, v - 15)); buf[i + 2] = Math.max(0, Math.min(255, v - 30));
+      }
+    }
+  }
+  return sharp(buf, { raw: { width, height, channels: 3 } }).png().toBuffer();
+});
 
 const createSpy = vi.hoisted(() => vi.fn(async () => ({
-  provider: "higgsfield" as const, model: "nano_banana", png: WHITE_PNG, width: 200, height: 200, jobId: "job-evo-gate",
+  provider: "higgsfield" as const, model: "nano_banana", png: await WHITE_PNG, width: 200, height: 200, jobId: "job-evo-gate",
 })));
 vi.mock("../server/vault-quest/ai/higgsfield", async (orig) => {
   const actual = (await orig()) as Record<string, unknown>;
@@ -201,7 +218,7 @@ run("Evolution Difference gate — route wiring", () => {
   });
   beforeEach(async () => {
     createSpy.mockReset();
-    createSpy.mockResolvedValue({ provider: "higgsfield" as const, model: "nano_banana", png: WHITE_PNG, width: 200, height: 200, jobId: "job-evo-gate" });
+    createSpy.mockResolvedValue({ provider: "higgsfield" as const, model: "nano_banana", png: await WHITE_PNG, width: 200, height: 200, jobId: "job-evo-gate" });
     scoreSpy.mockReset();
     evoScoreSpy.mockReset();
     candidateStore.clear();
@@ -209,6 +226,9 @@ run("Evolution Difference gate — route wiring", () => {
     keyCounter++;
     await q("DELETE FROM vq_generation_requests", []);
     await q("DELETE FROM vq_config", []);
+    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES (\x27gen_master_portrait\x27,true,\x27test\x27),(\x27gen_action_pose\x27,true,\x27test\x27),(\x27gen_face_closeup\x27,true,\x27test\x27),(\x27gen_turnaround_sheet\x27,true,\x27test\x27),(\x27gen_colour_sheet\x27,true,\x27test\x27),(\x27gen_card_artwork\x27,true,\x27test\x27),(\x27gen_replacement\x27,true,\x27test\x27) ON CONFLICT (feature) DO UPDATE SET enabled = true", []); // Phase 2 correction A: gen_* now defaults OFF — these tests exercise OTHER gates and need every type enabled
+    await q("DELETE FROM vq_feature_flags WHERE feature = 'auto_paid_retry'", []);
+    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('auto_paid_retry', true, 'test') ON CONFLICT (feature) DO UPDATE SET enabled = true", []); // item E: these tests exercise the EXISTING retry-on-failure mechanics, which now require the toggle explicitly ON
   });
   afterAll(async () => {
     await q("DELETE FROM vq_generation_requests", []);

@@ -10,6 +10,23 @@ jobs:
   check:
     name: Lint, Type Check, Test & Build
     runs-on: ubuntu-latest
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_vq_phase10_local
+      MINTVAULT_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_vq_phase10_local
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: mintvault_vq_phase10_local
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U postgres -d mintvault_vq_phase10_local"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
 
     steps:
       - uses: actions/checkout@v4
@@ -20,6 +37,33 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      - name: Prepare disposable test database
+        run: |
+          node - <<'NODE'
+          const testUrl = new URL(process.env.TEST_DATABASE_URL || "");
+          const appUrl = new URL(process.env.MINTVAULT_DATABASE_URL || "");
+          const safe =
+            testUrl.hostname === "127.0.0.1" &&
+            testUrl.port === "55432" &&
+            testUrl.pathname === "/mintvault_vq_phase10_local" &&
+            process.env.TEST_DATABASE_URL === process.env.MINTVAULT_DATABASE_URL;
+          if (!safe) {
+            throw new Error("CI database URLs must point to the disposable local Vault Quest test database");
+          }
+          console.log(`[ci-db] disposable database host=${testUrl.hostname}:${testUrl.port} db=${testUrl.pathname.slice(1)}`);
+          NODE
+          if ! command -v psql >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+          npx drizzle-kit push --force
+          for migration in migrations-vq/*.sql; do
+            echo "[ci-db] applying ${migration}"
+            psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$migration" >/dev/null
+          done
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'" | grep -q "gen_action_pose"
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'" | grep -q "auto_paid_retry"
 
       - name: Lint
         run: npm run lint

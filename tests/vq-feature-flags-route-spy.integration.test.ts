@@ -60,6 +60,16 @@ import { pool } from "../server/db";
 
 const q = (s: string, a: unknown[] = []) => (pool as unknown as { query: (s: string, a: unknown[]) => Promise<{ rows: unknown[] }> }).query(s, a);
 
+async function markProviderRemotelyVerified() {
+  await q(
+    "INSERT INTO vq_config(key, value, updated_by) VALUES ($1,$2,$3),($4,$5,$6) ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_by = excluded.updated_by",
+    [
+      "provider.higgsfield.last_status", "connected", "test",
+      "provider.higgsfield.last_success_at", "2026-07-14T12:00:00.000Z", "test",
+    ],
+  );
+}
+
 let server: Server;
 let base = "";
 
@@ -86,7 +96,15 @@ run("emergency feature kill switches — real router", () => {
   });
   beforeEach(async () => {
     createSpy.mockClear();
+    process.env["HIGGSFIELD_API_KEY"] = "test-token";
+    delete process.env.HIGGSFIELD_TOKEN_EXPIRES_AT;
+    delete process.env.HIGGSFIELD_API_KEY_EXPIRES_AT;
     await q("DELETE FROM vq_feature_flags", []);
+    // Phase 2 correction A: gen_* now defaults OFF. This file tests the ORIGINAL
+    // three flags (generation/exports/writes) and their independence from each
+    // other — not the per-type toggle itself (see vq-spend-guard-phase2 for that)
+    // — so pre-enable the type this file's tests actually generate.
+    await q("INSERT INTO vq_feature_flags (feature, enabled, updated_by) VALUES ('gen_action_pose', true, 'test')", []);
     await q("DELETE FROM vq_config", []);
     await q("DELETE FROM vq_generation_requests", []);
   });
@@ -99,11 +117,13 @@ run("emergency feature kill switches — real router", () => {
   });
 
   it("baseline (no flags set): the paid route reaches the provider normally", async () => {
+    await markProviderRemotelyVerified();
     const r = await req("POST", "/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", model: "nano_banana", idempotencyKey: "baseline-1" });
     expect(r.status).not.toBe(503);
   });
 
   it("generation DB-disabled → 503 before spend/reservation/provider — the paid route never reaches Higgsfield", async () => {
+    await markProviderRemotelyVerified();
     await q("INSERT INTO vq_feature_flags(feature, enabled, reason) VALUES ($1,$2,$3)", ["generation", false, "owner paused"]);
     const r = await req("POST", "/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", model: "nano_banana", idempotencyKey: "gen-off-1" });
     expect(r.status).toBe(503);
@@ -120,9 +140,25 @@ run("emergency feature kill switches — real router", () => {
   });
 
   it("exports disabled does NOT block generation (features are independent)", async () => {
+    await markProviderRemotelyVerified();
     await q("INSERT INTO vq_feature_flags(feature, enabled) VALUES ($1,$2)", ["exports", false]);
     const r = await req("POST", "/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", model: "nano_banana", idempotencyKey: "gen-ok-despite-exports-off" });
     expect(r.status).not.toBe(503);
+  });
+
+  it("shared provider token_expired state blocks the next generation before provider contact", async () => {
+    await q(
+      "INSERT INTO vq_config(key, value, updated_by) VALUES ($1,$2,$3),($4,$5,$6)",
+      [
+        "provider.higgsfield.last_status", "token_expired", "machine-a",
+        "provider.higgsfield.last_auth_failure_at", "2026-07-14T12:00:00.000Z", "machine-a",
+      ],
+    );
+    const r = await req("POST", "/api/admin/vault-quest/characters/GNV-F01-S1/generate-artwork", { referenceType: "action_pose", model: "nano_banana", idempotencyKey: "provider-locked-1" });
+    expect(r.status).toBe(503);
+    expect((r.json as { message?: string; providerStatus?: string }).message).toBe("Reconnect provider first");
+    expect((r.json as { providerStatus?: string }).providerStatus).toBe("token_expired");
+    expect(createSpy).not.toHaveBeenCalled();
   });
 
   it("writes DB-disabled → ANY mutating VQ route is frozen (global kill switch)", async () => {
