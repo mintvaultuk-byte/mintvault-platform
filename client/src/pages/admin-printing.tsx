@@ -204,6 +204,7 @@ function EditLabelModal({
                 value={form.watch("setName") || ""}
                 onChange={(name) => form.setValue("setName", name, { shouldDirty: true })}
                 allowAddSet
+                allowEditSet
                 createEndpoint="/api/staff/custom-sets"
                 prefill={{ setName: form.watch("setName") || "" }}
                 testId="input-edit-setName"
@@ -1008,42 +1009,45 @@ function SheetPrintingPanel() {
   // streamed from R2 via the server endpoints (no expiring blob URLs); SVG
   // still arrives as base64 in the POST response and uses a blob URL.
   // All three filenames share the batchId so the operator can pair them.
-  const saveBatchFiles = useCallback((data: { pdfUrl: string; svg?: string; pngUrl?: string; batchId: string }) => {
-    const decode = (b64: string, mime: string) => {
-      const bin = atob(b64);
-      const buf = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
-      return new Blob([buf], { type: mime });
-    };
-    const saveBlob = (blob: Blob, filename: string) => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    };
-    const saveServerUrl = (url: string, filename: string) => {
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    };
-    // Multi-sheet (multi-page) batches are guillotine-only — no cut SVG. Only
-    // save the SVG when the server returned one (single-sheet batches).
-    if (data.svg) saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
-    // PNG is intentionally NOT auto-downloaded here — Chrome's multi-download
-    // gate silently blocks the 2nd/3rd file from a single gesture. Reprint
-    // flows (this helper's only callers) skip the PNG; the primary Generate
-    // Batch flow downloads its PNG inline.
-    // ?download=1 flips the PDF endpoint to Content-Disposition: attachment
-    // so this drops it to Downloads rather than opening inline in a tab.
-    saveServerUrl(`${rebaseUrl(data.pdfUrl, base)}?download=1`, `mintvault-batch-${data.batchId}.pdf`);
-  }, [base]);
+  const saveBatchFiles = useCallback(
+    (data: { pdfUrl: string; svg?: string; pngUrl?: string; batchId: string }) => {
+      const decode = (b64: string, mime: string) => {
+        const bin = atob(b64);
+        const buf = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        return new Blob([buf], { type: mime });
+      };
+      const saveBlob = (blob: Blob, filename: string) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      };
+      const saveServerUrl = (url: string, filename: string) => {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      };
+      // Multi-sheet (multi-page) batches are guillotine-only — no cut SVG. Only
+      // save the SVG when the server returned one (single-sheet batches).
+      if (data.svg) saveBlob(decode(data.svg, "image/svg+xml"), `mintvault-batch-${data.batchId}.svg`);
+      // PNG is intentionally NOT auto-downloaded here — Chrome's multi-download
+      // gate silently blocks the 2nd/3rd file from a single gesture. Reprint
+      // flows (this helper's only callers) skip the PNG; the primary Generate
+      // Batch flow downloads its PNG inline.
+      // ?download=1 flips the PDF endpoint to Content-Disposition: attachment
+      // so this drops it to Downloads rather than opening inline in a tab.
+      saveServerUrl(`${rebaseUrl(data.pdfUrl, base)}?download=1`, `mintvault-batch-${data.batchId}.pdf`);
+    },
+    [base]
+  );
 
   // v525 — single-cert reprint routes through the same /api/admin/print-batch
   // endpoint as multi-cert batches. Produces a 1-row sheet (front + claim

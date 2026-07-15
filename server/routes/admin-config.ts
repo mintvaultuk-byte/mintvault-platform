@@ -1,5 +1,6 @@
 import { sendServerError } from "../lib/error-response";
 import type { Express } from "express";
+import rateLimit from "express-rate-limit";
 import { storage } from "../storage";
 import { requireAdmin } from "../auth";
 import { uploadToR2 } from "../r2";
@@ -10,6 +11,15 @@ import { importTcgdexSets, isTcgdexImportRunning } from "../services/tcgdex-sets
 import { resolveEnglishSetByNameAndNumber } from "../services/tcgdex-set-resolve";
 import { getFeatureFlag } from "../config/feature-flags";
 import { normalizeCertId } from "../lib/cert-id";
+import { createDbCustomSetEditorStore, editCustomSetDetails, CustomSetEditError } from "../services/custom-set-editor";
+
+const adminCustomSetEditLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many set edit attempts. Please wait a few minutes and try again." },
+});
 
 export function registerAdminConfigRoutes(app: Express): void {
   app.get("/api/admin/db-info", requireAdmin, async (_req, res) => {
@@ -289,6 +299,21 @@ export function registerAdminConfigRoutes(app: Express): void {
       if (pgCode === "23505") return res.status(409).json({ error: `Set "${req.body.setId}" already exists` });
       console.error("[custom-set] insert failed:", err);
       res.status(500).json({ error: "Couldn't add set — check server logs" });
+    }
+  });
+
+  app.patch("/api/admin/custom-sets/:setId", requireAdmin, adminCustomSetEditLimit, async (req, res) => {
+    try {
+      const adminUser = (req.session as { adminEmail?: string })?.adminEmail || "admin";
+      const result = await editCustomSetDetails(createDbCustomSetEditorStore(), String(req.params.setId), req.body, {
+        user: adminUser,
+        role: "admin",
+      });
+      return res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof CustomSetEditError) return res.status(err.status).json({ error: err.message });
+      console.error("[custom-set] update failed:", err);
+      return res.status(500).json({ error: "Couldn't update set — check server logs" });
     }
   });
 

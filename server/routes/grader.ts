@@ -48,6 +48,7 @@ import {
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { graderEditSubmissionRateLimit } from "../lib/rate-limiters";
+import { createDbCustomSetEditorStore, editCustomSetDetails, CustomSetEditError } from "../services/custom-set-editor";
 import {
   STAFF_ABSOLUTE_SESSION_MS,
   clearSessionCookie,
@@ -62,6 +63,14 @@ const graderLoginLimit = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many login attempts. Please wait a few minutes and try again." },
+});
+
+const staffCustomSetEditLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many set edit attempts. Please wait a few minutes and try again." },
 });
 
 /** Panel actions the grader proxy may delegate to the admin handlers. */
@@ -112,6 +121,7 @@ export function registerGraderRoutes(app: Express): void {
       s.capGrade = result.caps.grade;
       s.capScan = result.caps.scan;
       s.capPrint = result.caps.print;
+      s.capEditSets = result.caps.editSets;
       s.isGrader = result.caps.grade;
       s.graderId = result.id;
       s.graderEmail = result.email;
@@ -671,6 +681,56 @@ export function registerGraderRoutes(app: Express): void {
     } catch (err: any) {
       console.error("[staff custom-set] insert failed:", err.message);
       return res.status(500).json({ error: "Couldn't add set — please try again" });
+    }
+  });
+
+  app.patch("/api/staff/custom-sets/:setId", staffCustomSetEditLimit, async (req: Request, res: Response) => {
+    const s = req.session as {
+      isAdmin?: boolean;
+      isStaff?: boolean;
+      staffId?: string;
+      capEditSets?: boolean;
+      credentialVersion?: number;
+      adminEmail?: string;
+      staffEmail?: string;
+      graderEmail?: string;
+    };
+    const isAdmin = !!s?.isAdmin;
+    if (!isAdmin) {
+      if (!(s?.isStaff && s?.staffId)) return res.status(401).json({ error: "Unauthorized" });
+      if (!s.capEditSets) return res.status(403).json({ error: "Forbidden: missing 'editSets' capability" });
+      if (isAbsoluteSessionExpired(req, STAFF_ABSOLUTE_SESSION_MS)) {
+        return req.session.destroy(() => {
+          clearSessionCookie(res);
+          res.status(401).json({ error: "Unauthorized" });
+        });
+      }
+      const live = await db.execute(
+        sql`SELECT deleted_at, can_edit_sets, credential_version FROM users WHERE id = ${String(s.staffId)} LIMIT 1`
+      );
+      const row = live.rows[0] as
+        | { deleted_at?: Date | string | null; can_edit_sets?: boolean; credential_version?: number }
+        | undefined;
+      if (!row || row.deleted_at || Number(s.credentialVersion ?? 1) !== credentialVersionOf(row)) {
+        return req.session.destroy(() => {
+          clearSessionCookie(res);
+          res.status(401).json({ error: "Unauthorized" });
+        });
+      }
+      if (!row.can_edit_sets) return res.status(403).json({ error: "Forbidden: missing 'editSets' capability" });
+    }
+
+    try {
+      const actor = isAdmin ? s?.adminEmail || "admin" : s?.staffEmail || s?.graderEmail || "staff";
+      const result = await editCustomSetDetails(createDbCustomSetEditorStore(), String(req.params.setId), req.body, {
+        user: actor,
+        role: isAdmin ? "admin" : "staff",
+      });
+      return res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof CustomSetEditError) return res.status(err.status).json({ error: err.message });
+      console.error("[staff custom-set] update failed:", err instanceof Error ? err.message : String(err));
+      return res.status(500).json({ error: "Couldn't update set — please try again" });
     }
   });
 

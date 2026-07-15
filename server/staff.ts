@@ -1,8 +1,8 @@
 /**
  * server/staff.ts — unified staff accounts + capability toggles.
  *
- * One staff account carries any of three capabilities: can_grade / can_scan /
- * can_print. role stays customer/admin/staff; capabilities (not role) decide
+ * One staff account carries capability flags: can_grade / can_scan / can_print /
+ * can_edit_sets. role stays customer/admin/staff; capabilities (not role) decide
  * which tools a staffer may use. ADMIN implicitly has ALL capabilities and is
  * NEVER gated on these flags. Builds on the existing grader machinery (session,
  * delegation proxy, PII sanitizer) — re-gates it on capabilities, never rewrites.
@@ -26,22 +26,34 @@ import {
   isAbsoluteSessionExpired,
 } from "./lib/auth-security";
 
-export type Capability = "grade" | "scan" | "print";
+export type Capability = "grade" | "scan" | "print" | "editSets";
 export interface Caps {
   grade: boolean;
   scan: boolean;
   print: boolean;
+  editSets: boolean;
+}
+
+function isValidStaffEmail(value: string): boolean {
+  if (value.length < 3 || value.length > 254) return false;
+  if (value.includes(" ")) return false;
+  const at = value.indexOf("@");
+  if (at <= 0 || at !== value.lastIndexOf("@")) return false;
+  const domain = value.slice(at + 1);
+  const dot = domain.lastIndexOf(".");
+  return dot > 0 && dot < domain.length - 1;
 }
 
 // ── Boot migrations (idempotent, additive, collision-checked: confirmed new) ──
 
-/** users.can_grade / can_scan / can_print + backfill grader→can_grade. */
+/** users.can_grade / can_scan / can_print / can_edit_sets + backfill grader→can_grade. */
 export async function migrateStaffCapabilitiesSchema(): Promise<void> {
   await db.execute(sql`
     ALTER TABLE users
       ADD COLUMN IF NOT EXISTS can_grade BOOLEAN NOT NULL DEFAULT false,
       ADD COLUMN IF NOT EXISTS can_scan  BOOLEAN NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS can_print BOOLEAN NOT NULL DEFAULT false
+      ADD COLUMN IF NOT EXISTS can_print BOOLEAN NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS can_edit_sets BOOLEAN NOT NULL DEFAULT false
   `);
   // Backfill: existing grader / senior_grader users get can_grade. Only touches
   // rows still at the false default, so it's idempotent and never flips a flag
@@ -53,7 +65,10 @@ export async function migrateStaffCapabilitiesSchema(): Promise<void> {
   await db.execute(sql`
     INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
     SELECT 'schema', 'users', 'staff_capabilities_migrate', NULL,
-           ${{ columns: ["can_grade", "can_scan", "can_print"], backfill: "role IN (grader,senior_grader) -> can_grade" }}::jsonb
+           ${{
+             columns: ["can_grade", "can_scan", "can_print", "can_edit_sets"],
+             backfill: "role IN (grader,senior_grader) -> can_grade; can_edit_sets defaults false",
+           }}::jsonb
     WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'staff_capabilities_migrate')
   `);
   console.log("[staff-caps-migrate] users capability columns ensured + grader backfill");
@@ -92,6 +107,7 @@ interface CachedStaff {
   capGrade: boolean;
   capScan: boolean;
   capPrint: boolean;
+  capEditSets: boolean;
   credentialVersion: number;
   expiry: number;
 }
@@ -105,7 +121,7 @@ async function validateStaffSession(staffId: string): Promise<CachedStaff> {
   const cached = staffSessionCache.get(staffId);
   if (cached && Date.now() < cached.expiry) return cached;
   const r = await db.execute(sql`
-    SELECT deleted_at, can_grade, can_scan, can_print, credential_version FROM users WHERE id = ${staffId} LIMIT 1
+    SELECT deleted_at, can_grade, can_scan, can_print, can_edit_sets, credential_version FROM users WHERE id = ${staffId} LIMIT 1
   `);
   const row = r.rows[0] as any;
   const live = !!row && !row.deleted_at;
@@ -114,6 +130,7 @@ async function validateStaffSession(staffId: string): Promise<CachedStaff> {
     capGrade: live && !!row.can_grade,
     capScan: live && !!row.can_scan,
     capPrint: live && !!row.can_print,
+    capEditSets: live && !!row.can_edit_sets,
     credentialVersion: live ? credentialVersionOf(row) : 1,
     expiry: Date.now() + 60_000,
   };
@@ -147,7 +164,7 @@ export async function requireStaff(req: Request, res: Response, next: NextFuncti
  *  the capability is missing. Re-checks BOTH liveness and the capability against
  *  the DB per request. Put on EVERY tool endpoint — a missed gate is a hole. */
 export function requireCapability(cap: Capability) {
-  const key = cap === "grade" ? "capGrade" : cap === "scan" ? "capScan" : "capPrint";
+  const key = cap === "grade" ? "capGrade" : cap === "scan" ? "capScan" : cap === "print" ? "capPrint" : "capEditSets";
   return async (req: Request, res: Response, next: NextFunction) => {
     const s = req.session as any;
     if (!(s && s.isStaff && s.staffId && !s.isAdmin)) return res.status(401).json({ error: "Unauthorized" });
@@ -163,7 +180,14 @@ export function requireCapability(cap: Capability) {
         await destroySessionAndClearCookie(req, res);
         return res.status(401).json({ error: "Unauthorized" });
       }
-      const liveCap = cap === "grade" ? live.capGrade : cap === "scan" ? live.capScan : live.capPrint;
+      const liveCap =
+        cap === "grade"
+          ? live.capGrade
+          : cap === "scan"
+            ? live.capScan
+            : cap === "print"
+              ? live.capPrint
+              : live.capEditSets;
       if (!liveCap) return res.status(403).json({ error: `Forbidden: missing '${cap}' capability` });
       return next();
     } catch {
@@ -187,7 +211,7 @@ export async function authenticateStaff(
     .trim();
   if (!cleanEmail || !password) return { ok: false };
   const r = await db.execute(sql`
-    SELECT id, email, display_name, password_hash, role, deleted_at, can_grade, can_scan, can_print,
+    SELECT id, email, display_name, password_hash, role, deleted_at, can_grade, can_scan, can_print, can_edit_sets,
            failed_login_count, locked_until, credential_version
     FROM users WHERE LOWER(email) = ${cleanEmail} LIMIT 1
   `);
@@ -206,8 +230,8 @@ export async function authenticateStaff(
     u.failed_login_count = 0;
     u.locked_until = null;
   }
-  const caps: Caps = { grade: !!u.can_grade, scan: !!u.can_scan, print: !!u.can_print };
-  if (!caps.grade && !caps.scan && !caps.print) return { ok: false };
+  const caps: Caps = { grade: !!u.can_grade, scan: !!u.can_scan, print: !!u.can_print, editSets: !!u.can_edit_sets };
+  if (!caps.grade && !caps.scan && !caps.print && !caps.editSets) return { ok: false };
   const valid = await verifyPassword(password, u.password_hash);
   if (!valid) {
     await db.execute(sql`
@@ -246,7 +270,7 @@ export async function authenticateStaff(
 /** All staff (any capability), with their caps + grade/scan workload counts. */
 export async function listStaffWithCounts() {
   const r = await db.execute(sql`
-    SELECT u.id, u.email, u.display_name, u.can_grade, u.can_scan, u.can_print, u.review_rate,
+    SELECT u.id, u.email, u.display_name, u.can_grade, u.can_scan, u.can_print, u.can_edit_sets, u.review_rate,
       u.deleted_at, u.failed_login_count, u.locked_until,
       (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'assigned')::int AS grade_assigned,
       (SELECT COUNT(*) FROM certificates c WHERE c.assigned_grader_id = u.id AND c.deleted_at IS NULL AND c.grader_status = 'pending_review')::int AS grade_pending,
@@ -254,14 +278,14 @@ export async function listStaffWithCounts() {
       (SELECT COUNT(*) FROM submissions s WHERE s.scan_assigned_to = u.id AND s.deleted_at IS NULL AND s.scan_status = 'assigned')::int AS scan_assigned
     FROM users u
     WHERE u.deleted_at IS NULL AND u.role <> 'admin' AND u.role <> 'customer'
-      AND (u.can_grade OR u.can_scan OR u.can_print)
+      AND (u.can_grade OR u.can_scan OR u.can_print OR u.can_edit_sets)
     ORDER BY u.created_at DESC
   `);
   return (r.rows as any[]).map((u) => ({
     id: u.id,
     email: u.email,
     displayName: u.display_name ?? null,
-    caps: { grade: !!u.can_grade, scan: !!u.can_scan, print: !!u.can_print },
+    caps: { grade: !!u.can_grade, scan: !!u.can_scan, print: !!u.can_print, editSets: !!u.can_edit_sets },
     enabled: !u.deleted_at,
     failedLoginCount: Number(u.failed_login_count || 0),
     lockedUntil: u.locked_until ? new Date(u.locked_until).toISOString() : null,
@@ -314,7 +338,7 @@ export async function createStaffAccount(
   const cleanEmail = String(email || "")
     .toLowerCase()
     .trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) return { ok: false, status: 400, error: "Invalid email address" };
+  if (!isValidStaffEmail(cleanEmail)) return { ok: false, status: 400, error: "Invalid email address" };
 
   const existing = await db.execute(
     sql`SELECT id, role, deleted_at FROM users WHERE LOWER(email) = ${cleanEmail} LIMIT 1`
@@ -342,6 +366,7 @@ export async function createStaffAccount(
     if (caps.grade) grant.grade = true;
     if (caps.scan) grant.scan = true;
     if (caps.print) grant.print = true;
+    if (caps.editSets) grant.editSets = true;
     if (Object.keys(grant).length) await setStaffCapabilities(row.id, grant, adminUser);
     await storage.writeAuditLog("user", row.id, "staff_promoted", adminUser, {
       email: cleanEmail,
@@ -357,8 +382,8 @@ export async function createStaffAccount(
   if (!pw.valid) return { ok: false, status: 400, error: pw.message || "Weak password" };
   const hash = await hashPassword(password);
   const r = await db.execute(sql`
-    INSERT INTO users (email, password_hash, display_name, role, email_verified, can_grade, can_scan, can_print, created_at, updated_at)
-    VALUES (${cleanEmail}, ${hash}, ${displayName?.trim() || null}, 'staff', true, ${!!caps.grade}, ${!!caps.scan}, ${!!caps.print}, NOW(), NOW())
+    INSERT INTO users (email, password_hash, display_name, role, email_verified, can_grade, can_scan, can_print, can_edit_sets, created_at, updated_at)
+    VALUES (${cleanEmail}, ${hash}, ${displayName?.trim() || null}, 'staff', true, ${!!caps.grade}, ${!!caps.scan}, ${!!caps.print}, ${!!caps.editSets}, NOW(), NOW())
     RETURNING id, email
   `);
   const newRow = r.rows[0] as any;
@@ -377,6 +402,7 @@ export async function setStaffCapabilities(userId: string, caps: Partial<Caps>, 
       can_grade = ${caps.grade === undefined ? sql`can_grade` : caps.grade},
       can_scan  = ${caps.scan === undefined ? sql`can_scan` : caps.scan},
       can_print = ${caps.print === undefined ? sql`can_print` : caps.print},
+      can_edit_sets = ${caps.editSets === undefined ? sql`can_edit_sets` : caps.editSets},
       updated_at = NOW()
     WHERE id = ${userId}
   `);
@@ -401,14 +427,14 @@ async function loadStaffForEdit(
   { ok: true; row: { id: string; email: string; role: string } } | { ok: false; status: number; error: string }
 > {
   const r = await db.execute(sql`
-    SELECT id, email, role, can_grade, can_scan, can_print
+    SELECT id, email, role, can_grade, can_scan, can_print, can_edit_sets
     FROM users WHERE id = ${userId} AND deleted_at IS NULL LIMIT 1
   `);
   const row = r.rows[0] as any;
   if (!row) return { ok: false, status: 404, error: "Staff account not found" };
   if (row.role === "admin") return { ok: false, status: 400, error: "Admin accounts cannot be edited here" };
   const isStaffRole = row.role === "staff" || row.role === "grader" || row.role === "senior_grader";
-  const hasCap = !!(row.can_grade || row.can_scan || row.can_print);
+  const hasCap = !!(row.can_grade || row.can_scan || row.can_print || row.can_edit_sets);
   if (!isStaffRole || !hasCap) return { ok: false, status: 400, error: "Not a staff account" };
   return { ok: true, row: { id: String(row.id), email: String(row.email), role: String(row.role) } };
 }
@@ -526,7 +552,7 @@ export async function revokeStaffSessions(
  */
 export async function deleteStaffAccount(staffId: string, adminUser: string) {
   const u = await db.execute(
-    sql`SELECT id, email, role, can_grade, can_scan, can_print FROM users WHERE id = ${staffId} AND deleted_at IS NULL LIMIT 1`
+    sql`SELECT id, email, role, can_grade, can_scan, can_print, can_edit_sets FROM users WHERE id = ${staffId} AND deleted_at IS NULL LIMIT 1`
   );
   const row = u.rows[0] as any;
   if (!row) return { ok: false as const, status: 404, error: "Staff account not found" };
@@ -550,7 +576,7 @@ export async function deleteStaffAccount(staffId: string, adminUser: string) {
   await storage.writeAuditLog("user", staffId, "staff_deleted", adminUser, {
     email: row.email,
     role: row.role,
-    caps: { grade: !!row.can_grade, scan: !!row.can_scan, print: !!row.can_print },
+    caps: { grade: !!row.can_grade, scan: !!row.can_scan, print: !!row.can_print, editSets: !!row.can_edit_sets },
   });
   // Phase 2 — kill the session caches NOW so the deleted account can't keep acting
   // for up to 60s on a stale cache entry.

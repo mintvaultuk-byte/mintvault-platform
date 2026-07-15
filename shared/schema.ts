@@ -110,6 +110,7 @@ export const users = pgTable("users", {
   canGrade: boolean("can_grade").notNull().default(false),
   canScan: boolean("can_scan").notNull().default(false),
   canPrint: boolean("can_print").notNull().default(false),
+  canEditSets: boolean("can_edit_sets").notNull().default(false),
   // ── Per-operator review rate (migratePerOperatorSchema) — Phase 0 ──────────
   // % of this operator's grades requiring manual review. Starts 100 (every card
   // reviewed) and is dialled DOWN as the operator earns trust (Phase 4 reads it).

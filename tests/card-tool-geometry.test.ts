@@ -15,6 +15,7 @@ import {
   BOTTOM,
   LEFT,
 } from "@/components/grading/card-tool-geometry";
+import { CENTERING_GUIDE_VISUALS } from "@/components/grading/manual-card-tool";
 import { computeCentering } from "@/components/grading/centering-from-rects";
 import { quadRotation, type CropQuad, type Point } from "@/components/grading/crop-geometry";
 import { centeringAxisGrade } from "../shared/centering";
@@ -37,6 +38,25 @@ const edges = (
 // Square outer card: edges at x/y = 10 and 90 → an 80×80 card box.
 //   TOP y=10, BOTTOM y=90, LEFT x=10, RIGHT x=90 (along-edge coord parked at 50).
 const OUTER_SQUARE = edges([50, 10], [90, 50], [50, 90], [10, 50]);
+
+describe("manual centering guide visuals", () => {
+  it("renders thicker high-contrast guides without changing measured centering", () => {
+    expect(CENTERING_GUIDE_VISUALS.placedColorStrokeWidth).toBeGreaterThanOrEqual(2);
+    expect(CENTERING_GUIDE_VISUALS.liveColorStrokeWidth).toBeGreaterThanOrEqual(2);
+    expect(CENTERING_GUIDE_VISUALS.railColorStrokeWidth).toBeGreaterThanOrEqual(2);
+    expect(CENTERING_GUIDE_VISUALS.placedHaloStrokeWidth).toBeGreaterThan(
+      CENTERING_GUIDE_VISUALS.placedColorStrokeWidth
+    );
+    expect(CENTERING_GUIDE_VISUALS.lightOutlineStroke).toContain("255,255,255");
+    expect(CENTERING_GUIDE_VISUALS.haloStroke).toContain("0,0,0");
+
+    const inner = edges([50, 20], [80, 50], [50, 80], [30, 50]);
+    const measured = computeCardTool("full", OUTER_SQUARE, inner, "front", 0, 0, 600, 900).centering!;
+    expect(measured.lr).toBe("67/33");
+    expect(measured.tb).toBe("50/50");
+    expect(measured.subgrade).toBe(7);
+  });
+});
 
 describe("border widths come from edge-pair gaps (relevant axis only)", () => {
   // Inner edges: top gap 10, bottom gap 10, left gap 20, right gap 10.
