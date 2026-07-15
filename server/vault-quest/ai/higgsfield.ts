@@ -28,6 +28,13 @@ export interface HiggsfieldArtworkResult {
   height: number;
 }
 
+export interface HiggsfieldVerificationResult {
+  ok: boolean;
+  status: number | null;
+  endpoint: "account_workspaces";
+  message: string;
+}
+
 /**
  * Thrown instead of a plain Error for any failure AFTER the provider `create` call
  * has already succeeded (poll timeout/failure, provider-resolved job failure,
@@ -108,7 +115,9 @@ export function higgsfieldConnection(): HiggsfieldConnection {
 }
 
 function clean(v: unknown): string {
-  return String(v ?? "").replace(/\s+/g, " ").trim();
+  return String(v ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function aspectRatioFor(slot: ArtworkSlot, mode: string): string {
@@ -178,11 +187,15 @@ export function buildVaultQuestArtworkPrompt(ctx: CardContext, mode: string, slo
     `Colour palette: driven by the ${element} theme with balanced secondary colours and strong contrast.`,
     negative ? `Avoid: ${negative}.` : "",
     "Do not imitate any famous franchise, character, or art style. Artwork only.",
-  ].filter(Boolean).join(" ");
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 export function safeVqCardId(cardId: string): string {
-  return clean(cardId).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80);
+  return clean(cardId)
+    .replace(/[^A-Za-z0-9._-]/g, "_")
+    .slice(0, 80);
 }
 
 export function validVqCardId(cardId: string): boolean {
@@ -201,11 +214,7 @@ export function isCandidateKeyForCard(key: string, cardId: string): boolean {
   // `..` is explicitly rejected: the char class below permits `.` and `/`, so a
   // key like `vq/art-candidates/{safe}/../../images/MV1/front.png` would satisfy
   // the prefix + regex — the `!includes("..")` guard closes that traversal.
-  return (
-    key.startsWith(`vq/art-candidates/${safe}/`) &&
-    !key.includes("..") &&
-    /^[A-Za-z0-9/._:-]+\.png$/.test(key)
-  );
+  return key.startsWith(`vq/art-candidates/${safe}/`) && !key.includes("..") && /^[A-Za-z0-9/._:-]+\.png$/.test(key);
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -228,6 +237,57 @@ async function readJson(res: Response): Promise<unknown> {
   }
 }
 
+export async function verifyHiggsfieldTokenZeroCost(): Promise<HiggsfieldVerificationResult> {
+  const key = env("HIGGSFIELD_API_KEY");
+  const conn = higgsfieldConnection();
+  if (!key || !conn.connected) {
+    return {
+      ok: false,
+      status: null,
+      endpoint: "account_workspaces",
+      message: "HIGGSFIELD_API_KEY is not configured.",
+    };
+  }
+
+  const res = await fetchWithTimeout(
+    `${conn.baseUrl}/developer/v2alpha/account/workspaces`,
+    {
+      headers: { Authorization: `Bearer ${key}` },
+    },
+    20_000
+  );
+  if (!res.ok) {
+    return {
+      ok: false,
+      status: res.status,
+      endpoint: "account_workspaces",
+      message:
+        res.status === 401 || res.status === 403
+          ? "Higgsfield rejected the token."
+          : `Higgsfield workspace verification failed (${res.status}).`,
+    };
+  }
+
+  const data = (await readJson(res)) as { id?: string }[] | { items?: { id?: string }[] };
+  const list = Array.isArray(data) ? data : (data.items ?? []);
+  const id = list.find((w) => w?.id)?.id;
+  if (!id) {
+    return {
+      ok: false,
+      status: 200,
+      endpoint: "account_workspaces",
+      message: "Higgsfield accepted the token but returned no workspace.",
+    };
+  }
+  cachedWorkspaceId = id;
+  return {
+    ok: true,
+    status: 200,
+    endpoint: "account_workspaces",
+    message: "Provider connection verified.",
+  };
+}
+
 async function recordHiggsfieldHttpFailure(status: number, message?: string): Promise<void> {
   const kind = classifyHiggsfieldStatus(status);
   recordHiggsfieldOutcome({ ok: false, kind });
@@ -248,12 +308,18 @@ async function resolveWorkspaceId(baseUrl: string, key: string): Promise<string>
   const fromEnv = env("HIGGSFIELD_WORKSPACE_ID");
   if (fromEnv) return fromEnv;
   if (cachedWorkspaceId) return cachedWorkspaceId;
-  const res = await fetchWithTimeout(`${baseUrl}/developer/v2alpha/account/workspaces`, {
-    headers: { Authorization: `Bearer ${key}` },
-  }, 20_000);
+  const res = await fetchWithTimeout(
+    `${baseUrl}/developer/v2alpha/account/workspaces`,
+    {
+      headers: { Authorization: `Bearer ${key}` },
+    },
+    20_000
+  );
   if (!res.ok) {
     await recordHiggsfieldHttpFailure(res.status, "Workspace lookup failed.");
-    throw new Error(`Higgsfield workspaces failed (${res.status}) — token may have expired; run \`higgsfield auth token\` and update HIGGSFIELD_API_KEY.`);
+    throw new Error(
+      `Higgsfield workspaces failed (${res.status}) — token may have expired; run \`higgsfield auth token\` and update HIGGSFIELD_API_KEY.`
+    );
   }
   const data = (await readJson(res)) as { id?: string }[] | { items?: { id?: string }[] };
   const list = Array.isArray(data) ? data : (data.items ?? []);
@@ -288,22 +354,41 @@ const mediaCache = new Map<string, { id: string; at: number }>();
 const MEDIA_CACHE_TTL_MS = 60 * 60 * 1000;
 
 /** Upload one PNG to Higgsfield media storage → media id for image_references. */
-export async function uploadHiggsfieldMedia(png: Buffer, opts: { baseUrl: string; key: string; workspaceId: string }): Promise<string> {
+export async function uploadHiggsfieldMedia(
+  png: Buffer,
+  opts: { baseUrl: string; key: string; workspaceId: string }
+): Promise<string> {
   const { createHash } = await import("crypto");
   const hash = createHash("sha1").update(png).digest("hex");
   const cached = mediaCache.get(hash);
   if (cached && Date.now() - cached.at < MEDIA_CACHE_TTL_MS) return cached.id;
-  const headers = { Authorization: `Bearer ${opts.key}`, "hf-workspace-id": opts.workspaceId, "Content-Type": "application/json" };
-  const createRes = await fetchWithTimeout(`${opts.baseUrl}/developer/v2alpha/media?type=image`, { method: "POST", headers, body: "{}" }, 30_000);
+  const headers = {
+    Authorization: `Bearer ${opts.key}`,
+    "hf-workspace-id": opts.workspaceId,
+    "Content-Type": "application/json",
+  };
+  const createRes = await fetchWithTimeout(
+    `${opts.baseUrl}/developer/v2alpha/media?type=image`,
+    { method: "POST", headers, body: "{}" },
+    30_000
+  );
   if (!createRes.ok) {
     await recordHiggsfieldHttpFailure(createRes.status, "Media create failed.");
     throw new Error(`Higgsfield media create failed (${createRes.status})`);
   }
   const slot = (await readJson(createRes)) as { id?: string; upload_url?: string };
   if (!slot.id || !slot.upload_url) throw new Error("Higgsfield media create returned no upload slot.");
-  const putRes = await fetchWithTimeout(slot.upload_url, { method: "PUT", headers: { "Content-Type": "image/png" }, body: new Uint8Array(png) }, 60_000);
+  const putRes = await fetchWithTimeout(
+    slot.upload_url,
+    { method: "PUT", headers: { "Content-Type": "image/png" }, body: new Uint8Array(png) },
+    60_000
+  );
   if (!putRes.ok) throw new Error(`Higgsfield media upload failed (${putRes.status})`);
-  const confRes = await fetchWithTimeout(`${opts.baseUrl}/developer/v2alpha/media/${encodeURIComponent(slot.id)}/confirm?type=image`, { method: "POST", headers, body: "{}" }, 30_000);
+  const confRes = await fetchWithTimeout(
+    `${opts.baseUrl}/developer/v2alpha/media/${encodeURIComponent(slot.id)}/confirm?type=image`,
+    { method: "POST", headers, body: "{}" },
+    30_000
+  );
   if (!confRes.ok) {
     await recordHiggsfieldHttpFailure(confRes.status, "Media confirm failed.");
     throw new Error(`Higgsfield media confirm failed (${confRes.status})`);
@@ -339,7 +424,9 @@ export async function generateHiggsfieldArtwork(input: {
   const key = env("HIGGSFIELD_API_KEY");
   const conn = higgsfieldConnection();
   if (!key || !conn.connected) {
-    throw new Error("Higgsfield provider not connected — set HIGGSFIELD_API_KEY (from `higgsfield auth token`) and restart the local server.");
+    throw new Error(
+      "Higgsfield provider not connected — set HIGGSFIELD_API_KEY (from `higgsfield auth token`) and restart the local server."
+    );
   }
   // Per-request model override (validated to a safe token); default = env/connection model.
   let model = input.model && /^[a-z0-9_]+$/.test(input.model) ? input.model : conn.model;
@@ -360,7 +447,10 @@ export async function generateHiggsfieldArtwork(input: {
     const refs = input.imageReferences.slice(0, cap);
     imageRefs = [];
     for (const buf of refs) {
-      imageRefs.push({ type: "media_input", id: await uploadHiggsfieldMedia(buf, { baseUrl: conn.baseUrl, key, workspaceId }) });
+      imageRefs.push({
+        type: "media_input",
+        id: await uploadHiggsfieldMedia(buf, { baseUrl: conn.baseUrl, key, workspaceId }),
+      });
     }
   }
 
@@ -375,14 +465,17 @@ export async function generateHiggsfieldArtwork(input: {
   const createRes = await fetchWithTimeout(
     `${conn.baseUrl}/developer/v2alpha/images/${encodeURIComponent(model)}/generations`,
     { method: "POST", headers, body: JSON.stringify(body) },
-    45_000,
+    45_000
   );
   if (!createRes.ok) {
     const errBody = await createRes.text().catch(() => "");
     // Observability (10A-3): record the REAL outcome so the admin status display is
     // honest (never "connected" off an env var alone) — never affects the response.
     await recordHiggsfieldHttpFailure(createRes.status, "Create failed before a provider job was created.");
-    if (createRes.status === 401 || createRes.status === 403) throw new Error("Higgsfield rejected the token (401) — it has likely expired. Run `higgsfield auth token` and update HIGGSFIELD_API_KEY in .env.");
+    if (createRes.status === 401 || createRes.status === 403)
+      throw new Error(
+        "Higgsfield rejected the token (401) — it has likely expired. Run `higgsfield auth token` and update HIGGSFIELD_API_KEY in .env."
+      );
     if (createRes.status === 402) throw new Error("Higgsfield: not enough credits to generate an image.");
     throw new Error(`Higgsfield create failed (${createRes.status})${errBody ? `: ${errBody.slice(0, 220)}` : ""}`);
   }
@@ -400,11 +493,18 @@ export async function generateHiggsfieldArtwork(input: {
     await new Promise((resolve) => setTimeout(resolve, attempt === 0 ? 1500 : 3000));
     let pollRes: Response;
     try {
-      pollRes = await fetchWithTimeout(`${conn.baseUrl}/developer/v2alpha/jobs/${encodeURIComponent(jobId)}`, { headers }, 30_000);
+      pollRes = await fetchWithTimeout(
+        `${conn.baseUrl}/developer/v2alpha/jobs/${encodeURIComponent(jobId)}`,
+        { headers },
+        30_000
+      );
     } catch {
       if (++pollFailures >= 5) {
         recordHiggsfieldOutcome({ ok: false, kind: "unknown" }); // network-level; the create already succeeded/charged
-        throw new HiggsfieldJobError("Higgsfield poll kept timing out — the job may still finish; try Regenerate in a moment.", jobId);
+        throw new HiggsfieldJobError(
+          "Higgsfield poll kept timing out — the job may still finish; try Regenerate in a moment.",
+          jobId
+        );
       }
       continue;
     }
@@ -416,7 +516,10 @@ export async function generateHiggsfieldArtwork(input: {
       }
       if (++pollFailures >= 5) {
         await recordHiggsfieldHttpFailure(pollRes.status, "Poll failed for an existing provider job.");
-        throw new HiggsfieldJobError(`Higgsfield poll failed (${pollRes.status})${errBody ? `: ${errBody.slice(0, 180)}` : ""}`, jobId);
+        throw new HiggsfieldJobError(
+          `Higgsfield poll failed (${pollRes.status})${errBody ? `: ${errBody.slice(0, 180)}` : ""}`,
+          jobId
+        );
       }
       continue;
     }
@@ -441,7 +544,10 @@ export async function generateHiggsfieldArtwork(input: {
       console.error(`[higgsfield] job ${jobId} resolved to "${status}" — provider detail: ${reason}`);
       throw new HiggsfieldJobError(`Higgsfield generation ${status}`, jobId);
     }
-    if (status === "completed" && data.result_url) { job = data; break; }
+    if (status === "completed" && data.result_url) {
+      job = data;
+      break;
+    }
   }
   if (!job?.result_url) {
     recordHiggsfieldOutcome({ ok: false, kind: "unknown" });

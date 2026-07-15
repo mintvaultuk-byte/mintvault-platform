@@ -9,13 +9,15 @@ import { __resetHiggsfieldOutcomeForTests, getLastHiggsfieldOutcome } from "../s
 // Static import (NOT dynamic per-test) — dynamic import() after vi.resetModules() would
 // load a SEPARATE provider-status.ts instance than the one this file imports above,
 // splitting the observation state across two module copies. One shared instance only.
-import { generateHiggsfieldArtwork } from "../server/vault-quest/ai/higgsfield";
+import { generateHiggsfieldArtwork, verifyHiggsfieldTokenZeroCost } from "../server/vault-quest/ai/higgsfield";
 
 // A real 64x64 PNG (the app's own floor — normaliseGeneratedImage rejects anything
 // smaller as "too small to use").
 let TEST_PNG: Buffer;
 beforeAll(async () => {
-  TEST_PNG = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 10, g: 10, b: 10 } } }).png().toBuffer();
+  TEST_PNG = await sharp({ create: { width: 64, height: 64, channels: 3, background: { r: 10, g: 10, b: 10 } } })
+    .png()
+    .toBuffer();
 });
 
 function jsonRes(status: number, body: unknown): Response {
@@ -33,6 +35,22 @@ beforeEach(() => {
 });
 
 describe("generateHiggsfieldArtwork — real observability wiring", () => {
+  it("provider verification is a zero-credit account read and never creates artwork jobs", async () => {
+    delete process.env.HIGGSFIELD_WORKSPACE_ID;
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonRes(200, [{ id: "workspace-1" }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await verifyHiggsfieldTokenZeroCost();
+
+    expect(result).toMatchObject({ ok: true, status: 200, endpoint: "account_workspaces" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = String(fetchMock.mock.calls[0][0]);
+    expect(url).toMatch(/\/developer\/v2alpha\/account\/workspaces$/);
+    expect(url).not.toMatch(/generations|\/jobs\/|\/media/);
+    expect(getLastHiggsfieldOutcome()).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
   it("a full success sequence records {ok:true}", async () => {
     const fetchMock = vi
       .fn()
@@ -73,7 +91,9 @@ describe("generateHiggsfieldArtwork — real observability wiring", () => {
       .mockResolvedValueOnce(new Response("", { status: 503 })); // download fails
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(generateHiggsfieldArtwork({ prompt: "x", mode: "main", slot: "main" })).rejects.toThrow(/download failed/);
+    await expect(generateHiggsfieldArtwork({ prompt: "x", mode: "main", slot: "main" })).rejects.toThrow(
+      /download failed/
+    );
     expect(getLastHiggsfieldOutcome()).toEqual({ ok: false, kind: "provider_unavailable" });
     vi.unstubAllGlobals();
   });

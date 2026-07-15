@@ -1,7 +1,7 @@
 import { inArray } from "drizzle-orm";
 import { vqConfig } from "@shared/vq-config-schema";
 import { isUndefinedTableOrColumn } from "../production-storage";
-import { higgsfieldConnection } from "../ai/higgsfield";
+import { higgsfieldConnection, verifyHiggsfieldTokenZeroCost } from "../ai/higgsfield";
 
 export type VqProviderConnectionStatus =
   | "configured"
@@ -39,7 +39,13 @@ const KEY_LAST_AUTH_FAILURE = "provider.higgsfield.last_auth_failure_at";
 const KEY_LAST_STATUS = "provider.higgsfield.last_status";
 const KEY_LAST_MESSAGE = "provider.higgsfield.last_message";
 
-const PROVIDER_KEYS = [KEY_LAST_CHECKED, KEY_LAST_SUCCESS, KEY_LAST_AUTH_FAILURE, KEY_LAST_STATUS, KEY_LAST_MESSAGE] as const;
+const PROVIDER_KEYS = [
+  KEY_LAST_CHECKED,
+  KEY_LAST_SUCCESS,
+  KEY_LAST_AUTH_FAILURE,
+  KEY_LAST_STATUS,
+  KEY_LAST_MESSAGE,
+] as const;
 
 type ProviderRows = Partial<Record<(typeof PROVIDER_KEYS)[number], string>>;
 
@@ -113,39 +119,88 @@ async function writeProviderRows(values: Record<string, string>, updatedBy: stri
 
 export async function markHiggsfieldProviderSuccess(nowMs = Date.now(), updatedBy = "provider-call"): Promise<void> {
   const now = new Date(nowMs).toISOString();
-  await writeProviderRows({
-    [KEY_LAST_SUCCESS]: now,
-    [KEY_LAST_CHECKED]: now,
-    [KEY_LAST_STATUS]: "connected",
-    [KEY_LAST_MESSAGE]: "Provider connection is healthy.",
-  }, updatedBy);
+  await writeProviderRows(
+    {
+      [KEY_LAST_SUCCESS]: now,
+      [KEY_LAST_CHECKED]: now,
+      [KEY_LAST_STATUS]: "connected",
+      [KEY_LAST_MESSAGE]: "Provider connection is healthy.",
+    },
+    updatedBy
+  );
 }
 
-export async function markHiggsfieldProviderAuthFailure(nowMs = Date.now(), updatedBy = "provider-call"): Promise<void> {
+export async function markHiggsfieldProviderAuthFailure(
+  nowMs = Date.now(),
+  updatedBy = "provider-call"
+): Promise<void> {
   const now = new Date(nowMs).toISOString();
-  await writeProviderRows({
-    [KEY_LAST_AUTH_FAILURE]: now,
-    [KEY_LAST_CHECKED]: now,
-    [KEY_LAST_STATUS]: "token_expired",
-    [KEY_LAST_MESSAGE]: "Token expired. Refresh the server-side provider token.",
-  }, updatedBy);
+  await writeProviderRows(
+    {
+      [KEY_LAST_AUTH_FAILURE]: now,
+      [KEY_LAST_CHECKED]: now,
+      [KEY_LAST_STATUS]: "token_expired",
+      [KEY_LAST_MESSAGE]: "Token expired. Refresh the server-side provider token.",
+    },
+    updatedBy
+  );
 }
 
-export async function markHiggsfieldProviderDisconnected(message = "Provider status could not be confirmed.", nowMs = Date.now(), updatedBy = "provider-call"): Promise<void> {
+export async function markHiggsfieldProviderDisconnected(
+  message = "Provider status could not be confirmed.",
+  nowMs = Date.now(),
+  updatedBy = "provider-call"
+): Promise<void> {
   const now = new Date(nowMs).toISOString();
-  await writeProviderRows({
-    [KEY_LAST_CHECKED]: now,
-    [KEY_LAST_STATUS]: "disconnected",
-    [KEY_LAST_MESSAGE]: message,
-  }, updatedBy);
+  await writeProviderRows(
+    {
+      [KEY_LAST_CHECKED]: now,
+      [KEY_LAST_STATUS]: "disconnected",
+      [KEY_LAST_MESSAGE]: message,
+    },
+    updatedBy
+  );
 }
 
-export async function refreshHiggsfieldProviderConnectionLocal(updatedBy = "admin", nowMs = Date.now()): Promise<VqProviderConnectionSnapshot> {
-  await writeProviderRows({
-    [KEY_LAST_CHECKED]: new Date(nowMs).toISOString(),
-    [KEY_LAST_MESSAGE]: "Credentials are configured, but a free remote connection test is not available.",
-  }, updatedBy);
+export async function refreshHiggsfieldProviderConnectionLocal(
+  updatedBy = "admin",
+  nowMs = Date.now()
+): Promise<VqProviderConnectionSnapshot> {
+  await writeProviderRows(
+    {
+      [KEY_LAST_CHECKED]: new Date(nowMs).toISOString(),
+      [KEY_LAST_MESSAGE]: "Credentials are configured, but a free remote connection test is not available.",
+    },
+    updatedBy
+  );
   return getHiggsfieldProviderConnection(nowMs);
+}
+
+export async function verifyHiggsfieldProviderConnection(
+  updatedBy = "admin",
+  nowMs = Date.now()
+): Promise<{
+  ok: boolean;
+  provider: VqProviderConnectionSnapshot;
+  endpoint: "account_workspaces";
+  message: string;
+  status: number | null;
+}> {
+  const result = await verifyHiggsfieldTokenZeroCost();
+  if (result.ok) {
+    await markHiggsfieldProviderSuccess(nowMs, updatedBy);
+  } else if (result.status === 401 || result.status === 403) {
+    await markHiggsfieldProviderAuthFailure(nowMs, updatedBy);
+  } else if (result.status !== null) {
+    await markHiggsfieldProviderDisconnected(result.message, nowMs, updatedBy);
+  }
+  return {
+    ok: result.ok,
+    provider: await getHiggsfieldProviderConnection(nowMs),
+    endpoint: result.endpoint,
+    message: result.message,
+    status: result.status,
+  };
 }
 
 export async function getHiggsfieldProviderConnection(nowMs = Date.now()): Promise<VqProviderConnectionSnapshot> {
@@ -187,9 +242,10 @@ export async function getHiggsfieldProviderConnection(nowMs = Date.now()): Promi
   } else if (!remoteSuccessIsCurrent) {
     status = "configured";
     warningLevel = expiry.malformed || !tokenExpiryAt ? "unavailable" : "none";
-    message = expiry.malformed || !tokenExpiryAt
-      ? "Credentials configured — remote connection not yet verified. Token expiry is not available."
-      : "Credentials configured — remote connection not yet verified.";
+    message =
+      expiry.malformed || !tokenExpiryAt
+        ? "Credentials configured — remote connection not yet verified. Token expiry is not available."
+        : "Credentials configured — remote connection not yet verified.";
   } else if (expiryMs != null && msUntilExpiry != null && msUntilExpiry <= 60 * 60 * 1000) {
     status = "token_expiring";
     warningLevel = "under_1h";
