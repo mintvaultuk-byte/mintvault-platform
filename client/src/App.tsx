@@ -40,6 +40,7 @@ const AdminSetsPage = lazy(() => import("@/pages/admin-sets"));
 const AdminOperatorStatsPage = lazy(() => import("@/pages/admin-operator-stats"));
 const AdminInstagramPage = lazy(() => import("@/pages/admin-instagram"));
 const AdminWeeklyReelPage = lazy(() => import("@/pages/admin-weekly-reel"));
+const AdminSocialStudioPage = lazy(() => import("@/pages/admin-social-studio"));
 const AdminMvgsCalibrationPage = lazy(() => import("@/pages/admin-mvgs-calibration"));
 const AdminVaultQuestPage = lazy(() => import("@/pages/admin-vault-quest"));
 const VaultQuestStudioPage = lazy(() => import("@/pages/vault-quest-studio"));
@@ -236,6 +237,7 @@ function Router() {
           </Route>
           <Route path="/staff" component={StaffPage} />
           <Route path="/admin/instagram" component={AdminInstagramPage} />
+          <Route path="/admin/social-studio" component={AdminSocialStudioPage} />
           <Route path="/admin/weekly-reel" component={AdminWeeklyReelPage} />
           <Route path="/admin/mvgs-calibration" component={AdminMvgsCalibrationPage} />
           <Route path="/admin/vault-quest/studio" component={VaultQuestStudioPage} />

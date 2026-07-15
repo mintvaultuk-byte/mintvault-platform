@@ -92,6 +92,19 @@ import { isServiceValidForCarrier } from "@shared/carriers";
 import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/variant-derive";
 import { findStaleOverwrites } from "@shared/edit-conflict";
 import { centeringAxisGrade } from "@shared/centering";
+import {
+  SOCIAL_STUDIO_BACKGROUNDS,
+  SOCIAL_STUDIO_FORMAT_DIMENSIONS,
+  buildSocialStudioDownloadFilename,
+  buildSocialStudioCaption,
+  buildSocialStudioHashtags,
+  escapeSocialStudioSearchTerm,
+  isSocialStudioBackground,
+  isSocialStudioFormat,
+  resolveAutoBackground,
+  resolveBackgroundVariant,
+  type SocialStudioBackgroundId,
+} from "@shared/social-studio";
 import { storage, deductAiCredits } from "./storage";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import {
@@ -393,7 +406,6 @@ function parseDesignations(raw: unknown, fallback: string[] = []): string[] {
   return fallback;
 }
 
-
 // normalizeCertId + certNumberFromId now live in the shared, ReDoS-safe helper
 // (server/lib/cert-id.ts, fixes #113). Re-exported here so existing callers that
 // do `import { normalizeCertId } from "../routes"` keep working unchanged.
@@ -465,10 +477,7 @@ async function certToPublic(c: any, viewerUserId?: string | null): Promise<Publi
       return null;
     }
   };
-  const [frontUrl, backUrl] = await Promise.all([
-    signImg(c.frontImagePath, "front"),
-    signImg(c.backImagePath, "back"),
-  ]);
+  const [frontUrl, backUrl] = await Promise.all([signImg(c.frontImagePath, "front"), signImg(c.backImagePath, "back")]);
 
   return {
     certId: normalizeCertId(c.certId),
@@ -845,12 +854,8 @@ async function migrateServiceTiersV213() {
   // checkout's reservation auto-frees once reserved_until passes, so no
   // sweeper job is needed. Nullable/additive — safe on live data.
   try {
-    await db.execute(
-      sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS reserved_at TIMESTAMPTZ`
-    );
-    await db.execute(
-      sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS reserved_until TIMESTAMPTZ`
-    );
+    await db.execute(sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS reserved_at TIMESTAMPTZ`);
+    await db.execute(sql`ALTER TABLE member_credits ADD COLUMN IF NOT EXISTS reserved_until TIMESTAMPTZ`);
     console.log("[v213-migrate] member_credits.reserved_at/reserved_until columns ensured");
   } catch (e: any) {
     console.error("[v213-migrate] ALTER member_credits reservation cols failed:", e.message);
@@ -1438,8 +1443,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Multer config for /api/pre-grade. In-memory storage (per spec — no
   // data stored on disk or R2), 20 MB per file, accepts JPEG/PNG/TIFF.
 
-
-
   // Rate limit for unauthenticated public lookup endpoints — protects against
   // enumeration scrapers (cert IDs are sequential MV1, MV2, ...).
   // Applied to /api/cert/:id, /api/cert/:id/population, /api/logbook/:certId,
@@ -1487,7 +1490,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.json({ ok: true }); // non-blocking — client has localStorage as source of truth
     }
   });
-
 
   app.get("/api/cards/autofill", async (req, res) => {
     try {
@@ -1620,7 +1622,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(500).json({ verified: false, error: "Internal error" });
     }
   });
-
 
   // ── Slab showcase — homepage 3D hero data ─────────────────────────────────
   // Public, no auth. Top graded certs with real label PNGs (generated +
@@ -1876,6 +1877,219 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Admin Social Studio (zero-credit, download-first) ─────────────────────
+  // These routes intentionally reuse the share renderer in static-only mode.
+  // Missing backgrounds fall back locally instead of calling Segmind.
+
+  function socialStudioCardFromLoaded(
+    loaded: NonNullable<Awaited<ReturnType<typeof loadShareCert>>>,
+    overrides: Record<string, any> = {}
+  ) {
+    const card = {
+      certNumber: loaded.cert.certNumber,
+      cardName: loaded.cert.cardName,
+      setName: loaded.cert.setName,
+      setNumber: loaded.cert.setNumber ?? null,
+      cardGame: loaded.cardGame,
+      grade: loaded.cert.grade,
+      gradeLabel: loaded.cert.gradeLabel,
+      hasImage: !!loaded.scanKey,
+      ...overrides,
+    };
+    return {
+      ...card,
+      autoBackground: resolveAutoBackground(card),
+      caption: buildSocialStudioCaption(card),
+      hashtags: buildSocialStudioHashtags(card),
+    };
+  }
+
+  const socialStudioRenderRateLimit = rateLimit({
+    windowMs: 60_000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: false,
+  });
+  const socialStudioCertificateBodySchema = z.object({
+    certNumber: z.string().trim().min(1).max(80),
+  });
+  const socialStudioRenderBodySchema = socialStudioCertificateBodySchema.extend({
+    format: z.string().refine(isSocialStudioFormat),
+    background: z.string().refine(isSocialStudioBackground),
+  });
+
+  app.get("/api/admin/social-studio/backgrounds", requireAdmin, (_req, res) => {
+    res.json({
+      backgrounds: SOCIAL_STUDIO_BACKGROUNDS.map((bg) => ({
+        ...bg,
+        preview: bg.id === "auto" ? null : `/api/admin/social-studio/backgrounds/${bg.id}/preview`,
+        staticOnly: true,
+      })),
+      staticOnly: true,
+      providerGeneration: false,
+    });
+  });
+
+  app.get("/api/admin/social-studio/backgrounds/:background/preview", requireAdmin, async (req, res) => {
+    try {
+      const background = String(req.params.background);
+      if (!isSocialStudioBackground(background) || background === "auto") {
+        return res.status(400).json({ error: "Unknown background" });
+      }
+      const variant = resolveBackgroundVariant(background, { certNumber: "MV0" });
+      const { getShareBackground } = await import("./share-image");
+      const buf = await getShareBackground(variant as any, { allowProviderGeneration: false });
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.setHeader("Content-Length", String(buf.length));
+      res.end(buf);
+    } catch (err: any) {
+      console.error("[social-studio] background preview failed:", err?.message || err);
+      res.status(500).json({ error: "Background preview failed" });
+    }
+  });
+
+  app.get("/api/admin/social-studio/certificates", requireAdmin, async (req, res) => {
+    try {
+      const q = String(req.query.q ?? "")
+        .trim()
+        .slice(0, 80);
+      const like = `%${escapeSocialStudioSearchTerm(q)}%`;
+      const rows = (
+        await db.execute(sql`
+          SELECT
+            c.certificate_number       AS cert_number,
+            c.grade::text              AS grade,
+            c.card_name                AS card_name,
+            c.set_name                 AS set_name,
+            c.card_number              AS card_number,
+            c.card_game                AS card_game,
+            c.marketing_featured       AS featured,
+            c.marketing_pinned         AS pinned,
+            c.marketing_blacklisted    AS blacklisted,
+            c.grading_front_display    AS grading_front_display,
+            c.grading_front_cropped    AS grading_front_cropped,
+            c.front_image_path         AS front_image_path,
+            s.id                       AS submission_id,
+            s.marketing_feature_consent AS marketing_consent
+          FROM certificates c
+          LEFT JOIN submission_items si ON si.id = c.submission_item_id
+          LEFT JOIN submissions s ON s.id = si.submission_id
+          WHERE c.deleted_at IS NULL
+            AND c.grade_approved_at IS NOT NULL
+            AND COALESCE(c.marketing_blacklisted, false) = false
+            AND (
+              c.grading_front_display IS NOT NULL
+              OR c.grading_front_cropped IS NOT NULL
+              OR c.front_image_path IS NOT NULL
+            )
+            AND (
+              ${q} = ''
+              OR c.certificate_number ILIKE ${like} ESCAPE '\\'
+              OR c.card_name ILIKE ${like} ESCAPE '\\'
+              OR c.set_name ILIKE ${like} ESCAPE '\\'
+              OR CAST(s.id AS TEXT) ILIKE ${like} ESCAPE '\\'
+            )
+          ORDER BY c.marketing_pinned DESC,
+                   c.marketing_featured DESC,
+                   c.grade_approved_at DESC
+          LIMIT 80
+        `)
+      ).rows as Array<any>;
+
+      const cards = rows.map((r) => {
+        const card = {
+          certNumber: String(r.cert_number),
+          cardName: r.card_name ? String(r.card_name) : "Graded Card",
+          setName: r.set_name ? String(r.set_name) : null,
+          setNumber: r.card_number ? String(r.card_number) : null,
+          cardGame: r.card_game ? String(r.card_game).toLowerCase() : null,
+          grade: r.grade != null ? Number(r.grade) : null,
+          featured: r.featured === true,
+          pinned: r.pinned === true,
+          marketingConsent: r.marketing_consent === true,
+          submissionReference: r.submission_id != null ? `Submission ${r.submission_id}` : null,
+          hasImage: !!(r.grading_front_display || r.grading_front_cropped || r.front_image_path),
+        };
+        return {
+          ...card,
+          autoBackground: resolveAutoBackground(card),
+          hashtags: buildSocialStudioHashtags(card),
+        };
+      });
+      res.json({ cards, q, staticOnly: true });
+    } catch (err: any) {
+      console.error("[social-studio] certificate search failed:", err?.message || err);
+      sendServerError(res, err);
+    }
+  });
+
+  app.post("/api/admin/social-studio/certificate", requireAdmin, socialStudioRenderRateLimit, async (req, res) => {
+    try {
+      const parsed = socialStudioCertificateBodySchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Invalid certificate request" });
+      const loaded = await loadShareCert(parsed.data.certNumber);
+      if (!loaded || !loaded.scanKey) return res.status(404).json({ error: "Certificate not found" });
+      res.json({ card: socialStudioCardFromLoaded(loaded), staticOnly: true });
+    } catch (err: any) {
+      console.error("[social-studio] certificate detail failed:", err?.message || err);
+      sendServerError(res, err);
+    }
+  });
+
+  app.post("/api/admin/social-studio/caption", requireAdmin, socialStudioRenderRateLimit, async (req, res) => {
+    try {
+      const parsed = socialStudioCertificateBodySchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Invalid caption request" });
+      const loaded = await loadShareCert(parsed.data.certNumber);
+      if (!loaded || !loaded.scanKey) return res.status(404).json({ error: "Certificate not found" });
+      const card = socialStudioCardFromLoaded(loaded);
+      res.json({ caption: card.caption, hashtags: card.hashtags, staticOnly: true });
+    } catch (err: any) {
+      console.error("[social-studio] caption failed:", err?.message || err);
+      sendServerError(res, err);
+    }
+  });
+
+  app.post("/api/admin/social-studio/render", requireAdmin, socialStudioRenderRateLimit, async (req, res) => {
+    try {
+      const parsed = socialStudioRenderBodySchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: "Invalid render request" });
+      const { certNumber, format, background } = parsed.data;
+
+      const loaded = await loadShareCert(certNumber);
+      if (!loaded || !loaded.scanKey) return res.status(404).json({ error: "Certificate not found" });
+
+      const variant = resolveBackgroundVariant(background as SocialStudioBackgroundId, {
+        certNumber: loaded.cert.certNumber,
+        cardName: loaded.cert.cardName,
+        setName: loaded.cert.setName,
+        cardGame: loaded.cardGame,
+        grade: loaded.cert.grade,
+      });
+      const shareFormat = format === "feed" || format === "weekly-highlights" ? "feed" : "story";
+      const { getOrCreateShareImage } = await import("./share-image");
+      const image = await getOrCreateShareImage(loaded.cert, loaded.scanKey, shareFormat, variant as any, {
+        allowProviderGeneration: false,
+      });
+      const dims = SOCIAL_STUDIO_FORMAT_DIMENSIONS[format];
+      const filename = buildSocialStudioDownloadFilename({ certNumber: loaded.cert.certNumber }, format);
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+      res.setHeader("X-MintVault-Static-Only", "true");
+      res.setHeader("X-MintVault-Provider-Generation", "false");
+      res.setHeader("X-MintVault-Output-Width", String(dims.width));
+      res.setHeader("X-MintVault-Output-Height", String(dims.height));
+      res.setHeader("Content-Length", String(image.length));
+      res.end(image);
+    } catch (err: any) {
+      console.error("[social-studio] render failed:", err?.message || err);
+      res.status(500).json({ error: "Social Studio render failed" });
+    }
+  });
+
   // ── Community wall ──────────────────────────────────────────────────────────
 
   app.get("/api/public/community", async (req, res) => {
@@ -2016,20 +2230,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
     res.json(results);
   });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
   // ── AI-ASSISTED GRADING (Build 3 placeholder — superseded by Build 5) ───────
 
@@ -3250,11 +3450,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     console.error("[stolen] startup migration error:", e.message);
   }
 
-
-
-
-
-
   // ── Capacity endpoint ─────────────────────────────────────────────────────
   // Returns current active vs max counts for each grading tier.
   // Cached in-memory for 30 s to avoid hammering the DB on every page load.
@@ -3444,20 +3639,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   })();
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   app.get("/api/admin/certificates/export-csv", requireAdmin, async (_req, res) => {
     try {
       const certs = await storage.listCertificates();
@@ -3517,7 +3698,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.status(500).json({ error: "Failed to export CSV" });
     }
   });
-
 
   app.get("/api/admin/certificates", requireAdmin, async (req, res) => {
     try {
@@ -4909,13 +5089,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ── PUBLIC CLAIM FLOW ──────────────────────────────────────────────────────
   // Rate limiter: max 5 attempts per IP per 15 minutes to prevent brute-forcing claim codes
 
-
-
   // ── PUBLIC TRANSFER FLOW ───────────────────────────────────────────────────
   // Rate limiter: max 5 attempts per IP per 15 minutes
-
-
-
 
   // ── V2 TRANSFER FLOW (DVLA-style: ref number + 14-day dispute window) ────
   // v435 — public transfer endpoints are gated by TRANSFER_FLOW_LIVE. When
@@ -4932,12 +5107,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Rate limiter: max 5 attempts per IP per 15 minutes (shared concept, separate instance)
 
   // Stricter rate limit for ref number verification — 3 attempts per hour per IP
-
-
-
-
-
-
 
   // v435 — masks an email for audit log use: alice@example.com → a***@example.com
   const maskEmailForAudit = (email: string): string => {
@@ -4958,12 +5127,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // window) or DISPUTE (transfer rejected, original ownership preserved).
   // Silence is treated as REJECTION (sweep auto-expires) — explicit
   // confirmation is required for ownership to change.
-
-
-
-
-
-
 
   // ── STAGING HARNESS (seed + reset test data — staging only) ──────────────
   // Endpoints registered on every deploy but triple-guarded:
@@ -5006,9 +5169,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   }
 
-
-
-
   // ── CERTIFICATE DOCUMENT (A4 PDF) ─────────────────────────────────────────
   app.get("/api/admin/certificates/:certId/certificate-document", requireAdmin, async (req, res) => {
     try {
@@ -5028,7 +5188,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.status(500).json({ error: "Failed to generate certificate document" });
     }
   });
-
 
   // ── GRADING REPORT ────────────────────────────────────────────────────────────
   app.patch("/api/admin/certificates/:certId/grading-report", requireAdmin, async (req, res) => {
@@ -5057,8 +5216,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.status(500).json({ error: "Failed to save grading report." });
     }
   });
-
-
 
   app.get("/sitemap.xml", (_req, res) => {
     const baseUrl = APP_BASE_URL;
@@ -5123,15 +5280,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ── CUSTOMER DASHBOARD API ─────────────────────────────────────────────────
 
-
-
   // ── Account-switch confirm flow ─────────────────────────────────────────────
   // Triggered by /api/customer/verify/:token when an active session is signed
   // in as a different customer. /account/switch renders an HTML confirm page;
   // the user explicitly confirms or cancels. See server/account-switch.ts.
-
-
-
 
   // ── Mobile-webview intermediate pages (PIN auth launch) ─────────────────────
   // Magic-link emails clicked from in-app webviews (Gmail, Outlook, FB, etc.)
@@ -5205,20 +5357,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 </body></html>`;
   }
 
-
-
-
   // ── PIN auth (v1 launch) ────────────────────────────────────────────────────
   // Replaces magic-link as primary login for cert-owners + admin step 2.
   // Magic-link demoted to first-time enrollment (/api/customer/verify routes
   // to /auth/pin/setup if no pin_hash) and forgot-PIN reset.
-
-
-
-
-
-
-
 
   // POST /api/customer/logout — destroy customer session
   app.post("/api/customer/logout", (req, res) => {
@@ -7406,7 +7548,6 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Build 4: Public phone upload endpoint ─────────────────────────────────
 
-
   app.post("/api/upload/:certId/:imageType", phoneUpload.single("image"), async (req, res) => {
     try {
       const { autoCrop, checkImageQuality } = await import("./image-processing");
@@ -7455,7 +7596,6 @@ Defects (admin-confirmed): ${defectLines}`;
   });
 
   // ── Build 4: Hot folder upload ─────────────────────────────────────────────
-
 
   app.post("/api/admin/hot-folder-upload", hotFolderUpload.single("front"), async (req, res) => {
     try {
@@ -8498,7 +8638,6 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Unified "Grade with AI" endpoint — auto-crop, identify, grade in one call ──
 
-
   app.post(
     "/api/admin/certificates/grade-with-ai",
     requireAdmin,
@@ -8620,7 +8759,6 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // ── Build 6+: Identify card from uploaded image (no cert required) ─────────
 
-
   app.post("/api/admin/identify-image", requireAdmin, identifyUpload.single("image"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No image file provided" });
     const uploadErr = await rejectInvalidUploads([req.file]);
@@ -8640,7 +8778,6 @@ Defects (admin-confirmed): ${defectLines}`;
   // yet when `skip` runs (multer is downstream). Admins hitting the web UI form
   // without the header will share the 5/hour bucket; power use should curl with
   // the header set.
-
 
   // GET /api/tools/estimate/credits?email=
   // H3 — strict per-IP rate limit. The estimate tool is anonymous (no session to
@@ -8937,7 +9074,6 @@ Defects (admin-confirmed): ${defectLines}`;
   });
 
   // ── Admin scan-ingest: scanner → cert → AI pipeline in one call ────────────
-
 
   app.post(
     "/api/admin/scan-ingest",
@@ -9322,13 +9458,9 @@ Defects (admin-confirmed): ${defectLines}`;
   // Override write also drops the in-memory cache so the change takes effect
   // on the very next AI call instead of waiting out the 30s TTL.
 
-
-
-
   // ── AI dashboard stats — single endpoint feeding the AI Learning page ────
   // Combines top-line cert stats with the new ai_predictions accuracy view so
   // the dashboard makes one fetch on load instead of fanning out to four.
-
 
   // ── Manual cert-image attach + soft-delete + preview ─────────────────────
   // Surgical-repair endpoints for orphan-cert recovery (e.g. when scanner
@@ -9341,7 +9473,6 @@ Defects (admin-confirmed): ${defectLines}`;
   // Out of scope: variant generation (greyscale/highcontrast/etc). The
   // attach path writes only `grading_{side}_original`. Run /reprocess-images
   // afterward if variants are needed.
-
 
   // GET /preview — light metadata used by Manual Mode UI to confirm cert
   // exists and which side(s) are populated before uploading.
@@ -9997,8 +10128,6 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
-
-
   // ── One-time-use metadata backfill ────────────────────────────────────────
   // Re-runs AI Identify on certs that were approved before identification
   // happened (per docs/corpus-capture-audit.md — MV20/21/41/44). Only fills
@@ -10221,7 +10350,6 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
-
   // ── RAG embed-corpus admin controls ──────────────────────────────────────
   // Force-run + per-cert re-embed. Wire-protocol contract:
   //   POST /api/admin/embed-corpus/run         — picks the next batch (up
@@ -10234,18 +10362,13 @@ Defects (admin-confirmed): ${defectLines}`;
   // Both audit-logged. The /run endpoint stores `picked` and `skipped`
   // (debounce-hit boolean) in details; the per-cert endpoint stores the
   // service's status code.
-  let lastForceRunAtMs = 0;
+  const lastForceRunAtMs = 0;
   const FORCE_RUN_DEBOUNCE_MS = 60_000;
-
-
-
 
   // ── B2 cold-archive endpoints ───────────────────────────────────────────
   // Manual trigger + status surface for the R2 → B2 archival worker.
   // Worker runs daily via setInterval (server/index.ts); these endpoints
   // give the operator a way to dry-run, force a sweep, or check progress.
-
-
 
   // PUT /api/admin/certificates/:id/status
   app.put("/api/admin/certificates/:id/status", requireAdmin, async (req, res) => {
@@ -10279,9 +10402,6 @@ Defects (admin-confirmed): ${defectLines}`;
     }
   });
 
-
-
-
   // ── Account auth (/api/auth/*) ────────────────────────────────────────────
 
   function getClientIpForAuth(req: any): string {
@@ -10294,26 +10414,7 @@ Defects (admin-confirmed): ${defectLines}`;
     return process.env.APP_URL || `${req.protocol}://${req.get("host")}`;
   }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
   // ── Tier capacity management ──────────────────────────────────────────────
-
-
-
-
-
 
   // ── Custom sets CRUD + pokemon-sets GET are canonical in admin-config.ts
   // and public.ts respectively. Shadowed duplicates removed 2026-06-20.
@@ -11476,7 +11577,6 @@ Defects (admin-confirmed): ${defectLines}`;
   });
 
   // ── Content enhancement uploads (intro / outro / music) ────────────────
-
 
   function makeAssetUploadHandler(opts: {
     r2Key: string;
