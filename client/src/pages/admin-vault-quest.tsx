@@ -773,6 +773,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   const [providerStatusLoaded, setProviderStatusLoaded] = useState(false);
   // Image model / quality — default DRAFT/CHEAP (never the expensive model unless chosen).
   const [imgModel, setImgModel] = useState<VqGenerateWith>("auto");
+  const resetGenerateWith = useCallback(() => setImgModel(resetGenerateWithAfterAttempt()), []);
   const [premiumConfirmed, setPremiumConfirmed] = useState(false);
   const [premiumReason, setPremiumReason] = useState("");
   const requestedImgModel = requestModelForGenerateWith(imgModel);
@@ -789,7 +790,6 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   }, [advanced]);
   const imagesPerItem = refType === "master_portrait" ? (cost.data?.masterImagesPerItem ?? 3) : 1;
   const higgsProvider = cost.data?.providers?.find((p) => p.id === "higgsfield");
-  const openaiProvider = cost.data?.providers?.find((p) => p.id === "openai");
   const BATCH_IMAGE_LIMIT = 3; // default max images before the typed confirmation is required
   const TYPED_PHRASE = "I understand this will spend credits";
   const autoPaidRetryEnabled = founderFlags.auto_paid_retry;
@@ -1079,8 +1079,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   const genPhaseLabel = genPhase === "still-processing" ? "Still processing…" : genPhase === "generating" ? "Generating…" : null;
 
   async function generateMasterArtwork(typeOverride?: VqRefType) {
-    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
-    if (genInFlight.current) return; // re-entrancy guard (double-click during reuse-check)
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); resetGenerateWith(); return; }
+    if (genInFlight.current) { resetGenerateWith(); return; } // re-entrancy guard (double-click during reuse-check)
     genInFlight.current = true;
     setBusy("gen-art");
     try {
@@ -1089,6 +1089,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       const blocked = generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(type), providerConnection, providerStatusLoaded);
       if (blocked) {
         toast({ title: "Generation unavailable", description: blocked, variant: "destructive" });
+        resetGenerateWith();
         return;
       }
       if (isVqRefType(typeOverride) && typeOverride !== refType) setRefType(typeOverride); // keep gallery + approved-image in sync
@@ -1104,7 +1105,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
           // out existing approved assets — tell the founder before spending credits.
           toast({ title: "Reuse check unavailable", description: "Couldn't verify existing approved assets — generating new artwork." });
         }
-        if (check && check.assets.length > 0) { setReuseType(type); setReuseCheck(check); setBusy(null); return; }
+        if (check && check.assets.length > 0) { setReuseType(type); setReuseCheck(check); setBusy(null); resetGenerateWith(); return; }
       }
       // Release before delegating — doGenerateReference acquires the latch itself
       // (it is also called directly by the ReusePanel buttons). Same synchronous
@@ -1134,8 +1135,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   }
 
   async function doGenerateReference(typeOverride?: VqRefType) {
-    if (!selected) return;
-    if (genInFlight.current) return; // double-click guard for the ReusePanel entry points too
+    if (!selected) { resetGenerateWith(); return; }
+    if (genInFlight.current) { resetGenerateWith(); return; } // double-click guard for the ReusePanel entry points too
     genInFlight.current = true;
     // Guard: only a real ref-type string; never a forwarded MouseEvent (would put a
     // DOM node into the JSON body → "Converting circular structure to JSON").
@@ -1145,6 +1146,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       toast({ title: "Generation unavailable", description: blocked, variant: "destructive" });
       genInFlight.current = false;
       setBusy(null);
+      resetGenerateWith();
       return;
     }
     const typeLabel = REF_TYPES.find((t) => t.value === type)?.label ?? "reference";
@@ -1216,15 +1218,15 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       genInFlight.current = false;
       setBusy(null);
       setGenPhase(null);
-      setImgModel(resetGenerateWithAfterAttempt());
+      resetGenerateWith();
     }
   }
 
   async function generateFamilyArtwork() {
-    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); resetGenerateWith(); return; }
     const blocked = generationBlockedReasonWithProvider(founderFlags, "gen_master_portrait", providerConnection, providerStatusLoaded);
-    if (blocked) { toast({ title: "Generation unavailable", description: blocked, variant: "destructive" }); return; }
-    if (!window.confirm(`Generate Stage 1/2/3 master artwork for family ${selected.familyId}? This spends Higgsfield credits (up to 3 images).`)) return;
+    if (blocked) { toast({ title: "Generation unavailable", description: blocked, variant: "destructive" }); resetGenerateWith(); return; }
+    if (!window.confirm(`Generate Stage 1/2/3 master artwork for family ${selected.familyId}? This spends Higgsfield credits (up to 3 images).`)) { resetGenerateWith(); return; }
     setBusy("gen-family");
     const requestModel = requestModelForGenerateWith(imgModel);
     const fallbackModel = requestModel ?? VQ_QUALITY_MODEL.draft;
@@ -1244,15 +1246,15 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       artworkError(e, "Generate family artwork failed");
     } finally {
       setBusy(null);
-      setImgModel(resetGenerateWithAfterAttempt());
+      resetGenerateWith();
     }
   }
 
   async function generate3More() {
-    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); resetGenerateWith(); return; }
     const blocked = generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(refType), providerConnection, providerStatusLoaded);
-    if (blocked) { toast({ title: "Generation unavailable", description: blocked, variant: "destructive" }); return; }
-    if (!window.confirm(`Generate 3 more ${refTypeMeta.label} candidates for ${selected.characterName}? This spends Higgsfield credits (3 images).`)) return;
+    if (blocked) { toast({ title: "Generation unavailable", description: blocked, variant: "destructive" }); resetGenerateWith(); return; }
+    if (!window.confirm(`Generate 3 more ${refTypeMeta.label} candidates for ${selected.characterName}? This spends Higgsfield credits (3 images).`)) { resetGenerateWith(); return; }
     setBusy("gen-3more");
     const requestModel = requestModelForGenerateWith(imgModel);
     const fallbackModel = requestModel ?? VQ_QUALITY_MODEL.draft;
@@ -1272,7 +1274,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       artworkError(e, "Generate 3 more failed");
     } finally {
       setBusy(null);
-      setImgModel(resetGenerateWithAfterAttempt());
+      resetGenerateWith();
     }
   }
 
@@ -1342,11 +1344,12 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   const imagesForType = (rt: VqRefType) => (rt === "master_portrait" ? masterImages : 1);
   // Build the estimate for an explicit list of (character, referenceType) work items.
   function openBatchItems(work: { characterId: string; name: string; stage: number; referenceType: VqRefType }[], label: string) {
-    if (batchRunning) return;
-    if (work.length === 0) { toast({ title: "Nothing to generate", description: `Everything for “${label}” is already approved / locked / complete — 0 credits.` }); return; }
+    if (batchRunning) { resetGenerateWith(); return; }
+    if (work.length === 0) { toast({ title: "Nothing to generate", description: `Everything for “${label}” is already approved / locked / complete — 0 credits.` }); resetGenerateWith(); return; }
     const disabledType = work.find((w) => generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(w.referenceType), providerConnection, providerStatusLoaded));
     if (disabledType) {
       toast({ title: "Generation unavailable", description: generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(disabledType.referenceType), providerConnection, providerStatusLoaded) ?? "This generation type is Off.", variant: "destructive" });
+      resetGenerateWith();
       return;
     }
     const items: BatchItem[] = work.map((w) => ({ ...w, status: "queued" }));
@@ -1367,18 +1370,19 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     openBatchItems(eligible.map((c) => ({ characterId: c.characterId, name: c.characterName, stage: c.stageNumber, referenceType: refType })), label);
   }
 
-  function stopBatch() { stopRef.current = true; pauseRef.current = false; setQueuePaused(false); }
+  function stopBatch() { stopRef.current = true; pauseRef.current = false; setQueuePaused(false); resetGenerateWith(); }
   function pauseQueue() { pauseRef.current = true; setQueuePaused(true); }
   function resumeQueue() { pauseRef.current = false; setQueuePaused(false); }
   function skipCurrent() { skipRef.current = true; }
   // Re-queue failed / rejected items from the finished batch as a fresh estimate.
   function retryBatch(statuses: BatchStatus[]) {
-    if (!batch || batchRunning) return;
+    if (!batch || batchRunning) { resetGenerateWith(); return; }
     const work = batch.filter((b) => statuses.includes(b.status)).map((b) => ({ characterId: b.characterId, name: b.name, stage: b.stage, referenceType: b.referenceType, kind: b.kind }));
-    if (!work.length) { toast({ title: "Nothing to retry" }); return; }
+    if (!work.length) { toast({ title: "Nothing to retry" }); resetGenerateWith(); return; }
     const disabledType = work.find((w) => generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(w.referenceType), providerConnection, providerStatusLoaded));
     if (disabledType) {
       toast({ title: "Generation unavailable", description: generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(disabledType.referenceType), providerConnection, providerStatusLoaded) ?? "This generation type is Off.", variant: "destructive" });
+      resetGenerateWith();
       return;
     }
     const images = work.reduce((a, w) => a + (w.kind === "description" ? 0 : imagesForType(w.referenceType)), 0);
@@ -1389,14 +1393,16 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   }
 
   async function runBatch() {
-    if (!estimate || batchRunning) return;
+    if (!estimate || batchRunning) { resetGenerateWith(); return; }
     if (estimate.needTyped && typedConfirm.trim() !== TYPED_PHRASE) {
       toast({ title: "Type the confirmation to proceed", description: `Type: ${TYPED_PHRASE}`, variant: "destructive" });
+      resetGenerateWith();
       return;
     }
     const disabledType = estimate.items.find((item) => item.kind !== "description" && generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(item.referenceType), providerConnection, providerStatusLoaded));
     if (disabledType) {
       toast({ title: "Generation unavailable", description: generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(disabledType.referenceType), providerConnection, providerStatusLoaded) ?? "This generation type is Off.", variant: "destructive" });
+      resetGenerateWith();
       return;
     }
     const items = estimate.items.map((i) => ({ ...i, status: "queued" as BatchStatus }));
@@ -1405,6 +1411,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     const batchCreditsPerImage = vqCreditsPerImage(batchModel);
     setBatch(items);
     setEstimate(null);
+    resetGenerateWith();
     setBatchRunning(true);
     stopRef.current = false; pauseRef.current = false; skipRef.current = false; setQueuePaused(false);
     const setItem = (idx: number, patch: Partial<BatchItem>) => setBatch((prev) => (prev ? prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)) : prev));
@@ -1418,7 +1425,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
         setItem(i, { status: "paused" });
         await new Promise((r) => setTimeout(r, 400));
       }
-      if (!alive.current) return; // unmounted: no further requests, no toast, no refetch
+      if (!alive.current) { resetGenerateWith(); return; } // unmounted: no further requests, no toast, no refetch
       if (stopRef.current) {
         setBatch((prev) => (prev ? prev.map((it) => (it.status === "queued" || it.status === "generating" || it.status === "paused" ? { ...it, status: "skipped" as BatchStatus } : it)) : prev));
         skipped = items.length - i;
@@ -1476,7 +1483,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       }
     }
     setBatchRunning(false);
-    setImgModel(resetGenerateWithAfterAttempt());
+    resetGenerateWith();
     stopRef.current = false; pauseRef.current = false; setQueuePaused(false);
     await candQuery.refetch();
     await chars.refetch();
@@ -1492,9 +1499,10 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       // NOT regenerated — this button previously clobbered manual unapproved drafts.
       .filter((c) => !c.locked && !isCanonical(c) && c.descriptionStatus !== "approved" && !dnaComplete(c))
       .map((c) => ({ characterId: c.characterId, name: c.characterName, stage: c.stageNumber, referenceType: "master_portrait" as VqRefType, kind: "description" as const }));
-    if (!work.length) { toast({ title: "Nothing to generate", description: "Every unlocked character already has an approved description." }); return; }
+    if (!work.length) { toast({ title: "Nothing to generate", description: "Every unlocked character already has an approved description." }); resetGenerateWith(); return; }
     setTypedConfirm("");
     setEstimate({ items: work.map((w) => ({ ...w, status: "queued" as BatchStatus })), images: 0, credits: 0, needTyped: false, label: `Missing descriptions (${work.length}) — Anthropic text, 0 Higgsfield credits`, model: requestModelForGenerateWith(imgModel) ?? VQ_QUALITY_MODEL.draft });
+    resetGenerateWith();
   }
 
   // ── Family actions ─────────────────────────────────────────────────────────
@@ -1575,7 +1583,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
           onReuse={applyReuseAsset}
           onGenerateWithRefs={() => void doGenerateReference()}
           onGenerateAnyway={() => void doGenerateReference()}
-          onClose={() => setReuseCheck(null)}
+          onClose={() => { setReuseCheck(null); resetGenerateWith(); }}
         />
       )}
       <div className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/40 p-3">
@@ -2393,7 +2401,6 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Image engine</span>
                     <button type="button" disabled className="rounded border border-amber-500 bg-amber-500/15 px-2 py-1 text-[11px] text-amber-200" title={higgsProvider?.note ?? "Higgsfield"}>Higgsfield</button>
-                    <button type="button" disabled className="rounded border border-slate-800 px-2 py-1 text-[11px] text-slate-600" title={openaiProvider?.note}>OpenAI Images — {openaiProvider?.note ?? "unavailable"}</button>
                     <div className="ml-auto flex gap-1">
                       <button type="button" onClick={() => setImgModel("auto")} className={`rounded px-2 py-1 text-[11px] font-semibold ${imgModel === "auto" ? "border border-amber-500 bg-amber-500/15 text-amber-200" : "border border-slate-700 text-slate-400 hover:border-slate-500"}`}>Auto</button>
                       {(["draft", "standard", "premium"] as const).map((q) => {
@@ -2470,7 +2477,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                       )}
                       <div className="mt-2 flex gap-1.5">
                         <button type="button" onClick={runBatch} disabled={estimate.needTyped && typedConfirm.trim() !== TYPED_PHRASE} className="rounded bg-amber-500 px-2.5 py-1 text-[11px] font-semibold text-slate-900 hover:bg-amber-400 disabled:opacity-40">{batchConfirmationButtonText(estimate.images, estimate.credits)}</button>
-                        <button type="button" onClick={() => { setEstimate(null); setTypedConfirm(""); }} className="rounded border border-slate-600 px-2.5 py-1 text-[11px] text-slate-300 hover:border-slate-400">Cancel</button>
+                        <button type="button" onClick={() => { setEstimate(null); setTypedConfirm(""); resetGenerateWith(); }} className="rounded border border-slate-600 px-2.5 py-1 text-[11px] text-slate-300 hover:border-slate-400">Cancel</button>
                       </div>
                     </div>
                   )}
