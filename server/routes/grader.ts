@@ -47,6 +47,7 @@ import {
 } from "../grader";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { graderEditSubmissionRateLimit } from "../lib/rate-limiters";
 
 const graderLoginLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -440,6 +441,7 @@ export function registerGraderRoutes(app: Express): void {
   app.post(
     "/api/grader/certificates/:id/edit-submission",
     requireCapability("grade"),
+    graderEditSubmissionRateLimit,
     async (req: Request, res: Response) => {
       try {
         const certId = parseInt(String(req.params.id), 10);
