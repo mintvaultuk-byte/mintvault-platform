@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { AlertTriangle, Archive, Check, Edit3, Search, X } from "lucide-react";
 import AdminShell from "@/components/admin/admin-shell";
@@ -165,6 +165,8 @@ export default function AdminSetsPage() {
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ row: SetRow; draft: EditDraft } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   useEffect(() => {
     (async () => {
@@ -215,10 +217,11 @@ export default function AdminSetsPage() {
   }
 
   async function saveEdit() {
-    if (!editing) return;
+    if (!editing || savingRef.current) return;
     const { row, draft } = editing;
     setMsg(null);
     setErr(null);
+    if (!hasDraftChanges(row, draft)) return;
     const cleanName = draft.setName.trim();
     const cleanCode = draft.setId.replace(/\s+/g, "").toLowerCase();
     if (!cleanName) return setErr("Set name is required.");
@@ -233,6 +236,8 @@ export default function AdminSetsPage() {
       if (!window.confirm(prompt)) return;
       confirmLinkedCardUpdate = codeChanged;
     }
+    savingRef.current = true;
+    setSaving(true);
     try {
       await apiRequest("PATCH", `/api/admin/sets/${row.source}/${encodeURIComponent(row.setId)}`, {
         ...draft,
@@ -247,14 +252,17 @@ export default function AdminSetsPage() {
       await load();
     } catch (error) {
       setErr(messageFromError(error, "Set was not updated."));
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   }
 
-  async function decide(row: SetRow, suggestion: Suggestion, decision: "reject" | "ignore") {
+  async function decide(row: SetRow, suggestion: Suggestion, decision: "reject" | "ignore"): Promise<boolean> {
     setMsg(null);
     setErr(null);
     const reason = window.prompt(`${decision === "reject" ? "Reject" : "Ignore"} "${suggestion.label}" reason:`);
-    if (reason === null) return;
+    if (reason === null) return false;
     try {
       await apiRequest("POST", `/api/admin/sets/${row.source}/${encodeURIComponent(row.setId)}/review`, {
         suggestionKey: suggestion.key,
@@ -263,8 +271,10 @@ export default function AdminSetsPage() {
       });
       setMsg(decision === "reject" ? "Suggestion rejected." : "Suggestion ignored.");
       await load();
+      return true;
     } catch (error) {
       setErr(messageFromError(error, "Review decision was not saved."));
+      return false;
     }
   }
 
@@ -282,6 +292,45 @@ export default function AdminSetsPage() {
     await fetch("/api/admin/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
     navigate("/cert");
   }
+
+  const editingHasChanges = editing ? hasDraftChanges(editing.row, editing.draft) : false;
+  const editingHasUnsavedChanges = editing ? hasUnsavedDraftChanges(editing.row, editing.draft) : false;
+  const editingSuggestion =
+    editing?.draft.approvedSuggestionId &&
+    editing.row.suggestions.find((s) => s.key === editing.draft.approvedSuggestionId);
+  const editingCanApprove = !!editingSuggestion && Object.keys(editingSuggestion.suggested).length > 0;
+
+  function closeEditor() {
+    if (saving) return;
+    if (editingHasUnsavedChanges && !window.confirm("Discard unsaved set changes?")) return;
+    setEditing(null);
+  }
+
+  async function rejectEditingSuggestion() {
+    if (!editing || !editingSuggestion || saving) return;
+    const rejected = await decide(editing.row, editingSuggestion, "reject");
+    if (rejected) setEditing(null);
+  }
+
+  useEffect(() => {
+    if (!editing) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeEditor();
+    };
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!editingHasUnsavedChanges) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [editing, editingHasUnsavedChanges, saving]);
 
   if (authed !== true) {
     return (
@@ -558,21 +607,37 @@ export default function AdminSetsPage() {
       </div>
 
       {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
-          <div className="w-full max-w-2xl rounded border border-[#D4AF37]/30 bg-[#090909] p-5 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-[#E8E4DC]">Edit Set</h2>
-                <p className="mt-1 text-sm text-[#E8E4DC]/55">
-                  Updates the existing {sourceLabel(editing.row.source)} record only.
-                </p>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="set-editor-title"
+          data-testid="set-editor-modal"
+        >
+          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded border border-[#D4AF37]/30 bg-[#090909] shadow-2xl">
+            <div className="border-b border-[#D4AF37]/15 p-5 pb-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h2 id="set-editor-title" className="text-lg font-semibold text-[#E8E4DC]">
+                    Edit Set
+                  </h2>
+                  <p className="mt-1 text-sm text-[#E8E4DC]/55">
+                    Updates the existing {sourceLabel(editing.row.source)} record only.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className={compactBtn}
+                  onClick={closeEditor}
+                  aria-label="Close editor"
+                  disabled={saving}
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-              <button type="button" className={compactBtn} onClick={() => setEditing(null)} aria-label="Cancel">
-                <X className="h-4 w-4" />
-              </button>
             </div>
 
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 overflow-y-auto p-5 sm:grid-cols-2">
               <label className="space-y-1">
                 <span className="text-xs font-semibold uppercase text-[#D4AF37]">Set name</span>
                 <input
@@ -659,12 +724,36 @@ export default function AdminSetsPage() {
               </label>
             </div>
 
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" className={compactBtn} onClick={() => setEditing(null)}>
+            <div
+              className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 border-t border-[#D4AF37]/20 bg-[#090909] p-4 shadow-[0_-10px_24px_rgba(0,0,0,0.45)]"
+              data-testid="set-editor-sticky-footer"
+            >
+              {editingSuggestion && (
+                <button type="button" className={compactBtn} onClick={rejectEditingSuggestion} disabled={saving}>
+                  Reject Suggestion
+                </button>
+              )}
+              {editingCanApprove && (
+                <button
+                  type="button"
+                  className="admin-btn admin-btn--gold"
+                  onClick={saveEdit}
+                  disabled={saving || !editingHasChanges}
+                >
+                  Approve Suggestion
+                </button>
+              )}
+              <button type="button" className={compactBtn} onClick={closeEditor} disabled={saving}>
                 Cancel
               </button>
-              <button type="button" className="admin-btn admin-btn--gold" onClick={saveEdit}>
-                Save
+              <button
+                type="button"
+                className="admin-btn admin-btn--gold"
+                onClick={saveEdit}
+                disabled={saving || !editingHasChanges}
+                data-testid="set-editor-save"
+              >
+                {saving ? "Saving..." : "Save Changes"}
               </button>
             </div>
           </div>
@@ -672,4 +761,42 @@ export default function AdminSetsPage() {
       )}
     </AdminShell>
   );
+}
+
+function normalizedDraftCode(value: string): string {
+  return value.replace(/\s+/g, "").toLowerCase();
+}
+
+function persistedDraft(row: SetRow, draft: EditDraft) {
+  return {
+    setId: normalizedDraftCode(draft.setId),
+    setName: draft.setName.trim(),
+    tcg: draft.tcg,
+    series: draft.series.trim(),
+    releaseYear: draft.releaseYear.trim(),
+    totalCards: draft.totalCards.trim(),
+    subset: draft.subset.trim(),
+    archived: draft.archived,
+  };
+}
+
+function persistedRow(row: SetRow) {
+  return {
+    setId: row.setId,
+    setName: row.setName,
+    tcg: row.tcg,
+    series: row.series || "",
+    releaseYear: row.releaseYear == null ? "" : String(row.releaseYear),
+    totalCards: row.totalCards == null ? "" : String(row.totalCards),
+    subset: row.subset || "",
+    archived: row.archived,
+  };
+}
+
+export function hasDraftChanges(row: SetRow, draft: EditDraft): boolean {
+  return JSON.stringify(persistedDraft(row, draft)) !== JSON.stringify(persistedRow(row));
+}
+
+export function hasUnsavedDraftChanges(row: SetRow, draft: EditDraft): boolean {
+  return hasDraftChanges(row, draft) || draft.reason.trim() !== "" || !!draft.approvedSuggestionId;
 }
