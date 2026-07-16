@@ -3,7 +3,7 @@
  * stars / shiny / code) filled with the correct colour so gold vs silver and 2★ vs 1★
  * are distinguishable by SHAPE + FILL, never by text colour alone.
  */
-import type { RaritySymbol as RaritySymbolMeta, SymbolColour } from "@shared/pokemon-rarity-catalogue";
+import { describeSymbol, type RaritySymbol as RaritySymbolMeta, type SymbolColour } from "@shared/pokemon-rarity-catalogue";
 
 const FILL: Record<SymbolColour, string> = {
   gold: "#C8A227",
@@ -41,7 +41,13 @@ export function RaritySymbol({ symbol, size = 30 }: { symbol: RaritySymbolMeta; 
   const count = symbol.count ?? 1;
   const w = symbol.shape === "stars" ? size * (count === 3 ? 2.2 : 1.7) : size;
   return (
-    <svg width={w} height={size} viewBox={`0 0 ${symbol.shape === "stars" ? (count === 3 ? 53 : 41) : 24} 24`} aria-hidden>
+    <svg
+      width={w}
+      height={size}
+      viewBox={`0 0 ${symbol.shape === "stars" ? (count === 3 ? 53 : 41) : 24} 24`}
+      role="img"
+      aria-label={describeSymbol(symbol)}
+    >
       <defs>
         <linearGradient id="mv-rarity-rainbow" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#ff4d4d" />

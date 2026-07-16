@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
+import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
 import {
@@ -192,9 +194,93 @@ export default function CertificateForm({
     gradeOverall: certificate?.gradeOverall || "",
     labelType: (certificate as any)?.labelType || "standard",
     status: certificate?.status || "active",
+    // Structured Pokémon rarity/variant (visual picker). Seeded from the cert's
+    // structured columns so an edit re-sends them unchanged (never erased). The
+    // legacy `variant`/`rarity` above stay as the historical source of truth.
+    rarityCode: certificate?.rarityCode || "",
+    finishVariant: certificate?.finishVariant || "",
+    promoType: certificate?.promoType || "",
+    subsetName: certificate?.subsetName || "",
+    era: certificate?.era || "",
   });
 
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
+
+  // ── Structured rarity/variant picker wiring ────────────────────────────────
+  // The picker emits a full StructuredCardVariant; we fan it out to the separate
+  // form keys (which auto-serialise to the save payload) and keep the existing
+  // `language` field in sync. A no-op guard prevents the picker's mount-time
+  // onChange from dirtying the form (which would trigger a spurious auto-save).
+  const handleStructuredChange = useCallback((v: StructuredCardVariant) => {
+    setForm((f) => {
+      const langLabel = languageByValueOrLabel(v.language)?.label ?? f.language;
+      if (
+        f.rarityCode === (v.rarity ?? "") &&
+        f.finishVariant === (v.finish ?? "") &&
+        f.promoType === (v.promo ?? "") &&
+        f.subsetName === (v.subset ?? "") &&
+        f.era === (v.era ?? "") &&
+        f.language === langLabel
+      ) {
+        return f;
+      }
+      return {
+        ...f,
+        rarityCode: v.rarity ?? "",
+        finishVariant: v.finish ?? "",
+        promoType: v.promo ?? "",
+        subsetName: v.subset ?? "",
+        era: v.era ?? "",
+        language: langLabel,
+      };
+    });
+  }, []);
+
+  // Per-admin favourites / recently-used (server-persisted via pipeline_settings).
+  // Undefined until loaded → the picker falls back to localStorage in the meantime.
+  const [rarityFavourites, setRarityFavourites] = useState<string[] | undefined>(undefined);
+  const [rarityRecent, setRarityRecent] = useState<string[] | undefined>(undefined);
+  useEffect(() => {
+    let active = true;
+    fetch("/api/admin/rarity-preferences", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { favourites: [], recent: [] }))
+      .then((p) => {
+        if (!active) return;
+        setRarityFavourites(Array.isArray(p?.favourites) ? p.favourites : []);
+        setRarityRecent(Array.isArray(p?.recent) ? p.recent : []);
+      })
+      .catch(() => {
+        if (active) {
+          setRarityFavourites([]);
+          setRarityRecent([]);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const persistPrefs = useCallback((favourites: string[], recent: string[]) => {
+    void fetch("/api/admin/rarity-preferences", {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ favourites, recent }),
+    }).catch(() => {});
+  }, []);
+  const onFavouritesChange = useCallback(
+    (favs: string[]) => {
+      setRarityFavourites(favs);
+      persistPrefs(favs, rarityRecent ?? []);
+    },
+    [persistPrefs, rarityRecent],
+  );
+  const onRecentChange = useCallback(
+    (rec: string[]) => {
+      setRarityRecent(rec);
+      persistPrefs(rarityFavourites ?? [], rec);
+    },
+    [persistPrefs, rarityFavourites],
+  );
 
   // Stale-tab guard: snapshot of the metadata values this form loaded. Sent
   // with every save so the server can detect a field someone ELSE changed
@@ -1822,6 +1908,30 @@ export default function CertificateForm({
               </div>
             );
           })()}
+
+          {/* Structured Pokémon rarity/variant picker (visual). Writes the new
+              nullable columns only; the legacy Variant control above is unchanged. */}
+          <div>
+            <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+              Structured Rarity &amp; Variant (visual picker)
+            </label>
+            <RarityVariantPicker
+              legacyVariant={form.variant || null}
+              value={{
+                language: languageByValueOrLabel(form.language)?.value ?? "en",
+                era: (form.era || null) as StructuredCardVariant["era"],
+                rarity: form.rarityCode || null,
+                finish: form.finishVariant || null,
+                promo: form.promoType || null,
+                subset: form.subsetName || null,
+              }}
+              onChange={handleStructuredChange}
+              favourites={rarityFavourites}
+              recent={rarityRecent}
+              onFavouritesChange={onFavouritesChange}
+              onRecentChange={onRecentChange}
+            />
+          </div>
 
           <div>
             <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
