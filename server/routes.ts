@@ -57,6 +57,7 @@ import { registerSubmissionRoutes } from "./routes/submissions";
 import { registerAdminSubmissionRoutes } from "./routes/admin-submissions";
 import { registerAdminConfigRoutes } from "./routes/admin-config";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
+import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
 import { registerTransferRoutes } from "./routes/transfers";
 import { registerPreGradeRoutes } from "./routes/pre-grade";
 import { registerVaultQuestAdminRoutes } from "./routes/vault-quest-admin";
@@ -1411,6 +1412,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerAdminSubmissionRoutes(app);
   registerAdminConfigRoutes(app);
   registerRarityMappingRoutes(app);
+  registerPokemonKnowledgeRoutes(app);
   registerTransferRoutes(app);
   registerPreGradeRoutes(app);
   registerStolenRoutes(app);
