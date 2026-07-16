@@ -1233,7 +1233,14 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   // and that NO automatic paid retry happened — with an explicit Try Again. Never
   // used to present rejected artwork as approved/usable.
   const [bgRejection, setBgRejection] = useState<
-    { reason: string; offPercent: number | null; thresholdPercent: number | null; creditUsed: boolean } | null
+    {
+      reason: string;
+      offPercent: number | null;
+      thresholdPercent: number | null;
+      creditUsed: boolean;
+      cleanupAttempted?: boolean;
+      quarantineRef?: string | null;
+    } | null
   >(null);
   useEffect(() => {
     setBgRejection(null);
@@ -1384,6 +1391,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
           backgroundOffFraction?: number;
           backgroundThreshold?: number;
           providerCreditUsed?: boolean;
+          cleanupAttempted?: boolean;
+          quarantineRef?: string | null;
         };
         if (type === "action_pose" && body.rejected && body.rejectionKind === "studio_background") {
           const pct = (v: number | undefined) => (typeof v === "number" ? Math.round(v * 1000) / 10 : null);
@@ -1392,6 +1401,8 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
             offPercent: pct(body.backgroundOffFraction),
             thresholdPercent: pct(body.backgroundThreshold),
             creditUsed: body.providerCreditUsed === true,
+            cleanupAttempted: body.cleanupAttempted === true,
+            quarantineRef: body.quarantineRef ?? null,
           });
           return;
         }
@@ -1416,11 +1427,16 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
         trackCredits(vqChargedCredits(data, fallbackModel)); // counts billed rejects at the model actually used
         toast({ title: `Master Reference — ${made} candidate${made === 1 ? "" : "s"}`, description: rejected ? `${rejected} auto-rejected for identity drift. Choose one below.` : "Studio references generated — choose one below." });
       } else {
-        const data = outcome.data as { width: number; height: number; model?: string; message?: string };
+        const data = outcome.data as { width: number; height: number; model?: string; message?: string; backgroundCorrected?: boolean };
         if (outcome.phase === "replayed") {
           toast({ title: "Already generated", description: data.message ?? "This exact request already completed. Refresh the gallery to see it." });
           await candQuery.refetch();
           return;
+        }
+        if (data.backgroundCorrected) {
+          // The raw provider background failed the gate but was fixed LOCALLY — no extra
+          // provider call, no extra credit. Reassure the founder explicitly.
+          toast({ title: "Studio background corrected automatically", description: "The studio background was cleaned up locally — no additional generation credit used. Review the candidate below." });
         }
         await candQuery.refetch();
         trackCredits(vqCreditsPerImage(data.model ?? fallbackModel)); // model the server actually used (refs may upgrade it)
@@ -2396,20 +2412,23 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                           )}
                           {bgRejection && !busyGen && (
                             <div className="mt-3 rounded-xl border border-amber-700/60 bg-amber-950/20 p-3 text-left">
-                              <div className="flex items-center gap-2 text-sm font-bold text-amber-200"><AlertCircle className="h-4 w-4" />Generated image had a non-studio background</div>
-                              <p className="mt-1 text-[12px] text-amber-100/90">No automatic retry was made — you choose whether to spend another generation credit.</p>
+                              <div className="flex items-center gap-2 text-sm font-bold text-amber-200"><AlertCircle className="h-4 w-4" />{bgRejection.cleanupAttempted ? "Background could not be corrected safely" : "Generated image had a non-studio background"}</div>
+                              <p className="mt-1 text-[12px] text-amber-100/90">{bgRejection.cleanupAttempted ? "Automatic cleanup could not safely isolate the character. No automatic retry was made — you choose whether to spend another generation credit." : "No automatic retry was made — you choose whether to spend another generation credit."}</p>
                               <div className="mt-2 grid grid-cols-1 gap-0.5 text-[11px] text-slate-300 sm:grid-cols-2">
                                 {bgRejection.offPercent != null && <div>Measured edge off-background: <b className="text-amber-200">{bgRejection.offPercent}%</b></div>}
                                 {bgRejection.thresholdPercent != null && <div>Allowed maximum: <b className="text-emerald-300">{bgRejection.thresholdPercent}%</b></div>}
                                 <div className="sm:col-span-2">{bgRejection.creditUsed ? "A generation credit was used for this attempt." : "No generation credit was used."}</div>
-                                <div className="sm:col-span-2 text-slate-500">The rejected image was not saved and is not usable — a clean pure-white studio background is required.</div>
+                                <div className="sm:col-span-2 text-slate-500">The rejected image was not saved as a candidate and is not usable — a clean pure-white studio background is required.</div>
                               </div>
                               <div className="mt-2.5 flex flex-wrap gap-2">
-                                <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked} className="rounded-lg px-4 py-2 text-xs font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>Try Again</button>
+                                <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked} className="rounded-lg px-4 py-2 text-xs font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>Generate Again — uses another credit</button>
                                 <label className={`flex cursor-pointer items-center gap-2 rounded-lg border border-slate-600 px-4 py-2 text-xs font-bold text-slate-100 hover:border-amber-500 ${busy ? "pointer-events-none opacity-40" : ""}`}>
                                   <Upload className="h-3.5 w-3.5" />{busy === "upload-action" ? "Uploading…" : "Manual Upload Action Pose"}
                                   <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void uploadActionReference(f); }} />
                                 </label>
+                                {bgRejection.quarantineRef && (
+                                  <a href={`/api/admin/vault-quest/quarantine/${bgRejection.quarantineRef}/image`} target="_blank" rel="noreferrer" className="flex items-center gap-2 rounded-lg border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-300 hover:border-slate-500">View Rejected Source</a>
+                                )}
                               </div>
                             </div>
                           )}

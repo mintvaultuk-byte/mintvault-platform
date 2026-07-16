@@ -105,6 +105,26 @@ const BAD_BG_PNG = vi.hoisted(() => {
   return sharp(buf, { raw: { width, height, channels: 3 } }).png().toBuffer();
 });
 
+// A real 200x200 PNG on a PLAIN near-white studio backdrop whose subject sprawls to the
+// right edge — FAILS the raw 5% gate, but the deterministic local finish CAN isolate the
+// subject and re-centre it on white. The exact production case: right creature, bad edges.
+const CORRECTABLE_PNG = vi.hoisted(() => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const sharp = require("sharp");
+  const width = 200, height = 200;
+  const buf = Buffer.alloc(width * height * 3);
+  const disc = (x: number, y: number, cx: number, cy: number, r: number) => Math.hypot(x - cx, y - cy) <= r;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 3;
+      let r = 248, g = 248, b = 248; // plain near-white studio backdrop
+      if (disc(x, y, 92, 100, 40) || (y > 64 && y < 136 && x > 92)) { r = 190; g = 60; b = 55; } // body + a tall arm reaching the right edge (fails the raw 5% gate)
+      buf[i] = r; buf[i + 1] = g; buf[i + 2] = b;
+    }
+  }
+  return sharp(buf, { raw: { width, height, channels: 3 } }).png().toBuffer();
+});
+
 const createSpy = vi.hoisted(() =>
   vi.fn(async () => ({
     provider: "higgsfield" as const,
@@ -356,7 +376,9 @@ run("Action Reference background gate — route wiring", () => {
     expect((res.json as { rejected?: boolean; error?: string }).rejected).toBe(true);
     expect((res.json as { error?: string }).error).toMatch(/studio background rejected/i);
     expect(createSpy).toHaveBeenCalledTimes(2); // one retry, then give up — never a 3rd
-    expect(uploadSpy).not.toHaveBeenCalled(); // discarded — never written to R2
+    // The rejected source is now PRESERVED privately in quarantine (a credit was spent),
+    // but is NEVER written as an approved candidate. The only upload is the quarantine key.
+    for (const call of uploadSpy.mock.calls) expect(String(call[0])).toMatch(/\/quarantine\//);
     expect(candidateStore.size).toBe(0); // never recorded as a candidate row
   });
 
@@ -397,8 +419,37 @@ run("Action Reference background gate — route wiring", () => {
     expect(body.autoRetried).toBe(false);
     // The decisive spend-safety assertion: exactly ONE paid provider call — no auto-retry.
     expect(createSpy).toHaveBeenCalledTimes(1);
-    expect(uploadSpy).not.toHaveBeenCalled();
+    // Rejected source preserved in private quarantine only — never as a candidate.
+    for (const call of uploadSpy.mock.calls) expect(String(call[0])).toMatch(/\/quarantine\//);
     expect(candidateStore.size).toBe(0);
+  });
+
+  it("DETERMINISTIC LOCAL FINISH: a raw image that fails the gate is corrected locally into a candidate — ZERO extra provider calls, zero extra credits", async () => {
+    await q("UPDATE vq_feature_flags SET enabled = false WHERE feature = 'auto_paid_retry'", []); // default-safe
+    createSpy.mockResolvedValue({
+      provider: "higgsfield" as const,
+      model: "nano_banana",
+      png: await CORRECTABLE_PNG, // near-white backdrop, subject to the edge → fails raw gate
+      width: 200,
+      height: 200,
+      jobId: "job-correctable",
+    });
+    const res = await post(`/api/admin/vault-quest/characters/${CHARACTER_NO_MASTER.characterId}/generate-artwork`, {
+      referenceType: "action_pose",
+      model: "nano_banana",
+      idempotencyKey: `finish-ok-${keyCounter}`,
+    });
+    const body = res.json as { backgroundCorrected?: boolean; candidateId?: number; studioFinish?: { method?: string; edgeOffAfter?: number } };
+    expect(res.status).toBe(201); // corrected → a real candidate, not a rejection
+    expect(body.backgroundCorrected).toBe(true);
+    expect(body.studioFinish?.method).toBe("chroma");
+    expect(body.studioFinish?.edgeOffAfter).toBeLessThanOrEqual(5); // final passes the UNCHANGED 5% gate
+    // THE decisive proof: the local finish spent NO extra provider call — one create only.
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    // The CLEANED image was written as a real candidate (a candidate key, not quarantine).
+    expect(candidateStore.size).toBe(1);
+    expect(uploadSpy.mock.calls.some((c) => /\/candidates?\//.test(String(c[0])) || !/\/quarantine\//.test(String(c[0])))).toBe(true);
+    for (const call of uploadSpy.mock.calls) expect(String(call[0])).not.toMatch(/\/quarantine\//); // nothing quarantined on success
   });
 
   it("background fails once, then passes on the automatic retry — accepted using exactly 2 provider calls", async () => {
