@@ -1097,6 +1097,147 @@ export const insertRarityMappingReviewSchema = createInsertSchema(rarityMappingR
 export type RarityMappingReview = typeof rarityMappingReviews.$inferSelect;
 export type InsertRarityMappingReview = z.infer<typeof insertRarityMappingReviewSchema>;
 
+// ── Pokémon Knowledge Engine (additive — migrations/add-pokemon-knowledge.sql) ──
+// Canonical SET knowledge lives here (companion to tcgdex_sets/custom_sets,
+// keyed by normalised set_key — the tcgdex re-import UPSERT clobbers its own
+// rows, so founder-verified knowledge must never live in importer-owned
+// columns). Rarities/finishes/promos/languages/eras stay in the ONE shared
+// catalogue (shared/pokemon-rarity-catalogue.ts) — no duplicate tables.
+
+export const pokemonSetKnowledge = pgTable(
+  "pokemon_set_knowledge",
+  {
+    id: serial("id").primaryKey(),
+    setKey: text("set_key").notNull(), // normalised code — join key to tcgdex/custom sets
+    language: text("language").notNull().default("en"),
+    canonicalName: text("canonical_name").notNull(),
+    localName: text("local_name"),
+    translatedName: text("translated_name"),
+    setCode: text("set_code"),
+    altCode: text("alt_code"),
+    abbreviation: text("abbreviation"),
+    series: text("series"),
+    era: text("era"), // same vocabulary as certificates.era CHECK
+    region: text("region"), // same vocabulary as certificates.region CHECK
+    releaseDate: text("release_date"),
+    year: text("year"),
+    announcedCount: integer("announced_count"),
+    mainCount: integer("main_count"),
+    secretCount: integer("secret_count"),
+    collectorNumberFormat: text("collector_number_format"),
+    parentSetKey: text("parent_set_key"), // regional-equivalent relationship (loose)
+    symbolNote: text("symbol_note"),
+    symbolAssetKey: text("symbol_asset_key"),
+    sourceType: text("source_type").notNull().default("unknown"),
+    sourceReference: text("source_reference"),
+    verifiedDate: text("verified_date"),
+    confidence: text("confidence").notNull().default("low"),
+    status: text("status").notNull().default("provisional"),
+    archived: boolean("archived").notNull().default(false),
+    notes: text("notes"),
+    version: integer("version").notNull().default(1),
+    createdBy: text("created_by"),
+    updatedBy: text("updated_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uqKeyLang: uniqueIndex("uq_pokemon_set_knowledge_key_lang").on(t.setKey, t.language),
+    idxStatus: index("idx_pokemon_set_knowledge_status").on(t.status),
+    idxEra: index("idx_pokemon_set_knowledge_era").on(t.era),
+    idxName: index("idx_pokemon_set_knowledge_name").on(t.canonicalName),
+  })
+);
+
+export const pokemonSetAliases = pgTable(
+  "pokemon_set_aliases",
+  {
+    id: serial("id").primaryKey(),
+    setKey: text("set_key").notNull(),
+    language: text("language").notNull().default("en"),
+    aliasType: text("alias_type").notNull(), // printed_code | ptcgo | jp_english_name | market_name | translated_name | other
+    aliasValue: text("alias_value").notNull(), // normalised
+    sourceType: text("source_type").notNull().default("community"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uqAlias: uniqueIndex("uq_pokemon_set_aliases_value").on(t.aliasType, t.aliasValue, t.language),
+    idxSetKey: index("idx_pokemon_set_aliases_set_key").on(t.setKey),
+  })
+);
+
+export const pokemonKnowledgeRevisions = pgTable(
+  "pokemon_knowledge_revisions",
+  {
+    id: serial("id").primaryKey(),
+    entityType: text("entity_type").notNull(), // 'set' | 'alias' | future kinds
+    entityKey: text("entity_key").notNull(), // "<set_key>:<language>"
+    revisionNumber: integer("revision_number").notNull(),
+    oldValue: jsonb("old_value").$type<Record<string, unknown> | null>(),
+    newValue: jsonb("new_value").$type<Record<string, unknown>>().notNull(),
+    reason: text("reason"),
+    sourceType: text("source_type"),
+    editedBy: text("edited_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uqRevision: uniqueIndex("uq_pokemon_knowledge_revisions").on(t.entityType, t.entityKey, t.revisionNumber),
+    idxEntity: index("idx_pokemon_knowledge_revisions_entity").on(t.entityType, t.entityKey),
+  })
+);
+
+export const pokemonImportRuns = pgTable(
+  "pokemon_import_runs",
+  {
+    id: serial("id").primaryKey(),
+    source: text("source").notNull(), // manual | starter_seed | csv | json | tcgdex
+    sourceReference: text("source_reference"),
+    status: text("status").notNull().default("draft"), // draft | approved | rejected | applied
+    payload: jsonb("payload").$type<unknown[]>().notNull().default([]),
+    recordsTotal: integer("records_total").notNull().default(0),
+    recordsAdded: integer("records_added").notNull().default(0),
+    recordsChanged: integer("records_changed").notNull().default(0),
+    conflicts: jsonb("conflicts").$type<unknown[]>().notNull().default([]),
+    startedBy: text("started_by"),
+    reviewedBy: text("reviewed_by"),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    idxStatus: index("idx_pokemon_import_runs_status").on(t.status),
+  })
+);
+
+export const pokemonReviewQueue = pgTable(
+  "pokemon_review_queue",
+  {
+    id: serial("id").primaryKey(),
+    kind: text("kind").notNull(),
+    entityType: text("entity_type").notNull().default("set"),
+    entityKey: text("entity_key").notNull(),
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
+    importRunId: integer("import_run_id"),
+    status: text("status").notNull().default("pending"), // pending | approved | rejected | ignored
+    resolutionNote: text("resolution_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedBy: text("resolved_by"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+  },
+  (t) => ({
+    idxStatus: index("idx_pokemon_review_queue_status").on(t.status),
+    idxEntity: index("idx_pokemon_review_queue_entity").on(t.entityType, t.entityKey),
+  })
+);
+
+export type PokemonSetKnowledge = typeof pokemonSetKnowledge.$inferSelect;
+export type InsertPokemonSetKnowledge = typeof pokemonSetKnowledge.$inferInsert;
+export type PokemonSetAlias = typeof pokemonSetAliases.$inferSelect;
+export type PokemonKnowledgeRevision = typeof pokemonKnowledgeRevisions.$inferSelect;
+export type PokemonImportRun = typeof pokemonImportRuns.$inferSelect;
+export type PokemonReviewQueueItem = typeof pokemonReviewQueue.$inferSelect;
+
 // ── Label printing — isolated tracking table ───────────────────────────────────
 export const labelPrints = pgTable("label_prints", {
   id: serial("id").primaryKey(),
