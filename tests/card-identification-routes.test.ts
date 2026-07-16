@@ -19,7 +19,7 @@ vi.mock("../server/config/feature-flags", () => ({
   getFeatureFlag: vi.fn(async () => false), // AI_CARD_IDENTIFICATION_ENABLED OFF
 }));
 
-import { handleIdentify } from "../server/routes/card-identification";
+import { handleIdentify, safeImageKey } from "../server/routes/card-identification";
 import { requireAdmin } from "../server/auth";
 
 interface MockRes {
@@ -111,5 +111,33 @@ describe("safety invariants (tests 12-14, 43-53)", () => {
     for (const imp of imports) {
       expect(imp).not.toMatch(/grader|mvgs|scoring|labels|certificate-document|stripe|vault-quest|social|instagram/i);
     }
+  });
+});
+
+describe("review fixes F1/F2/F3", () => {
+  it("F1: arbitrary R2 keys are rejected; only this cert's card image is accepted", () => {
+    // No cert → no key accepted.
+    expect(safeImageKey("images/MV1/front.jpg", null)).toBeNull();
+    // This cert's card image accepted — both normalised + stored certId forms.
+    expect(safeImageKey("images/MV1/front.jpg", "MV1")).toBe("images/MV1/front.jpg");
+    expect(safeImageKey("images/MV-0000000001/front.jpg", "MV1")).toBe("images/MV-0000000001/front.jpg");
+    expect(safeImageKey("images/MV1/back.png", "MV-0000000001")).toBe("images/MV1/back.png");
+    // Cross-cert / other-namespace / traversal / non-image all rejected.
+    expect(safeImageKey("images/MV999/front.jpg", "MV1")).toBeNull();
+    expect(safeImageKey("vq/cards/secret.png", "MV1")).toBeNull();
+    expect(safeImageKey("logbooks/v5/MV1.pdf", "MV1")).toBeNull();
+    expect(safeImageKey("images/MV1/../../etc/passwd", "MV1")).toBeNull();
+    expect(safeImageKey("/images/MV1/front.jpg", "MV1")).toBeNull();
+    expect(safeImageKey("images/MV1/notes.txt", "MV1")).toBeNull();
+  });
+  it("F2: the idempotency key stored is actor-namespaced (no cross-user replay)", () => {
+    expect(ROUTE_SRC).toMatch(/const idempotencyKey = `\$\{actorOf\(req\)\}::\$\{clientKey\}`/);
+    // The lookup uses the namespaced key, not the raw client key.
+    expect(ROUTE_SRC).toMatch(/findByIdempotencyKey\(idempotencyKey\)/);
+  });
+  it("F3: correction analytics values are charset-restricted (no free-text PII)", () => {
+    expect(STORE_SRC).toMatch(/SAFE_CODE = \/\^\[A-Za-z0-9/);
+    expect(STORE_SRC).toContain("suggestedValue: safeCode(");
+    expect(STORE_SRC).toContain("correctedValue: safeCode(");
   });
 });

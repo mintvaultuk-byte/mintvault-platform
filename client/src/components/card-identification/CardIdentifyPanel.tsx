@@ -8,7 +8,7 @@
  * before replacement. The manual form stays fully usable regardless.
  */
 import { useMemo, useState } from "react";
-import { languageByValueOrLabel } from "@shared/pokemon-rarity-catalogue";
+import { buildAcceptRows, acceptAllKeys as computeAcceptAllKeys, defaultSelected, fieldsToApply } from "@shared/card-identification-accept";
 
 type Band = "high" | "medium" | "low" | "conflict" | "unknown";
 interface Evidence {
@@ -37,19 +37,18 @@ interface Suggestion {
   [k: string]: unknown;
 }
 
-/** suggestion field → form field + label + how to turn the suggested value into a form value. */
-const FIELD_MAP: { key: string; formKey: string; label: string; toForm?: (v: unknown) => string }[] = [
-  { key: "cardName", formKey: "cardName", label: "Card name" },
-  { key: "setName", formKey: "setName", label: "Set" },
-  { key: "collectorNumber", formKey: "cardNumber", label: "Collector number" },
-  { key: "year", formKey: "year", label: "Year" },
-  { key: "language", formKey: "language", label: "Language", toForm: (v) => languageByValueOrLabel(String(v))?.label ?? String(v) },
-  { key: "era", formKey: "era", label: "Era" },
-  { key: "rarityCode", formKey: "rarityCode", label: "Rarity" },
-  { key: "finishVariant", formKey: "finishVariant", label: "Finish" },
-  { key: "promoType", formKey: "promoType", label: "Promo" },
-  { key: "subsetName", formKey: "subsetName", label: "Subset" },
-];
+const LABELS: Record<string, string> = {
+  cardName: "Card name",
+  setName: "Set",
+  cardNumber: "Collector number",
+  year: "Year",
+  language: "Language",
+  era: "Era",
+  rarityCode: "Rarity",
+  finishVariant: "Finish",
+  promoType: "Promo",
+  subsetName: "Subset",
+};
 
 const bandChip = (b: Band) => {
   const map: Record<Band, string> = {
@@ -100,18 +99,10 @@ export function CardIdentifyPanel({
       r.readAsDataURL(f);
     });
 
-  const applicableRows = useMemo(() => {
-    if (!suggestion) return [];
-    return FIELD_MAP.map((m) => {
-      const f = suggestion[m.key] as SuggestedField<unknown> | undefined;
-      if (!f || f.value == null) return null;
-      const suggestedForm = m.toForm ? m.toForm(f.value) : String(f.value);
-      const current = currentValues[m.formKey] ?? "";
-      const wouldOverwrite = current.trim() !== "" && current !== suggestedForm;
-      const isConflict = f.validationStatus === "conflict" || f.confidence === "conflict";
-      return { ...m, field: f, suggestedForm, current, wouldOverwrite, isConflict };
-    }).filter(Boolean) as Array<(typeof FIELD_MAP)[number] & { field: SuggestedField<unknown>; suggestedForm: string; current: string; wouldOverwrite: boolean; isConflict: boolean }>;
-  }, [suggestion, currentValues]);
+  const applicableRows = useMemo(
+    () => (suggestion ? buildAcceptRows(suggestion as unknown as Parameters<typeof buildAcceptRows>[0], currentValues) : []),
+    [suggestion, currentValues],
+  );
 
   async function identify() {
     setStatus("working");
@@ -145,17 +136,8 @@ export function CardIdentifyPanel({
       }
       const sug = data.suggestion as Suggestion;
       setSuggestion(sug);
-      // Default-select: validated, non-conflict, non-overwriting fields.
-      const pre: Record<string, boolean> = {};
-      for (const m of FIELD_MAP) {
-        const f = sug[m.key] as SuggestedField<unknown> | undefined;
-        if (!f || f.value == null) continue;
-        const current = currentValues[m.formKey] ?? "";
-        const suggestedForm = m.toForm ? m.toForm(f.value) : String(f.value);
-        const overwrite = current.trim() !== "" && current !== suggestedForm;
-        pre[m.formKey] = f.confidence !== "conflict" && f.validationStatus !== "conflict" && f.confidence !== "low" && !overwrite;
-      }
-      setSelected(pre);
+      // Default-select: validated, non-conflict, non-low, non-overwriting fields.
+      setSelected(defaultSelected(buildAcceptRows(sug as unknown as Parameters<typeof buildAcceptRows>[0], currentValues)));
       setStatus("ready");
     } catch {
       clearInterval(ticker);
@@ -172,7 +154,7 @@ export function CardIdentifyPanel({
       suggestedValue: r.suggestedForm.slice(0, 80),
       decision: applied.has(r.formKey) ? "accepted" : "rejected",
       correctedValue: null,
-      confidenceBand: r.field.confidence,
+      confidenceBand: r.confidence,
       setKey: null,
       era: (suggestion.era as SuggestedField<string> | undefined)?.value ?? null,
       language: (suggestion.language as SuggestedField<string> | undefined)?.value ?? null,
@@ -188,16 +170,14 @@ export function CardIdentifyPanel({
   }
 
   function applyFields(keys: string[]) {
-    const fields: Record<string, string> = {};
-    for (const r of applicableRows) if (keys.includes(r.formKey)) fields[r.formKey] = r.suggestedForm;
-    onAccept(fields); // parent copies into the draft form — never saves
+    onAccept(fieldsToApply(applicableRows, keys)); // parent copies into the draft form — never saves
     postCorrections(new Set(keys));
     setStatus("idle");
     setSuggestion(null);
   }
 
   const hasConflict = suggestion ? applicableRows.some((r) => r.isConflict) || suggestion.knowledgeValidation.conflicts.length > 0 : false;
-  const acceptAllKeys = applicableRows.filter((r) => !r.isConflict && !r.wouldOverwrite).map((r) => r.formKey);
+  const acceptAllKeys = computeAcceptAllKeys(applicableRows);
 
   return (
     <div className="space-y-3 rounded-2xl border border-slate-800 bg-slate-950/50 p-4" data-testid="card-identify-panel">
@@ -259,10 +239,10 @@ export function CardIdentifyPanel({
                   />
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-300">{r.label}:</span>
+                      <span className="font-semibold text-slate-300">{LABELS[r.formKey] ?? r.formKey}:</span>
                       <span className="text-slate-100">{r.suggestedForm}</span>
-                      {bandChip(r.field.confidence)}
-                      {r.field.finishConfirmation === "requires_physical_inspection" && (
+                      {bandChip(r.confidence as Band)}
+                      {r.finishConfirmation === "requires_physical_inspection" && (
                         <span className="rounded bg-slate-800 px-1 text-[9px] text-slate-400">needs physical check</span>
                       )}
                     </div>
@@ -271,10 +251,10 @@ export function CardIdentifyPanel({
                         Replaces current value "{r.current}" — tick to confirm replacement.
                       </div>
                     )}
-                    {r.isConflict && r.field.canonicalAlternative != null && (
-                      <div className="text-red-300">Knowledge Engine suggests: {String(r.field.canonicalAlternative)}</div>
+                    {r.isConflict && r.canonicalAlternative != null && (
+                      <div className="text-red-300">Knowledge Engine suggests: {r.canonicalAlternative}</div>
                     )}
-                    {r.field.evidence[0] && <div className="text-slate-500">{r.field.evidence[0].summary}</div>}
+                    {r.evidence && <div className="text-slate-500">{r.evidence}</div>}
                   </div>
                 </label>
               ))}

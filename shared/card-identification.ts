@@ -180,11 +180,32 @@ function pickExact<T>(guess: string, hits: T[], tokensOf: (t: T) => string[]): T
   return hits.length === 1 ? hits[0] : null;
 }
 
-/** Resolve an AI/free-text rarity guess to a canonical catalogue rarity, or null. */
-export function resolveRarityGuess(guess: string | null | undefined): PokemonRarity | null {
+/** Resolve an AI/free-text rarity guess to a canonical catalogue rarity, or null.
+ *  Region-aware: a code shared by an English and a Japanese tier (e.g. "SAR",
+ *  "AR") resolves to the region-appropriate entry — jp_* on a Japanese card,
+ *  the English tier on a western card. */
+export function resolveRarityGuess(guess: string | null | undefined, region?: string | null): PokemonRarity | null {
   const q = String(guess ?? "").trim();
   if (!q) return null;
-  return pickExact(q, searchCatalogue(q).rarities, (r) => [...r.codes, r.label, ...r.aliases]);
+  const nq = normToken(q);
+  const hits = searchCatalogue(q).rarities;
+  const exact = hits.filter((r) => [...r.codes, r.label, ...r.aliases].some((t) => normToken(t) === nq));
+  const pool = exact.length ? exact : hits.length === 1 ? hits : [];
+  if (pool.length === 0) return null;
+  if (region && pool.length > 1) {
+    const compat = pool.filter((r) => r.regions === "all" || r.regions.includes(region as never));
+    const candidates = compat.length ? compat : pool;
+    if (region !== "western") {
+      // Prefer a region-specific (non-western-inclusive) entry for JP/KR/CN/SEA.
+      const specific = candidates.find((r) => r.regions !== "all" && !r.regions.includes("western"));
+      if (specific) return specific;
+    } else {
+      const en = candidates.find((r) => r.regions !== "all" && r.regions.includes("western"));
+      if (en) return en;
+    }
+    return candidates[0];
+  }
+  return pool[0];
 }
 
 export function resolveFinishGuess(guess: string | null | undefined): string | null {
@@ -241,7 +262,7 @@ export function buildRarityField(
   region: string | null,
   era: string | null,
 ): { rarityCode: SuggestedField<string>; label: string | null; symbol: string | null; count: number | null; colour: string | null } {
-  const rarity = resolveRarityGuess(guess);
+  const rarity = resolveRarityGuess(guess, region);
   if (!rarity) {
     return { rarityCode: { ...emptyField<string>(), evidence: guess ? [evidenceSummary("ai_visual_inference", `AI saw "${guess}" — no catalogue match`)] : [] }, label: null, symbol: null, count: null, colour: null };
   }

@@ -78,19 +78,29 @@ export interface CorrectionRow {
   model: string | null;
 }
 
+// Analytics values are catalogue codes / short labels only — enforce a safe
+// charset so no free-text PII (emails, notes, names) can land in this table,
+// keeping "non-PII by construction" a real guarantee rather than a convention.
+const SAFE_CODE = /^[A-Za-z0-9_.\- ]{0,64}$/;
+function safeCode(v: string | null | undefined): string | null {
+  if (v == null) return null;
+  const s = String(v).trim().slice(0, 64);
+  return SAFE_CODE.test(s) ? s || null : null;
+}
+
 export async function recordCorrections(rows: CorrectionRow[], actor: string | null): Promise<number> {
   const bounded = rows.slice(0, 40).map((r) => ({
     requestId: String(r.requestId).slice(0, 80),
-    field: String(r.field).slice(0, 60),
-    suggestedValue: r.suggestedValue?.slice(0, 80) ?? null,
+    field: safeCode(r.field) ?? "unknown",
+    suggestedValue: safeCode(r.suggestedValue),
     decision: r.decision,
-    correctedValue: r.correctedValue?.slice(0, 80) ?? null,
-    confidenceBand: r.confidenceBand?.slice(0, 20) ?? null,
-    setKey: r.setKey?.slice(0, 60) ?? null,
-    era: r.era?.slice(0, 20) ?? null,
-    language: r.language?.slice(0, 20) ?? null,
-    provider: r.provider?.slice(0, 40) ?? null,
-    model: r.model?.slice(0, 60) ?? null,
+    correctedValue: safeCode(r.correctedValue),
+    confidenceBand: safeCode(r.confidenceBand),
+    setKey: safeCode(r.setKey),
+    era: safeCode(r.era),
+    language: safeCode(r.language),
+    provider: safeCode(r.provider),
+    model: safeCode(r.model),
     actor: actor?.slice(0, 80) ?? null,
   }));
   if (bounded.length === 0) return 0;

@@ -17,6 +17,7 @@ import { requireAdmin } from "../auth";
 import { requireCapability } from "../staff";
 import { getFeatureFlag } from "../config/feature-flags";
 import { getR2Buffer } from "../r2";
+import { normalizeCertId } from "../lib/cert-id";
 import { validateIdentificationImages, normaliseForProvider } from "../lib/card-identification/image-gates";
 import { selectProvider, ProviderUnavailableError } from "../lib/card-identification/provider";
 import { runIdentificationPipeline } from "../lib/card-identification/pipeline";
@@ -57,11 +58,31 @@ function base64ToBuffer(v: unknown): Buffer | null {
   }
 }
 
+/**
+ * A supplied R2 key is accepted ONLY when it's a card image scoped to the
+ * certificate this request is for: `images/{normalizeCertId(certId)}/...`, with
+ * no traversal. This blocks reading arbitrary bucket objects (other customers'
+ * images, VQ artwork, backups) — a caller can't point identification at anything
+ * but the card they already have open. Returns the key, or null if unsafe.
+ */
+export function safeImageKey(rawKey: unknown, certId: unknown): string | null {
+  if (typeof rawKey !== "string" || !rawKey) return null;
+  if (typeof certId !== "string" || !certId.trim()) return null; // a key requires a cert to scope to
+  // Must be a card front/back image key: images/<cert>/front|back.<ext> — the
+  // strict shape rules out traversal, other namespaces (vq/, labels/, logbooks/)
+  // and control chars. The cert in the key must match this request's cert
+  // (compared normalised, since the stored key uses the un-normalised cert id).
+  const m = rawKey.match(/^images\/([A-Za-z0-9-]+)\/(front|back)\.[A-Za-z0-9]{1,5}$/);
+  if (!m) return null;
+  const want = normalizeCertId(certId.trim());
+  return want && normalizeCertId(m[1]) === want ? rawKey : null;
+}
+
 async function resolveImage(body: Record<string, unknown>, keyField: string, r2Field: string): Promise<Buffer | null> {
   const inline = base64ToBuffer(body[keyField]);
   if (inline) return inline;
-  // Or a server-side R2 key the grader already has open (never a client URL).
-  const r2Key = typeof body[r2Field] === "string" ? (body[r2Field] as string) : null;
+  // Or a server-side R2 key the grader already has open — scoped to this cert.
+  const r2Key = safeImageKey(body[r2Field], body.certId);
   if (r2Key) return await getR2Buffer(r2Key);
   return null;
 }
@@ -73,11 +94,14 @@ export async function handleIdentify(req: Request, res: Response): Promise<void>
       return;
     }
     const body = (req.body ?? {}) as Record<string, unknown>;
-    const idempotencyKey = typeof body.idempotencyKey === "string" && body.idempotencyKey.trim() ? body.idempotencyKey.trim().slice(0, 120) : null;
-    if (!idempotencyKey) {
+    const clientKey = typeof body.idempotencyKey === "string" && body.idempotencyKey.trim() ? body.idempotencyKey.trim().slice(0, 120) : null;
+    if (!clientKey) {
       res.status(400).json({ error: "idempotencyKey is required." });
       return;
     }
+    // Actor-scope the idempotency key so one grader can't read or poison another's
+    // stored suggestion by reusing a key (the stored key is namespaced per actor).
+    const idempotencyKey = `${actorOf(req)}::${clientKey}`.slice(0, 200);
 
     // Idempotency: a repeat click returns the stored suggestion — no second call.
     const existing = await findByIdempotencyKey(idempotencyKey);
@@ -106,7 +130,7 @@ export async function handleIdentify(req: Request, res: Response): Promise<void>
     const [frontN, backN] = await Promise.all([normaliseForProvider(front!), back ? normaliseForProvider(back) : Promise.resolve(null)]);
 
     const suggestion = await runIdentificationPipeline({
-      requestId: idempotencyKey,
+      requestId: clientKey,
       provider,
       vision: { frontBase64: frontN.base64, frontMediaType: frontN.mediaType, backBase64: backN?.base64 ?? null, backMediaType: backN?.mediaType ?? null },
       setLookup: dbSetLookup,

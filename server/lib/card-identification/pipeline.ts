@@ -61,6 +61,8 @@ const FLAT_SCAN_UNCERTAIN_FINISHES = new Set([
   "full_texture",
   "gold_foil",
   "silver_foil",
+  "pokeball_reverse", // reflective reverse-holo patterns — confirm by hand
+  "masterball_reverse",
 ]);
 
 function field<T>(value: T | null, band: ConfidenceBand, source: SuggestedField<T>["source"], evidence: Evidence[], status: SuggestedField<T>["validationStatus"] = value == null ? "unknown" : "unvalidated"): SuggestedField<T> {
