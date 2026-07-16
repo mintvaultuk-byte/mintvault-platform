@@ -1033,6 +1033,44 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     }
   }
 
+  async function uploadActionReference(file: File) {
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    const masterKey = selected.referencePack?.master_portrait?.r2Key || selected.approvedArtworkR2Key;
+    if (!masterKey) {
+      toast({ title: "Approve a Master Reference first", description: "The Action Pose is linked to the approved Master.", variant: "destructive" });
+      return;
+    }
+    const confirmReplaceLocked = selected.locked
+      ? window.confirm(`${selected.characterName} is locked as canonical.\n\nUploading this Action Pose will replace the active Action Reference and archive the previous one. Continue?`)
+      : false;
+    if (selected.locked && !confirmReplaceLocked) return;
+    setBusy("upload-action");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (confirmReplaceLocked) fd.append("confirmReplaceLocked", "true");
+      const res = await fetch(`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/reference/action_pose/upload`, {
+        method: "POST",
+        body: fd,
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = new Error((await res.json().catch(() => ({}))).error || `upload failed (${res.status})`) as Error & { status?: number };
+        err.status = res.status;
+        throw err;
+      }
+      const data = (await res.json()) as { width: number; height: number };
+      await chars.refetch();
+      await candQuery.refetch();
+      setArtNonce((n) => n + 1);
+      toast({ title: "Action Pose uploaded", description: `${data.width}x${data.height} approved as the Action Reference.` });
+    } catch (e) {
+      onAuthError(e, "Upload Action Pose failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function setLocked(id: string, locked: boolean) {
     await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(id)}/lock`, { locked });
   }
@@ -2151,17 +2189,35 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               <button type="button" onClick={() => setZoomId("action")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500">View</button>
                               <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || referenceGenerationBlocked("action_pose")} title={referenceGenerationTitle("action_pose")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 disabled:opacity-40">Replace Action</button>
+                              <label className={`cursor-pointer rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 ${busy ? "pointer-events-none opacity-40" : ""}`}>
+                                {busy === "upload-action" ? "Uploading…" : "Upload Action Pose"}
+                                <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void uploadActionReference(f); }} />
+                              </label>
                               <button type="button" onClick={() => setHistoryFor("action_pose")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500">Archive</button>
                             </div>
+                            {referenceGenerationBlocked("action_pose") && (
+                              <div className="mt-2 text-[11px] text-amber-300">{referenceGenerationTitle("action_pose")}</div>
+                            )}
                           </div>
                         </div>
                       ) : (
                         <>
                           {actionCands.length === 0 && (
-                            <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked || referenceGenerationBlocked("action_pose")} title={referenceGenerationTitle("action_pose")}
-                              className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>
-                              {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}{busyGen ? (genPhaseLabel ?? "Generating…") : "Generate Matching Action Pose"}
-                            </button>
+                            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                              <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked || referenceGenerationBlocked("action_pose")} title={referenceGenerationTitle("action_pose")}
+                                className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>
+                                {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}{busyGen ? (genPhaseLabel ?? "Generating…") : "Generate Matching Action Pose"}
+                              </button>
+                              <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-600 px-5 py-4 text-sm font-bold text-slate-100 hover:border-amber-500 ${busy ? "pointer-events-none opacity-40" : ""}`}>
+                                <Upload className="h-4 w-4" />{busy === "upload-action" ? "Uploading…" : "Upload Action Pose"}
+                                <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void uploadActionReference(f); }} />
+                              </label>
+                            </div>
+                          )}
+                          {(selected.locked || referenceGenerationBlocked("action_pose")) && (
+                            <p className="mt-2 text-center text-[11px] text-amber-300">
+                              {selected.locked ? "Generation is locked for this character. Uploading a finished Action Pose is still available with confirmation." : referenceGenerationTitle("action_pose")}
+                            </p>
                           )}
                           <p className="mt-2 text-center text-[11px] text-slate-500">Always built from your approved Master — face, colours, markings, ears, tail, accessories &amp; shape stay the same. Only pose, expression, camera angle and movement change.</p>
                         </>

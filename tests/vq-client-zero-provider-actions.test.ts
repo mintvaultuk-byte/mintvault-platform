@@ -19,6 +19,7 @@ const SAFE_PROMPT_AND_VIEW_ACTIONS = [
   "open existing candidate",
   "select existing candidate",
   "view existing reference",
+  "upload action pose",
   "reload existing stored image",
   "open batch confirmation",
   "cancel batch confirmation",

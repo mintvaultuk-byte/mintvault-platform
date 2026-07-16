@@ -1438,6 +1438,58 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
     }
   );
 
+  app.post(
+    "/api/admin/vault-quest/characters/:characterId/reference/:referenceType/upload",
+    requireAdmin,
+    toolsUpload.single("file"),
+    async (req: Request, res: Response) => {
+      try {
+        const characterId = String(req.params.characterId);
+        if (!validVqCardId(characterId)) return res.status(400).json({ error: "invalid character id" });
+        const referenceType = parseReferenceType(req.params.referenceType);
+        if (referenceType !== "action_pose") {
+          return res.status(400).json({ error: "Manual upload is only supported for Action Reference here." });
+        }
+        const character = await vqStorage.getCharacter(characterId);
+        if (!character) return res.status(404).json({ error: "character not found" });
+        if (character.locked && String(req.body?.confirmReplaceLocked ?? "") !== "true") {
+          return res.status(423).json({
+            error: "Character is locked — confirm before replacing its Action Reference.",
+            locked: true,
+          });
+        }
+        const masterKey = character.referencePack?.master_portrait?.r2Key || character.approvedArtworkR2Key;
+        if (!masterKey || !masterKey.startsWith("vq/characters/")) {
+          return res.status(409).json({ error: "Approve a Master Reference before uploading an Action Reference." });
+        }
+        const file = (req as Request & { file?: Express.Multer.File }).file;
+        if (!file) return res.status(400).json({ error: "no file uploaded (field 'file')" });
+        const guard = await validateArtwork(file.buffer);
+        if (!guard.ok) return res.status(400).json({ error: guard.error });
+        const png = await (await import("sharp")).default(file.buffer).png().toBuffer();
+        const { r2Key: approvedKey, character: updated } = await promoteCharacterReferenceRevision({
+          characterId,
+          referenceType,
+          buffer: png,
+          width: guard.width,
+          height: guard.height,
+          createdBy: req.session?.adminEmail || "admin",
+        });
+        res.json({
+          character: updated,
+          key: approvedKey,
+          referenceType,
+          packCompleteness: vqPackCompleteness(updated.referencePack),
+          width: guard.width,
+          height: guard.height,
+          providerGeneration: false,
+        });
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : "failed to upload Action Reference" });
+      }
+    }
+  );
+
   // ── Master artwork BOOTSTRAP (founder-only). Generates a STANDALONE character
   // candidate from Character Bible DNA — allowed WITHOUT approved artwork (this is
   // how the first reference is created). Never approves/locks/creates cards. ──
