@@ -56,6 +56,12 @@ export const FEATURE_FLAGS = {
   // ── TCGdex card-lookup flags ──────────────────────────────────────────────
   AI_CARD_LOOKUP_PREFILL_ENABLED: process.env.AI_CARD_LOOKUP_PREFILL_ENABLED !== "false", // default ON
   AI_AUTO_ADD_MISSING_SETS_ENABLED: process.env.AI_AUTO_ADD_MISSING_SETS_ENABLED === "true", // default OFF
+
+  // ── AI Card Identification Assistant (structured Quick-Identify) ───────────
+  // Gates the whole structured identify pipeline. Default OFF — the founder
+  // enables it explicitly via /api/admin/ai-feature-flags. Manual grading works
+  // regardless; when off the route returns 503 and the UI shows manual entry.
+  AI_CARD_IDENTIFICATION_ENABLED: process.env.AI_CARD_IDENTIFICATION_ENABLED === "true", // default OFF
 } as const;
 
 /** All AI flag names that participate in the runtime-toggle system. */
@@ -72,6 +78,7 @@ export const AI_FLAG_NAMES = [
   "AI_PUBLIC_ESTIMATE_ENABLED",
   "AI_CARD_LOOKUP_PREFILL_ENABLED",
   "AI_AUTO_ADD_MISSING_SETS_ENABLED",
+  "AI_CARD_IDENTIFICATION_ENABLED",
 ] as const;
 
 export type AiFlagName = (typeof AI_FLAG_NAMES)[number];

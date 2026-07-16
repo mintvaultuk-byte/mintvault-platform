@@ -1238,6 +1238,56 @@ export type PokemonKnowledgeRevision = typeof pokemonKnowledgeRevisions.$inferSe
 export type PokemonImportRun = typeof pokemonImportRuns.$inferSelect;
 export type PokemonReviewQueueItem = typeof pokemonReviewQueue.$inferSelect;
 
+// ── AI Card Identification (additive — migrations/add-card-identification-analytics.sql) ──
+// Non-PII correction analytics + multi-machine idempotency ledger. Never stores
+// card images, customer data, cert numbers, or provider chain-of-thought.
+export const cardIdentificationCorrections = pgTable(
+  "card_identification_corrections",
+  {
+    id: serial("id").primaryKey(),
+    requestId: text("request_id").notNull(),
+    field: text("field").notNull(),
+    suggestedValue: text("suggested_value"),
+    decision: text("decision").notNull(), // accepted | rejected | changed
+    correctedValue: text("corrected_value"),
+    confidenceBand: text("confidence_band"),
+    setKey: text("set_key"),
+    era: text("era"),
+    language: text("language"),
+    provider: text("provider"),
+    model: text("model"),
+    actor: text("actor"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    idxField: index("idx_card_id_corrections_field").on(t.field),
+    idxCreated: index("idx_card_id_corrections_created").on(t.createdAt),
+    idxRequest: index("idx_card_id_corrections_request").on(t.requestId),
+  }),
+);
+
+export const cardIdentificationRequests = pgTable(
+  "card_identification_requests",
+  {
+    id: serial("id").primaryKey(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    certId: text("cert_id"),
+    provider: text("provider").notNull(),
+    model: text("model").notNull(),
+    costUsd: numeric("cost_usd", { precision: 10, scale: 5 }),
+    result: jsonb("result").$type<Record<string, unknown> | null>(),
+    actor: text("actor"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uqKey: uniqueIndex("uq_card_id_requests_key").on(t.idempotencyKey),
+    idxCreated: index("idx_card_id_requests_created").on(t.createdAt),
+  }),
+);
+
+export type CardIdentificationCorrection = typeof cardIdentificationCorrections.$inferSelect;
+export type CardIdentificationRequest = typeof cardIdentificationRequests.$inferSelect;
+
 // ── Label printing — isolated tracking table ───────────────────────────────────
 export const labelPrints = pgTable("label_prints", {
   id: serial("id").primaryKey(),
