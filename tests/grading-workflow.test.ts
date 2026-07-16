@@ -16,9 +16,9 @@ import {
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
 describe("stage model (pure)", () => {
-  it("has the four named stages in order", () => {
+  it("has the four named stages in order (compact MacBook labels)", () => {
     expect(GRADING_STAGES.map((s) => s.key)).toEqual(["identify", "rarity", "grade", "review"]);
-    expect(GRADING_STAGES.map((s) => s.label)).toEqual(["Identify Card", "Rarity & Variant", "Grade Card", "Review & Save"]);
+    expect(GRADING_STAGES.map((s) => s.label)).toEqual(["Card", "Rarity", "Grade", "Review"]);
   });
 
   it("current is highlighted, earlier stages complete, later pending", () => {
