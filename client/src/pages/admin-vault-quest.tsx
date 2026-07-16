@@ -1228,6 +1228,16 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   // the button and on the production tracker's active step so the one-click flow
   // narrates itself and never looks frozen. Purely visual; drives no gate.
   const [genStageLabel, setGenStageLabel] = useState<string | null>(null);
+  // A generated Action Pose that the studio-background gate rejected. Kept so the
+  // founder sees exactly WHY (measured edge % vs threshold), that a credit was spent,
+  // and that NO automatic paid retry happened — with an explicit Try Again. Never
+  // used to present rejected artwork as approved/usable.
+  const [bgRejection, setBgRejection] = useState<
+    { reason: string; offPercent: number | null; thresholdPercent: number | null; creditUsed: boolean } | null
+  >(null);
+  useEffect(() => {
+    setBgRejection(null);
+  }, [selectedId]); // a background-rejection notice belongs to one character only
 
   async function generateMasterArtwork(typeOverride?: VqRefType) {
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); resetGenerateWith(); return; }
@@ -1314,6 +1324,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     // panel. Returns false (already messaged) if the founder cancels or a real,
     // unresolvable reason remains. The server re-checks both gates on the POST below.
     setBusy("gen-art");
+    setBgRejection(null); // a fresh attempt clears any prior background-rejection notice
     const ready = await ensureGenerationReady(featureForReferenceType(type));
     if (!ready) {
       genInFlight.current = false;
@@ -1362,6 +1373,28 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       }
       if (outcome.phase === "failed") {
         clearIdempotencyKey(scopeKey); // terminal (error) response — a deliberate retry should charge again
+        // A studio-background rejection is a specific, expected outcome (the image
+        // reached the gate and was correctly rejected): show the dedicated founder
+        // panel with the measured %, threshold and credit note + an explicit Try
+        // Again, instead of a generic error toast. NO automatic paid retry happened.
+        const body = (outcome.data ?? {}) as {
+          rejected?: boolean;
+          rejectionKind?: string;
+          error?: string;
+          backgroundOffFraction?: number;
+          backgroundThreshold?: number;
+          providerCreditUsed?: boolean;
+        };
+        if (type === "action_pose" && body.rejected && body.rejectionKind === "studio_background") {
+          const pct = (v: number | undefined) => (typeof v === "number" ? Math.round(v * 1000) / 10 : null);
+          setBgRejection({
+            reason: body.error ?? "Generated image had a non-studio background.",
+            offPercent: pct(body.backgroundOffFraction),
+            thresholdPercent: pct(body.backgroundThreshold),
+            creditUsed: body.providerCreditUsed === true,
+          });
+          return;
+        }
         artworkError(outcome.error, `Generate ${typeLabel} failed`);
         return;
       }
@@ -2359,6 +2392,25 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                 <Upload className="h-4 w-4" />{busy === "upload-action" ? "Uploading…" : "Upload Action Pose"}
                                 <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void uploadActionReference(f); }} />
                               </label>
+                            </div>
+                          )}
+                          {bgRejection && !busyGen && (
+                            <div className="mt-3 rounded-xl border border-amber-700/60 bg-amber-950/20 p-3 text-left">
+                              <div className="flex items-center gap-2 text-sm font-bold text-amber-200"><AlertCircle className="h-4 w-4" />Generated image had a non-studio background</div>
+                              <p className="mt-1 text-[12px] text-amber-100/90">No automatic retry was made — you choose whether to spend another generation credit.</p>
+                              <div className="mt-2 grid grid-cols-1 gap-0.5 text-[11px] text-slate-300 sm:grid-cols-2">
+                                {bgRejection.offPercent != null && <div>Measured edge off-background: <b className="text-amber-200">{bgRejection.offPercent}%</b></div>}
+                                {bgRejection.thresholdPercent != null && <div>Allowed maximum: <b className="text-emerald-300">{bgRejection.thresholdPercent}%</b></div>}
+                                <div className="sm:col-span-2">{bgRejection.creditUsed ? "A generation credit was used for this attempt." : "No generation credit was used."}</div>
+                                <div className="sm:col-span-2 text-slate-500">The rejected image was not saved and is not usable — a clean pure-white studio background is required.</div>
+                              </div>
+                              <div className="mt-2.5 flex flex-wrap gap-2">
+                                <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked} className="rounded-lg px-4 py-2 text-xs font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>Try Again</button>
+                                <label className={`flex cursor-pointer items-center gap-2 rounded-lg border border-slate-600 px-4 py-2 text-xs font-bold text-slate-100 hover:border-amber-500 ${busy ? "pointer-events-none opacity-40" : ""}`}>
+                                  <Upload className="h-3.5 w-3.5" />{busy === "upload-action" ? "Uploading…" : "Manual Upload Action Pose"}
+                                  <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void uploadActionReference(f); }} />
+                                </label>
+                              </div>
                             </div>
                           )}
                           {(selected.locked || referenceGenerationHardTitle("action_pose")) && (
