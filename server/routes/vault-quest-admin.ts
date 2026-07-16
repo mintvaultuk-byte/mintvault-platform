@@ -64,7 +64,7 @@ import {
 import { validateSingleImageCount } from "../vault-quest/lib/vq-image-count";
 import { loadVqDbFlags } from "../vault-quest/lib/vq-feature-flags-store";
 import type { GenerationPayload } from "../vault-quest/lib/generation-idempotency";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash } from "crypto";
 import { generate, type GenerateReq } from "../vault-quest/generate";
 import {
   runGenerator,
@@ -112,6 +112,7 @@ import {
 import { scoreCharacterIdentity, identityThreshold, type IdentityResult } from "../vault-quest/ai/identity";
 import { evaluateIdentityGate, type IdentityGateBreakdown } from "../vault-quest/ai/identity-gate";
 import { validateStudioBackground, OFF_BG_THRESHOLD } from "../vault-quest/ai/bg-validate";
+import { finishStudioBackground, type StudioFinishMethod } from "../vault-quest/ai/studio-finish";
 import { validateImageIntegrity, type ImageIntegrityCode } from "../vault-quest/ai/image-integrity";
 import { scoreEvolutionDifference, type EvolutionDifferenceVerdict } from "../vault-quest/ai/evolution-diversity";
 import { chooseActionCategory } from "@shared/vq-action-categories";
@@ -653,6 +654,14 @@ async function scoreAndGateCandidate(
 // providerCalls = actual number of paid Higgsfield creates this made (a master or
 // action_pose can retry once on studio-background failure → up to 2), so the caller
 // records ACTUAL spend, not just candidate count (Reviewer 1 F-1 / financial accuracy).
+interface StudioFinishAudit {
+  method: StudioFinishMethod;
+  confidence: number;
+  offBefore: number;
+  offAfter: number;
+  sourceChecksum: string;
+  cleanedChecksum: string;
+}
 interface GenCandidateResult {
   candidate: VqArtworkCandidate;
   artwork: HiggsfieldArtworkResult;
@@ -661,7 +670,26 @@ interface GenCandidateResult {
   autoRejected: boolean;
   referencesUsed: string[];
   providerCalls: number;
+  /** Set when the studio background was corrected LOCALLY (zero extra provider calls). */
+  studioFinish?: StudioFinishAudit | null;
 }
+// Preserve a REJECTED provider image privately so a spent credit leaves an auditable
+// source (Phase 1 quarantine). Stored under the `vq/characters/.../quarantine/` keyspace
+// (same private R2 bucket, never a public/long-lived URL) with a content checksum;
+// only ever served through the admin-gated view route below. Best-effort: a storage
+// outage must never turn a rejection into a 500 — the caller `.catch(() => null)`s it.
+async function quarantineRejectedImage(
+  characterId: string,
+  png: Buffer,
+): Promise<{ key: string; checksum: string } | null> {
+  const safe = characterId.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
+  if (!safe) return null;
+  const checksum = createHash("sha256").update(png).digest("hex");
+  const key = assertVqWriteKey(`vq/characters/${safe}/quarantine/${Date.now()}-${checksum.slice(0, 12)}.png`);
+  await uploadToR2(key, png, "image/png");
+  return { key, checksum };
+}
+
 async function generateCharacterCandidate(
   character: VqCharacter,
   referenceType: VqReferenceType = "master_portrait",
@@ -676,6 +704,11 @@ async function generateCharacterCandidate(
       integrityCode?: ImageIntegrityCode;
       backgroundOffFraction?: number;
       backgroundThreshold?: number;
+      /** Private R2 key of the quarantined rejected source (never public). */
+      quarantineKey?: string | null;
+      quarantineChecksum?: string | null;
+      /** True when a local cleanup was attempted but could not safely isolate the subject. */
+      cleanupAttempted?: boolean;
     }
 > {
   const prev = character.evolvesFromCharacterId
@@ -785,6 +818,7 @@ async function generateCharacterCandidate(
   let artwork: HiggsfieldArtworkResult | null = null;
   let prompt = "";
   let bgReason: string | undefined;
+  let studioFinish: StudioFinishAudit | null = null; // set when the background was corrected locally (zero extra provider calls)
   let providerCalls = 0; // every generateHiggsfieldArtwork below is a PAID create
   let preScored: IdentityResult | null = null; // action_pose/evolution: reused after upload so scoring isn't done twice
   let preScoredEvolution: EvolutionDifferenceVerdict | null = null; // evolution: reused after upload
@@ -826,7 +860,7 @@ async function generateCharacterCandidate(
       : "";
     prompt = basePrompt + idLock + poseSuffix + evoSuffix + (bgCheckActive && attempt > 1 ? STRICTER_BG_SUFFIX : "");
     providerCalls++;
-    const generated = await generateHiggsfieldArtwork({
+    let generated = await generateHiggsfieldArtwork({
       prompt,
       mode: "main",
       slot: "main",
@@ -856,13 +890,44 @@ async function generateCharacterCandidate(
     }
 
     if (bgCheckActive) {
-      const bg = await validateStudioBackground(generated.png);
+      let bg = await validateStudioBackground(generated.png);
+      // ── Deterministic local studio finish (Action Reference only) ──────────────
+      // The raw provider image failed the background gate. Before discarding a
+      // credit, try to SALVAGE it locally with ZERO further provider calls: isolate
+      // the creature from a plain near-white backdrop and re-centre it on solid white
+      // with a generous margin. It only ever runs the EXISTING 5% validator on its
+      // output; identity/pose/integrity below still run on the CLEANED image, so no
+      // gate is weakened and nothing is auto-approved. If it cannot safely isolate the
+      // subject, `generated` is left untouched and the reject path (with quarantine)
+      // runs exactly as before.
+      let cleanupAttempted = false;
+      if (!bg.ok && referenceType === "action_pose") {
+        cleanupAttempted = true;
+        const finish = await finishStudioBackground(generated.png);
+        if (finish.ok && finish.png) {
+          const cleanedIntegrity = await validateImageIntegrity(finish.png);
+          const cleanedBg = await validateStudioBackground(finish.png);
+          if (cleanedIntegrity.ok && cleanedBg.ok) {
+            studioFinish = {
+              method: finish.method!,
+              confidence: finish.confidence,
+              offBefore: bg.offBackgroundFraction,
+              offAfter: finish.finalEdgeOffFraction,
+              sourceChecksum: finish.sourceChecksum,
+              cleanedChecksum: finish.cleanedChecksum!,
+            };
+            generated = { ...generated, png: finish.png, width: finish.width, height: finish.height };
+            bg = cleanedBg; // now passes — fall through to identity/pose on the CLEANED image
+          }
+        }
+      }
       if (!bg.ok) {
         bgReason = bg.reason;
         if (attempt === maxAttempts) {
-          // Background never passed — reject WITHOUT uploading/recording (don't clutter
-          // R2/gallery, don't consume the approval workflow). The image is discarded —
-          // but it WAS charged.
+          // Background never passed and local cleanup could not safely fix it. Do NOT
+          // create an approved candidate — but PRESERVE the rejected source privately
+          // (a credit was spent) so the founder can view it / attempt manual upload.
+          const quarantine = await quarantineRejectedImage(character.characterId, generated.png).catch(() => null);
           return {
             rejected: true,
             reason: `studio background rejected (${bg.reason})`,
@@ -870,6 +935,9 @@ async function generateCharacterCandidate(
             jobId: generated.jobId ?? null,
             backgroundOffFraction: bg.offBackgroundFraction,
             backgroundThreshold: OFF_BG_THRESHOLD,
+            quarantineKey: quarantine?.key ?? null,
+            quarantineChecksum: quarantine?.checksum ?? null,
+            cleanupAttempted,
           };
         }
         continue;
@@ -1055,7 +1123,7 @@ async function generateCharacterCandidate(
   } else {
     ({ identity, autoRejected } = await scoreAndGateCandidate(candidate.id, artwork.png, ownRefs, character));
   }
-  return { candidate, artwork, key, identity, autoRejected, referencesUsed: used, providerCalls };
+  return { candidate, artwork, key, identity, autoRejected, referencesUsed: used, providerCalls, studioFinish };
 }
 
 // Phase 10A D10 — read the client-persisted idempotency key (the browser mints + stores
@@ -1738,9 +1806,14 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
             backgroundThreshold: r.backgroundThreshold,
             providerCreditUsed: r.providerCalls > 0,
             autoRetried: false,
+            // Local cleanup was attempted (Action Pose) but could not safely isolate the
+            // creature. The rejected source is preserved privately for View Rejected Source.
+            cleanupAttempted: r.cleanupAttempted === true,
+            quarantined: !!r.quarantineKey,
+            quarantineRef: r.quarantineKey ? encodeURIComponent(r.quarantineKey) : null,
           });
         }
-        const { candidate, artwork, key, identity, autoRejected, referencesUsed } = r;
+        const { candidate, artwork, key, identity, autoRejected, referencesUsed, studioFinish } = r;
         if (autoRejected) {
           // Identity drifted below threshold — candidate stored for audit, never shown.
           // (A pose-diversity failure alone does NOT hit this branch — see the comment
@@ -1772,10 +1845,47 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           referencesUsed,
           preview: `data:image/png;base64,${thumb.toString("base64")}`,
           idempotencyKey,
+          // Local studio finish (Phase 2–4): the raw provider background failed the gate
+          // but was corrected LOCALLY with zero extra provider calls. Drives the founder
+          // "Studio background corrected automatically — no additional credit used" note.
+          backgroundCorrected: !!studioFinish,
+          studioFinish: studioFinish
+            ? {
+                method: studioFinish.method,
+                confidence: Math.round(studioFinish.confidence * 100) / 100,
+                edgeOffBefore: Math.round(studioFinish.offBefore * 1000) / 10,
+                edgeOffAfter: Math.round(studioFinish.offAfter * 1000) / 10,
+              }
+            : null,
         });
       } catch (err) {
         await finishErr(err);
         artworkErrorResponse(res, err);
+      }
+    }
+  );
+
+  // View a QUARANTINED rejected source (Phase 1). Admin-only, streamed from the private
+  // R2 quarantine keyspace — never a public or long-lived URL, never a candidate. The
+  // ref is the URL-encoded quarantine key returned in the 422 above; it is re-validated
+  // as a read key inside the `vq/characters/.../quarantine/` space (no traversal).
+  app.get(
+    "/api/admin/vault-quest/quarantine/:ref/image",
+    requireAdmin,
+    async (req: Request, res: Response) => {
+      try {
+        const decoded = decodeURIComponent(String(req.params.ref));
+        if (!decoded.startsWith("vq/characters/") || !decoded.includes("/quarantine/") || decoded.includes("..")) {
+          return res.status(400).json({ error: "invalid quarantine reference" });
+        }
+        const key = assertVqReadKey(decoded);
+        const buf = await getR2Buffer(key);
+        if (!buf) return res.status(404).json({ error: "quarantined source not found" });
+        res.setHeader("Content-Type", "image/png");
+        res.setHeader("Cache-Control", "private, no-store");
+        res.send(buf);
+      } catch (err) {
+        res.status(500).json({ error: err instanceof Error ? err.message : "failed to load quarantined source" });
       }
     }
   );
