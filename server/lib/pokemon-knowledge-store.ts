@@ -32,6 +32,7 @@ const CONFIDENCES = new Set(["high", "medium", "low"]);
 const STATUSES = new Set<string>(REVIEW_STATUSES_KNOWLEDGE);
 const SOURCES = new Set<string>(SOURCE_TYPES);
 const LANGUAGES = new Set(POKEMON_LANGUAGES.map((l) => l.value));
+const ALIAS_TYPES = new Set(["printed_code", "ptcgo", "jp_english_name", "market_name", "translated_name", "other"]);
 
 export class KnowledgeValidationError extends Error {
   status = 400;
@@ -220,10 +221,6 @@ export async function upsertSetKnowledge(
 ): Promise<{ row: PokemonSetKnowledge; created: boolean }> {
   const v = validateSetInput(input);
   const entityKey = `${v.setKey}:${v.language}`;
-  const [existing] = await db
-    .select()
-    .from(pokemonSetKnowledge)
-    .where(and(eq(pokemonSetKnowledge.setKey, v.setKey), eq(pokemonSetKnowledge.language, v.language)));
 
   const values = {
     setKey: v.setKey,
@@ -256,40 +253,52 @@ export async function upsertSetKnowledge(
     updatedAt: new Date(),
   };
 
-  let row: PokemonSetKnowledge;
-  if (existing) {
-    const nextVersion = existing.version + 1;
-    [row] = await db
-      .update(pokemonSetKnowledge)
-      .set({ ...values, version: nextVersion })
-      .where(eq(pokemonSetKnowledge.id, existing.id))
-      .returning();
-    await db.insert(pokemonKnowledgeRevisions).values({
-      entityType: "set",
-      entityKey,
-      revisionNumber: nextVersion,
-      oldValue: existing as unknown as Record<string, unknown>,
-      newValue: row as unknown as Record<string, unknown>,
-      reason,
-      sourceType: values.sourceType,
-      editedBy: editor,
-    });
-  } else {
-    [row] = await db
+  // The row write + its revision insert run in ONE transaction, and the existing
+  // row is re-read FOR UPDATE inside it, so two Fly machines editing the same
+  // (set_key, language) serialize — a canonical change can never commit without
+  // its matching revision, and revision numbers never collide.
+  const { row, created } = await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(pokemonSetKnowledge)
+      .where(and(eq(pokemonSetKnowledge.setKey, v.setKey), eq(pokemonSetKnowledge.language, v.language)))
+      .for("update");
+
+    if (existing) {
+      const nextVersion = existing.version + 1;
+      const [r] = await tx
+        .update(pokemonSetKnowledge)
+        .set({ ...values, version: nextVersion })
+        .where(eq(pokemonSetKnowledge.id, existing.id))
+        .returning();
+      await tx.insert(pokemonKnowledgeRevisions).values({
+        entityType: "set",
+        entityKey,
+        revisionNumber: nextVersion,
+        oldValue: existing as unknown as Record<string, unknown>,
+        newValue: r as unknown as Record<string, unknown>,
+        reason,
+        sourceType: values.sourceType,
+        editedBy: editor,
+      });
+      return { row: r, created: false };
+    }
+    const [r] = await tx
       .insert(pokemonSetKnowledge)
       .values({ ...values, createdBy: editor, version: 1 })
       .returning();
-    await db.insert(pokemonKnowledgeRevisions).values({
+    await tx.insert(pokemonKnowledgeRevisions).values({
       entityType: "set",
       entityKey,
       revisionNumber: 1,
       oldValue: null,
-      newValue: row as unknown as Record<string, unknown>,
+      newValue: r as unknown as Record<string, unknown>,
       reason: reason ?? "created",
       sourceType: values.sourceType,
       editedBy: editor,
     });
-  }
+    return { row: r, created: true };
+  });
 
   // Duplicate-name detection across DIFFERENT keys → review queue (never a merge).
   const dupes = await db
@@ -311,20 +320,23 @@ export async function upsertSetKnowledge(
     });
   }
 
-  // Aliases from the input (idempotent inserts).
+  // Aliases from the input (idempotent inserts). alias_type is coerced to the
+  // catalogue vocabulary so an out-of-vocab value can never reach the DB CHECK
+  // (which would surface as a 500 instead of being silently normalised).
   const aliasInput = (input as { aliases?: { aliasType: string; aliasValue: string }[] }).aliases;
   if (Array.isArray(aliasInput)) {
     for (const a of aliasInput.slice(0, 20)) {
       const aliasValue = normalizeSetCode(String(a.aliasValue ?? "")) || String(a.aliasValue ?? "").trim().toLowerCase();
       if (!aliasValue) continue;
+      const aliasType = ALIAS_TYPES.has(String(a.aliasType)) ? String(a.aliasType) : "other";
       await db
         .insert(pokemonSetAliases)
-        .values({ setKey: v.setKey, language: v.language, aliasType: String(a.aliasType ?? "other").slice(0, 30), aliasValue: aliasValue.slice(0, 120), createdBy: editor })
+        .values({ setKey: v.setKey, language: v.language, aliasType, aliasValue: aliasValue.slice(0, 120), createdBy: editor })
         .onConflictDoNothing();
     }
   }
 
-  return { row, created: !existing };
+  return { row, created };
 }
 
 /** Restore an old revision AS A NEW revision (never rewrites history). */

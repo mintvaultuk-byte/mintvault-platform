@@ -110,6 +110,18 @@ describe("workflow discipline (tests 33-38)", () => {
     expect(restoreFn).toContain("upsertSetKnowledge(snapshot"); // restore-as-new-revision
     expect(restoreFn).not.toMatch(/delete|update\(pokemonKnowledgeRevisions\)/i); // history never rewritten
   });
+  it("row write + revision insert are transactional with a row lock (review F1)", () => {
+    const upsertFn = STORE_SRC.slice(STORE_SRC.indexOf("export async function upsertSetKnowledge"), STORE_SRC.indexOf("export async function restoreRevision"));
+    expect(upsertFn).toContain("db.transaction(async (tx)");
+    expect(upsertFn).toContain('.for("update")'); // serialise concurrent same-set edits across machines
+    // Both the row write and the revision insert use the transaction handle.
+    expect(upsertFn).toMatch(/tx\s*\.\s*insert\(pokemonKnowledgeRevisions\)/);
+  });
+  it("out-of-vocabulary alias_type is coerced, not sent raw to the DB CHECK (review F2)", () => {
+    const upsertFn = STORE_SRC.slice(STORE_SRC.indexOf("export async function upsertSetKnowledge"), STORE_SRC.indexOf("export async function restoreRevision"));
+    expect(upsertFn).toContain("ALIAS_TYPES.has(String(a.aliasType))");
+    expect(STORE_SRC).toContain('const ALIAS_TYPES = new Set(["printed_code"');
+  });
 });
 
 describe("grading integration + regression (tests 39-44, 58-63)", () => {
