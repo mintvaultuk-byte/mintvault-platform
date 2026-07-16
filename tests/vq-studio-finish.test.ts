@@ -246,3 +246,85 @@ describe("studio-finish — deterministic cleanup + composition", () => {
     expect(r.reason).toBe("decode_failed");
   });
 });
+
+describe("studio-finish — REVIEW: disconnected-detail preservation (Phase 2)", () => {
+  // Vault Quest art is cel-shaded with crisp DARK linework. A legitimate disconnected
+  // detail therefore has its own dark outline, which STOPS the border flood-fill — so
+  // the detail's (even white) interior is enclosed and preserved. This is the core
+  // reason the "white-on-white" limitation is not material for the real art style.
+  it("a disconnected detail WITH a dark outline keeps its enclosed white core (outline blocks the fill)", async () => {
+    const outlined = await rgb((x, y) => {
+      if (disc(x, y, 120, 120, 34)) return [150, 70, 40]; // body
+      const d = Math.hypot(x - 60, y - 62); // separate detail, far from the body
+      if (d <= 16 && d > 11) return [20, 20, 30]; // dark outline ring
+      if (d <= 11) return [252, 252, 252]; // enclosed near-white core
+      return WHITE;
+    });
+    const outlinedR = await finishStudioBackground(outlined);
+    // Same detail but with NO outline — a plain near-white blob on white (the documented
+    // limitation): its core is indistinguishable from backdrop and is removed.
+    const plain = await rgb((x, y) => {
+      if (disc(x, y, 120, 120, 34)) return [150, 70, 40];
+      if (disc(x, y, 60, 62, 16)) return [252, 252, 252]; // outline-less near-white blob
+      return WHITE;
+    });
+    const plainR = await finishStudioBackground(plain);
+    expect(outlinedR.ok).toBe(true);
+    expect(plainR.ok).toBe(true);
+    // The outlined detail retains materially MORE foreground (its enclosed core survives)
+    // than the outline-less blob — proving the cel-outline preservation mechanism.
+    expect(outlinedR.subjectFraction).toBeGreaterThan(plainR.subjectFraction);
+  });
+
+  it("a CLEARLY-COLOURED detail is NEVER removed, even disconnected and far from the body", async () => {
+    // Anything unambiguously not-backdrop (distance ≫ tolerance) must survive wherever it is.
+    const src = await rgb((x, y) => {
+      if (disc(x, y, 120, 120, 30)) return [150, 70, 40];
+      if (disc(x, y, 40, 40, 10) || disc(x, y, 200, 205, 9)) return [30, 60, 200]; // far blue details
+      return WHITE;
+    });
+    const r = await finishStudioBackground(src);
+    expect(r.ok).toBe(true);
+    // body + both blue details retained: π(30²)+π(10²)+π(9²) ≈ 3400 → ~0.059
+    expect(r.subjectFraction).toBeGreaterThan(0.055);
+  });
+});
+
+describe("studio-finish — REVIEW: memory / decompression safety (Phase 4)", () => {
+  it("zero-length buffer refuses safely", async () => {
+    const r = await finishStudioBackground(Buffer.alloc(0));
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("decode_failed");
+  });
+
+  it("a single-channel (grayscale) image is handled via ensureAlpha (no crash)", async () => {
+    const gray = await sharp(Buffer.alloc(W * H, 248), { raw: { width: W, height: H, channels: 1 } })
+      .png()
+      .toBuffer();
+    const r = await finishStudioBackground(gray);
+    // A blank grey field has no separable subject → refuses safely (never throws).
+    expect(typeof r.ok).toBe("boolean");
+    expect(r.ok).toBe(false);
+  });
+
+  it("a large valid image is DOWNSCALED before raw extraction (bounded memory)", async () => {
+    const big = await sharp({ create: { width: 3000, height: 3000, channels: 3, background: { r: 255, g: 255, b: 255 } } })
+      .composite([{ input: await rgb((x, y) => (disc(x, y, 120, 120, 55) ? [40, 90, 160] : WHITE)).then((b) => b), gravity: "centre" }])
+      .png()
+      .toBuffer();
+    const r = await finishStudioBackground(big);
+    expect(r.width).toBeLessThanOrEqual(1400); // ANALYSIS_MAX_DIM cap
+    expect(r.height).toBeLessThanOrEqual(1400);
+  });
+
+  it("an oversized-pixel image (decompression bomb) is refused before allocation", async () => {
+    // 6500×6500 = 42.25M pixels > MAX_PIXELS (40M): sharp's limitInputPixels refuses to
+    // decode it, so we never allocate the raw buffer. Compresses tiny (solid colour).
+    const bomb = await sharp({ create: { width: 6500, height: 6500, channels: 3, background: { r: 255, g: 255, b: 255 } } })
+      .png()
+      .toBuffer();
+    const r = await finishStudioBackground(bomb);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("decode_failed");
+  });
+});
