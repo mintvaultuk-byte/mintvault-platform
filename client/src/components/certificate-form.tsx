@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
-import { CardIdentifyPanel } from "@/components/card-identification/CardIdentifyPanel";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
@@ -1910,34 +1909,10 @@ export default function CertificateForm({
             );
           })()}
 
-          {/* AI Card Identification — explicit, suggestion-only. Accepting copies
-              values into the draft form; nothing saves/grades automatically. */}
-          <div>
-            <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
-              AI Card Identification (optional)
-            </label>
-            <CardIdentifyPanel
-              apiBase="/api/admin"
-              certId={certificate?.certId ?? null}
-              frontImage={frontImage}
-              backImage={backImage}
-              frontImageKey={(certificate as any)?.frontImagePath ?? null}
-              backImageKey={(certificate as any)?.backImagePath ?? null}
-              currentValues={{
-                cardName: form.cardName,
-                setName: form.setName,
-                cardNumber: form.cardNumber,
-                year: form.year,
-                language: form.language,
-                rarityCode: form.rarityCode,
-                finishVariant: form.finishVariant,
-                promoType: form.promoType,
-                subsetName: form.subsetName,
-                era: form.era,
-              }}
-              onAccept={(fields) => setForm((f) => ({ ...f, ...fields }))}
-            />
-          </div>
+          {/* AI Card Identification removed from the daily grading UI (founder
+              decision 2026-07-16): graders identify cards manually with TCGdex
+              lookup + the visual picker. The feature stays flag-OFF and dormant
+              server-side; nothing here calls a provider. */}
 
           {/* Structured Pokémon rarity/variant picker (visual). Writes the new
               nullable columns only; the legacy Variant control above is unchanged. */}

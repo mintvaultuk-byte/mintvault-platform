@@ -688,7 +688,12 @@ export default function AdminLearningPage() {
                 to "default" clears the override.
               </p>
               <div className="space-y-3">
-                {flagsData.flags.map((f) => {
+                {flagsData.flags
+                  // AI Card Identification is removed from the daily grading UI
+                  // (founder decision) — hide its toggle here too. The flag stays
+                  // OFF server-side; it is not exposed for toggling in the admin UI.
+                  .filter((f) => f.name !== "AI_CARD_IDENTIFICATION_ENABLED")
+                  .map((f) => {
                   const copy = FLAG_COPY[f.name] || { title: f.name, description: "" };
                   const isSubmitting = submittingFlag === f.name;
                   return (
