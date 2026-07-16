@@ -16,10 +16,10 @@ export interface WorkflowStage {
 }
 
 export const GRADING_STAGES: readonly WorkflowStage[] = [
-  { key: "identify", label: "Identify Card", sublabel: "Card details & variant" },
-  { key: "rarity", label: "Rarity & Variant", sublabel: "Rarity, finish, promo" },
-  { key: "grade", label: "Grade Card", sublabel: "Front + back + centering" },
-  { key: "review", label: "Review & Save", sublabel: "Notes, score & certificate" },
+  { key: "identify", label: "Card", sublabel: "Details & TCGdex" },
+  { key: "rarity", label: "Rarity", sublabel: "Rarity, finish, promo" },
+  { key: "grade", label: "Grade", sublabel: "Front, back, centering" },
+  { key: "review", label: "Review", sublabel: "Notes & save" },
 ];
 
 export type StageStatus = "complete" | "current" | "pending";

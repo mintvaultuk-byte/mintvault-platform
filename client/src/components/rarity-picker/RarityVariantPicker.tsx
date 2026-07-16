@@ -42,14 +42,25 @@ import {
 import { validateStructuredVariant } from "@shared/structured-variant-validate";
 import { RaritySymbol } from "./RaritySymbol";
 
-// ── Founder's common choices (Phase 4). Everything else is behind More Variants. ──
-const QUICK_RARITIES = [
+// ── Founder's common choices, REGION-AWARE so Japanese codes don't dominate a
+// modern-English card (and vice versa). Everything else is behind More rarities. ──
+const QUICK_RARITIES_WESTERN = [
+  "common",
+  "uncommon",
   "rare",
   "double_rare",
   "illustration_rare",
   "ultra_rare",
   "special_illustration_rare",
   "hyper_rare",
+  "ace_spec",
+];
+const QUICK_RARITIES_EASTERN = [
+  "common",
+  "uncommon",
+  "rare",
+  "jp_double_rare", // RR
+  "jp_triple_rare", // RRR
   "jp_art_rare", // AR
   "jp_special_art_rare", // SAR
   "jp_super_rare", // SR
@@ -122,9 +133,11 @@ export function RarityVariantPicker({
     () => filterRarities({ language, era: showAll ? null : era || null }),
     [language, era, showAll],
   );
+  const quickList = (languageByValueOrLabel(language)?.region ?? "western") === "western" ? QUICK_RARITIES_WESTERN : QUICK_RARITIES_EASTERN;
   const quickRarities = useMemo(
-    () => QUICK_RARITIES.map(rarityByValue).filter((r): r is PokemonRarity => Boolean(r) && base.some((b) => b.value === r!.value)),
-    [base],
+    () => quickList.map(rarityByValue).filter((r): r is PokemonRarity => Boolean(r) && base.some((b) => b.value === r!.value)),
+    // quickList derives from `language`, so language stands in for it here.
+    [base, language],
   );
   const moreRarities = useMemo(() => {
     const quickSet = new Set(quickRarities.map((r) => r.value));
@@ -177,13 +190,13 @@ export function RarityVariantPicker({
         onClick={() => pickRarity(rr.value)}
         title={`${rr.label} — ${rr.description}`}
         data-testid={`rarity-chip-${rr.value}`}
-        className={`group relative flex min-w-[112px] max-w-[164px] items-center gap-1.5 rounded-lg border px-2 py-1.5 text-left transition ${
+        className={`group relative flex h-[38px] min-w-[84px] max-w-[132px] items-center gap-1 rounded-md border px-1.5 py-1 text-left transition ${
           selected ? "border-amber-400 bg-amber-500/15 ring-2 ring-amber-400" : "border-slate-700 bg-slate-900/60 hover:border-slate-500"
         }`}
       >
-        <RaritySymbol symbol={rr.symbol} size={22} />
+        <RaritySymbol symbol={rr.symbol} size={17} />
         <span className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-[11px] font-bold text-slate-100">{rr.label}</span>
+          <span className="truncate text-[10px] font-bold text-slate-100">{rr.label}</span>
           {rr.codes[0] && <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">{rr.codes[0]}</span>}
         </span>
         <span
@@ -397,12 +410,23 @@ export function RarityVariantPicker({
         </div>
       )}
 
-      {/* Live preview — each field separate, clearly disclaimed */}
-      <div className="rounded-xl border border-amber-800/40 bg-amber-950/10 p-3" data-testid="rarity-preview">
-        <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-300/80">
-          Preview only — final label rendering unchanged
+      {/* Compact one-line summary + expandable details, clearly disclaimed */}
+      <div className="rounded-lg border border-amber-800/40 bg-amber-950/10 px-2.5 py-1.5" data-testid="rarity-preview">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-slate-200" data-testid="rarity-preview-line">
+          <span>{languageByValueOrLabel(structured.language)?.label ?? "—"}</span>
+          {structured.era && <span>· {POKEMON_ERAS.find((e) => e.value === structured.era)?.label}</span>}
+          {rarity && (
+            <span className="inline-flex items-center gap-1">
+              · <RaritySymbol symbol={rarityByValue(rarity)!.symbol} size={14} /> {rarityByValue(rarity)!.label}
+            </span>
+          )}
+          <span>· {structured.finish ? finishByValue(structured.finish)?.label : "No finish"}</span>
+          <span>· {structured.promo ? promoByValue(structured.promo)?.label : structured.subset ? promoByValue(structured.subset)?.label : "No promo"}</span>
         </div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-300 sm:grid-cols-3">
+        <div className="mt-0.5 text-[9px] uppercase tracking-wide text-amber-300/60">Preview only — printed label unchanged</div>
+        <details className="mt-1">
+        <summary className="cursor-pointer text-[10px] text-slate-400 hover:text-slate-200">View details</summary>
+        <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-300 sm:grid-cols-3">
           <div>
             Language: <b className="text-slate-100">{languageByValueOrLabel(structured.language)?.label ?? "—"}</b>
           </div>
@@ -436,6 +460,7 @@ export function RarityVariantPicker({
             Subset: <b className="text-slate-100">{structured.subset ? promoByValue(structured.subset)?.label : "—"}</b>
           </div>
         </div>
+        </details>
       </div>
     </div>
   );

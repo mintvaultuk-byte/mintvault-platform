@@ -39,7 +39,7 @@ export function GradingWorkflowBar({
             data-testid={`workflow-stage-${stage.key}`}
             onClick={() => onStageClick?.(i, stage)}
             title={`${stage.label} — ${stage.sublabel}`}
-            className={`flex flex-1 items-center gap-2 rounded-lg px-3 py-2 text-left transition ${
+            className={`flex flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition ${
               isCurrent
                 ? "border border-[var(--admin-gold)] bg-[var(--admin-gold)]/15"
                 : isComplete
@@ -62,7 +62,7 @@ export function GradingWorkflowBar({
               <span className={`block truncate text-xs font-bold ${isCurrent || isComplete ? "text-[var(--admin-ink)]" : "text-[var(--admin-ink-faint)]"}`}>
                 {stage.label}
               </span>
-              <span className="hidden truncate text-[10px] text-[var(--admin-ink-faint)] sm:block">{stage.sublabel}</span>
+              <span className="hidden truncate text-[10px] text-[var(--admin-ink-faint)] xl:block">{stage.sublabel}</span>
             </span>
           </button>
         );
