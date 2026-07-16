@@ -1,6 +1,7 @@
 import { sendServerError } from "./lib/error-response";
 import { normalizeCertId, certNumberFromId } from "./lib/cert-id";
 import { ensurePerfIndexes } from "./lib/perf-indexes";
+import { applyStructuredVariantFromBody } from "./lib/structured-variant";
 import type {
   Express,
   Request as ExpressRequest,
@@ -55,6 +56,7 @@ import { registerAuthRoutes } from "./routes/auth";
 import { registerSubmissionRoutes } from "./routes/submissions";
 import { registerAdminSubmissionRoutes } from "./routes/admin-submissions";
 import { registerAdminConfigRoutes } from "./routes/admin-config";
+import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerTransferRoutes } from "./routes/transfers";
 import { registerPreGradeRoutes } from "./routes/pre-grade";
 import { registerVaultQuestAdminRoutes } from "./routes/vault-quest-admin";
@@ -1408,6 +1410,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerSubmissionRoutes(app);
   registerAdminSubmissionRoutes(app);
   registerAdminConfigRoutes(app);
+  registerRarityMappingRoutes(app);
   registerTransferRoutes(app);
   registerPreGradeRoutes(app);
   registerStolenRoutes(app);
@@ -3905,6 +3908,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           });
         }
 
+        // Structured rarity/variant picker → new nullable columns (legacy
+        // variant/rarity above are left untouched). Validated + symbol-derived
+        // server-side; invalid catalogue values are rejected here, not at the DB.
+        const structuredCreate = applyStructuredVariantFromBody(req.body, data);
+        if (!structuredCreate.ok) {
+          return res.status(400).json({ error: "Invalid rarity selection.", details: structuredCreate.errors });
+        }
+
         const cert = await storage.createCertificate(data, req.session.adminEmail || "admin");
 
         await storage.writeAuditLog("certificate", cert.certId, "create", req.session.adminEmail || "admin", {
@@ -4104,6 +4115,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           return res.status(400).json({
             error: "Set either Variant or Rarity, not both — the front label shows only one on line 3.",
           });
+        }
+
+        // Structured rarity/variant picker → new nullable columns. Opt-in by key
+        // presence, so a partial PUT (e.g. grade-only) never erases them; the
+        // legacy variant/rarity remain the untouched historical source of truth.
+        const structuredUpdate = applyStructuredVariantFromBody(req.body, data);
+        if (!structuredUpdate.ok) {
+          return res.status(400).json({ error: "Invalid rarity selection.", details: structuredUpdate.errors });
         }
 
         if (frontImage) {

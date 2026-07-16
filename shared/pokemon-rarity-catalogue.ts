@@ -188,6 +188,18 @@ export function languageByValue(value: string | null | undefined): PokemonLangua
   return POKEMON_LANGUAGES.find((l) => l.value === value);
 }
 
+/** Resolve a language from its catalogue code ("en"), display label ("English"),
+ *  or any alias — so the picker (codes) and the existing `language` column
+ *  (display names) both map to the same entry. */
+export function languageByValueOrLabel(value: string | null | undefined): PokemonLanguage | undefined {
+  if (value == null) return undefined;
+  const q = norm(String(value));
+  if (!q) return undefined;
+  return POKEMON_LANGUAGES.find(
+    (l) => l.value === value || norm(l.label) === q || l.aliases.some((a) => norm(a) === q),
+  );
+}
+
 /** Rarities available for a given language + era + (optional) explicit region override. */
 export function filterRarities(opts: { language?: string | null; era?: PokemonEra | null }): PokemonRarity[] {
   const lang = languageByValue(opts.language ?? "en");
@@ -223,6 +235,38 @@ export function searchCatalogue(query: string): CatalogueSearchResult {
     finishes: POKEMON_FINISHES.filter((x) => hit(x.label, x.aliases)),
     promos: POKEMON_PROMOS.filter((x) => hit(x.label, x.aliases)),
   };
+}
+
+const COUNT_WORD: Record<number, string> = { 1: "one", 2: "two", 3: "three" };
+
+/**
+ * Plain-English description of a printed symbol for screen readers + tests —
+ * always naming the COUNT and COLOUR so gold vs silver and 1★ vs 2★ vs 3★ are
+ * distinguishable without seeing the graphic. E.g. "two gold stars".
+ */
+export function describeSymbol(symbol: RaritySymbol): string {
+  const colour = symbol.colour === "none" ? "" : symbol.colour;
+  switch (symbol.shape) {
+    case "star":
+    case "stars": {
+      const n = symbol.count ?? 1;
+      const plural = n === 1 ? "star" : "stars";
+      return `${COUNT_WORD[n] ?? n} ${colour} ${plural}`.replace(/\s+/g, " ").trim();
+    }
+    case "circle":
+      return `${colour} circle`.trim();
+    case "diamond":
+      return `${colour} diamond`.trim();
+    case "shiny": {
+      const n = symbol.count ?? 1;
+      return `${n === 1 ? "" : COUNT_WORD[n] ?? n} ${colour} shiny symbol`.replace(/\s+/g, " ").trim();
+    }
+    case "text":
+      return `${colour} “${symbol.glyph}” marker`.trim();
+    case "none":
+    default:
+      return "no printed symbol";
+  }
 }
 
 export function rarityByValue(value: string | null | undefined): PokemonRarity | undefined {
