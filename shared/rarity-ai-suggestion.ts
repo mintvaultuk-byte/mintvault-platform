@@ -38,3 +38,37 @@ export type RaritySuggestionDecision = "accept" | "reject";
 export function suggestRarityFromImage(_req: RaritySuggestionRequest): RaritySuggestion | null {
   return null;
 }
+
+// ── v2 contract (Knowledge Engine) — full card identification, still stub-only ──
+
+/** One candidate identification. Everything is a PROPOSAL — nothing auto-saves. */
+export interface CardIdentificationCandidate {
+  setValue: string | null; // canonical pokemon_sets value/code
+  setCode: string | null;
+  rarityCode: string | null; // canonical catalogue rarity value
+  finishVariant: string | null;
+  promoType: string | null;
+  subsetName: string | null;
+  language: string | null; // catalogue language value
+  /** 0..1 — advisory only. */
+  confidence: number;
+  /** Human-checkable reasons (symbol seen, code seen, number format matched…). */
+  evidence: string[];
+}
+
+/** Full v2 suggestion: a primary candidate + ranked alternatives.
+ *  `needsHumanReview` is ALWAYS true in this phase — no auto-selection exists. */
+export interface CardIdentificationSuggestion {
+  primary: CardIdentificationCandidate;
+  alternatives: CardIdentificationCandidate[];
+  needsHumanReview: true;
+}
+
+/**
+ * v2 placeholder resolver — identical safety contract to v1: ZERO provider
+ * calls, ZERO credits, always returns null (no suggestion). The UI built on
+ * this must offer only Accept / Reject / Choose-alternative, never auto-save.
+ */
+export function identifyCardFromImages(_req: RaritySuggestionRequest): CardIdentificationSuggestion | null {
+  return null;
+}
