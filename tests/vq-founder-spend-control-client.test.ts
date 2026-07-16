@@ -296,4 +296,17 @@ describe("first-time founder flow — fully automatic, correct phase order, zero
     expect(result.outcome).toBe("generate");
     expect(result.calls).toEqual([]);
   });
+
+  it("global generation lock Off → blocked immediately; the master switch is NEVER auto-enabled", () => {
+    // Even though the per-type flag is on and the provider is ready, the master lock
+    // wins: the flow stops, tells the founder why, and makes ZERO mutating calls —
+    // in particular it never POSTs to enable the "generation" master switch.
+    const result = simulateOneClick([
+      { features: [{ feature: "generation", enabled: false }, { feature: "gen_action_pose", enabled: true, reason: "db_flag_on" }], provider: READY_PROVIDER },
+    ]);
+    expect(result.outcome).toBe("blocked");
+    if (result.outcome === "blocked") expect(result.reason).toMatch(/AI Generation is Locked/i);
+    expect(result.calls).toEqual([]);
+    expect(result.calls.some((c) => c.includes("feature-flags/generation"))).toBe(false);
+  });
 });
