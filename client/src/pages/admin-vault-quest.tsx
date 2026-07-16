@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { AdminButton } from "@/components/admin";
@@ -21,11 +21,18 @@ import {
   expectedResolvedModel,
   featureForReferenceType,
   generationBlockedReasonWithProvider,
+  generationStageLabel,
   isPremiumModel,
+  planGenerationGate,
   providerGenerationBlockedReason,
+  providerHardBlockReason,
+  providerReadiness,
   resolveFounderFeatureMap,
+  resolveFounderFeatureReasons,
+  stageForPlan,
   type FounderFeatureKey,
   type FounderFeatureMap,
+  type FounderFeatureStatus,
   type ProviderConnection,
 } from "@/components/vault-quest/spend-control";
 
@@ -698,6 +705,7 @@ async function postJson(url: string, body: unknown): Promise<{ status: number; j
 
 function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => void; onAuthError: (e: unknown, fallbackTitle: string) => void; deepLink?: BibleDeepLink | null }) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const chars = useQuery<{ characters: VqCharacterRow[] } | null>({ queryKey: ["/api/admin/vault-quest/characters"], retry: false });
   const [selectedId, setSelectedId] = useState("");
   const [draft, setDraft] = useState<BibleDraft>(draftFromCharacter(null));
@@ -799,10 +807,28 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       ? { premiumModel: model, premiumConfirmed: true, premiumReason: reason.trim() }
       : {};
   const generationDisabledTitle = (feature: FounderFeatureKey) => generationBlockedReasonWithProvider(founderFlags, feature, providerConnection, providerStatusLoaded) ?? undefined;
+  // Full block (unchanged) — feature Off OR provider not verified OR premium
+  // unconfirmed. Still used by the advanced batch/family buttons so their behavior
+  // is byte-for-byte the same as before this change.
   const referenceGenerationBlocked = (type: VqRefType) =>
     !canSubmitGeneration(founderFlags, featureForReferenceType(type)) ||
     !!providerGenerationBlockedReason(providerConnection, providerStatusLoaded) ||
     !!premiumBlockReason;
+  // The founder primary Generate buttons are NEVER disabled by the spend gates —
+  // only by local, in-the-moment conditions (a generation already in flight, a
+  // locked character, an unapproved description). The click itself resolves the
+  // gates on FRESH server state (ensureGenerationReady) and always ends in either a
+  // generation or a specific real-reason toast, so the button can never be a silent
+  // dead end (and never flashes a scary "locked" while status is still loading).
+  // This helper supplies an OPTIONAL amber hint shown beside the button once status
+  // has loaded and a real, click-unresolvable reason exists — informational only.
+  const referenceGenerationHardTitle = (_type: VqRefType): string | undefined => {
+    if (premiumBlockReason) return premiumBlockReason; // local model choice — always valid
+    if (!providerStatusLoaded) return undefined; // status still loading — show nothing rather than flash
+    if (!founderFlags.generation) return "AI Generation is Locked. Turn it back on in Founder Spend Controls.";
+    if (providerReadiness(providerConnection, providerStatusLoaded) === "hard_blocked") return providerHardBlockReason(providerConnection);
+    return undefined;
+  };
   const referenceGenerationTitle = (type: VqRefType, fallback?: string) => generationDisabledTitle(featureForReferenceType(type)) ?? premiumBlockReason ?? fallback;
 
   const characters = chars.data?.characters ?? [];
@@ -1033,6 +1059,44 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     }
   }
 
+  async function uploadActionReference(file: File) {
+    if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); return; }
+    const masterKey = selected.referencePack?.master_portrait?.r2Key || selected.approvedArtworkR2Key;
+    if (!masterKey) {
+      toast({ title: "Approve a Master Reference first", description: "The Action Pose is linked to the approved Master.", variant: "destructive" });
+      return;
+    }
+    const confirmReplaceLocked = selected.locked
+      ? window.confirm(`${selected.characterName} is locked as canonical.\n\nUploading this Action Pose will replace the active Action Reference and archive the previous one. Continue?`)
+      : false;
+    if (selected.locked && !confirmReplaceLocked) return;
+    setBusy("upload-action");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      if (confirmReplaceLocked) fd.append("confirmReplaceLocked", "true");
+      const res = await fetch(`/api/admin/vault-quest/characters/${encodeURIComponent(selected.characterId)}/reference/action_pose/upload`, {
+        method: "POST",
+        body: fd,
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = new Error((await res.json().catch(() => ({}))).error || `upload failed (${res.status})`) as Error & { status?: number };
+        err.status = res.status;
+        throw err;
+      }
+      const data = (await res.json()) as { width: number; height: number };
+      await chars.refetch();
+      await candQuery.refetch();
+      setArtNonce((n) => n + 1);
+      toast({ title: "Action Pose uploaded", description: `${data.width}x${data.height} approved as the Action Reference.` });
+    } catch (e) {
+      onAuthError(e, "Upload Action Pose failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function setLocked(id: string, locked: boolean) {
     await apiRequest("POST", `/api/admin/vault-quest/characters/${encodeURIComponent(id)}/lock`, { locked });
   }
@@ -1058,9 +1122,91 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
 
   function artworkError(e: unknown, fallback: string) {
     const status = (e as { status?: number })?.status;
+    const serverMsg = (e as { message?: string })?.message;
     if (status === 402) toast({ title: "Higgsfield limit", description: "Needs a higher plan or more credits — no artwork generated.", variant: "destructive" });
-    else if (status === 503) toast({ title: "Provider not connected", description: "Higgsfield token missing or expired.", variant: "destructive" });
+    else if (status === 503) toast({ title: "Provider not connected", description: serverMsg || "Higgsfield token missing or expired.", variant: "destructive" });
+    // 422 = a real, actionable server reason (description not approved, image
+    // failed the integrity/pose/identity gate). Surface it verbatim so the founder
+    // sees exactly why, never a silent no-op.
+    else if (status === 422) toast({ title: `${fallback}`, description: serverMsg || "The character isn't ready for this generation yet.", variant: "destructive" });
     else onAuthError(e, fallback);
+  }
+
+  // One-click generation readiness for the founder — FULLY AUTOMATIC. The Generate
+  // button is a SINGLE action: this resolves the two legitimate spend gates in
+  // place, with no dialogs and no hidden panels, narrating each step:
+  //   (1) the per-type flag — a type the founder has never used is enabled
+  //       automatically (their explicit, logged click IS the enable); a deliberate
+  //       owner Off (db_flag_off) and the master lock are respected, never bypassed,
+  //   (2) the free provider verification — a zero-cost token check, no credits —
+  // by driving the SAME sanctioned endpoints the Founder Spend Controls / AI
+  // Provider panels use. The server still independently re-checks BOTH gates on the
+  // generate call; nothing here weakens them. Returns true only when generation may
+  // proceed. Reads a FRESH server snapshot after each step (never stale React state)
+  // and, on any failure, shows the EXACT reason (never a silent no-op).
+  async function ensureGenerationReady(feature: FounderFeatureKey): Promise<boolean> {
+    const fetchOps = async (): Promise<{ features?: FounderFeatureStatus[]; provider?: ProviderConnection } | null> => {
+      try {
+        return (await (await apiRequest("GET", "/api/admin/vault-quest/ops/status")).json()) as {
+          features?: FounderFeatureStatus[];
+          provider?: ProviderConnection;
+        };
+      } catch {
+        return null; // fail closed below
+      }
+    };
+    setGenStageLabel(generationStageLabel("preparing"));
+    let snap = await fetchOps();
+    for (let step = 0; step < 4; step++) {
+      if (!snap) {
+        toast({ title: "Generation unavailable", description: "Couldn't read your spend controls. Check the connection and try again.", variant: "destructive" });
+        return false;
+      }
+      const flags = resolveFounderFeatureMap(snap.features, true);
+      const reasons = resolveFounderFeatureReasons(snap.features);
+      const plan = planGenerationGate(flags, feature, reasons[feature], snap.provider ?? null, true);
+      if (plan.kind === "generate") return true;
+      if (plan.kind === "blocked") {
+        toast({ title: "Generation unavailable", description: plan.reason, variant: "destructive" });
+        return false;
+      }
+      const stage = stageForPlan(plan.kind);
+      if (stage) setGenStageLabel(generationStageLabel(stage));
+      if (plan.kind === "enable_then_continue") {
+        // Auto-enable the type the founder explicitly asked to generate. Their click
+        // is the explicit owner action; a brief toast keeps it transparent (never
+        // silent). Server default-Off and the master lock are unchanged.
+        try {
+          await apiRequest("POST", `/api/admin/vault-quest/ops/feature-flags/${plan.feature}`, {
+            enabled: true,
+            reason: `${plan.label} enabled automatically from the Generate button (founder)`,
+          });
+          toast({ title: `${plan.label} generation enabled` });
+        } catch (e) {
+          onAuthError(e, "Couldn't enable generation");
+          return false;
+        }
+      } else if (plan.kind === "verify_then_continue") {
+        // Zero-cost token check (no credits, no image) — the sanctioned provider
+        // verification, run automatically so the founder never hunts for it.
+        try {
+          await apiRequest("POST", "/api/admin/vault-quest/ops/provider/test-connection", {});
+        } catch (e) {
+          onAuthError(e, "Couldn't verify the AI provider");
+          return false;
+        }
+      }
+      await queryClient.invalidateQueries({ queryKey: ["/api/admin/vault-quest/ops/status"] });
+      snap = await fetchOps();
+    }
+    // Still not ready after enabling + verifying — surface the freshest real reason.
+    const provider = snap?.provider ?? null;
+    const reason =
+      providerReadiness(provider, true) === "hard_blocked"
+        ? providerHardBlockReason(provider)
+        : "The AI provider still isn't connected. Check the AI Provider panel above.";
+    toast({ title: "Generation unavailable", description: reason, variant: "destructive" });
+    return false;
   }
 
   // Reuse-before-generate: never silently regenerate when approved assets exist.
@@ -1077,6 +1223,11 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
   // while a real (sometimes 15-60s) generation is in flight. Null when idle.
   const [genPhase, setGenPhase] = useState<GenerationPhase | null>(null);
   const genPhaseLabel = genPhase === "still-processing" ? "Still processing…" : genPhase === "generating" ? "Generating…" : null;
+  // Live founder-facing phase across the WHOLE automatic sequence — Preparing →
+  // Verifying Provider → Generating <type> → Refreshing. Null when idle. Shown on
+  // the button and on the production tracker's active step so the one-click flow
+  // narrates itself and never looks frozen. Purely visual; drives no gate.
+  const [genStageLabel, setGenStageLabel] = useState<string | null>(null);
 
   async function generateMasterArtwork(typeOverride?: VqRefType) {
     if (!selected) { toast({ title: "Choose a character first", variant: "destructive" }); resetGenerateWith(); return; }
@@ -1086,12 +1237,10 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     try {
       // Guard: only accept a real ref-type string; never a forwarded MouseEvent.
       const type: VqRefType = isVqRefType(typeOverride) ? typeOverride : refType;
-      const blocked = generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(type), providerConnection, providerStatusLoaded);
-      if (blocked) {
-        toast({ title: "Generation unavailable", description: blocked, variant: "destructive" });
-        resetGenerateWith();
-        return;
-      }
+      // Spend gates (per-type flag + provider verification) are resolved in
+      // doGenerateReference via ensureGenerationReady — the single funnel every
+      // path (this button AND the ReusePanel) shares — so the founder's one click
+      // enables + verifies + generates with no hidden step, on FRESH server state.
       if (isVqRefType(typeOverride) && typeOverride !== refType) setRefType(typeOverride); // keep gallery + approved-image in sync
       // Reuse popup is an ADVANCED-only affordance (Phase 1): Simple mode keeps the
       // founder in the plain Generate → Approve flow and never shows the cross-asset
@@ -1141,9 +1290,32 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
     // Guard: only a real ref-type string; never a forwarded MouseEvent (would put a
     // DOM node into the JSON body → "Converting circular structure to JSON").
     const type: VqRefType = isVqRefType(typeOverride) ? typeOverride : refType;
-    const blocked = generationBlockedReasonWithProvider(founderFlags, featureForReferenceType(type), providerConnection, providerStatusLoaded);
-    if (blocked) {
-      toast({ title: "Generation unavailable", description: blocked, variant: "destructive" });
+    // Premium (highest-quality) model requires an explicit checked confirmation +
+    // reason before it can spend the premium rate — unchanged, still enforced here.
+    if (premiumBlockReason) {
+      toast({ title: "Confirm premium generation", description: premiumBlockReason, variant: "destructive" });
+      genInFlight.current = false;
+      setBusy(null);
+      resetGenerateWith();
+      return;
+    }
+    // The character's description must be approved before any artwork (server also
+    // enforces this with a 422). Surface it here so the founder gets the real reason
+    // instead of a request that silently bounces.
+    if (selected.descriptionStatus !== "approved") {
+      toast({ title: "Approve the description first", description: "Generate, review and Approve the character description before generating artwork.", variant: "destructive" });
+      genInFlight.current = false;
+      setBusy(null);
+      resetGenerateWith();
+      return;
+    }
+    // Resolve the two spend gates (per-type flag + provider verification) through
+    // the sanctioned enable/verify endpoints — the founder's single click, no hidden
+    // panel. Returns false (already messaged) if the founder cancels or a real,
+    // unresolvable reason remains. The server re-checks both gates on the POST below.
+    setBusy("gen-art");
+    const ready = await ensureGenerationReady(featureForReferenceType(type));
+    if (!ready) {
       genInFlight.current = false;
       setBusy(null);
       resetGenerateWith();
@@ -1172,7 +1344,14 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       // Bounded client wait, then safe re-polling on the SAME idempotencyKey — the
       // server's D10 guard makes a repeat POST free (202 pending / 200 replayed), so
       // "recovery" here is just asking the same question again, never a new charge.
-      const outcome = await runGenerationWithRecovery({ post: () => postJson(url, body), onPhase: setGenPhase });
+      const outcome = await runGenerationWithRecovery({
+        post: () => postJson(url, body),
+        onPhase: (phase) => {
+          setGenPhase(phase);
+          if (phase === "generating") setGenStageLabel(generationStageLabel("generating", typeLabel));
+          else if (phase === "still-processing") setGenStageLabel("Still processing…");
+        },
+      });
 
       if (outcome.phase === "still-processing") {
         // Timed out AND the poll budget is exhausted with no terminal answer yet.
@@ -1188,6 +1367,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       }
       // completed or replayed — both terminal, safe to clear.
       clearIdempotencyKey(scopeKey);
+      setGenStageLabel(generationStageLabel("refreshing")); // narrate the auto-refresh
       if (type === "master_portrait") {
         const data = outcome.data as { created?: { model?: string }[]; autoRejected?: number; bgRejected?: number; message?: string };
         if (outcome.phase === "replayed") {
@@ -1218,6 +1398,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
       genInFlight.current = false;
       setBusy(null);
       setGenPhase(null);
+      setGenStageLabel(null);
       resetGenerateWith();
     }
   }
@@ -1806,7 +1987,11 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                           }`}
                           title={s.future ? "Coming soon" : undefined}
                         >
-                          {s.future ? "🔒" : s.done ? "✅" : i === active ? "▶" : "•"} {s.label}{s.future ? " (soon)" : ""}
+                          {/* While the one-click sequence runs, the active step narrates the
+                              live phase (Preparing → Verifying Provider → Generating → Refreshing). */}
+                          {i === active && genStageLabel
+                            ? `🟡 ${genStageLabel}`
+                            : `${s.future ? "🔒" : s.done ? "✅" : i === active ? "▶" : "•"} ${s.label}${s.future ? " (soon)" : ""}`}
                         </span>
                       </span>
                     ))}
@@ -2032,16 +2217,16 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                             <p className="mt-0.5 max-w-sm text-[11px] text-slate-500">Every future card and pose reuses this exact image so the character always looks the same.</p>
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               <button type="button" onClick={() => setZoomId("master")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500">View</button>
-                              <button type="button" onClick={() => generateMasterArtwork("master_portrait")} disabled={busyGen || referenceGenerationBlocked("master_portrait")} title={referenceGenerationTitle("master_portrait")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 disabled:opacity-40">Replace Master</button>
+                              <button type="button" onClick={() => generateMasterArtwork("master_portrait")} disabled={busyGen} title={referenceGenerationHardTitle("master_portrait")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 disabled:opacity-40">Replace Master</button>
                               <button type="button" onClick={() => setHistoryFor("master_portrait")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500">Archive</button>
                             </div>
                           </div>
                         </div>
                       ) : (
                         <>
-                          <button type="button" onClick={() => generateMasterArtwork("master_portrait")} disabled={busyGen || !descOk || selected.locked || referenceGenerationBlocked("master_portrait")} title={referenceGenerationTitle("master_portrait", !descOk ? "Approve the description first" : undefined)}
+                          <button type="button" onClick={() => generateMasterArtwork("master_portrait")} disabled={busyGen || !descOk || selected.locked} title={referenceGenerationHardTitle("master_portrait") ?? (!descOk ? "Approve the description first" : undefined)}
                             className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40" style={{ background: gold }}>
-                            {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}{busyGen ? (genPhaseLabel ?? "Generating…") : masterVerb}
+                            {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}{busyGen ? (genStageLabel ?? genPhaseLabel ?? "Generating…") : masterVerb}
                           </button>
                           {!descOk && <p className="mt-2 text-center text-[11px] text-slate-500">Approve the character description above to unlock this.</p>}
                         </>
@@ -2150,18 +2335,36 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                             <div className="text-sm text-emerald-300">Approved Action Pose on file</div>
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               <button type="button" onClick={() => setZoomId("action")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500">View</button>
-                              <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || referenceGenerationBlocked("action_pose")} title={referenceGenerationTitle("action_pose")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 disabled:opacity-40">Replace Action</button>
+                              <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen} title={referenceGenerationHardTitle("action_pose")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 disabled:opacity-40">Replace Action</button>
+                              <label className={`cursor-pointer rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500 ${busy ? "pointer-events-none opacity-40" : ""}`}>
+                                {busy === "upload-action" ? "Uploading…" : "Upload Action Pose"}
+                                <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void uploadActionReference(f); }} />
+                              </label>
                               <button type="button" onClick={() => setHistoryFor("action_pose")} className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:border-amber-500">Archive</button>
                             </div>
+                            {referenceGenerationHardTitle("action_pose") && (
+                              <div className="mt-2 text-[11px] text-amber-300">{referenceGenerationHardTitle("action_pose")}</div>
+                            )}
                           </div>
                         </div>
                       ) : (
                         <>
                           {actionCands.length === 0 && (
-                            <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked || referenceGenerationBlocked("action_pose")} title={referenceGenerationTitle("action_pose")}
-                              className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>
-                              {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}{busyGen ? (genPhaseLabel ?? "Generating…") : "Generate Matching Action Pose"}
-                            </button>
+                            <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                              <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || selected.locked} title={referenceGenerationHardTitle("action_pose")}
+                                className="flex w-full items-center justify-center gap-2 rounded-xl px-6 py-4 text-base font-bold text-black transition enabled:hover:brightness-110 disabled:opacity-40" style={{ background: gold }}>
+                                {busyGen ? <Loader2 className="h-5 w-5 animate-spin" /> : <Wand2 className="h-5 w-5" />}{busyGen ? (genStageLabel ?? genPhaseLabel ?? "Generating…") : "Generate Matching Action Pose"}
+                              </button>
+                              <label className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-600 px-5 py-4 text-sm font-bold text-slate-100 hover:border-amber-500 ${busy ? "pointer-events-none opacity-40" : ""}`}>
+                                <Upload className="h-4 w-4" />{busy === "upload-action" ? "Uploading…" : "Upload Action Pose"}
+                                <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void uploadActionReference(f); }} />
+                              </label>
+                            </div>
+                          )}
+                          {(selected.locked || referenceGenerationHardTitle("action_pose")) && (
+                            <p className="mt-2 text-center text-[11px] text-amber-300">
+                              {selected.locked ? "Generation is locked for this character. Uploading a finished Action Pose is still available with confirmation." : referenceGenerationHardTitle("action_pose")}
+                            </p>
                           )}
                           <p className="mt-2 text-center text-[11px] text-slate-500">Always built from your approved Master — face, colours, markings, ears, tail, accessories &amp; shape stay the same. Only pose, expression, camera angle and movement change.</p>
                         </>
@@ -2227,7 +2430,7 @@ function CharacterBibleView({ onBack, onAuthError, deepLink }: { onBack: () => v
                                   </div>
                                 );
                               })}
-                              <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen || referenceGenerationBlocked("action_pose")} title={referenceGenerationTitle("action_pose")} className="w-full rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-500 disabled:opacity-40">{busyGen ? (genPhaseLabel ?? "Generating…") : "Generate Another Matching Pose"}</button>
+                              <button type="button" onClick={() => generateMasterArtwork("action_pose")} disabled={busyGen} title={referenceGenerationHardTitle("action_pose")} className="w-full rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-amber-500 disabled:opacity-40">{busyGen ? (genStageLabel ?? genPhaseLabel ?? "Generating…") : "Generate Another Matching Pose"}</button>
                             </div>
                           )}
                     </div>

@@ -160,6 +160,57 @@ run("artwork revisions — real router + real vqStorage + local Postgres", () =>
     }
   });
 
+  it("manual Action Reference upload promotes action_pose without provider jobs or candidates", async () => {
+    const characterId = "RT-ACTION-S1";
+    const masterKey = "vq/characters/RT-ACTION-S1/approved/master_portrait.png";
+    r2Store.set(masterKey, await REAL_PNG_1());
+    await q(
+      `INSERT INTO vq_characters (character_id, family_id, card_id, stage_number, character_name, element, approved_artwork_r2_key, reference_artwork_r2_key, reference_pack)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8::jsonb)`,
+      [
+        characterId,
+        "RT-ACTION",
+        "RT-ACTION-CARD-1",
+        1,
+        "Action Upload Subject",
+        "Flame",
+        masterKey,
+        JSON.stringify({ master_portrait: { r2Key: masterKey, approvedAt: new Date(0).toISOString() } }),
+      ],
+    );
+
+    const beforeCandidates = await q("SELECT count(*)::int AS n FROM vq_artwork_candidates WHERE character_id = $1", [characterId]);
+    const beforeJobs = await q("SELECT count(*)::int AS n FROM vq_ai_generations WHERE card_id = $1", ["RT-ACTION-CARD-1"]);
+    const png = await REAL_PNG_2();
+    const form = new FormData();
+    form.append("file", new Blob([png], { type: "image/png" }), "action.png");
+    const uploadRes = await fetch(`${base}/api/admin/vault-quest/characters/${characterId}/reference/action_pose/upload`, {
+      method: "POST",
+      body: form,
+    });
+    expect(uploadRes.status).toBe(200);
+    const uploadJson = (await uploadRes.json()) as { key: string; referenceType: string; providerGeneration: boolean };
+    expect(uploadJson.referenceType).toBe("action_pose");
+    expect(uploadJson.providerGeneration).toBe(false);
+    expect(uploadJson.key).toMatch(/^vq\/characters\/RT-ACTION-S1\/approved\/action_pose\/.+\.png$/);
+
+    const activeKey = await getActiveRevisionKey("character", characterId, "action_pose");
+    expect(activeKey).toBe(uploadJson.key);
+    const { rows } = await q("SELECT reference_pack, approved_artwork_r2_key FROM vq_characters WHERE character_id = $1", [characterId]);
+    const row = rows[0] as { reference_pack: Record<string, { r2Key?: string }>; approved_artwork_r2_key: string };
+    expect(row.reference_pack.action_pose.r2Key).toBe(uploadJson.key);
+    expect(row.reference_pack.master_portrait.r2Key).toBe(masterKey);
+    expect(row.approved_artwork_r2_key).toBe(masterKey);
+
+    const preview = await getBinary(`/api/admin/vault-quest/characters/${characterId}/pack/action_pose`);
+    expect(preview.status).toBe(200);
+    expect(preview.buf?.equals(png)).toBe(true);
+    const afterCandidates = await q("SELECT count(*)::int AS n FROM vq_artwork_candidates WHERE character_id = $1", [characterId]);
+    const afterJobs = await q("SELECT count(*)::int AS n FROM vq_ai_generations WHERE card_id = $1", ["RT-ACTION-CARD-1"]);
+    expect((afterCandidates.rows[0] as { n: number }).n).toBe((beforeCandidates.rows[0] as { n: number }).n);
+    expect((afterJobs.rows[0] as { n: number }).n).toBe((beforeJobs.rows[0] as { n: number }).n);
+  });
+
   it("GET /artwork-revisions returns history; POST .../restore rolls back and is reflected everywhere", async () => {
     await q(`INSERT INTO vq_cards (card_id, collector_number, name, card_type, element) VALUES ($1,$2,$3,$4,$5)`, ["RT-HIST-1", "003/150", "History Card", "Creature", "Storm"]);
     const png1 = await REAL_PNG_1();
