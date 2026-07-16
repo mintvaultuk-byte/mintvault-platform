@@ -7,12 +7,14 @@ import {
   featureForReferenceType,
   generationBlockedReason,
   generationBlockedReasonWithProvider,
+  generationStageLabel,
   planGenerationGate,
   providerGenerationBlockedReason,
   providerHardBlockReason,
   providerReadiness,
   resolveFounderFeatureMap,
   resolveFounderFeatureReasons,
+  stageForPlan,
   type FounderFeatureStatus,
   type ProviderConnection,
 } from "../client/src/components/vault-quest/spend-control";
@@ -203,5 +205,95 @@ describe("planGenerationGate — the founder single-click decision", () => {
     for (const feature of ["gen_master_portrait", "gen_face_closeup", "gen_turnaround_sheet", "gen_colour_sheet"] as const) {
       expect(planGenerationGate(flags, feature, "not_yet_enabled", READY_PROVIDER).kind).toBe("enable_then_continue");
     }
+  });
+});
+
+// ── Visible phase progression (the one-click auto sequence) ─────────────────────
+describe("generation phase labels", () => {
+  it("match the founder-facing wording exactly", () => {
+    expect(generationStageLabel("preparing")).toBe("Preparing Generation…");
+    expect(generationStageLabel("verifying")).toBe("Verifying Provider…");
+    expect(generationStageLabel("generating", "Action Pose")).toBe("Generating Action Pose…");
+    expect(generationStageLabel("refreshing")).toBe("Refreshing…");
+  });
+
+  it("maps each in-flight plan to its visible prep stage", () => {
+    expect(stageForPlan("enable_then_continue")).toBe("preparing");
+    expect(stageForPlan("verify_then_continue")).toBe("verifying");
+    expect(stageForPlan("generate")).toBeNull();
+    expect(stageForPlan("blocked")).toBeNull();
+  });
+});
+
+describe("first-time founder flow — fully automatic, correct phase order, zero premature provider work", () => {
+  // Deterministic model of the client's ensureGenerationReady loop: it re-plans on a
+  // FRESH server snapshot after each sanctioned action, records the visible phases and
+  // the endpoints it hits, and never contacts the paid generate route until "generate".
+  function simulateOneClick(snapshots: Array<{ features: FounderFeatureStatus[]; provider: ProviderConnection | null }>) {
+    const phases: string[] = [];
+    const calls: string[] = [];
+    phases.push(generationStageLabel("preparing")); // initial, before any decision
+    let i = 0;
+    for (let step = 0; step < 4; step++) {
+      const snap = snapshots[Math.min(i, snapshots.length - 1)];
+      const flags = resolveFounderFeatureMap(snap.features, true);
+      const reasons = resolveFounderFeatureReasons(snap.features);
+      const plan = planGenerationGate(flags, "gen_action_pose", reasons.gen_action_pose, snap.provider, true);
+      if (plan.kind === "generate") return { outcome: "generate" as const, phases, calls };
+      if (plan.kind === "blocked") return { outcome: "blocked" as const, reason: plan.reason, phases, calls };
+      const stage = stageForPlan(plan.kind);
+      if (stage) phases.push(generationStageLabel(stage));
+      if (plan.kind === "enable_then_continue") calls.push("POST /ops/feature-flags/gen_action_pose");
+      else if (plan.kind === "verify_then_continue") calls.push("POST /ops/provider/test-connection");
+      i++;
+    }
+    return { outcome: "exhausted" as const, phases, calls };
+  }
+
+  it("never-enabled type + unverified provider + valid token → auto-enable, auto-verify, then generate", () => {
+    const result = simulateOneClick([
+      { features: [{ feature: "generation", enabled: true }], provider: CONFIGURED_UNVERIFIED }, // 0: nothing enabled
+      { features: [{ feature: "generation", enabled: true }, { feature: "gen_action_pose", enabled: true, reason: "db_flag_on" }], provider: CONFIGURED_UNVERIFIED }, // 1: after enable
+      { features: [{ feature: "generation", enabled: true }, { feature: "gen_action_pose", enabled: true, reason: "db_flag_on" }], provider: READY_PROVIDER }, // 2: after verify
+    ]);
+    expect(result.outcome).toBe("generate");
+    // Visible sequence the founder sees on the button/tracker (Generating…/Refreshing…
+    // are appended later by the generation call itself, not this pre-flight loop).
+    expect(result.phases).toEqual(["Preparing Generation…", "Preparing Generation…", "Verifying Provider…"]);
+    // Exactly the two sanctioned zero-cost setup calls, in order — and NOTHING else.
+    expect(result.calls).toEqual([
+      "POST /ops/feature-flags/gen_action_pose",
+      "POST /ops/provider/test-connection",
+    ]);
+    // Critically: no paid generate endpoint was ever hit during setup.
+    expect(result.calls.some((c) => c.includes("generate-artwork"))).toBe(false);
+  });
+
+  it("no provider calls while blocked — an expired token stops at Verifying with the real reason", () => {
+    const result = simulateOneClick([
+      { features: [{ feature: "generation", enabled: true }, { feature: "gen_action_pose", enabled: true, reason: "db_flag_on" }], provider: CONFIGURED_UNVERIFIED },
+      { features: [{ feature: "generation", enabled: true }, { feature: "gen_action_pose", enabled: true, reason: "db_flag_on" }], provider: EXPIRED_PROVIDER }, // verify revealed expiry
+    ]);
+    expect(result.outcome).toBe("blocked");
+    if (result.outcome === "blocked") expect(result.reason).toMatch(/token has expired/i);
+    expect(result.phases).toEqual(["Preparing Generation…", "Verifying Provider…"]);
+    expect(result.calls).toEqual(["POST /ops/provider/test-connection"]); // verified, then stopped — no generate
+  });
+
+  it("intentionally disabled by the founder (db_flag_off) → blocked immediately, no enable, no provider call", () => {
+    const result = simulateOneClick([
+      { features: [{ feature: "generation", enabled: true }, { feature: "gen_action_pose", enabled: false, reason: "db_flag_off" }], provider: READY_PROVIDER },
+    ]);
+    expect(result.outcome).toBe("blocked");
+    if (result.outcome === "blocked") expect(result.reason).toMatch(/turned Off in Founder Spend Controls/i);
+    expect(result.calls).toEqual([]); // nothing enabled, nothing verified — respected the owner's Off
+  });
+
+  it("already enabled + already verified → straight to generate, no setup calls at all", () => {
+    const result = simulateOneClick([
+      { features: [{ feature: "generation", enabled: true }, { feature: "gen_action_pose", enabled: true, reason: "db_flag_on" }], provider: READY_PROVIDER },
+    ]);
+    expect(result.outcome).toBe("generate");
+    expect(result.calls).toEqual([]);
   });
 });

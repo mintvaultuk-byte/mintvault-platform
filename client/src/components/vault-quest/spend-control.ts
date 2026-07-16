@@ -170,6 +170,33 @@ export type GenerationGatePlan =
   | { kind: "verify_then_continue" }
   | { kind: "blocked"; reason: string };
 
+// ── Visible phase progression ──────────────────────────────────────────────────
+// The founder's one click runs an automatic sequence; each stage shows a plain
+// label so the page never just looks frozen. Pure so the labels/ordering are
+// unit-testable without a browser.
+export type GenerationStage = "preparing" | "verifying" | "generating" | "refreshing";
+
+export function generationStageLabel(stage: GenerationStage, typeLabel = "artwork"): string {
+  switch (stage) {
+    case "preparing":
+      return "Preparing Generation…";
+    case "verifying":
+      return "Verifying Provider…";
+    case "generating":
+      return `Generating ${typeLabel}…`;
+    case "refreshing":
+      return "Refreshing…";
+  }
+}
+
+/** Which visible stage a gate plan corresponds to while it is being resolved.
+ *  enable/verify are the two automatic prep steps; generate/blocked are terminal. */
+export function stageForPlan(kind: GenerationGatePlan["kind"]): GenerationStage | null {
+  if (kind === "enable_then_continue") return "preparing";
+  if (kind === "verify_then_continue") return "verifying";
+  return null;
+}
+
 export function planGenerationGate(
   flags: FounderFeatureMap,
   feature: FounderFeatureKey,
