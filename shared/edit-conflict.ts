@@ -26,6 +26,14 @@ export const CONFLICT_GUARDED_FIELDS = [
   "language",
   "collectionCode",
   "collectionOther",
+  // Structured rarity/variant fields (added with the visual picker). form key =
+  // cert record key = body key, so the same stale-tab guard extends to them.
+  // region + symbol columns are server-derived (never posted) so are not guarded.
+  "rarityCode",
+  "finishVariant",
+  "promoType",
+  "subsetName",
+  "era",
 ] as const;
 
 /** null/undefined/absent and whitespace-only all mean "empty". */

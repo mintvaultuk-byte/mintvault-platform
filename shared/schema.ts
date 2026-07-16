@@ -367,6 +367,27 @@ export const certificates = pgTable("certificates", {
   collectionOther: text("collection_other"),
   rarityOther: text("rarity_other"),
   language: text("language").default("English"),
+  // ── Structured Pokémon rarity/variant (Phase 1 — additive, all nullable) ──────
+  // Each concept is stored SEPARATELY here instead of crammed into the flat
+  // `variant` column above. Every column is nullable with no default, so existing
+  // rows stay valid and current writers are unaffected. The legacy `variant` /
+  // `variant_other` / `rarity` columns remain the historical source of truth and
+  // are never overwritten by this foundation. `language` reuses the existing
+  // column above (no duplicate added). Populated only by the future structured
+  // picker (not wired yet). Bounded CHECK constraints on the small, stable enums
+  // (symbol colour/count, region, era) live in
+  // migrations/add-structured-rarity-columns.sql.
+  rarityCode: text("rarity_code"),
+  rarityLabelStructured: text("rarity_label"),
+  printedSymbol: text("printed_symbol"),
+  printedSymbolCount: integer("printed_symbol_count"),
+  printedSymbolColour: text("printed_symbol_colour"),
+  finishVariant: text("finish_variant"),
+  promoType: text("promo_type"),
+  subsetName: text("subset_name"),
+  region: text("region"),
+  era: text("era"),
+  structuredVariantVersion: integer("structured_variant_version"),
   year: text("year_text"),
   notes: text("notes"),
   frontImagePath: text("front_image_path"),
@@ -1027,6 +1048,54 @@ export type CertificateRecord = typeof certificates.$inferSelect;
 export type InsertCertificate = z.infer<typeof insertCertificateSchema>;
 export type CertificateImage = typeof certificateImages.$inferSelect;
 export type InsertCertificateImage = z.infer<typeof insertCertificateImageSchema>;
+
+// ── Structured-rarity legacy mapping review queue (Phase 1 — data only) ─────────
+// The admin-facing queue for confirming how each historical flat `variant` value
+// maps onto the structured catalogue. Populated later from the read-only audit
+// (shared/rarity-legacy-audit.ts); NOTHING here rewrites a certificate. Each row
+// is one distinct legacy value with a proposed classification/mapping the admin
+// can approve / reject / ignore. No approval UI yet — data structure only.
+export const REVIEW_STATUSES = ["pending", "approved", "rejected", "ignored"] as const;
+export type ReviewStatus = (typeof REVIEW_STATUSES)[number];
+
+export const rarityMappingReviews = pgTable(
+  "rarity_mapping_reviews",
+  {
+    id: serial("id").primaryKey(),
+    // The historical value as stored in certificates.variant (e.g. "REVERSE_HOLO").
+    legacyValue: text("legacy_value").notNull(),
+    // Proposed target: rarity | finish | promo | subset | ambiguous.
+    proposedClassification: text("proposed_classification"),
+    // Proposed canonical catalogue value (null when ambiguous / needs a human).
+    proposedValue: text("proposed_value"),
+    // high | medium | low.
+    confidence: text("confidence"),
+    // Plain-English reason for the proposal.
+    reason: text("reason"),
+    // Snapshot of how many certificates carried this value at audit time.
+    recordCount: integer("record_count").notNull().default(0),
+    // Whether a human must confirm before this mapping could ever be applied.
+    reviewRequired: boolean("review_required").notNull().default(true),
+    // pending | approved | rejected | ignored. Nothing is ever auto-applied.
+    status: text("status").notNull().default("pending"),
+    reviewedBy: text("reviewed_by"),
+    reviewedAt: timestamp("reviewed_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    uqLegacyValue: uniqueIndex("uq_rarity_mapping_reviews_legacy_value").on(t.legacyValue),
+    idxStatus: index("idx_rarity_mapping_reviews_status").on(t.status),
+  })
+);
+
+export const insertRarityMappingReviewSchema = createInsertSchema(rarityMappingReviews).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type RarityMappingReview = typeof rarityMappingReviews.$inferSelect;
+export type InsertRarityMappingReview = z.infer<typeof insertRarityMappingReviewSchema>;
 
 // ── Label printing — isolated tracking table ───────────────────────────────────
 export const labelPrints = pgTable("label_prints", {
