@@ -280,6 +280,7 @@ export function mapLegacyVariant(code: string | null | undefined): LegacyMapping
     RADIANT: { classification: "rarity", value: "radiant_rare", ambiguous: true, note: "Could be the Radiant rarity OR the Radiant Collection subset — confirm." },
     TRAINER_GALLERY: { classification: "subset", value: "trainer_gallery", ambiguous: false },
     GALARIAN_GALLERY: { classification: "subset", value: "galarian_gallery", ambiguous: false },
+    BLACK_STAR_PROMO: { classification: "promo", value: "black_star_promo", ambiguous: false },
     // Genuinely ambiguous art-type / generic values → admin review.
     FULL_ART: { classification: "ambiguous", value: null, ambiguous: true, note: "Full Art is an art style, not a rarity — needs the actual printed rarity." },
     ALT_ART: { classification: "ambiguous", value: null, ambiguous: true, note: "Alt Art is an art style — needs the actual printed rarity." },
