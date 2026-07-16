@@ -324,6 +324,18 @@ run("Action Reference background gate — route wiring", () => {
 
     // Must NOT have fallen through to the old illustration-flavoured/bootstrap-fallback prompt path.
     expect(prompt).not.toMatch(/Standalone original character artwork/);
+
+    // Action-pose studio-containment strengthening (this fix): #1 pure white studio bg,
+    // #2 no scenery/gradient/texture/edge-effects, full containment + white margin,
+    // #3 identity preserved (only pose/expression/camera/movement change).
+    expect(prompt).toMatch(/STUDIO CONTAINMENT/);
+    expect(prompt).toMatch(/pure solid white/i);
+    expect(prompt).toMatch(/generous empty margin of plain white on all four sides/);
+    expect(prompt).toMatch(/may touch, cross or even approach any edge/);
+    expect(prompt).toMatch(/no gradient, no texture, no vignette/);
+    expect(prompt).toMatch(/motion lines, speed streaks, energy trails/);
+    expect(prompt).toMatch(/none reaching or touching the frame edges/);
+    expect(prompt).toMatch(/Preserve the exact approved character identity — change ONLY pose, expression, camera angle and movement/);
   });
 
   it("background fails on BOTH attempts — hard-discarded: never uploaded, never a candidate row, 422, capped at 2 provider calls", async () => {
@@ -346,6 +358,47 @@ run("Action Reference background gate — route wiring", () => {
     expect(createSpy).toHaveBeenCalledTimes(2); // one retry, then give up — never a 3rd
     expect(uploadSpy).not.toHaveBeenCalled(); // discarded — never written to R2
     expect(candidateStore.size).toBe(0); // never recorded as a candidate row
+  });
+
+  it("auto_paid_retry OFF: a background rejection makes EXACTLY ONE provider call and returns structured 422 (no silent second charge)", async () => {
+    // Default-safe state: the owner has NOT enabled automatic paid retry.
+    await q("UPDATE vq_feature_flags SET enabled = false WHERE feature = 'auto_paid_retry'", []);
+    createSpy.mockResolvedValue({
+      provider: "higgsfield" as const,
+      model: "nano_banana",
+      png: await BAD_BG_PNG,
+      width: 1,
+      height: 1,
+      jobId: "job-bad-bg-noretry",
+    });
+    const res = await post(`/api/admin/vault-quest/characters/${CHARACTER_NO_MASTER.characterId}/generate-artwork`, {
+      referenceType: "action_pose",
+      model: "nano_banana",
+      idempotencyKey: `bg-noretry-${keyCounter}`,
+    });
+    const body = res.json as {
+      rejected?: boolean;
+      rejectionKind?: string;
+      error?: string;
+      backgroundOffFraction?: number;
+      backgroundThreshold?: number;
+      providerCreditUsed?: boolean;
+      autoRetried?: boolean;
+    };
+    expect(res.status).toBe(422);
+    expect(body.rejected).toBe(true);
+    expect(body.rejectionKind).toBe("studio_background");
+    expect(body.error).toMatch(/studio background rejected/i);
+    // Structured, founder-facing evidence: measured fraction, exact threshold, credit note.
+    expect(typeof body.backgroundOffFraction).toBe("number");
+    expect(body.backgroundOffFraction).toBeGreaterThan(0.05);
+    expect(body.backgroundThreshold).toBe(0.05);
+    expect(body.providerCreditUsed).toBe(true);
+    expect(body.autoRetried).toBe(false);
+    // The decisive spend-safety assertion: exactly ONE paid provider call — no auto-retry.
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(uploadSpy).not.toHaveBeenCalled();
+    expect(candidateStore.size).toBe(0);
   });
 
   it("background fails once, then passes on the automatic retry — accepted using exactly 2 provider calls", async () => {

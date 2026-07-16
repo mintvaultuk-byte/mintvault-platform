@@ -111,7 +111,7 @@ import {
 } from "@shared/vq-schema";
 import { scoreCharacterIdentity, identityThreshold, type IdentityResult } from "../vault-quest/ai/identity";
 import { evaluateIdentityGate, type IdentityGateBreakdown } from "../vault-quest/ai/identity-gate";
-import { validateStudioBackground } from "../vault-quest/ai/bg-validate";
+import { validateStudioBackground, OFF_BG_THRESHOLD } from "../vault-quest/ai/bg-validate";
 import { validateImageIntegrity, type ImageIntegrityCode } from "../vault-quest/ai/image-integrity";
 import { scoreEvolutionDifference, type EvolutionDifferenceVerdict } from "../vault-quest/ai/evolution-diversity";
 import { chooseActionCategory } from "@shared/vq-action-categories";
@@ -416,8 +416,18 @@ function masterReferencePrompt(ch: VqCharacter): string {
 const ACTION_POSE_SECTION =
   "Pose: the SAME character caught mid-action on the SAME plain studio backdrop as the Master Reference — genuinely running, leaping, attacking, dodging, crouching to pounce, roaring, or twisting through the air. Limb positions, body rotation, head angle and tail position MUST be substantially and unmistakably different from the Master's neutral standing pose — this is NOT a standing pose with a slightly different camera angle, it is a completely different physical action. The ENTIRE creature must remain completely visible from head to toe at all times — never crop the ears, tail or feet, even mid-action. Match the Master's exact framing and camera distance; only the pose itself changes.";
 
+// Action poses are dynamic, so limbs, tail, motion and any elemental effects tend to
+// sprawl toward the frame edges and the model tends to add a scene — exactly what the
+// studio-background gate rejects. This action-only clause pins the composition to a
+// clean, fully-contained studio shot with a generous empty margin, so the outer edge
+// of the image (the region the background gate samples) is nothing but plain white.
+// It changes ONLY composition/background — identity, pose freedom and framing distance
+// are untouched.
+const ACTION_STUDIO_CONTAINMENT =
+  " STUDIO CONTAINMENT (critical — this is a studio reference, not an action scene): the background MUST be pure solid white (#FFFFFF), one flat uniform colour edge to edge, exactly the plain studio backdrop of the Master Reference — no scenery, no landscape, no environment, no gradient, no texture, no vignette, no coloured or glowing corners, no decorative edge effects, no border glow. Keep the ENTIRE creature — every limb, the tail, ears and every intrinsic body feature — fully inside the frame with a clear, generous empty margin of plain white on all four sides; nothing the creature is or does may touch, cross or even approach any edge or corner of the image, and the whole outer border of the image must be plain white backdrop only. Absolutely NO motion lines, speed streaks, energy trails, aura, water, splashes, spray, mist, bubbles, fire, embers, smoke, dust, lightning, sparks or magical particles anywhere in the image — and in particular none reaching or touching the frame edges. Show ONLY the creature and its own intrinsic body; do not remove or alter any of the creature's real features. Any contact shadow must be small, faint and directly under the feet, kept well clear of the bottom edge and the margins. Preserve the exact approved character identity — change ONLY pose, expression, camera angle and movement.";
+
 function actionReferencePrompt(ch: VqCharacter): string {
-  return studioReferencePrompt(ch, ACTION_POSE_SECTION);
+  return studioReferencePrompt(ch, ACTION_POSE_SECTION) + ACTION_STUDIO_CONTAINMENT;
 }
 
 // Appended on a retry after the background validation fails — turns the plain-background
@@ -658,7 +668,15 @@ async function generateCharacterCandidate(
   opts?: { model?: string; actionCategory?: string | null; autoRetryEnabled?: boolean }
 ): Promise<
   | GenCandidateResult
-  | { rejected: true; reason: string; providerCalls: number; jobId?: string | null; integrityCode?: ImageIntegrityCode }
+  | {
+      rejected: true;
+      reason: string;
+      providerCalls: number;
+      jobId?: string | null;
+      integrityCode?: ImageIntegrityCode;
+      backgroundOffFraction?: number;
+      backgroundThreshold?: number;
+    }
 > {
   const prev = character.evolvesFromCharacterId
     ? ((await vqStorage.getCharacter(character.evolvesFromCharacterId)) ?? null)
@@ -845,7 +863,14 @@ async function generateCharacterCandidate(
           // Background never passed — reject WITHOUT uploading/recording (don't clutter
           // R2/gallery, don't consume the approval workflow). The image is discarded —
           // but it WAS charged.
-          return { rejected: true, reason: `studio background rejected (${bg.reason})`, providerCalls };
+          return {
+            rejected: true,
+            reason: `studio background rejected (${bg.reason})`,
+            providerCalls,
+            jobId: generated.jobId ?? null,
+            backgroundOffFraction: bg.offBackgroundFraction,
+            backgroundThreshold: OFF_BG_THRESHOLD,
+          };
         }
         continue;
       }
@@ -1698,10 +1723,22 @@ export function registerVaultQuestAdminRoutes(app: Express): void {
           autoRetryEnabled,
         });
         if ("rejected" in r) {
-          // provider_job_id preserved even on rejection (e.g. an integrity failure —
-          // the job WAS created and charged, only the result was discarded).
+          // provider_job_id preserved even on rejection (e.g. an integrity/background
+          // failure — the job WAS created and charged, only the result was discarded).
           await finishOk(r.providerCalls * perImage, null, model ?? null, r.jobId ?? null);
-          return res.status(422).json({ error: r.reason, rejected: true, integrityCode: r.integrityCode });
+          // Structured fields let the founder-facing UI show the exact measured edge
+          // fraction + threshold and note that a credit was used — WITHOUT any auto-retry.
+          const isBackground = r.backgroundOffFraction != null;
+          return res.status(422).json({
+            error: r.reason,
+            rejected: true,
+            rejectionKind: isBackground ? "studio_background" : r.integrityCode ? "integrity" : "rejected",
+            integrityCode: r.integrityCode,
+            backgroundOffFraction: r.backgroundOffFraction,
+            backgroundThreshold: r.backgroundThreshold,
+            providerCreditUsed: r.providerCalls > 0,
+            autoRetried: false,
+          });
         }
         const { candidate, artwork, key, identity, autoRejected, referencesUsed } = r;
         if (autoRejected) {

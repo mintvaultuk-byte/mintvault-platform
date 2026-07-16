@@ -21,7 +21,10 @@ export interface BgValidation {
   reason?: string;
 }
 
-const OFF_BG_THRESHOLD = 0.05; // >5% of edge pixels off-background ⇒ reject
+// >5% of edge pixels off-background ⇒ reject. Exported (read-only) so callers can
+// report the exact threshold to the founder alongside the measured fraction — the
+// value and the rejection logic are UNCHANGED.
+export const OFF_BG_THRESHOLD = 0.05;
 const COLOUR_DISTANCE = 26; // per-pixel deviation from the plain backdrop that counts as "off"
 
 export async function validateStudioBackground(png: Buffer): Promise<BgValidation> {
