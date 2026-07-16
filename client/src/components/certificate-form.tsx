@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
+import { GradingWorkflowBar } from "@/components/grading-workflow/GradingWorkflowBar";
+import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
@@ -1322,6 +1324,29 @@ export default function CertificateForm({
 
   const canAutofill = (setId.trim() || form.setName.trim()) && form.cardNumber.trim();
 
+  // Grading workflow progress (advisory only — never gates saving/grading). The
+  // bar reflects which of the 4 stages have enough data; clicking a stage scrolls
+  // its section into view. No form value is changed here.
+  const stageCompletion = useMemo(
+    () =>
+      deriveStageCompletion({
+        cardName: form.cardName,
+        setName: form.setName,
+        rarityCode: form.rarityCode,
+        variant: form.variant,
+        finishVariant: form.finishVariant,
+        promoType: form.promoType,
+        subsetName: form.subsetName,
+        gradeOverall: form.gradeOverall,
+      }),
+    [form.cardName, form.setName, form.rarityCode, form.variant, form.finishVariant, form.promoType, form.subsetName, form.gradeOverall],
+  );
+  const workflowCurrent = furthestReached(stageCompletion);
+  const scrollToStage = (_i: number, stage: { key: string }) => {
+    if (typeof document === "undefined") return;
+    document.querySelector(`[data-workflow-stage="${stage.key}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
     <div>
       <h2 className="text-xl font-bold text-[var(--admin-gold)] tracking-widest mb-1" data-testid="text-form-title">
@@ -1420,6 +1445,8 @@ export default function CertificateForm({
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Persistent 4-stage workflow bar — navigation + progress only. */}
+        <GradingWorkflowBar currentIndex={workflowCurrent} maxReached={workflowCurrent} onStageClick={scrollToStage} />
         {!isEdit && (
           <SubmissionItemLink
             value={form.submissionItemId}
@@ -1440,7 +1467,7 @@ export default function CertificateForm({
             }}
           />
         )}
-        <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
+        <fieldset data-workflow-stage="identify" className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
           <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2">Card Details</legend>
 
           {/* TCG search + manual entry helpers */}
@@ -1916,7 +1943,7 @@ export default function CertificateForm({
 
           {/* Structured Pokémon rarity/variant picker (visual). Writes the new
               nullable columns only; the legacy Variant control above is unchanged. */}
-          <div>
+          <div data-workflow-stage="rarity">
             <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
               Structured Rarity &amp; Variant (visual picker)
               <a
@@ -2005,7 +2032,7 @@ export default function CertificateForm({
           </div>
 
           {/* Grader Notes with preset helper */}
-          <div className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">
+          <div data-workflow-stage="review" className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">
             <div className="flex items-center gap-2">
               <FileText size={13} className="text-[var(--admin-gold)]/60 shrink-0" />
               <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider">Grader Notes</label>
@@ -2082,6 +2109,7 @@ export default function CertificateForm({
             AI Identify → Card Details → grade the card → Grade section. Rendered
             inside the <form> but every workstation button is type="button" and
             handleSubmit no-ops pre-approval, so it can never submit the form. */}
+        <div data-workflow-stage="grade" />
         {workstationSlot && (
           <div
             onKeyDown={(e) => {
