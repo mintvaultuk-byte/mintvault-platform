@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
 import { GradingWorkflowBar } from "@/components/grading-workflow/GradingWorkflowBar";
 import { CardPreviewPanel } from "@/components/grading-workflow/CardPreviewPanel";
+import { ReviewSummary } from "@/components/grading-workflow/ReviewSummary";
 import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
@@ -2673,7 +2674,34 @@ export default function CertificateForm({
         {/* Stage 4 · REVIEW & SAVE — moved grader notes (collapsed) + the existing
             explicit save action. Note content, templates and persistence are the
             EXACT pre-existing implementation, only relocated. */}
-        <div data-workflow-stage="review" className={stageClass(3)}>
+        <div data-workflow-stage="review" className={`space-y-3 ${stageClass(3)}`}>
+        {/* Read-only confirmation summary — every value comes from existing form
+            state; Edit links only switch the local stage (no save/mutation). */}
+        <ReviewSummary
+          values={{
+            certificateId: certificate?.id ?? null,
+            frontFile: frontImage,
+            backFile: backImage,
+            cardGame: form.cardGame,
+            cardName: form.cardName,
+            setName: form.setName,
+            cardNumber: form.cardNumber,
+            year: form.year,
+            language: form.language,
+            rarityCode: form.rarityCode,
+            finishVariant: form.finishVariant,
+            promoType: form.promoType,
+            subsetName: form.subsetName,
+            era: form.era,
+            designations,
+            gradeOverall: form.gradeOverall,
+            labelType: form.labelType,
+            status: form.status,
+          }}
+          onEditCard={() => goToStage(0)}
+          onEditRarity={() => goToStage(1)}
+          onEditGrade={() => goToStage(2)}
+        />
         <div className="flex items-center justify-start">
           <button
             type="button"
