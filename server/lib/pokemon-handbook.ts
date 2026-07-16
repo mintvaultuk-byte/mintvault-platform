@@ -192,12 +192,16 @@ function collect(doc: Doc): Promise<Buffer> {
   });
 }
 
-/** Footer painted on every page after content (bufferPages). */
+/** Footer painted on every page after content (bufferPages). Writing text near
+ *  the bottom margin would make pdfkit auto-append a blank page, so we zero the
+ *  page's bottom margin for the duration of each footer write. */
 function paintFooters(doc: Doc, titleForFooter: string): void {
   const range = doc.bufferedPageRange();
   const generated = new Date().toISOString().slice(0, 10);
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i);
+    const savedBottom = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     const y = PAGE_H - 34;
     doc.rect(MARGIN, y - 6, CONTENT_W, 0.6).fill(GOLD);
     doc
@@ -208,9 +212,10 @@ function paintFooters(doc: Doc, titleForFooter: string): void {
         `${titleForFooter}  |  v${KNOWLEDGE_CATALOGUE_VERSION} (${catalogueChecksum()})  |  Generated ${generated}  |  ${DISCLAIMER}`,
         MARGIN,
         y,
-        { width: CONTENT_W - 40, align: "left" },
+        { width: CONTENT_W - 90, align: "left", lineBreak: false },
       );
-    doc.font("Helvetica").fontSize(7).fillColor(GRAY_MID).text(`Page ${i - range.start + 1} of ${range.count}`, PAGE_W - MARGIN - 60, y, { width: 60, align: "right" });
+    doc.font("Helvetica").fontSize(7).fillColor(GRAY_MID).text(`Page ${i - range.start + 1} of ${range.count}`, PAGE_W - MARGIN - 60, y, { width: 60, align: "right", lineBreak: false });
+    doc.page.margins.bottom = savedBottom;
   }
 }
 
@@ -563,14 +568,17 @@ export async function generateDeskSheetPdf(kind: DeskSheetKind, opts: HandbookOp
     }
   }
 
-  // Landscape footer.
+  // Landscape footer — zero the bottom margin so near-edge text doesn't append pages.
   const range = doc.bufferedPageRange();
   for (let i = range.start; i < range.start + range.count; i++) {
     doc.switchToPage(i);
+    const savedBottom = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     doc.font("Helvetica").fontSize(6.5).fillColor(GRAY_LIGHT).text(
       `v${KNOWLEDGE_CATALOGUE_VERSION} (${catalogueChecksum()})  ·  Generated ${new Date().toISOString().slice(0, 10)}  ·  ${DISCLAIMER}`,
-      LM, LH - 26, { width: LCW - 60 });
-    doc.fontSize(7).fillColor(GRAY_MID).text(`Page ${i - range.start + 1} of ${range.count}`, LW - LM - 60, LH - 26, { width: 60, align: "right" });
+      LM, LH - 26, { width: LCW - 90, lineBreak: false });
+    doc.fontSize(7).fillColor(GRAY_MID).text(`Page ${i - range.start + 1} of ${range.count}`, LW - LM - 60, LH - 26, { width: 60, align: "right", lineBreak: false });
+    doc.page.margins.bottom = savedBottom;
   }
   doc.end();
   return done;

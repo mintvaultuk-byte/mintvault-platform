@@ -25,6 +25,12 @@ const SETS: HandbookSetRow[] = [
 /** pdfkit writes text as hex-encoded TJ runs (`<4d696e74> TJ`) split at kern
  *  pairs — decode every hex chunk in stream order so substring assertions see
  *  the real page text. */
+/** Page count from the pdfkit page tree (/Type /Pages … /Count N). */
+function pageCount(pdf: Buffer): number {
+  const m = pdf.toString("latin1").match(/\/Type\s*\/Pages[\s\S]*?\/Count\s+(\d+)/);
+  return m ? Number(m[1]) : -1;
+}
+
 function decodePdfText(pdf: Buffer): string {
   const raw = pdf.toString("latin1");
   const out: string[] = [];
@@ -51,6 +57,10 @@ describe("handbook PDF (tests 45-52)", () => {
     expect(text).toMatch(/Generated \d{4}-\d{2}-\d{2}/); // generated date
     expect(text).toContain("MintVault internal identification reference"); // disclaimer
     expect(text).toContain("belong to their respective owners");
+    // Footer painting must NOT append blank pages (pdfkit bottom-margin trap):
+    // handbook is ~12-18 pages, never dozens.
+    expect(pageCount(pdf)).toBeGreaterThanOrEqual(10);
+    expect(pageCount(pdf)).toBeLessThanOrEqual(18);
   });
 
   it("labels provisional records and never claims official affiliation", async () => {
@@ -78,13 +88,14 @@ describe("handbook PDF (tests 45-52)", () => {
 });
 
 describe("desk sheets (tests 53-55)", () => {
-  it("all five kinds generate valid LANDSCAPE A4 PDFs", async () => {
+  it("all five kinds generate valid LANDSCAPE A4 PDFs with no footer-inflated pages", async () => {
     for (const kind of Object.keys(DESK_SHEET_FILENAMES) as DeskSheetKind[]) {
       const pdf = await generateDeskSheetPdf(kind, { sets: SETS, compress: false });
       const text = pdf.toString("latin1");
       expect(pdf.subarray(0, 5).toString(), kind).toBe("%PDF-");
       // pdfkit landscape A4 = MediaBox [0 0 841.89 595.28]
       expect(text, kind).toMatch(/841\.89\s+595\.28/);
+      expect(pageCount(pdf), `${kind} page count`).toBeLessThanOrEqual(4); // no blank footer pages
     }
   });
 
