@@ -1914,6 +1914,15 @@ export default function CertificateForm({
           <div>
             <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
               Structured Rarity &amp; Variant (visual picker)
+              <a
+                href="/admin/pokemon-knowledge"
+                target="_blank"
+                rel="noreferrer"
+                className="ml-2 normal-case tracking-normal text-[10px] text-slate-400 underline hover:text-slate-200"
+                title="Open the Pokémon Knowledge Hub — set codes, rarity symbols, comparisons and the printable handbook"
+              >
+                Knowledge Hub ↗
+              </a>
             </label>
             <RarityVariantPicker
               legacyVariant={form.variant || null}

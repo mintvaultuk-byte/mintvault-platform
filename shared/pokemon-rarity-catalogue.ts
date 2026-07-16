@@ -106,6 +106,7 @@ export const POKEMON_RARITIES: readonly PokemonRarity[] = [
   r({ value: "rare_holo", label: "Rare Holo (classic)", description: "Classic single-star rare (holo finish tracked separately).", symbol: { shape: "star", count: 1, colour: "black", glyph: "★" }, codes: ["R"], regions: ["western"], eras: ["vintage", "ex-dp", "bw-xy", "sm"], aliases: ["rare holo", "classic rare"] }),
   r({ value: "amazing_rare", label: "Amazing Rare", description: "Amazing Rare (rainbow 'A' rarity, SwSh).", symbol: { shape: "text", colour: "rainbow", glyph: "A" }, codes: ["A", "AR"], regions: ["western", "japan"], eras: ["swsh"], aliases: ["amazing rare", "amazing", "a rare"] }),
   r({ value: "radiant_rare", label: "Radiant Rare", description: "Radiant Pokémon (K) — etched shiny rare.", symbol: { shape: "shiny", colour: "gold", glyph: "◈" }, codes: ["K"], regions: ["western", "japan"], eras: ["swsh"], aliases: ["radiant", "radiant rare", "k rare"] }),
+  r({ value: "prism_star", label: "Prism Star", description: "Prism Star (♢) — one-per-deck prism card (Sun & Moon).", symbol: { shape: "diamond", colour: "white", glyph: "♢" }, codes: [], regions: ["western", "japan"], eras: ["sm"], aliases: ["prism star", "prism", "prism rare"] }),
   // ── International / code-based (region-gated) ──────────────────────────────────
   r({ value: "jp_super_rare", label: "Super Rare (SR)", description: "Japanese Super Rare — full-art (SR).", symbol: { shape: "text", colour: "silver", glyph: "SR" }, codes: ["SR"], regions: ["japan", "korea", "china"], eras: ["bw-xy", "sm", "swsh", "sv"], aliases: ["super rare", "sr"] }),
   r({ value: "jp_double_rare", label: "Double Rare (RR)", description: "Japanese Double Rare (RR).", symbol: { shape: "text", colour: "black", glyph: "RR" }, codes: ["RR"], regions: ["japan", "korea", "china"], eras: ["bw-xy", "sm", "swsh", "sv"], aliases: ["double rare rr", "rr jp"] }),
@@ -150,7 +151,17 @@ export const POKEMON_FINISHES: readonly PokemonFinish[] = [
   f("prerelease_stamp", "Prerelease Stamp", "Prerelease event stamp.", ["prerelease stamp", "prerelease", "pre-release"]),
   f("pokemon_center_stamp", "Pokémon Center Stamp", "Pokémon Center stamp.", ["pokemon center stamp", "pokemon center", "poke center"]),
   f("league_stamp", "League Stamp", "Play! Pokémon League stamp.", ["league stamp", "league"]),
+  f("championship_stamp", "Championship Stamp", "Championship event stamp.", ["championship stamp", "championship", "worlds stamp"]),
   f("other_stamp", "Other Stamp", "Another stamp not listed.", ["other stamp", "stamp", "stamped"]),
+  // Knowledge-engine additions (provisional — see shared/pokemon-knowledge.ts provenance).
+  f("mirror_holo", "Mirror Holo", "Uniform mirror sheen across the card body, no pattern.", ["mirror holo", "mirror", "mirror reverse"]),
+  f("crosshatch_holo", "Crosshatch Holo", "Crosshatch-pattern holo (often prize/league cards).", ["crosshatch holo", "crosshatch", "cross hatch"]),
+  f("confetti_holo", "Confetti Holo", "Confetti-speckle holo pattern.", ["confetti holo", "confetti"]),
+  f("glitter_holo", "Glitter Holo", "Glitter-dust holo pattern.", ["glitter holo", "glitter"]),
+  f("textured", "Textured", "Embossed textured foil surface (modern ultra rares).", ["textured", "texture", "embossed"]),
+  f("full_texture", "Full Texture", "Full-surface texture embossing.", ["full texture", "fully textured"]),
+  f("gold_foil", "Gold Foil", "Gold-foil card treatment.", ["gold foil", "gold card", "gold etched"]),
+  f("silver_foil", "Silver Foil", "Silver-foil card treatment.", ["silver foil", "silver card"]),
 ];
 
 // ── 4 · Promo / Subset (kept separate from rarity) ───────────────────────────────
@@ -174,6 +185,13 @@ export const POKEMON_PROMOS: readonly PokemonPromo[] = [
   p("mcdonalds_promo", "McDonald’s Promo", "promo", "McDonald’s collection promo.", ["mcdonalds promo", "mcdonald's", "mcdonalds", "happy meal"]),
   p("league_promo", "League Promo", "promo", "League / organised-play promo.", ["league promo", "league"]),
   p("event_promo", "Event Promo", "promo", "Event / championship promo.", ["event promo", "event", "championship"]),
+  // Knowledge-engine additions (provisional — see shared/pokemon-knowledge.ts provenance).
+  p("world_championships_promo", "World Championships", "promo", "World Championships event promo.", ["world championships", "worlds", "wcs promo"]),
+  p("play_pokemon_promo", "Play! Pokémon", "promo", "Play! Pokémon organised-play promo.", ["play pokemon", "play! pokemon", "op promo"]),
+  p("illustration_contest_promo", "Illustration Contest", "promo", "Illustration contest prize promo.", ["illustration contest", "illus contest", "art contest"]),
+  p("ana_promo", "ANA Promo", "promo", "ANA airline promotional card (Japan).", ["ana", "ana promo", "airline promo"]),
+  p("corocoro_promo", "CoroCoro Promo", "promo", "CoroCoro magazine promo (Japan).", ["corocoro", "coro coro", "magazine promo"]),
+  p("cd_promo", "CD Promo", "promo", "CD/media pack-in promo (Japan).", ["cd promo", "cd", "media promo"]),
   p("other_promo", "Other", "promo", "Another promo/subset not listed.", ["other promo", "other subset"]),
 ];
 
@@ -306,10 +324,10 @@ export function mapLegacyVariant(code: string | null | undefined): LegacyMapping
     FIRST_EDITION: { classification: "finish", value: "first_edition", ambiguous: false },
     UNLIMITED: { classification: "finish", value: "unlimited", ambiguous: false },
     SHADOWLESS: { classification: "finish", value: "shadowless", ambiguous: false },
-    MIRROR_HOLO: { classification: "finish", value: "reverse_holo", ambiguous: true, note: "Mirror holo has no dedicated finish yet — mapped to reverse_holo; confirm." },
-    GLITTER_HOLO: { classification: "finish", value: "holo", ambiguous: true, note: "Glitter holo pattern — confirm exact finish." },
-    PATTERN_HOLO: { classification: "finish", value: "holo", ambiguous: true, note: "Pattern holo — confirm exact finish." },
-    TEXTURED: { classification: "finish", value: "holo", ambiguous: true, note: "Textured is a surface attribute, not a rarity — confirm finish." },
+    MIRROR_HOLO: { classification: "finish", value: "mirror_holo", ambiguous: false },
+    GLITTER_HOLO: { classification: "finish", value: "glitter_holo", ambiguous: false },
+    PATTERN_HOLO: { classification: "finish", value: "holo", ambiguous: true, note: "Pattern holo — confirm exact finish (cosmos / cracked ice / crosshatch / confetti)." },
+    TEXTURED: { classification: "finish", value: "textured", ambiguous: false },
     DOUBLE_RARE: { classification: "rarity", value: "double_rare", ambiguous: false },
     ILLUSTRATION_RARE: { classification: "rarity", value: "illustration_rare", ambiguous: false },
     ULTRA_RARE: { classification: "rarity", value: "ultra_rare", ambiguous: false },
