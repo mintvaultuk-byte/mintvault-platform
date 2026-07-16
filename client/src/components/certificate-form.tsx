@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } fro
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
 import { GradingWorkflowBar } from "@/components/grading-workflow/GradingWorkflowBar";
+import { CardPreviewPanel } from "@/components/grading-workflow/CardPreviewPanel";
 import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
@@ -207,6 +208,8 @@ export default function CertificateForm({
   });
 
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
+  // Grader notes live in Stage 4 (Review), collapsed unless the cert already has notes.
+  const [notesOpen, setNotesOpen] = useState<boolean>(() => Boolean(certificate?.notes));
 
   // ── Structured rarity/variant picker wiring ────────────────────────────────
   // The picker emits a full StructuredCardVariant; we fan it out to the separate
@@ -1341,11 +1344,25 @@ export default function CertificateForm({
       }),
     [form.cardName, form.setName, form.rarityCode, form.variant, form.finishVariant, form.promoType, form.subsetName, form.gradeOverall],
   );
-  const workflowCurrent = furthestReached(stageCompletion);
-  const scrollToStage = (_i: number, stage: { key: string }) => {
-    if (typeof document === "undefined") return;
-    document.querySelector(`[data-workflow-stage="${stage.key}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Stage gating is LOCAL UI STATE only: every stage's content stays mounted
+  // (hidden with CSS) so moving Back/Next can never clear a field, trigger a
+  // save, grade, or touch the DB. The protected workstation is geometry-safe
+  // under this: its card tool reads getBoundingClientRect LIVE per event
+  // (manual-card-tool.tsx), never caching mount-time sizes.
+  const [wfStage, setWfStage] = useState(0);
+  const [wfMaxStage, setWfMaxStage] = useState(0);
+  const goToStage = (i: number) => {
+    const next = Math.min(3, Math.max(0, i));
+    setWfStage(next);
+    setWfMaxStage((m) => Math.max(m, next));
+    if (typeof document !== "undefined") {
+      document.querySelector('[data-testid="grading-workflow-bar"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   };
+  /** Hidden-not-unmounted: stage content keeps all React state while inactive. */
+  const stageClass = (i: number) => (wfStage === i ? "" : "hidden");
+  const workflowCurrent = wfStage;
+  const workflowMax = Math.max(wfMaxStage, furthestReached(stageCompletion));
 
   return (
     <div>
@@ -1446,7 +1463,14 @@ export default function CertificateForm({
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Persistent 4-stage workflow bar — navigation + progress only. */}
-        <GradingWorkflowBar currentIndex={workflowCurrent} maxReached={workflowCurrent} onStageClick={scrollToStage} />
+        <GradingWorkflowBar currentIndex={workflowCurrent} maxReached={workflowMax} onStageClick={(i) => goToStage(i)} />
+        {/* Existing auto-save status, kept visible on every stage (reuses the
+            pre-existing autoSaveStatus state — no new save system). */}
+        {autoSaveEligible && wfStage !== 3 && (
+          <div className="-mt-3 text-right text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]" data-testid="text-autosave-status-mini">
+            {autoSaveStatus === "saving" ? "Saving…" : autoSaveStatus === "error" ? "Save failed — retrying on next change" : autoSaveStatus === "saved" ? "Saved" : "Unsaved changes save automatically"}
+          </div>
+        )}
         {!isEdit && (
           <SubmissionItemLink
             value={form.submissionItemId}
@@ -1467,8 +1491,21 @@ export default function CertificateForm({
             }}
           />
         )}
-        <fieldset data-workflow-stage="identify" className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
-          <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2">Card Details</legend>
+        <fieldset data-workflow-stage="identify" className={`border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 ${wfStage <= 1 ? "" : "hidden"}`}>
+          <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2">
+            {wfStage === 0 ? "1 · Card details" : "2 · Rarity & variant"}
+          </legend>
+
+          {/* MacBook-first split: sticky read-only card preview (left ~38%) beside
+              the stage controls. The preview is a plain <img> from signed display
+              URLs / uploaded files — no coordinates, no protected tooling. */}
+          <div className="lg:grid lg:grid-cols-[minmax(240px,38%)_minmax(0,1fr)] lg:gap-4 lg:items-start">
+            <div className="mb-3 lg:mb-0 lg:sticky lg:top-16">
+              <CardPreviewPanel certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
+            </div>
+            <div className="space-y-3 min-w-0">
+          {/* ── STAGE 1 · CARD — identification fields only ── */}
+          <div className={`space-y-3 ${stageClass(0)}`}>
 
           {/* TCG search + manual entry helpers */}
           <div className="flex items-center gap-3 text-[10px]">
@@ -1750,6 +1787,17 @@ export default function CertificateForm({
             </div>
           )}
 
+          </div>
+          {/* ── STAGE 2 · RARITY — structured picker + finish + promo (+ legacy/advanced) ── */}
+          <div className={`space-y-3 ${stageClass(1)}`}>
+          {/* Legacy flat Variant control — superseded for daily grading by the
+              structured picker below. Kept fully functional (historical values,
+              save compatibility) but collapsed under Legacy / advanced. */}
+          <details className="rounded-lg border border-[var(--admin-gold)]/10 px-3 py-2" data-testid="legacy-variant-details">
+            <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
+              Legacy / advanced variant
+            </summary>
+            <div className="pt-2">
           {(() => {
             // Build merged option list: static (minus OTHER) + DB variants + localStorage custom + OTHER
             // seenLabels uses BOTH labels ("reverse holo") AND codes ("reverse_holo") to prevent
@@ -1936,6 +1984,9 @@ export default function CertificateForm({
             );
           })()}
 
+            </div>
+          </details>
+
           {/* AI Card Identification removed from the daily grading UI (founder
               decision 2026-07-16): graders identify cards manually with TCGdex
               lookup + the visual picker. The feature stays flag-OFF and dormant
@@ -1974,11 +2025,13 @@ export default function CertificateForm({
             />
           </div>
 
-          <div>
-            <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
-              Designations
-            </label>
-            <div className="flex flex-wrap gap-2" data-testid="designations-chips">
+          {/* Optional designations — collapsed by default so daily grading stays
+              compact. Auto-open when the cert already carries designations. */}
+          <details className="rounded-lg border border-[var(--admin-gold)]/10 px-3 py-2" open={designations.length > 0} data-testid="designations-details">
+            <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
+              Optional designations{designations.length > 0 ? ` (${designations.length})` : ""}
+            </summary>
+            <div className="pt-2 flex flex-wrap gap-2" data-testid="designations-chips">
               {DESIGNATION_OPTIONS.map((d) => {
                 const active = designations.includes(d.code);
                 return (
@@ -2001,8 +2054,31 @@ export default function CertificateForm({
                 Selected: {designations.map((c) => getDesignationLabel(c)).join(", ")}
               </p>
             )}
+          </details>
+
+          {/* Stage 2 nav */}
+          <div className="flex items-center justify-between pt-1">
+            <button
+              type="button"
+              onClick={() => goToStage(0)}
+              data-testid="button-back-to-card"
+              className="px-4 py-2 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
+            >
+              ← Back to Card
+            </button>
+            <button
+              type="button"
+              onClick={() => goToStage(2)}
+              data-testid="button-continue-to-grade"
+              className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all"
+            >
+              Continue to Grade →
+            </button>
+          </div>
           </div>
 
+          {/* ── stage 1 (card) continued: language + year live with card details ── */}
+          <div className={`space-y-3 ${stageClass(0)}`}>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <FormInput
@@ -2031,75 +2107,23 @@ export default function CertificateForm({
             />
           </div>
 
-          {/* Grader Notes with preset helper */}
-          <div data-workflow-stage="review" className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">
-            <div className="flex items-center gap-2">
-              <FileText size={13} className="text-[var(--admin-gold)]/60 shrink-0" />
-              <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider">Grader Notes</label>
-            </div>
-
-            {/* Template buttons */}
-            <div>
-              <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">
-                Insert template
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {NOTE_TEMPLATES.map((t) => (
-                  <button
-                    key={t.label}
-                    type="button"
-                    onClick={() => updateField("notes", t.text)}
-                    className="text-xs px-2.5 py-1 rounded border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 hover:border-[var(--admin-gold)]/60 hover:text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/5 transition-all"
-                    data-testid={`button-template-${t.label.toLowerCase().replace(" ", "-")}`}
-                  >
-                    {t.label} Notes
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Notes textarea */}
-            <textarea
-              value={form.notes}
-              onChange={(e) => updateField("notes", e.target.value)}
-              rows={4}
-              placeholder="Grader notes appear on the public certificate page. Leave blank to hide."
-              className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors resize-none"
-              data-testid="input-cert-notes"
-            />
-
-            {/* Preset chips */}
-            <div>
-              <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">Quick add</p>
-              <div className="flex flex-wrap gap-1.5">
-                {PRESET_NOTES.map((preset) => {
-                  const lines = form.notes
-                    .split("\n")
-                    .map((l) => l.trim())
-                    .filter(Boolean);
-                  const alreadyAdded = lines.includes(preset);
-                  return (
-                    <button
-                      key={preset}
-                      type="button"
-                      disabled={alreadyAdded}
-                      onClick={() => {
-                        const current = form.notes.trimEnd();
-                        updateField("notes", current ? `${current}\n${preset}` : preset);
-                      }}
-                      className={`text-[11px] px-2 py-0.5 rounded border transition-all flex items-center gap-1 ${
-                        alreadyAdded
-                          ? "border-[var(--admin-gold)]/15 text-[var(--admin-gold)]/25 cursor-default"
-                          : "border-[var(--admin-gold)]/25 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/50 hover:text-[var(--admin-ink)] hover:bg-[var(--admin-gold)]/5 cursor-pointer"
-                      }`}
-                      data-testid={`button-preset-${preset.toLowerCase().replace(/\s+/g, "-")}`}
-                    >
-                      {!alreadyAdded && <Plus size={10} className="shrink-0" />}
-                      {preset}
-                    </button>
-                  );
-                })}
-              </div>
+          {/* Stage 1 nav */}
+          <div className="flex items-center justify-end pt-1">
+            <button
+              type="button"
+              onClick={() => goToStage(1)}
+              disabled={!form.cardName.trim() || !form.cardNumber.trim()}
+              title={!form.cardName.trim() || !form.cardNumber.trim() ? "Enter the card name and number first." : undefined}
+              data-testid="button-continue-to-rarity"
+              className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Continue to Rarity →
+            </button>
+          </div>
+          {(!form.cardName.trim() || !form.cardNumber.trim()) && (
+            <p className={`text-[10px] text-[var(--admin-ink-faint)] text-right ${stageClass(0)}`}>Enter the card name and number first.</p>
+          )}
+          </div>
             </div>
           </div>
         </fieldset>
@@ -2109,7 +2133,11 @@ export default function CertificateForm({
             AI Identify → Card Details → grade the card → Grade section. Rendered
             inside the <form> but every workstation button is type="button" and
             handleSubmit no-ops pre-approval, so it can never submit the form. */}
-        <div data-workflow-stage="grade" />
+        {/* Stage 3 · GRADE — the protected workstation renders UNCHANGED inside
+            this wrapper. Hidden with CSS only (never unmounted, never scaled or
+            transformed): the card tool reads getBoundingClientRect live per
+            event, so visibility toggling cannot alter its coordinate system. */}
+        <div data-workflow-stage="grade" className={stageClass(2)}>
         {workstationSlot && (
           <div
             onKeyDown={(e) => {
@@ -2234,6 +2262,27 @@ export default function CertificateForm({
             </>
           )}
         </fieldset>
+
+        {/* Stage 3 nav */}
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => goToStage(1)}
+            data-testid="button-back-to-rarity"
+            className="px-4 py-2 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
+          >
+            ← Back to Rarity
+          </button>
+          <button
+            type="button"
+            onClick={() => goToStage(3)}
+            data-testid="button-review-card"
+            className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all"
+          >
+            Review Card →
+          </button>
+        </div>
+        </div>
 
         {/* ── Card images and AI grading are handled by the GradingPanel workstation above ── */}
 
@@ -2621,6 +2670,103 @@ export default function CertificateForm({
           </p>
         )}
 
+        {/* Stage 4 · REVIEW & SAVE — moved grader notes (collapsed) + the existing
+            explicit save action. Note content, templates and persistence are the
+            EXACT pre-existing implementation, only relocated. */}
+        <div data-workflow-stage="review" className={stageClass(3)}>
+        <div className="flex items-center justify-start">
+          <button
+            type="button"
+            onClick={() => goToStage(2)}
+            data-testid="button-back-to-grade"
+            className="px-4 py-2 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
+          >
+            ← Back to Grade
+          </button>
+        </div>
+        {/* Grader Notes with preset helper — moved from Card Details, unchanged. */}
+        {notesOpen ? (
+          <div className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">
+            <div className="flex items-center gap-2">
+              <FileText size={13} className="text-[var(--admin-gold)]/60 shrink-0" />
+              <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider">Grader Notes</label>
+            </div>
+
+            {/* Template buttons */}
+            <div>
+              <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">
+                Insert template
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {NOTE_TEMPLATES.map((t) => (
+                  <button
+                    key={t.label}
+                    type="button"
+                    onClick={() => updateField("notes", t.text)}
+                    className="text-xs px-2.5 py-1 rounded border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 hover:border-[var(--admin-gold)]/60 hover:text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/5 transition-all"
+                    data-testid={`button-template-${t.label.toLowerCase().replace(" ", "-")}`}
+                  >
+                    {t.label} Notes
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Notes textarea */}
+            <textarea
+              value={form.notes}
+              onChange={(e) => updateField("notes", e.target.value)}
+              rows={4}
+              placeholder="Grader notes appear on the public certificate page. Leave blank to hide."
+              className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors resize-none"
+              data-testid="input-cert-notes"
+            />
+
+            {/* Preset chips */}
+            <div>
+              <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">Quick add</p>
+              <div className="flex flex-wrap gap-1.5">
+                {PRESET_NOTES.map((preset) => {
+                  const lines = form.notes
+                    .split("\n")
+                    .map((l) => l.trim())
+                    .filter(Boolean);
+                  const alreadyAdded = lines.includes(preset);
+                  return (
+                    <button
+                      key={preset}
+                      type="button"
+                      disabled={alreadyAdded}
+                      onClick={() => {
+                        const current = form.notes.trimEnd();
+                        updateField("notes", current ? `${current}\n${preset}` : preset);
+                      }}
+                      className={`text-[11px] px-2 py-0.5 rounded border transition-all flex items-center gap-1 ${
+                        alreadyAdded
+                          ? "border-[var(--admin-gold)]/15 text-[var(--admin-gold)]/25 cursor-default"
+                          : "border-[var(--admin-gold)]/25 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/50 hover:text-[var(--admin-ink)] hover:bg-[var(--admin-gold)]/5 cursor-pointer"
+                      }`}
+                      data-testid={`button-preset-${preset.toLowerCase().replace(/\s+/g, "-")}`}
+                    >
+                      {!alreadyAdded && <Plus size={10} className="shrink-0" />}
+                      {preset}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setNotesOpen(true)}
+            data-testid="button-add-grader-notes"
+            className="w-full px-4 py-2.5 rounded-lg border border-dashed border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/5 transition-colors"
+          >
+            + Add Grader Notes
+          </button>
+        )}
+
         {/* Owner directive (2026-07-01): an existing, not-yet-approved
             certificate auto-saves silently (see autoSaveNow above) — no
             manual button, matching the grading workstation below it. Create
@@ -2659,6 +2805,7 @@ export default function CertificateForm({
             {mutation.isPending ? "Saving..." : isEdit ? "Save Changes to Published Certificate" : "Save Certificate"}
           </GradientButton>
         )}
+        </div>
       </form>
     </div>
   );
