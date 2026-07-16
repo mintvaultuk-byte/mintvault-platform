@@ -112,12 +112,15 @@ export interface RarityPreferences {
   recent: string[];
 }
 
+const MAX_PREF_ENTRY_LEN = 64; // catalogue codes are well under this — reject blobs
+
 function sanitiseList(list: unknown, max: number): string[] {
   if (!Array.isArray(list)) return [];
   const seen = new Set<string>();
   const out: string[] = [];
   for (const v of list) {
-    const s = typeof v === "string" ? v.trim() : "";
+    // Cap each entry length so an admin can't stash a large blob in the pref row.
+    const s = (typeof v === "string" ? v.trim() : "").slice(0, MAX_PREF_ENTRY_LEN);
     if (!s || seen.has(s)) continue;
     seen.add(s);
     out.push(s);
