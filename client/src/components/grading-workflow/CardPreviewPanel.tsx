@@ -161,7 +161,7 @@ export function CardPreviewPanel({
       }}
       className={`relative overflow-hidden rounded outline-none focus-visible:ring-1 focus-visible:ring-[var(--admin-gold)]/50 ${
         zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : ""
-      } ${big ? "h-[80vh] w-full bg-black/60" : "max-h-[40vh]"}`}
+      } ${big ? "flex h-[80vh] w-full items-center justify-center bg-black/60" : "max-h-[40vh]"}`}
       data-testid="card-preview-viewport"
     >
       {url ? (
