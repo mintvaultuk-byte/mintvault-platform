@@ -1,0 +1,207 @@
+/**
+ * Card-stage compactness pass — source assertions proving the density refinements
+ * (shorter read-only preview, Year+Language sharing a row, one combined
+ * workflow/session/queue strip, thin Identification Tools, compact Search TCG
+ * button, reduced padding) while every protected surface, the save payload, the
+ * queue/session logic and Stage 3 stay untouched. Zero provider calls, zero
+ * credits.
+ */
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "fs";
+import { execSync } from "child_process";
+import { join } from "path";
+
+const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+const FORM = read("client/src/components/certificate-form.tsx");
+const PREVIEW = read("client/src/components/grading-workflow/CardPreviewPanel.tsx");
+const HUD = read("client/src/components/grading-workflow/SessionHud.tsx");
+const BAR = read("client/src/components/grading-workflow/GradingWorkflowBar.tsx");
+const DASH = read("client/src/pages/admin-dashboard.tsx");
+
+/** Slice of a source string between two anchors (asserts both exist, in order). */
+function slice(src: string, start: string, end: string): string {
+  const i = src.indexOf(start);
+  const j = src.indexOf(end, i + 1);
+  expect(i, `anchor "${start}"`).toBeGreaterThan(-1);
+  expect(j, `anchor "${end}"`).toBeGreaterThan(i);
+  return src.slice(i, j);
+}
+
+/** Files changed vs the merge base (origin/main locally-or-CI, else main). */
+function changedFiles(): string[] | null {
+  const base = ["origin/main", "main"].find((r) => {
+    try {
+      execSync(`git rev-parse --verify ${r}`, { stdio: "pipe" });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!base) return null;
+  return execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+}
+
+describe("1. read-only preview is shorter (spec 1)", () => {
+  it("preview cap dropped to 40vh (was 56vh); fullscreen 80vh retained", () => {
+    expect(PREVIEW).toContain("max-h-[40vh]");
+    expect(PREVIEW).not.toContain("max-h-[56vh]");
+    expect(PREVIEW).not.toContain("max-h-[44vh]");
+    expect(PREVIEW).toContain("80vh"); // fullscreen still available for inspection
+  });
+  it("keeps front/back, wheel zoom, fit/reset, fullscreen controls", () => {
+    expect(PREVIEW).toContain('(["front", "back"] as const)');
+    expect(PREVIEW).toContain("card-preview-${s}");
+    expect(PREVIEW).toContain("wheelZoom");
+    expect(PREVIEW).toContain("Fit to screen / reset zoom");
+    expect(PREVIEW).toContain("Full-screen preview");
+  });
+});
+
+describe("2/3. Year + Language share one 4-column row (spec 2)", () => {
+  it("Row 2 uses a 4-column template (Name · Number+Auto-fill · Year · Language)", () => {
+    expect(FORM).toContain("sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,1fr)]");
+  });
+  it("Language now lives inside Row 2 beside Year — not in a row of its own", () => {
+    // Language input sits within a short window after the Year field (same row),
+    // and there is exactly one Language field (moved, not duplicated).
+    expect((FORM.match(/testId="input-language"/g) ?? []).length).toBe(1);
+    expect((FORM.match(/label="Year \*"/g) ?? []).length).toBe(1);
+    const row2 = slice(FORM, 'label="Card Name *"', "{!fallbackMatch && canAutofill");
+    expect(row2).toContain('testId="input-year"');
+    expect(row2).toContain('testId="input-language"'); // Language is in the same row block as Year
+    // The former standalone language row wrapper is gone.
+    expect(FORM).not.toContain("stage 1 (card) continued");
+  });
+});
+
+describe("4. one combined workflow/session/queue strip (spec 3)", () => {
+  const STRIP = slice(FORM, 'data-testid="workstation-strip"', "text-autosave-status-mini");
+  it("a single workstation-strip wraps the workflow bar + queue + session HUD", () => {
+    expect(FORM).toContain('data-testid="workstation-strip"');
+    expect(STRIP).toContain("<GradingWorkflowBar embedded");
+    expect(STRIP).toContain('data-testid="queue-progress"');
+    expect(STRIP).toContain("<SessionHud embedded");
+    expect(STRIP).toContain('data-testid="batch-header"');
+  });
+  it("the three former separate strips are gone (no standalone SessionHud / bordered batch row)", () => {
+    // No non-embedded SessionHud usage remains, and the workflow bar is embedded.
+    expect(FORM).not.toMatch(/<SessionHud completed=\{sessionCompleted\} \/>/);
+    expect((FORM.match(/<GradingWorkflowBar/g) ?? []).length).toBe(1);
+    expect(FORM).toContain("<GradingWorkflowBar embedded");
+  });
+  it("workflow bar + HUD support an embedded (chrome-less) variant", () => {
+    expect(BAR).toContain("embedded");
+    expect(HUD).toContain("embedded");
+  });
+});
+
+describe("5/6. queue order + session calc unchanged (spec 3)", () => {
+  it("session cards/hr + completed math is byte-identical (display only)", () => {
+    expect(HUD).toContain("Math.round((done / elapsedMs) * 3600_000)");
+    expect(HUD).toContain("session.completedTimes.length");
+  });
+  it("admin-dashboard queue stepping (frozen snapshot, +1) is untouched this pass", () => {
+    expect(DASH).toContain("openNextQueuedCard");
+    const changed = changedFiles();
+    if (changed) expect(changed).not.toContain("client/src/pages/admin-dashboard.tsx");
+  });
+});
+
+describe("7/8. Identification Tools thin + collapsed (spec 4)", () => {
+  const IDT = slice(FORM, 'data-testid="identification-tools"', "runIdentify");
+  it("stays a closed-by-default <details> (no `open` attribute, no large AI banner)", () => {
+    expect(IDT).toContain("<summary");
+    expect(IDT).not.toMatch(/<details[^>]*\sopen/);
+  });
+  it("uses compact styling (py-1.5 summary, lighter frame)", () => {
+    expect(IDT).toContain("py-1.5");
+    expect(IDT).toContain("Identification tools");
+  });
+});
+
+describe("9. Search TCG is a compact button, behaviour unchanged (spec 5)", () => {
+  it("outlined utility button that still opens the TCGdex search dialog", () => {
+    const region = slice(FORM, "Search TCG is a compact", "Search TCG Database");
+    expect(region).toContain("setTcgSearchOpen(true)");
+    expect(region).toContain("Search TCG");
+    expect(region).toMatch(/rounded-md border/); // button, not a bare text link
+  });
+});
+
+describe("10/11. Certificate Tools + Ownership/NFC unchanged (spec 7)", () => {
+  it("Certificate Tools launcher + drawer remain wired in admin-dashboard", () => {
+    expect(DASH).toContain('data-testid="button-certificate-tools"');
+    expect(DASH).toContain("<CertificateToolsDrawer");
+  });
+  it("Ownership/NFC are NOT rendered inline beneath the grading form", () => {
+    expect(DASH).not.toMatch(/<OwnershipSection\b/);
+    expect(DASH).not.toMatch(/<NfcSection\b/);
+  });
+});
+
+describe("12/13/14. save payload + navigation + Next Card unchanged", () => {
+  it("no save endpoint / payload line changed in this pass", () => {
+    const base = ["origin/main", "main"].find((r) => {
+      try {
+        execSync(`git rev-parse --verify ${r}`, { stdio: "pipe" });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (!base) return;
+    const diff = execSync(`git diff ${base}...HEAD -- client/src/components/certificate-form.tsx`, { encoding: "utf8" });
+    const touched = diff
+      .split("\n")
+      .filter((l) => /^[+-]/.test(l) && !/^[+-]{3}/.test(l))
+      .filter((l) => /apiRequest\(|\/api\/admin\/certificates|method:\s*"(POST|PUT|PATCH)"|buildCertFormData/.test(l));
+    expect(touched).toEqual([]);
+  });
+  it("stage navigation stays pure and Next Card still advances the queue", () => {
+    const fn = FORM.slice(FORM.indexOf("const goToStage"), FORM.indexOf("const stageClass"));
+    expect(fn).toContain("setWfStage");
+    expect(fn).not.toMatch(/mutate|handleSubmit|fetch\(|setForm/);
+    expect(FORM).toContain('data-testid="button-next-card"');
+    expect(FORM).toContain("queue.onNext");
+  });
+});
+
+describe("15-20. protected surfaces, providers, credits", () => {
+  it("git diff touches ONLY the allowed UI + test files — no protected/server/schema file", () => {
+    const changed = changedFiles();
+    if (!changed) return;
+    const allowedNonTest = new Set([
+      "client/src/components/certificate-form.tsx",
+      "client/src/components/grading-workflow/CardPreviewPanel.tsx",
+      "client/src/components/grading-workflow/GradingWorkflowBar.tsx",
+      "client/src/components/grading-workflow/SessionHud.tsx",
+    ]);
+    for (const f of changed) {
+      expect(f, `${f} must not be a protected/server/schema file`).not.toMatch(
+        /components\/grading\/|mvgs|scoring|centering|pristine|defect|grader\.ts|labels\.ts|certificate-document|cert-id|schema\.ts|^server\/|^migrations\//,
+      );
+      if (!f.startsWith("tests/")) {
+        expect(allowedNonTest.has(f), `unexpected non-test file changed: ${f}`).toBe(true);
+      }
+    }
+  });
+  it("no provider/credit call introduced (UI-only diff)", () => {
+    const base = ["origin/main", "main"].find((r) => {
+      try {
+        execSync(`git rev-parse --verify ${r}`, { stdio: "pipe" });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (!base) return;
+    // Scan the SOURCE diff only (client/); test files legitimately contain these
+    // provider words inside this very guard's regex.
+    const added = execSync(`git diff ${base}...HEAD -- client/`, { encoding: "utf8" })
+      .split("\n")
+      .filter((l) => l.startsWith("+") && !l.startsWith("+++"));
+    for (const l of added) {
+      expect(l).not.toMatch(/anthropic|higgsfield|stripe|\.charge|credits?\.(spend|reserve|deduct)/i);
+    }
+  });
+});

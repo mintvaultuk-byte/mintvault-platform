@@ -24,7 +24,7 @@ function between(start: string, end: string): string {
 }
 
 const STAGE_CARD = between("STAGE 1 · CARD", "STAGE 2 · RARITY");
-const STAGE_RARITY = between("STAGE 2 · RARITY", "stage 1 (card) continued");
+const STAGE_RARITY = between("STAGE 2 · RARITY", "stage 1 (card) nav");
 const STAGE_REVIEW = FORM.slice(FORM.indexOf("Stage 4 · REVIEW"));
 /** Code with comments stripped (comments deliberately describe what is NOT done). */
 const stripComments = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
