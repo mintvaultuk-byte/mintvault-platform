@@ -255,7 +255,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
   if (showForm) {
     return (
       <AdminShell activeTab={activeTab} onTabChange={setActiveTab} onLogout={handleLogout} focus>
-        <div className="flex h-full min-h-0 flex-col p-3">
+        <div className="flex min-h-[100dvh] flex-col p-3">
           {/* Compact grading header — Back · cert ID · Certificate Tools (with
               tiny status). Replaces the tall "Edit MV####" header chrome so the
               four-stage form starts near the top on a 13-inch MacBook. */}

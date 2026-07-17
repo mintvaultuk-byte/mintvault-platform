@@ -72,16 +72,16 @@ describe("Ownership + NFC moved out of the grading scroll (spec 8-13, 15-17)", (
 
 describe("two-column shell + density (spec 1, 3, 19)", () => {
   it("Card/Rarity render the preview beside the controls (~40% left column)", () => {
-    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 lg:flex-row");
-    expect(FORM).toContain("lg:w-[40%] lg:shrink-0");
-    // Preview now lives in the workspace aside (fixed-height shell), not a sticky
+    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
+    expect(FORM).toContain("md:w-[40%] md:shrink-0");
+    // Preview now lives in the workspace aside (bounded-height shell), not a sticky
     // column inside the form.
     expect(FORM).toContain('data-testid="grading-preview-panel"');
   });
-  it("the grading page uses a full-height focus shell + compact header (not the tall Edit header)", () => {
-    // Fixed-height workstation: AdminShell focus mode + full-height flex column,
-    // replacing the former max-w-6xl scroll container.
-    expect(DASH).toContain("flex h-full min-h-0 flex-col");
+  it("the grading page uses a page-scrollable focus shell + compact header (not the tall Edit header)", () => {
+    // Bounded-height workstation: AdminShell focus mode + min-h-[100dvh] flex
+    // column (page-scrollable, no clip), replacing the former max-w-6xl container.
+    expect(DASH).toContain("flex min-h-[100dvh] flex-col");
     expect(DASH).toContain('data-testid="grading-header"');
     expect(DASH).toContain("&larr; Certificates");
   });

@@ -173,9 +173,16 @@ export default function AdminShell({
     return (
       <div className="admin-root">
         <GrainOverlay />
+        {/* Grading workstation shell. Uses min-height (not a fixed height) and
+            NO overflow:hidden so the browser page can always scroll as a
+            fallback — the previous height:100vh + overflow:hidden clipped any
+            content past the viewport and trapped scrolling. The workstation
+            itself sets a bounded, viewport-relative height at desktop so its
+            right column scrolls internally; below that it flows and the page
+            scrolls normally. */}
         <div
           className="admin-focus"
-          style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}
+          style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}
         >
           {children}
         </div>

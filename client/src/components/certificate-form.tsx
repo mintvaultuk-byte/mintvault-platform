@@ -1487,7 +1487,10 @@ export default function CertificateForm({
   const showManualEditor = manualMode || identifyConfidence === "low" || !aiIdentifyAvailable;
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="grading-workspace">
+    <div
+      className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]"
+      data-testid="grading-workspace"
+    >
       {/* Workstation shell — a fixed-height two-panel layout: a read-only card
           preview aside (stages 0/1 only) beside the control panel that holds the
           header strip + identification tools (fixed) and the scrollable form.
@@ -1497,9 +1500,9 @@ export default function CertificateForm({
           INSIDE the form after Card Details — safe because every workstation
           button is type="button" and handleSubmit no-ops pre-approval, so it can
           never trigger a form submit. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row">
         {wfStage <= 1 && (
-          <aside className="min-h-0 lg:w-[40%] lg:shrink-0" data-testid="grading-preview-panel">
+          <aside className="min-h-0 max-md:max-h-[55vh] md:w-[40%] md:shrink-0" data-testid="grading-preview-panel">
             <CardPreviewPanel fill certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
           </aside>
         )}
@@ -1642,7 +1645,7 @@ export default function CertificateForm({
                 goToStage(2);
               }
             }}
-            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto lg:pr-1"
+            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"
           >
         {/* "✓ Saved" confirmation toast — fades ~2.5s after a successful save. */}
         {savedToast && (

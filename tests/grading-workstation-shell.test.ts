@@ -37,16 +37,18 @@ const WORKSPACE = slice(FORM, 'data-testid="grading-workspace"', "</form>");
 const CONTROL_HEADER = slice(FORM, `data-testid="grading-control-panel"`, "onSubmit={handleSubmit}");
 
 describe("1-4. two-panel workspace: preview aside + control panel are grid siblings", () => {
-  it("a viewport-height workspace wraps a full-height two-column flex row (preview | controls)", () => {
+  it("a viewport-bounded workspace wraps a two-column flex row (preview | controls)", () => {
     expect(FORM).toMatch(/data-testid="grading-workspace"[^>]*/);
-    expect(FORM).toContain("flex h-full min-h-0 flex-col");
-    // The panels container is a full-height flex row at lg+ (column-stack below):
-    // 40% preview aside on the left, flex-1 control panel on the right.
-    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 lg:flex-row");
-    expect(FORM).toContain("lg:w-[40%] lg:shrink-0");
+    // Bounded, viewport-relative workstation height at desktop (decoupled from a
+    // fragile h-full chain); auto height below md so the page flows and scrolls.
+    expect(FORM).toContain("flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]");
+    // The panels container is a flex row at md+ (column-stack below): 40% preview
+    // aside on the left, flex-1 control panel on the right.
+    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
+    expect(FORM).toContain("md:w-[40%] md:shrink-0");
   });
   it("CardPreviewPanel lives in the preview aside; controls in the control panel — siblings in one flex row", () => {
-    const row = slice(FORM, "flex min-h-0 flex-1 flex-col gap-3 lg:flex-row", "onSubmit={handleSubmit}");
+    const row = slice(FORM, "flex min-h-0 flex-1 flex-col gap-3 md:flex-row", "onSubmit={handleSubmit}");
     expect(row).toContain('data-testid="grading-preview-panel"');
     expect(row).toContain("<CardPreviewPanel");
     expect(row).toContain('data-testid="grading-control-panel"');
@@ -81,10 +83,11 @@ describe("5-6. fixed-height shell + internal scroll", () => {
     expect(controlPanel).toContain("overflow-y-auto");
     expect(controlPanel).toContain("min-h-0 flex-1");
   });
-  it("admin-dashboard renders the grading view in a full-height focus shell", () => {
+  it("admin-dashboard renders the grading view in a page-scrollable focus shell", () => {
     expect(DASH).toContain("focus"); // AdminShell focus prop passed
     expect(DASH).toContain('data-testid="grading-header"');
-    expect(DASH).toContain("h-full min-h-0 flex-col");
+    // min-height (not h-full) so the page can always scroll as a fallback.
+    expect(DASH).toContain("min-h-[100dvh] flex-col");
   });
   it("AdminShell focus mode hides the big admin-top header AND the sidebar", () => {
     expect(SHELL).toMatch(/focus\??:\s*boolean/);

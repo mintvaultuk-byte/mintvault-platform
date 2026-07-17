@@ -18,9 +18,12 @@ interface ImagesResponse {
   urls?: Record<string, string | null>;
 }
 
+// Button-only zoom levels: 100% → 175% → 250% → 325% → 400% (75 percentage
+// points per click), max 400%, min 100%. Zoom is ONLY driven by the +/− and
+// Reset buttons — never the mouse wheel (the wheel scrolls the page/panel).
 const MIN_ZOOM = 1;
-const MAX_ZOOM = 5;
-const ZOOM_STEP = 0.25;
+const MAX_ZOOM = 4;
+const ZOOM_STEP = 0.75;
 const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
 export function CardPreviewPanel({
