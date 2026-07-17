@@ -67,11 +67,11 @@ describe("same as last card quick-fill (spec 9) — never overwrites (spec 5)", 
     expect(FORM).toContain("captureLastCardContext");
     expect(FORM).toContain('data-testid="button-same-as-last-card"');
   });
-  it("applyLastCardContext only fills EMPTY fields (f.x || last.x)", () => {
-    const fn = FORM.slice(FORM.indexOf("function applyLastCardContext"), FORM.indexOf("function applyLastCardContext") + 500);
-    expect(fn).toMatch(/f\.setName \|\| lastCardContext\.setName/);
-    expect(fn).toMatch(/f\.year \|\| lastCardContext\.year/);
-    expect(fn).toMatch(/f\.language \|\| lastCardContext\.language/);
+  it("applyLastCardContext only fills EMPTY fields (guarded by !f.x)", () => {
+    const fn = FORM.slice(FORM.indexOf("function applyLastCardContext"), FORM.indexOf("function applyLastCardContext") + 800);
+    expect(fn).toMatch(/if \(!f\.setName && lastCardContext\.setName\)/);
+    expect(fn).toMatch(/if \(!f\.year && lastCardContext\.year\)/);
+    expect(fn).toMatch(/if \(!f\.language && lastCardContext\.language\)/);
   });
   it("only remembers the shared context, NOT the per-card name/number", () => {
     const fn = FORM.slice(FORM.indexOf("function captureLastCardContext"), FORM.indexOf("function captureLastCardContext") + 500);
