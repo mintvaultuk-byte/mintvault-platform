@@ -121,19 +121,27 @@ export function inventoriedMatviews(): string[] {
   return UNMANAGED_INVENTORY.filter((e) => e.objectType === "materialized_view").map((e) => e.name).sort();
 }
 
+export interface NonPublicObject {
+  schema: string;
+  name: string;
+  kind: string; // 'table' | 'view' | 'materialized_view'
+}
+
 export interface LiveObjects {
-  tables: string[];
-  views: string[];
-  matviews: string[];
-  schemas: string[];
-  orphanSequences: string[];
-  enums: string[];
+  tables: string[]; // public schema
+  views: string[]; // public schema
+  matviews: string[]; // public schema
+  schemas: string[]; // all non-system schemas
+  orphanSequences: string[]; // public schema
+  enums: string[]; // public schema
+  nonPublicObjects?: NonPublicObject[]; // objects in non-public, non-system schemas
 }
 
 export interface Classification {
   managed: string[];
   unmanaged: string[];
   vaultQuest: string[];
+  integrationOwned: { schema: string; name: string; kind: string }[]; // in a known non-public schema
   unknown: { objectType: string; name: string }[];
 }
 
@@ -146,7 +154,7 @@ export function classifyLiveObjects(objs: LiveObjects): Classification {
   const knownSchemas = new Set(KNOWN_SCHEMAS.map((s) => s.name));
   const knownOrphanSeq = new Set(KNOWN_ORPHAN_SEQUENCES);
 
-  const result: Classification = { managed: [], unmanaged: [], vaultQuest: [], unknown: [] };
+  const result: Classification = { managed: [], unmanaged: [], vaultQuest: [], integrationOwned: [], unknown: [] };
 
   for (const t of objs.tables) {
     if (isVaultQuestName(t)) result.vaultQuest.push(t);
@@ -173,6 +181,17 @@ export function classifyLiveObjects(objs: LiveObjects): Classification {
   // Any enum is unknown: shared/schema.ts materialises no pg enums (verified none on prod).
   for (const e of objs.enums) {
     result.unknown.push({ objectType: "enum", name: e });
+  }
+  // Objects in non-public schemas: if the schema is a known integration schema, the object
+  // is integration-owned (reported, never a drop candidate — Drizzle push is public-scoped).
+  // If the schema is unknown, the schema itself is already flagged unknown above; the object
+  // is additionally surfaced so it is never silent.
+  for (const o of objs.nonPublicObjects ?? []) {
+    if (knownSchemas.has(o.schema) && o.schema !== "public") {
+      result.integrationOwned.push(o);
+    } else if (!knownSchemas.has(o.schema)) {
+      result.unknown.push({ objectType: `${o.kind}@${o.schema}`, name: `${o.schema}.${o.name}` });
+    }
   }
   return result;
 }

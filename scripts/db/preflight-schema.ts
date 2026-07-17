@@ -16,7 +16,7 @@ import { classifyLiveObjects, type LiveObjects, type Classification } from "./sc
 
 export interface PreflightResult extends Classification {
   ok: boolean;
-  counts: { tables: number; views: number; matviews: number; schemas: number; orphanSequences: number; enums: number };
+  counts: { tables: number; views: number; matviews: number; schemas: number; orphanSequences: number; enums: number; nonPublicObjects: number };
 }
 
 /** Pure evaluation over a provided object set (used by tests and by the DB path). */
@@ -32,6 +32,7 @@ export function evaluatePreflight(objs: LiveObjects): PreflightResult {
       schemas: objs.schemas.length,
       orphanSequences: objs.orphanSequences.length,
       enums: objs.enums.length,
+      nonPublicObjects: (objs.nonPublicObjects ?? []).length,
     },
   };
 }
@@ -64,12 +65,26 @@ async function fetchLiveObjects(databaseUrl: string): Promise<LiveObjects> {
     const enums = await one(
       "select t.typname as name from pg_type t join pg_namespace n on n.oid=t.typnamespace where n.nspname='public' and t.typtype='e'",
     );
+    // Objects in NON-public, non-system schemas (schema-qualified) so they are never invisible.
+    const npRows = (
+      await client.query<{ schema: string; name: string; kind: string }>(
+        `select table_schema as schema, table_name as name,
+                case when table_type='VIEW' then 'view' else 'table' end as kind
+           from information_schema.tables
+          where table_schema not in ('pg_catalog','information_schema','pg_toast','public')
+            and table_schema not like 'pg_temp%' and table_schema not like 'pg_toast_temp%'
+         union all
+         select schemaname as schema, matviewname as name, 'materialized_view' as kind
+           from pg_matviews where schemaname not in ('public') and schemaname not like 'pg_%'`,
+      )
+    ).rows;
+    const nonPublicObjects = npRows.map((r) => ({ schema: r.schema, name: r.name, kind: r.kind }));
     // Incomplete-metadata guard: a database with zero tables and zero schemas is not a real
     // target — fail closed rather than reporting a spuriously clean preflight.
     if (tables.length === 0 && schemas.length === 0) {
       throw new Error("Preflight received empty metadata (no tables, no schemas) — failing closed.");
     }
-    return { tables, views, matviews, schemas, orphanSequences, enums };
+    return { tables, views, matviews, schemas, orphanSequences, enums, nonPublicObjects };
   } finally {
     await client.end();
   }
@@ -104,8 +119,9 @@ if (isMain()) {
   } else {
     console.log(
       `Preflight: tables=${res.counts.tables} views=${res.counts.views} matviews=${res.counts.matviews} ` +
-        `schemas=${res.counts.schemas} orphanSeq=${res.counts.orphanSequences} enums=${res.counts.enums} | ` +
-        `managed=${res.managed.length} unmanaged=${res.unmanaged.length} vaultQuest=${res.vaultQuest.length} unknown=${res.unknown.length}`,
+        `schemas=${res.counts.schemas} orphanSeq=${res.counts.orphanSequences} enums=${res.counts.enums} ` +
+        `nonPublicObj=${res.counts.nonPublicObjects} | managed=${res.managed.length} unmanaged=${res.unmanaged.length} ` +
+        `vaultQuest=${res.vaultQuest.length} integrationOwned=${res.integrationOwned.length} unknown=${res.unknown.length}`,
     );
   }
   if (!res.ok) {

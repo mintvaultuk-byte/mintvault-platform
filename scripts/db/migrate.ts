@@ -49,16 +49,22 @@ function sha256(s: string): string {
 export function listMigrationFiles(dir: string = MIGRATIONS_DIR): MigrationFile[] {
   const files = readdirSync(dir)
     .filter((f) => FILE_RE.test(f))
-    .sort()
     .map((filename) => {
       const path = join(dir, filename);
       const sql = readFileSync(path, "utf8");
       const number = filename.match(FILE_RE)![1];
       return { number, filename, path, sql, checksum: sha256(sql), noTransaction: /--\s*migrate:no-transaction/i.test(sql) };
-    });
-  // Reject duplicate migration numbers up front.
-  const byNumber = new Map<string, string[]>();
-  for (const f of files) byNumber.set(f.number, [...(byNumber.get(f.number) ?? []), f.filename]);
+    })
+    // Deterministic NUMERIC ordering by the integer prefix (not lexical), then filename as a
+    // stable tiebreaker. Guards against variable-width numbers (\d{4,}) misordering.
+    .sort((a, b) => Number(a.number) - Number(b.number) || a.filename.localeCompare(b.filename));
+  // Reject duplicate migration numbers up front — compared by NUMERIC value so 0001 and 00001
+  // (same logical number, different width) are caught as duplicates.
+  const byNumber = new Map<number, string[]>();
+  for (const f of files) {
+    const n = Number(f.number);
+    byNumber.set(n, [...(byNumber.get(n) ?? []), f.filename]);
+  }
   const dups = [...byNumber.entries()].filter(([, names]) => names.length > 1);
   if (dups.length > 0) {
     throw new Error(`Duplicate migration number(s): ${dups.map(([n, names]) => `${n} -> ${names.join(", ")}`).join("; ")}`);
@@ -93,9 +99,19 @@ interface JournalRow {
   status: string;
 }
 
+async function journalExists(client: PgClientLike): Promise<boolean> {
+  const { rows } = await client.query("SELECT to_regclass('public.schema_migrations') AS reg");
+  return rows[0]?.reg != null;
+}
+
+/**
+ * Read-only journal read. If the journal table does not exist yet, returns an empty map
+ * WITHOUT creating it — so planMigrations (dry-run) never mutates the database.
+ */
 async function journalMap(client: PgClientLike): Promise<Map<string, JournalRow>> {
-  const { rows } = await client.query("SELECT filename, checksum, status FROM schema_migrations");
   const m = new Map<string, JournalRow>();
+  if (!(await journalExists(client))) return m;
+  const { rows } = await client.query("SELECT filename, checksum, status FROM schema_migrations");
   for (const r of rows) m.set(String(r.filename), { checksum: String(r.checksum), status: String(r.status) });
   return m;
 }
@@ -108,8 +124,8 @@ export interface MigratePlan {
   destructive: { filename: string; findings: ReturnType<typeof lintSql> }[];
 }
 
+/** Read-only planning: never mutates the database (does not create the journal table). */
 export async function planMigrations(client: PgClientLike, files: MigrationFile[]): Promise<MigratePlan> {
-  await ensureJournal(client);
   const journal = await journalMap(client);
   const plan: MigratePlan = { pending: [], alreadyApplied: [], checksumMismatches: [], inconsistent: [], destructive: [] };
   for (const f of files) {
@@ -140,6 +156,7 @@ export async function applyMigrations(
     throw new Error("Another migration runner holds the advisory lock. Refusing to run concurrently.");
   }
   try {
+    await ensureJournal(client); // create/upgrade the journal only on the apply path (never on dry-run)
     const plan = await planMigrations(client, files);
     if (plan.inconsistent.length > 0) {
       throw new Error(
