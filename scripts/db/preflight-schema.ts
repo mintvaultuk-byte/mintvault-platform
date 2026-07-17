@@ -59,8 +59,11 @@ async function fetchLiveObjects(databaseUrl: string): Promise<LiveObjects> {
     const schemas = await one(
       "select schema_name as name from information_schema.schemata where schema_name not in ('pg_catalog','information_schema','pg_toast') and schema_name not like 'pg_temp%' and schema_name not like 'pg_toast_temp%'",
     );
+    // Orphan = a sequence NOT owned by a column. Column-owned sequences have a pg_depend row
+    // with deptype 'a' (serial/OWNED BY) or 'i' (GENERATED ... AS IDENTITY). Both are owned and
+    // must NOT be flagged as orphans.
     const orphanSequences = await one(
-      "select s.relname as name from pg_class s join pg_namespace n on n.oid=s.relnamespace where s.relkind='S' and n.nspname='public' and not exists (select 1 from pg_depend d where d.objid=s.oid and d.deptype='a')",
+      "select s.relname as name from pg_class s join pg_namespace n on n.oid=s.relnamespace where s.relkind='S' and n.nspname='public' and not exists (select 1 from pg_depend d where d.objid=s.oid and d.deptype in ('a','i'))",
     );
     const enums = await one(
       "select t.typname as name from pg_type t join pg_namespace n on n.oid=t.typnamespace where n.nspname='public' and t.typtype='e'",
@@ -121,7 +124,7 @@ if (isMain()) {
       `Preflight: tables=${res.counts.tables} views=${res.counts.views} matviews=${res.counts.matviews} ` +
         `schemas=${res.counts.schemas} orphanSeq=${res.counts.orphanSequences} enums=${res.counts.enums} ` +
         `nonPublicObj=${res.counts.nonPublicObjects} | managed=${res.managed.length} unmanaged=${res.unmanaged.length} ` +
-        `vaultQuest=${res.vaultQuest.length} integrationOwned=${res.integrationOwned.length} unknown=${res.unknown.length}`,
+        `vaultQuest=${res.vaultQuest.length} partnerNetwork=${res.partnerNetwork.length} integrationOwned=${res.integrationOwned.length} unknown=${res.unknown.length}`,
     );
   }
   if (!res.ok) {
