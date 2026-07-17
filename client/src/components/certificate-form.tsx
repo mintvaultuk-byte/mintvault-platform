@@ -1734,7 +1734,15 @@ export default function CertificateForm({
               choose Manual (or identify comes back low-confidence). */}
           {aiIdentifyAvailable && (
             <div
-              className="rounded-lg border border-[var(--admin-gold)]/25 bg-[var(--admin-gold)]/[0.03] p-3 space-y-2.5"
+              className={`rounded-lg border p-3 space-y-2.5 transition-colors ${
+                identifyConfidence === "high"
+                  ? "border-[var(--admin-green)]/40 bg-[var(--admin-green)]/[0.05]"
+                  : identifyConfidence === "medium"
+                    ? "border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/[0.05]"
+                    : identifyConfidence === "low"
+                      ? "border-[var(--admin-red)]/40 bg-[var(--admin-red)]/[0.05]"
+                      : "border-[var(--admin-gold)]/25 bg-[var(--admin-gold)]/[0.03]"
+              }`}
               data-testid="ai-identify-panel"
             >
               <div className="flex items-center justify-between gap-2">
@@ -1742,21 +1750,20 @@ export default function CertificateForm({
                   <Cpu size={12} /> Card Identification
                 </span>
                 {identifyConfidence && (
-                  <span className="flex items-center gap-1.5 text-[11px]" data-testid="ai-identify-confidence">
+                  <span
+                    className={`flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                      identifyConfidence === "high"
+                        ? "bg-[var(--admin-green)]/15 text-[var(--admin-green)]"
+                        : identifyConfidence === "medium"
+                          ? "bg-[var(--admin-amber)]/15 text-[var(--admin-amber)]"
+                          : "bg-[var(--admin-red)]/15 text-[var(--admin-red)]"
+                    }`}
+                    data-testid="ai-identify-confidence"
+                  >
                     <span
                       className={`h-2 w-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
                     />
-                    <span
-                      className={
-                        identifyConfidence === "high"
-                          ? "text-[var(--admin-green)]"
-                          : identifyConfidence === "medium"
-                            ? "text-[var(--admin-amber)]"
-                            : "text-[var(--admin-red)]"
-                      }
-                    >
-                      {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
-                    </span>
+                    {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
                   </span>
                 )}
               </div>
@@ -1798,18 +1805,11 @@ export default function CertificateForm({
                 </p>
               )}
 
-              {/* Primary actions: Accept · Search Again · Manual */}
+              {/* Primary actions. Once a card is identified, Accept is the
+                  strongest action (confirm & continue → Rarity); Search Again is
+                  the secondary outline; Manual stays visually quiet. Before any
+                  match exists, AI Identify is the strong primary. */}
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={runIdentify}
-                  disabled={identifyLoading}
-                  data-testid="button-ai-identify"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] px-3.5 py-1.5 text-[11px] font-bold uppercase text-[#1A1400] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                >
-                  {identifyLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
-                  {identifyLoading ? "Identifying…" : hasCardMeta ? "Search Again" : "AI Identify"}
-                </button>
                 {hasCardMeta && (
                   <button
                     type="button"
@@ -1824,16 +1824,30 @@ export default function CertificateForm({
                         : "Confirm and continue"
                     }
                     data-testid="button-accept-identify"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-green)]/40 bg-[var(--admin-green)]/10 px-3.5 py-1.5 text-[11px] font-bold uppercase text-[var(--admin-green)] hover:bg-[var(--admin-green)]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-green)] bg-[var(--admin-green)] px-4 py-2 text-[12px] font-bold uppercase text-[#07130b] shadow-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                   >
-                    <Check size={12} /> Accept
+                    <Check size={14} /> Accept
                   </button>
                 )}
                 <button
                   type="button"
+                  onClick={runIdentify}
+                  disabled={identifyLoading}
+                  data-testid="button-ai-identify"
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[11px] font-bold uppercase transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                    hasCardMeta
+                      ? "border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10"
+                      : "border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] hover:opacity-90"
+                  }`}
+                >
+                  {identifyLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                  {identifyLoading ? "Identifying…" : hasCardMeta ? "Search Again" : "AI Identify"}
+                </button>
+                <button
+                  type="button"
                   onClick={() => setManualMode((m) => !m)}
                   data-testid="button-manual-entry"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/30 px-3.5 py-1.5 text-[11px] font-bold uppercase text-[var(--admin-gold)]/80 hover:bg-[var(--admin-gold)]/10 transition-colors"
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/5 hover:text-[var(--admin-gold)] transition-colors"
                 >
                   {showManualEditor ? "Hide manual" : "Manual"}
                 </button>
@@ -3059,7 +3073,20 @@ export default function CertificateForm({
         {/* Stage 4 · REVIEW & SAVE — moved grader notes (collapsed) + the existing
             explicit save action. Note content, templates and persistence are the
             EXACT pre-existing implementation, only relocated. */}
-        <div data-workflow-stage="review" className={`space-y-3 ${stageClass(3)}`}>
+        <div data-workflow-stage="review" className={`space-y-2.5 ${stageClass(3)}`}>
+        {/* Compact approval header — frames Stage 4 as a final dashboard and keeps
+            Back to Grade as a quiet inline control instead of a chunky button row. */}
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">Final review &amp; approval</span>
+          <button
+            type="button"
+            onClick={() => goToStage(2)}
+            data-testid="button-back-to-grade"
+            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-gold)] transition-colors"
+          >
+            ← Back to Grade
+          </button>
+        </div>
         {/* Read-only confirmation summary — every value comes from existing form
             state; Edit links only switch the local stage (no save/mutation). */}
         <ReviewSummary
@@ -3101,16 +3128,6 @@ export default function CertificateForm({
             </span>
           </div>
         )}
-        <div className="flex items-center justify-start">
-          <button
-            type="button"
-            onClick={() => goToStage(2)}
-            data-testid="button-back-to-grade"
-            className="px-4 py-2 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
-          >
-            ← Back to Grade
-          </button>
-        </div>
         {/* Grader Notes with preset helper — moved from Card Details, unchanged. */}
         {notesOpen ? (
           <div className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">
@@ -3748,30 +3765,44 @@ export function PokemonSetPicker({
               </div>
             </div>
           )}
-          {filtered.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => {
-                onChange(s.name, s.id);
-                setQuery(s.name);
-                recordRecentSet(s.id, s.name);
-                setOpen(false);
-              }}
-              className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--admin-gold)]/5 border-b border-[var(--admin-line)] last:border-0"
-            >
-              <span className="font-mono text-[var(--admin-gold)] text-[10px] mr-2">{s.id}</span>
-              <span className="text-[var(--admin-ink)] font-medium">{s.name}</span>
-              {(s as any).source === "custom" && (
-                <span className="text-[8px] bg-[color-mix(in_srgb,var(--admin-green)_18%,transparent)] text-[var(--admin-green)] px-1 py-0.5 rounded ml-1 font-bold uppercase">
-                  Custom
-                </span>
-              )}
-              <span className="text-[var(--admin-ink-faint)] ml-2">
-                · {s.series} · {s.total} cards · {s.releaseDate?.split("-")[0]}
-              </span>
-            </button>
-          ))}
+          {filtered.map((s) => {
+            const year = s.releaseDate?.split("-")[0];
+            const code = s.ptcgoCode || "";
+            return (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() => {
+                  onChange(s.name, s.id);
+                  setQuery(s.name);
+                  recordRecentSet(s.id, s.name);
+                  setOpen(false);
+                }}
+                className="w-full text-left px-3 py-2 hover:bg-[var(--admin-gold)]/5 border-b border-[var(--admin-line)] last:border-0"
+              >
+                {/* Line 1: recognisable collection code chip + set name. Line 2:
+                    series · year · card count · internal id — so the grader can
+                    recognise the set without memorising codes. */}
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0 rounded bg-[var(--admin-gold)]/10 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-[var(--admin-gold)]">
+                    {code || s.id}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--admin-ink)]">{s.name}</span>
+                  {s.source === "custom" && (
+                    <span className="shrink-0 rounded bg-[color-mix(in_srgb,var(--admin-green)_18%,transparent)] px-1 py-0.5 text-[8px] font-bold uppercase text-[var(--admin-green)]">
+                      Custom
+                    </span>
+                  )}
+                </div>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-[var(--admin-ink-faint)]">
+                  {s.series && <span>{s.series}</span>}
+                  {year && <span>· {year}</span>}
+                  {s.total ? <span>· {s.total} cards</span> : null}
+                  {code && code !== s.id && <span className="font-mono">· {s.id}</span>}
+                </div>
+              </button>
+            );
+          })}
           {/* Add new set button (admin only) */}
           {allowAddSet && (
             <button

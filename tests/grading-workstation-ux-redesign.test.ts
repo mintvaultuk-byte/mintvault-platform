@@ -138,15 +138,25 @@ describe("protected surfaces untouched (hard rule)", () => {
   const PROTECTED =
     /components\/grading\/|mvgs|scoring|centering|pristine|grader\.ts|grading-prompt|labels\.ts|certificate-document|shared\/schema\.ts|^migrations\//;
 
-  // Files this redesign commit changed. Falls back to the working tree if HEAD
-  // has no parent (shouldn't happen here) so the guard never silently no-ops.
+  // Files the grading-UX redesign changed vs the approved two-column shell base
+  // (b5fe522c). Captures BOTH the AI-first redesign commit and the polish commit.
+  // Falls back to the working tree if the base ref is unavailable so the guard
+  // never silently no-ops.
+  const REDESIGN_BASE = "b5fe522c";
   const changed = (() => {
     try {
-      return execSync("git diff --name-only HEAD~1 HEAD", { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+      execSync(`git rev-parse --verify ${REDESIGN_BASE}`, { stdio: "pipe" });
+      return execSync(`git diff --name-only ${REDESIGN_BASE} HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
     } catch {
       return execSync("git diff --name-only", { encoding: "utf8" }).trim().split("\n").filter(Boolean);
     }
   })();
+
+  // Non-protected grading-UX surfaces this redesign is allowed to touch.
+  const ALLOWED_CLIENT = new Set([
+    "client/src/components/certificate-form.tsx",
+    "client/src/components/rarity-picker/RarityVariantPicker.tsx",
+  ]);
 
   it("this session changed NO grading-protected / schema / migration file", () => {
     expect(changed.length).toBeGreaterThan(0);
@@ -155,9 +165,14 @@ describe("protected surfaces untouched (hard rule)", () => {
     }
   });
 
-  it("this session's ONLY client edit is certificate-form.tsx (no components/grading touched)", () => {
+  it("client edits stay within the allowed grading-UX files (no components/grading touched)", () => {
     const clientEdits = changed.filter((f) => f.startsWith("client/"));
-    expect(clientEdits).toEqual(["client/src/components/certificate-form.tsx"]);
+    expect(clientEdits.length).toBeGreaterThan(0);
+    for (const f of clientEdits) {
+      expect(ALLOWED_CLIENT.has(f), `unexpected client file: ${f}`).toBe(true);
+    }
+    // certificate-form.tsx is always part of the redesign.
+    expect(clientEdits).toContain("client/src/components/certificate-form.tsx");
   });
 
   it("workstationSlot render + the 4-stage contract are preserved", () => {
