@@ -106,6 +106,24 @@ export function superAdminPartnerRouter(): Router {
     res.json({ ok: true });
   });
 
+  // Trusted Super Admin MFA reset (force-disable a user's MFA). Requires a reason; audited; revokes
+  // sessions + bumps credential_version. Partner users have NO route to reset another user's MFA.
+  r.post("/:partnerId/users/:userId/mfa-reset", async (req, res) => {
+    const reason = String(req.body?.reason ?? "").trim();
+    if (!reason) {
+      res.status(400).json({ error: "reason required" });
+      return;
+    }
+    const email = (req.session as { adminEmail?: string })?.adminEmail ?? "admin";
+    await partnerAdminQuery("UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id=$1 AND tenant_id=$2", [req.params.userId, req.params.partnerId]);
+    await partnerAdminQuery("DELETE FROM partner_recovery_codes WHERE user_id=$1 AND tenant_id=$2", [req.params.userId, req.params.partnerId]);
+    await partnerAdminQuery("UPDATE partner_users SET mfa_enabled=false, mfa_required=false, credential_version=credential_version+1 WHERE id=$1 AND tenant_id=$2", [req.params.userId, req.params.partnerId]);
+    await partnerAdminQuery("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [req.params.userId]);
+    await partnerAdminQuery("INSERT INTO partner_security_events (tenant_id, severity, kind) VALUES ($1,'high','partner_mfa_admin_reset')", [req.params.partnerId]);
+    await adminAudit(req.params.partnerId, "partner_mfa_admin_reset", reason, email, "partner_user", req.params.userId);
+    res.json({ ok: true });
+  });
+
   r.post("/:partnerId/revoke-sessions", async (req, res) => {
     const email = (req.session as { adminEmail?: string })?.adminEmail ?? "admin";
     const rr = await partnerAdminQuery("UPDATE partner_sessions SET revoked_at=now() WHERE tenant_id=$1 AND revoked_at IS NULL", [req.params.partnerId]);

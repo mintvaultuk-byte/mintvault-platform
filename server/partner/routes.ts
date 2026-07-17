@@ -11,10 +11,13 @@ import {
   requirePartnerAuth, requirePartnerCapability, setPartnerCookie, clearPartnerCookie, PARTNER_COOKIE,
   requireNotViewOnly, requireNotSensitiveFrozen,
 } from "./session";
-import { partnerLoginLimiter, partnerMfaLimiter, partnerResetLimiter } from "./rate-limit";
+import { partnerLoginLimiter, partnerMfaLimiter, partnerResetLimiter, partnerLocationSwitchLimiter } from "./rate-limit";
 import { withTenant, partnerRuntimeQuery } from "./db";
-import { decryptSecret, verifyTotp, recoveryHash, mfaEncryptionConfigured } from "./mfa";
+import { recoveryHash, mfaEncryptionConfigured } from "./mfa";
 import { writePartnerAudit } from "./audit";
+import { resetDeliveryConfigured, deliverResetToken } from "./delivery";
+import { switchLocation } from "./location";
+import { mfaEnrolStart, mfaEnrolConfirm, mfaRegenerateRecovery, mfaDisable, verifyActiveTotpNoReplay } from "./mfa-service";
 
 export function partnerApiRouter(): Router {
   const r = Router();
@@ -59,12 +62,7 @@ export function partnerApiRouter(): Router {
         return (rc.rowCount ?? 0) === 1;
       }
       if (typeof code === "string") {
-        const m = await c.query<{ secret_ref: string }>(
-          "SELECT secret_ref FROM partner_mfa_methods WHERE user_id=$1 AND method='totp' AND status='ACTIVE' AND secret_ref IS NOT NULL LIMIT 1",
-          [req.partner!.userId],
-        );
-        if (m.rowCount !== 1) return false;
-        return verifyTotp(decryptSecret(m.rows[0].secret_ref), code, Date.now());
+        return verifyActiveTotpNoReplay(c, req.partner!.userId, code); // F3: replay-protected
       }
       return false;
     });
@@ -98,11 +96,12 @@ export function partnerApiRouter(): Router {
           "SELECT user_id, tenant_id, user_status, org_status FROM partner_auth_lookup($1)",
           [email],
         );
-        if (rows.length === 1 && rows[0].user_status === "ACTIVE" && rows[0].org_status === "ACTIVE") {
-          await createPasswordResetToken(rows[0].tenant_id, rows[0].user_id);
+        if (rows.length === 1 && rows[0].user_status === "ACTIVE" && rows[0].org_status === "ACTIVE" && resetDeliveryConfigured()) {
+          const token = await createPasswordResetToken(rows[0].tenant_id, rows[0].user_id);
+          await deliverResetToken(email, token); // out-of-band; token never returned in the response
         }
       } catch {
-        /* swallow — response stays generic */
+        /* swallow — response stays generic regardless */
       }
     }
     res.json({ ok: true });
@@ -155,6 +154,89 @@ export function partnerApiRouter(): Router {
       return u.rows;
     });
     res.json(rows);
+  });
+
+  // ---- location switching (Item 2) ----
+  r.post("/session/location", partnerLocationSwitchLimiter, requirePartnerAuth, async (req, res) => {
+    const { locationId } = req.body ?? {}; // any submitted partner/tenant id is ignored
+    if (typeof locationId !== "string") {
+      res.status(400).json({ error: "invalid request" });
+      return;
+    }
+    const result = await switchLocation(req.partner!, locationId);
+    if (!result.ok) {
+      res.status(result.reason === "not_assigned" ? 403 : 404).json({ error: result.reason });
+      return;
+    }
+    res.json({ ok: true, locationId });
+  });
+
+  // ---- MFA enrolment (Item 3) ----
+  // enrol/confirm are reachable by an mfa-pending session (a user with mfa_required but no method yet).
+  r.post("/mfa/enrol", partnerMfaLimiter, async (req, res) => {
+    if (!req.partner) {
+      res.status(401).json({ error: "authentication required" });
+      return;
+    }
+    const { password } = req.body ?? {};
+    if (typeof password !== "string") {
+      res.status(400).json({ error: "elevated verification required" });
+      return;
+    }
+    const out = await mfaEnrolStart({ tenantId: req.partner.tenantId, userId: req.partner.userId, sessionMfaPassed: req.partner.mfaPassed }, password);
+    if (!out.ok) {
+      const status = out.reason === "encryption_unavailable" ? 503 : out.reason === "requires_current_factor" ? 403 : 401;
+      res.status(status).json({ error: out.reason });
+      return;
+    }
+    res.json({ ok: true, secret: out.secret, otpauthUri: out.otpauthUri }); // shown once; never logged
+  });
+
+  r.post("/mfa/confirm", partnerMfaLimiter, async (req, res) => {
+    if (!req.partner) {
+      res.status(401).json({ error: "authentication required" });
+      return;
+    }
+    const { code } = req.body ?? {};
+    if (typeof code !== "string") {
+      res.status(400).json({ error: "invalid request" });
+      return;
+    }
+    const out = await mfaEnrolConfirm({ tenantId: req.partner.tenantId, userId: req.partner.userId, sessionId: req.partner.sessionId, sessionMfaPassed: req.partner.mfaPassed }, code);
+    if (!out.ok) {
+      res.status(out.reason === "requires_current_factor" ? 403 : 400).json({ error: out.reason });
+      return;
+    }
+    res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once
+  });
+
+  r.post("/mfa/recovery-codes/regenerate", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
+    const { password } = req.body ?? {};
+    if (typeof password !== "string") {
+      res.status(400).json({ error: "elevated verification required" });
+      return;
+    }
+    const out = await mfaRegenerateRecovery({ tenantId: req.partner!.tenantId, userId: req.partner!.userId }, password);
+    if (!out.ok) {
+      res.status(401).json({ error: out.reason });
+      return;
+    }
+    res.json({ ok: true, recoveryCodes: out.recoveryCodes });
+  });
+
+  r.post("/mfa/disable", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
+    const { password, code, recoveryCode } = req.body ?? {};
+    if (typeof password !== "string") {
+      res.status(400).json({ error: "elevated verification required" });
+      return;
+    }
+    const out = await mfaDisable({ tenantId: req.partner!.tenantId, userId: req.partner!.userId }, password, { code, recoveryCode });
+    if (!out.ok) {
+      res.status(out.reason === "second_factor_required" ? 400 : 401).json({ error: out.reason });
+      return;
+    }
+    clearPartnerCookie(res); // sessions revoked on disable
+    res.json({ ok: true });
   });
 
   r.post("/users/:id/revoke-sessions", requirePartnerCapability("partner.sessions.revoke"), requireNotViewOnly, requireNotSensitiveFrozen, async (req, res) => {

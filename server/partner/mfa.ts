@@ -98,18 +98,32 @@ export function currentTotp(base32Secret: string, nowMs: number, stepSeconds = 3
   return hotp(base32Decode(base32Secret), Math.floor(nowMs / 1000 / stepSeconds));
 }
 
+/** Return the matched counter for a valid code within the ±1 window, or null. Enables replay rejection. */
+export function matchTotpCounter(base32Secret: string, code: string, nowMs: number, stepSeconds = 30): number | null {
+  if (!/^\d{6}$/.test(code)) return null;
+  const secret = base32Decode(base32Secret);
+  const counter = Math.floor(nowMs / 1000 / stepSeconds);
+  for (let w = -1; w <= 1; w++) {
+    if (crypto.timingSafeEqual(Buffer.from(hotp(secret, counter + w)), Buffer.from(code))) return counter + w;
+  }
+  return null;
+}
+
 // ---------------- recovery codes (single use) ----------------
+// F2: 80-bit entropy (was 40) and keyed HMAC-SHA256 (was bare SHA-256), so a stolen code_hash column
+// is not cheaply brute-forceable offline. The HMAC key is PARTNER_MFA_ENC_KEY — recovery verification
+// therefore FAILS CLOSED without the key (consistent with TOTP secret encryption).
 export function generateRecoveryCodes(n = 10): { plaintext: string[]; hashes: string[] } {
   const plaintext: string[] = [];
   const hashes: string[] = [];
   for (let i = 0; i < n; i++) {
-    const code = crypto.randomBytes(5).toString("hex"); // 10 hex chars
+    const code = crypto.randomBytes(10).toString("hex"); // 20 hex chars = 80 bits
     plaintext.push(code);
-    hashes.push(crypto.createHash("sha256").update(code).digest("hex"));
+    hashes.push(recoveryHash(code));
   }
   return { plaintext, hashes };
 }
 
 export function recoveryHash(code: string): string {
-  return crypto.createHash("sha256").update(code).digest("hex");
+  return crypto.createHmac("sha256", encKey()).update(code).digest("hex");
 }
