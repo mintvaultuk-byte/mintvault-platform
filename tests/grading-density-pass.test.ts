@@ -71,8 +71,9 @@ describe("Ownership + NFC moved out of the grading scroll (spec 8-13, 15-17)", (
 });
 
 describe("two-column shell + density (spec 1, 3, 19)", () => {
-  it("Card/Rarity render the preview beside the controls (~34% left column)", () => {
-    expect(FORM).toContain("lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)]");
+  it("Card/Rarity render the preview beside the controls (~40% left column)", () => {
+    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 lg:flex-row");
+    expect(FORM).toContain("lg:w-[40%] lg:shrink-0");
     // Preview now lives in the workspace aside (fixed-height shell), not a sticky
     // column inside the form.
     expect(FORM).toContain('data-testid="grading-preview-panel"');

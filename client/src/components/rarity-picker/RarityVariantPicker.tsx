@@ -190,8 +190,10 @@ export function RarityVariantPicker({
         onClick={() => pickRarity(rr.value)}
         title={`${rr.label} — ${rr.description}`}
         data-testid={`rarity-chip-${rr.value}`}
-        className={`group relative flex min-h-[42px] min-w-[92px] max-w-[140px] items-center gap-1.5 rounded-md border px-2 py-1 text-left transition ${
-          selected ? "border-amber-400 bg-amber-500/15 ring-2 ring-amber-400" : "border-slate-700 bg-slate-900/60 hover:border-slate-500"
+        className={`group relative flex min-h-[40px] min-w-[84px] max-w-[124px] items-center gap-1 rounded-md border px-1.5 py-0.5 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${
+          selected
+            ? "border-amber-400 bg-amber-500/25 ring-2 ring-amber-400 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]"
+            : "border-slate-700 bg-slate-900/60 hover:border-amber-400/50 hover:bg-slate-800/70"
         }`}
       >
         <RaritySymbol symbol={rr.symbol} size={17} />
@@ -231,8 +233,10 @@ export function RarityVariantPicker({
       onClick={onPick}
       title={item.description}
       data-testid={`pill-${item.value}`}
-      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${
-        active ? "border-emerald-500 bg-emerald-500/15 text-emerald-200" : "border-slate-700 bg-slate-900/60 text-slate-300 hover:border-slate-500"
+      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition outline-none focus-visible:ring-2 focus-visible:ring-emerald-300 ${
+        active
+          ? "border-emerald-400 bg-emerald-500/25 text-emerald-100 ring-1 ring-emerald-400/60"
+          : "border-slate-700 bg-slate-900/60 text-slate-300 hover:border-emerald-400/50 hover:bg-slate-800/70"
       }`}
     >
       {item.label}
@@ -336,7 +340,7 @@ export function RarityVariantPicker({
               Show all options
             </label>
           </div>
-          <div className="flex flex-wrap gap-1.5">{quickRarities.map(chip)}</div>
+          <div className="flex flex-wrap gap-1">{quickRarities.map(chip)}</div>
           {moreRarities.length > 0 && (
             <>
               <button
@@ -347,7 +351,7 @@ export function RarityVariantPicker({
               >
                 {showMore ? "Hide" : "More rarities"} ({moreRarities.length})
               </button>
-              {showMore && <div className="mt-2 flex flex-wrap gap-1.5 opacity-90">{moreRarities.map(chip)}</div>}
+              {showMore && <div className="mt-2 flex flex-wrap gap-1 opacity-90">{moreRarities.map(chip)}</div>}
             </>
           )}
           {/* Selected-item info line — the description lives here, not on every tile. */}

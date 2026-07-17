@@ -41,12 +41,21 @@ function changedFiles(): string[] | null {
   return execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
 }
 
-describe("1. read-only preview is shorter (spec 1)", () => {
-  it("preview cap dropped to 40vh (was 56vh); fullscreen 80vh retained", () => {
-    expect(PREVIEW).toContain("max-h-[40vh]");
+describe("1. read-only preview fills the panel (spec 1)", () => {
+  it("fill mode: card contain-fits the full panel height; non-fill keeps a capped thumbnail (Review stage)", () => {
+    // Opt-in `fill` prop: the workstation aside passes fill and the panel becomes
+    // a full-height flex column whose image grows to fill; the shared Review-stage
+    // thumbnail (default, no fill) keeps a capped size so it isn't enlarged.
+    expect(PREVIEW).toContain("fill = false"); // opt-in prop, default off
+    expect(PREVIEW).toContain("flex h-full min-h-0 flex-col"); // fill: full-height column
+    expect(PREVIEW).toContain("flex min-h-0 flex-1 items-center justify-center"); // fill: viewport grows
+    expect(PREVIEW).toContain("max-h-full"); // fill: img contains to the flex-1 box
+    expect(PREVIEW).toContain("max-h-[40vh]"); // non-fill default: capped thumbnail
     expect(PREVIEW).not.toContain("max-h-[56vh]");
     expect(PREVIEW).not.toContain("max-h-[44vh]");
     expect(PREVIEW).toContain("80vh"); // fullscreen still available for inspection
+    // the workstation aside opts in to fill
+    expect(FORM).toContain("<CardPreviewPanel fill");
   });
   it("keeps front/back, button zoom, fit/reset, fullscreen controls", () => {
     expect(PREVIEW).toContain('(["front", "back"] as const)');
@@ -209,6 +218,7 @@ describe("15-20. protected surfaces, providers, credits", () => {
     const allowedNonTest = new Set([
       "client/src/components/certificate-form.tsx",
       "client/src/components/grading-workflow/CardPreviewPanel.tsx",
+      "client/src/components/rarity-picker/RarityVariantPicker.tsx",
       "client/src/components/grading-workflow/GradingWorkflowBar.tsx",
       "client/src/components/grading-workflow/SessionHud.tsx",
       // workstation-shell pass (same branch): layout-only shell files

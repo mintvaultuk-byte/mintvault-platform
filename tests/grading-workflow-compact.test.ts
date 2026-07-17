@@ -37,8 +37,8 @@ describe("AI Card Identification removed from the daily grading UI", () => {
 
 describe("compact rarity picker (Phase 5/8/9)", () => {
   it("rarity tiles use compact chip dimensions (not oversized cards)", () => {
-    expect(PICKER).toContain("min-w-[92px]"); // compact chip (v3, code + readable name)
-    expect(PICKER).toContain("max-w-[140px]");
+    expect(PICKER).toContain("min-w-[84px]"); // compact chip (v4, code + readable name)
+    expect(PICKER).toContain("max-w-[124px]");
     expect(PICKER).not.toContain("min-w-[140px] flex-col"); // old tall card layout gone
   });
   it("descriptions are NOT on every tile — moved to tooltip + a selected-info line", () => {

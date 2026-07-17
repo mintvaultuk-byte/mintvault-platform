@@ -44,20 +44,21 @@ const WORKSPACE = slice(FORM, 'data-testid="grading-workspace"', "</form>");
 const CONTROL_HEADER = slice(FORM, `data-testid="grading-control-panel"`, "onSubmit={handleSubmit}");
 
 describe("1-4. two-panel workspace: preview aside + control panel are grid siblings", () => {
-  it("a viewport-height workspace wraps a two-column grid (preview | controls)", () => {
+  it("a viewport-height workspace wraps a full-height two-column flex row (preview | controls)", () => {
     expect(FORM).toMatch(/data-testid="grading-workspace"[^>]*/);
     expect(FORM).toContain("flex h-full min-h-0 flex-col");
-    // stage 0/1 use the 34% preview column; stages 2/3 collapse to one column.
-    expect(FORM).toContain("lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)]");
-    expect(FORM).toContain('wfStage <= 1 ? "lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)]" : "lg:grid-cols-1"');
+    // The panels container is a full-height flex row at lg+ (column-stack below):
+    // 40% preview aside on the left, flex-1 control panel on the right.
+    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 lg:flex-row");
+    expect(FORM).toContain("lg:w-[40%] lg:shrink-0");
   });
-  it("CardPreviewPanel lives in the preview aside; controls in the control panel — siblings in one grid", () => {
-    const grid = slice(FORM, "className={`grid min-h-0 flex-1", "onSubmit={handleSubmit}");
-    expect(grid).toContain('data-testid="grading-preview-panel"');
-    expect(grid).toContain("<CardPreviewPanel");
-    expect(grid).toContain('data-testid="grading-control-panel"');
+  it("CardPreviewPanel lives in the preview aside; controls in the control panel — siblings in one flex row", () => {
+    const row = slice(FORM, "flex min-h-0 flex-1 flex-col gap-3 lg:flex-row", "onSubmit={handleSubmit}");
+    expect(row).toContain('data-testid="grading-preview-panel"');
+    expect(row).toContain("<CardPreviewPanel");
+    expect(row).toContain('data-testid="grading-control-panel"');
     // preview aside only renders for the Card/Rarity stages.
-    expect(grid).toMatch(/wfStage <= 1 &&[\s\S]*grading-preview-panel/);
+    expect(row).toMatch(/wfStage <= 1 &&[\s\S]*grading-preview-panel/);
   });
   it("preview is NOT rendered above the fields as a full-width block", () => {
     // The only CardPreviewPanel render is inside the aside (grid sibling of the
@@ -92,10 +93,15 @@ describe("5-6. fixed-height shell + internal scroll", () => {
     expect(DASH).toContain('data-testid="grading-header"');
     expect(DASH).toContain("h-full min-h-0 flex-col");
   });
-  it("AdminShell focus mode hides the big admin-top header", () => {
+  it("AdminShell focus mode hides the big admin-top header AND the sidebar", () => {
     expect(SHELL).toMatch(/focus\??:\s*boolean/);
-    // admin-top is conditional on !focus
-    expect(SHELL).toMatch(/focus \?[\s\S]*admin-top/);
+    // Focus mode is an early return that renders only the compact workstation —
+    // no admin-top header and no admin-side sidebar. The full-chrome render
+    // (admin-app) comes after.
+    const focusBlock = SHELL.slice(SHELL.indexOf("if (focus)"), SHELL.indexOf('className="admin-app"'));
+    expect(focusBlock).toContain("admin-focus");
+    expect(focusBlock).not.toContain("admin-top");
+    expect(focusBlock).not.toContain("admin-side");
   });
 });
 
@@ -131,6 +137,7 @@ describe("12-20. protected surfaces / save / queue / Ownership-NFC / providers u
       "client/src/pages/admin-dashboard.tsx",
       // viewer wheel-zoom removal (same branch): read-only preview only
       "client/src/components/grading-workflow/CardPreviewPanel.tsx",
+      "client/src/components/rarity-picker/RarityVariantPicker.tsx",
     ]);
     for (const f of changed) {
       expect(f, `${f} must not be protected/server/schema`).not.toMatch(
