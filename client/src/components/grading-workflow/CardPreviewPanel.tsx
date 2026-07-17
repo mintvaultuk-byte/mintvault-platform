@@ -97,7 +97,7 @@ export function CardPreviewPanel({
           setSide((s) => (s === "front" ? "back" : "front"));
         }
       }}
-      className={`relative overflow-hidden rounded outline-none focus-visible:ring-1 focus-visible:ring-[var(--admin-gold)]/50 ${big ? "h-[80vh] w-full bg-black/60" : "max-h-[44vh]"}`}
+      className={`relative overflow-hidden rounded outline-none focus-visible:ring-1 focus-visible:ring-[var(--admin-gold)]/50 ${big ? "h-[80vh] w-full bg-black/60" : "max-h-[56vh]"}`}
       data-testid="card-preview-viewport"
     >
       {url ? (
@@ -105,7 +105,7 @@ export function CardPreviewPanel({
           src={url}
           alt={`Card ${side}`}
           style={{ transform: `scale(${zoom})`, transition: "transform 0.08s ease-out" }}
-          className={`mx-auto w-auto max-w-full origin-center rounded object-contain ${big ? "max-h-[80vh]" : "max-h-[44vh]"} ${zoom > 1 ? "cursor-grab" : ""}`}
+          className={`mx-auto w-auto max-w-full origin-center rounded object-contain ${big ? "max-h-[80vh]" : "max-h-[56vh]"} ${zoom > 1 ? "cursor-grab" : ""}`}
           data-testid="card-preview-image"
           draggable={false}
         />

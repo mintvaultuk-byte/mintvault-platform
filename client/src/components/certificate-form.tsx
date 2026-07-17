@@ -1839,7 +1839,10 @@ export default function CertificateForm({
             </DialogContent>
           </Dialog>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Card identity — mock-matching 3-column row (Game · Set · Set Code).
+              Set Code is its own full field (not a nested sub-input) to match the
+              workstation reference density at 1280px. */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <FormSelect
               label="Card Game *"
               value={form.cardGame}
@@ -1858,24 +1861,24 @@ export default function CertificateForm({
                 testId="input-set-name"
               />
               <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set">The collection name printed on the card.</p>
-              <div className="mt-1.5">
-                <label className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-wider block mb-1">
-                  Set Code
-                </label>
-                <input
-                  type="text"
-                  value={setId}
-                  onChange={(e) => setSetId(e.target.value)}
-                  placeholder="e.g. MEW or SV8"
-                  className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-2 py-1 text-[var(--admin-ink)] text-xs placeholder:text-[var(--admin-gold)]/15 focus:outline-none focus:border-[var(--admin-gold)]/50 transition-colors"
-                  data-testid="input-set-id"
-                />
-                <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set-code">Usually a short code such as MEW or SV8.</p>
-              </div>
+            </div>
+            <div>
+              <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                Set Code
+              </label>
+              <input
+                type="text"
+                value={setId}
+                onChange={(e) => setSetId(e.target.value)}
+                placeholder="e.g. MEW or SV8"
+                className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
+                data-testid="input-set-id"
+              />
+              <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set-code">Usually a short code such as MEW or SV8.</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <FormInput
               label="Card Name *"
               value={form.cardName}
@@ -1987,6 +1990,14 @@ export default function CertificateForm({
                 </div>
               )}
             </div>
+            <FormInput
+              label="Year *"
+              value={form.year}
+              onChange={(v) => updateField("year", v)}
+              placeholder="e.g. 1999"
+              testId="input-year"
+              highlight={(autofillRan && manuallyEdited.has("year")) || flashFields.has("year")}
+            />
           </div>
 
           {!fallbackMatch && canAutofill && !autofillLoading && suggestions.length === 0 && (
@@ -2325,7 +2336,8 @@ export default function CertificateForm({
           </div>
           </div>
 
-          {/* ── stage 1 (card) continued: language + year live with card details ── */}
+          {/* ── stage 1 (card) continued: language lives with card details (year
+              now sits beside Card Number in the 3-column row above) ── */}
           <div className={`space-y-3 ${stageClass(0)}`}>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
@@ -2345,14 +2357,6 @@ export default function CertificateForm({
                 </p>
               )}
             </div>
-            <FormInput
-              label="Year *"
-              value={form.year}
-              onChange={(v) => updateField("year", v)}
-              placeholder="e.g. 1999"
-              testId="input-year"
-              highlight={(autofillRan && manuallyEdited.has("year")) || flashFields.has("year")}
-            />
           </div>
 
           {/* Stage 1 nav */}
