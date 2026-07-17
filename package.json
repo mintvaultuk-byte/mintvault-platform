@@ -12,7 +12,10 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "db:push": "drizzle-kit push",
+    "db:push": "tsx scripts/db/guard-db-push.ts",
+    "db:preflight": "tsx scripts/db/preflight-schema.ts",
+    "db:migrate": "tsx scripts/db/migrate.ts",
+    "db:lint-sql": "tsx scripts/db/lint-destructive-sql.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepare": "husky"
