@@ -87,7 +87,17 @@ export function CardPreviewPanel({
   const imageArea = (big: boolean) => (
     <div
       onWheel={wheelZoom}
-      className={`relative overflow-hidden rounded ${big ? "h-[80vh] w-full bg-black/60" : "max-h-[52vh]"}`}
+      tabIndex={0}
+      role="group"
+      aria-label="Card preview — space toggles front and back"
+      onKeyDown={(e) => {
+        // Space toggles front/back — only while focus is inside the preview.
+        if (e.key === " " || e.code === "Space") {
+          e.preventDefault();
+          setSide((s) => (s === "front" ? "back" : "front"));
+        }
+      }}
+      className={`relative overflow-hidden rounded outline-none focus-visible:ring-1 focus-visible:ring-[var(--admin-gold)]/50 ${big ? "h-[80vh] w-full bg-black/60" : "max-h-[52vh]"}`}
       data-testid="card-preview-viewport"
     >
       {url ? (
