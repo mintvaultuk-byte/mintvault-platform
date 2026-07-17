@@ -51,7 +51,7 @@ describe("db host policy (db:push guard) — no override exists", () => {
 
   it("blocks any non-local host (no prod hostname hardcoded)", () => {
     for (const url of [
-      "postgresql://u:p@ep-example-1234.eu-west-2.aws.neon.tech/neondb",
+      "postgresql://u:p@ep-example-1234.eu-west-2.aws.neon.tech/appdb",
       "postgresql://u:p%40ssword@db.internal.example.com:5432/app", // percent-encoded creds
       "postgres://user@10.20.30.40:5432/app",
     ]) {
