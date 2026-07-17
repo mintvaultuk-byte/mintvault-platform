@@ -119,6 +119,31 @@ describe("fail-closed preflight (all object types)", () => {
     expect(c.unmanaged).toContain("member_credits");
     expect(c.unknown).toEqual([]);
   });
+
+  it("reports objects in known non-public schemas as integration-owned, not unknown (F4)", () => {
+    const c = classifyLiveObjects(
+      objs({
+        tables: managedTables(),
+        schemas: ["public", "stripe", "drizzle"],
+        nonPublicObjects: [
+          { schema: "stripe", name: "charges", kind: "table" },
+          { schema: "drizzle", name: "__drizzle_migrations", kind: "table" },
+        ],
+      }),
+    );
+    expect(c.unknown).toEqual([]);
+    expect(c.integrationOwned.map((o) => `${o.schema}.${o.name}`)).toEqual(["stripe.charges", "drizzle.__drizzle_migrations"]);
+  });
+
+  it("FAILS on an object in an UNKNOWN schema (F4 — never silent)", () => {
+    const res = evaluatePreflight(
+      objs({ tables: managedTables(), schemas: ["public", "rogue"], nonPublicObjects: [{ schema: "rogue", name: "x", kind: "table" }] }),
+    );
+    expect(res.ok).toBe(false);
+    // both the unknown schema and the object in it are surfaced
+    expect(res.unknown.some((u) => u.name === "rogue")).toBe(true);
+    expect(res.unknown.some((u) => u.name === "rogue.x")).toBe(true);
+  });
 });
 
 describe("unmanaged inventory completeness & richness", () => {
@@ -196,6 +221,13 @@ describe("destructive-SQL linter (expanded object coverage)", () => {
     expect(hasBlocking(lintSql("UPDATE certificates SET x = 1;"))).toBe(false);
   });
 
+  it("does NOT block a referential ON DELETE/UPDATE CASCADE in an additive FK (F3)", () => {
+    const sql = "CREATE TABLE IF NOT EXISTS child (id serial primary key, p int REFERENCES parent(id) ON DELETE CASCADE);";
+    expect(lintSql(sql)).toEqual([]);
+    // but a destructive DROP ... CASCADE is still blocked
+    expect(hasBlocking(lintSql("DROP TABLE parent CASCADE;"))).toBe(true);
+  });
+
   it("allows DELETE/UPDATE with WHERE and safe additive SQL", () => {
     expect(hasBlocking(lintSql("DELETE FROM certificates WHERE id = 1;"))).toBe(false);
     const additive = `
@@ -231,6 +263,7 @@ describe("migration runner planning (pure)", () => {
     const journal: { filename: string; checksum: string; status: string }[] = [];
     const client = {
       async query(sql: string) {
+        if (/to_regclass/i.test(sql)) return { rows: [{ reg: "schema_migrations" }] }; // journal exists
         if (/CREATE TABLE IF NOT EXISTS schema_migrations|ALTER TABLE schema_migrations/i.test(sql)) return { rows: [] };
         if (/SELECT filename, checksum, status FROM schema_migrations/i.test(sql)) return { rows: journal.slice() };
         return { rows: [] };
@@ -244,5 +277,21 @@ describe("migration runner planning (pure)", () => {
     expect((await planMigrations(client, edited)).checksumMismatches.map((m) => m.filename)).toEqual(["0001_x.sql"]);
     journal[0].status = "failed";
     expect((await planMigrations(client, files)).inconsistent.map((i) => i.filename)).toEqual(["0001_x.sql"]);
+  });
+
+  it("dry-run planMigrations issues NO mutating DDL (F1 — dry-run mutates nothing)", async () => {
+    const { planMigrations } = await import("../scripts/db/migrate");
+    const issued: string[] = [];
+    const client = {
+      async query(sql: string) {
+        issued.push(sql);
+        if (/to_regclass/i.test(sql)) return { rows: [{ reg: null }] }; // journal table absent
+        return { rows: [] };
+      },
+    };
+    const files = [{ number: "0001", filename: "0001_x.sql", path: "", sql: "CREATE TABLE x();", checksum: "aaa", noTransaction: false }];
+    const plan = await planMigrations(client, files);
+    expect(plan.pending).toEqual(["0001_x.sql"]); // missing journal -> all pending
+    expect(issued.some((s) => /CREATE TABLE|ALTER TABLE/i.test(s))).toBe(false); // no DDL issued
   });
 });

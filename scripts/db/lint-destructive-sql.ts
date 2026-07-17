@@ -78,7 +78,9 @@ const RULES: Rule[] = [
   { kind: "drop_constraint", severity: "block", re: /\bALTER\s+TABLE\b[\s\S]{0,200}?\bDROP\s+CONSTRAINT\b/i },
   { kind: "rename_table", severity: "block", re: /\bALTER\s+TABLE\b[\s\S]{0,120}?\bRENAME\s+TO\b/i },
   { kind: "rename_column", severity: "block", re: /\bALTER\s+TABLE\b[\s\S]{0,200}?\bRENAME\s+COLUMN\b/i },
-  { kind: "cascade", severity: "block", re: /\bCASCADE\b/i },
+  // Only DESTRUCTIVE cascades (DROP/TRUNCATE ... CASCADE). Referential actions like
+  // "ON DELETE CASCADE" / "ON UPDATE CASCADE" in a FK definition are safe and NOT flagged.
+  { kind: "cascade", severity: "block", re: /\b(DROP|TRUNCATE)\b[\s\S]{0,200}?\bCASCADE\b/i },
   { kind: "enum_value_removed", severity: "block", re: /\bALTER\s+TYPE\b[\s\S]{0,120}?\b(RENAME\s+VALUE|DROP\s+VALUE)\b/i },
   // Flags (review, not automatic block):
   { kind: "column_type_change", severity: "flag", re: /\bALTER\s+(?:COLUMN\s+)?[^\s;]+\s+(?:SET\s+DATA\s+)?TYPE\b/i },
