@@ -42,16 +42,20 @@ function changedFiles(): string[] | null {
 }
 
 describe("1. read-only preview fills the panel (spec 1)", () => {
-  it("inline card fills the panel height (flex-1 min-h-0 / max-h-full), no 40vh cap; fullscreen 80vh retained", () => {
-    // The panel is a full-height flex column and the image viewport grows to fill,
-    // so the card contain-fits the panel rather than floating in a 40vh box.
-    expect(PREVIEW).toContain("flex h-full min-h-0 flex-col"); // panel is a full-height column
-    expect(PREVIEW).toContain("flex min-h-0 flex-1 items-center justify-center"); // inline viewport grows
-    expect(PREVIEW).toContain("max-h-full"); // inline img contains to the flex-1 box
-    expect(PREVIEW).not.toContain("max-h-[40vh]"); // old fixed cap gone
+  it("fill mode: card contain-fits the full panel height; non-fill keeps a capped thumbnail (Review stage)", () => {
+    // Opt-in `fill` prop: the workstation aside passes fill and the panel becomes
+    // a full-height flex column whose image grows to fill; the shared Review-stage
+    // thumbnail (default, no fill) keeps a capped size so it isn't enlarged.
+    expect(PREVIEW).toContain("fill = false"); // opt-in prop, default off
+    expect(PREVIEW).toContain("flex h-full min-h-0 flex-col"); // fill: full-height column
+    expect(PREVIEW).toContain("flex min-h-0 flex-1 items-center justify-center"); // fill: viewport grows
+    expect(PREVIEW).toContain("max-h-full"); // fill: img contains to the flex-1 box
+    expect(PREVIEW).toContain("max-h-[40vh]"); // non-fill default: capped thumbnail
     expect(PREVIEW).not.toContain("max-h-[56vh]");
     expect(PREVIEW).not.toContain("max-h-[44vh]");
     expect(PREVIEW).toContain("80vh"); // fullscreen still available for inspection
+    // the workstation aside opts in to fill
+    expect(FORM).toContain("<CardPreviewPanel fill");
   });
   it("keeps front/back, button zoom, fit/reset, fullscreen controls", () => {
     expect(PREVIEW).toContain('(["front", "back"] as const)');

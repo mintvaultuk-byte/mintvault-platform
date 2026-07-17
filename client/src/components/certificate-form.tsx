@@ -1484,7 +1484,7 @@ export default function CertificateForm({
       <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
         {wfStage <= 1 && (
           <aside className="min-h-0 lg:w-[40%] lg:shrink-0" data-testid="grading-preview-panel">
-            <CardPreviewPanel certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
+            <CardPreviewPanel fill certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
           </aside>
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel">

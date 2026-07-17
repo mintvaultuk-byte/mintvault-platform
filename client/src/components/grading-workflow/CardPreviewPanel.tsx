@@ -27,10 +27,15 @@ export function CardPreviewPanel({
   certificateId,
   frontFile,
   backFile,
+  fill = false,
 }: {
   certificateId: number | null;
   frontFile?: File | null;
   backFile?: File | null;
+  /** When true, the panel fills its parent's height and the card contain-fits
+      that height (the Card/Rarity workstation aside). Default false keeps the
+      capped thumbnail size used by the Review-stage summary. */
+  fill?: boolean;
 }) {
   const [side, setSide] = useState<"front" | "back">("front");
   const [zoom, setZoom] = useState(1);
@@ -141,7 +146,7 @@ export function CardPreviewPanel({
       }}
       className={`relative overflow-hidden rounded outline-none focus-visible:ring-1 focus-visible:ring-[var(--admin-gold)]/50 ${
         zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : ""
-      } ${big ? "flex h-[80vh] w-full items-center justify-center bg-black/60" : "flex min-h-0 flex-1 items-center justify-center"}`}
+      } ${big ? "flex h-[80vh] w-full items-center justify-center bg-black/60" : fill ? "flex min-h-0 flex-1 items-center justify-center" : "max-h-[40vh]"}`}
       data-testid="card-preview-viewport"
     >
       {url ? (
@@ -152,7 +157,7 @@ export function CardPreviewPanel({
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transition: dragging ? "none" : "transform 0.1s ease-out",
           }}
-          className={`mx-auto w-auto max-w-full origin-center rounded object-contain ${big ? "max-h-[80vh]" : "max-h-full"}`}
+          className={`mx-auto w-auto max-w-full origin-center rounded object-contain ${big ? "max-h-[80vh]" : fill ? "max-h-full" : "max-h-[40vh]"}`}
           data-testid="card-preview-image"
           draggable={false}
         />
@@ -202,7 +207,7 @@ export function CardPreviewPanel({
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col rounded-lg border border-[var(--admin-gold)]/15 bg-black/20 p-2" data-testid="card-preview-panel">
+    <div className={`${fill ? "flex h-full min-h-0 flex-col " : ""}rounded-lg border border-[var(--admin-gold)]/15 bg-black/20 p-2`} data-testid="card-preview-panel">
       {toolbar}
       {imageArea(false)}
       <p className="mt-1 shrink-0 text-center text-[9px] text-[var(--admin-ink-faint)]">Zoom with the buttons · drag to pan when zoomed · read-only reference</p>
