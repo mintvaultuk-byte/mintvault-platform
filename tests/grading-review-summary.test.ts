@@ -96,7 +96,17 @@ describe("notes stay collapsed + protected surfaces untouched (spec 11-16)", () 
     expect(FORM).toContain('useState<boolean>(() => Boolean(certificate?.notes))'); // collapsed unless pre-existing notes
   });
   it("git diff vs main touches NO protected grading/centering/label/schema/server file", () => {
-    const changed = execSync("git diff --name-only main...HEAD", { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+    // Resolve whichever base ref exists — local has `main`, CI only `origin/main`.
+    const base = ["origin/main", "main"].find((r) => {
+      try {
+        execSync(`git rev-parse --verify ${r}`, { stdio: "pipe" });
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (!base) return;
+    const changed = execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
     for (const f of changed) {
       expect(f, f).not.toMatch(/components\/grading\/|mvgs|scoring|centering|pristine|grader\.ts|labels\.ts|certificate-document|cert-id|schema\.ts|^server\/|^migrations\//);
     }
