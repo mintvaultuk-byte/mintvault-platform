@@ -1716,7 +1716,7 @@ export default function CertificateForm({
               the stage controls. The preview is a plain <img> from signed display
               URLs / uploaded files — no coordinates, no protected tooling. */}
           <div className="lg:grid lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)] lg:gap-4 lg:items-start">
-            <div className="mb-2 lg:mb-0 lg:sticky lg:top-14">
+            <div className="mb-2 lg:mb-0 lg:sticky lg:top-16">
               <CardPreviewPanel certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
             </div>
             <div className="space-y-2.5 min-w-0">

@@ -3,13 +3,15 @@
  *
  * A plain <img> fed by (a) the object URL of a just-uploaded file, or (b) the
  * existing signed display URLs from GET /api/admin/certificates/:id/images
- * (front_display / back_display). Front/Back tabs, mouse-wheel zoom, fit-to-
- * screen, reset, and a full-screen modal. Deliberately NOT the grading tool:
- * no coordinates, no click-to-grade, no crop/centering writes, no protected
- * components — zooming here is a pure CSS transform on a preview image and
- * never touches the workstation's coordinate system.
+ * (front_display / back_display). Front/Back tabs, mouse-wheel zoom (anchored at
+ * the cursor), click-and-drag panning while zoomed, fit-to-screen / reset, and a
+ * full-screen modal. Deliberately NOT the grading tool: no grading coordinates,
+ * no click-to-grade, no crop/centering writes, no protected imports — zoom + pan
+ * are a pure CSS transform (translate + scale) on a preview image and never touch
+ * the workstation's coordinate system. getBoundingClientRect here is used only to
+ * anchor the zoom under the cursor, not to map any grading position.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ZoomIn, ZoomOut, Maximize2, Minimize2, RotateCcw } from "lucide-react";
 
@@ -19,6 +21,7 @@ interface ImagesResponse {
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 5;
+const ZOOM_STEP = 0.25;
 const clampZoom = (z: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z));
 
 export function CardPreviewPanel({
@@ -32,6 +35,10 @@ export function CardPreviewPanel({
 }) {
   const [side, setSide] = useState<"front" | "back">("front");
   const [zoom, setZoom] = useState(1);
+  // Pan offset in CSS pixels (translate applied before scale). {0,0} = centred.
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const dragRef = useRef<{ sx: number; sy: number; px: number; py: number } | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
 
   const { data } = useQuery<ImagesResponse>({
@@ -54,8 +61,11 @@ export function CardPreviewPanel({
   const backUrl = backObjectUrl ?? data?.urls?.back_display ?? null;
   const url = side === "front" ? frontUrl : backUrl;
 
-  // Reset zoom whenever the shown image changes or fullscreen toggles.
-  useEffect(() => setZoom(1), [side, url, fullscreen]);
+  // Reset zoom + pan whenever the shown image changes or fullscreen toggles.
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  }, [side, url, fullscreen]);
 
   // Close fullscreen on Escape.
   useEffect(() => {
@@ -65,10 +75,58 @@ export function CardPreviewPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [fullscreen]);
 
+  // Mouse-wheel zoom, anchored so the point under the cursor stays fixed. Reads
+  // the viewport rect only to keep the cursor point stationary while scaling —
+  // no grading coordinate is derived. Returning to 1× re-centres (pan 0).
   const wheelZoom = (e: React.WheelEvent) => {
     if (!url) return;
     e.preventDefault();
-    setZoom((z) => clampZoom(z + (e.deltaY < 0 ? 0.25 : -0.25)));
+    const nextZoom = clampZoom(zoom + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
+    if (nextZoom === zoom) return;
+    if (nextZoom <= 1) {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const mx = e.clientX - (rect.left + rect.width / 2);
+    const my = e.clientY - (rect.top + rect.height / 2);
+    const ratio = nextZoom / zoom;
+    setPan((p) => ({ x: mx - ratio * (mx - p.x), y: my - ratio * (my - p.y) }));
+    setZoom(nextZoom);
+  };
+
+  // Drag-to-pan (only meaningful when zoomed in). Pure pixel translation of the
+  // preview image; never reads/writes any grading position.
+  const startDrag = (e: React.MouseEvent) => {
+    if (zoom <= 1) return;
+    e.preventDefault();
+    dragRef.current = { sx: e.clientX, sy: e.clientY, px: pan.x, py: pan.y };
+    setDragging(true);
+  };
+  const onDrag = (e: React.MouseEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    setPan({ x: d.px + (e.clientX - d.sx), y: d.py + (e.clientY - d.sy) });
+  };
+  const endDrag = () => {
+    dragRef.current = null;
+    setDragging(false);
+  };
+
+  // Button zoom (centred). Returning to 1× re-centres.
+  const stepZoom = (delta: number) => {
+    const nextZoom = clampZoom(zoom + delta);
+    if (nextZoom <= 1) {
+      setZoom(1);
+      setPan({ x: 0, y: 0 });
+      return;
+    }
+    setZoom(nextZoom);
+  };
+  const resetView = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
   };
 
   const ControlButton = ({ onClick, label, children, disabled }: { onClick: () => void; label: string; children: React.ReactNode; disabled?: boolean }) => (
@@ -87,9 +145,13 @@ export function CardPreviewPanel({
   const imageArea = (big: boolean) => (
     <div
       onWheel={wheelZoom}
+      onMouseDown={startDrag}
+      onMouseMove={onDrag}
+      onMouseUp={endDrag}
+      onMouseLeave={endDrag}
       tabIndex={0}
       role="group"
-      aria-label="Card preview — space toggles front and back"
+      aria-label="Card preview — scroll to zoom, drag to pan, space toggles front and back"
       onKeyDown={(e) => {
         // Space toggles front/back — only while focus is inside the preview.
         if (e.key === " " || e.code === "Space") {
@@ -97,15 +159,20 @@ export function CardPreviewPanel({
           setSide((s) => (s === "front" ? "back" : "front"));
         }
       }}
-      className={`relative overflow-hidden rounded outline-none focus-visible:ring-1 focus-visible:ring-[var(--admin-gold)]/50 ${big ? "h-[80vh] w-full bg-black/60" : "max-h-[40vh]"}`}
+      className={`relative overflow-hidden rounded outline-none focus-visible:ring-1 focus-visible:ring-[var(--admin-gold)]/50 ${
+        zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : ""
+      } ${big ? "h-[80vh] w-full bg-black/60" : "max-h-[40vh]"}`}
       data-testid="card-preview-viewport"
     >
       {url ? (
         <img
           src={url}
           alt={`Card ${side}`}
-          style={{ transform: `scale(${zoom})`, transition: "transform 0.08s ease-out" }}
-          className={`mx-auto w-auto max-w-full origin-center rounded object-contain ${big ? "max-h-[80vh]" : "max-h-[40vh]"} ${zoom > 1 ? "cursor-grab" : ""}`}
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transition: dragging ? "none" : "transform 0.1s ease-out",
+          }}
+          className={`mx-auto w-auto max-w-full origin-center rounded object-contain ${big ? "max-h-[80vh]" : "max-h-[40vh]"}`}
           data-testid="card-preview-image"
           draggable={false}
         />
@@ -135,16 +202,16 @@ export function CardPreviewPanel({
         ))}
       </div>
       <div className="flex items-center gap-0.5">
-        <ControlButton onClick={() => setZoom((z) => clampZoom(z - 0.25))} label="Zoom out" disabled={!url || zoom <= MIN_ZOOM}>
+        <ControlButton onClick={() => stepZoom(-ZOOM_STEP)} label="Zoom out" disabled={!url || zoom <= MIN_ZOOM}>
           <ZoomOut size={14} />
         </ControlButton>
         <span className="w-8 text-center text-[10px] tabular-nums text-[var(--admin-ink-faint)]" data-testid="card-preview-zoom">
           {Math.round(zoom * 100)}%
         </span>
-        <ControlButton onClick={() => setZoom((z) => clampZoom(z + 0.25))} label="Zoom in" disabled={!url || zoom >= MAX_ZOOM}>
+        <ControlButton onClick={() => stepZoom(ZOOM_STEP)} label="Zoom in" disabled={!url || zoom >= MAX_ZOOM}>
           <ZoomIn size={14} />
         </ControlButton>
-        <ControlButton onClick={() => setZoom(1)} label="Fit to screen / reset zoom" disabled={!url}>
+        <ControlButton onClick={resetView} label="Fit to screen / reset zoom" disabled={!url}>
           <RotateCcw size={13} />
         </ControlButton>
         <ControlButton onClick={() => setFullscreen(true)} label="Full-screen preview" disabled={!url}>
@@ -158,7 +225,7 @@ export function CardPreviewPanel({
     <div className="rounded-lg border border-[var(--admin-gold)]/15 bg-black/20 p-2" data-testid="card-preview-panel">
       {toolbar}
       {imageArea(false)}
-      <p className="mt-1 text-center text-[9px] text-[var(--admin-ink-faint)]">Scroll to zoom · read-only reference</p>
+      <p className="mt-1 text-center text-[9px] text-[var(--admin-ink-faint)]">Scroll to zoom · drag to pan · read-only reference</p>
 
       {fullscreen && (
         <div
