@@ -1493,9 +1493,9 @@ export default function CertificateForm({
           workstation button is type="button" and handleSubmit no-ops
           pre-approval, so it can never trigger a form submit. */}
       {isEdit && certificate?.id && (
-        <details className="border border-[var(--admin-gold)]/20 rounded-lg bg-[var(--admin-gold)]/[0.03] mb-4" data-testid="identification-tools">
-          <summary className="cursor-pointer list-none px-3 py-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]">
-            <Cpu size={13} /> Identification tools
+        <details className="border border-[var(--admin-gold)]/15 rounded-lg bg-[var(--admin-gold)]/[0.02] mb-2" data-testid="identification-tools">
+          <summary className="cursor-pointer list-none px-3 py-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]">
+            <Cpu size={12} /> Identification tools
             <span className="ml-auto text-[9px] font-normal normal-case text-[var(--admin-ink-faint)]">AI Identify · AI Grade</span>
           </summary>
           <div className="px-3 pb-3 pt-1 space-y-3">
@@ -1645,37 +1645,41 @@ export default function CertificateForm({
           </div>
         )}
 
-        {/* Read-only batch header + queue progress + session HUD. All display-only. */}
-        {(batch || queue) && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/50 px-3 py-2" data-testid="batch-header">
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
-              {batch?.customer && (
-                <span className="text-[var(--admin-ink)]">
-                  <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Customer</span> {batch.customer}
-                </span>
-              )}
-              {batch?.submissionId && (
-                <span className="text-[var(--admin-ink)]">
-                  <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Submission</span> {batch.submissionId}
-                </span>
-              )}
-              {typeof batch?.remaining === "number" && (
-                <span className="text-[var(--admin-ink)]">
-                  <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Remaining</span> {batch.remaining}
-                </span>
-              )}
-            </div>
+        {/* Combined workstation header strip — 4-stage workflow (left) + queue /
+            session stats (right), consolidated from the former separate batch,
+            SessionHud and workflow-bar rows into one compact row. Display-only:
+            no queue-order or session-calc change, just presentation. */}
+        <div
+          className="sticky top-0 z-20 mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/95 px-2 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-[var(--admin-panel)]/80"
+          data-testid="workstation-strip"
+        >
+          <div className="min-w-0 flex-1">
+            <GradingWorkflowBar embedded currentIndex={workflowCurrent} maxReached={workflowMax} onStageClick={(i) => goToStage(i)} />
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" data-testid="batch-header">
+            {batch?.customer && (
+              <span className="text-[var(--admin-ink)]" title="Customer">
+                <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Cust</span> {batch.customer}
+              </span>
+            )}
+            {batch?.submissionId && (
+              <span className="text-[var(--admin-ink)]" title="Submission">
+                <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Sub</span> {batch.submissionId}
+              </span>
+            )}
+            {typeof batch?.remaining === "number" && (
+              <span className="text-[var(--admin-ink)]" title="Remaining in batch">
+                <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Left</span> {batch.remaining}
+              </span>
+            )}
             {queue && (
-              <span className="text-[11px] font-bold tabular-nums text-[var(--admin-gold)]" data-testid="queue-progress" title="Position in the grading queue">
+              <span className="font-bold tabular-nums text-[var(--admin-gold)]" data-testid="queue-progress" title="Position in the grading queue">
                 {queue.position} / {queue.total}
               </span>
             )}
+            <SessionHud embedded completed={sessionCompleted} />
           </div>
-        )}
-        <SessionHud completed={sessionCompleted} />
-
-        {/* Persistent 4-stage workflow bar — navigation + progress only. */}
-        <GradingWorkflowBar currentIndex={workflowCurrent} maxReached={workflowMax} onStageClick={(i) => goToStage(i)} />
+        </div>
         {/* Existing auto-save status, kept visible on every stage (reuses the
             pre-existing autoSaveStatus state — no new save system). */}
         {autoSaveEligible && wfStage !== 3 && (
@@ -1703,7 +1707,7 @@ export default function CertificateForm({
             }}
           />
         )}
-        <fieldset data-workflow-stage="identify" className={`border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 ${wfStage <= 1 ? "" : "hidden"}`}>
+        <fieldset data-workflow-stage="identify" className={`border border-[var(--admin-gold)]/20 rounded-lg p-2.5 space-y-2.5 ${wfStage <= 1 ? "" : "hidden"}`}>
           <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2">
             {wfStage === 0 ? "1 · Card details" : "2 · Rarity & variant"}
           </legend>
@@ -1712,10 +1716,10 @@ export default function CertificateForm({
               the stage controls. The preview is a plain <img> from signed display
               URLs / uploaded files — no coordinates, no protected tooling. */}
           <div className="lg:grid lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)] lg:gap-4 lg:items-start">
-            <div className="mb-3 lg:mb-0 lg:sticky lg:top-16">
+            <div className="mb-2 lg:mb-0 lg:sticky lg:top-14">
               <CardPreviewPanel certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
             </div>
-            <div className="space-y-3 min-w-0">
+            <div className="space-y-2.5 min-w-0">
           {/* ── STAGE 1 · CARD — identification fields only ── */}
           <div className={`space-y-3 ${stageClass(0)}`}>
 
@@ -1752,9 +1756,9 @@ export default function CertificateForm({
             </div>
           )}
 
-          {/* TCG search + manual entry helpers */}
-          <div className="flex items-center gap-3 text-[10px]">
-            <span className="text-[var(--admin-ink-faint)]">Can't find the right card?</span>
+          {/* TCG search + manual entry helpers — Search TCG is a compact outlined
+              utility button (TCGdex behaviour unchanged). */}
+          <div className="flex flex-wrap items-center gap-2 text-[10px]">
             <button
               type="button"
               onClick={() => {
@@ -1763,9 +1767,10 @@ export default function CertificateForm({
                 setTcgResults([]);
               }}
               disabled={!form.cardGame}
-              className="flex items-center gap-1 text-[var(--admin-gold)] hover:text-[var(--admin-gold-deep)] font-bold uppercase tracking-wider disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="Search the TCGdex card database"
+              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--admin-gold)]/40 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
-              <Database size={10} />
+              <Database size={11} />
               Search TCG
             </button>
             {!form.cardGame && <span className="text-[var(--admin-ink-faint)] italic">Select card game first</span>}
@@ -1878,7 +1883,11 @@ export default function CertificateForm({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Row 2 — 4-column (Name · Card Number+Auto-fill · Year · Language) so
+              Language shares this row instead of a near-empty row of its own. The
+              tuned template keeps the Card Number cell (widest, 1.3fr) readable at
+              1280px. */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,1fr)]">
             <FormInput
               label="Card Name *"
               value={form.cardName}
@@ -1998,6 +2007,23 @@ export default function CertificateForm({
               testId="input-year"
               highlight={(autofillRan && manuallyEdited.has("year")) || flashFields.has("year")}
             />
+            <div>
+              <FormInput
+                label="Language"
+                value={form.language}
+                onChange={(v) => {
+                  updateField("language", v);
+                  setLanguageChangedByFallback(false);
+                }}
+                testId="input-language"
+                highlight={languageChangedByFallback || flashFields.has("language")}
+              />
+              {languageChangedByFallback && (
+                <p className="text-[var(--admin-amber)] text-[10px] mt-1" data-testid="text-language-fallback-notice">
+                  Changed by fallback match
+                </p>
+              )}
+            </div>
           </div>
 
           {!fallbackMatch && canAutofill && !autofillLoading && suggestions.length === 0 && (
@@ -2336,29 +2362,9 @@ export default function CertificateForm({
           </div>
           </div>
 
-          {/* ── stage 1 (card) continued: language lives with card details (year
-              now sits beside Card Number in the 3-column row above) ── */}
+          {/* ── stage 1 (card) nav — all card fields (incl. Year + Language) now
+              live in the two dense rows above ── */}
           <div className={`space-y-3 ${stageClass(0)}`}>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div>
-              <FormInput
-                label="Language"
-                value={form.language}
-                onChange={(v) => {
-                  updateField("language", v);
-                  setLanguageChangedByFallback(false);
-                }}
-                testId="input-language"
-                highlight={languageChangedByFallback || flashFields.has("language")}
-              />
-              {languageChangedByFallback && (
-                <p className="text-[var(--admin-amber)] text-[10px] mt-1" data-testid="text-language-fallback-notice">
-                  Changed by fallback match
-                </p>
-              )}
-            </div>
-          </div>
-
           {/* Stage 1 nav */}
           <div className="flex items-center justify-end pt-1">
             <button
