@@ -170,7 +170,14 @@ export async function createPasswordResetToken(tenantId: string, userId: string)
  * L6: the tenant is derived FROM the token via a SECURITY DEFINER lookup — never from a request
  * body — so no attacker-controlled tenant id reaches RLS.
  */
+export const MIN_PASSWORD_LEN = 10;
+export const MAX_PASSWORD_LEN = 200; // bcrypt truncates at 72 bytes; cap to avoid silent truncation
+
 export async function consumePasswordResetToken(token: string, newPassword: string): Promise<boolean> {
+  // F5: enforce the password policy in the SERVICE layer so every caller shares it, not just the route.
+  if (typeof newPassword !== "string" || newPassword.length < MIN_PASSWORD_LEN || newPassword.length > MAX_PASSWORD_LEN) {
+    return false;
+  }
   const { rows: tRows } = await partnerRuntimeQuery<{ tenant: string | null }>(
     "SELECT partner_reset_token_tenant($1) AS tenant",
     [sha256(token)],
