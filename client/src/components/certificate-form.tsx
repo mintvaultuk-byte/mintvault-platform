@@ -19,6 +19,7 @@ import {
   HelpCircle,
   Link2,
   FileText,
+  Copy,
   Plus,
   Cpu,
   Loader2,
@@ -211,6 +212,41 @@ export default function CertificateForm({
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
   // Grader notes live in Stage 4 (Review), collapsed unless the cert already has notes.
   const [notesOpen, setNotesOpen] = useState<boolean>(() => Boolean(certificate?.notes));
+
+  // "Same as last card" — remember the shared identification context of the last
+  // card a grader processed (game/set/year/language, NOT the per-card name/number)
+  // so a box of the same set fills in one click. Display convenience only: it is
+  // captured locally on Continue and only applied when the grader clicks it, and
+  // it never overwrites a field that already has a value.
+  const [lastCardContext, setLastCardContext] = useState<{ cardGame: string; setName: string; setId: string; year: string; language: string } | null>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("mv.lastCardContext") || "null");
+      return raw && typeof raw === "object" ? raw : null;
+    } catch {
+      return null;
+    }
+  });
+  function captureLastCardContext() {
+    const ctx = { cardGame: form.cardGame, setName: form.setName, setId, year: form.year, language: form.language };
+    if (!ctx.setName && !ctx.year) return; // nothing worth remembering yet
+    try {
+      localStorage.setItem("mv.lastCardContext", JSON.stringify(ctx));
+    } catch {
+      /* private mode */
+    }
+    setLastCardContext(ctx);
+  }
+  function applyLastCardContext() {
+    if (!lastCardContext) return;
+    setForm((f) => ({
+      ...f,
+      cardGame: f.cardGame || lastCardContext.cardGame,
+      setName: f.setName || lastCardContext.setName,
+      year: f.year || lastCardContext.year,
+      language: f.language || lastCardContext.language,
+    }));
+    if (!setId && lastCardContext.setId) setSetId(lastCardContext.setId);
+  }
 
   // ── Structured rarity/variant picker wiring ────────────────────────────────
   // The picker emits a full StructuredCardVariant; we fan it out to the separate
@@ -1362,6 +1398,25 @@ export default function CertificateForm({
   };
   /** Hidden-not-unmounted: stage content keeps all React state while inactive. */
   const stageClass = (i: number) => (wfStage === i ? "" : "hidden");
+
+  // Auto-focus the first logical field when a stage opens, so a grader can start
+  // typing without reaching for the mouse. Card stage → Card Name. Guarded so it
+  // never steals focus mid-typing (only fires on stage change) and never on an
+  // already-focused field.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const firstField: Record<number, string> = { 0: "input-card-name" };
+    const testId = firstField[wfStage];
+    if (!testId) return;
+    const active = document.activeElement;
+    // Don't steal focus if the grader already put the cursor in a field.
+    const alreadyTyping = active && active !== document.body && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT");
+    if (alreadyTyping) return;
+    const t = window.setTimeout(() => {
+      document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.focus();
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [wfStage]);
   const workflowCurrent = wfStage;
   const workflowMax = Math.max(wfMaxStage, furthestReached(stageCompletion));
 
@@ -1507,6 +1562,20 @@ export default function CertificateForm({
             <div className="space-y-3 min-w-0">
           {/* ── STAGE 1 · CARD — identification fields only ── */}
           <div className={`space-y-3 ${stageClass(0)}`}>
+
+          {/* Same as last card — one-click quick-fill of the shared set/year/
+              language context (never overwrites a field that already has a value). */}
+          {lastCardContext && (lastCardContext.setName || lastCardContext.year) && !form.setName && (
+            <button
+              type="button"
+              onClick={applyLastCardContext}
+              data-testid="button-same-as-last-card"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/30 px-2.5 py-1.5 text-[11px] text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10 transition-colors"
+              title="Fill game, set, year and language from the last card you processed"
+            >
+              <Copy size={12} /> Same as last card{lastCardContext.setName ? `: ${lastCardContext.setName}` : ""}
+            </button>
+          )}
 
           {/* TCG search + manual entry helpers */}
           <div className="flex items-center gap-3 text-[10px]">
@@ -2112,7 +2181,10 @@ export default function CertificateForm({
           <div className="flex items-center justify-end pt-1">
             <button
               type="button"
-              onClick={() => goToStage(1)}
+              onClick={() => {
+                captureLastCardContext();
+                goToStage(1);
+              }}
               disabled={!form.cardName.trim() || !form.cardNumber.trim()}
               title={!form.cardName.trim() || !form.cardNumber.trim() ? "Enter the card name and number first." : undefined}
               data-testid="button-continue-to-rarity"
@@ -3097,6 +3169,30 @@ export function PokemonSetPicker({
   const [editSaving, setEditSaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Recently-used sets (last 8, per-device) so a grader working through a box of
+  // the same set fills it in one click. Display-only convenience — never changes
+  // stored data or the set catalogue.
+  const [recentSets, setRecentSets] = useState<{ id: string; name: string }[]>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("mv.recentSets") || "[]");
+      return Array.isArray(raw) ? raw.filter((r) => r && r.id && r.name).slice(0, 8) : [];
+    } catch {
+      return [];
+    }
+  });
+  function recordRecentSet(id: string, name: string) {
+    if (!id || !name) return;
+    setRecentSets((prev) => {
+      const next = [{ id, name }, ...prev.filter((r) => r.id !== id)].slice(0, 8);
+      try {
+        localStorage.setItem("mv.recentSets", JSON.stringify(next));
+      } catch {
+        /* private mode — chips just won't persist */
+      }
+      return next;
+    });
+  }
+
   const errorMessage = (error: unknown) => (error instanceof Error ? error.message : "Unexpected error");
 
   useEffect(() => {
@@ -3278,6 +3374,33 @@ export function PokemonSetPicker({
       )}
       {open && (
         <div className="absolute z-30 left-0 right-0 mt-1 bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-lg shadow-lg max-h-72 overflow-y-auto">
+          {/* Recently-used sets — one-click fill, pinned above the list when the
+              grader hasn't typed a query yet. */}
+          {!q && recentSets.length > 0 && (
+            <div className="border-b border-[var(--admin-line)] px-2 py-2" data-testid="recent-sets">
+              <p className="mb-1 px-1 text-[9px] uppercase tracking-widest text-[var(--admin-gold)]/40">Recent sets</p>
+              <div className="flex flex-wrap gap-1">
+                {recentSets.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => {
+                      onChange(r.name, r.id);
+                      setQuery(r.name);
+                      recordRecentSet(r.id, r.name);
+                      setOpen(false);
+                    }}
+                    data-testid={`recent-set-${r.id}`}
+                    className="rounded border border-[var(--admin-gold)]/25 px-2 py-1 text-[10px] text-[var(--admin-ink)] hover:bg-[var(--admin-gold)]/10"
+                    title={`${r.id} · ${r.name}`}
+                  >
+                    <span className="font-mono text-[var(--admin-gold)] mr-1">{r.id}</span>
+                    {r.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {filtered.map((s) => (
             <button
               key={s.id}
@@ -3285,6 +3408,7 @@ export function PokemonSetPicker({
               onClick={() => {
                 onChange(s.name, s.id);
                 setQuery(s.name);
+                recordRecentSet(s.id, s.name);
                 setOpen(false);
               }}
               className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--admin-gold)]/5 border-b border-[var(--admin-line)] last:border-0"
