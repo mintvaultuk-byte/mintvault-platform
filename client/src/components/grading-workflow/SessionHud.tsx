@@ -49,7 +49,7 @@ function fmtElapsed(ms: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
-export function SessionHud({ completed, nowProvider }: { completed: number; nowProvider?: () => number }) {
+export function SessionHud({ completed, nowProvider, embedded = false }: { completed: number; nowProvider?: () => number; embedded?: boolean }) {
   const now = nowProvider ?? (() => Date.now());
   const [session, setSession] = useState<SessionState>(() => loadSession(now()));
   const [tick, setTick] = useState(now());
@@ -92,7 +92,11 @@ export function SessionHud({ completed, nowProvider }: { completed: number; nowP
 
   return (
     <div
-      className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/60 px-3 py-1.5"
+      className={
+        embedded
+          ? "flex flex-wrap items-center gap-x-3 gap-y-1"
+          : "flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/60 px-3 py-1.5"
+      }
       data-testid="session-hud"
       aria-label="Grading session statistics"
     >
@@ -105,9 +109,14 @@ export function SessionHud({ completed, nowProvider }: { completed: number; nowP
         data-testid="session-reset"
         title="Start a new session"
         aria-label="Start a new session"
-        className="ml-auto flex items-center gap-1 text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold)]"
+        className={
+          embedded
+            ? "flex items-center text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold)]"
+            : "ml-auto flex items-center gap-1 text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-gold)]"
+        }
       >
-        <RotateCcw size={11} /> New session
+        <RotateCcw size={11} />
+        {!embedded && <span className="ml-1">New session</span>}
       </button>
     </div>
   );

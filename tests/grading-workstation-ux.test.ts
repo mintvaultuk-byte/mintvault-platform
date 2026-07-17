@@ -25,10 +25,11 @@ describe("floating card viewer is read-only with zoom controls (spec 1)", () => 
     expect(VIEWER).toContain('data-testid="card-preview-fullscreen"');
     expect(VIEWER).toContain("Full-screen preview");
   });
-  it("zoom is a pure CSS transform on a preview image — never touches grading geometry", () => {
-    expect(VIEWER).toContain("transform: `scale(");
+  it("zoom + pan are a pure CSS transform on a preview image — never touches grading geometry", () => {
+    // translate (pan) + scale (zoom) CSS transform, no grading coordinate math.
+    expect(VIEWER).toMatch(/transform:\s*`translate\([^`]*scale\(/);
     const code = stripComments(VIEWER);
-    expect(code).not.toMatch(/getBoundingClientRect|onMouseDown|centering|crop|coordinate/i);
+    expect(code).not.toMatch(/centering|crop|defect|x_percent|y_percent|imagePctFromEvent/i);
     const imports = (code.match(/from\s+"[^"]+"/g) ?? []).join("\n");
     expect(imports).not.toMatch(/components\/grading\//);
   });

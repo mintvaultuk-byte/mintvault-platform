@@ -12,11 +12,15 @@ export function GradingWorkflowBar({
   currentIndex,
   maxReached,
   onStageClick,
+  embedded = false,
 }: {
   currentIndex: number;
   maxReached?: number;
   /** Called with the stage index when a stage is clicked (scroll/navigate only). */
   onStageClick?: (index: number, stage: WorkflowStage) => void;
+  /** When true, drop the standalone sticky/border/bg chrome so this bar can live
+      inside the combined workstation header strip (which supplies them). */
+  embedded?: boolean;
 }) {
   const statuses = stageStatuses(currentIndex, maxReached ?? currentIndex);
 
@@ -24,7 +28,11 @@ export function GradingWorkflowBar({
     <nav
       aria-label="Grading workflow"
       data-testid="grading-workflow-bar"
-      className="sticky top-0 z-20 -mx-1 mb-4 flex items-stretch gap-1 rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/95 p-1.5 backdrop-blur supports-[backdrop-filter]:bg-[var(--admin-panel)]/80"
+      className={
+        embedded
+          ? "flex items-stretch gap-1"
+          : "sticky top-0 z-20 -mx-1 mb-4 flex items-stretch gap-1 rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/95 p-1.5 backdrop-blur supports-[backdrop-filter]:bg-[var(--admin-panel)]/80"
+      }
     >
       {GRADING_STAGES.map((stage, i) => {
         const status = statuses[i];
