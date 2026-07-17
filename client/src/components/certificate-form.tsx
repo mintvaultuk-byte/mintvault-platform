@@ -1471,27 +1471,64 @@ export default function CertificateForm({
   const workflowMax = Math.max(wfMaxStage, furthestReached(stageCompletion));
 
   return (
-    <div>
-      <h2 className="text-xl font-bold text-[var(--admin-gold)] tracking-widest mb-1" data-testid="text-form-title">
-        {isEdit
-          ? !certificate.cardName || certificate.cardName === "(untitled)" || certificate.cardName === "(pending)"
-            ? `NEW ${certificate.certId}`
-            : `EDIT ${certificate.certId}`
-          : "NEW CERTIFICATE"}
-      </h2>
-      <p className="text-[var(--admin-ink-faint)] text-sm mb-6">
-        {isEdit
-          ? "Update certificate details"
-          : "Fill in card details and click Save. A cert number will be assigned automatically."}
-      </p>
-
-      {/* Workflow order (owner directive, Option A 2026-07-02): 1. AI Identify →
-          2. Card Details (AI Identify fills these fields, so confirm them next) →
-          3. grading workstation (card tool + defects, via workstationSlot) →
-          4. Grade. The AI-actions block sits OUTSIDE the <form>; the workstation
-          renders INSIDE the form after Card Details — safe because every
-          workstation button is type="button" and handleSubmit no-ops
-          pre-approval, so it can never trigger a form submit. */}
+    <div className="flex h-full min-h-0 flex-col" data-testid="grading-workspace">
+      {/* Workstation shell — a fixed-height two-panel layout: a read-only card
+          preview aside (stages 0/1 only) beside the control panel that holds the
+          header strip + identification tools (fixed) and the scrollable form.
+          Workflow order (owner directive, Option A 2026-07-02): 1. AI Identify →
+          2. Card Details → 3. grading workstation (workstationSlot) → 4. Grade.
+          The AI-actions block sits OUTSIDE the <form>; the workstation renders
+          INSIDE the form after Card Details — safe because every workstation
+          button is type="button" and handleSubmit no-ops pre-approval, so it can
+          never trigger a form submit. */}
+      <div
+        className={`grid min-h-0 flex-1 grid-cols-1 lg:gap-3 ${
+          wfStage <= 1 ? "lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)]" : "lg:grid-cols-1"
+        }`}
+      >
+        {wfStage <= 1 && (
+          <aside className="mb-2 min-h-0 lg:mb-0 lg:overflow-hidden" data-testid="grading-preview-panel">
+            <CardPreviewPanel certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
+          </aside>
+        )}
+        <div className="flex min-h-0 min-w-0 flex-col" data-testid="grading-control-panel">
+          <div className="shrink-0 space-y-2">
+            {/* Combined workstation header strip — 4-stage workflow (left) + queue /
+                session stats (right). Moved out of the <form> into the fixed
+                control-panel header so it stays put while the form scrolls.
+                Display-only: no queue-order or session-calc change. Inner content
+                unchanged from the former strip. */}
+            <div
+              className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/95 px-2 py-1.5"
+              data-testid="workstation-strip"
+            >
+              <div className="min-w-0 flex-1">
+                <GradingWorkflowBar embedded currentIndex={workflowCurrent} maxReached={workflowMax} onStageClick={(i) => goToStage(i)} />
+              </div>
+              <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" data-testid="batch-header">
+                {batch?.customer && (
+                  <span className="text-[var(--admin-ink)]" title="Customer">
+                    <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Cust</span> {batch.customer}
+                  </span>
+                )}
+                {batch?.submissionId && (
+                  <span className="text-[var(--admin-ink)]" title="Submission">
+                    <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Sub</span> {batch.submissionId}
+                  </span>
+                )}
+                {typeof batch?.remaining === "number" && (
+                  <span className="text-[var(--admin-ink)]" title="Remaining in batch">
+                    <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Left</span> {batch.remaining}
+                  </span>
+                )}
+                {queue && (
+                  <span className="font-bold tabular-nums text-[var(--admin-gold)]" data-testid="queue-progress" title="Position in the grading queue">
+                    {queue.position} / {queue.total}
+                  </span>
+                )}
+                <SessionHud embedded completed={sessionCompleted} />
+              </div>
+            </div>
       {isEdit && certificate?.id && (
         <details className="border border-[var(--admin-gold)]/15 rounded-lg bg-[var(--admin-gold)]/[0.02] mb-2" data-testid="identification-tools">
           <summary className="cursor-pointer list-none px-3 py-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]">
@@ -1572,29 +1609,29 @@ export default function CertificateForm({
           </div>
         </details>
       )}
-
-      <form
-        onSubmit={handleSubmit}
-        onKeyDown={(e) => {
-          // Enter advances the stage (Continue) when the grader isn't in a
-          // textarea and the stage's validation already passes — and never lets
-          // Enter submit/save the form from Stage 1/2. Textareas keep newlines.
-          if (e.key !== "Enter") return;
-          const tag = (e.target as HTMLElement).tagName;
-          if (tag === "TEXTAREA") return;
-          if (wfStage === 0) {
-            e.preventDefault();
-            if (form.cardName.trim() && form.cardNumber.trim()) {
-              captureLastCardContext();
-              goToStage(1);
-            }
-          } else if (wfStage === 1) {
-            e.preventDefault();
-            goToStage(2);
-          }
-        }}
-        className="space-y-4"
-      >
+          </div>
+          <form
+            onSubmit={handleSubmit}
+            onKeyDown={(e) => {
+              // Enter advances the stage (Continue) when the grader isn't in a
+              // textarea and the stage's validation already passes — and never lets
+              // Enter submit/save the form from Stage 1/2. Textareas keep newlines.
+              if (e.key !== "Enter") return;
+              const tag = (e.target as HTMLElement).tagName;
+              if (tag === "TEXTAREA") return;
+              if (wfStage === 0) {
+                e.preventDefault();
+                if (form.cardName.trim() && form.cardNumber.trim()) {
+                  captureLastCardContext();
+                  goToStage(1);
+                }
+              } else if (wfStage === 1) {
+                e.preventDefault();
+                goToStage(2);
+              }
+            }}
+            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto lg:pr-1"
+          >
         {/* "✓ Saved" confirmation toast — fades ~2.5s after a successful save. */}
         {savedToast && (
           <div
@@ -1645,41 +1682,6 @@ export default function CertificateForm({
           </div>
         )}
 
-        {/* Combined workstation header strip — 4-stage workflow (left) + queue /
-            session stats (right), consolidated from the former separate batch,
-            SessionHud and workflow-bar rows into one compact row. Display-only:
-            no queue-order or session-calc change, just presentation. */}
-        <div
-          className="sticky top-0 z-20 mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/95 px-2 py-1.5 backdrop-blur supports-[backdrop-filter]:bg-[var(--admin-panel)]/80"
-          data-testid="workstation-strip"
-        >
-          <div className="min-w-0 flex-1">
-            <GradingWorkflowBar embedded currentIndex={workflowCurrent} maxReached={workflowMax} onStageClick={(i) => goToStage(i)} />
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" data-testid="batch-header">
-            {batch?.customer && (
-              <span className="text-[var(--admin-ink)]" title="Customer">
-                <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Cust</span> {batch.customer}
-              </span>
-            )}
-            {batch?.submissionId && (
-              <span className="text-[var(--admin-ink)]" title="Submission">
-                <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Sub</span> {batch.submissionId}
-              </span>
-            )}
-            {typeof batch?.remaining === "number" && (
-              <span className="text-[var(--admin-ink)]" title="Remaining in batch">
-                <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Left</span> {batch.remaining}
-              </span>
-            )}
-            {queue && (
-              <span className="font-bold tabular-nums text-[var(--admin-gold)]" data-testid="queue-progress" title="Position in the grading queue">
-                {queue.position} / {queue.total}
-              </span>
-            )}
-            <SessionHud embedded completed={sessionCompleted} />
-          </div>
-        </div>
         {/* Existing auto-save status, kept visible on every stage (reuses the
             pre-existing autoSaveStatus state — no new save system). */}
         {autoSaveEligible && wfStage !== 3 && (
@@ -1707,19 +1709,9 @@ export default function CertificateForm({
             }}
           />
         )}
-        <fieldset data-workflow-stage="identify" className={`border border-[var(--admin-gold)]/20 rounded-lg p-2.5 space-y-2.5 ${wfStage <= 1 ? "" : "hidden"}`}>
-          <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2">
-            {wfStage === 0 ? "1 · Card details" : "2 · Rarity & variant"}
-          </legend>
-
-          {/* MacBook-first split: sticky read-only card preview (left ~38%) beside
-              the stage controls. The preview is a plain <img> from signed display
-              URLs / uploaded files — no coordinates, no protected tooling. */}
-          <div className="lg:grid lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)] lg:gap-4 lg:items-start">
-            <div className="mb-2 lg:mb-0 lg:sticky lg:top-16">
-              <CardPreviewPanel certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
-            </div>
-            <div className="space-y-2.5 min-w-0">
+        {/* Identify controls (stages 0 + 1). The card preview now lives in the
+            fixed workspace aside; this panel is just the stage controls. */}
+        <div data-workflow-stage="identify" className={`space-y-2.5 ${wfStage <= 1 ? "" : "hidden"}`}>
           {/* ── STAGE 1 · CARD — identification fields only ── */}
           <div className={`space-y-3 ${stageClass(0)}`}>
 
@@ -2385,9 +2377,7 @@ export default function CertificateForm({
             <p className={`text-[10px] text-[var(--admin-ink-faint)] text-right ${stageClass(0)}`}>Enter the card name and number first.</p>
           )}
           </div>
-            </div>
-          </div>
-        </fieldset>
+        </div>
 
         {/* Grading workstation — card tool front/back + defect marking. Placed
             right after Card Details (owner directive, Option A 2026-07-02):
@@ -2418,8 +2408,8 @@ export default function CertificateForm({
           </div>
         )}
 
-        <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
-          <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2">Grade</legend>
+        <div className="space-y-4">
+          <div className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest mb-1">Grade</div>
 
           <div>
             <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
@@ -2522,7 +2512,7 @@ export default function CertificateForm({
               </div>
             </>
           )}
-        </fieldset>
+        </div>
 
         {/* Stage 3 nav */}
         <div className="flex items-center justify-between">
@@ -3094,7 +3084,9 @@ export default function CertificateForm({
           </GradientButton>
         )}
         </div>
-      </form>
+          </form>
+        </div>
+      </div>
     </div>
   );
 }

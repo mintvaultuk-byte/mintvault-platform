@@ -135,6 +135,10 @@ interface AdminShellProps {
   /** Override the topbar title/crumb (defaults derive from the active tab). */
   title?: ReactNode;
   crumb?: ReactNode;
+  /** Focus mode — hide the top header chrome and give the content area the full
+      viewport height so a full-height child (e.g. the grading workstation) can
+      fill it. Non-focus rendering is unchanged. */
+  focus?: boolean;
   children: ReactNode;
 }
 
@@ -145,6 +149,7 @@ export default function AdminShell({
   search,
   title,
   crumb,
+  focus,
   children,
 }: AdminShellProps) {
   const { data: dbInfo } = useQuery<DbInfo>({
@@ -222,6 +227,15 @@ export default function AdminShell({
 
         {/* ── Main column ─────────────────────────────────────────────── */}
         <div className="admin-main">
+          {focus ? (
+            <div
+              className="admin-focus"
+              style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}
+            >
+              {children}
+            </div>
+          ) : (
+            <>
           <header className="admin-top">
             <div className="admin-crumb">
               <div className="admin-crumb__t">{topTitle}</div>
@@ -279,6 +293,8 @@ export default function AdminShell({
           </header>
 
           <main className="admin-scroll">{children}</main>
+            </>
+          )}
         </div>
       </div>
     </div>

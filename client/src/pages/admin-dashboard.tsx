@@ -254,12 +254,12 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
 
   if (showForm) {
     return (
-      <AdminShell activeTab={activeTab} onTabChange={setActiveTab} onLogout={handleLogout}>
-        <div className="max-w-6xl mx-auto">
+      <AdminShell activeTab={activeTab} onTabChange={setActiveTab} onLogout={handleLogout} focus>
+        <div className="flex h-full min-h-0 flex-col p-3">
           {/* Compact grading header — Back · cert ID · Certificate Tools (with
               tiny status). Replaces the tall "Edit MV####" header chrome so the
               four-stage form starts near the top on a 13-inch MacBook. */}
-          <div className="mb-3 flex items-center justify-between gap-3" data-testid="grading-header">
+          <div className="mb-3 flex shrink-0 items-center justify-between gap-3" data-testid="grading-header">
             <div className="flex items-center gap-3">
               <button
                 onClick={handleFormClose}
@@ -295,8 +295,9 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
           {/* Owner directive (2026-07-01): one continuous block, in workflow
               order — EDIT MV#### header → AI Identify → grading workstation
               (card tool + defects, passed into the form as workstationSlot) →
-              Card Details → Grade — with Ownership + NFC at the very bottom
-              of the page. */}
+              Card Details → Grade — with Ownership + NFC in the tools drawer.
+              The form fills the remaining height (fixed-height workstation). */}
+          <div className="min-h-0 flex-1">
           <CertificateForm
             certificate={editingCert}
             onSuccess={handleFormClose}
@@ -367,6 +368,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
               ) : null
             }
           />
+          </div>
           {/* Ownership + NFC moved OUT of the grading scroll into the drawer above. */}
           {editingCert && editingCert.id && (
             <CertificateToolsDrawer
