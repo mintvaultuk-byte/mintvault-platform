@@ -1493,7 +1493,12 @@ export default function CertificateForm({
           workstation button is type="button" and handleSubmit no-ops
           pre-approval, so it can never trigger a form submit. */}
       {isEdit && certificate?.id && (
-        <div className="border border-[var(--admin-gold)]/30 rounded-lg p-4 bg-[var(--admin-gold)]/5 space-y-3 mb-6">
+        <details className="border border-[var(--admin-gold)]/20 rounded-lg bg-[var(--admin-gold)]/[0.03] mb-4" data-testid="identification-tools">
+          <summary className="cursor-pointer list-none px-3 py-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]">
+            <Cpu size={13} /> Identification tools
+            <span className="ml-auto text-[9px] font-normal normal-case text-[var(--admin-ink-faint)]">AI Identify · AI Grade</span>
+          </summary>
+          <div className="px-3 pb-3 pt-1 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Identify */}
             <button
@@ -1564,7 +1569,8 @@ export default function CertificateForm({
               )}
             </div>
           )}
-        </div>
+          </div>
+        </details>
       )}
 
       <form
@@ -1587,7 +1593,7 @@ export default function CertificateForm({
             goToStage(2);
           }
         }}
-        className="space-y-6"
+        className="space-y-4"
       >
         {/* "✓ Saved" confirmation toast — fades ~2.5s after a successful save. */}
         {savedToast && (
@@ -1705,7 +1711,7 @@ export default function CertificateForm({
           {/* MacBook-first split: sticky read-only card preview (left ~38%) beside
               the stage controls. The preview is a plain <img> from signed display
               URLs / uploaded files — no coordinates, no protected tooling. */}
-          <div className="lg:grid lg:grid-cols-[minmax(240px,38%)_minmax(0,1fr)] lg:gap-4 lg:items-start">
+          <div className="lg:grid lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)] lg:gap-4 lg:items-start">
             <div className="mb-3 lg:mb-0 lg:sticky lg:top-16">
               <CardPreviewPanel certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
             </div>
@@ -1851,18 +1857,20 @@ export default function CertificateForm({
                 allowEditSet
                 testId="input-set-name"
               />
+              <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set">The collection name printed on the card.</p>
               <div className="mt-1.5">
                 <label className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-wider block mb-1">
-                  Set ID (for autofill)
+                  Set Code
                 </label>
                 <input
                   type="text"
                   value={setId}
                   onChange={(e) => setSetId(e.target.value)}
-                  placeholder="e.g. sv3pt5"
+                  placeholder="e.g. MEW or SV8"
                   className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-2 py-1 text-[var(--admin-ink)] text-xs placeholder:text-[var(--admin-gold)]/15 focus:outline-none focus:border-[var(--admin-gold)]/50 transition-colors"
                   data-testid="input-set-id"
                 />
+                <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set-code">Usually a short code such as MEW or SV8.</p>
               </div>
             </div>
           </div>
@@ -1904,6 +1912,7 @@ export default function CertificateForm({
                   {autofillLoading ? "..." : "Auto-fill"}
                 </button>
               </div>
+              <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-card-number">The number at the bottom of the card, for example 063/165.</p>
 
               {suggestions.length > 0 && (
                 <div
