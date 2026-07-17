@@ -178,10 +178,32 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     onLogout();
   };
 
+  // Next Card queue: an ordered snapshot of the not-yet-approved certs captured
+  // when a card is opened, plus the current position. Advancing steps through
+  // this frozen list by exactly one, so it preserves ordering and can never skip
+  // a card (navigation only — no save/grading/DB change).
+  const [gradeQueue, setGradeQueue] = useState<{ ids: number[]; pos: number } | null>(null);
+
   const handleEdit = (cert: CertificateRecord) => {
     setEditingCert(cert);
     setShowForm(true);
     setActiveTab("certs");
+    const ids = certs.filter((c) => !(c as any).gradeApprovedAt).map((c) => c.id);
+    const pos = ids.indexOf(cert.id);
+    setGradeQueue(pos >= 0 ? { ids, pos } : null);
+  };
+
+  const openNextQueuedCard = () => {
+    if (!gradeQueue) return;
+    const nextId = gradeQueue.ids[gradeQueue.pos + 1];
+    if (nextId == null) return;
+    const nextCert = certs.find((c) => c.id === nextId);
+    if (!nextCert) return; // never skip — if it can't be resolved, do nothing
+    setGradeQueue({ ids: gradeQueue.ids, pos: gradeQueue.pos + 1 });
+    setEditingCert(nextCert);
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
   };
 
   const handleFormClose = (newCert?: any) => {
@@ -248,6 +270,18 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
           <CertificateForm
             certificate={editingCert}
             onSuccess={handleFormClose}
+            queue={
+              gradeQueue && editingCert && gradeQueue.ids[gradeQueue.pos] === editingCert.id
+                ? {
+                    position: gradeQueue.pos + 1,
+                    total: gradeQueue.ids.length,
+                    hasNext: gradeQueue.pos < gradeQueue.ids.length - 1,
+                    onNext: openNextQueuedCard,
+                    onBackToQueue: () => handleFormClose(),
+                  }
+                : undefined
+            }
+            batch={editingCert?.submissionItemId ? { submissionId: String(editingCert.submissionItemId) } : undefined}
             externalIdentification={externalIdentification}
             onExternalIdentificationConsumed={() => setExternalIdentification(null)}
             onIdentifyAndGrade={(result) => {
