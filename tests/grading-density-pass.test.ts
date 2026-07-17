@@ -73,10 +73,14 @@ describe("Ownership + NFC moved out of the grading scroll (spec 8-13, 15-17)", (
 describe("two-column shell + density (spec 1, 3, 19)", () => {
   it("Card/Rarity render the preview beside the controls (~34% left column)", () => {
     expect(FORM).toContain("lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)]");
-    expect(FORM).toContain("lg:sticky");
+    // Preview now lives in the workspace aside (fixed-height shell), not a sticky
+    // column inside the form.
+    expect(FORM).toContain('data-testid="grading-preview-panel"');
   });
-  it("the grading page uses a wider container + compact header (not the tall Edit header)", () => {
-    expect(DASH).toContain("max-w-6xl");
+  it("the grading page uses a full-height focus shell + compact header (not the tall Edit header)", () => {
+    // Fixed-height workstation: AdminShell focus mode + full-height flex column,
+    // replacing the former max-w-6xl scroll container.
+    expect(DASH).toContain("flex h-full min-h-0 flex-col");
     expect(DASH).toContain('data-testid="grading-header"');
     expect(DASH).toContain("&larr; Certificates");
   });

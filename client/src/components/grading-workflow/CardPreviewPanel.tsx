@@ -3,13 +3,12 @@
  *
  * A plain <img> fed by (a) the object URL of a just-uploaded file, or (b) the
  * existing signed display URLs from GET /api/admin/certificates/:id/images
- * (front_display / back_display). Front/Back tabs, mouse-wheel zoom (anchored at
- * the cursor), click-and-drag panning while zoomed, fit-to-screen / reset, and a
- * full-screen modal. Deliberately NOT the grading tool: no grading coordinates,
- * no click-to-grade, no crop/centering writes, no protected imports — zoom + pan
- * are a pure CSS transform (translate + scale) on a preview image and never touch
- * the workstation's coordinate system. getBoundingClientRect here is used only to
- * anchor the zoom under the cursor, not to map any grading position.
+ * (front_display / back_display). Front/Back tabs, button-only zoom (+/−/Fit),
+ * click-and-drag panning while zoomed, and a full-screen modal. The mouse wheel
+ * is NOT captured — it scrolls the page/panel normally. Deliberately NOT the
+ * grading tool: no grading coordinates, no click-to-grade, no crop/centering
+ * writes, no protected imports — zoom + pan are a pure CSS transform (translate +
+ * scale) on a preview image and never touch the workstation's coordinate system.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -75,26 +74,8 @@ export function CardPreviewPanel({
     return () => window.removeEventListener("keydown", onKey);
   }, [fullscreen]);
 
-  // Mouse-wheel zoom, anchored so the point under the cursor stays fixed. Reads
-  // the viewport rect only to keep the cursor point stationary while scaling —
-  // no grading coordinate is derived. Returning to 1× re-centres (pan 0).
-  const wheelZoom = (e: React.WheelEvent) => {
-    if (!url) return;
-    e.preventDefault();
-    const nextZoom = clampZoom(zoom + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP));
-    if (nextZoom === zoom) return;
-    if (nextZoom <= 1) {
-      setZoom(1);
-      setPan({ x: 0, y: 0 });
-      return;
-    }
-    const rect = e.currentTarget.getBoundingClientRect();
-    const mx = e.clientX - (rect.left + rect.width / 2);
-    const my = e.clientY - (rect.top + rect.height / 2);
-    const ratio = nextZoom / zoom;
-    setPan((p) => ({ x: mx - ratio * (mx - p.x), y: my - ratio * (my - p.y) }));
-    setZoom(nextZoom);
-  };
+  // Mouse wheel is intentionally NOT handled here — the wheel scrolls the page /
+  // panel normally. Zoom is only via the +/−/Reset(Fit)/Fullscreen buttons.
 
   // Drag-to-pan (only meaningful when zoomed in). Pure pixel translation of the
   // preview image; never reads/writes any grading position.
@@ -144,14 +125,13 @@ export function CardPreviewPanel({
 
   const imageArea = (big: boolean) => (
     <div
-      onWheel={wheelZoom}
       onMouseDown={startDrag}
       onMouseMove={onDrag}
       onMouseUp={endDrag}
       onMouseLeave={endDrag}
       tabIndex={0}
       role="group"
-      aria-label="Card preview — scroll to zoom, drag to pan, space toggles front and back"
+      aria-label="Card preview — zoom with the buttons, drag to pan when zoomed, space toggles front and back"
       onKeyDown={(e) => {
         // Space toggles front/back — only while focus is inside the preview.
         if (e.key === " " || e.code === "Space") {
@@ -225,7 +205,7 @@ export function CardPreviewPanel({
     <div className="rounded-lg border border-[var(--admin-gold)]/15 bg-black/20 p-2" data-testid="card-preview-panel">
       {toolbar}
       {imageArea(false)}
-      <p className="mt-1 text-center text-[9px] text-[var(--admin-ink-faint)]">Scroll to zoom · drag to pan · read-only reference</p>
+      <p className="mt-1 text-center text-[9px] text-[var(--admin-ink-faint)]">Zoom with the buttons · drag to pan when zoomed · read-only reference</p>
 
       {fullscreen && (
         <div

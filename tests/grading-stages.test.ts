@@ -91,9 +91,11 @@ describe("card preview is read-only (spec 3)", () => {
     const imports = (code.match(/from\s+"[^"]+"/g) ?? []).join("\n");
     expect(imports).not.toMatch(/components\/grading\//);
   });
-  it("form places the sticky preview beside stage controls (MacBook split)", () => {
+  it("workspace places the read-only preview aside beside stage controls (MacBook split)", () => {
+    // Fixed-height workstation shell: preview lives in a dedicated aside beside
+    // the control panel (stages 0/1 only), not a sticky column inside the form.
     expect(FORM).toContain("lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)]");
-    expect(FORM).toContain("lg:sticky");
+    expect(FORM).toContain('data-testid="grading-preview-panel"');
     expect(FORM).toContain("<CardPreviewPanel");
   });
 });

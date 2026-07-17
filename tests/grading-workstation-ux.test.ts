@@ -17,10 +17,11 @@ const PICKER = read("client/src/components/rarity-picker/RarityVariantPicker.tsx
 const stripComments = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 describe("floating card viewer is read-only with zoom controls (spec 1)", () => {
-  it("has front/back tabs, wheel zoom, fit/reset, and a fullscreen modal", () => {
+  it("has front/back tabs, button zoom (wheel does NOT zoom), fit/reset, and a fullscreen modal", () => {
     expect(VIEWER).toContain("card-preview-${s}"); // front/back tab testids (template)
     expect(VIEWER).toMatch(/\["front", "back"\]/); // both sides rendered
-    expect(VIEWER).toContain("onWheel");
+    expect(VIEWER).not.toContain("onWheel"); // wheel scrolls the page/panel, never zooms
+    expect(VIEWER).toContain("stepZoom"); // zoom only via +/− buttons
     expect(VIEWER).toContain('data-testid="card-preview-zoom"');
     expect(VIEWER).toContain('data-testid="card-preview-fullscreen"');
     expect(VIEWER).toContain("Full-screen preview");
