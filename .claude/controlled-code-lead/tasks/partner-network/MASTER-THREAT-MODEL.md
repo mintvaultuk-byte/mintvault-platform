@@ -61,3 +61,11 @@ threats, and the control that mitigates each. Every threat maps to a Phase-20 at
 - Shared Fly platform CPU (partner app is separate app but same org/region; monitor).
 - Regex-heuristic destructive-SQL linter (documented; not a parser).
 - Physical controls (welder, custody) depend on operational discipline + evidence, not code alone.
+
+## Addendum — new-subsystem threats
+| T# | Threat | Control | Phase |
+|---|---|---|---|
+| T25 | Custody gap / out-of-order checkpoint hides a switch | Append-only ordered checkpoints; state machine blocks advance without prior checkpoint; ADR-015 | 7,10 |
+| T26 | Card marked "MintVault Verified" without full dual gate | VERIFIED derived only at the completion gate; not a settable flag; ADR-016 | 11 |
+| T27 | Partner self-upgrades accreditation to loosen limits | Level is super-admin-controlled + explainable; never bypasses critical gates; ADR-017 | 3 |
+| T28 | Seal by an ungoverned/expired welder | Welder registry status + service/cal checks gate completion; ADR-018 | 10,11 |

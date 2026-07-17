@@ -30,8 +30,9 @@ functions, other partners' data, or Vault Quest.
 2. **No `requireAdmin` for partners; no broad numeric-ID admin routes exposed.** Partner
    principals use a separate auth stack entirely.
 3. **Money integrity** — immutable append-only credit ledger; credits created only by the
-   verified Stripe→server path; shop can never create/edit/increase credits; no negative
-   balances; one £15 credit reserved per card, consumed only at controlled completion.
+   verified Stripe→server path **or an authenticated Super Admin adjustment (reason + re-auth +
+   audit; ADR-008)**; the shop can never create/edit/increase credits; no negative balances;
+   one £15 credit reserved per card, consumed only at controlled completion.
 4. **Grading integrity** — the shop never issues the final grade. Final grade is the Supreme
    Grader's; physical completion is the Field Authentication Officer's. Separation of duties
    is mandatory. MVGS scoring/pristine/cert-allocation/label/NFC are reused as-is (PROTECTED),
@@ -228,3 +229,31 @@ spec already answers, pick the safest repository-consistent option, record it in
    the owner signs off Phase 0.5.
 
 None of the above blocks producing this master plan or (post-approval) local Phase 1 development.
+
+---
+
+## 13. New subsystems (integrated across phases; ADR-015…019)
+- **Digital Chain of Custody checkpoint system (ADR-015):** ordered, append-only, server-enforced
+  checkpoints from RECEIVED → COLLECTED; the card state machine will not advance without the
+  required checkpoint. Built in Phase 6/7 (capture/custody) and enforced at Phase 10/11 (field/seal).
+- **MintVault Verified outcome (ADR-016):** the public dual-verified status; set only at the full
+  completion gate; delivered in Phase 11/14 (completion + public cert).
+- **Partner Accreditation Levels (ADR-017):** PROVISIONAL→APPROVED→SILVER→GOLD→PLATINUM; evidence-
+  based; adjusts configurable limits only, never the critical gates; built in Phase 3, enforced
+  wherever limits apply.
+- **Anti-card-switch controls (ADR-014):** tamper-evident numbered packaging + image fingerprint +
+  field physical-vs-scan comparison; spans Phase 7 (capture) and Phase 10 (field).
+- **Ultrasonic welder governance (ADR-018):** registered welder assets gate sealing/completion;
+  built in Phase 10/11.
+- **Field Authentication Officer workflow (ADR-007/013):** Phase 10.
+- **Batch field-visit operations:** Phase 16 (field routes) — visit queue, thresholds, regional
+  route grouping across shops.
+
+## 14. Phase 23 — Future Expansion (gated, NOT in this programme; ADR-019)
+Recorded for continuity; each item is a separate future programme with its own owner approval,
+threat model, and pilot: additional grading service tiers · higher-value card handling · automated
+field-route planning · reduced-QA sampling for proven partners · larger/auto-top-up credit models ·
+Stripe Connect / partner payouts / split settlements · multi-region operations · additional partner
+marketing surfaces · fully separate Neon project + dedicated infra (ADR-002 revisit). None may
+weaken tenant isolation, financial integrity, or grading integrity. Programme table adds Phase 23
+under a new "F — Future" grouping (not started, 0%).

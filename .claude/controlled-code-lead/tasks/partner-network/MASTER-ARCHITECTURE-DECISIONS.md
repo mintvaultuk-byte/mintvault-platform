@@ -22,7 +22,7 @@ public publication) are shared, called as functions — never by proxying `/api/
 partner runtime. Existing MintVault tables are not granted to the partner role.
 **Consequences:** even an app-layer bug cannot read cross-tenant or existing MintVault data,
 because the DB refuses it. Missing tenant context = no rows (fail closed). Revisit a fully
-separate Neon project at expansion (Phase 22).
+separate Neon project at **Phase 23 (Future Expansion, ADR-019)**, not the pilot review (Phase 22).
 
 ## ADR-003 — Dedicated private R2 buckets for partner assets
 **Status:** ACCEPTED. **Decision:** new private buckets — one prod, one staging — never the
@@ -110,3 +110,74 @@ photographed with the packaging number; image fingerprint/comparison reference c
 field officer verifies packaging number + tamper state and compares the physical card to the
 original scans before sealing. High-value cards get extra evidence + dual control + mandatory HQ
 review.
+
+## ADR-015 — Digital Chain of Custody checkpoint system
+**Status:** ACCEPTED. **Context:** custody must be provable at every physical transition, not just
+recorded ad hoc. **Decision:** a partner card passes through an ordered, server-enforced set of
+**custody checkpoints**, each an immutable event: `RECEIVED`, `ARRIVAL_PHOTOS`, `PACKAGED`
+(tamper-evident numbered packaging linked + photographed), `STORED`, `SCANNED`, `HANDOVER_*`
+(each physical handover), `FIELD_CUSTODY_VERIFIED`, `SEALED`, `COLLECTED`. Each checkpoint records
+actor + device + timestamp + location + evidence ref + (where relevant) packaging number and
+image-fingerprint reference. Checkpoints are append-only; the workflow state machine refuses to
+advance if the required checkpoint is missing. **Consequences:** any gap or out-of-order transition
+is detectable; the Field Authentication Officer verifies the packaging number and tamper state
+against the `PACKAGED` checkpoint before sealing (anti-switch, ADR-014). Stored in
+`partner_custody_checkpoints`.
+
+## ADR-016 — "MintVault Verified" outcome
+**Status:** ACCEPTED. **Context:** the public must be able to tell a dual-verified partner-graded
+card from an ungraded/incomplete one. **Decision:** a partner certificate reaches the public
+**MintVault Verified** outcome ONLY after the full dual-verification chain completes — credit
+reserved, shop evidence complete, Supreme Grader approved, Field Authentication Officer approved,
+authenticated, correct label, NFC verified, sealed, final photos present. The public certificate
+page shows a "MintVault Verified — processed through a MintVault Approved Grading Centre and
+independently approved under the MVGS dual-verification process" status, without exposing private
+technician/officer identities. `certificate_status` becomes `VERIFIED` only at that gate; nothing
+earlier may present as verified. **Consequences:** "MintVault Verified" is a controlled outcome,
+never a partner-settable flag; the credit consumes at the same gate.
+
+## ADR-017 — Partner Accreditation Levels
+**Status:** ACCEPTED. **Decision:** partners carry an evidence-based level:
+`PROVISIONAL_PARTNER → APPROVED_PARTNER → SILVER_PARTNER → GOLD_PARTNER → PLATINUM_PARTNER`.
+Level may adjust configurable operational parameters only: daily submission limits, active-card
+limits, declared-value limits, credit-bundle access, QA monitoring frequency, document-review
+frequency, approved location/technician counts, priority support, approved marketing permissions.
+**A level NEVER bypasses** central Supreme Grader approval, Field Officer approval (pilot),
+payment/credit controls, chain-of-custody, device security, authentication, NFC validation,
+ultrasonic sealing, or certificate-publication gates. Upgrades require authorised MintVault
+approval (system may recommend + explain, never auto-grant). Critical policy failures may
+auto-downgrade/suspend/hold with an immutable audit trail. Stored on `partner_organisations`
+(`accreditation_level`) + `partner_accreditation_events`.
+
+## ADR-018 — Ultrasonic welder governance
+**Status:** ACCEPTED. **Decision:** every ultrasonic welder is a registered asset in the
+MintVault-internal (super-admin) registry **`field_welders`** — NOT a tenant-scoped `partner_*`
+table (no RLS tenant predicate; MintVault-owned): machine id, serial, assigned officer, service
+date, calibration date, fault
+history, seal count, status (`ACTIVE|SERVICE_DUE|PAUSED|QUARANTINED|LOST_OR_STOLEN|RETIRED`),
+location history, last use. A card cannot reach sealed/completed if the welder is unapproved,
+service-expired, or the assigned officer is unauthorised, or NFC read-back fails, or final photos
+are missing. Seal events reference the welder id + officer + device. **Consequences:** every seal
+is attributable to a governed machine; a quarantined/retired welder cannot complete cards.
+
+## ADR-019 — Phase 23 Future Expansion (placeholder, gated)
+**Status:** PROPOSED. **Decision:** post-pilot expansion candidates are recorded but NOT built in
+this programme: additional grading service tiers, higher-value card handling, automated field-route
+planning, reduced-QA sampling for proven partners, larger/auto-top-up credit models, Stripe
+Connect / partner payouts, multi-region operations, additional partner marketing surfaces, and a
+separate Neon project + fully separate infra per ADR-002's revisit. Each is a future programme with
+its own owner approval, threat model, and pilot. Nothing in Phase 23 may weaken tenant isolation,
+financial integrity, or grading integrity.
+
+## ADR-020 — Field Authentication Officer auth stack (resolves review finding 6)
+**Status:** ACCEPTED. **Context:** the Field Officer is MintVault-internal staff, but their
+endpoints live in the partner app and ADR-004 forbids `requireAdmin` on partner-app routes.
+**Decision:** the Field Officer authenticates as a **dedicated MintVault-internal field-officer
+principal** — a distinct auth stack (`requireFieldOfficer`), NOT the partner principal
+(`mv.partner.sid`) and NOT the broad admin `requireAdmin`. It uses its own cookie/token namespace,
+mandatory MFA, and a registered mobile device (a `partner_devices` row of type `mobile`, ADR-009).
+The `/api/partner/field/*` routes are served by the partner app but gated by `requireFieldOfficer`,
+which resolves the officer identity + assigned visits server-side and grants access only to cards
+on assigned field visits — never to arbitrary partner or MintVault data. **Consequences:** the
+officer sees only assigned visits; no partner user can assume the officer role and vice versa; the
+officer never gains `requireAdmin` or partner-tenant data access beyond assigned cards.

@@ -45,6 +45,17 @@ and (where applicable) a threat T# from the threat model.
 - Expired mandatory insurance blocks live grading; expired ID blocks that user; missing annual
   accreditation blocks certificate completion; suspended/removed technician cannot capture.
 
+## QA / risk engine (Phase 9) — T15,T27
+- Risk score computed from the documented inputs; 100% pilot review enforced regardless of score.
+- High-value + top-grade + random-sample selection paths trigger review.
+- Training-error vs deliberate-manipulation classification is deterministic and explainable.
+- Discrepancy (partner vs Supreme Grader) recorded; contributes to strike logic only per policy.
+
+## Batch field-visit operations (Phase 16) — T14,T23,T28
+- Visit queue groups only cards past HQ approval; visit triggers (min quantity / max wait / high-
+  value / manual) fire correctly; regional route grouping never mixes tenants' data on one screen.
+- A field officer's route exposes only assigned visits/cards (no cross-tenant leakage).
+
 ## Storage (Phase 7, 20) — T16,T17,T20
 - Signed URL only after ownership check; short TTL; key traversal guard; no cross-tenant key.
 - Upload: type/size/magic-byte validated at runtime (verify against built artifact, not source —
@@ -73,3 +84,18 @@ Each attack is a test that must fail to breach.
 `npm run check` + full `npm test` (incl. MVGS regression) + `npm run lint` + `npm run build`
 (where bundling touched) + disposable-DB validation for DB work + secret scan of the diff +
 independent verification. No phase is "done" on design/local-proof alone — state the proof level.
+
+## Addendum — new subsystem tests
+- **Custody checkpoints (ADR-015):** out-of-order checkpoint rejected; missing `PACKAGED` blocks
+  seal; checkpoint rows are append-only (no update/delete); packaging number + fingerprint compared
+  at field verification; cross-tenant checkpoint isolation.
+- **MintVault Verified (ADR-016):** `VERIFIED`/badge appears ONLY after the full dual gate; a card
+  short of any gate never shows verified; badge is derived, not a settable flag; public page leaks
+  no technician/officer identity.
+- **Accreditation levels (ADR-017):** partner cannot self-upgrade; a higher level does NOT bypass
+  Supreme Grader/Field/payment/custody/device/NFC/seal/publication gates; upgrade requires MintVault
+  approval and is explainable; auto-downgrade preserves evidence; cross-tenant isolation of level
+  events.
+- **Welder governance (ADR-018):** seal blocked when welder unapproved/service-expired/quarantined
+  or officer unauthorised; seal attributable to welder+officer+device; NFC read-back + final photos
+  required for completion.

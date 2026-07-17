@@ -40,3 +40,9 @@ maintenance messaging, and re-enabling services one at a time after investigatio
   explicit owner approval and the Phase 0.5 destructive-migration workflow (linter + preflight +
   disposable-DB rehearsal + owner sign-off).
 - Never roll back by editing an applied migration (checksum breaks) — write a new one.
+
+## Addendum — new subsystems
+Custody-checkpoint, accreditation-level, verified-status, and welder tables are all additive
+`partner_*` tables behind flags; rollback = flags off + branch revert. "MintVault Verified" is a
+derived projection, so disabling the partner path removes the badge with no data surgery. No
+destructive action on existing MintVault data in any rollback path.

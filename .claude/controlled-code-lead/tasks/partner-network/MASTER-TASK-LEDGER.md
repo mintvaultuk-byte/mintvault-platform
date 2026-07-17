@@ -66,3 +66,15 @@ webhook, auth, cert_counter, R2 signing).
 Await master-plan approval. On approval: begin Phase 1 local development per the automated
 execution rules (isolated branch, disposable DB, tests, local commit, independent verification),
 stopping at the first merge/infra/migration/deploy boundary.
+
+## Update 2026-07-17b — master plan finalised + Programme A authorised
+- Master docs finalised with new subsystems: Digital Chain of Custody checkpoints (ADR-015),
+  MintVault Verified outcome (ADR-016), Partner Accreditation Levels (ADR-017), Ultrasonic welder
+  governance (ADR-018), Phase 23 Future Expansion (ADR-019). Threats T25–T28 added.
+- ADR register now 19 entries. Data model / API map / test plan / threat model / pilot / rollback
+  carry matching addenda.
+- Programme A authorised for local build (Phases 1–4), isolated phase branches, no merge/deploy.
+- Phase branches (planned): feat/partner-network-phase-1-foundation, -phase-2-onboarding,
+  -phase-3-accreditation, -phase-4-device-security.
+- Weighted completion unchanged at ≈12–15% (documentation does not raise application-completion;
+  code remains ~4% = Phase 0.5 tooling only). Programme A phases begin at 0% code until built.

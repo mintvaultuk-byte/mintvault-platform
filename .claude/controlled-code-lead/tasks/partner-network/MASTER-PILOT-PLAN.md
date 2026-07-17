@@ -50,3 +50,11 @@ sealing · reliable customer collection · reliable backups · reliable emergenc
 Any tenant escape, credit-integrity failure, certificate/NFC duplication, card-substitution
 evidence, or unrecoverable data-loss event → freeze via super-admin emergency controls, preserve
 evidence, run incident procedure, do not resume until root cause fixed and re-verified.
+
+## Addendum — new subsystems in the pilot
+- Every pilot card must pass all Digital Chain of Custody checkpoints (ADR-015); a missing/out-of-
+  order checkpoint blocks completion.
+- "MintVault Verified" appears on the public cert only at the full dual-verification gate (ADR-016).
+- Pilot partner starts at PROVISIONAL_PARTNER (ADR-017); 100% Supreme Grader + Field approval apply
+  regardless of level.
+- The single registered welder must be ACTIVE + in service/calibration (ADR-018) for any seal.

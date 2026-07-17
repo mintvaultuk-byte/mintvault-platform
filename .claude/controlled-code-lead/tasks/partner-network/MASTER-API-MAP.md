@@ -28,8 +28,7 @@ POST /api/partner/cards/:id/identify
 POST /api/partner/cards/:id/mvgs-evidence
 POST /api/partner/cards/:id/submit          (-> "awaiting MintVault review"; no final grade)
 GET  /api/partner/cards                      (queue, scoped)
-# custody / stock / docs / training / support
-POST /api/partner/custody/:id/handover
+# custody (handover = a HANDOVER checkpoint via the checkpoint route below) / stock / docs / training / support
 GET  /api/partner/stock ; POST /api/partner/stock/report-damage
 POST /api/partner/documents ; GET /api/partner/documents
 GET  /api/partner/training ; POST /api/partner/training/:id/complete
@@ -38,7 +37,7 @@ POST /api/partner/support ; GET /api/partner/support
 GET  /api/partner/assets/:key/signed-url     (server checks ownership, mints short-lived URL)
 ```
 
-## Field Authentication Officer (mobile, MFA + registered device)
+## Field Authentication Officer (mobile, `requireFieldOfficer` — dedicated MintVault-internal auth, ADR-020; MFA + registered `mobile` device; NOT `mv.partner.sid`, NOT `requireAdmin`)
 ```
 GET  /api/partner/field/visits              (only assigned visits)
 POST /api/partner/field/visits/:id/scan-qr
@@ -79,3 +78,21 @@ explicit inputs; never reached by proxying `/api/admin/*`.
 - Separate rate limiters (durable store) per partner route group.
 - Webhook: partner Stripe webhook is signature-verified + event-id deduped (Phase 5), mounted
   before body JSON parsing, in the partner app.
+
+## Addendum — new subsystem routes
+```
+# custody checkpoints (ADR-015) — device-gated, append-only
+POST /api/partner/cards/:id/custody/checkpoint      (type in closed set; server enforces order)
+GET  /api/partner/cards/:id/custody                  (scoped)
+# MintVault Verified (ADR-016) — read-only public projection lives on existing public cert page
+GET  /api/cert/:id                                    (existing; shows "MintVault Verified" only at gate)
+# accreditation levels (ADR-017) — super-admin controlled
+GET  /api/super-admin/grading-partners/:id/accreditation
+POST /api/super-admin/grading-partners/:id/accreditation/upgrade   (approval required; explainable)
+POST /api/super-admin/grading-partners/:id/accreditation/downgrade (reason + audit)
+# welder governance (ADR-018) — MintVault-internal `field_welders` registry (not tenant-scoped)
+GET  /api/super-admin/field-welders ; POST /api/super-admin/field-welders/:id/status
+GET  /api/partner/field/welders/:id                   (officer, requireFieldOfficer: assigned welder validity)
+```
+Partner users have READ-only visibility of their own accreditation level and its parameters; they
+can never self-upgrade (ADR-017). Checkpoint POSTs require an approved device + valid workflow state.
