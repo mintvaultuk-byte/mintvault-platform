@@ -105,8 +105,7 @@ interface DbInfo {
 }
 
 import CertificateForm from "@/components/certificate-form";
-import NfcSection from "@/components/nfc-section";
-import OwnershipSection from "@/components/ownership-section";
+import { CertificateToolsDrawer, certificateToolsStatus } from "@/components/grading-workflow/CertificateToolsDrawer";
 import GradingPanel from "@/components/grading/grading-panel";
 import GradingQueue from "@/components/grading/grading-queue";
 
@@ -183,6 +182,8 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
   // this frozen list by exactly one, so it preserves ordering and can never skip
   // a card (navigation only — no save/grading/DB change).
   const [gradeQueue, setGradeQueue] = useState<{ ids: number[]; pos: number } | null>(null);
+  // Ownership + NFC now live in a Certificate Tools drawer (out of the grading scroll).
+  const [certToolsOpen, setCertToolsOpen] = useState(false);
 
   const handleEdit = (cert: CertificateRecord) => {
     setEditingCert(cert);
@@ -254,14 +255,43 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
   if (showForm) {
     return (
       <AdminShell activeTab={activeTab} onTabChange={setActiveTab} onLogout={handleLogout}>
-        <div className="max-w-3xl mx-auto">
-          <button
-            onClick={handleFormClose}
-            className="text-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)] text-sm mb-4 transition-colors"
-            data-testid="button-back-list"
-          >
-            &larr; Back to list
-          </button>
+        <div className="max-w-6xl mx-auto">
+          {/* Compact grading header — Back · cert ID · Certificate Tools (with
+              tiny status). Replaces the tall "Edit MV####" header chrome so the
+              four-stage form starts near the top on a 13-inch MacBook. */}
+          <div className="mb-3 flex items-center justify-between gap-3" data-testid="grading-header">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleFormClose}
+                className="text-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)] text-sm transition-colors"
+                data-testid="button-back-list"
+              >
+                &larr; Certificates
+              </button>
+              {editingCert?.certId && (
+                <span className="text-sm font-bold tracking-wide text-[var(--admin-gold)]" style={{ fontFamily: "var(--admin-mono)" }} data-testid="grading-header-cert">
+                  {editingCert.certId}
+                </span>
+              )}
+            </div>
+            {editingCert && editingCert.id && (
+              <button
+                type="button"
+                onClick={() => setCertToolsOpen(true)}
+                data-testid="button-certificate-tools"
+                className="flex items-center gap-2 rounded-lg border border-[var(--admin-gold)]/30 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10 transition-colors"
+                title="Ownership + NFC (done after grading)"
+              >
+                Certificate Tools
+                <span className="text-[9px] font-normal normal-case text-[var(--admin-ink-faint)]">
+                  {(() => {
+                    const s = certificateToolsStatus(editingCert);
+                    return `${s.ownership} · ${s.nfc}`;
+                  })()}
+                </span>
+              </button>
+            )}
+          </div>
           {/* Owner directive (2026-07-01): one continuous block, in workflow
               order — EDIT MV#### header → AI Identify → grading workstation
               (card tool + defects, passed into the form as workstationSlot) →
@@ -337,11 +367,14 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
               ) : null
             }
           />
+          {/* Ownership + NFC moved OUT of the grading scroll into the drawer above. */}
           {editingCert && editingCert.id && (
-            <div className="mt-6 space-y-6">
-              <OwnershipSection cert={editingCert} />
-              <NfcSection cert={editingCert} onUpdated={(updated) => setEditingCert(updated)} />
-            </div>
+            <CertificateToolsDrawer
+              cert={editingCert}
+              open={certToolsOpen}
+              onClose={() => setCertToolsOpen(false)}
+              onUpdated={(updated) => setEditingCert(updated)}
+            />
           )}
         </div>
       </AdminShell>
