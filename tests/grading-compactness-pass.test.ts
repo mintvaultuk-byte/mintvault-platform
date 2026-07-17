@@ -57,6 +57,42 @@ describe("1. read-only preview is shorter (spec 1)", () => {
   });
 });
 
+describe("0. read-only viewer pan/zoom restored (regression fix)", () => {
+  it("mouse-wheel zoom retained and anchored at the cursor", () => {
+    expect(PREVIEW).toContain("wheelZoom");
+    expect(PREVIEW).toContain("e.deltaY");
+    // cursor anchoring: reads the viewport rect to keep the point under the
+    // cursor fixed while scaling.
+    expect(PREVIEW).toContain("getBoundingClientRect");
+    expect(PREVIEW).toMatch(/ratio\s*=\s*nextZoom\s*\/\s*zoom/);
+  });
+  it("drag-to-pan while zoomed (the previously-missing behaviour)", () => {
+    expect(PREVIEW).toContain("onMouseDown={startDrag}");
+    expect(PREVIEW).toContain("onMouseMove={onDrag}");
+    expect(PREVIEW).toContain("onMouseUp={endDrag}");
+    expect(PREVIEW).toContain("onMouseLeave={endDrag}");
+    expect(PREVIEW).toMatch(/const \[pan, setPan\]/);
+    expect(PREVIEW).toMatch(/if \(zoom <= 1\) return;/); // no pan until zoomed
+  });
+  it("smooth transform (translate+scale), no transition while dragging", () => {
+    expect(PREVIEW).toMatch(/transform:\s*`translate\([^`]*scale\(/);
+    expect(PREVIEW).toContain('transition: dragging ? "none" : "transform 0.1s ease-out"');
+  });
+  it("fit/reset re-centres (zoom 1 + pan 0); grab/grabbing cursor while zoomed", () => {
+    expect(PREVIEW).toContain("resetView");
+    expect(PREVIEW).toContain("Fit to screen / reset zoom");
+    expect(PREVIEW).toMatch(/cursor-grabbing.*cursor-grab|cursor-grab.*cursor-grabbing/);
+  });
+  it("front/back + fullscreen + Escape unchanged; no protected import", () => {
+    expect(PREVIEW).toContain('(["front", "back"] as const)');
+    expect(PREVIEW).toContain('data-testid="card-preview-fullscreen"');
+    expect(PREVIEW).toContain('e.key === "Escape"');
+    // never imports a protected grading component (grading-coordinate absence is
+    // asserted on comment-stripped source in grading-stages / grading-workstation-ux).
+    expect(PREVIEW).not.toMatch(/from\s+"[^"]*components\/grading\//);
+  });
+});
+
 describe("2/3. Year + Language share one 4-column row (spec 2)", () => {
   it("Row 2 uses a 4-column template (Name · Number+Auto-fill · Year · Language)", () => {
     expect(FORM).toContain("sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,1fr)]");

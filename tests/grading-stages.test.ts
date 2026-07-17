@@ -85,7 +85,9 @@ describe("card preview is read-only (spec 3)", () => {
     expect(PREVIEW).toContain("URL.createObjectURL");
     // Check CODE only (comments deliberately mention what is NOT done).
     const code = stripComments(PREVIEW);
-    expect(code).not.toMatch(/getBoundingClientRect|onMouseDown|centering|crop/i);
+    // Read-only preview may pan/zoom (viewport geometry), but must do NO grading
+    // coordinate work: no centering/crop/defect/image-percent mapping.
+    expect(code).not.toMatch(/centering|crop|defect|x_percent|y_percent|imagePctFromEvent/i);
     const imports = (code.match(/from\s+"[^"]+"/g) ?? []).join("\n");
     expect(imports).not.toMatch(/components\/grading\//);
   });
