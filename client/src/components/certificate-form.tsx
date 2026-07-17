@@ -4,6 +4,7 @@ import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPic
 import { GradingWorkflowBar } from "@/components/grading-workflow/GradingWorkflowBar";
 import { CardPreviewPanel } from "@/components/grading-workflow/CardPreviewPanel";
 import { ReviewSummary } from "@/components/grading-workflow/ReviewSummary";
+import { SessionHud } from "@/components/grading-workflow/SessionHud";
 import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
@@ -19,6 +20,7 @@ import {
   HelpCircle,
   Link2,
   FileText,
+  Copy,
   Plus,
   Cpu,
   Loader2,
@@ -60,6 +62,17 @@ interface Props {
       component (and outside the <form> element — its buttons must never
       trigger a form submit). */
   workstationSlot?: ReactNode;
+  /** Optional grading-queue context (display + Next Card navigation only). When
+      absent the form behaves exactly as before — no progress, no Next Card. */
+  queue?: {
+    position: number; // 1-based position of the current card in the queue
+    total: number;
+    hasNext: boolean;
+    onNext: () => void; // open the next queued draft (parent-owned navigation)
+    onBackToQueue?: () => void;
+  };
+  /** Optional read-only batch header (customer / submission / remaining). */
+  batch?: { customer?: string; submissionId?: string; remaining?: number };
 }
 
 /**
@@ -154,6 +167,8 @@ export default function CertificateForm({
   externalIdentification,
   onExternalIdentificationConsumed,
   workstationSlot,
+  queue,
+  batch,
 }: Props) {
   const isEdit = !!certificate;
   const { toast } = useToast();
@@ -211,6 +226,66 @@ export default function CertificateForm({
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
   // Grader notes live in Stage 4 (Review), collapsed unless the cert already has notes.
   const [notesOpen, setNotesOpen] = useState<boolean>(() => Boolean(certificate?.notes));
+
+  // Session HUD: count of cards completed (explicit save success) this session.
+  const [sessionCompleted, setSessionCompleted] = useState(0);
+  // "✓ Saved" confirmation toast — fades ~2.5s after a successful explicit save.
+  const [savedToast, setSavedToast] = useState(false);
+  // Post-save panel (only when a queue is provided): Saved → Next Card / Back.
+  const [showSavedPanel, setShowSavedPanel] = useState(false);
+  // Fields to briefly highlight (~1s) after a quick-fill, for visual feedback.
+  const [flashFields, setFlashFields] = useState<Set<string>>(new Set());
+  const flashApplied = (keys: string[]) => {
+    setFlashFields(new Set(keys));
+    window.setTimeout(() => setFlashFields(new Set()), 1000);
+  };
+
+  // "Same as last card" — remember the shared identification context of the last
+  // card a grader processed (game/set/year/language, NOT the per-card name/number)
+  // so a box of the same set fills in one click. Display convenience only: it is
+  // captured locally on Continue and only applied when the grader clicks it, and
+  // it never overwrites a field that already has a value.
+  const [lastCardContext, setLastCardContext] = useState<{ cardGame: string; setName: string; setId: string; year: string; language: string } | null>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("mv.lastCardContext") || "null");
+      return raw && typeof raw === "object" ? raw : null;
+    } catch {
+      return null;
+    }
+  });
+  function captureLastCardContext() {
+    const ctx = { cardGame: form.cardGame, setName: form.setName, setId, year: form.year, language: form.language };
+    if (!ctx.setName && !ctx.year) return; // nothing worth remembering yet
+    try {
+      localStorage.setItem("mv.lastCardContext", JSON.stringify(ctx));
+    } catch {
+      /* private mode */
+    }
+    setLastCardContext(ctx);
+  }
+  function applyLastCardContext() {
+    if (!lastCardContext) return;
+    const filled: string[] = [];
+    setForm((f) => {
+      const next = { ...f };
+      if (!f.cardGame && lastCardContext.cardGame) { next.cardGame = lastCardContext.cardGame; filled.push("cardGame"); }
+      if (!f.setName && lastCardContext.setName) { next.setName = lastCardContext.setName; filled.push("setName"); }
+      if (!f.year && lastCardContext.year) { next.year = lastCardContext.year; filled.push("year"); }
+      if (!f.language && lastCardContext.language) { next.language = lastCardContext.language; filled.push("language"); }
+      return next;
+    });
+    if (!setId && lastCardContext.setId) setSetId(lastCardContext.setId);
+    if (filled.length) flashApplied(filled);
+  }
+  /** Copy one shared field from the last card (explicit per-field action). */
+  function copyLastCardField(field: "setName" | "year" | "language") {
+    if (!lastCardContext) return;
+    const val = lastCardContext[field];
+    if (!val) return;
+    updateField(field, val);
+    if (field === "setName" && lastCardContext.setId && !setId) setSetId(lastCardContext.setId);
+    flashApplied([field]);
+  }
 
   // ── Structured rarity/variant picker wiring ────────────────────────────────
   // The picker emits a full StructuredCardVariant; we fan it out to the separate
@@ -998,7 +1073,18 @@ export default function CertificateForm({
       // re-submits/re-uploads the same File object once it's already persisted.
       setFrontImage(null);
       setBackImage(null);
-      onSuccess(isEdit ? undefined : data);
+      // Session/feedback UI (display only — save behaviour is unchanged above).
+      setSessionCompleted((c) => c + 1);
+      setSavedToast(true);
+      window.setTimeout(() => setSavedToast(false), 2500);
+      // When a grading queue is provided, hold on a "Saved → Next Card" panel
+      // instead of navigating away immediately. Without a queue, behave exactly
+      // as before (call the parent's onSuccess straight away).
+      if (queue) {
+        setShowSavedPanel(true);
+      } else {
+        onSuccess(isEdit ? undefined : data);
+      }
     },
     onError: (err: any) => setError(err.message),
   });
@@ -1362,6 +1448,25 @@ export default function CertificateForm({
   };
   /** Hidden-not-unmounted: stage content keeps all React state while inactive. */
   const stageClass = (i: number) => (wfStage === i ? "" : "hidden");
+
+  // Auto-focus the first logical field when a stage opens, so a grader can start
+  // typing without reaching for the mouse. Card stage → Card Name. Guarded so it
+  // never steals focus mid-typing (only fires on stage change) and never on an
+  // already-focused field.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const firstField: Record<number, string> = { 0: "input-card-name" };
+    const testId = firstField[wfStage];
+    if (!testId) return;
+    const active = document.activeElement;
+    // Don't steal focus if the grader already put the cursor in a field.
+    const alreadyTyping = active && active !== document.body && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT");
+    if (alreadyTyping) return;
+    const t = window.setTimeout(() => {
+      document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.focus();
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [wfStage]);
   const workflowCurrent = wfStage;
   const workflowMax = Math.max(wfMaxStage, furthestReached(stageCompletion));
 
@@ -1388,7 +1493,12 @@ export default function CertificateForm({
           workstation button is type="button" and handleSubmit no-ops
           pre-approval, so it can never trigger a form submit. */}
       {isEdit && certificate?.id && (
-        <div className="border border-[var(--admin-gold)]/30 rounded-lg p-4 bg-[var(--admin-gold)]/5 space-y-3 mb-6">
+        <details className="border border-[var(--admin-gold)]/20 rounded-lg bg-[var(--admin-gold)]/[0.03] mb-4" data-testid="identification-tools">
+          <summary className="cursor-pointer list-none px-3 py-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]">
+            <Cpu size={13} /> Identification tools
+            <span className="ml-auto text-[9px] font-normal normal-case text-[var(--admin-ink-faint)]">AI Identify · AI Grade</span>
+          </summary>
+          <div className="px-3 pb-3 pt-1 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {/* Identify */}
             <button
@@ -1459,10 +1569,111 @@ export default function CertificateForm({
               )}
             </div>
           )}
-        </div>
+          </div>
+        </details>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form
+        onSubmit={handleSubmit}
+        onKeyDown={(e) => {
+          // Enter advances the stage (Continue) when the grader isn't in a
+          // textarea and the stage's validation already passes — and never lets
+          // Enter submit/save the form from Stage 1/2. Textareas keep newlines.
+          if (e.key !== "Enter") return;
+          const tag = (e.target as HTMLElement).tagName;
+          if (tag === "TEXTAREA") return;
+          if (wfStage === 0) {
+            e.preventDefault();
+            if (form.cardName.trim() && form.cardNumber.trim()) {
+              captureLastCardContext();
+              goToStage(1);
+            }
+          } else if (wfStage === 1) {
+            e.preventDefault();
+            goToStage(2);
+          }
+        }}
+        className="space-y-4"
+      >
+        {/* "✓ Saved" confirmation toast — fades ~2.5s after a successful save. */}
+        {savedToast && (
+          <div
+            className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-lg border border-[var(--admin-green)]/40 bg-[var(--admin-panel)] px-3 py-2 text-[12px] text-[var(--admin-green)] shadow-lg"
+            style={{ animation: "fadeIn 0.15s ease-out" }}
+            role="status"
+            data-testid="save-toast"
+          >
+            <CheckCircle2 size={14} /> Saved
+          </div>
+        )}
+
+        {/* Post-save panel (only when a grading queue is provided) — Next Card is
+            the primary action; the grader confirms before the next draft opens. */}
+        {showSavedPanel && queue && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Card saved" data-testid="saved-panel">
+            <div className="w-full max-w-sm rounded-xl border border-[var(--admin-gold)]/30 bg-[var(--admin-panel)] p-5 text-center">
+              <div className="mb-3 flex items-center justify-center gap-2 text-[var(--admin-green)]">
+                <CheckCircle2 size={20} /> <span className="text-sm font-bold uppercase tracking-wider">Card Saved</span>
+              </div>
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  data-testid="button-next-card"
+                  disabled={!queue.hasNext}
+                  title={queue.hasNext ? "Open the next queued draft" : "No more cards in the queue"}
+                  onClick={() => {
+                    setShowSavedPanel(false);
+                    queue.onNext();
+                  }}
+                  className="w-full rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] px-4 py-2.5 text-xs font-bold uppercase text-[#1A1400] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {queue.hasNext ? "Next Card →" : "No more cards"}
+                </button>
+                <button
+                  type="button"
+                  data-testid="button-back-to-queue"
+                  onClick={() => {
+                    setShowSavedPanel(false);
+                    (queue.onBackToQueue ?? (() => onSuccess(undefined)))();
+                  }}
+                  className="w-full rounded-lg border border-[var(--admin-gold)]/30 px-4 py-2 text-xs font-bold uppercase text-[var(--admin-gold)]/80 hover:bg-[var(--admin-gold)]/10"
+                >
+                  Back to Queue
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Read-only batch header + queue progress + session HUD. All display-only. */}
+        {(batch || queue) && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/50 px-3 py-2" data-testid="batch-header">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+              {batch?.customer && (
+                <span className="text-[var(--admin-ink)]">
+                  <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Customer</span> {batch.customer}
+                </span>
+              )}
+              {batch?.submissionId && (
+                <span className="text-[var(--admin-ink)]">
+                  <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Submission</span> {batch.submissionId}
+                </span>
+              )}
+              {typeof batch?.remaining === "number" && (
+                <span className="text-[var(--admin-ink)]">
+                  <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Remaining</span> {batch.remaining}
+                </span>
+              )}
+            </div>
+            {queue && (
+              <span className="text-[11px] font-bold tabular-nums text-[var(--admin-gold)]" data-testid="queue-progress" title="Position in the grading queue">
+                {queue.position} / {queue.total}
+              </span>
+            )}
+          </div>
+        )}
+        <SessionHud completed={sessionCompleted} />
+
         {/* Persistent 4-stage workflow bar — navigation + progress only. */}
         <GradingWorkflowBar currentIndex={workflowCurrent} maxReached={workflowMax} onStageClick={(i) => goToStage(i)} />
         {/* Existing auto-save status, kept visible on every stage (reuses the
@@ -1500,13 +1711,46 @@ export default function CertificateForm({
           {/* MacBook-first split: sticky read-only card preview (left ~38%) beside
               the stage controls. The preview is a plain <img> from signed display
               URLs / uploaded files — no coordinates, no protected tooling. */}
-          <div className="lg:grid lg:grid-cols-[minmax(240px,38%)_minmax(0,1fr)] lg:gap-4 lg:items-start">
+          <div className="lg:grid lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)] lg:gap-4 lg:items-start">
             <div className="mb-3 lg:mb-0 lg:sticky lg:top-16">
               <CardPreviewPanel certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
             </div>
             <div className="space-y-3 min-w-0">
           {/* ── STAGE 1 · CARD — identification fields only ── */}
           <div className={`space-y-3 ${stageClass(0)}`}>
+
+          {/* Same as last card — one-click quick-fill of the shared set/year/
+              language context (never overwrites a field that already has a value). */}
+          {lastCardContext && (lastCardContext.setName || lastCardContext.year) && (
+            <div className="flex flex-wrap items-center gap-1.5" data-testid="last-card-quick-fill">
+              {!form.setName && (
+                <button
+                  type="button"
+                  onClick={applyLastCardContext}
+                  data-testid="button-same-as-last-card"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/30 px-2.5 py-1.5 text-[11px] text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10 transition-colors"
+                  title="Fill game, set, year and language from the last card you processed"
+                >
+                  <Copy size={12} /> Same as last card{lastCardContext.setName ? `: ${lastCardContext.setName}` : ""}
+                </button>
+              )}
+              {lastCardContext.setName && (
+                <button type="button" onClick={() => copyLastCardField("setName")} data-testid="button-copy-set" className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10" title={`Copy set: ${lastCardContext.setName}`}>
+                  Copy Set
+                </button>
+              )}
+              {lastCardContext.year && (
+                <button type="button" onClick={() => copyLastCardField("year")} data-testid="button-copy-year" className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10" title={`Copy year: ${lastCardContext.year}`}>
+                  Copy Year
+                </button>
+              )}
+              {lastCardContext.language && (
+                <button type="button" onClick={() => copyLastCardField("language")} data-testid="button-copy-language" className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10" title={`Copy language: ${lastCardContext.language}`}>
+                  Copy Language
+                </button>
+              )}
+            </div>
+          )}
 
           {/* TCG search + manual entry helpers */}
           <div className="flex items-center gap-3 text-[10px]">
@@ -1595,7 +1839,10 @@ export default function CertificateForm({
             </DialogContent>
           </Dialog>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Card identity — mock-matching 3-column row (Game · Set · Set Code).
+              Set Code is its own full field (not a nested sub-input) to match the
+              workstation reference density at 1280px. */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <FormSelect
               label="Card Game *"
               value={form.cardGame}
@@ -1613,23 +1860,25 @@ export default function CertificateForm({
                 allowEditSet
                 testId="input-set-name"
               />
-              <div className="mt-1.5">
-                <label className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-wider block mb-1">
-                  Set ID (for autofill)
-                </label>
-                <input
-                  type="text"
-                  value={setId}
-                  onChange={(e) => setSetId(e.target.value)}
-                  placeholder="e.g. sv3pt5"
-                  className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-2 py-1 text-[var(--admin-ink)] text-xs placeholder:text-[var(--admin-gold)]/15 focus:outline-none focus:border-[var(--admin-gold)]/50 transition-colors"
-                  data-testid="input-set-id"
-                />
-              </div>
+              <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set">The collection name printed on the card.</p>
+            </div>
+            <div>
+              <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                Set Code
+              </label>
+              <input
+                type="text"
+                value={setId}
+                onChange={(e) => setSetId(e.target.value)}
+                placeholder="e.g. MEW or SV8"
+                className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
+                data-testid="input-set-id"
+              />
+              <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set-code">Usually a short code such as MEW or SV8.</p>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <FormInput
               label="Card Name *"
               value={form.cardName}
@@ -1666,6 +1915,7 @@ export default function CertificateForm({
                   {autofillLoading ? "..." : "Auto-fill"}
                 </button>
               </div>
+              <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-card-number">The number at the bottom of the card, for example 063/165.</p>
 
               {suggestions.length > 0 && (
                 <div
@@ -1740,6 +1990,14 @@ export default function CertificateForm({
                 </div>
               )}
             </div>
+            <FormInput
+              label="Year *"
+              value={form.year}
+              onChange={(v) => updateField("year", v)}
+              placeholder="e.g. 1999"
+              testId="input-year"
+              highlight={(autofillRan && manuallyEdited.has("year")) || flashFields.has("year")}
+            />
           </div>
 
           {!fallbackMatch && canAutofill && !autofillLoading && suggestions.length === 0 && (
@@ -2078,7 +2336,8 @@ export default function CertificateForm({
           </div>
           </div>
 
-          {/* ── stage 1 (card) continued: language + year live with card details ── */}
+          {/* ── stage 1 (card) continued: language lives with card details (year
+              now sits beside Card Number in the 3-column row above) ── */}
           <div className={`space-y-3 ${stageClass(0)}`}>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
@@ -2090,7 +2349,7 @@ export default function CertificateForm({
                   setLanguageChangedByFallback(false);
                 }}
                 testId="input-language"
-                highlight={languageChangedByFallback}
+                highlight={languageChangedByFallback || flashFields.has("language")}
               />
               {languageChangedByFallback && (
                 <p className="text-[var(--admin-amber)] text-[10px] mt-1" data-testid="text-language-fallback-notice">
@@ -2098,21 +2357,16 @@ export default function CertificateForm({
                 </p>
               )}
             </div>
-            <FormInput
-              label="Year *"
-              value={form.year}
-              onChange={(v) => updateField("year", v)}
-              placeholder="e.g. 1999"
-              testId="input-year"
-              highlight={autofillRan && manuallyEdited.has("year")}
-            />
           </div>
 
           {/* Stage 1 nav */}
           <div className="flex items-center justify-end pt-1">
             <button
               type="button"
-              onClick={() => goToStage(1)}
+              onClick={() => {
+                captureLastCardContext();
+                goToStage(1);
+              }}
               disabled={!form.cardName.trim() || !form.cardNumber.trim()}
               title={!form.cardName.trim() || !form.cardNumber.trim() ? "Enter the card name and number first." : undefined}
               data-testid="button-continue-to-rarity"
@@ -3097,6 +3351,30 @@ export function PokemonSetPicker({
   const [editSaving, setEditSaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Recently-used sets (last 8, per-device) so a grader working through a box of
+  // the same set fills it in one click. Display-only convenience — never changes
+  // stored data or the set catalogue.
+  const [recentSets, setRecentSets] = useState<{ id: string; name: string }[]>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem("mv.recentSets") || "[]");
+      return Array.isArray(raw) ? raw.filter((r) => r && r.id && r.name).slice(0, 8) : [];
+    } catch {
+      return [];
+    }
+  });
+  function recordRecentSet(id: string, name: string) {
+    if (!id || !name) return;
+    setRecentSets((prev) => {
+      const next = [{ id, name }, ...prev.filter((r) => r.id !== id)].slice(0, 8);
+      try {
+        localStorage.setItem("mv.recentSets", JSON.stringify(next));
+      } catch {
+        /* private mode — chips just won't persist */
+      }
+      return next;
+    });
+  }
+
   const errorMessage = (error: unknown) => (error instanceof Error ? error.message : "Unexpected error");
 
   useEffect(() => {
@@ -3278,6 +3556,33 @@ export function PokemonSetPicker({
       )}
       {open && (
         <div className="absolute z-30 left-0 right-0 mt-1 bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-lg shadow-lg max-h-72 overflow-y-auto">
+          {/* Recently-used sets — one-click fill, pinned above the list when the
+              grader hasn't typed a query yet. */}
+          {!q && recentSets.length > 0 && (
+            <div className="border-b border-[var(--admin-line)] px-2 py-2" data-testid="recent-sets">
+              <p className="mb-1 px-1 text-[9px] uppercase tracking-widest text-[var(--admin-gold)]/40">Recent sets</p>
+              <div className="flex flex-wrap gap-1">
+                {recentSets.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => {
+                      onChange(r.name, r.id);
+                      setQuery(r.name);
+                      recordRecentSet(r.id, r.name);
+                      setOpen(false);
+                    }}
+                    data-testid={`recent-set-${r.id}`}
+                    className="rounded border border-[var(--admin-gold)]/25 px-2 py-1 text-[10px] text-[var(--admin-ink)] hover:bg-[var(--admin-gold)]/10"
+                    title={`${r.id} · ${r.name}`}
+                  >
+                    <span className="font-mono text-[var(--admin-gold)] mr-1">{r.id}</span>
+                    {r.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {filtered.map((s) => (
             <button
               key={s.id}
@@ -3285,6 +3590,7 @@ export function PokemonSetPicker({
               onClick={() => {
                 onChange(s.name, s.id);
                 setQuery(s.name);
+                recordRecentSet(s.id, s.name);
                 setOpen(false);
               }}
               className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--admin-gold)]/5 border-b border-[var(--admin-line)] last:border-0"
