@@ -129,6 +129,8 @@ describe("12-20. protected surfaces / save / queue / Ownership-NFC / providers u
       "client/src/components/certificate-form.tsx",
       "client/src/components/admin/admin-shell.tsx",
       "client/src/pages/admin-dashboard.tsx",
+      // viewer wheel-zoom removal (same branch): read-only preview only
+      "client/src/components/grading-workflow/CardPreviewPanel.tsx",
     ]);
     for (const f of changed) {
       expect(f, `${f} must not be protected/server/schema`).not.toMatch(
