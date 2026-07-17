@@ -462,6 +462,11 @@ export default function CertificateForm({
   const [gradeLoading, setGradeLoading] = useState(false);
   const [identifyConfidence, setIdentifyConfidence] = useState<string | null>(null);
   const [identifyVerified, setIdentifyVerified] = useState(false);
+  // AI-first Card stage: the tall manual field grid is hidden by default. The
+  // grader confirms the AI/TCGdex result via read-only chips and only reveals
+  // the manual editor when they click "Manual" (or confidence comes back low).
+  // Presentation-only — every field + binding is preserved, just gated.
+  const [manualMode, setManualMode] = useState(false);
 
   // AI feature flags (for gating the Identify / Grade buttons)
   const { data: aiFlags } = useQuery<{ flags: Array<{ name: string; enabled: boolean }> }>({
@@ -1470,6 +1475,17 @@ export default function CertificateForm({
   const workflowCurrent = wfStage;
   const workflowMax = Math.max(wfMaxStage, furthestReached(stageCompletion));
 
+  // AI-first Card stage derived state (presentation only — no save/grade/API).
+  // hasCardMeta: the card already carries identification data (from AI, TCGdex
+  // or a previous edit) so we can show the read-only "verify" chips instead of a
+  // tall form. aiIdentifyAvailable: AI Identify can run (edit mode + flag on).
+  // showManualEditor: reveal the full manual field grid — default hidden, shown
+  // when the grader opts in, when identify was low-confidence, or when AI isn't
+  // available at all (new draft / flag off) so entry is never blocked.
+  const hasCardMeta = !!(form.cardName.trim() || form.setName.trim() || form.cardNumber.trim());
+  const aiIdentifyAvailable = isEdit && !!certificate?.id && identifyEnabled;
+  const showManualEditor = manualMode || identifyConfidence === "low" || !aiIdentifyAvailable;
+
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="grading-workspace">
       {/* Workstation shell — a fixed-height two-panel layout: a read-only card
@@ -1711,6 +1727,120 @@ export default function CertificateForm({
           {/* ── STAGE 1 · CARD — identification fields only ── */}
           <div className={`space-y-3 ${stageClass(0)}`}>
 
+          {/* AI-first card identification — the primary Card-stage experience.
+              The grader runs AI Identify (the EXISTING runIdentify — logic
+              unchanged), then VERIFIES the auto-filled result via read-only
+              chips. The tall manual field grid below stays hidden until they
+              choose Manual (or identify comes back low-confidence). */}
+          {aiIdentifyAvailable && (
+            <div
+              className="rounded-lg border border-[var(--admin-gold)]/25 bg-[var(--admin-gold)]/[0.03] p-3 space-y-2.5"
+              data-testid="ai-identify-panel"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
+                  <Cpu size={12} /> Card Identification
+                </span>
+                {identifyConfidence && (
+                  <span className="flex items-center gap-1.5 text-[11px]" data-testid="ai-identify-confidence">
+                    <span
+                      className={`h-2 w-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
+                    />
+                    <span
+                      className={
+                        identifyConfidence === "high"
+                          ? "text-[var(--admin-green)]"
+                          : identifyConfidence === "medium"
+                            ? "text-[var(--admin-amber)]"
+                            : "text-[var(--admin-red)]"
+                      }
+                    >
+                      {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
+                    </span>
+                  </span>
+                )}
+              </div>
+
+              {/* Identified card summary — read-only verify chips (name · set ·
+                  number · year · language). Grader confirms rather than types. */}
+              {hasCardMeta ? (
+                <div className="flex flex-wrap items-center gap-1.5" data-testid="ai-identify-summary">
+                  {[
+                    form.cardName,
+                    form.setName,
+                    form.cardNumber ? `#${form.cardNumber}` : "",
+                    form.year,
+                    form.language,
+                  ]
+                    .filter(Boolean)
+                    .map((chip, i) => (
+                      <span
+                        key={i}
+                        className="rounded border border-[var(--admin-gold)]/20 bg-[var(--admin-panel2)] px-2 py-1 text-[11px] text-[var(--admin-ink)]"
+                      >
+                        {chip}
+                      </span>
+                    ))}
+                  <button
+                    type="button"
+                    onClick={() => setManualMode(true)}
+                    data-testid="button-verify-edit"
+                    className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]"
+                  >
+                    <Pencil size={10} /> Edit
+                  </button>
+                </div>
+              ) : (
+                <p className="text-[11px] text-[var(--admin-ink-faint)]">
+                  {identifyLoading
+                    ? "Identifying…"
+                    : "Run AI Identify to auto-fill the card details, or switch to Manual entry."}
+                </p>
+              )}
+
+              {/* Primary actions: Accept · Search Again · Manual */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={runIdentify}
+                  disabled={identifyLoading}
+                  data-testid="button-ai-identify"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] px-3.5 py-1.5 text-[11px] font-bold uppercase text-[#1A1400] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  {identifyLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                  {identifyLoading ? "Identifying…" : hasCardMeta ? "Search Again" : "AI Identify"}
+                </button>
+                {hasCardMeta && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      captureLastCardContext();
+                      goToStage(1);
+                    }}
+                    disabled={!form.cardName.trim() || !form.cardNumber.trim()}
+                    title={
+                      !form.cardName.trim() || !form.cardNumber.trim()
+                        ? "Card name and number are required first."
+                        : "Confirm and continue"
+                    }
+                    data-testid="button-accept-identify"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-green)]/40 bg-[var(--admin-green)]/10 px-3.5 py-1.5 text-[11px] font-bold uppercase text-[var(--admin-green)] hover:bg-[var(--admin-green)]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                  >
+                    <Check size={12} /> Accept
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setManualMode((m) => !m)}
+                  data-testid="button-manual-entry"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/30 px-3.5 py-1.5 text-[11px] font-bold uppercase text-[var(--admin-gold)]/80 hover:bg-[var(--admin-gold)]/10 transition-colors"
+                >
+                  {showManualEditor ? "Hide manual" : "Manual"}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Same as last card — one-click quick-fill of the shared set/year/
               language context (never overwrites a field that already has a value). */}
           {lastCardContext && (lastCardContext.setName || lastCardContext.year) && (
@@ -1832,6 +1962,13 @@ export default function CertificateForm({
             </DialogContent>
           </Dialog>
 
+          {/* Manual editor — hidden by default (AI-first). Revealed via the
+              "Manual" toggle in the identification panel above, or automatically
+              when identify returns low confidence / AI is unavailable. EVERY card
+              field + binding below is preserved unchanged; only visibility is
+              gated by showManualEditor. */}
+          {showManualEditor && (
+            <div className="space-y-3" data-testid="manual-card-editor">
           {/* Card identity — mock-matching 3-column row (Game · Set · Set Code).
               Set Code is its own full field (not a nested sub-input) to match the
               workstation reference density at 1280px. */}
@@ -2057,6 +2194,8 @@ export default function CertificateForm({
                   </div>
                 </div>
               </div>
+            </div>
+          )}
             </div>
           )}
 
@@ -2948,6 +3087,20 @@ export default function CertificateForm({
           onEditRarity={() => goToStage(1)}
           onEditGrade={() => goToStage(2)}
         />
+        {/* Authentication summary — shown only for non-numeric (Authentic /
+            Authentic Altered) grade types, derived from the EXISTING form
+            gradeType. No value is invented; numeric grades render nothing here. */}
+        {isNonNum && (
+          <div
+            className="flex items-center gap-2 rounded-lg border border-[var(--admin-gold)]/15 bg-[var(--admin-gold)]/[0.02] px-2.5 py-1.5"
+            data-testid="review-authentication"
+          >
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">Authentication</span>
+            <span className="text-[12px] font-bold text-[var(--admin-ink)]">
+              {NON_NUMERIC_GRADES.find((ng) => ng.value === form.gradeType)?.description ?? form.gradeType}
+            </span>
+          </div>
+        )}
         <div className="flex items-center justify-start">
           <button
             type="button"
@@ -3398,17 +3551,35 @@ export function PokemonSetPicker({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const q = query.toLowerCase();
+  const q = query.toLowerCase().trim();
+  // Intelligent set search — rank matches so typing a collection code or a
+  // partial name surfaces the right set first, e.g. "MEW" → Scarlet & Violet 151
+  // (MEW), "PAR" → Paradox Rift, "TG12"/"SVP…" → the matching promo/gallery set.
+  // Case-insensitive fuzzy match over set code (ptcgo/collection code) AND name,
+  // reading the EXISTING /api/pokemon-sets catalogue (data source unchanged).
+  // Exact/prefix code hits outrank name hits; series is the weakest match.
+  // NOTE: on staging the card_sets catalogue is near-empty, so results may be
+  // sparse there — that's a data condition, not a UI bug.
+  const scoreSet = (s: PokemonSet): number => {
+    const code = (s.ptcgoCode || "").toLowerCase();
+    const id = s.id.toLowerCase();
+    const name = s.name.toLowerCase();
+    const series = (s.series || "").toLowerCase();
+    if (code === q || id === q) return 0; // exact collection code
+    if (code.startsWith(q) || id.startsWith(q)) return 1; // code prefix
+    if (name.startsWith(q)) return 2; // name prefix
+    if (name.includes(q)) return 3; // name substring
+    if (code.includes(q) || id.includes(q)) return 4; // code substring
+    if (series.includes(q)) return 5; // series
+    return 99; // no match
+  };
   const filtered = q
     ? sets
-        .filter(
-          (s) =>
-            s.name.toLowerCase().includes(q) ||
-            s.id.toLowerCase().includes(q) ||
-            (s.ptcgoCode || "").toLowerCase().includes(q) ||
-            s.series.toLowerCase().includes(q)
-        )
+        .map((s) => ({ s, score: scoreSet(s) }))
+        .filter((x) => x.score < 99)
+        .sort((a, b) => a.score - b.score)
         .slice(0, 12)
+        .map((x) => x.s)
     : sets.slice(0, 12);
 
   const selectedSet = sets.find(
