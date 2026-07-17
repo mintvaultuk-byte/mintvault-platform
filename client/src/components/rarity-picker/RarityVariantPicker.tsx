@@ -190,14 +190,16 @@ export function RarityVariantPicker({
         onClick={() => pickRarity(rr.value)}
         title={`${rr.label} — ${rr.description}`}
         data-testid={`rarity-chip-${rr.value}`}
-        className={`group relative flex h-[38px] min-w-[84px] max-w-[132px] items-center gap-1 rounded-md border px-1.5 py-1 text-left transition ${
+        className={`group relative flex min-h-[42px] min-w-[92px] max-w-[140px] items-center gap-1.5 rounded-md border px-2 py-1 text-left transition ${
           selected ? "border-amber-400 bg-amber-500/15 ring-2 ring-amber-400" : "border-slate-700 bg-slate-900/60 hover:border-slate-500"
         }`}
       >
         <RaritySymbol symbol={rr.symbol} size={17} />
+        {/* Code prominent, readable name beneath (beginner-friendly, matches the
+            workstation reference: "IR" over "Illustration Rare"). */}
         <span className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-[10px] font-bold text-slate-100">{rr.label}</span>
-          {rr.codes[0] && <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400">{rr.codes[0]}</span>}
+          <span className="truncate text-[11px] font-bold uppercase tracking-wide text-slate-100">{rr.codes[0] || rr.label}</span>
+          <span className="truncate text-[9px] font-normal text-slate-400">{rr.label}</span>
         </span>
         <span
           role="button"
