@@ -187,6 +187,29 @@ describe("unmanaged inventory completeness & richness", () => {
       expect(inv.has(t)).toBe(true);
     }
   });
+
+  it("the runner's own schema_migrations journal is inventoried, not unknown", () => {
+    expect(inventoriedUnmanaged()).toContain("schema_migrations");
+    expect(classifyLiveTables(["schema_migrations", ...managedTables()]).unknown).toEqual([]);
+  });
+});
+
+describe("partner network classification (Phase 1)", () => {
+  it("classifies partner_* and field_welders as partnerNetwork, never unknown", () => {
+    const c = classifyLiveObjects(
+      objs({ tables: ["partner_organisations", "partner_users", "partner_credit_ledger", "field_welders", "certificates"] }),
+    );
+    expect(c.partnerNetwork.sort()).toEqual(["field_welders", "partner_credit_ledger", "partner_organisations", "partner_users"]);
+    expect(c.managed).toContain("certificates");
+    expect(c.unknown).toEqual([]);
+  });
+
+  it("a non-partner unknown table still fails, with partner tables present", () => {
+    const res = evaluatePreflight(objs({ tables: ["partner_users", "rogue_table", ...managedTables()] }));
+    expect(res.ok).toBe(false);
+    expect(res.unknown).toEqual([{ objectType: "table", name: "rogue_table" }]);
+    expect(res.partnerNetwork).toContain("partner_users");
+  });
 });
 
 describe("destructive-SQL linter (expanded object coverage)", () => {

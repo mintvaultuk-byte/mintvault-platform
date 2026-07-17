@@ -92,6 +92,9 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
   { schema: "public", name: "bot_seen", objectType: "table", class: "unknown_investigate", purpose: "bot-seen tracking", active: false, owningSubsystem: "bot-detection (?)", reason: "confirm active", futureDisposition: "investigate", evidenceSource: INSPECTION },
   { schema: "public", name: "bot_settings", objectType: "table", class: "unknown_investigate", purpose: "bot-detection settings", active: false, owningSubsystem: "bot-detection (?)", reason: "confirm active", futureDisposition: "investigate", evidenceSource: INSPECTION },
   { schema: "public", name: "population_report", objectType: "materialized_view", class: "legacy_active", purpose: "population report (grade distribution) materialized view", active: true, owningSubsystem: "reporting", reason: "materialized view; not a Drizzle-managed table", futureDisposition: "keep; document refresh cadence", evidenceSource: INSPECTION },
+  // Created by the Phase 0.5 numbered-migration runner itself (scripts/db/migrate.ts). Present on
+  // any DB the runner has applied a migration to; intentionally outside shared/schema.ts.
+  { schema: "public", name: "schema_migrations", objectType: "table", class: "intentionally_unmanaged", purpose: "Phase 0.5 numbered-migration journal (filename/checksum/status)", active: true, owningSubsystem: "db-migration-runner", reason: "bootstrapped by scripts/db/migrate.ts, never by schema.ts", futureDisposition: "keep runner-managed", evidenceSource: "Phase 0.5 runner (scripts/db/migrate.ts)" },
 ] as const;
 
 /** Non-public schemas known and expected. Any other schema is an unknown that must fail preflight. */
@@ -109,6 +112,11 @@ export const KNOWN_ORPHAN_SEQUENCES: readonly string[] = ["ai_predictions_id_seq
 
 export function isVaultQuestName(name: string): boolean {
   return name.startsWith("vq_");
+}
+
+/** Partner Network tables are managed by drizzle-partner.config.ts + migrations/0001+; not unknown. */
+export function isPartnerNetworkName(name: string): boolean {
+  return name.startsWith("partner_") || name === "field_welders";
 }
 
 export function inventoriedTables(): string[] {
@@ -141,6 +149,7 @@ export interface Classification {
   managed: string[];
   unmanaged: string[];
   vaultQuest: string[];
+  partnerNetwork: string[]; // partner_* / field_welders — managed by drizzle-partner.config + migrations
   integrationOwned: { schema: string; name: string; kind: string }[]; // in a known non-public schema
   unknown: { objectType: string; name: string }[];
 }
@@ -154,21 +163,24 @@ export function classifyLiveObjects(objs: LiveObjects): Classification {
   const knownSchemas = new Set(KNOWN_SCHEMAS.map((s) => s.name));
   const knownOrphanSeq = new Set(KNOWN_ORPHAN_SEQUENCES);
 
-  const result: Classification = { managed: [], unmanaged: [], vaultQuest: [], integrationOwned: [], unknown: [] };
+  const result: Classification = { managed: [], unmanaged: [], vaultQuest: [], partnerNetwork: [], integrationOwned: [], unknown: [] };
 
   for (const t of objs.tables) {
     if (isVaultQuestName(t)) result.vaultQuest.push(t);
+    else if (isPartnerNetworkName(t)) result.partnerNetwork.push(t);
     else if (managedSet.has(t)) result.managed.push(t);
     else if (invTables.has(t)) result.unmanaged.push(t);
     else result.unknown.push({ objectType: "table", name: t });
   }
   for (const v of objs.views) {
     if (isVaultQuestName(v)) result.vaultQuest.push(v);
+    else if (isPartnerNetworkName(v)) result.partnerNetwork.push(v);
     else if (invViews.has(v)) result.unmanaged.push(v);
     else result.unknown.push({ objectType: "view", name: v });
   }
   for (const m of objs.matviews) {
     if (isVaultQuestName(m)) result.vaultQuest.push(m);
+    else if (isPartnerNetworkName(m)) result.partnerNetwork.push(m);
     else if (invMatviews.has(m)) result.unmanaged.push(m);
     else result.unknown.push({ objectType: "materialized_view", name: m });
   }
