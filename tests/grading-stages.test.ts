@@ -94,15 +94,16 @@ describe("card preview is read-only (spec 3)", () => {
   it("workspace places the read-only preview aside beside stage controls (MacBook split)", () => {
     // Fixed-height workstation shell: preview lives in a dedicated aside beside
     // the control panel (stages 0/1 only), not a sticky column inside the form.
-    expect(FORM).toContain("lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)]");
+    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 lg:flex-row");
+    expect(FORM).toContain("lg:w-[40%] lg:shrink-0");
     expect(FORM).toContain('data-testid="grading-preview-panel"');
     expect(FORM).toContain("<CardPreviewPanel");
   });
 });
 
 describe("compact chips v2 + region-aware defaults (spec 5-6)", () => {
-  it("chips shrank again (~38px high, 84-132px wide)", () => {
-    expect(PICKER).toContain("min-h-[42px] min-w-[92px] max-w-[140px]");
+  it("chips shrank again (~40px high, 84-124px wide)", () => {
+    expect(PICKER).toContain("min-h-[40px] min-w-[84px] max-w-[124px]");
   });
   it("modern-English quick list has no Japanese-only codes; eastern list has them", () => {
     const west = PICKER.slice(PICKER.indexOf("QUICK_RARITIES_WESTERN"), PICKER.indexOf("QUICK_RARITIES_EASTERN"));

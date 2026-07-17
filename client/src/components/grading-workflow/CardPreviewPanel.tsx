@@ -141,7 +141,7 @@ export function CardPreviewPanel({
       }}
       className={`relative overflow-hidden rounded outline-none focus-visible:ring-1 focus-visible:ring-[var(--admin-gold)]/50 ${
         zoom > 1 ? (dragging ? "cursor-grabbing" : "cursor-grab") : ""
-      } ${big ? "flex h-[80vh] w-full items-center justify-center bg-black/60" : "max-h-[40vh]"}`}
+      } ${big ? "flex h-[80vh] w-full items-center justify-center bg-black/60" : "flex min-h-0 flex-1 items-center justify-center"}`}
       data-testid="card-preview-viewport"
     >
       {url ? (
@@ -152,7 +152,7 @@ export function CardPreviewPanel({
             transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
             transition: dragging ? "none" : "transform 0.1s ease-out",
           }}
-          className={`mx-auto w-auto max-w-full origin-center rounded object-contain ${big ? "max-h-[80vh]" : "max-h-[40vh]"}`}
+          className={`mx-auto w-auto max-w-full origin-center rounded object-contain ${big ? "max-h-[80vh]" : "max-h-full"}`}
           data-testid="card-preview-image"
           draggable={false}
         />
@@ -165,7 +165,7 @@ export function CardPreviewPanel({
   );
 
   const toolbar = (
-    <div className="mb-1.5 flex items-center justify-between gap-2">
+    <div className="mb-1.5 flex shrink-0 items-center justify-between gap-2">
       <div className="flex gap-1">
         {(["front", "back"] as const).map((s) => (
           <button
@@ -202,10 +202,10 @@ export function CardPreviewPanel({
   );
 
   return (
-    <div className="rounded-lg border border-[var(--admin-gold)]/15 bg-black/20 p-2" data-testid="card-preview-panel">
+    <div className="flex h-full min-h-0 flex-col rounded-lg border border-[var(--admin-gold)]/15 bg-black/20 p-2" data-testid="card-preview-panel">
       {toolbar}
       {imageArea(false)}
-      <p className="mt-1 text-center text-[9px] text-[var(--admin-ink-faint)]">Zoom with the buttons · drag to pan when zoomed · read-only reference</p>
+      <p className="mt-1 shrink-0 text-center text-[9px] text-[var(--admin-ink-faint)]">Zoom with the buttons · drag to pan when zoomed · read-only reference</p>
 
       {fullscreen && (
         <div

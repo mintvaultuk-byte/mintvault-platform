@@ -41,9 +41,14 @@ function changedFiles(): string[] | null {
   return execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
 }
 
-describe("1. read-only preview is shorter (spec 1)", () => {
-  it("preview cap dropped to 40vh (was 56vh); fullscreen 80vh retained", () => {
-    expect(PREVIEW).toContain("max-h-[40vh]");
+describe("1. read-only preview fills the panel (spec 1)", () => {
+  it("inline card fills the panel height (flex-1 min-h-0 / max-h-full), no 40vh cap; fullscreen 80vh retained", () => {
+    // The panel is a full-height flex column and the image viewport grows to fill,
+    // so the card contain-fits the panel rather than floating in a 40vh box.
+    expect(PREVIEW).toContain("flex h-full min-h-0 flex-col"); // panel is a full-height column
+    expect(PREVIEW).toContain("flex min-h-0 flex-1 items-center justify-center"); // inline viewport grows
+    expect(PREVIEW).toContain("max-h-full"); // inline img contains to the flex-1 box
+    expect(PREVIEW).not.toContain("max-h-[40vh]"); // old fixed cap gone
     expect(PREVIEW).not.toContain("max-h-[56vh]");
     expect(PREVIEW).not.toContain("max-h-[44vh]");
     expect(PREVIEW).toContain("80vh"); // fullscreen still available for inspection
@@ -209,6 +214,7 @@ describe("15-20. protected surfaces, providers, credits", () => {
     const allowedNonTest = new Set([
       "client/src/components/certificate-form.tsx",
       "client/src/components/grading-workflow/CardPreviewPanel.tsx",
+      "client/src/components/rarity-picker/RarityVariantPicker.tsx",
       "client/src/components/grading-workflow/GradingWorkflowBar.tsx",
       "client/src/components/grading-workflow/SessionHud.tsx",
       // workstation-shell pass (same branch): layout-only shell files

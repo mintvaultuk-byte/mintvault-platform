@@ -166,6 +166,23 @@ export default function AdminShell({
   const topTitle = title ?? derived.title;
   const topCrumb = crumb ?? derived.path;
 
+  // Focus mode (e.g. the grading workstation) drops BOTH the top header chrome
+  // and the left sidebar so the workstation gets the full viewport width — just
+  // a compact header + the two-column workspace, no admin nav.
+  if (focus) {
+    return (
+      <div className="admin-root">
+        <GrainOverlay />
+        <div
+          className="admin-focus"
+          style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}
+        >
+          {children}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="admin-root">
       <GrainOverlay />
@@ -227,15 +244,6 @@ export default function AdminShell({
 
         {/* ── Main column ─────────────────────────────────────────────── */}
         <div className="admin-main">
-          {focus ? (
-            <div
-              className="admin-focus"
-              style={{ height: "100vh", display: "flex", flexDirection: "column", overflow: "hidden" }}
-            >
-              {children}
-            </div>
-          ) : (
-            <>
           <header className="admin-top">
             <div className="admin-crumb">
               <div className="admin-crumb__t">{topTitle}</div>
@@ -293,8 +301,6 @@ export default function AdminShell({
           </header>
 
           <main className="admin-scroll">{children}</main>
-            </>
-          )}
         </div>
       </div>
     </div>

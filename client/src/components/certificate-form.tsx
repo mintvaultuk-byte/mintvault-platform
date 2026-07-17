@@ -1481,17 +1481,13 @@ export default function CertificateForm({
           INSIDE the form after Card Details — safe because every workstation
           button is type="button" and handleSubmit no-ops pre-approval, so it can
           never trigger a form submit. */}
-      <div
-        className={`grid min-h-0 flex-1 grid-cols-1 lg:gap-3 ${
-          wfStage <= 1 ? "lg:grid-cols-[minmax(230px,34%)_minmax(0,1fr)]" : "lg:grid-cols-1"
-        }`}
-      >
+      <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
         {wfStage <= 1 && (
-          <aside className="mb-2 min-h-0 lg:mb-0 lg:overflow-hidden" data-testid="grading-preview-panel">
+          <aside className="min-h-0 lg:w-[40%] lg:shrink-0" data-testid="grading-preview-panel">
             <CardPreviewPanel certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
           </aside>
         )}
-        <div className="flex min-h-0 min-w-0 flex-col" data-testid="grading-control-panel">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel">
           <div className="shrink-0 space-y-2">
             {/* Combined workstation header strip — 4-stage workflow (left) + queue /
                 session stats (right). Moved out of the <form> into the fixed
