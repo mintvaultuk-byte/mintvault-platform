@@ -131,7 +131,7 @@ export function CardPreviewPanel({
       onMouseLeave={endDrag}
       tabIndex={0}
       role="group"
-      aria-label="Card preview — scroll to zoom, drag to pan, space toggles front and back"
+      aria-label="Card preview — zoom with the buttons, drag to pan when zoomed, space toggles front and back"
       onKeyDown={(e) => {
         // Space toggles front/back — only while focus is inside the preview.
         if (e.key === " " || e.code === "Space") {
