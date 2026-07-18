@@ -11,6 +11,7 @@ import { CardPreviewPanel } from "@/components/grading-workflow/CardPreviewPanel
 import { RaritySymbol } from "@/components/rarity-picker/RaritySymbol";
 import { rarityByValue, finishByValue, promoByValue, POKEMON_ERAS, languageByValueOrLabel } from "@shared/pokemon-rarity-catalogue";
 import { getDesignationLabel } from "@/lib/designationOptions";
+import { formatCollectorNumber } from "@shared/collector-number-format";
 
 export interface ReviewSummaryValues {
   certificateId: number | null;
@@ -102,7 +103,7 @@ export function ReviewSummary({
             <Row label="Name" value={v.cardName} />
             <Row label="Game" value={v.cardGame} />
             <Row label="Set" value={v.setName} />
-            <Row label="Number" value={v.cardNumber} />
+            <Row label="Number" value={formatCollectorNumber(v.cardNumber)} />
             <Row label="Year" value={v.year} />
             <Row label="Language" value={lang?.label ?? v.language} />
           </div>

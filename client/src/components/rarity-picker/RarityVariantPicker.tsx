@@ -38,6 +38,7 @@ import {
   type PokemonRarity,
   type PokemonEra,
   type StructuredCardVariant,
+  type RaritySymbol as RaritySymbolMetaType,
 } from "@shared/pokemon-rarity-catalogue";
 import { validateStructuredVariant } from "@shared/structured-variant-validate";
 import { RaritySymbol } from "./RaritySymbol";
@@ -48,6 +49,7 @@ const QUICK_RARITIES_WESTERN = [
   "common",
   "uncommon",
   "rare",
+  "silver_star_rare",
   "double_rare",
   "illustration_rare",
   "ultra_rare",
@@ -96,6 +98,109 @@ function usePersistentList(
   return [local, set];
 }
 
+// ── "Add missing rarity" — a controlled fallback for a genuine printed rarity
+// that isn't in the catalogue yet. It NEVER mutates the shared catalogue or
+// requires a schema change: every custom entry stores its stable canonical
+// value as CUSTOM_RARITY_VALUE (a real, already-validated POKEMON_RARITIES
+// member — see shared/pokemon-rarity-catalogue.ts) and carries its own
+// free-text description, which the parent form writes into the certificate's
+// EXISTING `rarityOther` metadata column via `onCustomRarityNote`. Distinct
+// custom entries are distinguished LOCALLY (by `selectedCustomId`), never by
+// the stored value, so several different custom rarities can each be added
+// and re-selected without ever touching the database. ──────────────────────
+const CUSTOM_RARITY_VALUE = "custom_unlisted";
+
+type CustomSymbolType = "black" | "silver" | "gold" | "text_only" | "no_symbol";
+const CUSTOM_SYMBOL_TYPES: { value: CustomSymbolType; label: string }[] = [
+  { value: "black", label: "Black" },
+  { value: "silver", label: "Silver" },
+  { value: "gold", label: "Gold" },
+  { value: "text_only", label: "Text-only marker" },
+  { value: "no_symbol", label: "No printed symbol" },
+];
+type CustomCategory = "international" | "japanese" | "promo" | "legacy" | "custom_other";
+const CUSTOM_CATEGORIES: { value: CustomCategory; label: string }[] = [
+  { value: "international", label: "International" },
+  { value: "japanese", label: "Japanese" },
+  { value: "promo", label: "Promo" },
+  { value: "legacy", label: "Legacy" },
+  { value: "custom_other", label: "Custom / Other" },
+];
+
+interface CustomRarityEntry {
+  id: string;
+  displayName: string;
+  code: string;
+  symbolDescription: string;
+  symbolType: CustomSymbolType;
+  starCount: number | null;
+  category: CustomCategory;
+  note: string;
+  /** Normalised name+code+symbol key used to prevent duplicate entries. */
+  dedupeKey: string;
+  /** The exact text written into the certificate's `rarityOther` field on select. */
+  composedNote: string;
+}
+
+const normCustom = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+
+/** Map the compact "symbol colour/type" + star count into a real RaritySymbol
+ *  for rendering (via the SAME contrast-safe RaritySymbol component). */
+function buildCustomSymbol(type: CustomSymbolType, starCount: number | null): RaritySymbolMetaType {
+  if (type === "no_symbol") return { shape: "none", colour: "none", glyph: "—" };
+  if (type === "text_only") return { shape: "text", colour: "white", glyph: "?" };
+  const n = starCount && starCount >= 1 ? Math.min(Math.round(starCount), 3) : 1;
+  return { shape: n > 1 ? "stars" : "star", count: n, colour: type, glyph: "★".repeat(n) };
+}
+
+function composeCustomNote(entry: {
+  displayName: string;
+  code: string;
+  symbolDescription: string;
+  symbolType: CustomSymbolType;
+  starCount: number | null;
+  category: CustomCategory;
+  note: string;
+}): string {
+  const symbolBit =
+    entry.symbolDescription.trim() ||
+    (entry.symbolType === "no_symbol"
+      ? "no printed symbol"
+      : entry.symbolType === "text_only"
+        ? "text-only marker"
+        : `${entry.starCount && entry.starCount > 1 ? `${entry.starCount} ` : ""}${entry.symbolType} ${entry.starCount === 1 || !entry.starCount ? "star" : "stars"}`);
+  const categoryLabel = CUSTOM_CATEGORIES.find((c) => c.value === entry.category)?.label ?? "Custom / Other";
+  const parts = [
+    `Custom rarity: ${entry.displayName.trim()}${entry.code.trim() ? ` (${entry.code.trim().toUpperCase()})` : ""}`,
+    symbolBit,
+    `Category: ${categoryLabel}`,
+  ];
+  if (entry.note.trim()) parts.push(`Note: ${entry.note.trim()}`);
+  return parts.join(" — ");
+}
+
+/** localStorage-backed list of admin-added custom rarities (this browser only —
+ *  no schema change; see the module comment above). */
+function useCustomRarities(): [CustomRarityEntry[], (next: CustomRarityEntry[]) => void] {
+  const KEY = "mv.customRarities";
+  const [list, setList] = useState<CustomRarityEntry[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(KEY) || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const set = (next: CustomRarityEntry[]) => {
+    setList(next);
+    try {
+      localStorage.setItem(KEY, JSON.stringify(next));
+    } catch {
+      /* ignore quota */
+    }
+  };
+  return [list, set];
+}
+
 export function RarityVariantPicker({
   value,
   onChange,
@@ -104,6 +209,7 @@ export function RarityVariantPicker({
   recent: recentProp,
   onFavouritesChange,
   onRecentChange,
+  onCustomRarityNote,
 }: {
   value?: Partial<StructuredCardVariant> | null;
   onChange?: (v: StructuredCardVariant) => void;
@@ -112,6 +218,12 @@ export function RarityVariantPicker({
   recent?: string[];
   onFavouritesChange?: (next: string[]) => void;
   onRecentChange?: (next: string[]) => void;
+  /** Called with the free-text description whenever a custom ("Add missing
+   *  rarity") entry is selected, and with `null` when the grader switches away
+   *  from a custom selection to a normal catalogue rarity. The parent writes
+   *  this into the certificate's EXISTING `rarityOther` field — no schema
+   *  change (see the CUSTOM_RARITY_VALUE comment above). */
+  onCustomRarityNote?: (note: string | null) => void;
 }) {
   const initialLang = languageByValueOrLabel(value?.language)?.value ?? "en";
   const [language, setLanguage] = useState<string>(initialLang);
@@ -126,11 +238,27 @@ export function RarityVariantPicker({
   const [showAll, setShowAll] = useState(false);
   const [favourites, setFavourites] = usePersistentList("mv.rarityFavourites", favouritesProp, onFavouritesChange);
   const [recent, setRecent] = usePersistentList("mv.rarityRecent", recentProp, onRecentChange);
+  const [customRarities, setCustomRarities] = useCustomRarities();
+  const [selectedCustomId, setSelectedCustomId] = useState<string | null>(null);
+  const [showAddRarity, setShowAddRarity] = useState(false);
+  const [addForm, setAddForm] = useState({
+    displayName: "",
+    code: "",
+    symbolDescription: "",
+    symbolType: "black" as CustomSymbolType,
+    starCount: "",
+    category: "custom_other" as CustomCategory,
+    note: "",
+  });
+  const [addError, setAddError] = useState<string | null>(null);
 
   // Region/era-aware base set; "Show all compatible" drops the era filter so
   // incomplete set data never permanently hides an option (Phase 8).
+  // CUSTOM_RARITY_VALUE is excluded from the generic list — it's reachable only
+  // via a custom chip (below) or the "Add missing rarity" form, never as a bare
+  // unlabelled catalogue entry mixed in with real printed rarities.
   const base = useMemo(
-    () => filterRarities({ language, era: showAll ? null : era || null }),
+    () => filterRarities({ language, era: showAll ? null : era || null }).filter((r) => r.value !== CUSTOM_RARITY_VALUE),
     [language, era, showAll],
   );
   const quickList = (languageByValueOrLabel(language)?.region ?? "western") === "western" ? QUICK_RARITIES_WESTERN : QUICK_RARITIES_EASTERN;
@@ -144,7 +272,7 @@ export function RarityVariantPicker({
     const inRegion = base.filter((r) => !quickSet.has(r.value));
     // Everything else in the catalogue (all regions/eras) so nothing is ever
     // permanently hidden when set data is incomplete — region set shown first.
-    const otherRegion = POKEMON_RARITIES.filter((r) => !quickSet.has(r.value) && !base.some((b) => b.value === r.value));
+    const otherRegion = POKEMON_RARITIES.filter((r) => r.value !== CUSTOM_RARITY_VALUE && !quickSet.has(r.value) && !base.some((b) => b.value === r.value));
     return [...inRegion, ...otherRegion];
   }, [base, quickRarities]);
 
@@ -175,7 +303,65 @@ export function RarityVariantPicker({
   const pickRarity = (v: string) => {
     setRarity(v);
     setRecent(addRecent(recent, v));
+    // Switching to a normal catalogue rarity leaves any previous custom note
+    // behind — only clear it if THIS picker actually set one, so an unrelated
+    // pre-existing rarityOther value (from a different flow) is never touched.
+    if (v !== CUSTOM_RARITY_VALUE && selectedCustomId) {
+      setSelectedCustomId(null);
+      onCustomRarityNote?.(null);
+    }
   };
+
+  const pickCustomRarity = (entry: CustomRarityEntry) => {
+    setRarity(CUSTOM_RARITY_VALUE);
+    setSelectedCustomId(entry.id);
+    setRecent(addRecent(recent, CUSTOM_RARITY_VALUE));
+    onCustomRarityNote?.(entry.composedNote);
+  };
+
+  function resetAddForm() {
+    setAddForm({ displayName: "", code: "", symbolDescription: "", symbolType: "black", starCount: "", category: "custom_other", note: "" });
+    setAddError(null);
+  }
+
+  function submitAddRarity() {
+    const displayName = addForm.displayName.trim();
+    if (displayName.length < 2) {
+      setAddError("Enter a display name (at least 2 characters).");
+      return;
+    }
+    const code = addForm.code.trim().toUpperCase();
+    const starCount = addForm.starCount.trim() ? Math.max(1, Math.min(5, parseInt(addForm.starCount, 10) || 1)) : null;
+    const dedupeKey = [normCustom(displayName), normCustom(code), addForm.symbolType, String(starCount ?? "")].join("|");
+    // Prevent accidental duplicates: same normalised name + code + symbol
+    // combination re-selects the EXISTING entry instead of creating a new one.
+    const existing = customRarities.find((c) => c.dedupeKey === dedupeKey);
+    if (existing) {
+      pickCustomRarity(existing);
+      setShowAddRarity(false);
+      resetAddForm();
+      return;
+    }
+    const base = {
+      displayName,
+      code,
+      symbolDescription: addForm.symbolDescription.trim(),
+      symbolType: addForm.symbolType,
+      starCount,
+      category: addForm.category,
+      note: addForm.note.trim(),
+    };
+    const entry: CustomRarityEntry = {
+      id: `custom-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
+      dedupeKey,
+      composedNote: composeCustomNote(base),
+      ...base,
+    };
+    setCustomRarities([...customRarities, entry]);
+    pickCustomRarity(entry);
+    setShowAddRarity(false);
+    resetAddForm();
+  }
 
   const chip = (rr: PokemonRarity) => {
     const selected = rarity === rr.value;
@@ -219,7 +405,40 @@ export function RarityVariantPicker({
     );
   };
 
+  /** Chip for an admin-added custom rarity. Same visual language as `chip()`,
+   *  but selection is tracked by `selectedCustomId` (not the shared
+   *  CUSTOM_RARITY_VALUE, which every custom entry stores) so distinct custom
+   *  entries never appear selected together. */
+  const customChip = (entry: CustomRarityEntry) => {
+    const selected = rarity === CUSTOM_RARITY_VALUE && selectedCustomId === entry.id;
+    const symbol = buildCustomSymbol(entry.symbolType, entry.starCount);
+    const aria = `${entry.displayName} — custom rarity — ${describeSymbol(symbol)}`;
+    return (
+      <button
+        key={entry.id}
+        type="button"
+        aria-pressed={selected}
+        aria-label={aria}
+        onClick={() => pickCustomRarity(entry)}
+        title={entry.composedNote}
+        data-testid={`rarity-chip-custom-${entry.id}`}
+        className={`group relative flex min-h-[40px] min-w-[84px] max-w-[124px] items-center gap-1 rounded-md border px-1.5 py-0.5 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${
+          selected
+            ? "border-amber-400 bg-amber-500/25 ring-2 ring-amber-400 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]"
+            : "border-dashed border-slate-600 bg-slate-900/60 hover:border-amber-400/50 hover:bg-slate-800/70"
+        }`}
+      >
+        <RaritySymbol symbol={symbol} size={17} />
+        <span className="flex min-w-0 flex-col leading-tight">
+          <span className="truncate text-[11px] font-bold uppercase tracking-wide text-slate-100">{entry.code || entry.displayName}</span>
+          <span className="truncate text-[9px] font-normal text-slate-400">{entry.displayName}</span>
+        </span>
+      </button>
+    );
+  };
+
   const selectedRarity = rarity ? rarityByValue(rarity) : undefined;
+  const selectedCustom = selectedCustomId ? customRarities.find((c) => c.id === selectedCustomId) : undefined;
 
   const pill = <T extends { value: string; label: string; description?: string }>(
     item: T,
@@ -341,28 +560,56 @@ export function RarityVariantPicker({
             </label>
           </div>
           <div className="flex flex-wrap gap-1">{quickRarities.map(chip)}</div>
-          {moreRarities.length > 0 && (
-            <>
+          {customRarities.length > 0 && (
+            <div className="mt-2">
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Custom / added by you</div>
+              <div className="flex flex-wrap gap-1" data-testid="rarity-custom-list">{customRarities.map(customChip)}</div>
+            </div>
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            {moreRarities.length > 0 && (
               <button
                 type="button"
                 onClick={() => setShowMore((s) => !s)}
                 data-testid="rarity-more"
-                className="mt-2 text-[11px] font-semibold text-slate-400 underline hover:text-slate-200"
+                className="text-[11px] font-semibold text-slate-400 underline hover:text-slate-200"
               >
                 {showMore ? "Hide" : "More rarities"} ({moreRarities.length})
               </button>
-              {showMore && <div className="mt-2 flex flex-wrap gap-1 opacity-90">{moreRarities.map(chip)}</div>}
-            </>
-          )}
-          {/* Selected-item info line — the description lives here, not on every tile. */}
-          {selectedRarity && (
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                resetAddForm();
+                setShowAddRarity(true);
+              }}
+              data-testid="button-add-missing-rarity"
+              className="inline-flex items-center gap-1 rounded-md border border-dashed border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 outline-none transition hover:border-amber-400/60 hover:text-amber-200 focus-visible:ring-2 focus-visible:ring-amber-300"
+            >
+              + Add missing rarity
+            </button>
+          </div>
+          {showMore && <div className="mt-2 flex flex-wrap gap-1 opacity-90">{moreRarities.map(chip)}</div>}
+          {/* Selected-item info line — the description lives here, not on every
+              tile, and is never truncated so long descriptions stay readable. */}
+          {selectedRarity && selectedRarity.value === CUSTOM_RARITY_VALUE && selectedCustom ? (
             <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-800/40 bg-amber-950/10 px-2 py-1.5" data-testid="rarity-selected-info">
-              <RaritySymbol symbol={selectedRarity.symbol} size={18} />
+              <RaritySymbol symbol={buildCustomSymbol(selectedCustom.symbolType, selectedCustom.starCount)} size={18} />
               <span className="text-[11px] leading-tight text-slate-300">
-                <b className="text-slate-100">{selectedRarity.label}</b>
-                {selectedRarity.codes[0] ? ` (${selectedRarity.codes.join("/")})` : ""} — {selectedRarity.description}
+                <b className="text-slate-100">{selectedCustom.displayName}</b>
+                {selectedCustom.code ? ` (${selectedCustom.code})` : ""} — {selectedCustom.composedNote}
               </span>
             </div>
+          ) : (
+            selectedRarity && (
+              <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-800/40 bg-amber-950/10 px-2 py-1.5" data-testid="rarity-selected-info">
+                <RaritySymbol symbol={selectedRarity.symbol} size={18} />
+                <span className="text-[11px] leading-tight text-slate-300">
+                  <b className="text-slate-100">{selectedRarity.label}</b>
+                  {selectedRarity.codes[0] ? ` (${selectedRarity.codes.join("/")})` : ""} — {selectedRarity.description}
+                </span>
+              </div>
+            )
           )}
         </div>
       )}
@@ -468,6 +715,154 @@ export function RarityVariantPicker({
         </div>
         </details>
       </div>
+
+      {/* "Add missing rarity" — compact controlled form (spec: never uncontrolled
+          free-text corruption of the standard taxonomy). Every field is a
+          bounded input/select; the composed result is stored via the stable
+          CUSTOM_RARITY_VALUE + a free-text note (see the module comment above). */}
+      {showAddRarity && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowAddRarity(false)}
+          data-testid="add-missing-rarity-modal"
+        >
+          <div
+            className="w-full max-w-sm space-y-3 rounded-xl border border-slate-700 bg-slate-950 p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-100">Add missing rarity</p>
+              <button type="button" onClick={() => setShowAddRarity(false)} className="text-slate-400 hover:text-slate-200" aria-label="Close">
+                ✕
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400">
+              For a genuine printed rarity that isn’t in the list yet. This does not change the standard taxonomy —
+              it stores your description alongside the certificate.
+            </p>
+
+            <label className="block">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Display name *</span>
+              <input
+                type="text"
+                value={addForm.displayName}
+                onChange={(e) => setAddForm((f) => ({ ...f, displayName: e.target.value }))}
+                placeholder="e.g. Full Art Secret Rare"
+                data-testid="add-rarity-display-name"
+                className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-400"
+              />
+            </label>
+
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Short code</span>
+                <input
+                  type="text"
+                  value={addForm.code}
+                  onChange={(e) => setAddForm((f) => ({ ...f, code: e.target.value }))}
+                  placeholder="e.g. FAS"
+                  data-testid="add-rarity-code"
+                  className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-400"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Stars (if any)</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={addForm.starCount}
+                  onChange={(e) => setAddForm((f) => ({ ...f, starCount: e.target.value }))}
+                  placeholder="e.g. 1"
+                  data-testid="add-rarity-star-count"
+                  className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-400"
+                />
+              </label>
+            </div>
+
+            <label className="block">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Symbol description</span>
+              <input
+                type="text"
+                value={addForm.symbolDescription}
+                onChange={(e) => setAddForm((f) => ({ ...f, symbolDescription: e.target.value }))}
+                placeholder="e.g. single silver star with a thin outline"
+                data-testid="add-rarity-symbol-description"
+                className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-400"
+              />
+            </label>
+
+            <div className="grid grid-cols-2 gap-2">
+              <label className="block">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Symbol colour/type</span>
+                <select
+                  value={addForm.symbolType}
+                  onChange={(e) => setAddForm((f) => ({ ...f, symbolType: e.target.value as CustomSymbolType }))}
+                  data-testid="add-rarity-symbol-type"
+                  className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-400"
+                >
+                  {CUSTOM_SYMBOL_TYPES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Category</span>
+                <select
+                  value={addForm.category}
+                  onChange={(e) => setAddForm((f) => ({ ...f, category: e.target.value as CustomCategory }))}
+                  data-testid="add-rarity-category"
+                  className="mt-1 w-full rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-400"
+                >
+                  {CUSTOM_CATEGORIES.map((c) => (
+                    <option key={c.value} value={c.value}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <label className="block">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Internal note (optional)</span>
+              <textarea
+                value={addForm.note}
+                onChange={(e) => setAddForm((f) => ({ ...f, note: e.target.value }))}
+                rows={2}
+                placeholder="Anything else worth recording for review"
+                data-testid="add-rarity-note"
+                className="mt-1 w-full resize-none rounded-md border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100 outline-none focus:border-amber-400"
+              />
+            </label>
+
+            {addError && (
+              <p className="text-[11px] text-red-300" data-testid="add-rarity-error">
+                {addError}
+              </p>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowAddRarity(false)}
+                className="rounded-md px-3 py-1.5 text-[11px] font-semibold text-slate-400 hover:text-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitAddRarity}
+                data-testid="add-rarity-submit"
+                className="rounded-md border border-amber-400 bg-amber-500/25 px-3 py-1.5 text-[11px] font-bold text-amber-100 hover:bg-amber-500/35"
+              >
+                Add &amp; select
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

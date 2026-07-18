@@ -3,9 +3,10 @@
  * (the admin grading form is auth-gated, so we assert on the committed source the
  * way the rest of the grading suite does). Proves:
  *   - the Card stage leads with an AI-first identification panel whose primary
- *     actions are Accept / Search Again / Manual (using the EXISTING runIdentify);
- *   - the tall manual field grid is gated behind `manualMode` / `showManualEditor`
- *     and every card field + binding is preserved;
+ *     action is Accept, with Search Again secondary (using the EXISTING runIdentify);
+ *   - the manual card-detail field grid is ALWAYS visible (permanent, not gated
+ *     behind a "Manual" toggle/accordion — spec: normal verification process, not
+ *     an exceptional fallback) and every card field + binding is preserved;
  *   - intelligent set search is wired to the existing /api/pokemon-sets catalogue;
  *   - the Review stage stays a compact dashboard (ReviewSummary + authentication);
  *   - NO protected grading file (client/src/components/grading/, MVGS/scoring/
@@ -42,20 +43,19 @@ describe("AI-first Card stage (spec 1-2)", () => {
     expect(FORM).toContain('data-testid="ai-identify-summary"'); // read-only verify chips
     expect(FORM).toContain('data-testid="ai-identify-confidence"'); // high/medium/low indicator
   });
-  it("exposes the three primary actions: Accept · Search Again · Manual", () => {
+  it("exposes Accept as primary, Search Again secondary, and a jump-to-fields affordance", () => {
     expect(FORM).toContain('data-testid="button-accept-identify"');
     expect(FORM).toContain('data-testid="button-ai-identify"');
     expect(FORM).toContain('data-testid="button-manual-entry"');
     expect(FORM).toContain("Accept");
     expect(FORM).toContain("Search Again");
-    expect(FORM).toContain('"Hide manual" : "Manual"'); // Manual toggle label
   });
   it("uses the EXISTING runIdentify — no new identify logic, no save/API in the panel", () => {
     const panel = slice('data-testid="ai-identify-panel"', "Same as last card");
     expect(panel).toContain("onClick={runIdentify}"); // Search Again / AI Identify
     expect(panel).toContain("goToStage(1)"); // Accept advances the stage only
     expect(panel).toContain("captureLastCardContext"); // same capture as the existing Continue
-    expect(panel).toContain("setManualMode"); // Manual toggles local state
+    expect(panel).toContain("manualEditorRef.current?.scrollIntoView"); // jump to the (always-visible) fields
     // The panel triggers no persistence / provider / grade work of its own.
     expect(panel).not.toMatch(/fetch\(|apiRequest|buildCertFormData|method:\s*"(POST|PUT|PATCH)"|runGrade|mutate/);
   });
@@ -65,15 +65,15 @@ describe("AI-first Card stage (spec 1-2)", () => {
   });
 });
 
-describe("manual editor gated behind manualMode (spec 1)", () => {
-  it("manualMode local state + showManualEditor derivation exist", () => {
-    expect(FORM).toContain("const [manualMode, setManualMode] = useState(false)");
-    expect(FORM).toContain("showManualEditor");
-    expect(FORM).toContain("const showManualEditor = manualMode || identifyConfidence === \"low\" || !aiIdentifyAvailable");
+describe("manual card-detail fields are ALWAYS visible (spec: normal process, not a fallback)", () => {
+  it("no manualMode/showManualEditor gating exists anywhere in the form", () => {
+    expect(FORM).not.toContain("manualMode");
+    expect(FORM).not.toContain("showManualEditor");
   });
-  it("the manual field grid renders only when showManualEditor is true", () => {
-    expect(FORM).toContain("{showManualEditor && (");
-    expect(FORM).toContain('data-testid="manual-card-editor"');
+  it("the manual field grid renders unconditionally — no accordion/hidden panel", () => {
+    expect(FORM).toContain('<div ref={manualEditorRef} className="space-y-3" data-testid="manual-card-editor">');
+    // not wrapped in any {condition && (...)} gate.
+    expect(FORM).not.toContain("{showManualEditor && (");
   });
   it("ALL card fields + bindings are preserved inside the manual editor", () => {
     for (const id of [
@@ -145,6 +145,11 @@ describe("protected surfaces untouched (hard rule)", () => {
     "client/src/components/admin/admin-shell.tsx",
     "client/src/pages/admin-dashboard.tsx",
     "client/src/components/grading-workflow/CardPreviewPanel.tsx",
+    "client/src/lib/lookup-errors.ts",
+    // Stage 1/2 usability pass (same branch): rarity contrast + custom-rarity
+    // workflow.
+    "client/src/components/rarity-picker/RaritySymbol.tsx",
+    "client/src/components/grading-workflow/ReviewSummary.tsx",
   ]);
 
   it("the grading release (PR #214) changed NO grading-protected / schema / migration file", () => {

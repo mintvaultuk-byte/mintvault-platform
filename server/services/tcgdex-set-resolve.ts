@@ -16,18 +16,13 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { searchCardsByName } from "./tcgdex";
+import { parseCollectorNumber, stripZeros } from "./collector-number";
 
 export interface ResolvedSet {
   set_id: string;
   set_name: string;
   release_date: string | null;
 }
-
-/** Compare card numbers ignoring leading zeros ("075" === "75"). */
-const stripZeros = (s: string): string =>
-  String(s ?? "")
-    .trim()
-    .replace(/^0+/, "") || "0";
 
 /** Same normalization custom_sets / tcgdex_sets use. */
 const normSetId = (id: string): string =>
@@ -48,10 +43,7 @@ export async function resolveEnglishSetByNameAndNumber(name: string, rawNumber: 
   const numRaw = String(rawNumber || "").trim();
   if (nm.length < 2 || !numRaw) return null;
 
-  // "199/197" → local "199", total 197; "4/102" → "4", 102; "SV107" → "SV107", no total.
-  const [localPart, totalPart] = numRaw.split("/");
-  const localKey = stripZeros(localPart);
-  const total = totalPart && /^\d+$/.test(totalPart.trim()) ? parseInt(totalPart.trim(), 10) : null;
+  const { localKey, total } = parseCollectorNumber(numRaw);
 
   const cards = await searchCardsByName(nm, "en");
   if (!cards.length) return null;
@@ -80,8 +72,12 @@ export async function resolveEnglishSetByNameAndNumber(name: string, rawNumber: 
     `)
   ).rows as any[];
 
-  // Disambiguate by the printed total (card count) when the AI supplied it.
-  const filtered = total != null ? rows.filter((r) => Number(r.total_cards) === total) : rows;
+  // Disambiguate by the printed total (card count) when the AI supplied it, but
+  // never do WORSE than the no-total case: if the total narrows to a non-empty
+  // subset use it; otherwise fall back to all candidate rows (a prefixed subset
+  // such as TG (30) may be catalogued under the parent set's count).
+  const byTotal = total != null ? rows.filter((r) => Number(r.total_cards) === total) : [];
+  const filtered = byTotal.length > 0 ? byTotal : rows;
 
   // Exactly one → confirmed. 0 (not in English catalogue) or >1 (ambiguous) → blank.
   if (filtered.length !== 1) return null;

@@ -94,8 +94,8 @@ describe("card preview is read-only (spec 3)", () => {
   it("workspace places the read-only preview aside beside stage controls (MacBook split)", () => {
     // Fixed-height workstation shell: preview lives in a dedicated aside beside
     // the control panel (stages 0/1 only), not a sticky column inside the form.
-    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 lg:flex-row");
-    expect(FORM).toContain("lg:w-[40%] lg:shrink-0");
+    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
+    expect(FORM).toContain("md:w-[40%] md:shrink-0");
     expect(FORM).toContain('data-testid="grading-preview-panel"');
     expect(FORM).toContain("<CardPreviewPanel");
   });

@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from "react";
+import { classifyLookupError } from "@/lib/lookup-errors";
+import { displayCollectorNumber } from "@shared/collector-number-format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
 import { GradingWorkflowBar } from "@/components/grading-workflow/GradingWorkflowBar";
@@ -462,11 +464,25 @@ export default function CertificateForm({
   const [gradeLoading, setGradeLoading] = useState(false);
   const [identifyConfidence, setIdentifyConfidence] = useState<string | null>(null);
   const [identifyVerified, setIdentifyVerified] = useState(false);
-  // AI-first Card stage: the tall manual field grid is hidden by default. The
-  // grader confirms the AI/TCGdex result via read-only chips and only reveals
-  // the manual editor when they click "Manual" (or confidence comes back low).
-  // Presentation-only — every field + binding is preserved, just gated.
-  const [manualMode, setManualMode] = useState(false);
+  // The PROPOSED identification from the last SUCCESSFUL AI identify — kept
+  // separate from the form so the panel never presents stale existing
+  // certificate values (e.g. a previous Rayquaza/#014) as a new result. Null
+  // until a real result arrives; cleared on any identify failure.
+  const [identifyResult, setIdentifyResult] = useState<{
+    name: string;
+    number: string;
+    year: string;
+    language: string;
+    rarity: string;
+    variant: string;
+  } | null>(null);
+  // Structured error for the TCG search dialog (distinguishes a transport /
+  // provider failure from a legitimate zero-result).
+  const [tcgError, setTcgError] = useState<string | null>(null);
+  // Manual card-detail fields are part of the NORMAL verification process (not
+  // an exceptional fallback) and always render — see manualEditorRef below,
+  // used only to scroll them into view from the "Edit" affordance.
+  const manualEditorRef = useRef<HTMLDivElement>(null);
 
   // AI feature flags (for gating the Identify / Grade buttons)
   const { data: aiFlags } = useQuery<{ flags: Array<{ name: string; enabled: boolean }> }>({
@@ -547,12 +563,18 @@ export default function CertificateForm({
 
     const cacheKey = `${form.cardGame || "pokemon"}:${query.trim().toLowerCase()}`;
     if (tcgCache.has(cacheKey)) {
+      setTcgError(null);
       setTcgResults(tcgCache.get(cacheKey)!);
       return;
     }
 
     setTcgLoading(true);
+    setTcgError(null);
     tcgDebounceRef.current = setTimeout(async () => {
+      // Transport vs response: a thrown fetch = server unreachable; a non-2xx =
+      // classified provider/auth/invalid error. Both must be distinguishable from
+      // a legitimate empty result set (which is NOT an error).
+      let res: Response;
       try {
         const gameSlug = (form.cardGame || "pokemon")
           .toLowerCase()
@@ -560,14 +582,29 @@ export default function CertificateForm({
           .replace(/[^a-z0-9]/g, "");
         const fetchUrl = `/api/admin/card-lookup?game=${encodeURIComponent(gameSlug)}&query=${encodeURIComponent(query.trim())}&mode=wildcard`;
         console.log("[tcg-search] fetching:", fetchUrl);
-        const res = await fetch(fetchUrl, { credentials: "include" });
-        if (!res.ok) throw new Error("Search failed");
-        const data = await res.json();
+        res = await fetch(fetchUrl, { credentials: "include" });
+      } catch (netErr) {
+        setTcgResults([]);
+        setTcgError(classifyLookupError({ thrown: netErr }).message);
+        setTcgLoading(false);
+        return;
+      }
+      try {
+        let data: any = null;
+        try {
+          data = await res.json();
+        } catch {
+          /* non-JSON */
+        }
+        if (!res.ok) {
+          setTcgResults([]);
+          setTcgError(classifyLookupError({ status: res.status, body: data }).message);
+          return;
+        }
         const results = Array.isArray(data) ? data : [];
         tcgCache.set(cacheKey, results);
+        setTcgError(null); // success — an empty list here is a real zero-result, not an error
         setTcgResults(results);
-      } catch {
-        setTcgResults([]);
       } finally {
         setTcgLoading(false);
       }
@@ -583,13 +620,25 @@ export default function CertificateForm({
       year: card.year || prev.year,
       rarity: card.rarity || prev.rarity,
     }));
+    // A manually-selected TCG card IS a confirmed result — reflect it as the
+    // proposed/verified identification so the panel shows it (not stale data).
+    setIdentifyResult({
+      name: card.name || "",
+      number: card.number || "",
+      year: card.year || "",
+      language: form.language || "",
+      rarity: card.rarity || "",
+      variant: "",
+    });
+    setIdentifyVerified(true);
     setManuallyVerified(true);
     setTcgSearchOpen(false);
     setTcgQuery("");
     setTcgResults([]);
+    setTcgError(null);
     toast({
       title: "Card selected",
-      description: `${card.name} — ${card.setName}${card.number ? ` #${card.number}` : ""}`,
+      description: `${card.name} — ${card.setName}${card.number ? ` ${displayCollectorNumber(card.number)}` : ""}`,
     });
 
     // Sync manual verification to AI panel via the existing pipeline
@@ -621,14 +670,35 @@ export default function CertificateForm({
     if (!isEdit || !certificate?.id) return;
     setIdentifyLoading(true);
     setIdentifyConfidence(null);
+    // Transport layer: fetch() throws only when the request never reaches the
+    // server (down/offline) — surface an actionable message, not "Failed to fetch".
+    let res: Response;
     try {
-      const res = await fetch(`/api/admin/certificates/${certificate.id}/identify`, {
+      res = await fetch(`/api/admin/certificates/${certificate.id}/identify`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Identify failed");
+    } catch (netErr) {
+      const c = classifyLookupError({ thrown: netErr });
+      setIdentifyResult(null); // never leave a stale result looking current
+      toast({ title: c.title, description: c.message, variant: "destructive" });
+      setIdentifyLoading(false);
+      return;
+    }
+    try {
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        /* non-JSON error body */
+      }
+      if (!res.ok) {
+        const c = classifyLookupError({ status: res.status, body: data });
+        setIdentifyResult(null);
+        toast({ title: c.title, description: c.message, variant: "destructive" });
+        return;
+      }
 
       // /identify returns everything NESTED under `identification`, with
       // detected_* names + set_code — NOT flat card_name/set_id. Read from there.
@@ -639,32 +709,42 @@ export default function CertificateForm({
       setIdentifyVerified(!!id.verified);
 
       if (id.detected_name || id.set_code || id.detected_number) {
-        const isEmpty = (v: any) => !v || v === "" || v === "(pending)" || v === "(untitled)";
-        const overwrite = !!id.verified || id.confidence === "high";
-        // Overwrite on high-confidence/verified, otherwise only fill blanks — fields stay editable.
-        const pick = (next: any, prev: any) => (overwrite ? next || prev : isEmpty(prev) ? next || prev : prev);
         const aiVariant = deriveVariantFromIdentification(id);
+        // Record the PROPOSED identification separately from the form so the panel
+        // shows the real result (and never the pre-existing certificate values).
+        setIdentifyResult({
+          name: id.detected_name || id.officialName || "",
+          number: id.detected_number || "",
+          year: id.detected_year || "",
+          language: id.detected_language || "",
+          rarity: id.detected_rarity || "",
+          variant: aiVariant || "",
+        });
+        const isEmpty = (v: any) => !v || v === "" || v === "(pending)" || v === "(untitled)";
+        // Fill BLANK fields only — never overwrite populated certificate details
+        // from the AI guess (the grader confirms via Accept, or TCGdex enrichment
+        // below supplies the authoritative set/name on a confirmed match).
+        const fillBlank = (next: any, prev: any) => (isEmpty(prev) ? next || prev : prev);
         setForm((prev) => ({
           ...prev,
-          cardName: pick(id.detected_name, prev.cardName),
+          cardName: fillBlank(id.detected_name, prev.cardName),
           // setName is intentionally NOT taken from the AI — TCGdex is the SOLE
           // source of set metadata (runTcgdexPrefill below). Prefilling it from
           // detected_set was the original Scarlet & Violet mis-prefill bug.
-          cardNumber: pick(id.detected_number, prev.cardNumber),
-          year: pick(id.detected_year, prev.year),
-          rarity: pick(id.detected_rarity, prev.rarity),
+          cardNumber: fillBlank(id.detected_number, prev.cardNumber),
+          year: fillBlank(id.detected_year, prev.year),
+          rarity: fillBlank(id.detected_rarity, prev.rarity),
           // Language is deterministic (script-based detection), so always fill it when
-          // identify returns one — don't gate on confidence like the other fields, or the
-          // non-empty "English" default keeps it stuck. The TCGdex lookup below overrides
-          // with the authoritative resolved language when a set resolves. Stays editable.
+          // identify returns one — don't gate like the other fields, or the non-empty
+          // "English" default keeps it stuck. The TCGdex lookup below overrides with the
+          // authoritative resolved language when a set resolves. Stays editable.
           language: id.detected_language || prev.language,
-          // Variant now fills from the AI's finish detection (previously left
-          // blank). Same fill/overwrite guard as the other fields — stays editable.
-          variant: pick(aiVariant, prev.variant),
+          // Variant fills from the AI's finish detection into a blank slot only.
+          variant: fillBlank(aiVariant, prev.variant),
         }));
         toast({
           title: "Card identified",
-          description: `${id.detected_name || id.officialName || "Card"}${id.detected_number ? ` · #${id.detected_number}` : ""}`,
+          description: `${id.detected_name || id.officialName || "Card"}${id.detected_number ? ` · ${displayCollectorNumber(id.detected_number)}` : ""}`,
         });
 
         // TCGdex enrichment — the ONLY source of canonical set/name/year. Fires
@@ -693,14 +773,19 @@ export default function CertificateForm({
           });
         }
       } else {
+        // A genuine zero-result (the request succeeded, no card matched) — NOT a
+        // transport error. Clear any prior proposal so nothing stale is shown.
+        setIdentifyResult(null);
         toast({
-          title: "Couldn't identify confidently",
-          description: "Please fill in card details manually",
+          title: "No confident match",
+          description: "The card couldn’t be identified automatically — enter the details manually below.",
           variant: "destructive",
         });
       }
     } catch (e: any) {
-      toast({ title: "Identify failed", description: e.message, variant: "destructive" });
+      const c = classifyLookupError({ thrown: e });
+      setIdentifyResult(null);
+      toast({ title: c.title, description: c.message, variant: "destructive" });
     } finally {
       setIdentifyLoading(false);
     }
@@ -726,7 +811,19 @@ export default function CertificateForm({
         `/api/admin/tcgdex-lookup?code=${encodeURIComponent(setCode)}&number=${encodeURIComponent(cardNumber)}&lang=${encodeURIComponent(lang)}${certDbId ? `&certId=${certDbId}` : ""}`,
         { credentials: "include" }
       );
-      if (!r.ok) return;
+      if (!r.ok) {
+        let body: { error?: string } | null = null;
+        try {
+          body = await r.json();
+        } catch {
+          /* non-JSON */
+        }
+        const c = classifyLookupError({ status: r.status, body });
+        // Best-effort enrichment, but surface a transport/provider/auth failure so
+        // the grader knows the set wasn't confirmed (not a silently-blank Set).
+        if (c.kind !== "not_found") toast({ title: c.title, description: c.message, variant: "destructive" });
+        return;
+      }
       const td = await r.json();
       if (!td.found) return;
 
@@ -763,8 +860,9 @@ export default function CertificateForm({
 
       const badge = td.auto_added ? " (set auto-added)" : td.needs_manual_add ? " (set needs manual add)" : "";
       toast({ title: `TCGdex enriched${badge}`, description: `${td.card_name} — ${td.set_name}` });
-    } catch {
-      // Silent — TCGdex enrichment is best-effort
+    } catch (e) {
+      const c = classifyLookupError({ thrown: e });
+      toast({ title: c.title, description: c.message, variant: "destructive" });
     }
   }
 
@@ -779,7 +877,17 @@ export default function CertificateForm({
         `/api/admin/tcgdex-resolve-set?name=${encodeURIComponent(name)}&number=${encodeURIComponent(cardNumber)}`,
         { credentials: "include" }
       );
-      if (!r.ok) return;
+      if (!r.ok) {
+        let body: { error?: string } | null = null;
+        try {
+          body = await r.json();
+        } catch {
+          /* non-JSON */
+        }
+        const c = classifyLookupError({ status: r.status, body });
+        if (c.kind !== "not_found") toast({ title: c.title, description: c.message, variant: "destructive" });
+        return;
+      }
       const td = await r.json();
       if (!td.found) return;
       // Same designation split as runTcgdexPrefill (owner ruling, option B).
@@ -793,8 +901,10 @@ export default function CertificateForm({
           : {}),
       }));
       toast({ title: "TCGdex set resolved", description: `${name} → ${td.set_name}` });
-    } catch {
-      // Best-effort — leave Set blank on any failure.
+    } catch (e) {
+      const c = classifyLookupError({ thrown: e });
+      // Only a transport failure is worth a toast here; anything else leaves Set blank.
+      if (c.kind === "network") toast({ title: c.title, description: c.message, variant: "destructive" });
     }
   }
 
@@ -1477,17 +1587,17 @@ export default function CertificateForm({
 
   // AI-first Card stage derived state (presentation only — no save/grade/API).
   // hasCardMeta: the card already carries identification data (from AI, TCGdex
-  // or a previous edit) so we can show the read-only "verify" chips instead of a
-  // tall form. aiIdentifyAvailable: AI Identify can run (edit mode + flag on).
-  // showManualEditor: reveal the full manual field grid — default hidden, shown
-  // when the grader opts in, when identify was low-confidence, or when AI isn't
-  // available at all (new draft / flag off) so entry is never blocked.
+  // or a previous edit) so we can show the read-only "verify" chips above the
+  // (always-visible) manual fields instead of a plain prompt.
+  // aiIdentifyAvailable: AI Identify can run (edit mode + flag on).
   const hasCardMeta = !!(form.cardName.trim() || form.setName.trim() || form.cardNumber.trim());
   const aiIdentifyAvailable = isEdit && !!certificate?.id && identifyEnabled;
-  const showManualEditor = manualMode || identifyConfidence === "low" || !aiIdentifyAvailable;
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="grading-workspace">
+    <div
+      className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]"
+      data-testid="grading-workspace"
+    >
       {/* Workstation shell — a fixed-height two-panel layout: a read-only card
           preview aside (stages 0/1 only) beside the control panel that holds the
           header strip + identification tools (fixed) and the scrollable form.
@@ -1497,9 +1607,9 @@ export default function CertificateForm({
           INSIDE the form after Card Details — safe because every workstation
           button is type="button" and handleSubmit no-ops pre-approval, so it can
           never trigger a form submit. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row">
         {wfStage <= 1 && (
-          <aside className="min-h-0 lg:w-[40%] lg:shrink-0" data-testid="grading-preview-panel">
+          <aside className="min-h-0 max-md:max-h-[55vh] md:w-[40%] md:shrink-0" data-testid="grading-preview-panel">
             <CardPreviewPanel fill certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
           </aside>
         )}
@@ -1642,7 +1752,7 @@ export default function CertificateForm({
                 goToStage(2);
               }
             }}
-            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto lg:pr-1"
+            className="min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"
           >
         {/* "✓ Saved" confirmation toast — fades ~2.5s after a successful save. */}
         {savedToast && (
@@ -1768,34 +1878,58 @@ export default function CertificateForm({
                 )}
               </div>
 
-              {/* Identified card summary — read-only verify chips (name · set ·
-                  number · year · language). Grader confirms rather than types. */}
-              {hasCardMeta ? (
-                <div className="flex flex-wrap items-center gap-1.5" data-testid="ai-identify-summary">
-                  {[
-                    form.cardName,
-                    form.setName,
-                    form.cardNumber ? `#${form.cardNumber}` : "",
-                    form.year,
-                    form.language,
-                  ]
-                    .filter(Boolean)
-                    .map((chip, i) => (
-                      <span
-                        key={i}
-                        className="rounded border border-[var(--admin-gold)]/20 bg-[var(--admin-panel2)] px-2 py-1 text-[11px] text-[var(--admin-ink)]"
-                      >
-                        {chip}
-                      </span>
-                    ))}
-                  <button
-                    type="button"
-                    onClick={() => setManualMode(true)}
-                    data-testid="button-verify-edit"
-                    className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]"
-                  >
-                    <Pencil size={10} /> Edit
-                  </button>
+              {/* Result summary. Three distinct states so stale certificate data is
+                  NEVER shown as if it were a fresh identification:
+                    • identifyResult set  → the PROPOSED result (from AI/TCGdex), verify chips.
+                    • no result, cert has existing data → clearly labelled EXISTING data.
+                    • otherwise → prompt to identify or enter manually. */}
+              {identifyResult ? (
+                <div className="space-y-1" data-testid="ai-identify-summary">
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/60">Proposed — verify</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[
+                      identifyResult.name,
+                      displayCollectorNumber(identifyResult.number),
+                      identifyResult.year,
+                      identifyResult.language,
+                      identifyResult.rarity,
+                    ]
+                      .filter(Boolean)
+                      .map((chip, i) => (
+                        <span
+                          key={i}
+                          className="rounded border border-[var(--admin-gold)]/20 bg-[var(--admin-panel2)] px-2 py-1 text-[11px] text-[var(--admin-ink)]"
+                        >
+                          {chip}
+                        </span>
+                      ))}
+                    <button
+                      type="button"
+                      onClick={() => manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      data-testid="button-verify-edit"
+                      title="The fields are always editable below — jump to them"
+                      className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]"
+                    >
+                      <Pencil size={10} /> Edit
+                    </button>
+                  </div>
+                </div>
+              ) : hasCardMeta ? (
+                <div className="space-y-1" data-testid="ai-existing-details">
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-faint)]">Existing certificate details</span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {[form.cardName, displayCollectorNumber(form.cardNumber), form.setName, form.year]
+                      .filter(Boolean)
+                      .map((chip, i) => (
+                        <span
+                          key={i}
+                          className="rounded border border-[var(--admin-line)] bg-transparent px-2 py-1 text-[11px] text-[var(--admin-ink-dim)]"
+                        >
+                          {chip}
+                        </span>
+                      ))}
+                  </div>
+                  <p className="text-[10px] text-[var(--admin-ink-faint)]">Run AI Identify to propose an update, or edit manually — these are not a new result.</p>
                 </div>
               ) : (
                 <p className="text-[11px] text-[var(--admin-ink-faint)]">
@@ -1810,18 +1944,34 @@ export default function CertificateForm({
                   the secondary outline; Manual stays visually quiet. Before any
                   match exists, AI Identify is the strong primary. */}
               <div className="flex flex-wrap items-center gap-2">
-                {hasCardMeta && (
+                {(identifyResult || hasCardMeta) && (
                   <button
                     type="button"
                     onClick={() => {
+                      // Accepting a proposed result is the ONLY point where it
+                      // overwrites populated certificate fields (req: don't clobber
+                      // until the grader confirms). Manual-only flow just advances.
+                      if (identifyResult) {
+                        setForm((prev) => ({
+                          ...prev,
+                          cardName: identifyResult.name || prev.cardName,
+                          cardNumber: identifyResult.number || prev.cardNumber,
+                          year: identifyResult.year || prev.year,
+                          language: identifyResult.language || prev.language,
+                          rarity: identifyResult.rarity || prev.rarity,
+                          variant: identifyResult.variant || prev.variant,
+                        }));
+                      }
                       captureLastCardContext();
                       goToStage(1);
                     }}
-                    disabled={!form.cardName.trim() || !form.cardNumber.trim()}
+                    disabled={
+                      identifyResult
+                        ? !(identifyResult.name || form.cardName.trim()) || !(identifyResult.number || form.cardNumber.trim())
+                        : !form.cardName.trim() || !form.cardNumber.trim()
+                    }
                     title={
-                      !form.cardName.trim() || !form.cardNumber.trim()
-                        ? "Card name and number are required first."
-                        : "Confirm and continue"
+                      identifyResult ? "Accept the proposed identification and continue" : "Confirm and continue"
                     }
                     data-testid="button-accept-identify"
                     className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-green)] bg-[var(--admin-green)] px-4 py-2 text-[12px] font-bold uppercase text-[#07130b] shadow-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
@@ -1843,13 +1993,16 @@ export default function CertificateForm({
                   {identifyLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
                   {identifyLoading ? "Identifying…" : hasCardMeta ? "Search Again" : "AI Identify"}
                 </button>
+                {/* The manual fields are always visible below (not a hidden
+                    panel) — this just scrolls to them; there is nothing to
+                    "reveal". Kept as button-manual-entry for compatibility. */}
                 <button
                   type="button"
-                  onClick={() => setManualMode((m) => !m)}
+                  onClick={() => manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
                   data-testid="button-manual-entry"
                   className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/5 hover:text-[var(--admin-gold)] transition-colors"
                 >
-                  {showManualEditor ? "Hide manual" : "Manual"}
+                  Card fields ↓
                 </button>
               </div>
             </div>
@@ -1938,7 +2091,14 @@ export default function CertificateForm({
                 </p>
               </div>
               <div className="max-h-[320px] overflow-y-auto">
-                {tcgQuery.trim().length >= 3 && !tcgLoading && tcgResults.length === 0 && (
+                {/* Transport/provider failure — distinct from a legitimate no-result. */}
+                {tcgError && !tcgLoading && (
+                  <div className="py-8 text-center" data-testid="tcg-search-error">
+                    <p className="text-[var(--admin-red)] text-sm font-semibold">Search unavailable</p>
+                    <p className="text-[var(--admin-ink-faint)] text-[11px] mt-1 px-6">{tcgError}</p>
+                  </div>
+                )}
+                {!tcgError && tcgQuery.trim().length >= 3 && !tcgLoading && tcgResults.length === 0 && (
                   <div className="py-8 text-center">
                     <p className="text-[var(--admin-ink-faint)] text-sm">No cards found</p>
                     <p className="text-[var(--admin-ink-faint)] text-[10px] mt-1">
@@ -1964,7 +2124,7 @@ export default function CertificateForm({
                       <p className="text-[var(--admin-ink)] text-sm font-bold truncate">{card.name}</p>
                       <p className="text-[var(--admin-ink-dim)] text-xs truncate">
                         {card.setName}
-                        {card.number ? ` · #${card.number}` : ""}
+                        {card.number ? ` · ${displayCollectorNumber(card.number)}` : ""}
                       </p>
                       <p className="text-[var(--admin-ink-faint)] text-[10px]">
                         {[card.rarity, card.year].filter(Boolean).join(" · ")}
@@ -1976,13 +2136,11 @@ export default function CertificateForm({
             </DialogContent>
           </Dialog>
 
-          {/* Manual editor — hidden by default (AI-first). Revealed via the
-              "Manual" toggle in the identification panel above, or automatically
-              when identify returns low confidence / AI is unavailable. EVERY card
-              field + binding below is preserved unchanged; only visibility is
-              gated by showManualEditor. */}
-          {showManualEditor && (
-            <div className="space-y-3" data-testid="manual-card-editor">
+          {/* Manual card-detail fields — ALWAYS visible (this is the normal
+              verification process, not an exceptional fallback). AI Identify /
+              Search TCG above are helper tools that propose values into these
+              same fields; the grader can always read and edit them directly. */}
+          <div ref={manualEditorRef} className="space-y-3" data-testid="manual-card-editor">
           {/* Card identity — mock-matching 3-column row (Game · Set · Set Code).
               Set Code is its own full field (not a nested sub-input) to match the
               workstation reference density at 1280px. */}
@@ -2211,7 +2369,6 @@ export default function CertificateForm({
             </div>
           )}
             </div>
-          )}
 
           </div>
           {/* ── STAGE 2 · RARITY — structured picker + finish + promo (+ legacy/advanced) ── */}
@@ -2448,6 +2605,7 @@ export default function CertificateForm({
               recent={rarityRecent}
               onFavouritesChange={onFavouritesChange}
               onRecentChange={onRecentChange}
+              onCustomRarityNote={(note) => updateField("rarityOther", note ?? "")}
             />
           </div>
 
@@ -2860,7 +3018,7 @@ export default function CertificateForm({
                         <p className="text-[var(--admin-ink)] font-medium">{r.name}</p>
                         <p className="text-[var(--admin-ink-dim)] text-[10px]">
                           {r.setName}
-                          {r.number ? ` · #${r.number}` : ""}
+                          {r.number ? ` · ${displayCollectorNumber(r.number)}` : ""}
                           {r.rarity ? ` · ${r.rarity}` : ""}
                         </p>
                         <p className="text-[var(--admin-ink-faint)] text-[9px]">{r.source}</p>
