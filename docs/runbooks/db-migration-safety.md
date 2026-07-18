@@ -99,3 +99,52 @@ If a schema change is causing an incident:
   behaviour).
 - No production hostname, credential, or connection string appears in any of these tools or in
   this document.
+
+## Partner Network — SECURITY DEFINER definer role (migration 0006, DB-F1)
+
+The Partner Portal pre-auth lookups (`partner_auth_lookup`, `partner_session_lookup`,
+`partner_reset_token_tenant`) run **before** any tenant context exists, under `FORCE ROW LEVEL
+SECURITY`. They only return rows because they are `SECURITY DEFINER` **owned by a dedicated
+BYPASSRLS role, `partner_definer`** — never by the runtime role and never by a superuser. If that
+ownership model is broken, partner login silently fails closed (returns nothing).
+
+**Provisioning requirement (one-time, elevated).** Creating a `BYPASSRLS` role requires the applying
+role to be a superuser, or to hold `CREATEROLE` + `BYPASSRLS`. On managed Postgres (Neon) the
+standard migration role may not have this. In that case, provision `partner_definer` **once** with an
+elevated role before applying `0006`, and grant the migration role membership so it can reassign
+function ownership:
+
+```sql
+CREATE ROLE partner_definer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+GRANT partner_definer TO <migration_role>;
+```
+
+Migration `0006` then reconciles the role, transfers ownership of exactly the three functions, and
+**fails closed** (aborts) if `partner_definer` is missing or misconfigured. The running Partner
+Portal needs **no** elevated privilege — `partner_runtime` stays `NOSUPERUSER`/`NOBYPASSRLS` with
+EXECUTE-only. `npm run db:preflight` and the Partner Portal startup check both re-assert the model
+and refuse a broken configuration.
+
+## Partner Network — choosing the rollback script (DB-F2)
+
+- **Full Phase-1 rollback (0001–0006):** use `migrations/rollback-partner-network-phase1.sql`. It
+  drops all `partner_*` tables + functions, both roles (`partner_definer`, `partner_runtime`) and all
+  Phase-1 journal rows, and preserves existing MintVault data. This is the ONLY full-phase rollback.
+- **`migrations/rollback-0001-partner-foundation.sql` is a 0001-ONLY rollback.** It now **refuses to
+  run** (raises) if any later Partner migration (0002–0006) is applied, so it can no longer be
+  mistaken for a full-phase rollback.
+- Both rollback scripts have no numeric prefix, so the migration runner never executes them as
+  forward migrations, and the destructive-SQL linter blocks them if pointed at them directly. Run a
+  rollback only as an explicit, owner-approved action, rehearsed on a disposable DB first.
+- Both scripts are wrapped in a single `BEGIN … COMMIT` transaction, so the 0001-only refuse-guard
+  aborts the whole script even under `psql -f` with its default `ON_ERROR_STOP=off` (every statement
+  after the raise then errors and COMMIT rolls back). Still, run rollbacks with
+  `psql -v ON_ERROR_STOP=1 -f <script>` so any unexpected error also stops immediately.
+
+## Partner Network — known operational prerequisites (documented, not defects)
+
+- **Rate limiting** (`server/partner/rate-limit.ts`) uses an in-process store by default. Before
+  enabling the portal on more than one machine, inject a shared (Postgres/Redis) store via
+  `setPartnerRateLimitStore`, or per-instance limits multiply. Tracked as a launch precondition.
+- **Password-reset request latency** is dominated by the awaited delivery call on the positive path;
+  a future hardening should move delivery off the request path to fully remove the timing signal.

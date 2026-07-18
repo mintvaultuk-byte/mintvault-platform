@@ -14,12 +14,11 @@
  *   npx vitest run tests/partner-runtime-integration.test.ts
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { Client } from "pg";
 import bcrypt from "bcryptjs";
+import { applyMigrationsRealistic } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_RT_ADMIN;
 const RUNTIME = process.env.PARTNER_RT_RUNTIME;
@@ -36,22 +35,15 @@ const L1 = "10000000-0000-0000-0000-0000000000c1";
 const L2 = "10000000-0000-0000-0000-0000000000c2";
 const LB = "20000000-0000-0000-0000-0000000000d1";
 
-async function apply(sqlFile: string) {
-  const sql = readFileSync(join(process.cwd(), "migrations", sqlFile), "utf8");
-  await admin.query(sql);
-}
-
 (isLocal ? describe : describe.skip)("Partner Portal runtime (disposable DB, real HTTP)", () => {
   beforeAll(async () => {
     admin = new Client({ connectionString: ADMIN });
     await admin.connect();
-    // clean + apply schema
+    // clean + apply schema under a REALISTIC non-superuser owner model (DB-F1): tables owned by
+    // pn_migrator (non-superuser), the pre-auth SECURITY DEFINER functions owned by partner_definer
+    // (BYPASSRLS). This proves partner auth works WITHOUT superuser-owned functions.
     await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
-    await apply("0001_partner_foundation.sql");
-    await apply("0002_partner_auth_support.sql");
-    await apply("0003_partner_auth_hardening.sql");
-    await apply("0004_partner_mfa_enrol.sql");
-    await apply("0005_partner_mfa_replay_and_grants.sql");
+    await applyMigrationsRealistic(admin, ADMIN!);
     // synthetic LOGIN role that inherits the restricted partner_runtime role
     await admin.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
     await admin.query("CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic'");

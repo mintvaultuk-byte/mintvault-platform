@@ -13,17 +13,20 @@
  * and unit-tested without a database.
  */
 import { classifyLiveObjects, type LiveObjects, type Classification } from "./schema-registry";
+import { definerModelViolations } from "../../server/partner/definer-guard";
 
 export interface PreflightResult extends Classification {
   ok: boolean;
+  definerViolations: string[];
   counts: { tables: number; views: number; matviews: number; schemas: number; orphanSequences: number; enums: number; nonPublicObjects: number };
 }
 
 /** Pure evaluation over a provided object set (used by tests and by the DB path). */
-export function evaluatePreflight(objs: LiveObjects): PreflightResult {
+export function evaluatePreflight(objs: LiveObjects, definerViolations: string[] = []): PreflightResult {
   const c = classifyLiveObjects(objs);
   return {
-    ok: c.unknown.length === 0,
+    ok: c.unknown.length === 0 && definerViolations.length === 0,
+    definerViolations,
     ...c,
     counts: {
       tables: objs.tables.length,
@@ -93,9 +96,33 @@ async function fetchLiveObjects(databaseUrl: string): Promise<LiveObjects> {
   }
 }
 
+/**
+ * Read-only definer-ownership check (DB-F1). Only enforced when the partner pre-auth functions are
+ * present; a database with no Partner Network is unaffected. Fails closed on query error.
+ */
+async function fetchDefinerViolations(databaseUrl: string): Promise<string[]> {
+  const { Client } = await import("pg");
+  const client = new Client({
+    connectionString: databaseUrl,
+    ssl: databaseUrl.includes("127.0.0.1") || databaseUrl.includes("localhost") ? undefined : { rejectUnauthorized: false },
+  });
+  await client.connect();
+  try {
+    await client.query("SET default_transaction_read_only = on");
+    const present = await client.query(
+      "select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.proname='partner_auth_lookup' and n.nspname='public'",
+    );
+    if (present.rows.length === 0) return []; // no Partner Network here — nothing to assert
+    return await definerModelViolations((sql, params) => client.query(sql, params as unknown[]));
+  } finally {
+    await client.end();
+  }
+}
+
 export async function runPreflight(databaseUrl: string): Promise<PreflightResult> {
   const objs = await fetchLiveObjects(databaseUrl);
-  return evaluatePreflight(objs);
+  const definerViolations = await fetchDefinerViolations(databaseUrl);
+  return evaluatePreflight(objs, definerViolations);
 }
 
 function isMain(): boolean {
@@ -126,6 +153,12 @@ if (isMain()) {
         `nonPublicObj=${res.counts.nonPublicObjects} | managed=${res.managed.length} unmanaged=${res.unmanaged.length} ` +
         `vaultQuest=${res.vaultQuest.length} partnerNetwork=${res.partnerNetwork.length} integrationOwned=${res.integrationOwned.length} unknown=${res.unknown.length}`,
     );
+  }
+  if (res.definerViolations.length > 0) {
+    console.error(`\n🚫 Preflight FAILED — Partner definer ownership model broken (DB-F1). Partner auth would fail closed:`);
+    for (const dv of res.definerViolations) console.error(`   - ${dv}`);
+    console.error(`\n   Apply migration 0006 with a role able to provision partner_definer (see db-migration-safety runbook).`);
+    process.exit(1);
   }
   if (!res.ok) {
     console.error(`\n🚫 Preflight FAILED — ${res.unknown.length} UNKNOWN object(s) not managed and not in the classified inventory:`);

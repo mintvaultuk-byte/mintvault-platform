@@ -1,10 +1,14 @@
 /**
  * Phase 1 — parity between the Drizzle partner schema (shared/partner-schema.ts) and the
- * authoritative migration (migrations/0001_partner_foundation.sql), so the two cannot silently
- * drift. Pure: reads files, no DB.
+ * authoritative migrations. The Drizzle model covers the 14 foundation tables of migration 0001,
+ * which is the surface it is used for; the auth/MFA tables and columns added in 0002–0005 are
+ * accessed by the runtime through raw SQL / SECURITY DEFINER functions (never typed Drizzle access),
+ * so they are MIGRATION-authoritative and intentionally not modelled in Drizzle. This test asserts
+ * the 0001 Drizzle↔migration parity exactly AND pins the full Phase-1 migration inventory (0001–0006)
+ * so a new/removed migration is noticed. Pure: reads files, no DB.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { getTableName, getTableColumns, is } from "drizzle-orm";
 import { PgTable } from "drizzle-orm/pg-core";
@@ -35,9 +39,31 @@ describe("partner schema ↔ migration parity", () => {
     }
   });
 
-  it("the Drizzle schema and migration define the same 14 partner tables", () => {
+  it("the Drizzle schema and migration 0001 define the same 14 foundation tables", () => {
     expect(drizzleTableNames()).toEqual(migrationTableNames());
     expect(drizzleTableNames().length).toBe(14);
+  });
+
+  it("pins the full Phase-1 migration inventory (0001–0006), so 0006 is known and drift is noticed", () => {
+    const numbered = readdirSync(join(process.cwd(), "migrations"))
+      .filter((f) => /^\d{4}_.+\.sql$/.test(f))
+      .sort();
+    expect(numbered).toEqual([
+      "0001_partner_foundation.sql",
+      "0002_partner_auth_support.sql",
+      "0003_partner_auth_hardening.sql",
+      "0004_partner_mfa_enrol.sql",
+      "0005_partner_mfa_replay_and_grants.sql",
+      "0006_partner_definer_role.sql",
+    ]);
+  });
+
+  it("0002 auth tables are migration-authoritative (raw-SQL access) and intentionally NOT in Drizzle", () => {
+    const m0002 = readFileSync(join(process.cwd(), "migrations", "0002_partner_auth_support.sql"), "utf8");
+    for (const t of ["partner_password_reset_tokens", "partner_recovery_codes"]) {
+      expect(m0002.includes(t), `${t} should be created in migration 0002`).toBe(true);
+      expect(drizzleTableNames().includes(t), `${t} is raw-SQL accessed, not Drizzle-modelled`).toBe(false);
+    }
   });
 
   it("all Drizzle partner table names are partner_* (classified by the registry)", () => {

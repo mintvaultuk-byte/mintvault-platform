@@ -12,12 +12,11 @@
  * PARTNER_ADMIN_TEST_RUNTIME (restricted-role URL) are set and local. Skips otherwise; refuses non-local.
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { Client } from "pg";
 import bcrypt from "bcryptjs";
+import { applyMigrationsRealistic } from "./helpers/partner-realistic-db";
 
 const ADMIN_DB = process.env.PARTNER_ADMIN_TEST;
 const RUNTIME_DB = process.env.PARTNER_ADMIN_TEST_RUNTIME;
@@ -73,9 +72,9 @@ let ADMIN_EMAIL: string;
     await admin.connect();
     await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
     await admin.query(USERS_DDL);
-    for (const f of ["0001_partner_foundation", "0002_partner_auth_support", "0003_partner_auth_hardening", "0004_partner_mfa_enrol", "0005_partner_mfa_replay_and_grants"]) {
-      await admin.query(readFileSync(join(process.cwd(), "migrations", `${f}.sql`), "utf8"));
-    }
+    // Apply partner migrations under the REALISTIC non-superuser owner model (DB-F1): the pre-auth
+    // SECURITY DEFINER functions end up owned by partner_definer (BYPASSRLS), not a superuser.
+    await applyMigrationsRealistic(admin, ADMIN_DB!);
     await admin.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
     await admin.query("CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic'");
     await admin.query("GRANT partner_runtime TO partner_app_test");

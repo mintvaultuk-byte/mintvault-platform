@@ -171,7 +171,10 @@ export async function createPasswordResetToken(tenantId: string, userId: string)
  * body — so no attacker-controlled tenant id reaches RLS.
  */
 export const MIN_PASSWORD_LEN = 10;
-export const MAX_PASSWORD_LEN = 200; // bcrypt truncates at 72 bytes; cap to avoid silent truncation
+// Upper bound to reject absurdly long inputs (DoS guard). NOTE: bcrypt only hashes the first 72
+// bytes, so bytes beyond 72 do not add entropy — this cap does NOT prevent that truncation; it is
+// only an input-size limit. (Behaviour unchanged.)
+export const MAX_PASSWORD_LEN = 200;
 
 export async function consumePasswordResetToken(token: string, newPassword: string): Promise<boolean> {
   // F5: enforce the password policy in the SERVICE layer so every caller shares it, not just the route.
