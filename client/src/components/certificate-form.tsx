@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from "react";
 import { classifyLookupError } from "@/lib/lookup-errors";
+import { displayCollectorNumber } from "@shared/collector-number-format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
 import { GradingWorkflowBar } from "@/components/grading-workflow/GradingWorkflowBar";
@@ -478,11 +479,10 @@ export default function CertificateForm({
   // Structured error for the TCG search dialog (distinguishes a transport /
   // provider failure from a legitimate zero-result).
   const [tcgError, setTcgError] = useState<string | null>(null);
-  // AI-first Card stage: the tall manual field grid is hidden by default. The
-  // grader confirms the AI/TCGdex result via read-only chips and only reveals
-  // the manual editor when they click "Manual" (or confidence comes back low).
-  // Presentation-only — every field + binding is preserved, just gated.
-  const [manualMode, setManualMode] = useState(false);
+  // Manual card-detail fields are part of the NORMAL verification process (not
+  // an exceptional fallback) and always render — see manualEditorRef below,
+  // used only to scroll them into view from the "Edit" affordance.
+  const manualEditorRef = useRef<HTMLDivElement>(null);
 
   // AI feature flags (for gating the Identify / Grade buttons)
   const { data: aiFlags } = useQuery<{ flags: Array<{ name: string; enabled: boolean }> }>({
@@ -1587,14 +1587,11 @@ export default function CertificateForm({
 
   // AI-first Card stage derived state (presentation only — no save/grade/API).
   // hasCardMeta: the card already carries identification data (from AI, TCGdex
-  // or a previous edit) so we can show the read-only "verify" chips instead of a
-  // tall form. aiIdentifyAvailable: AI Identify can run (edit mode + flag on).
-  // showManualEditor: reveal the full manual field grid — default hidden, shown
-  // when the grader opts in, when identify was low-confidence, or when AI isn't
-  // available at all (new draft / flag off) so entry is never blocked.
+  // or a previous edit) so we can show the read-only "verify" chips above the
+  // (always-visible) manual fields instead of a plain prompt.
+  // aiIdentifyAvailable: AI Identify can run (edit mode + flag on).
   const hasCardMeta = !!(form.cardName.trim() || form.setName.trim() || form.cardNumber.trim());
   const aiIdentifyAvailable = isEdit && !!certificate?.id && identifyEnabled;
-  const showManualEditor = manualMode || identifyConfidence === "low" || !aiIdentifyAvailable;
 
   return (
     <div
@@ -1892,7 +1889,7 @@ export default function CertificateForm({
                   <div className="flex flex-wrap items-center gap-1.5">
                     {[
                       identifyResult.name,
-                      identifyResult.number ? `#${identifyResult.number}` : "",
+                      displayCollectorNumber(identifyResult.number),
                       identifyResult.year,
                       identifyResult.language,
                       identifyResult.rarity,
@@ -1908,8 +1905,9 @@ export default function CertificateForm({
                       ))}
                     <button
                       type="button"
-                      onClick={() => setManualMode(true)}
+                      onClick={() => manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
                       data-testid="button-verify-edit"
+                      title="The fields are always editable below — jump to them"
                       className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]"
                     >
                       <Pencil size={10} /> Edit
@@ -1920,7 +1918,7 @@ export default function CertificateForm({
                 <div className="space-y-1" data-testid="ai-existing-details">
                   <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-faint)]">Existing certificate details</span>
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {[form.cardName, form.cardNumber ? `#${form.cardNumber}` : "", form.setName, form.year]
+                    {[form.cardName, displayCollectorNumber(form.cardNumber), form.setName, form.year]
                       .filter(Boolean)
                       .map((chip, i) => (
                         <span
@@ -1995,13 +1993,16 @@ export default function CertificateForm({
                   {identifyLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
                   {identifyLoading ? "Identifying…" : hasCardMeta ? "Search Again" : "AI Identify"}
                 </button>
+                {/* The manual fields are always visible below (not a hidden
+                    panel) — this just scrolls to them; there is nothing to
+                    "reveal". Kept as button-manual-entry for compatibility. */}
                 <button
                   type="button"
-                  onClick={() => setManualMode((m) => !m)}
+                  onClick={() => manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
                   data-testid="button-manual-entry"
                   className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/5 hover:text-[var(--admin-gold)] transition-colors"
                 >
-                  {showManualEditor ? "Hide manual" : "Manual"}
+                  Card fields ↓
                 </button>
               </div>
             </div>
@@ -2123,7 +2124,7 @@ export default function CertificateForm({
                       <p className="text-[var(--admin-ink)] text-sm font-bold truncate">{card.name}</p>
                       <p className="text-[var(--admin-ink-dim)] text-xs truncate">
                         {card.setName}
-                        {card.number ? ` · #${card.number}` : ""}
+                        {card.number ? ` · ${displayCollectorNumber(card.number)}` : ""}
                       </p>
                       <p className="text-[var(--admin-ink-faint)] text-[10px]">
                         {[card.rarity, card.year].filter(Boolean).join(" · ")}
@@ -2135,13 +2136,11 @@ export default function CertificateForm({
             </DialogContent>
           </Dialog>
 
-          {/* Manual editor — hidden by default (AI-first). Revealed via the
-              "Manual" toggle in the identification panel above, or automatically
-              when identify returns low confidence / AI is unavailable. EVERY card
-              field + binding below is preserved unchanged; only visibility is
-              gated by showManualEditor. */}
-          {showManualEditor && (
-            <div className="space-y-3" data-testid="manual-card-editor">
+          {/* Manual card-detail fields — ALWAYS visible (this is the normal
+              verification process, not an exceptional fallback). AI Identify /
+              Search TCG above are helper tools that propose values into these
+              same fields; the grader can always read and edit them directly. */}
+          <div ref={manualEditorRef} className="space-y-3" data-testid="manual-card-editor">
           {/* Card identity — mock-matching 3-column row (Game · Set · Set Code).
               Set Code is its own full field (not a nested sub-input) to match the
               workstation reference density at 1280px. */}
@@ -2370,7 +2369,6 @@ export default function CertificateForm({
             </div>
           )}
             </div>
-          )}
 
           </div>
           {/* ── STAGE 2 · RARITY — structured picker + finish + promo (+ legacy/advanced) ── */}
@@ -2607,6 +2605,7 @@ export default function CertificateForm({
               recent={rarityRecent}
               onFavouritesChange={onFavouritesChange}
               onRecentChange={onRecentChange}
+              onCustomRarityNote={(note) => updateField("rarityOther", note ?? "")}
             />
           </div>
 

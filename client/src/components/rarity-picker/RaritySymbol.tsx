@@ -2,24 +2,38 @@
  * Visual rarity-symbol renderer. Draws the ACTUAL symbol (circle / diamond / 1-2-3
  * stars / shiny / code) filled with the correct colour so gold vs silver and 2★ vs 1★
  * are distinguishable by SHAPE + FILL, never by text colour alone.
+ *
+ * The admin grading picker is a DARK-themed surface (near-black tiles). The
+ * catalogue's `colour` is the real PRINTED colour of the symbol (used in the
+ * accessible description + grading data) — but rendering a literal near-black
+ * fill for `colour: "black"` on a near-black tile made it almost invisible
+ * ("ACE"/"RR"/"RRR"/"PR" and the common/uncommon/rare marks). FILL/STROKE below
+ * are the DISPLAY colours for this dark UI, chosen for contrast, not the print
+ * colour — every printed colour still renders as a distinct, bright, readable
+ * tone, and the printed colour itself is preserved in `describeSymbol()` /
+ * the stored data. Never black-on-dark.
  */
 import { describeSymbol, type RaritySymbol as RaritySymbolMeta, type SymbolColour } from "@shared/pokemon-rarity-catalogue";
 
 const FILL: Record<SymbolColour, string> = {
-  gold: "#C8A227",
-  silver: "#AEB4BC",
-  black: "#1b1b1f",
-  bronze: "#A9713B",
-  white: "#f5f5f5",
+  gold: "#E8C25C",
+  silver: "#D7DDE6",
+  // Printed BLACK renders as a bright, warm off-white on this dark UI — never
+  // near-black-on-dark. Distinct in hue from `silver` (cool grey) and `white`.
+  black: "#F3EFE3",
+  bronze: "#D79A5C",
+  // Printed WHITE renders as a pale ice-blue so it's visually distinct from the
+  // (warm off-white) `black` display colour above.
+  white: "#CFE6FA",
   rainbow: "url(#mv-rarity-rainbow)",
   none: "transparent",
 };
 const STROKE: Record<SymbolColour, string> = {
   gold: "#8a6d12",
-  silver: "#7d828a",
-  black: "#000",
+  silver: "#6b7480",
+  black: "#4a4638",
   bronze: "#6f4a24",
-  white: "#c9c9c9",
+  white: "#5c7c96",
   rainbow: "#7a3ea8",
   none: "#9aa0a8",
 };
@@ -65,7 +79,9 @@ export function RaritySymbol({ symbol, size = 30 }: { symbol: RaritySymbolMeta; 
         <text x={12} y={17} textAnchor="middle" fontSize={16} fill={fill} stroke={stroke} strokeWidth={0.3}>✦</text>
       )}
       {symbol.shape === "text" && (
-        <text x={12} y={16} textAnchor="middle" fontSize={9} fontWeight={800} fill={symbol.colour === "black" ? "#1b1b1f" : fill} stroke={symbol.colour === "black" ? "none" : stroke} strokeWidth={0.3}>
+        // Always the display fill/stroke above (never the literal print colour) —
+        // this is the exact spot that made "ACE" / "RR" / "RRR" / "PR" invisible.
+        <text x={12} y={16} textAnchor="middle" fontSize={9} fontWeight={800} fill={fill} stroke={stroke} strokeWidth={0.3}>
           {symbol.glyph}
         </text>
       )}

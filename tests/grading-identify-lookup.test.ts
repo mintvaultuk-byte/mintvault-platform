@@ -124,10 +124,13 @@ describe("TCG search distinguishes provider failure from zero-result; manual fal
     // a legitimate empty result set is NOT flagged as an error.
     expect(FORM).toContain("an empty list here is a real zero-result, not an error");
   });
-  it("manual entry remains available regardless of provider state", () => {
+  it("manual fields are ALWAYS visible (not gated behind a toggle) regardless of provider state", () => {
     expect(FORM).toContain('data-testid="manual-card-editor"');
-    expect(FORM).toContain('"Hide manual" : "Manual"');
-    expect(FORM).toContain("const showManualEditor = manualMode");
+    // No conditional gate around the manual editor — it is unconditionally
+    // rendered (permanently visible), never hidden behind a "Manual" toggle.
+    expect(FORM).not.toContain("{showManualEditor && (");
+    expect(FORM).not.toContain("showManualEditor");
+    expect(FORM).not.toContain("manualMode");
   });
 });
 
