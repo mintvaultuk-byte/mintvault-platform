@@ -169,6 +169,11 @@ describe("10. protected Stage-3 / grading files remain untouched", () => {
     "client/src/components/admin/admin-shell.tsx",
     "client/src/pages/admin-dashboard.tsx",
     "client/src/lib/lookup-errors.ts",
+    // Stage 1/2 usability pass (same branch): rarity contrast + custom-rarity
+    // workflow.
+    "client/src/components/rarity-picker/RarityVariantPicker.tsx",
+    "client/src/components/rarity-picker/RaritySymbol.tsx",
+    "client/src/components/grading-workflow/ReviewSummary.tsx",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {

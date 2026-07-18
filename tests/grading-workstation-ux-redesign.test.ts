@@ -146,6 +146,10 @@ describe("protected surfaces untouched (hard rule)", () => {
     "client/src/pages/admin-dashboard.tsx",
     "client/src/components/grading-workflow/CardPreviewPanel.tsx",
     "client/src/lib/lookup-errors.ts",
+    // Stage 1/2 usability pass (same branch): rarity contrast + custom-rarity
+    // workflow.
+    "client/src/components/rarity-picker/RaritySymbol.tsx",
+    "client/src/components/grading-workflow/ReviewSummary.tsx",
   ]);
 
   it("the grading release (PR #214) changed NO grading-protected / schema / migration file", () => {

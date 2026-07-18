@@ -148,6 +148,13 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     "server/services/tcgdex-set-resolve.ts",
     "server/services/collector-number.ts",
     "server/vite.ts",
+    // Stage 1/2 usability pass (same branch): rarity contrast + custom-rarity
+    // workflow + collector-number display formatter.
+    "client/src/components/rarity-picker/RarityVariantPicker.tsx",
+    "client/src/components/rarity-picker/RaritySymbol.tsx",
+    "client/src/components/grading-workflow/ReviewSummary.tsx",
+    "shared/pokemon-rarity-catalogue.ts",
+    "shared/collector-number-format.ts",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {

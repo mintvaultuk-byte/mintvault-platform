@@ -216,6 +216,12 @@ describe("15-20. protected surfaces, providers, credits", () => {
       "server/services/collector-number.ts",
       // dev-server fs.allow fix (same branch) — dev-only, no prod/grading impact
       "server/vite.ts",
+      // Stage 1/2 usability pass (same branch): rarity contrast + custom-rarity
+      // workflow + collector-number display formatter.
+      "client/src/components/rarity-picker/RaritySymbol.tsx",
+      "client/src/components/grading-workflow/ReviewSummary.tsx",
+      "shared/pokemon-rarity-catalogue.ts",
+      "shared/collector-number-format.ts",
     ]);
     for (const f of changed) {
       expect(f, `${f} must not be a protected/server/schema file`).not.toMatch(
