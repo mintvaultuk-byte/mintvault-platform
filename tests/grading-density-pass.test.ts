@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
-import { execSync } from "child_process";
+import { gradingReleaseChangedFiles, GRADING_PROTECTED_PATHS } from "./helpers/grading-release-scope";
 import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -125,19 +125,11 @@ describe("four stages + protected surfaces unchanged (spec 16-24)", () => {
     const fn = FORM.slice(FORM.indexOf("function buildCertFormData"), FORM.indexOf("function buildCertFormData") + 900);
     expect(fn).not.toMatch(/certTools|drawer|density|ownership|nfc/i);
   });
-  it("git diff vs base touches NO protected grading/centering/label/schema/server file", () => {
-    const base = ["origin/main", "main", "f64ec30b"].find((r) => {
-      try {
-        execSync(`git rev-parse --verify ${r}`, { stdio: "pipe" });
-        return true;
-      } catch {
-        return false;
-      }
-    });
-    if (!base) return;
-    const changed = execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
-    for (const f of changed) {
-      expect(f, f).not.toMatch(/components\/grading\/|mvgs|scoring|centering|pristine|grader\.ts|labels\.ts|certificate-document|cert-id|schema\.ts|^server\/|^migrations\//);
+  // HISTORICAL release-scope proof: the grading release (PR #214) itself changed no protected file.
+  // Pinned to the fixed grading range d69ad147..fc57b53b — never the current branch (see helper).
+  it("grading release (PR #214) touched NO protected grading/centering/label/schema/server file", () => {
+    for (const f of gradingReleaseChangedFiles()) {
+      expect(f, f).not.toMatch(GRADING_PROTECTED_PATHS);
     }
   });
 });

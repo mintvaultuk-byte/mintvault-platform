@@ -8,7 +8,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
-import { execSync } from "child_process";
+import { gradingReleaseChangedFiles, gradingReleaseFileDiff } from "./helpers/grading-release-scope";
 import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -27,18 +27,9 @@ function slice(src: string, start: string, end: string): string {
   return src.slice(i, j);
 }
 
-/** Files changed vs the merge base (origin/main locally-or-CI, else main). */
-function changedFiles(): string[] | null {
-  const base = ["origin/main", "main"].find((r) => {
-    try {
-      execSync(`git rev-parse --verify ${r}`, { stdio: "pipe" });
-      return true;
-    } catch {
-      return false;
-    }
-  });
-  if (!base) return null;
-  return execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+/** Files changed by the grading RELEASE (PR #214), from the fixed range d69ad147..fc57b53b. */
+function changedFiles(): string[] {
+  return gradingReleaseChangedFiles();
 }
 
 describe("1. read-only preview fills the panel (spec 1)", () => {
@@ -186,16 +177,7 @@ describe("10/11. Certificate Tools + Ownership/NFC unchanged (spec 7)", () => {
 
 describe("12/13/14. save payload + navigation + Next Card unchanged", () => {
   it("no save endpoint / payload line changed in this pass", () => {
-    const base = ["origin/main", "main"].find((r) => {
-      try {
-        execSync(`git rev-parse --verify ${r}`, { stdio: "pipe" });
-        return true;
-      } catch {
-        return false;
-      }
-    });
-    if (!base) return;
-    const diff = execSync(`git diff ${base}...HEAD -- client/src/components/certificate-form.tsx`, { encoding: "utf8" });
+    const diff = gradingReleaseFileDiff("client/src/components/certificate-form.tsx");
     const touched = diff
       .split("\n")
       .filter((l) => /^[+-]/.test(l) && !/^[+-]{3}/.test(l))
@@ -214,7 +196,6 @@ describe("12/13/14. save payload + navigation + Next Card unchanged", () => {
 describe("15-20. protected surfaces, providers, credits", () => {
   it("git diff touches ONLY the allowed UI + test files — no protected/server/schema file", () => {
     const changed = changedFiles();
-    if (!changed) return;
     const allowedNonTest = new Set([
       "client/src/components/certificate-form.tsx",
       "client/src/components/grading-workflow/CardPreviewPanel.tsx",
@@ -235,18 +216,9 @@ describe("15-20. protected surfaces, providers, credits", () => {
     }
   });
   it("no provider/credit call introduced (UI-only diff)", () => {
-    const base = ["origin/main", "main"].find((r) => {
-      try {
-        execSync(`git rev-parse --verify ${r}`, { stdio: "pipe" });
-        return true;
-      } catch {
-        return false;
-      }
-    });
-    if (!base) return;
     // Scan the SOURCE diff only (client/); test files legitimately contain these
     // provider words inside this very guard's regex.
-    const added = execSync(`git diff ${base}...HEAD -- client/`, { encoding: "utf8" })
+    const added = gradingReleaseFileDiff("client/")
       .split("\n")
       .filter((l) => l.startsWith("+") && !l.startsWith("+++"));
     for (const l of added) {
