@@ -9,6 +9,7 @@ import { sql, inArray } from "drizzle-orm";
 import { lookupCard, isAllowedLang } from "../services/tcgdex";
 import { importTcgdexSets, isTcgdexImportRunning } from "../services/tcgdex-sets-import";
 import { resolveEnglishSetByNameAndNumber } from "../services/tcgdex-set-resolve";
+import { COLLECTOR_NUMBER_RE } from "../services/collector-number";
 import { getFeatureFlag } from "../config/feature-flags";
 import { normalizeCertId } from "../lib/cert-id";
 import { createDbCustomSetEditorStore, editCustomSetDetails, CustomSetEditError } from "../services/custom-set-editor";
@@ -1022,7 +1023,7 @@ export function registerAdminConfigRoutes(app: Express): void {
   // Otherwise writes to pending_set_lookups for manual review.
 
   const CODE_RE = /^[A-Za-z0-9._-]{1,20}$/;
-  const NUMBER_RE = /^[A-Za-z0-9/_-]{1,10}$/;
+  const NUMBER_RE = COLLECTOR_NUMBER_RE;
 
   // GET /api/admin/tcgdex-resolve-set?name=Charizard&number=4/102
   // English-only set resolution from card NAME + NUMBER — the fallback for when

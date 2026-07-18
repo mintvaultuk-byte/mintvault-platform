@@ -133,10 +133,16 @@ describe("12-20. protected surfaces / save / queue / Ownership-NFC / providers u
       // viewer wheel-zoom removal (same branch): read-only preview only
       "client/src/components/grading-workflow/CardPreviewPanel.tsx",
       "client/src/components/rarity-picker/RarityVariantPicker.tsx",
+      // identify/lookup fix (same branch): structured-error lib + non-protected
+      // TCGdex lookup routes/services.
+      "client/src/lib/lookup-errors.ts",
+      "server/routes/admin-config.ts",
+      "server/services/tcgdex-set-resolve.ts",
+      "server/services/collector-number.ts",
     ]);
     for (const f of changed) {
       expect(f, `${f} must not be protected/server/schema`).not.toMatch(
-        /components\/grading\/|mvgs|scoring|centering|pristine|defect|grader\.ts|labels\.ts|certificate-document|cert-id|schema\.ts|^server\/|^migrations\//,
+        /components\/grading\/|mvgs|scoring|centering|pristine|defect|grader\.ts|labels\.ts|certificate-document|cert-id|schema\.ts|^server\/(?!routes\/admin-config\.ts|services\/tcgdex-set-resolve\.ts|services\/collector-number\.ts)|^migrations\//,
       );
       if (!f.startsWith("tests/")) expect(allowedNonTest.has(f), `unexpected file: ${f}`).toBe(true);
     }

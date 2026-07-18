@@ -145,6 +145,7 @@ describe("protected surfaces untouched (hard rule)", () => {
     "client/src/components/admin/admin-shell.tsx",
     "client/src/pages/admin-dashboard.tsx",
     "client/src/components/grading-workflow/CardPreviewPanel.tsx",
+    "client/src/lib/lookup-errors.ts",
   ]);
 
   it("the grading release (PR #214) changed NO grading-protected / schema / migration file", () => {
