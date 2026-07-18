@@ -404,6 +404,67 @@ export async function addCard(principal: PartnerPrincipal, submissionId: string,
   });
 }
 
+export interface EditCardInput {
+  cardName?: string;
+  game?: string | null;
+  cardSet?: string | null;
+  cardNumber?: string | null;
+  year?: number | null;
+  variant?: string | null;
+  language?: string | null;
+  declaredValuePence?: number | null;
+  quantity?: number;
+  customerNotes?: string | null;
+  intakeNotes?: string | null;
+}
+
+/** In-place card edit — draft-only (same guard as addCard/removeCard), never touches sequence_number
+ *  (edits must not silently reorder cards) or any grade/cert field (the table has no such columns). */
+export async function editCard(principal: PartnerPrincipal, submissionId: string, cardId: string, input: EditCardInput) {
+  if (input.cardName !== undefined && !input.cardName.trim()) throw VALIDATION("Card name is required.");
+  return withTenant({ tenantId: principal.tenantId }, async (c) => {
+    const row = await loadSubmissionForUpdate(c, principal, submissionId);
+    if (!row) throw NOT_FOUND();
+    if (row.status !== "draft") throw NOT_DRAFT();
+    const { rows } = await c.query(
+      `UPDATE partner_submission_cards SET
+         card_name = COALESCE($3, card_name),
+         game = COALESCE($4, game),
+         card_set = COALESCE($5, card_set),
+         card_number = COALESCE($6, card_number),
+         year = COALESCE($7, year),
+         variant = COALESCE($8, variant),
+         language = COALESCE($9, language),
+         declared_value_pence = COALESCE($10, declared_value_pence),
+         quantity = COALESCE($11, quantity),
+         customer_notes = COALESCE($12, customer_notes),
+         intake_notes = COALESCE($13, intake_notes),
+         updated_at = now()
+       WHERE id=$1 AND submission_id=$2 AND removed_at IS NULL
+       RETURNING id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
+                 declared_value_pence, quantity, customer_notes, intake_notes, created_at`,
+      [
+        cardId,
+        submissionId,
+        input.cardName?.trim() ?? null,
+        input.game ?? null,
+        input.cardSet ?? null,
+        input.cardNumber ?? null,
+        input.year ?? null,
+        input.variant ?? null,
+        input.language ?? null,
+        input.declaredValuePence ?? null,
+        input.quantity ?? null,
+        input.customerNotes ?? null,
+        input.intakeNotes ?? null,
+      ],
+    );
+    if (rows.length !== 1) throw NOT_FOUND();
+    await writeEvent(c, principal, submissionId, "card_updated", null, null, null);
+    return rows[0];
+  });
+}
+
 export async function removeCard(principal: PartnerPrincipal, submissionId: string, cardId: string, reason?: string) {
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
@@ -575,6 +636,37 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
       after: { status: "submitted_to_mintvault" },
     });
     return buildDetail(c, principal, submissionId);
+  });
+}
+
+export interface AvailableServiceTier {
+  tierCode: string;
+  label: string;
+  pricePerCardPence: number;
+  turnaroundDays: number;
+}
+
+/**
+ * List CURRENTLY ACTIVE service tiers visible to this tenant (its own tiers + global defaults),
+ * for the wizard's "Select an available service" step. Read-only; RLS is the actual isolation
+ * boundary (another tenant's private tier is invisible), same as resolveServiceTier(). Never
+ * returns a disabled tier — the Portal must never let a partner pick something unavailable.
+ */
+export async function listAvailableServiceTiers(principal: PartnerPrincipal): Promise<AvailableServiceTier[]> {
+  return withTenant({ tenantId: principal.tenantId }, async (c) => {
+    const { rows } = await c.query(
+      `SELECT DISTINCT ON (tier_code) tier_code, label, price_per_card_pence, turnaround_days
+         FROM partner_service_tiers
+        WHERE is_active AND (tenant_id = $1 OR tenant_id IS NULL)
+        ORDER BY tier_code, tenant_id NULLS LAST`,
+      [principal.tenantId],
+    );
+    return rows.map((r: any) => ({
+      tierCode: r.tier_code,
+      label: r.label,
+      pricePerCardPence: r.price_per_card_pence,
+      turnaroundDays: r.turnaround_days,
+    }));
   });
 }
 

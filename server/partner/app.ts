@@ -12,6 +12,7 @@ import express, { type Express, type Request, type Response, type NextFunction }
 import { partnerSessionMiddleware } from "./session";
 import { partnerApiRouter } from "./routes";
 import { partnerSubmissionRouter } from "./submission-routes";
+import { partnerCustomerRouter } from "./customer-routes";
 import { partnerDbConfigured, partnerRuntimeQuery } from "./db";
 import { resolveGlobalFlag } from "./flags";
 import { assertDefinerModel, definerModelViolations } from "./definer-guard";
@@ -104,6 +105,7 @@ export function createPartnerApp(): Express {
   app.use(partnerSessionMiddleware);
   app.use("/api/partner", partnerApiRouter());
   app.use("/api/partner", partnerSubmissionRouter()); // Phase 2 submission workflow
+  app.use("/api/partner", partnerCustomerRouter()); // Phase 2 customer records
 
   // minimal UI shell route (SPA placeholder — no data, no secrets)
   app.get("/partner", (_req: Request, res: Response) => {

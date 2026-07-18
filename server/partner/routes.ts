@@ -156,6 +156,27 @@ export function partnerApiRouter(): Router {
     res.json(rows);
   });
 
+  // Locations the current user may operate at — org-wide roles (owner/manager/finance-viewer) see
+  // every ACTIVE location; everyone else sees only their explicit partner_user_locations
+  // assignments. Powers the Portal's location switcher (Increment A) and the "select a location"
+  // step of the submission wizard (Increment B) — read-only, no client-supplied tenant/org filter.
+  r.get("/locations", requirePartnerCapability("partner.location.view"), async (req, res) => {
+    const rows = await withTenant({ tenantId: req.partner!.tenantId }, async (c) => {
+      if (req.partner!.orgWide) {
+        const l = await c.query("SELECT id, name, status FROM partner_locations WHERE status='ACTIVE' ORDER BY name");
+        return l.rows;
+      }
+      const l = await c.query(
+        `SELECT pl.id, pl.name, pl.status FROM partner_locations pl
+           JOIN partner_user_locations pul ON pul.location_id = pl.id
+          WHERE pul.user_id = $1 AND pl.status = 'ACTIVE' ORDER BY pl.name`,
+        [req.partner!.userId],
+      );
+      return l.rows;
+    });
+    res.json(rows);
+  });
+
   // ---- location switching (Item 2) ----
   r.post("/session/location", partnerLocationSwitchLimiter, requirePartnerAuth, async (req, res) => {
     const { locationId } = req.body ?? {}; // any submitted partner/tenant id is ignored
