@@ -173,6 +173,7 @@ describe("12-20. protected surfaces / save / queue / Ownership-NFC / providers u
       "client/src/components/grading-workflow/WorkstationPreviewAside.tsx",
       "client/src/components/admin/AdminHeaderRow.tsx",
       "client/src/pages/staff.tsx",
+      "client/src/components/grading-workflow/CertificateToolsDrawer.tsx",
     ]);
     for (const f of changed) {
       expect(f, `${f} must not be protected/server/schema`).not.toMatch(

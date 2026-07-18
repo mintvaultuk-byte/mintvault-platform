@@ -244,6 +244,7 @@ describe("15-20. protected surfaces, providers, credits", () => {
       "client/src/components/grading-workflow/WorkstationPreviewAside.tsx",
       "client/src/components/admin/AdminHeaderRow.tsx",
       "client/src/pages/staff.tsx",
+      "client/src/components/grading-workflow/CertificateToolsDrawer.tsx",
     ]);
     for (const f of changed) {
       expect(f, `${f} must not be a protected/server/schema file`).not.toMatch(
