@@ -55,9 +55,14 @@ describe("checkR2Identity — fail-closed guard (never infers staging from DB)",
 });
 
 describe("grading drizzle config excludes vq_* (migration isolation hardening)", () => {
-  it("drizzle.config.ts declares tablesFilter [\"!vq_*\"]; drizzle-vq.config keeps vq_*", () => {
+  it("grading config scopes to the managed allowlist which contains no vq_* table; drizzle-vq.config keeps vq_*", async () => {
+    // Phase 0.5 replaced the denylist (["!vq_*"]) with a fail-closed allowlist derived
+    // from shared/schema.ts. VQ isolation is preserved because no vq_* table is in
+    // shared/schema.ts, hence none is in the managed allowlist.
     const grading = readFileSync("drizzle.config.ts", "utf8");
-    expect(grading).toMatch(/tablesFilter:\s*\["!vq_\*"\]/);
+    expect(grading).toMatch(/tablesFilter:\s*managedTables\(\)/);
+    const { managedTables } = await import("../scripts/db/schema-registry");
+    expect(managedTables().some((t) => t.startsWith("vq_"))).toBe(false);
     const vq = readFileSync("drizzle-vq.config.ts", "utf8");
     expect(vq).toMatch(/tablesFilter:\s*\["vq_\*"\]/);
   });

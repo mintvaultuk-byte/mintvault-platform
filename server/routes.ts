@@ -56,6 +56,7 @@ import { registerAuthRoutes } from "./routes/auth";
 import { registerSubmissionRoutes } from "./routes/submissions";
 import { registerAdminSubmissionRoutes } from "./routes/admin-submissions";
 import { registerAdminConfigRoutes } from "./routes/admin-config";
+import { registerSuperAdminPartnerRoutes } from "./partner/admin-routes";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
 import { registerCardIdentificationRoutes } from "./routes/card-identification";
@@ -1412,6 +1413,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerSubmissionRoutes(app);
   registerAdminSubmissionRoutes(app);
   registerAdminConfigRoutes(app);
+  registerSuperAdminPartnerRoutes(app); // Phase 1 partner-network super-admin control shell (requireAdmin-gated)
   registerRarityMappingRoutes(app);
   registerPokemonKnowledgeRoutes(app);
   registerCardIdentificationRoutes(app);
