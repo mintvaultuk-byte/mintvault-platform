@@ -97,7 +97,9 @@ describe("no overlap mechanism (absolute positioning / negative margins / z-inde
 
 describe("responsive rules move statistics below/beside the nav explicitly (not squeeze-to-fit)", () => {
   it("the strip stacks as two full rows by default and only sits side-by-side at 2xl+", () => {
-    expect(STRIP).toMatch(/className="flex flex-col gap-1\.5[^"]*2xl:flex-row[^"]*"/);
+    // gap tightened further by the later compact-header hotfix (gap-1.5 -> gap-1)
+    // — the two-row/2xl-side-by-side structure itself is what this guards.
+    expect(STRIP).toMatch(/className="flex flex-col gap-1[^"]*2xl:flex-row[^"]*"/);
   });
   it("the stats zone never grows to compete with the nav zone at the wide breakpoint (shrink-0)", () => {
     expect(STRIP).toMatch(/className="[^"]*2xl:shrink-0[^"]*"\s+data-testid="batch-header"/);
@@ -137,11 +139,17 @@ describe("active stage and completed-stage styling preserved", () => {
 });
 
 describe("protected boundary: only the workflow header + this test changed", () => {
+  // Pinned to the FIXED historical range of the header-overlap hotfix itself
+  // (bcf74e25 -> ceea57a5, its functional commit), not "...HEAD" — later
+  // hotfixes stack additional commits on top (e.g. the compact-header pass),
+  // which is expected and must not falsely trip this guard.
   const base = "bcf74e25";
+  const head = "ceea57a5";
   let changed: string[] = [];
   try {
     execSync(`git rev-parse --verify ${base}`, { stdio: "pipe" });
-    changed = execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+    execSync(`git rev-parse --verify ${head}`, { stdio: "pipe" });
+    changed = execSync(`git diff --name-only ${base}..${head}`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
   } catch {
     changed = [];
   }

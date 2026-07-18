@@ -153,6 +153,9 @@ describe("protected surfaces untouched (hard rule)", () => {
     // workflow-header overlap hotfix (same branch): stage nav + session-stats
     // zoning only — no protected/server file involved.
     "client/src/components/grading-workflow/GradingWorkflowBar.tsx",
+    // compact-header + Review-layout hotfix (same branch): session-stats
+    // sizing only — no protected/server file involved.
+    "client/src/components/grading-workflow/SessionHud.tsx",
   ]);
 
   it("the grading release (PR #214) changed NO grading-protected / schema / migration file", () => {

@@ -152,6 +152,9 @@ describe("12-20. protected surfaces / save / queue / Ownership-NFC / providers u
       // workflow-header overlap hotfix (same branch): stage nav + session-stats
       // zoning only — no protected/server file involved.
       "client/src/components/grading-workflow/GradingWorkflowBar.tsx",
+      // compact-header + Review-layout hotfix (same branch): session-stats
+      // sizing only — no protected/server file involved.
+      "client/src/components/grading-workflow/SessionHud.tsx",
     ]);
     for (const f of changed) {
       expect(f, `${f} must not be protected/server/schema`).not.toMatch(
