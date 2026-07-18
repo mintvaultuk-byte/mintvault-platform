@@ -74,3 +74,17 @@ export const partnerLoginLimiter = partnerRateLimit({ name: "partner_login", win
 export const partnerMfaLimiter = partnerRateLimit({ name: "partner_mfa", windowMs: 15 * 60_000, max: 20, failClosed: true });
 export const partnerResetLimiter = partnerRateLimit({ name: "partner_reset", windowMs: 15 * 60_000, max: 5, failClosed: true, keyFn: acct });
 export const partnerLocationSwitchLimiter = partnerRateLimit({ name: "partner_locswitch", windowMs: 60_000, max: 30, failClosed: true });
+
+// Phase 2: submission-mutation limiter. Runs AFTER requirePartnerAuth (so req.partner is set) —
+// keys per authenticated user, not per-IP, so it bounds one account's write volume regardless of
+// the caller's source IP. Not failClosed: a rate-limit-store outage should not block legitimate
+// submission work when the account itself has done nothing suspicious (unlike login/reset/MFA,
+// where fail-closed protects against credential attacks specifically).
+const userKey = (req: Request): string => req.partner?.userId ?? req.ip ?? "unknown";
+export const partnerSubmissionMutationLimiter = partnerRateLimit({
+  name: "partner_submission_mutation",
+  windowMs: 60_000,
+  max: 60,
+  failClosed: false,
+  keyFn: userKey,
+});

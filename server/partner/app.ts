@@ -11,6 +11,7 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import { partnerSessionMiddleware } from "./session";
 import { partnerApiRouter } from "./routes";
+import { partnerSubmissionRouter } from "./submission-routes";
 import { partnerDbConfigured, partnerRuntimeQuery } from "./db";
 import { resolveGlobalFlag } from "./flags";
 import { assertDefinerModel, definerModelViolations } from "./definer-guard";
@@ -102,6 +103,7 @@ export function createPartnerApp(): Express {
 
   app.use(partnerSessionMiddleware);
   app.use("/api/partner", partnerApiRouter());
+  app.use("/api/partner", partnerSubmissionRouter()); // Phase 2 submission workflow
 
   // minimal UI shell route (SPA placeholder — no data, no secrets)
   app.get("/partner", (_req: Request, res: Response) => {

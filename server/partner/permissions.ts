@@ -23,6 +23,9 @@ export const PARTNER_PERMISSIONS = [
   "partner.credits.view",
   "partner.orders.view",
   "partner.orders.create",
+  "partner.orders.edit",
+  "partner.orders.submit",
+  "partner.orders.cancel",
   "partner.cards.view",
   "partner.cards.receive",
   "partner.cards.scan",
@@ -39,6 +42,7 @@ export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
     "partner.dashboard.view", "partner.organisation.view", "partner.location.view",
     "partner.users.view", "partner.users.manage", "partner.sessions.revoke", "partner.documents.view",
     "partner.training.view", "partner.credits.view", "partner.orders.view", "partner.orders.create",
+    "partner.orders.edit", "partner.orders.submit", "partner.orders.cancel",
     "partner.cards.view", "partner.cards.receive", "partner.cards.scan", "partner.cards.assess",
     "partner.support.view", "partner.support.create",
   ],
@@ -49,6 +53,7 @@ export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
   ],
   PARTNER_RECEPTION: [
     "partner.dashboard.view", "partner.location.view", "partner.orders.view", "partner.orders.create",
+    "partner.orders.edit", "partner.orders.submit",
     "partner.cards.view", "partner.cards.receive", "partner.support.view", "partner.support.create",
   ],
   PARTNER_FINANCE_VIEWER: [

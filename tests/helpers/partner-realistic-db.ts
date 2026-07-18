@@ -24,6 +24,7 @@ export const PARTNER_MIGRATIONS = [
   "0004_partner_mfa_enrol",
   "0005_partner_mfa_replay_and_grants",
   "0006_partner_definer_role",
+  "0007_partner_submissions",
 ] as const;
 
 export const MIGRATOR_ROLE = "pn_migrator";
