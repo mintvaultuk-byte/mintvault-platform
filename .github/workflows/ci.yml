@@ -30,6 +30,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history so the grading-release-scope guard (tests/helpers/grading-release-scope.ts)
+          # can reach its pinned base commits (d69ad147/fc57b53b); it fail-closes on a shallow clone.
+          # Mirrors the gitleaks job, which already uses fetch-depth: 0.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
