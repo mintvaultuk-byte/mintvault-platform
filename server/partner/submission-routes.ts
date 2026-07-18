@@ -15,11 +15,13 @@ import {
   editSubmissionDraft,
   cancelSubmission,
   addCard,
+  editCard,
   removeCard,
   listCards,
   getSubmissionDetail,
   submitSubmission,
   dashboardSummary,
+  listAvailableServiceTiers,
 } from "./submission-service";
 
 function sendError(res: import("express").Response, err: unknown): void {
@@ -29,7 +31,9 @@ function sendError(res: import("express").Response, err: unknown): void {
         ? 404
         : err.code === "forbidden"
           ? 403
-          : err.code === "stale_version" || err.code === "idempotency_conflict" || err.code === "service_tier_unavailable"
+          : err.code === "stale_version" ||
+              err.code === "idempotency_conflict" ||
+              err.code === "service_tier_unavailable"
             ? 409
             : 400;
     res.status(status).json({ error: { code: err.code, message: err.message } });
@@ -98,6 +102,15 @@ export function partnerSubmissionRouter(): Router {
     }
   });
 
+  // Currently-available service tiers for the wizard's "Select a service" step. Read-only.
+  r.get("/service-tiers", requirePartnerCapability("partner.orders.view"), async (req, res) => {
+    try {
+      res.json(await listAvailableServiceTiers(req.partner!));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
   r.get("/submissions", requirePartnerCapability("partner.orders.view"), async (req, res) => {
     try {
       const status = typeof req.query.status === "string" ? req.query.status : undefined;
@@ -123,7 +136,13 @@ export function partnerSubmissionRouter(): Router {
     async (req, res) => {
       try {
         const body = req.body ?? {};
-        if (typeof body.locationId !== "string" || tooLong(body.customerId) || tooLong(body.internalReference) || tooLong(body.serviceTierCode) || tooLong(body.intakeNotes)) {
+        if (
+          typeof body.locationId !== "string" ||
+          tooLong(body.customerId) ||
+          tooLong(body.internalReference) ||
+          tooLong(body.serviceTierCode) ||
+          tooLong(body.intakeNotes)
+        ) {
           res.status(400).json({ error: { code: "validation", message: "Invalid submission input." } });
           return;
         }
@@ -138,7 +157,7 @@ export function partnerSubmissionRouter(): Router {
       } catch (err) {
         sendError(res, err);
       }
-    },
+    }
   );
 
   r.get("/submissions/:id", requirePartnerCapability("partner.orders.view"), async (req, res) => {
@@ -179,7 +198,7 @@ export function partnerSubmissionRouter(): Router {
       } catch (err) {
         sendError(res, err);
       }
-    },
+    }
   );
 
   r.delete(
@@ -199,7 +218,7 @@ export function partnerSubmissionRouter(): Router {
       } catch (err) {
         sendError(res, err);
       }
-    },
+    }
   );
 
   r.get("/submissions/:id/cards", requirePartnerCapability("partner.cards.view"), async (req, res) => {
@@ -257,7 +276,69 @@ export function partnerSubmissionRouter(): Router {
       } catch (err) {
         sendError(res, err);
       }
-    },
+    }
+  );
+
+  r.patch(
+    "/submissions/:id/cards/:cardId",
+    requirePartnerCapability("partner.orders.edit"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    partnerSubmissionMutationLimiter,
+    async (req, res) => {
+      try {
+        const body = req.body ?? {};
+        if (
+          (body.cardName !== undefined && typeof body.cardName !== "string") ||
+          tooLong(body.cardName) ||
+          tooLong(body.game) ||
+          tooLong(body.cardSet) ||
+          tooLong(body.cardNumber) ||
+          tooLong(body.variant) ||
+          tooLong(body.language) ||
+          tooLong(body.customerNotes) ||
+          tooLong(body.intakeNotes)
+        ) {
+          res.status(400).json({ error: { code: "validation", message: "Invalid card input." } });
+          return;
+        }
+        if (body.quantity !== undefined && asBoundedInt(body.quantity, 1, MAX_QUANTITY) === null) {
+          res.status(400).json({ error: { code: "invalid_quantity", message: "Enter a valid card quantity." } });
+          return;
+        }
+        // asBoundedInt collapses "omitted" and "invalid" into the same null — fine for editCard's
+        // COALESCE (null = no change), but that would silently swallow a genuinely invalid year or
+        // declared value instead of rejecting it, unlike quantity above. Reject explicitly here.
+        if (body.year !== undefined && asBoundedInt(body.year, MIN_YEAR, MAX_YEAR) === null) {
+          res.status(400).json({ error: { code: "invalid_year", message: "Enter a valid year." } });
+          return;
+        }
+        if (
+          body.declaredValuePence !== undefined &&
+          asBoundedInt(body.declaredValuePence, 0, MAX_DECLARED_VALUE_PENCE) === null
+        ) {
+          res.status(400).json({ error: { code: "invalid_declared_value", message: "Enter a valid declared value." } });
+          return;
+        }
+        const updated = await editCard(req.partner!, String(req.params.id), String(req.params.cardId), {
+          cardName: typeof body.cardName === "string" ? body.cardName : undefined,
+          game: asString(body.game),
+          cardSet: asString(body.cardSet),
+          cardNumber: asString(body.cardNumber),
+          year: asBoundedInt(body.year, MIN_YEAR, MAX_YEAR),
+          variant: asString(body.variant),
+          language: asString(body.language),
+          declaredValuePence: asBoundedInt(body.declaredValuePence, 0, MAX_DECLARED_VALUE_PENCE),
+          quantity:
+            body.quantity !== undefined ? (asBoundedInt(body.quantity, 1, MAX_QUANTITY) ?? undefined) : undefined,
+          customerNotes: asString(body.customerNotes),
+          intakeNotes: asString(body.intakeNotes),
+        });
+        res.json(updated);
+      } catch (err) {
+        sendError(res, err);
+      }
+    }
   );
 
   r.delete(
@@ -279,7 +360,7 @@ export function partnerSubmissionRouter(): Router {
       } catch (err) {
         sendError(res, err);
       }
-    },
+    }
   );
 
   r.post(
@@ -290,7 +371,8 @@ export function partnerSubmissionRouter(): Router {
     partnerSubmissionMutationLimiter,
     async (req, res) => {
       try {
-        const idempotencyKeyRaw = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : req.header("Idempotency-Key");
+        const idempotencyKeyRaw =
+          typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey : req.header("Idempotency-Key");
         if (typeof idempotencyKeyRaw !== "string" || !idempotencyKeyRaw.trim() || tooLong(idempotencyKeyRaw)) {
           res.status(400).json({ error: { code: "validation", message: "An idempotency key is required." } });
           return;
@@ -299,7 +381,7 @@ export function partnerSubmissionRouter(): Router {
       } catch (err) {
         sendError(res, err);
       }
-    },
+    }
   );
 
   return r;

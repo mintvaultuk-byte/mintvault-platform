@@ -9,6 +9,8 @@ import ErrorBoundary from "@/components/error-boundary";
 import { FeatureFlagsContext, useFeatureFlagsQuery } from "@/hooks/use-feature-flags";
 import CookieBanner from "@/components/cookie-banner";
 import VaultVideoBg from "@/components/v2/vault-video-bg";
+import { PartnerSessionProvider } from "@/hooks/use-partner-session";
+import { PartnerRouteGuard } from "@/components/partner/partner-route-guard";
 
 // Critical-path pages — eagerly loaded
 import Home from "@/pages/home";
@@ -116,6 +118,20 @@ const ShowroomsListPage = lazy(() => import("@/pages/showrooms"));
 const CommunityPage = lazy(() => import("@/pages/community"));
 const AdminCommunityPage = lazy(() => import("@/pages/admin/community"));
 
+// Partner Portal (Phase 2, Increments A+B) — isolated /partner/* surface. Fails closed at the
+// backend (partner_portal_enabled flag + emergency stop) if the flag is off; not enabled in any
+// live environment yet. See INTEGRATION-ORDER.md.
+const PartnerLoginPage = lazy(() => import("@/pages/partner/login"));
+const PartnerDashboardPage = lazy(() => import("@/pages/partner/dashboard"));
+const PartnerSubmissionsPage = lazy(() => import("@/pages/partner/submissions"));
+const PartnerSubmissionWizardPage = lazy(() => import("@/pages/partner/submission-wizard"));
+const PartnerSubmissionDetailPage = lazy(() => import("@/pages/partner/submission-detail"));
+const PartnerUsersPage = lazy(() => import("@/pages/partner/coming-soon"));
+const PartnerLocationsPage = lazy(() => import("@/pages/partner/locations"));
+const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
+const PartnerHelpPage = lazy(() => import("@/pages/partner/help"));
+const PartnerSecurityPage = lazy(() => import("@/pages/partner/security"));
+
 function GoldBurstEffect() {
   useEffect(() => {
     function handlePointerDown(e: PointerEvent) {
@@ -207,6 +223,72 @@ function PageLoader() {
   );
 }
 
+/**
+ * Mounted at BOTH "/partner" (bare) and "/partner/*" (wouter's regexparam wildcard requires a
+ * literal trailing slash before the capture, so it never matches the bare path on its own — see
+ * the two Route entries in Router() below). Session check is scoped to this subtree only — it
+ * never fires for ordinary site traffic outside /partner/*.
+ */
+function PartnerPortalRoutes() {
+  return (
+    <PartnerSessionProvider>
+      <Switch>
+        <Route path="/partner/login">
+          <PartnerLoginPage />
+        </Route>
+        <Route path="/partner/dashboard">
+          <PartnerRouteGuard>
+            <PartnerDashboardPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/submissions/new">
+          <PartnerRouteGuard>
+            <PartnerSubmissionWizardPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/submissions/:id">
+          <PartnerRouteGuard>
+            <PartnerSubmissionDetailPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/submissions">
+          <PartnerRouteGuard>
+            <PartnerSubmissionsPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/users">
+          <PartnerRouteGuard>
+            <PartnerUsersPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/locations">
+          <PartnerRouteGuard>
+            <PartnerLocationsPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/billing">
+          <PartnerRouteGuard>
+            <PartnerBillingPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/help">
+          <PartnerRouteGuard>
+            <PartnerHelpPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/security">
+          <PartnerRouteGuard>
+            <PartnerSecurityPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route>
+          <Redirect to="/partner/dashboard" />
+        </Route>
+      </Switch>
+    </PartnerSessionProvider>
+  );
+}
+
 function Router() {
   return (
     <>
@@ -217,6 +299,12 @@ function Router() {
         <Switch>
           <Route path="/admin/login">
             <AdminLoginPage />
+          </Route>
+          <Route path="/partner">
+            <PartnerPortalRoutes />
+          </Route>
+          <Route path="/partner/*">
+            <PartnerPortalRoutes />
           </Route>
           <Route path="/home-v2-integrated" component={HomeV2Integrated} />
           <Route path="/how-it-works-v2" component={HowItWorksV2} />

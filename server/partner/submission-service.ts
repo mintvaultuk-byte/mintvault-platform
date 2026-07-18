@@ -21,7 +21,7 @@ import type { PartnerPrincipal } from "./session";
 export class SubmissionError extends Error {
   constructor(
     public code: string,
-    message: string,
+    message: string
   ) {
     super(message);
   }
@@ -29,15 +29,15 @@ export class SubmissionError extends Error {
 
 const NOT_FOUND = () => new SubmissionError("not_found", "Submission not found.");
 const FORBIDDEN = () => new SubmissionError("forbidden", "You do not have access to this submission.");
-const STALE = () => new SubmissionError("stale_version", "This submission was updated elsewhere. Refresh before saving again.");
+const STALE = () =>
+  new SubmissionError("stale_version", "This submission was updated elsewhere. Refresh before saving again.");
 const NOT_DRAFT = () => new SubmissionError("not_draft", "This submission can no longer be edited.");
 const VALIDATION = (msg: string) => new SubmissionError("validation", msg);
-const INVALID_SERVICE_TIER = () =>
-  new SubmissionError("invalid_service_tier", "Select an available service.");
+const INVALID_SERVICE_TIER = () => new SubmissionError("invalid_service_tier", "Select an available service.");
 const SERVICE_TIER_UNAVAILABLE = () =>
   new SubmissionError(
     "service_tier_unavailable",
-    "This service is no longer available. Choose an available service before submitting.",
+    "This service is no longer available. Choose an available service before submitting."
   );
 
 /** Location-scope predicate, appended to every submission query. Org-wide roles see everything;
@@ -48,12 +48,12 @@ const SERVICE_TIER_UNAVAILABLE = () =>
 async function locationScopeSql(
   c: PoolClient,
   principal: PartnerPrincipal,
-  paramOffset: number,
+  paramOffset: number
 ): Promise<{ sql: string; params: unknown[] }> {
   if (principal.orgWide) return { sql: "TRUE", params: [] };
   const { rows } = await c.query<{ location_id: string }>(
     "SELECT location_id FROM partner_user_locations WHERE user_id = $1",
-    [principal.userId],
+    [principal.userId]
   );
   const ids = rows.map((r) => r.location_id);
   if (ids.length === 0) return { sql: "FALSE", params: [] }; // no assignment = no visibility, fail closed
@@ -78,7 +78,7 @@ export interface SubmissionSummary {
 
 export async function listSubmissions(
   principal: PartnerPrincipal,
-  opts: { status?: string; page?: number; pageSize?: number } = {},
+  opts: { status?: string; page?: number; pageSize?: number } = {}
 ): Promise<{ items: SubmissionSummary[]; total: number }> {
   const page = Math.max(1, opts.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, opts.pageSize ?? 25)); // guards oversized/malformed pagination
@@ -91,7 +91,10 @@ export async function listSubmissions(
       params.push(opts.status);
     }
     const where = whereParts.join(" AND ");
-    const countRes = await c.query<{ n: string }>(`SELECT count(*)::text n FROM partner_submissions WHERE ${where}`, params);
+    const countRes = await c.query<{ n: string }>(
+      `SELECT count(*)::text n FROM partner_submissions WHERE ${where}`,
+      params
+    );
     const limitIdx = params.length + 1;
     const offsetIdx = params.length + 2;
     const { rows } = await c.query(
@@ -100,7 +103,7 @@ export async function listSubmissions(
          FROM partner_submissions WHERE ${where}
         ORDER BY created_at DESC, id DESC
         LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-      [...params, pageSize, (page - 1) * pageSize],
+      [...params, pageSize, (page - 1) * pageSize]
     );
     return {
       items: rows.map(toSummary),
@@ -137,16 +140,16 @@ export interface CreateSubmissionInput {
 
 export async function createSubmissionDraft(
   principal: PartnerPrincipal,
-  input: CreateSubmissionInput,
+  input: CreateSubmissionInput
 ): Promise<SubmissionSummary> {
   if (!input.locationId) throw VALIDATION("A location is required.");
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     // Never trust a client-supplied location — it must be one this user is actually assigned to,
     // UNLESS the user is org-wide (owner/manager may create on behalf of any org location).
-    const assigned = await c.query(
-      "SELECT 1 FROM partner_locations WHERE id=$1 AND tenant_id=$2 AND status='ACTIVE'",
-      [input.locationId, principal.tenantId],
-    );
+    const assigned = await c.query("SELECT 1 FROM partner_locations WHERE id=$1 AND tenant_id=$2 AND status='ACTIVE'", [
+      input.locationId,
+      principal.tenantId,
+    ]);
     if (assigned.rowCount !== 1) throw VALIDATION("Selected location is not available.");
     if (!principal.orgWide) {
       const own = await c.query("SELECT 1 FROM partner_user_locations WHERE user_id=$1 AND location_id=$2", [
@@ -160,7 +163,9 @@ export async function createSubmissionDraft(
     // supplied (including an empty string) it must resolve to an approved, currently-active tier —
     // never accepted as arbitrary text.
     const estimatedPrice =
-      input.serviceTierCode != null ? (await resolveServiceTier(c, principal.tenantId, input.serviceTierCode)).pricePerCardPence : null;
+      input.serviceTierCode != null
+        ? (await resolveServiceTier(c, principal.tenantId, input.serviceTierCode)).pricePerCardPence
+        : null;
     const { rows } = await c.query(
       `INSERT INTO partner_submissions
          (tenant_id, location_id, created_by, customer_id, internal_reference, service_tier_code, estimated_price_pence, intake_notes)
@@ -176,7 +181,7 @@ export async function createSubmissionDraft(
         input.serviceTierCode ?? null,
         estimatedPrice,
         input.intakeNotes ?? null,
-      ],
+      ]
     );
     const row = rows[0];
     await writeEvent(c, principal, row.id, "created", null, "draft", null);
@@ -215,13 +220,13 @@ async function verifyCustomerOwnership(c: PoolClient, tenantId: string, customer
 async function resolveServiceTier(
   c: PoolClient,
   tenantId: string,
-  tierCode: string,
+  tierCode: string
 ): Promise<{ pricePerCardPence: number }> {
   const { rows } = await c.query<{ price_per_card_pence: number }>(
     `SELECT price_per_card_pence FROM partner_service_tiers
       WHERE tier_code=$1 AND is_active AND (tenant_id=$2 OR tenant_id IS NULL)
       ORDER BY tenant_id NULLS LAST LIMIT 1`,
-    [tierCode, tenantId],
+    [tierCode, tenantId]
   );
   if (rows.length !== 1) throw INVALID_SERVICE_TIER();
   return { pricePerCardPence: rows[0].price_per_card_pence };
@@ -234,23 +239,29 @@ async function writeEvent(
   eventType: string,
   fromStatus: string | null,
   toStatus: string | null,
-  reason: string | null,
+  reason: string | null
 ): Promise<void> {
   await c.query(
     `INSERT INTO partner_submission_events (tenant_id, submission_id, actor_user_id, event_type, from_status, to_status, reason)
      VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [principal.tenantId, submissionId, principal.userId, eventType, fromStatus, toStatus, reason],
+    [principal.tenantId, submissionId, principal.userId, eventType, fromStatus, toStatus, reason]
   );
 }
 
 async function loadSubmissionForUpdate(
   c: PoolClient,
   principal: PartnerPrincipal,
-  submissionId: string,
-): Promise<{ id: string; location_id: string; status: string; version: number; idempotency_key: string | null } | null> {
+  submissionId: string
+): Promise<{
+  id: string;
+  location_id: string;
+  status: string;
+  version: number;
+  idempotency_key: string | null;
+} | null> {
   const { rows } = await c.query(
     `SELECT id, location_id, status, version, idempotency_key FROM partner_submissions WHERE id=$1 FOR UPDATE`,
-    [submissionId],
+    [submissionId]
   );
   if (rows.length !== 1) return null;
   const row = rows[0];
@@ -275,7 +286,7 @@ export interface EditSubmissionInput {
 export async function editSubmissionDraft(
   principal: PartnerPrincipal,
   submissionId: string,
-  input: EditSubmissionInput,
+  input: EditSubmissionInput
 ): Promise<SubmissionSummary> {
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const row = await loadSubmissionForUpdate(c, principal, submissionId);
@@ -319,7 +330,7 @@ export async function editSubmissionDraft(
         newEstimatedPrice ?? null,
         input.intakeNotes ?? null,
         tierChanged,
-      ],
+      ]
     );
     if (rows.length !== 1) throw STALE(); // lost the race between load and update
     await writeEvent(c, principal, submissionId, "updated", "draft", "draft", null);
@@ -330,7 +341,7 @@ export async function editSubmissionDraft(
 export async function cancelSubmission(
   principal: PartnerPrincipal,
   submissionId: string,
-  reason: string,
+  reason: string
 ): Promise<SubmissionSummary> {
   if (!reason || !reason.trim()) throw VALIDATION("A cancellation reason is required.");
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
@@ -341,7 +352,7 @@ export async function cancelSubmission(
       `UPDATE partner_submissions SET status='cancelled', cancelled_reason=$2, cancelled_at=now(), version=version+1, updated_at=now()
        WHERE id=$1 RETURNING id, public_ref, location_id, customer_id, internal_reference, service_tier_code,
                  estimated_price_pence, card_count, status, version, created_at, updated_at, submitted_at`,
-      [submissionId, reason],
+      [submissionId, reason]
     );
     await writeEvent(c, principal, submissionId, "cancelled", row.status, "cancelled", reason);
     return toSummary(rows[0]);
@@ -371,7 +382,7 @@ export async function addCard(principal: PartnerPrincipal, submissionId: string,
     const seq = await c.query<{ next: number }>(
       `SELECT COALESCE(MAX(sequence_number), 0) + 1 AS next FROM partner_submission_cards
         WHERE submission_id=$1 AND removed_at IS NULL`,
-      [submissionId],
+      [submissionId]
     );
     const nextSeq = seq.rows[0].next;
     const { rows } = await c.query(
@@ -396,10 +407,78 @@ export async function addCard(principal: PartnerPrincipal, submissionId: string,
         input.quantity ?? 1,
         input.customerNotes ?? null,
         input.intakeNotes ?? null,
-      ],
+      ]
     );
-    await c.query(`UPDATE partner_submissions SET card_count = card_count + 1, updated_at = now() WHERE id=$1`, [submissionId]);
+    await c.query(`UPDATE partner_submissions SET card_count = card_count + 1, updated_at = now() WHERE id=$1`, [
+      submissionId,
+    ]);
     await writeEvent(c, principal, submissionId, "card_added", null, null, null);
+    return rows[0];
+  });
+}
+
+export interface EditCardInput {
+  cardName?: string;
+  game?: string | null;
+  cardSet?: string | null;
+  cardNumber?: string | null;
+  year?: number | null;
+  variant?: string | null;
+  language?: string | null;
+  declaredValuePence?: number | null;
+  quantity?: number;
+  customerNotes?: string | null;
+  intakeNotes?: string | null;
+}
+
+/** In-place card edit — draft-only (same guard as addCard/removeCard), never touches sequence_number
+ *  (edits must not silently reorder cards) or any grade/cert field (the table has no such columns). */
+export async function editCard(
+  principal: PartnerPrincipal,
+  submissionId: string,
+  cardId: string,
+  input: EditCardInput
+) {
+  if (input.cardName !== undefined && !input.cardName.trim()) throw VALIDATION("Card name is required.");
+  return withTenant({ tenantId: principal.tenantId }, async (c) => {
+    const row = await loadSubmissionForUpdate(c, principal, submissionId);
+    if (!row) throw NOT_FOUND();
+    if (row.status !== "draft") throw NOT_DRAFT();
+    const { rows } = await c.query(
+      `UPDATE partner_submission_cards SET
+         card_name = COALESCE($3, card_name),
+         game = COALESCE($4, game),
+         card_set = COALESCE($5, card_set),
+         card_number = COALESCE($6, card_number),
+         year = COALESCE($7, year),
+         variant = COALESCE($8, variant),
+         language = COALESCE($9, language),
+         declared_value_pence = COALESCE($10, declared_value_pence),
+         quantity = COALESCE($11, quantity),
+         customer_notes = COALESCE($12, customer_notes),
+         intake_notes = COALESCE($13, intake_notes),
+         updated_at = now()
+       WHERE id=$1 AND submission_id=$2 AND removed_at IS NULL
+       RETURNING id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
+                 declared_value_pence, quantity, customer_notes, intake_notes, created_at`,
+      [
+        cardId,
+        submissionId,
+        input.cardName?.trim() ?? null,
+        input.game ?? null,
+        input.cardSet ?? null,
+        input.cardNumber ?? null,
+        input.year ?? null,
+        input.variant ?? null,
+        input.language ?? null,
+        input.declaredValuePence ?? null,
+        input.quantity ?? null,
+        input.customerNotes ?? null,
+        input.intakeNotes ?? null,
+      ]
+    );
+    if (rows.length !== 1) throw NOT_FOUND();
+    await writeEvent(c, principal, submissionId, "card_updated", null, null, null);
     return rows[0];
   });
 }
@@ -412,12 +491,13 @@ export async function removeCard(principal: PartnerPrincipal, submissionId: stri
     const res = await c.query(
       `UPDATE partner_submission_cards SET removed_at=now(), removed_reason=$3
         WHERE id=$1 AND submission_id=$2 AND removed_at IS NULL`,
-      [cardId, submissionId, reason ?? null],
+      [cardId, submissionId, reason ?? null]
     );
     if (res.rowCount !== 1) throw NOT_FOUND();
-    await c.query(`UPDATE partner_submissions SET card_count = GREATEST(card_count - 1, 0), updated_at = now() WHERE id=$1`, [
-      submissionId,
-    ]);
+    await c.query(
+      `UPDATE partner_submissions SET card_count = GREATEST(card_count - 1, 0), updated_at = now() WHERE id=$1`,
+      [submissionId]
+    );
     await writeEvent(c, principal, submissionId, "card_removed", null, null, reason ?? null);
   });
 }
@@ -427,13 +507,16 @@ export async function listCards(principal: PartnerPrincipal, submissionId: strin
     // Read-only: use the non-locking scope check (matching buildDetail), not loadSubmissionForUpdate
     // — a FOR UPDATE lock here would needlessly block concurrent edits to this submission.
     const scope = await locationScopeSql(c, principal, 1);
-    const exists = await c.query(`SELECT 1 FROM partner_submissions WHERE id=$1 AND ${scope.sql}`, [submissionId, ...scope.params]);
+    const exists = await c.query(`SELECT 1 FROM partner_submissions WHERE id=$1 AND ${scope.sql}`, [
+      submissionId,
+      ...scope.params,
+    ]);
     if (exists.rowCount !== 1) throw NOT_FOUND();
     const { rows } = await c.query(
       `SELECT id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
               declared_value_pence, quantity, customer_notes, intake_notes, created_at
          FROM partner_submission_cards WHERE submission_id=$1 AND removed_at IS NULL ORDER BY sequence_number`,
-      [submissionId],
+      [submissionId]
     );
     return rows;
   });
@@ -457,19 +540,19 @@ async function buildDetail(c: PoolClient, principal: PartnerPrincipal, submissio
             estimated_price_pence, card_count, status, version, created_at, updated_at, submitted_at,
             cancelled_reason, cancelled_at
        FROM partner_submissions WHERE id=$1 AND ${scope.sql}`,
-    [submissionId, ...scope.params],
+    [submissionId, ...scope.params]
   );
   if (rows.length !== 1) throw NOT_FOUND();
   const cards = await c.query(
     `SELECT id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
             declared_value_pence, quantity, customer_notes, intake_notes, created_at
        FROM partner_submission_cards WHERE submission_id=$1 AND removed_at IS NULL ORDER BY sequence_number`,
-    [submissionId],
+    [submissionId]
   );
   const events = await c.query(
     `SELECT id, event_type, from_status, to_status, reason, created_at, actor_user_id
        FROM partner_submission_events WHERE submission_id=$1 ORDER BY created_at`,
-    [submissionId],
+    [submissionId]
   );
   return { submission: toSummary(rows[0]), cards: cards.rows, events: events.rows };
 }
@@ -486,11 +569,14 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
     // never re-execute the handoff logic.
     const already = await c.query(
       `SELECT id, status FROM partner_submissions WHERE tenant_id=$1 AND idempotency_key=$2`,
-      [principal.tenantId, idempotencyKey],
+      [principal.tenantId, idempotencyKey]
     );
     if (already.rowCount === 1) {
       if (already.rows[0].id !== submissionId) {
-        throw new SubmissionError("idempotency_conflict", "This idempotency key was already used for a different submission.");
+        throw new SubmissionError(
+          "idempotency_conflict",
+          "This idempotency key was already used for a different submission."
+        );
       }
       return buildDetail(c, principal, submissionId);
     }
@@ -510,9 +596,10 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
       throw NOT_DRAFT();
     }
 
-    const cards = await c.query(`SELECT count(*)::int n FROM partner_submission_cards WHERE submission_id=$1 AND removed_at IS NULL`, [
-      submissionId,
-    ]);
+    const cards = await c.query(
+      `SELECT count(*)::int n FROM partner_submission_cards WHERE submission_id=$1 AND removed_at IS NULL`,
+      [submissionId]
+    );
     if (cards.rows[0].n < 1) throw VALIDATION("Add at least one card before submitting.");
 
     const full = await c.query(
@@ -522,7 +609,7 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
             FROM partner_submission_cards WHERE submission_id=s.id AND removed_at IS NULL ORDER BY sequence_number
         ) sc) AS cards
        FROM partner_submissions s WHERE s.id=$1`,
-      [submissionId],
+      [submissionId]
     );
     const snapshot = full.rows[0];
 
@@ -532,7 +619,7 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
     if (snapshot.service_tier_code) {
       const stillActive = await c.query<{ n: number }>(
         `SELECT count(*)::int n FROM partner_service_tiers WHERE tier_code=$1 AND is_active AND (tenant_id=$2 OR tenant_id IS NULL)`,
-        [snapshot.service_tier_code, principal.tenantId],
+        [snapshot.service_tier_code, principal.tenantId]
       );
       if (stillActive.rows[0].n < 1) throw SERVICE_TIER_UNAVAILABLE();
     }
@@ -543,14 +630,14 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
     // longer 'draft' and throws NOT_DRAFT() instead of inserting a second handoff.
     await c.query(
       `INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending',$3)`,
-      [principal.tenantId, submissionId, JSON.stringify(snapshot)],
+      [principal.tenantId, submissionId, JSON.stringify(snapshot)]
     );
     let updated;
     try {
       updated = await c.query(
         `UPDATE partner_submissions SET status='submitted_to_mintvault', submitted_at=now(), idempotency_key=$2, version=version+1, updated_at=now()
          WHERE id=$1 RETURNING id`,
-        [submissionId, idempotencyKey],
+        [submissionId, idempotencyKey]
       );
     } catch (err) {
       // RACE: the SAME idempotency key was concurrently attached to a DIFFERENT submission (the
@@ -559,7 +646,10 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
       // (tenant_id, idempotency_key) is the backstop; translate its violation into the same clean
       // 409 the sequential (non-racing) case already returns, instead of a raw 500.
       if ((err as { code?: string }).code === "23505") {
-        throw new SubmissionError("idempotency_conflict", "This idempotency key was already used for a different submission.");
+        throw new SubmissionError(
+          "idempotency_conflict",
+          "This idempotency key was already used for a different submission."
+        );
       }
       throw err;
     }
@@ -578,12 +668,43 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
   });
 }
 
+export interface AvailableServiceTier {
+  tierCode: string;
+  label: string;
+  pricePerCardPence: number;
+  turnaroundDays: number;
+}
+
+/**
+ * List CURRENTLY ACTIVE service tiers visible to this tenant (its own tiers + global defaults),
+ * for the wizard's "Select an available service" step. Read-only; RLS is the actual isolation
+ * boundary (another tenant's private tier is invisible), same as resolveServiceTier(). Never
+ * returns a disabled tier — the Portal must never let a partner pick something unavailable.
+ */
+export async function listAvailableServiceTiers(principal: PartnerPrincipal): Promise<AvailableServiceTier[]> {
+  return withTenant({ tenantId: principal.tenantId }, async (c) => {
+    const { rows } = await c.query(
+      `SELECT DISTINCT ON (tier_code) tier_code, label, price_per_card_pence, turnaround_days
+         FROM partner_service_tiers
+        WHERE is_active AND (tenant_id = $1 OR tenant_id IS NULL)
+        ORDER BY tier_code, tenant_id NULLS LAST`,
+      [principal.tenantId]
+    );
+    return rows.map((r: any) => ({
+      tierCode: r.tier_code,
+      label: r.label,
+      pricePerCardPence: r.price_per_card_pence,
+      turnaroundDays: r.turnaround_days,
+    }));
+  });
+}
+
 export async function dashboardSummary(principal: PartnerPrincipal) {
   return withTenant({ tenantId: principal.tenantId }, async (c) => {
     const scope = await locationScopeSql(c, principal, 0); // scope predicate is first in this query
     const { rows } = await c.query(
       `SELECT status, count(*)::int n FROM partner_submissions WHERE ${scope.sql} GROUP BY status`,
-      scope.params,
+      scope.params
     );
     const counts: Record<string, number> = { draft: 0, submitted_to_mintvault: 0, cancelled: 0 };
     for (const r of rows) counts[r.status] = r.n;
