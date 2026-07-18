@@ -30,8 +30,8 @@ export function GradingWorkflowBar({
       data-testid="grading-workflow-bar"
       className={
         embedded
-          ? "flex items-stretch gap-1"
-          : "sticky top-0 z-20 -mx-1 mb-4 flex items-stretch gap-1 rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/95 p-1.5 backdrop-blur supports-[backdrop-filter]:bg-[var(--admin-panel)]/80"
+          ? "flex min-w-0 items-stretch gap-1 overflow-x-auto"
+          : "sticky top-0 z-20 -mx-1 mb-4 flex min-w-0 items-stretch gap-1 overflow-x-auto rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/95 p-1.5 backdrop-blur supports-[backdrop-filter]:bg-[var(--admin-panel)]/80"
       }
     >
       {GRADING_STAGES.map((stage, i) => {
@@ -47,7 +47,7 @@ export function GradingWorkflowBar({
             data-testid={`workflow-stage-${stage.key}`}
             onClick={() => onStageClick?.(i, stage)}
             title={`${stage.label} — ${stage.sublabel}`}
-            className={`flex flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition ${
+            className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition ${
               isCurrent
                 ? "border border-[var(--admin-gold)] bg-[var(--admin-gold)]/15"
                 : isComplete
@@ -67,10 +67,14 @@ export function GradingWorkflowBar({
               {isComplete ? <Check size={13} strokeWidth={3} /> : i + 1}
             </span>
             <span className="min-w-0 leading-tight">
-              <span className={`block truncate text-xs font-bold ${isCurrent || isComplete ? "text-[var(--admin-ink)]" : "text-[var(--admin-ink-faint)]"}`}>
+              <span
+                className={`block truncate text-xs font-bold ${isCurrent || isComplete ? "text-[var(--admin-ink)]" : "text-[var(--admin-ink-faint)]"}`}
+              >
                 {stage.label}
               </span>
-              <span className="hidden truncate text-[10px] text-[var(--admin-ink-faint)] xl:block">{stage.sublabel}</span>
+              <span className="hidden truncate text-[10px] text-[var(--admin-ink-faint)] xl:block">
+                {stage.sublabel}
+              </span>
             </span>
           </button>
         );

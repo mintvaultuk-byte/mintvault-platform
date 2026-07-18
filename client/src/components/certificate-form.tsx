@@ -1615,19 +1615,27 @@ export default function CertificateForm({
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel">
           <div className="shrink-0 space-y-2">
-            {/* Combined workstation header strip — 4-stage workflow (left) + queue /
-                session stats (right). Moved out of the <form> into the fixed
+            {/* Combined workstation header strip — 4-stage workflow navigation and
+                queue / session stats are DELIBERATELY two separate zones, never one
+                shared shrink-to-fit row: on a real 13" laptop the two pieces
+                together don't reliably fit on one line, and letting them share a
+                row (relying on flex-wrap + text truncation alone) let session-stat
+                text render on top of the stage buttons in production. Below the
+                2xl breakpoint (where a laptop-width control panel actually has
+                room) they stack as two full-width rows; at 2xl+ they sit
+                side-by-side with the stats zone shrink-0 so it can never eat into
+                the nav zone's space. No absolute positioning, no negative margins,
+                no shared grid columns. Moved out of the <form> into the fixed
                 control-panel header so it stays put while the form scrolls.
-                Display-only: no queue-order or session-calc change. Inner content
-                unchanged from the former strip. */}
+                Display-only: no queue-order or session-calc change. */}
             <div
-              className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/95 px-2 py-1.5"
+              className="flex flex-col gap-1.5 rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/95 px-2 py-1.5 2xl:flex-row 2xl:items-center 2xl:gap-x-3 2xl:gap-y-0"
               data-testid="workstation-strip"
             >
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 2xl:flex-1" data-testid="workflow-nav-zone">
                 <GradingWorkflowBar embedded currentIndex={workflowCurrent} maxReached={workflowMax} onStageClick={(i) => goToStage(i)} />
               </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" data-testid="batch-header">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] 2xl:shrink-0 2xl:justify-end" data-testid="batch-header">
                 {batch?.customer && (
                   <span className="text-[var(--admin-ink)]" title="Customer">
                     <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Cust</span> {batch.customer}
