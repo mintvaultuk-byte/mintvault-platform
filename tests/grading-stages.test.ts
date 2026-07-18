@@ -102,8 +102,9 @@ describe("card preview is read-only (spec 3)", () => {
 });
 
 describe("compact chips v2 + region-aware defaults (spec 5-6)", () => {
-  it("chips shrank again (~40px high, 84-124px wide)", () => {
-    expect(PICKER).toContain("min-h-[40px] min-w-[84px] max-w-[124px]");
+  it("chips shrank again (v5 hotfix: ~28px high, dense auto-fill grid)", () => {
+    expect(PICKER).toContain("min-h-[28px]");
+    expect(PICKER).toContain("RARITY_TILE_GRID");
   });
   it("modern-English quick list has no Japanese-only codes; eastern list has them", () => {
     const west = PICKER.slice(PICKER.indexOf("QUICK_RARITIES_WESTERN"), PICKER.indexOf("QUICK_RARITIES_EASTERN"));

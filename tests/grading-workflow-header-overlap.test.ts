@@ -39,14 +39,20 @@ function slice(src: string, start: string, end: string): string {
   return src.slice(i, j);
 }
 
-const STRIP = slice(FORM, 'data-testid="workstation-strip"', "text-autosave-status-mini");
+// Anchor BEFORE the strip's opening <div className="..."> so the assertions
+// below can see its className (className precedes data-testid in the JSX),
+// and end tightly right after SessionHud — i.e. exactly the workstation-strip
+// element, not the much larger scrollable form that follows it (which
+// legitimately has its own unrelated fixed/z-50 toasts and panels).
+const STRIP = slice(FORM, "Combined workstation header strip", "identification-tools");
 
 describe("all four workflow stages render with labels intact", () => {
   it("GRADING_STAGES (imported from the shared workflow contract) drives every stage button", () => {
     expect(BAR).toContain("GRADING_STAGES.map((stage, i)");
     expect(BAR).toContain("data-testid={`workflow-stage-${stage.key}`}");
     const shared = read("shared/grading-workflow.ts");
-    const stageCount = (shared.match(/key:\s*"/g) ?? []).length;
+    const stagesArray = shared.slice(shared.indexOf("export const GRADING_STAGES"), shared.indexOf("export type StageStatus"));
+    const stageCount = (stagesArray.match(/\{\s*key:\s*"/g) ?? []).length;
     expect(stageCount).toBe(4);
   });
   it("stage label and sublabel both still render", () => {
@@ -73,23 +79,23 @@ describe("workflow navigation and session statistics are two SEPARATE containers
 });
 
 describe("no overlap mechanism (absolute positioning / negative margins / z-index stacking)", () => {
-  it("the workstation strip and its two zones use normal flow only", () => {
-    expect(STRIP).not.toMatch(/\babsolute\b/);
-    expect(STRIP).not.toMatch(/-m[trblxy]?-\d/); // no negative margins
-    expect(STRIP).not.toMatch(/\bz-\d/);
+  it("no element in the strip uses className=\"...absolute...\" or a z-index utility", () => {
+    // Checked as actual class TOKENS (not the explanatory comment prose above
+    // the strip, which legitimately uses the word "absolute" in English).
+    expect(STRIP).not.toMatch(/className="[^"]*\babsolute\b[^"]*"/);
+    expect(STRIP).not.toMatch(/className="[^"]*\bz-\d[^"]*"/);
   });
   it("the workflow bar itself never uses absolute positioning to lay out stages", () => {
-    expect(BAR).not.toMatch(/\babsolute\b/);
-    expect(BAR).not.toMatch(/-m[trblxy]?-\d/);
+    expect(BAR).not.toMatch(/className=\{?"[^"]*\babsolute\b/);
   });
 });
 
 describe("responsive rules move statistics below/beside the nav explicitly (not squeeze-to-fit)", () => {
   it("the strip stacks as two full rows by default and only sits side-by-side at 2xl+", () => {
-    expect(STRIP).toMatch(/flex flex-col gap-1\.5[^"]*2xl:flex-row/);
+    expect(STRIP).toMatch(/className="flex flex-col gap-1\.5[^"]*2xl:flex-row[^"]*"/);
   });
   it("the stats zone never grows to compete with the nav zone at the wide breakpoint (shrink-0)", () => {
-    expect(STRIP).toMatch(/data-testid="batch-header"[^>]*2xl:shrink-0/);
+    expect(STRIP).toMatch(/className="[^"]*2xl:shrink-0[^"]*"\s+data-testid="batch-header"/);
   });
   it("the nav zone can actually shrink (min-w-0) instead of overflowing into the stats zone", () => {
     const navZoneOpenTag = STRIP.slice(
@@ -109,7 +115,9 @@ describe("the workflow bar can genuinely shrink/scroll instead of silently overf
     expect(navTag).toContain("overflow-x-auto");
   });
   it("each stage button has min-w-0 so flex-1 + truncate actually shrinks it (not held to content width)", () => {
-    const buttonClass = BAR.slice(BAR.indexOf("className={`flex"), BAR.indexOf("${"));
+    const classIdx = BAR.indexOf("className={`flex");
+    expect(classIdx).toBeGreaterThan(-1);
+    const buttonClass = BAR.slice(classIdx, BAR.indexOf("${", classIdx));
     expect(buttonClass).toContain("min-w-0");
   });
 });

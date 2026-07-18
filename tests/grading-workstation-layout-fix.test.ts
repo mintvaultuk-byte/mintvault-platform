@@ -174,6 +174,9 @@ describe("10. protected Stage-3 / grading files remain untouched", () => {
     "client/src/components/rarity-picker/RarityVariantPicker.tsx",
     "client/src/components/rarity-picker/RaritySymbol.tsx",
     "client/src/components/grading-workflow/ReviewSummary.tsx",
+    // workflow-header overlap hotfix (same branch): stage nav + session-stats
+    // zoning only — no protected/server file involved.
+    "client/src/components/grading-workflow/GradingWorkflowBar.tsx",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {

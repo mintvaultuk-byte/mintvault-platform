@@ -157,6 +157,9 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     "shared/collector-number-format.ts",
     // CI-only fetch-depth fix bundled in this release (dev-tooling, non-protected).
     ".github/workflows/ci.yml",
+    // workflow-header overlap hotfix (same branch): stage nav + session-stats
+    // zoning only — no protected/server file involved.
+    "client/src/components/grading-workflow/GradingWorkflowBar.tsx",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {

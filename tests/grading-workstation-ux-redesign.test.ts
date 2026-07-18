@@ -150,6 +150,9 @@ describe("protected surfaces untouched (hard rule)", () => {
     // workflow.
     "client/src/components/rarity-picker/RaritySymbol.tsx",
     "client/src/components/grading-workflow/ReviewSummary.tsx",
+    // workflow-header overlap hotfix (same branch): stage nav + session-stats
+    // zoning only — no protected/server file involved.
+    "client/src/components/grading-workflow/GradingWorkflowBar.tsx",
   ]);
 
   it("the grading release (PR #214) changed NO grading-protected / schema / migration file", () => {

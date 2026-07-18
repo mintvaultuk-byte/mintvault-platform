@@ -147,6 +147,9 @@ describe("12-20. protected surfaces / save / queue / Ownership-NFC / providers u
       "client/src/components/grading-workflow/ReviewSummary.tsx",
       "shared/pokemon-rarity-catalogue.ts",
       "shared/collector-number-format.ts",
+      // workflow-header overlap hotfix (same branch): stage nav + session-stats
+      // zoning only — no protected/server file involved.
+      "client/src/components/grading-workflow/GradingWorkflowBar.tsx",
     ]);
     for (const f of changed) {
       expect(f, `${f} must not be protected/server/schema`).not.toMatch(

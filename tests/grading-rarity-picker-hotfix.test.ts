@@ -23,9 +23,10 @@ const PICKER = read("client/src/components/rarity-picker/RarityVariantPicker.tsx
 
 describe("real printed colour is preserved (never recoloured for display)", () => {
   it("black stays a true black fill/stroke, not the previous off-white display colour", () => {
-    expect(SYMBOL).toMatch(/black:\s*"#000000"/);
-    // the old recolour-to-off-white regression must not reappear.
-    expect(SYMBOL).not.toMatch(/black:\s*"#F3EFE3"/);
+    const fillBlock = SYMBOL.slice(SYMBOL.indexOf("const FILL"), SYMBOL.indexOf("const STROKE"));
+    expect(fillBlock).toMatch(/black:\s*"#000000"/);
+    // the old recolour-to-off-white regression must not reappear as the FILL colour.
+    expect(fillBlock).not.toMatch(/black:\s*"#F3EFE3"/);
   });
   it("silver and gold are distinct, real metallic tones (not the same fill as black)", () => {
     const fillBlock = SYMBOL.slice(SYMBOL.indexOf("const FILL"), SYMBOL.indexOf("const STROKE"));
@@ -57,8 +58,9 @@ describe("contrast is solved with a fixed-size badge behind the symbol, not reco
     expect(SYMBOL).toContain("const BADGE_CX");
     expect(SYMBOL).toContain("const BADGE_CY");
     expect(SYMBOL).toContain("const BADGE_R");
-    // the badge circle is drawn once, unconditionally, before any shape branch.
-    const badgeIdx = SYMBOL.indexOf("<circle cx={BADGE_CX}");
+    // the badge circle (identified by its unique data-badge-colour attribute) is
+    // drawn once, unconditionally, before any shape branch.
+    const badgeIdx = SYMBOL.indexOf("data-badge-colour");
     const firstShapeIdx = SYMBOL.indexOf('symbol.shape === "circle"');
     expect(badgeIdx).toBeGreaterThan(-1);
     expect(firstShapeIdx).toBeGreaterThan(badgeIdx);
@@ -142,11 +144,17 @@ describe("selected state, keyboard focus and accessibility preserved", () => {
 });
 
 describe("protected boundary: only rarity picker presentation + this test changed", () => {
+  // Pinned to the FIXED historical range of the rarity-picker hotfix itself
+  // (2091ea83 -> bcf74e25), not "...HEAD" — later hotfixes stack additional
+  // commits on top (e.g. the workflow-header overlap fix), which is expected
+  // and must not falsely trip this guard.
   const base = "2091ea83";
+  const head = "bcf74e25";
   let changed: string[] = [];
   try {
     execSync(`git rev-parse --verify ${base}`, { stdio: "pipe" });
-    changed = execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+    execSync(`git rev-parse --verify ${head}`, { stdio: "pipe" });
+    changed = execSync(`git diff --name-only ${base}..${head}`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
   } catch {
     changed = [];
   }
