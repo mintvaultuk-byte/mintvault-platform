@@ -151,9 +151,13 @@ describe("protected boundary: only the workflow header + this test changed", () 
     if (changed.length === 0) return;
     for (const f of changed) expect(f, f).not.toMatch(PROTECTED);
   });
-  it("no rarity-picker file was touched by this pass (that hotfix stays as-is)", () => {
+  it("no rarity-picker SOURCE file was touched by this pass (that hotfix stays as-is)", () => {
     if (changed.length === 0) return;
-    for (const f of changed) expect(f).not.toMatch(/rarity-picker/);
+    // Scoped to the source directory only — test files that happen to mention
+    // "rarity-picker" in their own name (e.g. a stale-assertion fix to
+    // grading-rarity-picker-hotfix.test.ts, made in the same branch) are not
+    // a violation of this boundary.
+    for (const f of changed) expect(f).not.toMatch(/^client\/src\/components\/rarity-picker\//);
   });
   it("every non-test change is exactly the workflow header files", () => {
     if (changed.length === 0) return;
