@@ -155,6 +155,8 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     "client/src/components/grading-workflow/ReviewSummary.tsx",
     "shared/pokemon-rarity-catalogue.ts",
     "shared/collector-number-format.ts",
+    // CI-only fetch-depth fix bundled in this release (dev-tooling, non-protected).
+    ".github/workflows/ci.yml",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {
