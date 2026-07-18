@@ -219,7 +219,9 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     const ids = queue.map((c) => c.id);
     setEditingCert(queue[0]);
     setShowForm(true);
-    setActiveTab("certs");
+    // No setActiveTab("certs") here — the workstation renders via `showForm`
+    // (an independent early return), and the caller (the activeTab==="grading"
+    // effect below) sets the final tab state itself right after this returns.
     setGradeQueue({ ids, pos: 0 });
   };
 
