@@ -108,7 +108,7 @@ import CertificateForm from "@/components/certificate-form";
 import { CertificateToolsDrawer, CertificateToolsButton } from "@/components/grading-workflow/CertificateToolsDrawer";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
 import GradingPanel from "@/components/grading/grading-panel";
-import GradingQueue from "@/components/grading/grading-queue";
+import { useToast } from "@/hooks/use-toast";
 
 interface Props {
   onLogout: () => void;
@@ -127,6 +127,7 @@ interface DashboardStats {
 }
 
 export default function AdminDashboard({ onLogout, initialTab }: Props) {
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab ?? "dashboard");
   const [filterPreset, setFilterPreset] = useState<CertsFilter>({});
   const [showForm, setShowForm] = useState(false);
@@ -145,8 +146,6 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     }
   }, []);
   const [previewCert, setPreviewCert] = useState<CertificateRecord | null>(null);
-  const [selectedGradingCertId, setSelectedGradingCertId] = useState<number | null>(null);
-  const [approvedSignal, setApprovedSignal] = useState<{ certId: string; grade: string; ts: number } | null>(null);
 
   const { data: certs = [], isLoading } = useQuery<CertificateRecord[]>({
     queryKey: ["/api/admin/certificates"],
@@ -194,6 +193,47 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     const pos = ids.indexOf(cert.id);
     setGradeQueue(pos >= 0 ? { ids, pos } : null);
   };
+
+  // Canonical grading entry point (unified-shell architecture pass). Replaces
+  // the retired standalone "Grading" tab (GradingQueue + bare GradingPanel,
+  // bypassing CertificateForm/AI-identify/the shared workstation shell — a
+  // second competing grading implementation). Reproduces that tab's ONE
+  // genuinely unique, load-bearing capability — a prioritised queue entry
+  // point (oldest not-yet-approved card first, matching the retired queue's
+  // `ORDER BY issued_at ASC` — see server/routes.ts's grading-queue route
+  // comment) — by seeding the SAME gradeQueue/CertificateForm mechanism
+  // handleEdit already uses, so it opens in the full AI-identify-enabled
+  // workstation instead of a bare GradingPanel with no card-metadata form.
+  // The retired tab's session-timer/completed-count are already covered live
+  // by the shared WorkstationHeaderStrip's SessionHud (Session/Completed/
+  // Cards-hr), so no separate session-summary modal was migrated.
+  const startGradingSession = () => {
+    const queue = certs
+      .filter((c) => !(c as any).gradeApprovedAt && c.status !== "voided")
+      .slice()
+      .sort((a, b) => new Date((a as any).createdAt ?? 0).getTime() - new Date((b as any).createdAt ?? 0).getTime());
+    if (queue.length === 0) {
+      toast({ title: "No cards awaiting grading", description: "The grading queue is empty right now." });
+      return;
+    }
+    const ids = queue.map((c) => c.id);
+    setEditingCert(queue[0]);
+    setShowForm(true);
+    setActiveTab("certs");
+    setGradeQueue({ ids, pos: 0 });
+  };
+
+  // Safe fallback for stale activeTab="grading" state (old bookmarked tab):
+  // the "grading" nav key still exists (same AdminShell nav entry, same
+  // onTabChange wiring), but instead of rendering the retired standalone
+  // shell it now redirects straight into the canonical workstation, then
+  // resets the tab so the URL/tab-bar never gets stuck on a dead branch.
+  useEffect(() => {
+    if (activeTab === "grading") {
+      startGradingSession();
+      setActiveTab("dashboard");
+    }
+  }, [activeTab]);
 
   const openNextQueuedCard = () => {
     if (!gradeQueue) return;
@@ -420,62 +460,12 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
       {activeTab === "divergence" && <AdminDivergencePage />}
       {activeTab === "transfers" && <AdminTransfers />}
       {activeTab === "scans" && <AdminScanHistory />}
-      {activeTab === "grading" &&
-        (() => {
-          const gradingCert = certs.find((c) => c.id === selectedGradingCertId) ?? null;
-          return (
-            <div className="max-w-5xl mx-auto px-4 py-6">
-              <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 items-start">
-                <GradingQueue
-                  currentCertId={selectedGradingCertId}
-                  onSelectCert={(id) => {
-                    setSelectedGradingCertId(id);
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                  }}
-                  approvedSignal={approvedSignal}
-                />
-                {gradingCert ? (
-                  <div className="space-y-4">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="text-xs font-bold uppercase tracking-widest"
-                        style={{ fontFamily: "var(--admin-mono)", color: "var(--admin-gold-hi)" }}
-                      >
-                        {gradingCert.certId}
-                      </span>
-                      <span className="text-xs" style={{ color: "var(--admin-ink-dim)" }}>
-                        {gradingCert.cardName}
-                      </span>
-                    </div>
-                    <GradingPanel
-                      certId={gradingCert.id}
-                      certIdStr={gradingCert.certId}
-                      cardName={gradingCert.cardName || ""}
-                      cardSet={gradingCert.setName || ""}
-                      existingGrade={gradingCert.gradeOverall}
-                      onGradeApproved={(cid, grade) => {
-                        if (cid && grade) setApprovedSignal({ certId: cid, grade, ts: Date.now() });
-                        queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div
-                    className="rounded-xl p-8 text-center"
-                    style={{
-                      background: "var(--admin-panel)",
-                      border: "1px solid var(--admin-line)",
-                    }}
-                  >
-                    <p className="text-sm" style={{ color: "var(--admin-ink-dim)" }}>
-                      Select a certificate from the queue to begin grading
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })()}
+      {/* The old "grading" tab (standalone GradingQueue + bare GradingPanel,
+          bypassing CertificateForm/the shared workstation shell) has been
+          RETIRED — see the startGradingSession() effect above, which
+          redirects activeTab==="grading" straight into the canonical
+          CertificateForm-based workstation instead of rendering anything
+          here. No render branch remains for this tab. */}
 
       {previewCert && <LabelPreviewModal cert={previewCert} onClose={() => setPreviewCert(null)} />}
 
