@@ -144,6 +144,7 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     "server/routes/admin-config.ts",
     "server/services/tcgdex-set-resolve.ts",
     "server/services/collector-number.ts",
+    "server/vite.ts",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {

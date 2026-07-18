@@ -9,10 +9,28 @@ import { nanoid } from "nanoid";
 const viteLogger = createLogger();
 
 export async function setupVite(server: Server, app: Express) {
+  const projectRoot = path.resolve(import.meta.dirname, "..");
+  // node_modules may be a SYMLINK (e.g. a git worktree that shares the primary
+  // checkout's install). Vite resolves package assets — like the @fontsource
+  // variable fonts pulled in by the client — to their REALPATH, which then falls
+  // outside the worktree root and Vite's default fs.allow. Because the
+  // customLogger.error handler below escalates that 403 to process.exit(1), the
+  // dev server was dying on the first font request (fs-allow deny → exit 1).
+  // Explicitly allow the real node_modules directory so legitimate package
+  // assets serve normally. Dev-only (setupVite never runs in production).
+  const fsAllow = [projectRoot];
+  try {
+    const nmReal = fs.realpathSync(path.join(projectRoot, "node_modules"));
+    if (!fsAllow.includes(nmReal)) fsAllow.push(nmReal);
+  } catch {
+    /* no node_modules (or not a symlink) — Vite's default allow is fine */
+  }
+
   const serverOptions = {
     middlewareMode: true,
     hmr: { server, path: "/vite-hmr" },
     allowedHosts: true as const,
+    fs: { allow: fsAllow },
   };
 
   const vite = await createViteServer({

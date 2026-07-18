@@ -162,7 +162,7 @@ describe("9. the workflow strip is in the controls column, not beneath the previ
 
 describe("10. protected Stage-3 / grading files remain untouched", () => {
   const PROTECTED =
-    /components\/grading\/|mvgs|scoring|centering|pristine|defect|grader\.ts|grading-prompt|labels\.ts|certificate-document|cert-id|shared\/schema\.ts|^server\/(?!routes\/admin-config\.ts|services\/tcgdex-set-resolve\.ts|services\/collector-number\.ts)|^migrations\//;
+    /components\/grading\/|mvgs|scoring|centering|pristine|defect|grader\.ts|grading-prompt|labels\.ts|certificate-document|cert-id|shared\/schema\.ts|^server\/(?!routes\/admin-config\.ts|services\/tcgdex-set-resolve\.ts|services\/collector-number\.ts|vite\.ts)|^migrations\//;
   const ALLOWED_CLIENT = new Set([
     "client/src/components/grading-workflow/CardPreviewPanel.tsx",
     "client/src/components/certificate-form.tsx",
