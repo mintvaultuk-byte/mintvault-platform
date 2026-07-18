@@ -26,7 +26,7 @@ BEGIN
         WHERE filename IN (
           '0002_partner_auth_support.sql','0003_partner_auth_hardening.sql',
           '0004_partner_mfa_enrol.sql','0005_partner_mfa_replay_and_grants.sql',
-          '0006_partner_definer_role.sql')
+          '0006_partner_definer_role.sql','0007_partner_submissions.sql')
      ) THEN
     RAISE EXCEPTION
       'rollback-0001 is a 0001-ONLY rollback, but later Partner migrations (0002+) are applied. Use migrations/rollback-partner-network-phase1.sql for a full Phase 1 rollback.';

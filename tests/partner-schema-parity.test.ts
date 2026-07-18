@@ -44,7 +44,7 @@ describe("partner schema ↔ migration parity", () => {
     expect(drizzleTableNames().length).toBe(14);
   });
 
-  it("pins the full Phase-1 migration inventory (0001–0006), so 0006 is known and drift is noticed", () => {
+  it("pins the full partner migration inventory (0001–0007), so a new migration is noticed", () => {
     const numbered = readdirSync(join(process.cwd(), "migrations"))
       .filter((f) => /^\d{4}_.+\.sql$/.test(f))
       .sort();
@@ -55,6 +55,7 @@ describe("partner schema ↔ migration parity", () => {
       "0004_partner_mfa_enrol.sql",
       "0005_partner_mfa_replay_and_grants.sql",
       "0006_partner_definer_role.sql",
+      "0007_partner_submissions.sql",
     ]);
   });
 

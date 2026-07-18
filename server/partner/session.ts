@@ -10,8 +10,11 @@
 import type { Request, Response, NextFunction } from "express";
 import crypto from "node:crypto";
 import { partnerRuntimeQuery, withTenant } from "./db";
-import { getUserPermissions } from "./permissions";
+import { getUserPermissions, getUserRoles } from "./permissions";
 import { readEmergencyState, isHardStopped } from "./emergency";
+
+/** Roles that see the whole organisation rather than only their assigned location(s) (Phase 2). */
+const ORG_WIDE_ROLES = new Set(["PARTNER_OWNER", "PARTNER_MANAGER", "PARTNER_FINANCE_VIEWER"]);
 
 export const PARTNER_COOKIE = "mv.partner.sid";
 export const IDLE_MINUTES = 30;
@@ -25,6 +28,9 @@ export interface PartnerPrincipal {
   permissions: Set<string>;
   viewOnly: boolean;
   sensitiveDisabled: boolean;
+  /** Phase 2: true if the user's role(s) grant organisation-wide visibility rather than
+   *  being scoped to their assigned location(s) — see ORG_WIDE_ROLES. */
+  orgWide: boolean;
 }
 
 declare global {
@@ -83,9 +89,11 @@ export async function resolvePartnerSession(token: string): Promise<PartnerPrinc
     }
     await c.query("UPDATE partner_sessions SET last_seen_at=now() WHERE id=$1", [s.session_id]);
     const permissions = await getUserPermissions(c, s.user_id);
+    const roles = await getUserRoles(c, s.user_id);
     return {
       sessionId: s.session_id, tenantId: s.tenant_id, userId: s.user_id, locationId: s.location_id,
       mfaPassed: s.mfa_passed, permissions, viewOnly: em.viewOnly, sensitiveDisabled: em.sensitiveDisabled,
+      orgWide: roles.some((r) => ORG_WIDE_ROLES.has(r)),
     } satisfies PartnerPrincipal;
   });
 }
