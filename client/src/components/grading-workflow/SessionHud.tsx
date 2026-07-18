@@ -83,10 +83,10 @@ export function SessionHud({ completed, nowProvider, embedded = false }: { compl
   };
 
   const Stat = ({ icon, label, value, testId }: { icon: React.ReactNode; label: string; value: string; testId: string }) => (
-    <div className="flex items-center gap-1.5" data-testid={testId}>
+    <div className="flex items-center gap-1" data-testid={testId}>
       <span className="text-[var(--admin-gold)]/50">{icon}</span>
-      <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">{label}</span>
-      <span className="text-[11px] font-bold tabular-nums text-[var(--admin-ink)]">{value}</span>
+      <span className="text-[8px] uppercase tracking-wider text-[var(--admin-ink-faint)]">{label}</span>
+      <span className="text-[10px] font-bold tabular-nums text-[var(--admin-ink)]">{value}</span>
     </div>
   );
 
@@ -94,15 +94,15 @@ export function SessionHud({ completed, nowProvider, embedded = false }: { compl
     <div
       className={
         embedded
-          ? "flex flex-wrap items-center gap-x-3 gap-y-1"
-          : "flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/60 px-3 py-1.5"
+          ? "flex flex-wrap items-center gap-x-2.5 gap-y-0.5"
+          : "flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/60 px-2.5 py-1"
       }
       data-testid="session-hud"
       aria-label="Grading session statistics"
     >
-      <Stat icon={<Clock size={12} />} label="Session" value={fmtElapsed(elapsedMs)} testId="session-timer" />
-      <Stat icon={<CheckCircle2 size={12} />} label="Completed" value={`${done}`} testId="session-completed" />
-      <Stat icon={<Gauge size={12} />} label="Cards/hr" value={`${perHour}`} testId="session-cards-per-hour" />
+      <Stat icon={<Clock size={11} />} label="Session" value={fmtElapsed(elapsedMs)} testId="session-timer" />
+      <Stat icon={<CheckCircle2 size={11} />} label="Completed" value={`${done}`} testId="session-completed" />
+      <Stat icon={<Gauge size={11} />} label="Cards/hr" value={`${perHour}`} testId="session-cards-per-hour" />
       <button
         type="button"
         onClick={reset}

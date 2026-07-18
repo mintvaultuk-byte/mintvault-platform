@@ -52,8 +52,9 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
     expect(row).toContain('data-testid="grading-preview-panel"');
     expect(row).toContain("<CardPreviewPanel");
     expect(row).toContain('data-testid="grading-control-panel"');
-    // preview aside only renders for the Card/Rarity stages.
-    expect(row).toMatch(/wfStage <= 1 &&[\s\S]*grading-preview-panel/);
+    // preview aside renders for Card, Rarity AND Review (Grade keeps its own
+    // dedicated protected card/defect tool and is intentionally excluded).
+    expect(row).toMatch(/\(wfStage <= 1 \|\| wfStage === 3\) &&[\s\S]*grading-preview-panel/);
   });
   it("preview is NOT rendered above the fields as a full-width block", () => {
     // The only CardPreviewPanel render is inside the aside (grid sibling of the
@@ -117,9 +118,10 @@ describe("10-11. navigation + stage reuse", () => {
     const controlPanel = slice(FORM, 'data-testid="grading-control-panel"', "</form>");
     expect(controlPanel).toContain('data-testid="button-continue-to-rarity"');
   });
-  it("Rarity stage reuses the same side-by-side shell (aside shows for wfStage <= 1)", () => {
-    // The preview aside gate is wfStage <= 1, which covers BOTH Card (0) and Rarity (1).
-    expect(FORM).toMatch(/\{wfStage <= 1 && \([\s\S]*grading-preview-panel/);
+  it("Rarity AND Review reuse the same side-by-side shell (aside shows for wfStage 0, 1, 3)", () => {
+    // The preview aside gate covers Card (0), Rarity (1) and Review (3); Grade
+    // (2) keeps its own dedicated protected card/defect tool instead.
+    expect(FORM).toMatch(/\{\(wfStage <= 1 \|\| wfStage === 3\) && \([\s\S]*grading-preview-panel/);
   });
 });
 

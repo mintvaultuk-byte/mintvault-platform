@@ -47,7 +47,7 @@ export function GradingWorkflowBar({
             data-testid={`workflow-stage-${stage.key}`}
             onClick={() => onStageClick?.(i, stage)}
             title={`${stage.label} — ${stage.sublabel}`}
-            className={`flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition ${
+            className={`flex min-w-0 flex-1 items-center gap-1.5 rounded-lg px-2 py-2 text-left transition ${
               isCurrent
                 ? "border border-[var(--admin-gold)] bg-[var(--admin-gold)]/15"
                 : isComplete
@@ -56,7 +56,7 @@ export function GradingWorkflowBar({
             }`}
           >
             <span
-              className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
+              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
                 isComplete
                   ? "bg-[var(--admin-gold)] text-[#1A1400]"
                   : isCurrent
@@ -66,15 +66,15 @@ export function GradingWorkflowBar({
             >
               {isComplete ? <Check size={13} strokeWidth={3} /> : i + 1}
             </span>
-            <span className="min-w-0 leading-tight">
-              <span
-                className={`block truncate text-xs font-bold ${isCurrent || isComplete ? "text-[var(--admin-ink)]" : "text-[var(--admin-ink-faint)]"}`}
-              >
-                {stage.label}
-              </span>
-              <span className="hidden truncate text-[10px] text-[var(--admin-ink-faint)] xl:block">
-                {stage.sublabel}
-              </span>
+            {/* Single-line label only — the sublabel used to force a two-line
+                (dashboard-card) button height at exactly the xl breakpoint
+                (>=1280px), which a real 13" laptop viewport crosses. The full
+                "label — sublabel" pairing is still available on hover via the
+                button's title attribute above. */}
+            <span
+              className={`min-w-0 truncate text-[11px] font-bold ${isCurrent || isComplete ? "text-[var(--admin-ink)]" : "text-[var(--admin-ink-faint)]"}`}
+            >
+              {stage.label}
             </span>
           </button>
         );

@@ -55,9 +55,14 @@ describe("all four workflow stages render with labels intact", () => {
     const stageCount = (stagesArray.match(/\{\s*key:\s*"/g) ?? []).length;
     expect(stageCount).toBe(4);
   });
-  it("stage label and sublabel both still render", () => {
+  it("stage label renders; sublabel is available via the tooltip only (compact hotfix removed the visible second line)", () => {
     expect(BAR).toContain("{stage.label}");
-    expect(BAR).toContain("{stage.sublabel}");
+    // the sublabel is still passed to `title` (hover tooltip) so the fuller
+    // description isn't lost, but it is no longer rendered as a visible span —
+    // that second line forced a two-line button height at exactly the xl
+    // breakpoint a 13" laptop viewport crosses.
+    expect(BAR).toContain("stage.label} — ${stage.sublabel}");
+    expect(BAR).not.toMatch(/<span[^>]*>\s*\{stage\.sublabel\}/);
   });
 });
 

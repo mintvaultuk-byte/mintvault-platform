@@ -255,12 +255,14 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
   if (showForm) {
     return (
       <AdminShell activeTab={activeTab} onTabChange={setActiveTab} onLogout={handleLogout} focus>
-        <div className="flex min-h-[100dvh] flex-col p-3">
+        <div className="flex min-h-[100dvh] flex-col p-2.5">
           {/* Compact grading header — Back · cert ID · Certificate Tools (with
               tiny status). Replaces the tall "Edit MV####" header chrome so the
-              four-stage form starts near the top on a 13-inch MacBook. */}
-          <div className="mb-3 flex shrink-0 items-center justify-between gap-3" data-testid="grading-header">
-            <div className="flex items-center gap-3">
+              four-stage form starts near the top on a 13-inch MacBook. Certificate
+              Tools is a small utility control beside the breadcrumb, not a large
+              isolated top-right pill — same row, same function, smaller footprint. */}
+          <div className="mb-2 flex shrink-0 items-center justify-between gap-2" data-testid="grading-header">
+            <div className="flex items-center gap-2">
               <button
                 onClick={handleFormClose}
                 className="text-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)] text-sm transition-colors"
@@ -279,11 +281,11 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
                 type="button"
                 onClick={() => setCertToolsOpen(true)}
                 data-testid="button-certificate-tools"
-                className="flex items-center gap-2 rounded-lg border border-[var(--admin-gold)]/30 px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10 transition-colors"
+                className="flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/30 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10 transition-colors"
                 title="Ownership + NFC (done after grading)"
               >
                 Certificate Tools
-                <span className="text-[9px] font-normal normal-case text-[var(--admin-ink-faint)]">
+                <span className="text-[8px] font-normal normal-case text-[var(--admin-ink-faint)]">
                   {(() => {
                     const s = certificateToolsStatus(editingCert);
                     return `${s.ownership} · ${s.nfc}`;
