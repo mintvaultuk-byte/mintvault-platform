@@ -44,7 +44,7 @@ describe("partner schema ↔ migration parity", () => {
     expect(drizzleTableNames().length).toBe(14);
   });
 
-  it("pins the full partner migration inventory (0001–0007), so a new migration is noticed", () => {
+  it("pins the full partner migration inventory (0001–0008), so a new migration is noticed", () => {
     const numbered = readdirSync(join(process.cwd(), "migrations"))
       .filter((f) => /^\d{4}_.+\.sql$/.test(f))
       .sort();
@@ -56,6 +56,7 @@ describe("partner schema ↔ migration parity", () => {
       "0005_partner_mfa_replay_and_grants.sql",
       "0006_partner_definer_role.sql",
       "0007_partner_submissions.sql",
+      "0008_partner_connector_foundation.sql",
     ]);
   });
 
@@ -114,9 +115,17 @@ describe("partner schema ↔ migration parity", () => {
 
   it("the RLS loop covers all 11 tenant-scoped tables (not the 3 global reference tables)", () => {
     const tenantScoped = [
-      "partner_organisations", "partner_locations", "partner_users", "partner_user_locations",
-      "partner_user_roles", "partner_sessions", "partner_mfa_methods", "partner_feature_flags",
-      "partner_audit_events", "partner_security_events", "partner_emergency_controls",
+      "partner_organisations",
+      "partner_locations",
+      "partner_users",
+      "partner_user_locations",
+      "partner_user_roles",
+      "partner_sessions",
+      "partner_mfa_methods",
+      "partner_feature_flags",
+      "partner_audit_events",
+      "partner_security_events",
+      "partner_emergency_controls",
     ];
     // the RLS ARRAY literal is repeated (enable loop + grant loop); assert each tenant table is in it.
     for (const t of tenantScoped) expect(migration).toContain(`'${t}'`);

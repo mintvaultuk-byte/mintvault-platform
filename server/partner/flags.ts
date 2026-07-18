@@ -19,6 +19,7 @@ export const PARTNER_FLAGS = [
   "partner_grading_enabled",
   "partner_device_enforcement_enabled",
   "partner_emergency_stop",
+  "partner_connector_enabled",
 ] as const;
 export type PartnerFlag = (typeof PARTNER_FLAGS)[number];
 
@@ -29,7 +30,7 @@ export type PartnerFlag = (typeof PARTNER_FLAGS)[number];
 export async function resolveFlag(
   client: PoolClient,
   flag: string,
-  ctx: { tenantId: string; locationId?: string | null },
+  ctx: { tenantId: string; locationId?: string | null }
 ): Promise<boolean> {
   const { rows } = await client.query<{ enabled: boolean; specificity: number }>(
     `SELECT enabled,
@@ -41,7 +42,7 @@ export async function resolveFlag(
         AND (location_id IS NULL OR location_id = $2)
       ORDER BY specificity DESC, updated_at DESC, id DESC
       LIMIT 1`,
-    [flag, ctx.locationId ?? null],
+    [flag, ctx.locationId ?? null]
   );
   if (rows.length === 0) return false; // fail closed
   return rows[0].enabled === true;
@@ -56,7 +57,7 @@ export async function resolveGlobalFlag(flag: string): Promise<boolean> {
   try {
     const { rows } = await partnerRuntimeQuery<{ enabled: boolean }>(
       "SELECT enabled FROM partner_feature_flags WHERE flag=$1 AND tenant_id IS NULL AND location_id IS NULL ORDER BY updated_at DESC, id DESC LIMIT 1",
-      [flag],
+      [flag]
     );
     return rows.length === 1 && rows[0].enabled === true;
   } catch {
