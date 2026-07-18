@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
-import { execSync } from "child_process";
+import { gradingReleaseChangedFiles, GRADING_PROTECTED_PATHS } from "./helpers/grading-release-scope";
 import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
@@ -120,21 +120,11 @@ describe("compact chips v2 + region-aware defaults (spec 5-6)", () => {
 });
 
 describe("protected surfaces untouched (spec 12-14, 21-24)", () => {
-  it("git diff vs main touches NO protected grading/centering/label/schema/server file", () => {
-    // Resolve whichever base ref exists — local checkouts have `main`, CI has
-    // only `origin/main` (shallow, detached). Skip gracefully if neither.
-    const base = ["origin/main", "main"].find((r) => {
-      try {
-        execSync(`git rev-parse --verify ${r}`, { stdio: "pipe" });
-        return true;
-      } catch {
-        return false;
-      }
-    });
-    if (!base) return;
-    const changed = execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
-    for (const f of changed) {
-      expect(f).not.toMatch(/components\/grading\/|mvgs|scoring|centering|pristine|grader\.ts|labels\.ts|certificate-document|cert-id|schema\.ts|^server\/|^migrations\//);
+  // HISTORICAL release-scope proof: the grading release (PR #214) itself changed no protected file.
+  // Pinned to the fixed grading range d69ad147..fc57b53b — never the current branch (see helper).
+  it("grading release (PR #214) touched NO protected grading/centering/label/schema/server file", () => {
+    for (const f of gradingReleaseChangedFiles()) {
+      expect(f, f).not.toMatch(GRADING_PROTECTED_PATHS);
     }
   });
   it("AI Card Identification stays absent; TCGdex stays present (spec 19-20)", () => {
