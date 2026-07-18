@@ -276,10 +276,14 @@ describe("5. collector-number DISPLAY formatting (uppercase, no stray space, pre
     expect(displayCollectorNumber(null)).toBe("");
     expect(displayCollectorNumber(undefined)).toBe("");
   });
-  it("the certificate form displays collector numbers via the shared formatter (existing + proposed chips, TCG search results)", () => {
+  it("the certificate form displays collector numbers via the shared formatter at every surface (chips, TCG search results, autofill suggestions, toasts)", () => {
     expect(FORM).toContain("displayCollectorNumber(identifyResult.number)");
     expect(FORM).toContain("displayCollectorNumber(form.cardNumber)");
     expect(FORM).toContain("displayCollectorNumber(card.number)");
+    expect(FORM).toContain("displayCollectorNumber(r.number)");
+    expect(FORM).toContain("displayCollectorNumber(id.detected_number)");
+    // No raw "#${...number}" template left anywhere (would reintroduce the bug).
+    expect(FORM).not.toMatch(/#\$\{[a-zA-Z.]*[Nn]umber\}/);
   });
 });
 

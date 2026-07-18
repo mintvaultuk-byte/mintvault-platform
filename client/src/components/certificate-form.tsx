@@ -638,7 +638,7 @@ export default function CertificateForm({
     setTcgError(null);
     toast({
       title: "Card selected",
-      description: `${card.name} — ${card.setName}${card.number ? ` #${card.number}` : ""}`,
+      description: `${card.name} — ${card.setName}${card.number ? ` ${displayCollectorNumber(card.number)}` : ""}`,
     });
 
     // Sync manual verification to AI panel via the existing pipeline
@@ -744,7 +744,7 @@ export default function CertificateForm({
         }));
         toast({
           title: "Card identified",
-          description: `${id.detected_name || id.officialName || "Card"}${id.detected_number ? ` · #${id.detected_number}` : ""}`,
+          description: `${id.detected_name || id.officialName || "Card"}${id.detected_number ? ` · ${displayCollectorNumber(id.detected_number)}` : ""}`,
         });
 
         // TCGdex enrichment — the ONLY source of canonical set/name/year. Fires
@@ -3018,7 +3018,7 @@ export default function CertificateForm({
                         <p className="text-[var(--admin-ink)] font-medium">{r.name}</p>
                         <p className="text-[var(--admin-ink-dim)] text-[10px]">
                           {r.setName}
-                          {r.number ? ` · #${r.number}` : ""}
+                          {r.number ? ` · ${displayCollectorNumber(r.number)}` : ""}
                           {r.rarity ? ` · ${r.rarity}` : ""}
                         </p>
                         <p className="text-[var(--admin-ink-faint)] text-[9px]">{r.source}</p>
