@@ -29,7 +29,7 @@ function sendError(res: import("express").Response, err: unknown): void {
         ? 404
         : err.code === "forbidden"
           ? 403
-          : err.code === "stale_version" || err.code === "idempotency_conflict"
+          : err.code === "stale_version" || err.code === "idempotency_conflict" || err.code === "service_tier_unavailable"
             ? 409
             : 400;
     res.status(status).json({ error: { code: err.code, message: err.message } });
@@ -54,9 +54,36 @@ function asString(v: unknown): string | null {
   return typeof v === "string" && !tooLong(v) ? v : null;
 }
 
+/**
+ * Tri-state field coercion for PATCH: distinguishes "field omitted" (undefined — don't touch) from
+ * "field explicitly cleared" (null — clear it) from "field set to a string" (validate/store it).
+ * A plain `typeof v === "string" ? v : undefined` (as used elsewhere for POST, where there is no
+ * "clear" concept) would collapse an explicit `null` into `undefined` and silently make "clear the
+ * service tier" a no-op — this preserves that distinction for editSubmissionDraft.
+ */
+function asStringOrExplicitNull(v: unknown): string | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null) return null;
+  return typeof v === "string" && !tooLong(v) ? v : undefined;
+}
+
 /** Bounded positive integer, or null if absent/invalid/out of range. */
 function asBoundedInt(v: unknown, min: number, max: number): number | null {
   return Number.isInteger(v) && (v as number) >= min && (v as number) <= max ? (v as number) : null;
+}
+
+/**
+ * Strict quantity validation — an invalid quantity must NEVER silently become 1. Only a genuinely
+ * OMITTED field (undefined) defaults to 1 (quantity is an intentionally optional field — the DB
+ * column itself defaults to 1). Anything else that isn't a valid integer in range is a hard
+ * rejection: zero, negative, decimal, NaN, Infinity, numeric strings ("5"), empty strings,
+ * non-numeric text, arrays, and objects are all rejected — `Number.isInteger` returns false for
+ * every one of those (it does not coerce strings), matching this file's existing strict-typing
+ * convention (year/declaredValuePence use the same `Number.isInteger` check, never string coercion).
+ */
+function parseQuantity(v: unknown): number | null {
+  if (v === undefined) return 1; // omitted only — an explicitly-sent invalid value is never defaulted
+  return asBoundedInt(v, 1, MAX_QUANTITY);
 }
 
 export function partnerSubmissionRouter(): Router {
@@ -145,7 +172,7 @@ export function partnerSubmissionRouter(): Router {
           version: body.version,
           customerId: typeof body.customerId === "string" ? body.customerId : undefined,
           internalReference: typeof body.internalReference === "string" ? body.internalReference : undefined,
-          serviceTierCode: typeof body.serviceTierCode === "string" ? body.serviceTierCode : undefined,
+          serviceTierCode: asStringOrExplicitNull(body.serviceTierCode),
           intakeNotes: typeof body.intakeNotes === "string" ? body.intakeNotes : undefined,
         });
         res.json(updated);
@@ -206,6 +233,13 @@ export function partnerSubmissionRouter(): Router {
           res.status(400).json({ error: { code: "validation", message: "Invalid card input." } });
           return;
         }
+        // Invalid quantity is a hard rejection BEFORE any DB call — it must never silently become 1,
+        // never create a card row, and never write an audit/event claiming a card was added.
+        const quantity = parseQuantity(body.quantity);
+        if (quantity === null) {
+          res.status(400).json({ error: { code: "invalid_quantity", message: "Enter a valid card quantity." } });
+          return;
+        }
         const created = await addCard(req.partner!, String(req.params.id), {
           cardName: body.cardName,
           game: asString(body.game),
@@ -215,7 +249,7 @@ export function partnerSubmissionRouter(): Router {
           variant: asString(body.variant),
           language: asString(body.language),
           declaredValuePence: asBoundedInt(body.declaredValuePence, 0, MAX_DECLARED_VALUE_PENCE),
-          quantity: asBoundedInt(body.quantity, 1, MAX_QUANTITY) ?? 1,
+          quantity,
           customerNotes: asString(body.customerNotes),
           intakeNotes: asString(body.intakeNotes),
         });

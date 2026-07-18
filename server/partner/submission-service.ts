@@ -32,6 +32,13 @@ const FORBIDDEN = () => new SubmissionError("forbidden", "You do not have access
 const STALE = () => new SubmissionError("stale_version", "This submission was updated elsewhere. Refresh before saving again.");
 const NOT_DRAFT = () => new SubmissionError("not_draft", "This submission can no longer be edited.");
 const VALIDATION = (msg: string) => new SubmissionError("validation", msg);
+const INVALID_SERVICE_TIER = () =>
+  new SubmissionError("invalid_service_tier", "Select an available service.");
+const SERVICE_TIER_UNAVAILABLE = () =>
+  new SubmissionError(
+    "service_tier_unavailable",
+    "This service is no longer available. Choose an available service before submitting.",
+  );
 
 /** Location-scope predicate, appended to every submission query. Org-wide roles see everything;
  *  everyone else is restricted to their assigned locations via partner_user_locations.
@@ -149,7 +156,11 @@ export async function createSubmissionDraft(
       if (own.rowCount !== 1) throw FORBIDDEN();
     }
     await verifyCustomerOwnership(c, principal.tenantId, input.customerId ?? null);
-    const estimatedPrice = await resolveTierPrice(c, principal.tenantId, input.serviceTierCode ?? null);
+    // serviceTierCode is optional at draft creation (null = no tier chosen yet); if a code IS
+    // supplied (including an empty string) it must resolve to an approved, currently-active tier —
+    // never accepted as arbitrary text.
+    const estimatedPrice =
+      input.serviceTierCode != null ? (await resolveServiceTier(c, principal.tenantId, input.serviceTierCode)).pricePerCardPence : null;
     const { rows } = await c.query(
       `INSERT INTO partner_submissions
          (tenant_id, location_id, created_by, customer_id, internal_reference, service_tier_code, estimated_price_pence, intake_notes)
@@ -185,15 +196,35 @@ async function verifyCustomerOwnership(c: PoolClient, tenantId: string, customer
   if (owned.rowCount !== 1) throw VALIDATION("Selected customer is not available.");
 }
 
-async function resolveTierPrice(c: PoolClient, tenantId: string, tierCode: string | null): Promise<number | null> {
-  if (!tierCode) return null;
+/**
+ * Resolve + VALIDATE a service-tier code against the approved Partner tier configuration. Returns
+ * the price to store, or throws INVALID_SERVICE_TIER if the code does not match any active tier
+ * visible to this tenant. serviceTierCode is optional throughout (a draft may have none), so `null`
+ * is a valid non-error input — this is called only when a non-null code is actually supplied.
+ *
+ * Cross-tenant safety: the query runs on `c`, whose transaction already has app.tenant_id set (by
+ * withTenant), so partner_service_tiers' RLS policy (`tenant_id IS NULL OR tenant_id =
+ * partner_current_tenant()`) makes another tenant's PRIVATE tier row simply invisible here — no
+ * additional tenant filter is needed beyond what RLS already enforces; `tenant_id=$2` in the WHERE
+ * clause is redundant-but-explicit defense in depth, not the actual security boundary. A
+ * tenant-specific active tier takes priority over a global one with the same code (ORDER BY
+ * tenant_id NULLS LAST). Unknown code, disabled tier, or (should it ever occur) a code that only
+ * exists as another tenant's private tier all resolve identically to zero rows -> one uniform
+ * rejection, so existence of another tenant's private tier is never revealed.
+ */
+async function resolveServiceTier(
+  c: PoolClient,
+  tenantId: string,
+  tierCode: string,
+): Promise<{ pricePerCardPence: number }> {
   const { rows } = await c.query<{ price_per_card_pence: number }>(
     `SELECT price_per_card_pence FROM partner_service_tiers
       WHERE tier_code=$1 AND is_active AND (tenant_id=$2 OR tenant_id IS NULL)
       ORDER BY tenant_id NULLS LAST LIMIT 1`,
     [tierCode, tenantId],
   );
-  return rows[0]?.price_per_card_pence ?? null;
+  if (rows.length !== 1) throw INVALID_SERVICE_TIER();
+  return { pricePerCardPence: rows[0].price_per_card_pence };
 }
 
 async function writeEvent(
@@ -252,14 +283,27 @@ export async function editSubmissionDraft(
     if (row.status !== "draft") throw NOT_DRAFT();
     if (row.version !== input.version) throw STALE();
     if (input.customerId !== undefined) await verifyCustomerOwnership(c, principal.tenantId, input.customerId);
-    const estimatedPrice =
-      input.serviceTierCode !== undefined ? await resolveTierPrice(c, principal.tenantId, input.serviceTierCode) : undefined;
+    // Same rule as create: undefined = not changing the tier; null = explicitly clearing it;
+    // any other string (including "") must resolve to an approved, currently-active tier.
+    let tierChanged = false;
+    let newTierCode: string | null | undefined;
+    let newEstimatedPrice: number | null | undefined;
+    if (input.serviceTierCode !== undefined) {
+      tierChanged = true;
+      if (input.serviceTierCode === null) {
+        newTierCode = null;
+        newEstimatedPrice = null;
+      } else {
+        newEstimatedPrice = (await resolveServiceTier(c, principal.tenantId, input.serviceTierCode)).pricePerCardPence;
+        newTierCode = input.serviceTierCode;
+      }
+    }
     const { rows } = await c.query(
       `UPDATE partner_submissions SET
          customer_id = COALESCE($3, customer_id),
          internal_reference = COALESCE($4, internal_reference),
-         service_tier_code = COALESCE($5, service_tier_code),
-         estimated_price_pence = COALESCE($6, estimated_price_pence),
+         service_tier_code = CASE WHEN $8 THEN $5 ELSE service_tier_code END,
+         estimated_price_pence = CASE WHEN $8 THEN $6 ELSE estimated_price_pence END,
          intake_notes = COALESCE($7, intake_notes),
          version = version + 1,
          updated_at = now()
@@ -271,9 +315,10 @@ export async function editSubmissionDraft(
         input.version,
         input.customerId ?? null,
         input.internalReference ?? null,
-        input.serviceTierCode ?? null,
-        estimatedPrice ?? null,
+        newTierCode ?? null,
+        newEstimatedPrice ?? null,
         input.intakeNotes ?? null,
+        tierChanged,
       ],
     );
     if (rows.length !== 1) throw STALE(); // lost the race between load and update
@@ -480,6 +525,17 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
       [submissionId],
     );
     const snapshot = full.rows[0];
+
+    // Submission-time revalidation: a tier chosen at draft time may have been disabled since (e.g.
+    // a super-admin turned it off). Re-check it is STILL active right before creating the handoff —
+    // a stored tier code is never trusted as still-valid just because it passed validation earlier.
+    if (snapshot.service_tier_code) {
+      const stillActive = await c.query<{ n: number }>(
+        `SELECT count(*)::int n FROM partner_service_tiers WHERE tier_code=$1 AND is_active AND (tenant_id=$2 OR tenant_id IS NULL)`,
+        [snapshot.service_tier_code, principal.tenantId],
+      );
+      if (stillActive.rows[0].n < 1) throw SERVICE_TIER_UNAVAILABLE();
+    }
 
     // Locking the row (loadSubmissionForUpdate did FOR UPDATE) + the unique index on submission_id
     // in partner_submission_handoffs together make this INSERT impossible to duplicate under

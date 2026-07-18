@@ -82,7 +82,14 @@ let admin: Client;
     // itself — see the note in migrations/0007_partner_submissions.sql.
     await admin.query(
       `INSERT INTO partner_service_tiers (tenant_id, tier_code, label, price_per_card_pence, turnaround_days, is_active) VALUES
-       (NULL,'standard','Vault Queue',1900,40,true), (NULL,'priority','Standard',2500,15,true), (NULL,'express','Express',4500,5,true)`,
+       (NULL,'standard','Vault Queue',1900,40,true), (NULL,'priority','Standard',2500,15,true), (NULL,'express','Express',4500,5,true),
+       (NULL,'disabled-tier','Retired Tier',999,99,false)`,
+    );
+    // Organisation-A-private tier (not visible to any other tenant) + a disabled org-A tier.
+    await admin.query(
+      `INSERT INTO partner_service_tiers (tenant_id, tier_code, label, price_per_card_pence, turnaround_days, is_active) VALUES
+       ($1,'wfa-private','WF-A Only Tier',3300,7,true), ($1,'wfa-disabled','WF-A Disabled Tier',1000,20,false)`,
+      [A],
     );
 
     const { createPartnerApp } = await import("../server/partner/app");
@@ -344,5 +351,260 @@ let admin: Client;
     const blocked = await j("GET", "/api/partner/submissions", cookie);
     expect(blocked.status).toBe(401); // session invalidated the moment the user is suspended
     await admin.query("UPDATE partner_users SET status='ACTIVE' WHERE id=$1", [OWNER_B]); // restore for any later test
+  });
+
+  describe("quantity validation — invalid quantity must never silently become 1", () => {
+    async function draftId(cookie: string): Promise<string> {
+      const sub = await j("POST", "/api/partner/submissions", cookie, { locationId: L1 });
+      return sub.body.id;
+    }
+    async function cardCount(id: string): Promise<number> {
+      const cards = await admin.query("SELECT count(*)::int n FROM partner_submission_cards WHERE submission_id=$1", [id]);
+      return cards.rows[0].n;
+    }
+    async function eventCount(id: string): Promise<number> {
+      const events = await admin.query(
+        "SELECT count(*)::int n FROM partner_submission_events WHERE submission_id=$1 AND event_type='card_added'",
+        [id],
+      );
+      return events.rows[0].n;
+    }
+
+    it("1. quantity omitted defaults to 1", async () => {
+      const cookie = await login("owner@wfa.com");
+      const id = await draftId(cookie);
+      const r = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "X" });
+      expect(r.status).toBe(201);
+      expect(r.body.quantity).toBe(1);
+    });
+
+    it("2. quantity 1 succeeds", async () => {
+      const cookie = await login("owner@wfa.com");
+      const id = await draftId(cookie);
+      const r = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "X", quantity: 1 });
+      expect(r.status).toBe(201);
+      expect(r.body.quantity).toBe(1);
+    });
+
+    it("3. a valid quantity above 1 succeeds", async () => {
+      const cookie = await login("owner@wfa.com");
+      const id = await draftId(cookie);
+      const r = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "X", quantity: 7 });
+      expect(r.status).toBe(201);
+      expect(r.body.quantity).toBe(7);
+    });
+
+    it.each([
+      ["4. zero", 0],
+      ["5. negative", -3],
+      ["6. decimal", 2.5],
+      ["8. alphabetic-shaped number", NaN],
+      ["10. excessive", 100000],
+    ])("%s quantity fails, creates no card, creates no card_added event", async (_label, qty) => {
+      const cookie = await login("owner@wfa.com");
+      const id = await draftId(cookie);
+      const before = await cardCount(id);
+      const r = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "X", quantity: qty });
+      expect(r.status).toBe(400);
+      expect(r.body.error.code).toBe("invalid_quantity");
+      expect(await cardCount(id)).toBe(before); // 11. never creates a card row
+      expect(await eventCount(id)).toBe(0); // 12. never claims a card was added
+    });
+
+    it("7. empty-string quantity fails (not coerced, not defaulted)", async () => {
+      const cookie = await login("owner@wfa.com");
+      const id = await draftId(cookie);
+      const r = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "X", quantity: "" });
+      expect(r.status).toBe(400);
+      expect(r.body.error.code).toBe("invalid_quantity");
+    });
+
+    it("9. array and object quantities fail", async () => {
+      const cookie = await login("owner@wfa.com");
+      const id = await draftId(cookie);
+      const arr = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "X", quantity: [1] });
+      expect(arr.status).toBe(400);
+      expect(arr.body.error.code).toBe("invalid_quantity");
+      const obj = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "X", quantity: { n: 1 } });
+      expect(obj.status).toBe(400);
+      expect(obj.body.error.code).toBe("invalid_quantity");
+    });
+
+    it("Infinity quantity fails", async () => {
+      const cookie = await login("owner@wfa.com");
+      const id = await draftId(cookie);
+      const r = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "X", quantity: Infinity });
+      expect(r.status).toBe(400);
+      expect(r.body.error.code).toBe("invalid_quantity");
+    });
+
+    it("non-numeric text quantity fails", async () => {
+      const cookie = await login("owner@wfa.com");
+      const id = await draftId(cookie);
+      const r = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "X", quantity: "seven" });
+      expect(r.status).toBe(400);
+      expect(r.body.error.code).toBe("invalid_quantity");
+    });
+
+    it("numeric-string quantity ('5') is rejected, not coerced (matches repo's strict Number.isInteger convention)", async () => {
+      const cookie = await login("owner@wfa.com");
+      const id = await draftId(cookie);
+      const r = await j("POST", `/api/partner/submissions/${id}/cards`, cookie, { cardName: "X", quantity: "5" });
+      expect(r.status).toBe(400);
+      expect(r.body.error.code).toBe("invalid_quantity");
+    });
+  });
+
+  describe("service-tier validation — arbitrary text is never accepted as an approved tier", () => {
+    it("13. approved active global tier succeeds", async () => {
+      const cookie = await login("owner@wfa.com");
+      const r = await j("POST", "/api/partner/submissions", cookie, { locationId: L1, serviceTierCode: "standard" });
+      expect(r.status).toBe(201);
+      expect(r.body.estimatedPricePence).toBe(1900);
+    });
+
+    it("14. approved active organisation-specific tier succeeds (and outranks the global default)", async () => {
+      const cookie = await login("owner@wfa.com");
+      const r = await j("POST", "/api/partner/submissions", cookie, { locationId: L1, serviceTierCode: "wfa-private" });
+      expect(r.status).toBe(201);
+      expect(r.body.estimatedPricePence).toBe(3300);
+    });
+
+    it("15. unknown tier code fails", async () => {
+      const cookie = await login("owner@wfa.com");
+      const r = await j("POST", "/api/partner/submissions", cookie, { locationId: L1, serviceTierCode: "does-not-exist" });
+      expect(r.status).toBe(400);
+      expect(r.body.error.code).toBe("invalid_service_tier");
+    });
+
+    it("16. disabled global tier fails", async () => {
+      const cookie = await login("owner@wfa.com");
+      const r = await j("POST", "/api/partner/submissions", cookie, { locationId: L1, serviceTierCode: "disabled-tier" });
+      expect(r.status).toBe(400);
+      expect(r.body.error.code).toBe("invalid_service_tier");
+    });
+
+    it("16b. disabled organisation-specific tier fails", async () => {
+      const cookie = await login("owner@wfa.com");
+      const r = await j("POST", "/api/partner/submissions", cookie, { locationId: L1, serviceTierCode: "wfa-disabled" });
+      expect(r.status).toBe(400);
+      expect(r.body.error.code).toBe("invalid_service_tier");
+    });
+
+    it("17. another organisation's private tier fails, indistinguishable from an unknown code (no existence leak)", async () => {
+      const cookieB = await login("owner@wfb.com");
+      const unknown = await j("POST", "/api/partner/submissions", cookieB, { locationId: LB, serviceTierCode: "does-not-exist" });
+      const private_ = await j("POST", "/api/partner/submissions", cookieB, { locationId: LB, serviceTierCode: "wfa-private" });
+      expect(unknown.status).toBe(400);
+      expect(private_.status).toBe(400);
+      expect(unknown.body.error).toEqual(private_.body.error); // identical rejection — existence not revealed
+    });
+
+    it("18. oversized tier code fails", async () => {
+      const cookie = await login("owner@wfa.com");
+      const r = await j("POST", "/api/partner/submissions", cookie, { locationId: L1, serviceTierCode: "x".repeat(600) });
+      expect(r.status).toBe(400);
+    });
+
+    it("empty-string tier code fails (not silently treated as 'no tier')", async () => {
+      const cookie = await login("owner@wfa.com");
+      const r = await j("POST", "/api/partner/submissions", cookie, { locationId: L1, serviceTierCode: "" });
+      expect(r.status).toBe(400);
+      expect(r.body.error.code).toBe("invalid_service_tier");
+    });
+
+    it("19. client-supplied price cannot override the tier configuration", async () => {
+      const cookie = await login("owner@wfa.com");
+      const r = await j("POST", "/api/partner/submissions", cookie, {
+        locationId: L1,
+        serviceTierCode: "standard",
+        estimatedPricePence: 1, // not a real field the service accepts — must be ignored
+        price: 1,
+      });
+      expect(r.status).toBe(201);
+      expect(r.body.estimatedPricePence).toBe(1900); // the authoritative configured price, not the client's
+    });
+
+    it("no tier chosen at draft creation is allowed (tier remains optional)", async () => {
+      const cookie = await login("owner@wfa.com");
+      const r = await j("POST", "/api/partner/submissions", cookie, { locationId: L1 });
+      expect(r.status).toBe(201);
+      expect(r.body.serviceTierCode).toBeNull();
+      expect(r.body.estimatedPricePence).toBeNull();
+    });
+
+    it("editing a draft to an invalid tier is rejected and does not change the stored tier", async () => {
+      const cookie = await login("owner@wfa.com");
+      const sub = await j("POST", "/api/partner/submissions", cookie, { locationId: L1, serviceTierCode: "standard" });
+      const edited = await j("PATCH", `/api/partner/submissions/${sub.body.id}`, cookie, { version: 1, serviceTierCode: "does-not-exist" });
+      expect(edited.status).toBe(400);
+      const detail = await j("GET", `/api/partner/submissions/${sub.body.id}`, cookie);
+      expect(detail.body.submission.serviceTierCode).toBe("standard"); // unchanged
+    });
+
+    it("editing a draft to clear the tier (explicit null) is allowed", async () => {
+      const cookie = await login("owner@wfa.com");
+      const sub = await j("POST", "/api/partner/submissions", cookie, { locationId: L1, serviceTierCode: "standard" });
+      const cleared = await j("PATCH", `/api/partner/submissions/${sub.body.id}`, cookie, { version: 1, serviceTierCode: null });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.serviceTierCode).toBeNull();
+      expect(cleared.body.estimatedPricePence).toBeNull();
+    });
+
+    it("20/21/22. a tier disabled between draft creation and submission fails submit safely: no handoff, submission stays draft", async () => {
+      // Seed a fresh tier just for this test so disabling it doesn't affect other parallel-ish tests.
+      await admin.query(
+        "INSERT INTO partner_service_tiers (tenant_id, tier_code, label, price_per_card_pence, turnaround_days, is_active) VALUES (NULL,'temp-tier','Temp',500,10,true)",
+      );
+      const cookie = await login("owner@wfa.com");
+      const sub = await j("POST", "/api/partner/submissions", cookie, { locationId: L1, serviceTierCode: "temp-tier" });
+      expect(sub.status).toBe(201);
+      await j("POST", `/api/partner/submissions/${sub.body.id}/cards`, cookie, { cardName: "Late-disable card" });
+
+      // disable it AFTER the draft was created — simulating a super-admin action mid-flow
+      await admin.query("UPDATE partner_service_tiers SET is_active=false WHERE tier_code='temp-tier' AND tenant_id IS NULL");
+
+      const submitted = await j("POST", `/api/partner/submissions/${sub.body.id}/submit`, cookie, {
+        idempotencyKey: "tier-disabled-" + sub.body.id,
+      });
+      expect(submitted.status).toBe(409); // 20. safe conflict response
+      expect(submitted.body.error.code).toBe("service_tier_unavailable");
+
+      const handoffs = await admin.query("SELECT count(*)::int n FROM partner_submission_handoffs WHERE submission_id=$1", [sub.body.id]);
+      expect(handoffs.rows[0].n).toBe(0); // 21. failed tier validation creates NO handoff
+
+      const detail = await j("GET", `/api/partner/submissions/${sub.body.id}`, cookie);
+      expect(detail.body.submission.status).toBe("draft"); // 22. submission never left draft
+
+      // 23. retrying after choosing a valid tier succeeds normally
+      const fixed = await j("PATCH", `/api/partner/submissions/${sub.body.id}`, cookie, { version: 1, serviceTierCode: "standard" });
+      expect(fixed.status).toBe(200);
+      const retried = await j("POST", `/api/partner/submissions/${sub.body.id}/submit`, cookie, {
+        idempotencyKey: "tier-fixed-" + sub.body.id,
+      });
+      expect(retried.status).toBe(200);
+      expect(retried.body.submission.status).toBe("submitted_to_mintvault");
+    });
+  });
+
+  describe("handoff immutability", () => {
+    it("partner_runtime cannot UPDATE a handoff row after it is created (no UPDATE grant)", async () => {
+      const cookie = await login("owner@wfa.com");
+      const sub = await j("POST", "/api/partner/submissions", cookie, { locationId: L1 });
+      await j("POST", `/api/partner/submissions/${sub.body.id}/cards`, cookie, { cardName: "Immutable-check" });
+      const submitted = await j("POST", `/api/partner/submissions/${sub.body.id}/submit`, cookie, {
+        idempotencyKey: "immutable-" + sub.body.id,
+      });
+      expect(submitted.status).toBe(200);
+
+      // Attempt a direct UPDATE as partner_runtime with the correct tenant context — must fail on
+      // privilege, not merely on RLS, proving the grant itself (not just the app layer) blocks it.
+      await admin.query("SET ROLE partner_runtime");
+      await admin.query("SELECT set_config('app.tenant_id', $1, false)", [A]);
+      await expect(
+        admin.query("UPDATE partner_submission_handoffs SET status='applied' WHERE submission_id=$1", [sub.body.id]),
+      ).rejects.toThrow(/permission denied/i);
+      await admin.query("RESET ROLE");
+    });
   });
 });

@@ -193,7 +193,7 @@ GRANT SELECT                        ON partner_service_tiers         TO partner_
 GRANT SELECT, INSERT, UPDATE        ON partner_submissions           TO partner_runtime; -- no hard delete; use status
 GRANT SELECT, INSERT, UPDATE        ON partner_submission_cards      TO partner_runtime; -- soft delete only
 GRANT SELECT, INSERT                ON partner_submission_events     TO partner_runtime; -- append-only
-GRANT SELECT, INSERT, UPDATE        ON partner_submission_handoffs   TO partner_runtime; -- status pending→applied/failed only; no DELETE (audit-immutable existence)
+GRANT SELECT, INSERT                ON partner_submission_handoffs   TO partner_runtime; -- append-only from the partner runtime's perspective; no UPDATE — no code in this slice mutates a handoff after creation, and the preferred security model is that partner_runtime NEVER mutates a handoff post-insert. A later trusted connector (not partner_runtime) must use a separate, narrowly-privileged role to flip status pending→applied/failed; that role does not exist yet and is out of scope for this slice.
 
 -- NOTE: the global default service-tier rows (tenant_id NULL) are NOT seeded here. Under FORCE RLS
 -- the migration applies as pn_migrator (non-superuser, non-BYPASSRLS — the realistic DB-F1 owner
