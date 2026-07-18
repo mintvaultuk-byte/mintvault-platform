@@ -36,14 +36,18 @@ describe("Next Card (spec 1) — user-confirmed, never skips, nav only", () => {
 });
 
 describe("queue progress + batch header (spec 2, 10) — read-only", () => {
+  // unified-shell pass: this markup moved into the shared WorkstationHeaderStrip
+  // component (one render site for all four stages).
+  const STRIP_SRC = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
   it("shows position / total", () => {
-    expect(FORM).toContain('data-testid="queue-progress"');
-    expect(FORM).toContain("{queue.position} / {queue.total}");
+    expect(FORM).toContain("<WorkstationHeaderStrip");
+    expect(STRIP_SRC).toContain('data-testid="queue-progress"');
+    expect(STRIP_SRC).toContain("{queue.position} / {queue.total}");
   });
   it("batch header is read-only (customer / submission / remaining)", () => {
-    expect(FORM).toContain('data-testid="batch-header"');
-    expect(FORM).toContain("batch?.customer");
-    expect(FORM).toContain("batch?.submissionId");
+    expect(STRIP_SRC).toContain('data-testid="batch-header"');
+    expect(STRIP_SRC).toContain("batch?.customer");
+    expect(STRIP_SRC).toContain("batch?.submissionId");
   });
 });
 

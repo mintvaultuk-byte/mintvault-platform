@@ -41,8 +41,11 @@ describe("Ownership + NFC moved out of the grading scroll (spec 8-13, 15-17)", (
     expect(DASH).not.toMatch(/<NfcSection\b/);
   });
   it("a Certificate Tools launcher exists in the grading header with tiny status", () => {
-    expect(DASH).toContain('data-testid="button-certificate-tools"');
-    expect(DASH).toContain("certificateToolsStatus");
+    // unified-shell pass: the launcher itself is the shared CertificateToolsButton
+    // primitive (same file as the status helper) — admin-dashboard.tsx renders it.
+    expect(DASH).toContain("<CertificateToolsButton");
+    expect(DRAWER).toContain('data-testid="button-certificate-tools"');
+    expect(DRAWER).toContain("certificateToolsStatus");
     expect(DASH).toContain("<CertificateToolsDrawer");
   });
   it("the drawer re-parents the EXISTING Ownership + NFC components (logic unchanged)", () => {
@@ -73,16 +76,20 @@ describe("Ownership + NFC moved out of the grading scroll (spec 8-13, 15-17)", (
 describe("two-column shell + density (spec 1, 3, 19)", () => {
   it("Card/Rarity render the preview beside the controls (~40% left column)", () => {
     expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
-    expect(FORM).toContain("md:w-[40%] md:shrink-0");
-    // Preview now lives in the workspace aside (bounded-height shell), not a sticky
-    // column inside the form.
-    expect(FORM).toContain('data-testid="grading-preview-panel"');
+    // unified-shell pass: the column-ratio class now lives in ONE shared
+    // constant inside WorkstationPreviewAside, not inline in certificate-form.
+    const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
+    expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
+    expect(asideSrc).toContain('data-testid="grading-preview-panel"');
+    expect(FORM).toContain("<WorkstationPreviewAside");
   });
   it("the grading page uses a page-scrollable focus shell + compact header (not the tall Edit header)", () => {
     // Bounded-height workstation: AdminShell focus mode + min-h-[100dvh] flex
     // column (page-scrollable, no clip), replacing the former max-w-6xl container.
     expect(DASH).toContain("flex min-h-[100dvh] flex-col");
-    expect(DASH).toContain('data-testid="grading-header"');
+    // grading-header is now the shared AdminHeaderRow primitive, passed
+    // testId="grading-header" (a prop, not a literal data-testid attribute).
+    expect(DASH).toContain('testId="grading-header"');
     expect(DASH).toContain("&larr; Certificates");
   });
   it("form vertical rhythm tightened (space-y-4, not space-y-6)", () => {

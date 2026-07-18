@@ -239,9 +239,13 @@ describe("4. Stage 1 manual card-detail fields are visible by default", () => {
     expect(FORM).toContain('data-testid="manual-card-editor"');
   });
   it("preview stays on the left / identification tools on the right (unchanged two-column shell)", () => {
-    expect(FORM).toContain('data-testid="grading-preview-panel"');
+    // unified-shell pass: the preview aside is now the shared
+    // WorkstationPreviewAside component.
+    expect(FORM).toContain("<WorkstationPreviewAside");
     expect(FORM).toContain('data-testid="grading-control-panel"');
-    expect(FORM).toContain("md:w-[40%] md:shrink-0");
+    const asideSrc = readFileSync(join(process.cwd(), "client/src/components/grading-workflow/WorkstationPreviewAside.tsx"), "utf8");
+    expect(asideSrc).toContain('data-testid="grading-preview-panel"');
+    expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
   });
   it("proposed AI/TCGdex result stays visually distinct from existing certificate details", () => {
     expect(FORM).toContain('data-testid="ai-identify-summary"');

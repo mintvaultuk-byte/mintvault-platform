@@ -105,7 +105,8 @@ interface DbInfo {
 }
 
 import CertificateForm from "@/components/certificate-form";
-import { CertificateToolsDrawer, certificateToolsStatus } from "@/components/grading-workflow/CertificateToolsDrawer";
+import { CertificateToolsDrawer, CertificateToolsButton } from "@/components/grading-workflow/CertificateToolsDrawer";
+import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
 import GradingPanel from "@/components/grading/grading-panel";
 import GradingQueue from "@/components/grading/grading-queue";
 
@@ -256,44 +257,36 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     return (
       <AdminShell activeTab={activeTab} onTabChange={setActiveTab} onLogout={handleLogout} focus>
         <div className="flex min-h-[100dvh] flex-col p-2.5">
-          {/* Compact grading header — Back · cert ID · Certificate Tools (with
-              tiny status). Replaces the tall "Edit MV####" header chrome so the
-              four-stage form starts near the top on a 13-inch MacBook. Certificate
-              Tools is a small utility control beside the breadcrumb, not a large
-              isolated top-right pill — same row, same function, smaller footprint. */}
-          <div className="mb-2 flex shrink-0 items-center justify-between gap-2" data-testid="grading-header">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleFormClose}
-                className="text-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)] text-sm transition-colors"
-                data-testid="button-back-list"
-              >
-                &larr; Certificates
-              </button>
-              {editingCert?.certId && (
-                <span className="text-sm font-bold tracking-wide text-[var(--admin-gold)]" style={{ fontFamily: "var(--admin-mono)" }} data-testid="grading-header-cert">
-                  {editingCert.certId}
-                </span>
-              )}
-            </div>
-            {editingCert && editingCert.id && (
-              <button
-                type="button"
-                onClick={() => setCertToolsOpen(true)}
-                data-testid="button-certificate-tools"
-                className="flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/30 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10 transition-colors"
-                title="Ownership + NFC (done after grading)"
-              >
-                Certificate Tools
-                <span className="text-[8px] font-normal normal-case text-[var(--admin-ink-faint)]">
-                  {(() => {
-                    const s = certificateToolsStatus(editingCert);
-                    return `${s.ownership} · ${s.nfc}`;
-                  })()}
-                </span>
-              </button>
-            )}
-          </div>
+          {/* Compact grading header — the SHARED AdminHeaderRow primitive (same
+              breadcrumb-left/actions-right row every admin surface uses).
+              Replaces the tall "Edit MV####" header chrome so the four-stage
+              form starts near the top on a 13-inch MacBook. Certificate Tools
+              is the shared compact utility-button primitive beside the
+              breadcrumb, not a large isolated top-right pill. */}
+          <AdminHeaderRow
+            testId="grading-header"
+            left={
+              <>
+                <button
+                  onClick={handleFormClose}
+                  className="text-[var(--admin-gold)] hover:text-[var(--admin-gold-hi)] text-sm transition-colors"
+                  data-testid="button-back-list"
+                >
+                  &larr; Certificates
+                </button>
+                {editingCert?.certId && (
+                  <span className="text-sm font-bold tracking-wide text-[var(--admin-gold)]" style={{ fontFamily: "var(--admin-mono)" }} data-testid="grading-header-cert">
+                    {editingCert.certId}
+                  </span>
+                )}
+              </>
+            }
+            right={
+              editingCert && editingCert.id ? (
+                <CertificateToolsButton cert={editingCert} onOpen={() => setCertToolsOpen(true)} />
+              ) : undefined
+            }
+          />
           {/* Owner directive (2026-07-01): one continuous block, in workflow
               order — EDIT MV#### header → AI Identify → grading workstation
               (card tool + defects, passed into the form as workstationSlot) →

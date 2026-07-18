@@ -28,8 +28,12 @@ import { execSync } from "child_process";
 import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-const FORM = read("client/src/components/certificate-form.tsx");
 const BAR = read("client/src/components/grading-workflow/GradingWorkflowBar.tsx");
+// unified-shell pass: the workstation-strip markup was extracted into its own
+// shared component (WorkstationHeaderStrip) so every stage renders it from
+// ONE source instead of an inline block inside certificate-form.tsx. All the
+// strip-geometry assertions below now target that component's source.
+const STRIP = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
 
 function slice(src: string, start: string, end: string): string {
   const i = src.indexOf(start);
@@ -38,13 +42,6 @@ function slice(src: string, start: string, end: string): string {
   expect(j, `anchor "${end}"`).toBeGreaterThan(i);
   return src.slice(i, j);
 }
-
-// Anchor BEFORE the strip's opening <div className="..."> so the assertions
-// below can see its className (className precedes data-testid in the JSX),
-// and end tightly right after SessionHud — i.e. exactly the workstation-strip
-// element, not the much larger scrollable form that follows it (which
-// legitimately has its own unrelated fixed/z-50 toasts and panels).
-const STRIP = slice(FORM, "Combined workstation header strip", "identification-tools");
 
 describe("all four workflow stages render with labels intact", () => {
   it("GRADING_STAGES (imported from the shared workflow contract) drives every stage button", () => {

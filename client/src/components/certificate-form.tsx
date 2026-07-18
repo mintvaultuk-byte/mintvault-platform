@@ -3,10 +3,9 @@ import { classifyLookupError } from "@/lib/lookup-errors";
 import { displayCollectorNumber } from "@shared/collector-number-format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
-import { GradingWorkflowBar } from "@/components/grading-workflow/GradingWorkflowBar";
-import { CardPreviewPanel } from "@/components/grading-workflow/CardPreviewPanel";
 import { ReviewSummary } from "@/components/grading-workflow/ReviewSummary";
-import { SessionHud } from "@/components/grading-workflow/SessionHud";
+import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
+import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
 import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
@@ -1608,65 +1607,45 @@ export default function CertificateForm({
           button is type="button" and handleSubmit no-ops pre-approval, so it can
           never trigger a form submit. */}
       <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row">
-        {/* Preview aside renders for Card, Rarity AND Review (0, 1, 3) — Stage 3
-            Grade keeps its own dedicated card/defect tool inside workstationSlot
-            (a protected components/grading/ surface, untouched by this pass) and
-            is intentionally excluded here. Review previously fell through to no
-            aside at all, which stretched the control panel to full width and
-            turned Stage 4 into one long full-width page — restoring the SAME
-            aside used by Card/Rarity fixes that without duplicating the image:
-            ReviewSummary's own former inline thumbnail was removed accordingly. */}
+        {/* Preview aside — the SHARED WorkstationPreviewAside primitive (one
+            component, one width/breakpoint constant) — renders for Card,
+            Rarity AND Review (wfStage 0, 1, 3).
+            ARCHITECTURE NOTE (unified-shell pass): Grade (wfStage 2)
+            deliberately does NOT use this aside. The protected
+            client/src/components/grading/grading-panel.tsx workstation
+            already renders its own interactive card image + defect-marking
+            tool with its OWN internal two-column split
+            (`grid-cols-1 lg:grid-cols-[60%_40%]`, image left / controls
+            right). Mounting this aside alongside it would either duplicate
+            the card image (explicitly out of scope) or squeeze that
+            protected grid into a much narrower width, degrading defect/
+            centering placement precision — a real functional regression to
+            the grading task, not a cosmetic one. Grade's workstationSlot is
+            therefore rendered directly into the shared control-panel column
+            at full width, using GradingPanel's OWN protected internal
+            geometry as its "preview left / controls right" equivalent. This
+            is a deliberate, evidence-based exception (see the architecture
+            report), not an oversight — Stage 3 internals are never touched. */}
         {(wfStage <= 1 || wfStage === 3) && (
-          <aside className="min-h-0 max-md:max-h-[55vh] md:w-[40%] md:shrink-0" data-testid="grading-preview-panel">
-            <CardPreviewPanel fill certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
-          </aside>
+          <WorkstationPreviewAside certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel">
           <div className="shrink-0 space-y-1.5">
-            {/* Combined workstation header strip — 4-stage workflow navigation and
-                queue / session stats are DELIBERATELY two separate zones, never one
-                shared shrink-to-fit row: on a real 13" laptop the two pieces
-                together don't reliably fit on one line, and letting them share a
-                row (relying on flex-wrap + text truncation alone) let session-stat
-                text render on top of the stage buttons in production. Below the
-                2xl breakpoint (where a laptop-width control panel actually has
-                room) they stack as two full-width rows; at 2xl+ they sit
-                side-by-side with the stats zone shrink-0 so it can never eat into
-                the nav zone's space. No absolute positioning, no negative margins,
-                no shared grid columns. Moved out of the <form> into the fixed
-                control-panel header so it stays put while the form scrolls.
-                Display-only: no queue-order or session-calc change. */}
-            <div
-              className="flex flex-col gap-1 rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/95 px-2 py-1 2xl:flex-row 2xl:items-center 2xl:gap-x-2.5 2xl:gap-y-0"
-              data-testid="workstation-strip"
-            >
-              <div className="min-w-0 2xl:flex-1" data-testid="workflow-nav-zone">
-                <GradingWorkflowBar embedded currentIndex={workflowCurrent} maxReached={workflowMax} onStageClick={(i) => goToStage(i)} />
-              </div>
-              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] 2xl:shrink-0 2xl:justify-end" data-testid="batch-header">
-                {batch?.customer && (
-                  <span className="text-[var(--admin-ink)]" title="Customer">
-                    <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Cust</span> {batch.customer}
-                  </span>
-                )}
-                {batch?.submissionId && (
-                  <span className="text-[var(--admin-ink)]" title="Submission">
-                    <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Sub</span> {batch.submissionId}
-                  </span>
-                )}
-                {typeof batch?.remaining === "number" && (
-                  <span className="text-[var(--admin-ink)]" title="Remaining in batch">
-                    <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Left</span> {batch.remaining}
-                  </span>
-                )}
-                {queue && (
-                  <span className="font-bold tabular-nums text-[var(--admin-gold)]" data-testid="queue-progress" title="Position in the grading queue">
-                    {queue.position} / {queue.total}
-                  </span>
-                )}
-                <SessionHud embedded completed={sessionCompleted} />
-              </div>
-            </div>
+            {/* Shared workstation header strip (WorkstationHeaderStrip) — 4-stage
+                workflow navigation + queue/session stats. ONE render site for
+                all four stages (outside the per-stage sections below), so
+                every stage sees byte-identical header geometry. Moved out of
+                the <form> into the fixed control-panel header so it stays put
+                while the form scrolls. Display-only: no queue-order or
+                session-calc change. */}
+            <WorkstationHeaderStrip
+              workflowCurrent={workflowCurrent}
+              workflowMax={workflowMax}
+              onStageClick={(i) => goToStage(i)}
+              batch={batch}
+              queue={queue}
+              sessionCompleted={sessionCompleted}
+            />
       {isEdit && certificate?.id && (
         <details className="border border-[var(--admin-gold)]/15 rounded-lg bg-[var(--admin-gold)]/[0.02] mb-1.5" data-testid="identification-tools">
           <summary className="cursor-pointer list-none px-3 py-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]">

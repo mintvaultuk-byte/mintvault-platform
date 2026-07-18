@@ -27,6 +27,12 @@ const BAR = read("client/src/components/grading-workflow/GradingWorkflowBar.tsx"
 const HUD = read("client/src/components/grading-workflow/SessionHud.tsx");
 const SUMMARY = read("client/src/components/grading-workflow/ReviewSummary.tsx");
 const DASH = read("client/src/pages/admin-dashboard.tsx");
+// unified-shell pass: the strip, the preview aside, and the Certificate Tools
+// button/breadcrumb row all moved into shared components. These constants
+// give the assertions below the actual current source of truth.
+const STRIP_SRC = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
+const ASIDE_SRC = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
+const CERT_TOOLS_SRC = read("client/src/components/grading-workflow/CertificateToolsDrawer.tsx");
 
 function slice(src: string, start: string, end: string): string {
   const i = src.indexOf(start);
@@ -72,31 +78,35 @@ describe("2. session statistics render as a slim utility row", () => {
     expect(HUD).toContain("gap-x-2.5 gap-y-0.5");
   });
   it("statistics render in their own container, separate from the stage-nav container (spec)", () => {
-    const stripBlock = slice(FORM, "Combined workstation header strip", "identification-tools");
-    expect(stripBlock).toContain('data-testid="workflow-nav-zone"');
-    expect(stripBlock).toContain('data-testid="batch-header"');
-    expect(stripBlock.indexOf('data-testid="workflow-nav-zone"')).toBeLessThan(stripBlock.indexOf('data-testid="batch-header"'));
+    expect(STRIP_SRC).toContain('data-testid="workflow-nav-zone"');
+    expect(STRIP_SRC).toContain('data-testid="batch-header"');
+    expect(STRIP_SRC.indexOf('data-testid="workflow-nav-zone"')).toBeLessThan(STRIP_SRC.indexOf('data-testid="batch-header"'));
   });
 });
 
 describe("3. Certificate Tools is a compact utility control, not a large isolated pill", () => {
   it("uses reduced padding/text-size classes", () => {
-    const btnIdx = DASH.indexOf('data-testid="button-certificate-tools"');
-    const btnBlock = DASH.slice(btnIdx - 40, btnIdx + 400);
+    // unified-shell pass: the button markup itself now lives in the shared
+    // CertificateToolsButton primitive (CertificateToolsDrawer.tsx).
+    const btnIdx = CERT_TOOLS_SRC.indexOf('data-testid="button-certificate-tools"');
+    const btnBlock = CERT_TOOLS_SRC.slice(btnIdx - 40, btnIdx + 400);
     expect(btnBlock).toContain("px-2 py-1");
     expect(btnBlock).not.toContain("px-3 py-1.5"); // old larger padding gone
     expect(btnBlock).toContain("text-[10px]");
   });
   it("stays in the same breadcrumb row as Certificates / cert-id (not a separate tall row)", () => {
-    const header = slice(DASH, 'data-testid="grading-header"', "</div>\n          </div>");
+    // grading-header is now the shared AdminHeaderRow primitive — admin-
+    // dashboard.tsx passes testId="grading-header" as a prop (not a literal
+    // data-testid attribute), and CertificateToolsButton as the right slot.
+    const header = slice(DASH, 'testId="grading-header"', "setCertToolsOpen(true)} />");
     expect(header).toContain("button-back-list");
     expect(header).toContain('data-testid="grading-header-cert"');
-    expect(header).toContain('data-testid="button-certificate-tools"');
+    expect(header).toContain("<CertificateToolsButton");
   });
   it("ownership/link status text is retained (function unchanged)", () => {
-    expect(DASH).toContain("certificateToolsStatus");
-    expect(DASH).toContain("s.ownership");
-    expect(DASH).toContain("s.nfc");
+    expect(CERT_TOOLS_SRC).toContain("certificateToolsStatus");
+    expect(CERT_TOOLS_SRC).toContain("s.ownership");
+    expect(CERT_TOOLS_SRC).toContain("s.nfc");
   });
 });
 
@@ -109,8 +119,11 @@ describe("4. Stage 4 Review restores the two-column workstation (card left, deta
     expect(cond).not.toContain("wfStage === 2");
   });
   it("preview and review-details are separate zones — no duplicated image", () => {
-    // Exactly one CardPreviewPanel render in certificate-form.tsx (the shared aside).
-    expect((FORM.match(/<CardPreviewPanel/g) ?? []).length).toBe(1);
+    // certificate-form.tsx no longer renders CardPreviewPanel directly at all —
+    // it delegates to the shared WorkstationPreviewAside, which has the ONE
+    // render site.
+    expect(FORM).not.toContain("<CardPreviewPanel");
+    expect((ASIDE_SRC.match(/<CardPreviewPanel/g) ?? []).length).toBe(1);
     // ReviewSummary no longer imports or renders CardPreviewPanel at all.
     expect(SUMMARY).not.toContain("CardPreviewPanel");
   });
@@ -121,9 +134,11 @@ describe("4. Stage 4 Review restores the two-column workstation (card left, deta
   it("Review reuses the SAME responsive breakpoint as the approved Card/Rarity workstation (md, not an excessively wide 2xl)", () => {
     // The aside/control-panel row is `md:flex-row` — Review renders inside that
     // exact same row (same aside gate, same flex row), so it inherits the
-    // identical md breakpoint rather than requiring a new one.
+    // identical md breakpoint rather than requiring a new one. The column
+    // ratio itself now lives in ONE shared constant (WorkstationPreviewAside).
     expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
-    expect(FORM).toContain("md:w-[40%] md:shrink-0");
+    expect(ASIDE_SRC).toContain("md:w-[40%] md:shrink-0");
+    expect(ASIDE_SRC).toContain("WORKSTATION_PREVIEW_WIDTH_CLASS");
   });
   it("mobile stacking remains supported (no md:/lg:-only mandatory two-column)", () => {
     // Base (mobile-first) classes are flex-col; md:flex-row only applies at
@@ -135,9 +150,8 @@ describe("4. Stage 4 Review restores the two-column workstation (card left, deta
 
 describe("5. no absolute-position overlap mechanism was introduced by this pass", () => {
   it("the strip, Certificate Tools row, and Review aside all use normal flow only", () => {
-    const stripBlock = slice(FORM, "Combined workstation header strip", "identification-tools");
-    expect(stripBlock).not.toMatch(/className="[^"]*\babsolute\b[^"]*"/);
-    const headerBlock = slice(DASH, 'data-testid="grading-header"', "</div>\n          </div>");
+    expect(STRIP_SRC).not.toMatch(/className="[^"]*\babsolute\b[^"]*"/);
+    const headerBlock = slice(DASH, 'testId="grading-header"', "/>");
     expect(headerBlock).not.toMatch(/className="[^"]*\babsolute\b[^"]*"/);
   });
 });
@@ -176,11 +190,17 @@ describe("6. save payload and Review field content are unchanged", () => {
 });
 
 describe("7. protected boundary: Stage 3 internals and the rarity picker are untouched", () => {
+  // Pinned to the FIXED historical range of this hotfix itself
+  // (b0e2e374 -> 8620607b, its functional commit), not "...HEAD" — later
+  // passes (e.g. the unified-shell architecture refactor) stack additional
+  // commits on top, which is expected and must not falsely trip this guard.
   const base = "b0e2e374";
+  const head = "8620607b";
   let changed: string[] = [];
   try {
     execSync(`git rev-parse --verify ${base}`, { stdio: "pipe" });
-    changed = execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+    execSync(`git rev-parse --verify ${head}`, { stdio: "pipe" });
+    changed = execSync(`git diff --name-only ${base}..${head}`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
   } catch {
     changed = [];
   }
