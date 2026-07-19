@@ -94,28 +94,72 @@ function isUnified(src: string): boolean {
   return false;
 }
 
-// Known-legacy routes NOT touched by this pass — each needs a reason. This is
-// the "complete list of legacy shells found" inventory from the 2026-07-19
-// audit. A route resolving to a file NOT in this list and NOT unified fails
-// the test below — i.e. new routes must be unified or explicitly logged here.
+// Known-legacy routes NOT yet unified — each needs a reason. This is the live
+// backlog inventory from the 2026-07-19 audit, MINUS Group 1 (admin-sets was
+// already AdminShell-wrapped; admin-operator-stats, admin-mvgs-calibration and
+// admin-legacy-review were unified in the 2026-07-19 Group-1 pass and are now
+// ENFORCED as unified below — they are deliberately absent here so a regression
+// back to a standalone shell fails the test instead of being silently excused).
+// A route resolving to a file NOT in this list and NOT unified fails the test —
+// i.e. new routes must be unified or explicitly logged here.
 const LEGACY_EXCEPTIONS: Record<string, string> = {
-  "client/src/pages/admin-legacy-review.tsx": "pre-existing legacy tool, not covered by this pass — audited 2026-07-19",
   "client/src/pages/admin-pokemon-knowledge.tsx":
-    "own slate-theme reference hub, not covered by this pass — audited 2026-07-19",
-  "client/src/pages/admin-operator-stats.tsx": "raw-hex stats page, not covered by this pass — audited 2026-07-19",
+    "own slate-theme reference hub — Group 2 backlog, audited 2026-07-19",
   "client/src/pages/vault-quest-studio.tsx":
     "separate Vault Quest product surface, own design language — audited 2026-07-19",
   "client/src/pages/admin-vault-quest-card-factory.tsx":
     "separate Vault Quest product surface, own design language — audited 2026-07-19",
   "client/src/pages/admin-vault-quest.tsx":
     "separate Vault Quest product surface, own design language — audited 2026-07-19",
-  "client/src/pages/admin/community.tsx": "raw-hex community tool, not covered by this pass — audited 2026-07-19",
-  "client/src/pages/grader.tsx": "legacy pre-Staff-portal grader UI, not covered by this pass — audited 2026-07-19",
+  "client/src/pages/admin/community.tsx": "raw-hex community tool — Group 2 backlog, audited 2026-07-19",
+  "client/src/pages/grader.tsx": "legacy pre-Staff-portal grader UI — Group 2 backlog, audited 2026-07-19",
   "client/src/pages/logbook.tsx":
     "public cert-lookup page reused at /admin/cert/:id, intentionally the public light theme",
-  "client/src/pages/admin-mvgs-calibration.tsx":
-    "uses var(--admin-*) tokens but is missing the .admin-root scoping class (partial gap) — audited 2026-07-19",
 };
+
+// Group 1 (2026-07-19): the four core admin routes brought onto the shared
+// design system in this pass. ENFORCED coverage — each must render inside the
+// .admin-root token scope AND (for the three re-shelled pages) use the shared
+// AdminHeaderRow, and must NOT reintroduce a standalone raw page shell. If any
+// regresses, this block fails; it is intentionally stricter than isUnified().
+const GROUP_1 = {
+  sets: "client/src/pages/admin-sets.tsx",
+  operatorStats: "client/src/pages/admin-operator-stats.tsx",
+  mvgsCalibration: "client/src/pages/admin-mvgs-calibration.tsx",
+  legacyReview: "client/src/pages/admin-legacy-review.tsx",
+} as const;
+
+describe("Group 1 routes are enforced onto the shared admin shell (no longer exceptions)", () => {
+  it("none of the 4 Group-1 files is still listed as a legacy exception", () => {
+    for (const f of Object.values(GROUP_1)) {
+      expect(LEGACY_EXCEPTIONS, `${f} must be enforced-unified, not excused`).not.toHaveProperty(f);
+    }
+  });
+  it("admin-sets keeps the full shared AdminShell (its pre-existing shell) and no raw brand hex", () => {
+    const src = read(GROUP_1.sets);
+    expect(src).toMatch(/<AdminShell\b/);
+    expect(src).not.toMatch(/#D4AF37|#E8E4DC/); // brand hex converted to var(--admin-*) tokens
+  });
+  it.each([
+    ["operator-stats", GROUP_1.operatorStats, "operator-stats-header"],
+    ["mvgs-calibration", GROUP_1.mvgsCalibration, "mvgs-calibration-header"],
+    ["legacy-review", GROUP_1.legacyReview, "legacy-review-header"],
+  ])("%s renders in .admin-root with a shared AdminHeaderRow and no standalone/legacy shell", (_name, file, testId) => {
+    const src = read(file);
+    // shared token scope + shared header primitive
+    expect(src).toMatch(/className="admin-root/);
+    expect(src).toContain('from "@/components/admin/AdminHeaderRow"');
+    expect(src).toContain("<AdminHeaderRow");
+    expect(src).toContain(`testId="${testId}"`);
+    // no reintroduced standalone application shell / raw legacy page markup.
+    // A full-page raw black GROUND (min-h-screen … bg-black, solid) is the exact
+    // legacy pattern these pages had; a `bg-black/NN` modal scrim is fine and
+    // allowed (the `(?!\/)` negative-lookahead excludes the slash-opacity form).
+    expect(src).not.toMatch(/min-h-screen[^"]*\bbg-black\b(?!\/)/); // no raw black page ground
+    expect(src).not.toMatch(/text-slate-\d|bg-slate-\d|border-slate-\d/); // no slate legacy theme
+    expect(src).not.toMatch(/#D4AF37|#E8E4DC/); // no raw brand hex — converted to var(--admin-*) tokens
+  });
+});
 
 describe("every admin/staff/grader route is either unified or an explicitly-logged exception", () => {
   it.each(routes)("$path → $component ($file)", ({ file }) => {
