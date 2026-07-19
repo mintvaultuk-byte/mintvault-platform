@@ -44,7 +44,7 @@ describe("partner schema ↔ migration parity", () => {
     expect(drizzleTableNames().length).toBe(14);
   });
 
-  it("pins the full partner migration inventory (0001–0013), so a new migration is noticed", () => {
+  it("pins the full partner migration inventory (0001–0014), so a new migration is noticed", () => {
     const numbered = readdirSync(join(process.cwd(), "migrations"))
       .filter((f) => /^\d{4}_.+\.sql$/.test(f))
       .sort();
@@ -62,6 +62,7 @@ describe("partner schema ↔ migration parity", () => {
       "0011_partner_connector_reconciliation.sql",
       "0012_partner_connector_import_attempts.sql",
       "0013_partner_connector_claim_index.sql",
+      "0014_partner_connector_admin_actions.sql",
     ]);
   });
 
