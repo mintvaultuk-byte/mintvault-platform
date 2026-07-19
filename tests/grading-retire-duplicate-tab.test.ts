@@ -38,8 +38,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
-import { execSync } from "child_process";
 import { join } from "path";
+import { unifiedAdminShellChangedFiles } from "./helpers/grading-release-scope";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const DASH = read("client/src/pages/admin-dashboard.tsx");
@@ -163,25 +163,14 @@ describe("8. shared primitives + all four grading stages still canonical (regres
   });
 });
 
-// unified-shell integration note: this pass's own scope check is pinned to
-// the CHERRY-PICKED equivalent of the commit it originally started from
-// ("aa8c0cea" in the pre-integration branch is "0825544a" once replayed onto
-// origin/main — same content, same position in this branch's linear history,
-// just a different hash after the cherry-pick). Using the OLD hash directly
-// would walk back to the real common ancestor of two now-disjoint lineages
-// (pre-integration branch vs. origin/main), which sits far earlier than
-// intended and falsely includes Partner Network and this branch's own
-// earlier, already-approved commits (e.g. the rarity-picker hotfix) as
-// "changed by this pass" — a base-drift artifact, not a real violation.
-const SCOPE_BASE = "0825544a"; // cherry-picked equivalent of the original aa8c0cea
-function changedSinceScopeBase(): string[] {
-  try {
-    execSync(`git rev-parse --verify ${SCOPE_BASE}`, { stdio: "pipe" });
-    return execSync(`git diff --name-only ${SCOPE_BASE}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
-}
+// This pass's scope check is pinned to the unified-shell pass's IMMUTABLE
+// commit range (0825544a..a7cac275), resolved by the shared helper — never
+// `<base>...HEAD`. The old local helper used `0825544a...HEAD`; because
+// 0825544a is an ancestor of main, that degenerates to `0825544a..HEAD` and
+// every commit merged to main afterwards (all the Partner Network work) leaked
+// in and tripped the `partner`/`^migrations/` matcher. See
+// tests/helpers/grading-release-scope.ts (UNIFIED_ADMIN_SHELL) for the full why.
+const changedSinceScopeBase = unifiedAdminShellChangedFiles;
 
 describe("9. Stage 3 protected component source remains untouched", () => {
   const changed = changedSinceScopeBase();
