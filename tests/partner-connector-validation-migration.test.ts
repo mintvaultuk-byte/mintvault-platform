@@ -61,6 +61,25 @@ async function applyAllRealistic(): Promise<void> {
       await admin.connect();
       await admin.query("CREATE TABLE IF NOT EXISTS certificates (id serial primary key, cert_id text, secret text)");
       await admin.query("INSERT INTO certificates (cert_id, secret) VALUES ('MV1','KEEP-A')");
+      // Minimal, representative MintVault tables — migration 0010 (G3, applied below via
+      // listMigrationFiles()) grants partner_connector_runtime access to these, so they must exist
+      // (and be owned by pn_migrator, the non-superuser applying role) before migrations run. Real
+      // production tables are managed by db:push, not by any migrations/ file — same reason
+      // `certificates` above is a hand-created fixture, not a real one. pn_migrator itself must exist
+      // FIRST (provisionRealisticRoles creates it) or the OWNER TO below fails.
+      await provisionRealisticRoles(admin);
+      await admin.query(
+        "CREATE TABLE IF NOT EXISTS users (id varchar primary key default gen_random_uuid(), email varchar unique)"
+      );
+      await admin.query(
+        "CREATE TABLE IF NOT EXISTS submissions (id serial primary key, user_id varchar not null, tracking_number text not null unique)"
+      );
+      await admin.query(
+        "CREATE TABLE IF NOT EXISTS submission_items (id serial primary key, submission_id integer not null)"
+      );
+      await admin.query("ALTER TABLE users OWNER TO pn_migrator");
+      await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
+      await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
       await applyAllRealistic();
       await admin.query("ALTER TABLE certificates OWNER TO pn_migrator").catch(() => {});
     }, 60_000);
@@ -77,11 +96,11 @@ async function applyAllRealistic(): Promise<void> {
       expect(rows[0].status).toBe("applied");
     });
 
-    it("all 9 partner migration journal rows are present and applied", async () => {
+    it("all 10 partner migration journal rows are present and applied", async () => {
       const { rows } = await admin.query(
-        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '000%_partner%' ORDER BY filename"
+        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '000%_partner%' OR filename LIKE '0010_partner%' ORDER BY filename"
       );
-      expect(rows).toHaveLength(9);
+      expect(rows).toHaveLength(10);
       for (const r of rows) expect(r.status).toBe("applied");
     });
 
@@ -165,7 +184,17 @@ async function applyAllRealistic(): Promise<void> {
       }
     });
 
-    it("G2 rollback removes exactly the two new tables and reverts the CHECK constraint, nothing else", async () => {
+    it("G2 rollback REFUSES once migration 0010 (G3) is present, and changes nothing", async () => {
+      await expect(admin.query(rb("rollback-partner-connector-g2.sql"))).rejects.toThrow(
+        /refuses to run.*migration 0010/i
+      );
+      await admin.query("ROLLBACK").catch(() => {});
+      const imports = await admin.query("SELECT to_regclass('public.partner_connector_imports') r");
+      expect(imports.rows[0].r).toBe("partner_connector_imports");
+    });
+
+    it("G2 rollback removes exactly the two new tables and reverts the CHECK constraint, nothing else (after G3 rollback)", async () => {
+      await admin.query(rb("rollback-partner-connector-g3.sql"));
       await admin.query(rb("rollback-partner-connector-g2.sql"));
 
       const runs = await admin.query("SELECT to_regclass('public.partner_connector_validation_runs') r");
@@ -198,12 +227,13 @@ async function applyAllRealistic(): Promise<void> {
       expect(journal.rows[0].n).toBe(0);
     });
 
-    it("migration 0009 reapplies cleanly after rollback", async () => {
+    it("migrations 0009 and 0010 reapply cleanly after rollback", async () => {
       const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
       await migrator.connect();
       try {
         const { applied } = await applyMigrations(migrator, listMigrationFiles());
         expect(applied).toContain("0009_partner_connector_validation.sql");
+        expect(applied).toContain("0010_partner_connector_import.sql");
       } finally {
         await migrator.end();
       }
