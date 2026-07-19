@@ -61,6 +61,25 @@ async function applyAllRealistic(): Promise<void> {
       // synthetic PRE-EXISTING MintVault data that must survive the G1 rollback
       await admin.query("CREATE TABLE IF NOT EXISTS certificates (id serial primary key, cert_id text, secret text)");
       await admin.query("INSERT INTO certificates (cert_id, secret) VALUES ('MV1','KEEP-A')");
+      // Minimal representative MintVault tables — migration 0010 (G3, applied below via
+      // listMigrationFiles(), which discovers every migration file present including 0010) grants
+      // partner_connector_runtime access to these, so they must exist and be owned by pn_migrator
+      // before migrations run. pn_migrator itself must exist FIRST (provisionRealisticRoles creates
+      // it) — ALTER TABLE ... OWNER TO a not-yet-existing role fails silently under .catch(() => {}),
+      // which otherwise masks this ordering bug entirely.
+      await provisionRealisticRoles(admin);
+      await admin.query(
+        "CREATE TABLE IF NOT EXISTS users (id varchar primary key default gen_random_uuid(), email varchar unique)"
+      );
+      await admin.query(
+        "CREATE TABLE IF NOT EXISTS submissions (id serial primary key, user_id varchar not null, tracking_number text not null unique)"
+      );
+      await admin.query(
+        "CREATE TABLE IF NOT EXISTS submission_items (id serial primary key, submission_id integer not null)"
+      );
+      await admin.query("ALTER TABLE users OWNER TO pn_migrator");
+      await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
+      await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
       await applyAllRealistic();
       await admin.query("ALTER TABLE certificates OWNER TO pn_migrator").catch(() => {});
     }, 60_000);
@@ -77,11 +96,11 @@ async function applyAllRealistic(): Promise<void> {
       expect(rows[0].status).toBe("applied");
     });
 
-    it("all 9 partner migration journal rows are present and applied", async () => {
+    it("all 10 partner migration journal rows are present and applied", async () => {
       const { rows } = await admin.query(
-        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '000%_partner%' ORDER BY filename"
+        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '000%_partner%' OR filename LIKE '0010_partner%' ORDER BY filename"
       );
-      expect(rows).toHaveLength(9);
+      expect(rows).toHaveLength(10);
       for (const r of rows) expect(r.status).toBe("applied");
     });
 
@@ -167,7 +186,17 @@ async function applyAllRealistic(): Promise<void> {
       expect(journal.rows[0].n).toBe(2);
     });
 
-    it("rolling back G2 first, then G1, correctly removes both in order and preserves Phase 1/2 data", async () => {
+    it("G2 rollback REFUSES once migration 0010 (G3) is present, and changes nothing", async () => {
+      await expect(admin.query(rb("rollback-partner-connector-g2.sql"))).rejects.toThrow(
+        /refuses to run.*migration 0010/i
+      );
+      await admin.query("ROLLBACK").catch(() => {});
+      const imports = await admin.query("SELECT to_regclass('public.partner_connector_imports') r");
+      expect(imports.rows[0].r).toBe("partner_connector_imports");
+    });
+
+    it("rolling back G3, then G2, then G1, correctly removes all three in order and preserves Phase 1/2 data", async () => {
+      await admin.query(rb("rollback-partner-connector-g3.sql"));
       await admin.query(rb("rollback-partner-connector-g2.sql"));
       await admin.query(rb("rollback-partner-connector-g1.sql"));
 
@@ -199,13 +228,14 @@ async function applyAllRealistic(): Promise<void> {
       expect(journal.rows[0].n).toBe(0);
     });
 
-    it("migrations 0008 and 0009 reapply cleanly after rollback", async () => {
+    it("migrations 0008, 0009 and 0010 reapply cleanly after rollback", async () => {
       const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
       await migrator.connect();
       try {
         const { applied } = await applyMigrations(migrator, listMigrationFiles());
         expect(applied).toContain("0008_partner_connector_foundation.sql");
         expect(applied).toContain("0009_partner_connector_validation.sql");
+        expect(applied).toContain("0010_partner_connector_import.sql");
       } finally {
         await migrator.end();
       }

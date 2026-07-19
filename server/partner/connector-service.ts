@@ -27,6 +27,7 @@ export const CONNECTOR_STATES = [
   "claimed",
   "validating",
   "ready_for_import",
+  "importing",
   "rejected",
   "failed",
   "cancelled",
@@ -45,12 +46,22 @@ const TERMINAL_STATES = new Set<ConnectorState>(["rejected", "cancelled", "impor
  * directly, since it also needs to atomically re-claim the record for the calling worker in the same
  * statement) — listed here too so this matrix stays true to its own "single source of truth" claim
  * rather than silently omitting a transition the code actually performs.
+ *
+ * G3 additions: `ready_for_import -> importing` and `importing -> failed` are listed here for the
+ * same reason — connector-import-service.ts's importValidatedConnector() enforces this fromState
+ * whitelist via its own raw UPDATE (not transitionConnectorState(), which hard-blocks toState
+ * "imported"/"importing" transitions are otherwise legal to enforce independently — see that
+ * function's own guard). `importing -> imported` is deliberately NOT listed as a transition any
+ * generic caller may request — only importValidatedConnector()'s own final UPDATE (in the same
+ * transaction as the destination-creation writes) may ever write `imported`, exactly mirroring how
+ * G1 already hard-blocks `toState === "imported"` in transitionConnectorState() below.
  */
 export const LEGAL_TRANSITIONS: Record<ConnectorState, ConnectorState[]> = {
   queued: ["claimed", "cancelled"],
   claimed: ["validating", "queued", "cancelled", "failed"],
   validating: ["ready_for_import", "rejected", "failed", "cancelled"],
-  ready_for_import: ["cancelled", "validating"],
+  ready_for_import: ["cancelled", "validating", "importing"],
+  importing: ["failed"],
   failed: ["queued", "cancelled", "validating"],
   rejected: [],
   cancelled: [],
@@ -394,12 +405,17 @@ export async function claimConnectorRecord(
 }
 
 /**
- * Move a record through one legal transition. `toState = "imported"` is hard-blocked BEFORE the
- * transaction opens — G1 must never legitimately reach it, independent of the transition matrix.
- * `tenantId`, when supplied, is checked against the record's actual tenant before anything else.
- * Moving INTO `queued` (an explicit release or a failed→queued retry) clears claimed_by/claimed_at/
- * claim_expires_at/next_retry_at — the same fields releaseConnectorClaim clears — so a requeued
- * record never carries a stale claimant or a stale retry time forward.
+ * Move a record through one legal transition. `toState = "imported"` and `toState = "importing"` are
+ * both hard-blocked BEFORE the transaction opens — this generic function must never be the thing
+ * that reserves an import or completes one; only connector-import-service.ts's own dedicated,
+ * single-transaction logic may perform either move (mirroring how requestConnectorRevalidation()
+ * already bypasses this function for its own atomic claim+transition). Allowing a generic caller to
+ * flip a record into `importing` without also creating the reservation row in the same transaction
+ * would strand it there with no valid exit but `failed`. `tenantId`, when supplied, is checked
+ * against the record's actual tenant before anything else. Moving INTO `queued` (an explicit release
+ * or a failed→queued retry) clears claimed_by/claimed_at/claim_expires_at/next_retry_at — the same
+ * fields releaseConnectorClaim clears — so a requeued record never carries a stale claimant or a
+ * stale retry time forward.
  */
 export async function transitionConnectorState(params: {
   connectorId: string;
@@ -410,10 +426,10 @@ export async function transitionConnectorState(params: {
   eventType: string;
   metadata?: Record<string, unknown>;
 }): Promise<ConnectorRecord> {
-  if (params.toState === "imported") {
+  if (params.toState === "imported" || params.toState === "importing") {
     throw new ConnectorError(
       "invalid_state_transition",
-      "G1 connector functions must never transition a record into 'imported'."
+      "Only the dedicated importer may transition a record into 'importing' or 'imported'."
     );
   }
   await assertConnectorActive();

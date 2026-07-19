@@ -55,46 +55,398 @@ const INSPECTION = "read-only prod inspection 2026-07-17 (information_schema / p
  */
 export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
   // ---- Payments / credits / subscriptions (dropping any = financial incident) ----
-  { schema: "public", name: "member_credits", objectType: "table", class: "intentionally_unmanaged", purpose: "Vault Club prepaid grading/reholder credits", active: true, owningSubsystem: "vault-club/credits", reason: "created by runtime migrateAccountSchema()", futureDisposition: "keep runtime-managed or adopt into schema.ts with care", evidenceSource: INSPECTION },
-  { schema: "public", name: "estimate_credits", objectType: "table", class: "intentionally_unmanaged", purpose: "AI estimate credit balances (email-keyed)", active: true, owningSubsystem: "ai-estimate", reason: "runtime-created", futureDisposition: "keep runtime-managed", evidenceSource: INSPECTION },
-  { schema: "public", name: "estimate_free_uses", objectType: "table", class: "intentionally_unmanaged", purpose: "free AI-estimate usage counter", active: true, owningSubsystem: "ai-estimate", reason: "runtime-created", futureDisposition: "keep runtime-managed", evidenceSource: INSPECTION },
-  { schema: "public", name: "promo_codes", objectType: "table", class: "intentionally_unmanaged", purpose: "typed promo codes with uses_count cap", active: true, owningSubsystem: "payments/promotions", reason: "hand-applied migration", futureDisposition: "candidate for schema.ts adoption", evidenceSource: INSPECTION },
-  { schema: "public", name: "promotions", objectType: "table", class: "intentionally_unmanaged", purpose: "auto-promotion config, single-active partial unique", active: true, owningSubsystem: "payments/promotions", reason: "migrations/add-promotions.sql", futureDisposition: "candidate for schema.ts adoption", evidenceSource: INSPECTION },
-  { schema: "public", name: "stripe_webhook_events", objectType: "table", class: "intentionally_unmanaged", purpose: "Stripe event idempotency ledger", active: true, owningSubsystem: "payments/stripe", reason: "migratePaymentIdempotencySchema() at boot", futureDisposition: "keep runtime-managed", evidenceSource: INSPECTION },
-  { schema: "public", name: "vault_club_subscriptions", objectType: "table", class: "intentionally_unmanaged", purpose: "Vault Club recurring subscriptions", active: true, owningSubsystem: "vault-club", reason: "runtime-created", futureDisposition: "keep runtime-managed", evidenceSource: INSPECTION },
-  { schema: "public", name: "vault_club_events", objectType: "table", class: "intentionally_unmanaged", purpose: "Vault Club Stripe event idempotency", active: true, owningSubsystem: "vault-club", reason: "runtime-created", futureDisposition: "keep runtime-managed", evidenceSource: INSPECTION },
-  { schema: "public", name: "vault_club_consents", objectType: "table", class: "intentionally_unmanaged", purpose: "Vault Club consent records", active: true, owningSubsystem: "vault-club", reason: "runtime-created", futureDisposition: "keep runtime-managed", evidenceSource: INSPECTION },
-  { schema: "public", name: "subscription_reminders", objectType: "table", class: "intentionally_unmanaged", purpose: "subscription reminder scheduling", active: true, owningSubsystem: "vault-club", reason: "runtime-created", futureDisposition: "keep runtime-managed", evidenceSource: INSPECTION },
-  { schema: "public", name: "value_protection_tiers", objectType: "table", class: "legacy_active", purpose: "declared-value protection tiers", active: true, owningSubsystem: "grading/pricing", reason: "hand-SQL, still referenced", futureDisposition: "review for schema.ts adoption", evidenceSource: INSPECTION },
-  { schema: "public", name: "reholder_credits", objectType: "view", class: "legacy_active", purpose: "reholder credit entitlements (VIEW, not a table)", active: true, owningSubsystem: "vault-club/credits", reason: "database view; not a Drizzle-managed table", futureDisposition: "keep as view; document source query", evidenceSource: INSPECTION },
+  {
+    schema: "public",
+    name: "member_credits",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "Vault Club prepaid grading/reholder credits",
+    active: true,
+    owningSubsystem: "vault-club/credits",
+    reason: "created by runtime migrateAccountSchema()",
+    futureDisposition: "keep runtime-managed or adopt into schema.ts with care",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "estimate_credits",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "AI estimate credit balances (email-keyed)",
+    active: true,
+    owningSubsystem: "ai-estimate",
+    reason: "runtime-created",
+    futureDisposition: "keep runtime-managed",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "estimate_free_uses",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "free AI-estimate usage counter",
+    active: true,
+    owningSubsystem: "ai-estimate",
+    reason: "runtime-created",
+    futureDisposition: "keep runtime-managed",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "promo_codes",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "typed promo codes with uses_count cap",
+    active: true,
+    owningSubsystem: "payments/promotions",
+    reason: "hand-applied migration",
+    futureDisposition: "candidate for schema.ts adoption",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "promotions",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "auto-promotion config, single-active partial unique",
+    active: true,
+    owningSubsystem: "payments/promotions",
+    reason: "migrations/add-promotions.sql",
+    futureDisposition: "candidate for schema.ts adoption",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "stripe_webhook_events",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "Stripe event idempotency ledger",
+    active: true,
+    owningSubsystem: "payments/stripe",
+    reason: "migratePaymentIdempotencySchema() at boot",
+    futureDisposition: "keep runtime-managed",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "vault_club_subscriptions",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "Vault Club recurring subscriptions",
+    active: true,
+    owningSubsystem: "vault-club",
+    reason: "runtime-created",
+    futureDisposition: "keep runtime-managed",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "vault_club_events",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "Vault Club Stripe event idempotency",
+    active: true,
+    owningSubsystem: "vault-club",
+    reason: "runtime-created",
+    futureDisposition: "keep runtime-managed",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "vault_club_consents",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "Vault Club consent records",
+    active: true,
+    owningSubsystem: "vault-club",
+    reason: "runtime-created",
+    futureDisposition: "keep runtime-managed",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "subscription_reminders",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "subscription reminder scheduling",
+    active: true,
+    owningSubsystem: "vault-club",
+    reason: "runtime-created",
+    futureDisposition: "keep runtime-managed",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "value_protection_tiers",
+    objectType: "table",
+    class: "legacy_active",
+    purpose: "declared-value protection tiers",
+    active: true,
+    owningSubsystem: "grading/pricing",
+    reason: "hand-SQL, still referenced",
+    futureDisposition: "review for schema.ts adoption",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "reholder_credits",
+    objectType: "view",
+    class: "legacy_active",
+    purpose: "reholder credit entitlements (VIEW, not a table)",
+    active: true,
+    owningSubsystem: "vault-club/credits",
+    reason: "database view; not a Drizzle-managed table",
+    futureDisposition: "keep as view; document source query",
+    evidenceSource: INSPECTION,
+  },
 
   // ---- Auth / sessions (dropping = lockout / broken login lockouts) ----
-  { schema: "public", name: "session", objectType: "table", class: "intentionally_unmanaged", purpose: "connect-pg-simple session store", active: true, owningSubsystem: "auth/session", reason: "provisioned out-of-band (createTableIfMissing=false)", futureDisposition: "keep out of Drizzle", evidenceSource: INSPECTION },
-  { schema: "public", name: "sessions", objectType: "table", class: "unknown_investigate", purpose: "second session-shaped table coexisting with 'session'", active: false, owningSubsystem: "auth/session (?)", reason: "duplicate; authoritative one is 'session'", futureDisposition: "investigate; drop only after confirming dead", evidenceSource: INSPECTION },
-  { schema: "public", name: "pin_attempts", objectType: "table", class: "intentionally_unmanaged", purpose: "admin PIN attempt lockout counters", active: true, owningSubsystem: "auth/pin", reason: "runtime-created", futureDisposition: "keep runtime-managed", evidenceSource: INSPECTION },
-  { schema: "public", name: "pin_reset_tokens", objectType: "table", class: "intentionally_unmanaged", purpose: "admin PIN reset tokens", active: true, owningSubsystem: "auth/pin", reason: "runtime-created", futureDisposition: "keep runtime-managed", evidenceSource: INSPECTION },
-  { schema: "public", name: "pending_switch_nonces", objectType: "table", class: "intentionally_unmanaged", purpose: "account-switch nonces", active: true, owningSubsystem: "auth", reason: "runtime-created", futureDisposition: "keep runtime-managed", evidenceSource: INSPECTION },
+  {
+    schema: "public",
+    name: "session",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "connect-pg-simple session store",
+    active: true,
+    owningSubsystem: "auth/session",
+    reason: "provisioned out-of-band (createTableIfMissing=false)",
+    futureDisposition: "keep out of Drizzle",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "sessions",
+    objectType: "table",
+    class: "unknown_investigate",
+    purpose: "second session-shaped table coexisting with 'session'",
+    active: false,
+    owningSubsystem: "auth/session (?)",
+    reason: "duplicate; authoritative one is 'session'",
+    futureDisposition: "investigate; drop only after confirming dead",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "pin_attempts",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "admin PIN attempt lockout counters",
+    active: true,
+    owningSubsystem: "auth/pin",
+    reason: "runtime-created",
+    futureDisposition: "keep runtime-managed",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "pin_reset_tokens",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "admin PIN reset tokens",
+    active: true,
+    owningSubsystem: "auth/pin",
+    reason: "runtime-created",
+    futureDisposition: "keep runtime-managed",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "pending_switch_nonces",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "account-switch nonces",
+    active: true,
+    owningSubsystem: "auth",
+    reason: "runtime-created",
+    futureDisposition: "keep runtime-managed",
+    evidenceSource: INSPECTION,
+  },
 
   // ---- Grading / AI operational data ----
-  { schema: "public", name: "grading_records", objectType: "table", class: "legacy_active", purpose: "per-operator grading records", active: true, owningSubsystem: "grading", reason: "runtime per-operator migrate", futureDisposition: "review for schema.ts adoption", evidenceSource: INSPECTION },
-  { schema: "public", name: "grading_sessions", objectType: "table", class: "legacy_active", purpose: "grading session snapshots", active: true, owningSubsystem: "grading", reason: "runtime migrate", futureDisposition: "review for schema.ts adoption", evidenceSource: INSPECTION },
-  { schema: "public", name: "ai_accuracy_log", objectType: "table", class: "legacy_active", purpose: "AI grade-vs-final accuracy log", active: true, owningSubsystem: "grading/ai", reason: "runtime-created", futureDisposition: "keep or adopt", evidenceSource: INSPECTION },
-  { schema: "public", name: "ai_grade_corrections", objectType: "table", class: "legacy_active", purpose: "AI grade correction records", active: true, owningSubsystem: "grading/ai", reason: "runtime-created", futureDisposition: "keep or adopt", evidenceSource: INSPECTION },
-  { schema: "public", name: "ai_override_audit", objectType: "table", class: "legacy_active", purpose: "AI override audit trail", active: true, owningSubsystem: "grading/ai", reason: "runtime-created", futureDisposition: "keep or adopt", evidenceSource: INSPECTION },
+  {
+    schema: "public",
+    name: "grading_records",
+    objectType: "table",
+    class: "legacy_active",
+    purpose: "per-operator grading records",
+    active: true,
+    owningSubsystem: "grading",
+    reason: "runtime per-operator migrate",
+    futureDisposition: "review for schema.ts adoption",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "grading_sessions",
+    objectType: "table",
+    class: "legacy_active",
+    purpose: "grading session snapshots",
+    active: true,
+    owningSubsystem: "grading",
+    reason: "runtime migrate",
+    futureDisposition: "review for schema.ts adoption",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "ai_accuracy_log",
+    objectType: "table",
+    class: "legacy_active",
+    purpose: "AI grade-vs-final accuracy log",
+    active: true,
+    owningSubsystem: "grading/ai",
+    reason: "runtime-created",
+    futureDisposition: "keep or adopt",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "ai_grade_corrections",
+    objectType: "table",
+    class: "legacy_active",
+    purpose: "AI grade correction records",
+    active: true,
+    owningSubsystem: "grading/ai",
+    reason: "runtime-created",
+    futureDisposition: "keep or adopt",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "ai_override_audit",
+    objectType: "table",
+    class: "legacy_active",
+    purpose: "AI override audit trail",
+    active: true,
+    owningSubsystem: "grading/ai",
+    reason: "runtime-created",
+    futureDisposition: "keep or adopt",
+    evidenceSource: INSPECTION,
+  },
 
   // ---- Catalogue / misc ----
-  { schema: "public", name: "custom_sets", objectType: "table", class: "legacy_active", purpose: "operator-defined custom card sets", active: true, owningSubsystem: "catalogue", reason: "runtime-created", futureDisposition: "review for adoption", evidenceSource: INSPECTION },
-  { schema: "public", name: "custom_variants", objectType: "table", class: "legacy_active", purpose: "operator-defined custom variants", active: true, owningSubsystem: "catalogue", reason: "runtime-created", futureDisposition: "review for adoption", evidenceSource: INSPECTION },
-  { schema: "public", name: "tcgdex_sets", objectType: "table", class: "intentionally_unmanaged", purpose: "TCGdex canonical set cache", active: true, owningSubsystem: "card-identification", reason: "runtime-created cache", futureDisposition: "keep runtime-managed", evidenceSource: INSPECTION },
-  { schema: "public", name: "set_review_decisions", objectType: "table", class: "pending_schema_adoption", purpose: "set-review decision log", active: true, owningSubsystem: "catalogue", reason: "hand-SQL", futureDisposition: "adopt into schema.ts", evidenceSource: INSPECTION },
-  { schema: "public", name: "audit_logs", objectType: "table", class: "unknown_investigate", purpose: "plural table coexisting with managed singular 'audit_log'", active: false, owningSubsystem: "audit (?)", reason: "duplicate of managed audit_log", futureDisposition: "investigate; confirm authoritative before any action", evidenceSource: INSPECTION },
-  { schema: "public", name: "bot_logs", objectType: "table", class: "unknown_investigate", purpose: "bot-detection log", active: false, owningSubsystem: "bot-detection (?)", reason: "confirm active before adoption/removal", futureDisposition: "investigate", evidenceSource: INSPECTION },
-  { schema: "public", name: "bot_seen", objectType: "table", class: "unknown_investigate", purpose: "bot-seen tracking", active: false, owningSubsystem: "bot-detection (?)", reason: "confirm active", futureDisposition: "investigate", evidenceSource: INSPECTION },
-  { schema: "public", name: "bot_settings", objectType: "table", class: "unknown_investigate", purpose: "bot-detection settings", active: false, owningSubsystem: "bot-detection (?)", reason: "confirm active", futureDisposition: "investigate", evidenceSource: INSPECTION },
-  { schema: "public", name: "population_report", objectType: "materialized_view", class: "legacy_active", purpose: "population report (grade distribution) materialized view", active: true, owningSubsystem: "reporting", reason: "materialized view; not a Drizzle-managed table", futureDisposition: "keep; document refresh cadence", evidenceSource: INSPECTION },
+  {
+    schema: "public",
+    name: "custom_sets",
+    objectType: "table",
+    class: "legacy_active",
+    purpose: "operator-defined custom card sets",
+    active: true,
+    owningSubsystem: "catalogue",
+    reason: "runtime-created",
+    futureDisposition: "review for adoption",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "custom_variants",
+    objectType: "table",
+    class: "legacy_active",
+    purpose: "operator-defined custom variants",
+    active: true,
+    owningSubsystem: "catalogue",
+    reason: "runtime-created",
+    futureDisposition: "review for adoption",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "tcgdex_sets",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "TCGdex canonical set cache",
+    active: true,
+    owningSubsystem: "card-identification",
+    reason: "runtime-created cache",
+    futureDisposition: "keep runtime-managed",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "set_review_decisions",
+    objectType: "table",
+    class: "pending_schema_adoption",
+    purpose: "set-review decision log",
+    active: true,
+    owningSubsystem: "catalogue",
+    reason: "hand-SQL",
+    futureDisposition: "adopt into schema.ts",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "audit_logs",
+    objectType: "table",
+    class: "unknown_investigate",
+    purpose: "plural table coexisting with managed singular 'audit_log'",
+    active: false,
+    owningSubsystem: "audit (?)",
+    reason: "duplicate of managed audit_log",
+    futureDisposition: "investigate; confirm authoritative before any action",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "bot_logs",
+    objectType: "table",
+    class: "unknown_investigate",
+    purpose: "bot-detection log",
+    active: false,
+    owningSubsystem: "bot-detection (?)",
+    reason: "confirm active before adoption/removal",
+    futureDisposition: "investigate",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "bot_seen",
+    objectType: "table",
+    class: "unknown_investigate",
+    purpose: "bot-seen tracking",
+    active: false,
+    owningSubsystem: "bot-detection (?)",
+    reason: "confirm active",
+    futureDisposition: "investigate",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "bot_settings",
+    objectType: "table",
+    class: "unknown_investigate",
+    purpose: "bot-detection settings",
+    active: false,
+    owningSubsystem: "bot-detection (?)",
+    reason: "confirm active",
+    futureDisposition: "investigate",
+    evidenceSource: INSPECTION,
+  },
+  {
+    schema: "public",
+    name: "population_report",
+    objectType: "materialized_view",
+    class: "legacy_active",
+    purpose: "population report (grade distribution) materialized view",
+    active: true,
+    owningSubsystem: "reporting",
+    reason: "materialized view; not a Drizzle-managed table",
+    futureDisposition: "keep; document refresh cadence",
+    evidenceSource: INSPECTION,
+  },
   // Created by the Phase 0.5 numbered-migration runner itself (scripts/db/migrate.ts). Present on
   // any DB the runner has applied a migration to; intentionally outside shared/schema.ts.
-  { schema: "public", name: "schema_migrations", objectType: "table", class: "intentionally_unmanaged", purpose: "Phase 0.5 numbered-migration journal (filename/checksum/status)", active: true, owningSubsystem: "db-migration-runner", reason: "bootstrapped by scripts/db/migrate.ts, never by schema.ts", futureDisposition: "keep runner-managed", evidenceSource: "Phase 0.5 runner (scripts/db/migrate.ts)" },
+  {
+    schema: "public",
+    name: "schema_migrations",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "Phase 0.5 numbered-migration journal (filename/checksum/status)",
+    active: true,
+    owningSubsystem: "db-migration-runner",
+    reason: "bootstrapped by scripts/db/migrate.ts, never by schema.ts",
+    futureDisposition: "keep runner-managed",
+    evidenceSource: "Phase 0.5 runner (scripts/db/migrate.ts)",
+  },
 ] as const;
 
 /** Non-public schemas known and expected. Any other schema is an unknown that must fail preflight. */
@@ -108,7 +460,13 @@ export const KNOWN_SCHEMAS: readonly { name: string; reason: string }[] = [
  * Orphan sequences (not owned by a table column) that are known and expected. Sequences
  * OWNED by a column follow their table and are never flagged; only orphans are checked.
  */
-export const KNOWN_ORPHAN_SEQUENCES: readonly string[] = ["ai_predictions_id_seq"];
+export const KNOWN_ORPHAN_SEQUENCES: readonly string[] = [
+  "ai_predictions_id_seq",
+  // Trusted Intake Connector G3 — connector-scoped destination-reference allocator (migration
+  // 0010_partner_connector_import.sql). Deliberately a free-standing sequence, not owned by any
+  // column (see connector-reference.ts) — used only via nextval(), never as a column DEFAULT.
+  "partner_connector_submission_ref_seq",
+];
 
 export function isVaultQuestName(name: string): boolean {
   return name.startsWith("vq_");
@@ -120,13 +478,19 @@ export function isPartnerNetworkName(name: string): boolean {
 }
 
 export function inventoriedTables(): string[] {
-  return UNMANAGED_INVENTORY.filter((e) => e.objectType === "table").map((e) => e.name).sort();
+  return UNMANAGED_INVENTORY.filter((e) => e.objectType === "table")
+    .map((e) => e.name)
+    .sort();
 }
 export function inventoriedViews(): string[] {
-  return UNMANAGED_INVENTORY.filter((e) => e.objectType === "view").map((e) => e.name).sort();
+  return UNMANAGED_INVENTORY.filter((e) => e.objectType === "view")
+    .map((e) => e.name)
+    .sort();
 }
 export function inventoriedMatviews(): string[] {
-  return UNMANAGED_INVENTORY.filter((e) => e.objectType === "materialized_view").map((e) => e.name).sort();
+  return UNMANAGED_INVENTORY.filter((e) => e.objectType === "materialized_view")
+    .map((e) => e.name)
+    .sort();
 }
 
 export interface NonPublicObject {
@@ -163,7 +527,14 @@ export function classifyLiveObjects(objs: LiveObjects): Classification {
   const knownSchemas = new Set(KNOWN_SCHEMAS.map((s) => s.name));
   const knownOrphanSeq = new Set(KNOWN_ORPHAN_SEQUENCES);
 
-  const result: Classification = { managed: [], unmanaged: [], vaultQuest: [], partnerNetwork: [], integrationOwned: [], unknown: [] };
+  const result: Classification = {
+    managed: [],
+    unmanaged: [],
+    vaultQuest: [],
+    partnerNetwork: [],
+    integrationOwned: [],
+    unknown: [],
+  };
 
   for (const t of objs.tables) {
     if (isVaultQuestName(t)) result.vaultQuest.push(t);
@@ -216,7 +587,12 @@ export function classifyLiveTables(tables: string[]): {
   unknown: string[];
 } {
   const c = classifyLiveObjects({ tables, views: [], matviews: [], schemas: [], orphanSequences: [], enums: [] });
-  return { managed: c.managed, unmanaged: c.unmanaged, vaultQuest: c.vaultQuest, unknown: c.unknown.map((u) => u.name) };
+  return {
+    managed: c.managed,
+    unmanaged: c.unmanaged,
+    vaultQuest: c.vaultQuest,
+    unknown: c.unknown.map((u) => u.name),
+  };
 }
 
 export function inventoriedUnmanaged(): string[] {

@@ -29,6 +29,17 @@ export const PARTNER_MIGRATIONS = [
   "0009_partner_connector_validation",
 ] as const;
 
+/**
+ * G3 (migration 0010) is deliberately NOT in PARTNER_MIGRATIONS above — 0010 grants
+ * partner_connector_runtime access to the MintVault-internal `users`/`submissions`/
+ * `submission_items` tables, which must already exist before it runs. Every EXISTING G1/G2 test
+ * file calls applyMigrationsRealistic() without creating those tables (they don't need G3's schema
+ * at all) — silently requiring them there would be an unrelated regression for every G1/G2 test.
+ * G3 test files call this instead, which requires the caller to have already created those three
+ * tables (see tests/partner-connector-import-service.test.ts's seedMintVaultTables()).
+ */
+export const PARTNER_MIGRATIONS_WITH_G3 = [...PARTNER_MIGRATIONS, "0010_partner_connector_import"] as const;
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 
@@ -68,12 +79,16 @@ export function migratorUrlFrom(adminUrl: string): string {
  * Full realistic setup: provision roles (superuser), then apply ALL partner migrations as the
  * NON-superuser pn_migrator. `admin` must be connected to the target DB; `adminUrl` is its URL.
  */
-export async function applyMigrationsRealistic(admin: pg.Client, adminUrl: string): Promise<void> {
+export async function applyMigrationsRealistic(
+  admin: pg.Client,
+  adminUrl: string,
+  migrations: readonly string[] = PARTNER_MIGRATIONS
+): Promise<void> {
   await provisionRealisticRoles(admin);
   const migrator = new pg.Client({ connectionString: migratorUrlFrom(adminUrl) });
   await migrator.connect();
   try {
-    for (const name of PARTNER_MIGRATIONS) {
+    for (const name of migrations) {
       await migrator.query(migrationSql(name));
     }
   } finally {
