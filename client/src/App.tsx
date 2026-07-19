@@ -117,6 +117,7 @@ const ShowroomPage = lazy(() => import("@/pages/showroom"));
 const ShowroomsListPage = lazy(() => import("@/pages/showrooms"));
 const CommunityPage = lazy(() => import("@/pages/community"));
 const AdminCommunityPage = lazy(() => import("@/pages/admin/community"));
+const AdminPartnerNetworkPage = lazy(() => import("@/pages/admin/partner-network"));
 
 // Partner Portal (Phase 2, Increments A+B) — isolated /partner/* surface. Fails closed at the
 // backend (partner_portal_enabled flag + emergency stop) if the flag is off; not enabled in any
@@ -337,6 +338,7 @@ function Router() {
           <Route path="/admin/vault-quest/card-factory" component={AdminVaultQuestCardFactoryPage} />
           <Route path="/admin/vault-quest" component={AdminVaultQuestPage} />
           <Route path="/admin/community" component={AdminCommunityPage} />
+          <Route path="/admin/partner-network" component={AdminPartnerNetworkPage} />
           <Route path="/community" component={CommunityPage} />
           <Route path="/reels" component={ReelsPage} />
           <Route path="/share/reel/:date/:certNumber" component={ShareReelPage} />

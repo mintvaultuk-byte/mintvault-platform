@@ -96,11 +96,11 @@ async function applyAllRealistic(): Promise<void> {
       expect(rows[0].status).toBe("applied");
     });
 
-    it("all 13 partner migration journal rows are present and applied", async () => {
+    it("all 14 partner migration journal rows are present and applied", async () => {
       const { rows } = await admin.query(
         "SELECT filename, status FROM schema_migrations WHERE filename LIKE '00%_partner%' ORDER BY filename"
       );
-      expect(rows).toHaveLength(13);
+      expect(rows).toHaveLength(14);
       for (const r of rows) expect(r.status).toBe("applied");
     });
 

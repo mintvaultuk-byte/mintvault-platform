@@ -87,6 +87,7 @@ const NAV: NavSection[] = [
       { key: "printing", label: "Printing", icon: Printer },
       { href: "/admin/staff", label: "Staff", icon: Users },
       { href: "/admin/security", label: "Security", icon: ShieldCheck },
+      { href: "/admin/partner-network", label: "Partner Connectors", icon: PackageCheck },
     ],
   },
   {
@@ -96,7 +97,12 @@ const NAV: NavSection[] = [
       { href: "/admin/vault-quest/card-factory", label: "Card Factory", icon: PackageCheck },
       { key: "learning", label: "AI Learning", icon: Brain },
       { key: "divergence", label: "AI Divergence", icon: TrendingUp },
-      { key: "grading", label: "Grading", icon: BarChart3, title: "Open the oldest ungraded certificate in the grading workstation" },
+      {
+        key: "grading",
+        label: "Grading",
+        icon: BarChart3,
+        title: "Open the oldest ungraded certificate in the grading workstation",
+      },
       { key: "capture-health", label: "Capture Health", icon: Activity },
     ],
   },
@@ -184,10 +190,7 @@ export default function AdminShell({
             itself sets a bounded, viewport-relative height at desktop so its
             right column scrolls internally; below that it flows and the page
             scrolls normally. */}
-        <div
-          className="admin-focus"
-          style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}
-        >
+        <div className="admin-focus" style={{ minHeight: "100dvh", display: "flex", flexDirection: "column" }}>
           {children}
         </div>
       </div>

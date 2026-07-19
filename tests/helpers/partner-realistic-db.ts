@@ -53,6 +53,12 @@ export const PARTNER_MIGRATIONS_WITH_G3F = [
   "0013_partner_connector_claim_index",
 ] as const;
 
+/** G4 — append-only Super-Admin operational-action audit table (0014). */
+export const PARTNER_MIGRATIONS_WITH_G4 = [
+  ...PARTNER_MIGRATIONS_WITH_G3F,
+  "0014_partner_connector_admin_actions",
+] as const;
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 
