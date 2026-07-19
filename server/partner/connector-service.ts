@@ -280,7 +280,11 @@ export async function getConnectorStatus(params: {
 /**
  * Claim ONE queued (or expired-claim) record across ALL tenants — the global work-queue primitive a
  * future worker polls. FOR UPDATE SKIP LOCKED guarantees two concurrent callers never claim the same
- * row. Returns null when nothing is claimable (not an error).
+ * row. Returns null when nothing is claimable (not an error). An expired lease on EITHER `claimed`
+ * or `validating` is reclaimable (G2C — closes the G1-documented gap where a `validating` record
+ * was never treated as reclaimable at all); a reclaim always resets state to `claimed`, so the new
+ * claimant explicitly re-enters `validating` itself rather than inheriting an unknown mid-validation
+ * state from whichever worker's lease just lapsed.
  */
 export async function claimNextConnectorRecord(
   claimedBy: string,
@@ -291,7 +295,7 @@ export async function claimNextConnectorRecord(
     withConnectorTx(async (client) => {
       const { rows } = await client.query<ConnectorRow>(
         `SELECT * FROM partner_connector_records
-        WHERE state = 'queued' OR (state = 'claimed' AND claim_expires_at < now())
+        WHERE state = 'queued' OR (state IN ('claimed','validating') AND claim_expires_at < now())
         ORDER BY created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1`
@@ -354,7 +358,9 @@ export async function claimConnectorRecord(
         throw new ConnectorError("invalid_state_transition", `Cannot claim a record in terminal state ${rec.state}.`);
       }
       const leaseExpired =
-        rec.state === "claimed" && rec.claim_expires_at != null && new Date(rec.claim_expires_at) < new Date();
+        (rec.state === "claimed" || rec.state === "validating") &&
+        rec.claim_expires_at != null &&
+        new Date(rec.claim_expires_at) < new Date();
       const claimable = rec.state === "queued" || leaseExpired;
       if (!claimable) throw new ConnectorError("already_claimed", "Record is already claimed by another processor.");
       const upd = await client.query<ConnectorRow>(

@@ -648,15 +648,19 @@ export async function validateConnectorRecord(params: {
         throw new ConnectorError("stale_claim", "Record changed since last read.");
       }
 
-      const runRes = await client.query<{ id: string }>(
-        `INSERT INTO partner_connector_validation_runs
-           (connector_record_id, validation_attempt, source_submission_version, source_handoff_status, outcome)
-         VALUES ($1, $2, 0, 'pending', 'failed')
-         RETURNING id`,
-        [connectorId, connector.attempt_count]
-      );
-      const runId = runRes.rows[0].id;
+      // withConnectorTx only sets the app.tenant_id GUC when a tenantId is known BEFORE the
+      // transaction opens — but here the connector's tenant is only known after reading the
+      // (non-RLS'd) connector record above. Set it now, transaction-local, before touching any of
+      // the FORCE-RLS'd tables loadValidationRows reads (organisations, locations, customers,
+      // service tiers, cards) — without this, every one of those reads would return zero rows
+      // regardless of the WHERE clause (RLS resolves partner_current_tenant() to NULL and no row's
+      // tenant_id ever equals NULL), making every validation appear to reference missing entities.
+      await client.query("SELECT set_config('app.tenant_id', $1, true)", [connector.tenant_id]);
 
+      // Do ALL the work first — load, fingerprint, evaluate — then write the run ONCE with its
+      // final values. partner_connector_validation_runs is granted SELECT+INSERT only (no UPDATE),
+      // matching "immutable after completion": there is no half-written row to ever update, so
+      // there is nothing to reconcile if the process crashes before the single INSERT commits.
       let outcome: ValidationOutcome;
       let findings: ValidationFinding[] = [];
       let fingerprint: string | null = null;
@@ -674,9 +678,9 @@ export async function validateConnectorRecord(params: {
           // Staleness check: compare against the immediately-prior COMPLETED run, if any.
           const priorRes = await client.query<{ source_submission_version: number; source_fingerprint: string | null }>(
             `SELECT source_submission_version, source_fingerprint FROM partner_connector_validation_runs
-              WHERE connector_record_id = $1 AND completed_at IS NOT NULL AND id != $2
+              WHERE connector_record_id = $1 AND completed_at IS NOT NULL
               ORDER BY created_at DESC LIMIT 1`,
-            [connectorId, runId]
+            [connectorId]
           );
           const prior = priorRes.rows[0] ?? null;
           fingerprint = calculateSourceFingerprint(toFingerprintSource(rows));
@@ -728,24 +732,25 @@ export async function validateConnectorRecord(params: {
       const blockingCount = findings.filter((f) => f.severity === "blocking").length;
       const warningCount = findings.filter((f) => f.severity === "warning").length;
 
-      await client.query(
-        `UPDATE partner_connector_validation_runs
-            SET outcome = $1, blocking_error_count = $2, warning_count = $3,
-                source_fingerprint = $4, source_fingerprint_version = $5,
-                source_submission_version = $6, source_handoff_status = $7,
-                completed_at = now()
-          WHERE id = $8`,
+      const runRes = await client.query<{ id: string }>(
+        `INSERT INTO partner_connector_validation_runs
+           (connector_record_id, validation_attempt, source_submission_version, source_handoff_status,
+            source_fingerprint, source_fingerprint_version, outcome, blocking_error_count, warning_count, completed_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
+         RETURNING id`,
         [
+          connectorId,
+          connector.attempt_count,
+          sourceSubmissionVersion,
+          sourceHandoffStatus,
+          fingerprint,
+          fingerprint ? SOURCE_FINGERPRINT_VERSION : null,
           outcome,
           blockingCount,
           warningCount,
-          fingerprint,
-          fingerprint ? SOURCE_FINGERPRINT_VERSION : null,
-          sourceSubmissionVersion,
-          sourceHandoffStatus,
-          runId,
         ]
       );
+      const runId = runRes.rows[0].id;
       for (const f of findings) {
         await client.query(
           `INSERT INTO partner_connector_validation_findings
