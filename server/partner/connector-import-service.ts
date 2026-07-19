@@ -24,7 +24,7 @@ import { calculateSourceFingerprint, SOURCE_FINGERPRINT_VERSION } from "./connec
 import { loadValidationRows, toFingerprintSource, type ConnectorRow } from "./connector-validation-service";
 import { resolveDestinationOwner } from "./connector-owner-resolution";
 import { allocateReferenceAndInsert } from "./connector-reference";
-import { connectorHook } from "./connector-instrumentation";
+import { connectorHook, type ConnectorHookPoint, type ConnectorHookContext } from "./connector-instrumentation";
 
 const MAPPING_VERSION = 1;
 
@@ -145,6 +145,10 @@ export async function importValidatedConnector(params: {
   return guarded(() =>
     withConnectorTx(async (client) => {
       const attemptStartedAt = new Date(); // G3F: import-attempt start, recorded in evidence at commit
+      // G3F: fault/observation hook (no-op in production). Always carries the transaction client so a
+      // fault test can act on the importer's OWN connection (e.g. terminate its backend).
+      const hook = (point: ConnectorHookPoint, ctx: Omit<ConnectorHookContext, "client">) =>
+        connectorHook(point, { ...ctx, client });
       const connRes = await client.query<FullConnectorRow>(
         `SELECT * FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
         [connectorId]
@@ -253,7 +257,7 @@ export async function importValidatedConnector(params: {
         );
       }
 
-      await connectorHook("before_validation_recheck", { connectorId, claimant });
+      await hook("before_validation_recheck", { connectorId, claimant });
 
       // Same GUC-scoping requirement loadValidationRows itself documents — must be set before any
       // FORCE-RLS'd Partner table read, using the connector's OWN (non-RLS'd) tenant_id, never a
@@ -265,7 +269,7 @@ export async function importValidatedConnector(params: {
       const fingerprintMatches =
         fingerprint === run.source_fingerprint && SOURCE_FINGERPRINT_VERSION === run.source_fingerprint_version;
 
-      await connectorHook("after_validation_recheck", { connectorId, claimant });
+      await hook("after_validation_recheck", { connectorId, claimant });
 
       // G3F: attempt_type — resumed if we resume an existing 'reserved' mapping, else retry if any
       // prior attempt row exists for this connector, else initial. Computed here (before the branch)
@@ -345,7 +349,7 @@ export async function importValidatedConnector(params: {
       // uq_partner_connector_imports_connector and previously left the record stuck in an
       // unrecoverable retry loop (RECONCILIATION-RUNBOOK.md scenario 4, now genuinely recoverable
       // both automatically here and via recoverReservedImport for a stale abandoned reservation).
-      await connectorHook("before_reservation", { connectorId, claimant });
+      await hook("before_reservation", { connectorId, claimant });
       let mappingId: string;
       if (existingMap && existingMap.state === "reserved") {
         mappingId = existingMap.id;
@@ -391,7 +395,7 @@ export async function importValidatedConnector(params: {
         }
       }
 
-      await connectorHook("after_reservation", { connectorId, claimant, mappingId });
+      await hook("after_reservation", { connectorId, claimant, mappingId });
 
       // ---- Owner resolution -------------------------------------------------------------------
       const owner = await resolveDestinationOwner(client, {
@@ -399,7 +403,7 @@ export async function importValidatedConnector(params: {
         customer: { id: rows.customer.id, fullName: rows.customer.full_name, email: rows.customer.email },
       });
 
-      await connectorHook("after_owner_resolution", { connectorId, claimant, mappingId });
+      await hook("after_owner_resolution", { connectorId, claimant, mappingId });
 
       // ---- Service/price mapping (mapping version 1 — direct passthrough, see SERVICE-PRICE-MAPPING.md)
       const expandedItems = rows.cards.flatMap((card) =>
@@ -437,7 +441,7 @@ export async function importValidatedConnector(params: {
         return subRes.rows[0];
       });
 
-      await connectorHook("after_submission_insert", {
+      await hook("after_submission_insert", {
         connectorId,
         claimant,
         mappingId,
@@ -461,7 +465,7 @@ export async function importValidatedConnector(params: {
             card.declared_value_pence ?? 0,
           ]
         );
-        await connectorHook("during_item_insert", {
+        await hook("during_item_insert", {
           connectorId,
           claimant,
           mappingId,
@@ -470,12 +474,12 @@ export async function importValidatedConnector(params: {
         });
       }
 
-      await connectorHook("after_items", { connectorId, claimant, mappingId, destinationSubmissionId: created.id });
+      await hook("after_items", { connectorId, claimant, mappingId, destinationSubmissionId: created.id });
 
       // ---- Complete the mapping, then transition the connector (ready_for_import -> importing ->
       // imported, two UPDATEs, same transaction — see file header for why 'importing' is never
       // durably observable outside this transaction) ----------------------------------------------
-      await connectorHook("before_mapping_completion", {
+      await hook("before_mapping_completion", {
         connectorId,
         claimant,
         mappingId,
@@ -487,7 +491,7 @@ export async function importValidatedConnector(params: {
           WHERE id = $2`,
         [created.id, mappingId]
       );
-      await connectorHook("after_mapping_completion", {
+      await hook("after_mapping_completion", {
         connectorId,
         claimant,
         mappingId,
@@ -510,7 +514,7 @@ export async function importValidatedConnector(params: {
         [connectorId, connector.attempt_count, JSON.stringify({}), claimant]
       );
 
-      await connectorHook("before_connector_imported", {
+      await hook("before_connector_imported", {
         connectorId,
         claimant,
         mappingId,
@@ -554,7 +558,7 @@ export async function importValidatedConnector(params: {
         startedAt: attemptStartedAt,
       });
 
-      await connectorHook("before_commit", { connectorId, claimant, mappingId, destinationSubmissionId: created.id });
+      await hook("before_commit", { connectorId, claimant, mappingId, destinationSubmissionId: created.id });
 
       return {
         outcome: "imported",

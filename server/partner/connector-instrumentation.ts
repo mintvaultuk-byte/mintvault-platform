@@ -28,9 +28,18 @@ export type ConnectorHookPoint =
   | "before_connector_imported"
   | "before_commit";
 
+/** Minimal query surface — lets a fault hook run SQL on the importer's OWN transaction connection
+ * (e.g. to terminate its backend and prove connection-death recovery). Typed loosely to avoid a pg
+ * dependency in this module. */
+export interface HookClient {
+  query(sql: string): Promise<{ rows: unknown[] }>;
+}
+
 export interface ConnectorHookContext {
   connectorId: string;
   claimant: string;
+  /** The importer's transaction client (test-only use). */
+  client?: HookClient;
   /** Set once known within the attempt; safe ids/counters only, never PII. */
   mappingId?: string;
   destinationSubmissionId?: number;
