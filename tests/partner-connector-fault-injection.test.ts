@@ -147,13 +147,19 @@ async function dbState(connectorId: string) {
   };
 }
 
+// Every hook point the importer actually emits (see connector-import-service.ts hook() calls). Each
+// is inside the single import transaction and precedes the destination commit, so a fault at any of
+// them must roll the whole transaction back with no partial destination, then a clean retry succeeds.
 const ROLLBACK_POINTS = [
+  "before_validation_recheck",
+  "after_validation_recheck",
   "before_reservation",
   "after_reservation",
   "after_owner_resolution",
   "after_submission_insert",
   "during_item_insert",
   "after_items",
+  "before_mapping_completion",
   "after_mapping_completion",
   "before_connector_imported",
   "before_commit",
