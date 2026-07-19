@@ -14,6 +14,13 @@
 --
 -- Wrapped in a single transaction so a mid-script failure rolls the whole rollback back atomically
 -- (and so it behaves identically under `psql -f` and node-postgres).
+--
+-- ⚠️ If the refusal above fires: this script's own BEGIN is never matched by a COMMIT (the RAISE
+-- aborts first), which leaves the CONNECTION's session in "current transaction is aborted" state for
+-- any further query on that same connection. `psql -f` closes the connection on exit, so this is a
+-- non-issue there; a caller reusing a pooled/long-lived connection (e.g. a test suite chaining this
+-- script programmatically) MUST issue an explicit `ROLLBACK` before reusing that connection — see
+-- tests/partner-connector-migration.test.ts's refusal test for the exact pattern.
 
 BEGIN;
 

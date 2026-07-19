@@ -403,6 +403,37 @@ async function claimAndStartValidating(
         const status = await svc.getConnectorStatus({ tenantId: A, connectorId: rec.id });
         expect(status?.state).toBe("cancelled");
       });
+
+      it("submission_superseded blocks when another live connector record already exists for the same submission (review finding: this code was documented as actively checked but had zero implementation)", async () => {
+        // Two independent DB constraints already make this doubly impossible through any normal
+        // path: partner_submission_handoffs.submission_id is UNIQUE (one handoff per submission,
+        // ever), and partner_connector_records.handoff_id is UNIQUE (one connector record per
+        // handoff). To exercise the defensive check at all, this test directly corrupts the
+        // referential link — creating a genuinely separate submission+handoff+connector record,
+        // then repointing its partner_submission_id at the FIRST submission via raw admin SQL — the
+        // exact kind of state the check exists to catch if that invariant were ever broken upstream.
+        const svc = await import("../server/partner/connector-service");
+        const val = await import("../server/partner/connector-validation-service");
+        const { submissionId: submissionIdA, handoffId: handoffIdA } = await seedFullSubmission(A, L1, U1);
+        const first = await svc.ensureConnectorRecordForHandoff({ tenantId: A, handoffId: handoffIdA });
+        const { handoffId: handoffIdOther } = await seedFullSubmission(A, L1, U1);
+        const second = await svc.ensureConnectorRecordForHandoff({ tenantId: A, handoffId: handoffIdOther });
+        await admin.query("UPDATE partner_connector_records SET partner_submission_id=$1 WHERE id=$2", [
+          submissionIdA,
+          second.id,
+        ]);
+
+        const claimed = await claimAndStartValidating(svc, second.id, "worker-1");
+        const result = await val.validateConnectorRecord({
+          connectorId: second.id,
+          claimant: "worker-1",
+          expectedVersion: claimed.version,
+        });
+        expect(result.outcome).toBe("invalid");
+        expect(result.findings.map((f) => f.code)).toContain("submission_superseded");
+        void first;
+        void submissionIdA;
+      });
     });
 
     describe("immutability of findings and runs", () => {
@@ -473,7 +504,9 @@ async function claimAndStartValidating(
         });
         expect(first.outcome).toBe("valid");
 
-        // Mutate the source: add a card and bump version (mirrors what addCard() in submission-service.ts does).
+        // Mutate the source directly: addCard() itself does NOT bump partner_submissions.version (only
+        // editSubmissionDraft does) — this manual UPDATE tests the version-mismatch detection path
+        // deliberately, independent of whether any real draft-mutation function happens to trigger it.
         await admin.query(
           "INSERT INTO partner_submission_cards (tenant_id, submission_id, sequence_number, card_name, quantity) VALUES ($1,$2,2,'Extra Card',1)",
           [A, submissionId]

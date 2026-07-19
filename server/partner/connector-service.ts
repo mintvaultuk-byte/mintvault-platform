@@ -38,15 +38,20 @@ const TERMINAL_STATES = new Set<ConnectorState>(["rejected", "cancelled", "impor
 
 /**
  * The explicit legal-transition matrix — the single source of truth for every state change.
- * `ready_for_import -> validating` (G2C, explicit revalidation) is the one addition beyond a pure
- * rename of G1's matrix.
+ * `ready_for_import -> validating` and `failed -> validating` (both G2C, explicit revalidation) are
+ * the two additions beyond a pure rename of G1's matrix — both are exercised by
+ * connector-validation-service.ts's requestConnectorRevalidation(), which independently enforces the
+ * same fromState whitelist via its own raw UPDATE (it doesn't call transitionConnectorState()
+ * directly, since it also needs to atomically re-claim the record for the calling worker in the same
+ * statement) — listed here too so this matrix stays true to its own "single source of truth" claim
+ * rather than silently omitting a transition the code actually performs.
  */
 export const LEGAL_TRANSITIONS: Record<ConnectorState, ConnectorState[]> = {
   queued: ["claimed", "cancelled"],
   claimed: ["validating", "queued", "cancelled", "failed"],
   validating: ["ready_for_import", "rejected", "failed", "cancelled"],
   ready_for_import: ["cancelled", "validating"],
-  failed: ["queued", "cancelled"],
+  failed: ["queued", "cancelled", "validating"],
   rejected: [],
   cancelled: [],
   imported: [],

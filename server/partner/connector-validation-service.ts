@@ -39,7 +39,7 @@ export const VALIDATION_FINDING_CODES = [
   "submission_missing",
   "submission_not_final",
   "submission_cancelled",
-  "submission_superseded",
+  "submission_superseded", // checked — see the supersededRes query in validateConnectorRecord
   "handoff_missing",
   "handoff_not_ready",
   "handoff_mismatch",
@@ -48,8 +48,8 @@ export const VALIDATION_FINDING_CODES = [
   "customer_invalid_email",
   "service_tier_missing",
   "service_tier_inactive",
-  "service_tier_unauthorised",
-  "service_tier_unmapped",
+  "service_tier_unauthorised", // RESERVED (G3+): no per-tenant tier authorisation list exists yet; never pushed
+  "service_tier_unmapped", // RESERVED (G3+): no Partner-tier -> MintVault-service mapping table exists yet; never pushed
   "service_price_mismatch",
   "no_cards",
   "too_many_cards",
@@ -60,7 +60,7 @@ export const VALIDATION_FINDING_CODES = [
   "totals_mismatch",
   "source_version_mismatch",
   "source_fingerprint_mismatch",
-  "already_imported",
+  "already_imported", // RESERVED (G3+): no import-mapping schema exists yet; never pushed
   "unknown_validation_error",
 ] as const;
 export type ValidationFindingCode = (typeof VALIDATION_FINDING_CODES)[number];
@@ -711,6 +711,28 @@ export async function validateConnectorRecord(params: {
             ];
           } else {
             findings = evaluateRules(connector, rows);
+            // submission_superseded: defence in depth against another connector record existing for
+            // the same Partner submission. Migration 0008's UNIQUE(handoff_id) already makes this
+            // structurally impossible under the current schema (one handoff -> at most one connector
+            // record, and a submission cannot produce two live 'pending' handoffs) — this check exists
+            // for the day that invariant is weakened by a future migration or a bug elsewhere, not
+            // because it currently fires in practice.
+            const supersededRes = await client.query<{ id: string }>(
+              `SELECT id FROM partner_connector_records
+                WHERE partner_submission_id = $1 AND id != $2 AND state NOT IN ('rejected','cancelled')
+                LIMIT 1`,
+              [connector.partner_submission_id, connector.id]
+            );
+            if (supersededRes.rows.length > 0) {
+              findings.push({
+                severity: "blocking",
+                code: "submission_superseded",
+                entityType: "submission",
+                safeEntityReference: connector.partner_submission_id,
+                safeFieldName: null,
+                safeMetadata: {},
+              });
+            }
             outcome = findings.some((f) => f.severity === "blocking") ? "invalid" : "valid";
           }
         }
