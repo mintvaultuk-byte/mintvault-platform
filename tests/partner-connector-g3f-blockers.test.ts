@@ -79,9 +79,7 @@ async function seedTenant(): Promise<void> {
 }
 
 /** Seed → claim → validate → ready_for_import. Returns ids + the validation run and fingerprint. */
-async function seedReady(
-  claimant: string
-): Promise<{
+async function seedReady(claimant: string): Promise<{
   connectorId: string;
   version: number;
   customerId: string;
