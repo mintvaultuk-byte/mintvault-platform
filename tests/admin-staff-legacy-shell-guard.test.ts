@@ -113,7 +113,6 @@ const LEGACY_EXCEPTIONS: Record<string, string> = {
     "separate Vault Quest product surface, own design language — audited 2026-07-19",
   "client/src/pages/admin-vault-quest.tsx":
     "separate Vault Quest product surface, own design language — audited 2026-07-19",
-  "client/src/pages/grader.tsx": "legacy pre-Staff-portal grader UI — Group 3 backlog, audited 2026-07-19",
   "client/src/pages/logbook.tsx":
     "public cert-lookup page reused at /admin/cert/:id, intentionally the public light theme",
 };
@@ -206,6 +205,57 @@ describe("Group 2 routes are enforced onto the shared admin shell (no longer exc
     expect(cm).toContain('status: "approved"');
     expect(cm).toContain('status: "rejected"');
     expect(cm).toContain("featured: !p.featured");
+  });
+});
+
+// Group 3 (2026-07-19): the Grader entry surfaces brought onto the shared
+// design system in this pass. ENFORCED coverage. The grader dashboard uses the
+// SAME token-on-root approach as staff.tsx (bg-[var(--admin-bg)] +
+// AdminHeaderRow) rather than the .admin-root wrapper, so this block asserts the
+// AdminHeaderRow primitive + design tokens + absence of a raw legacy shell,
+// matching how staff.tsx is (correctly) classified as unified. The grader login
+// is a pure redirect into the already-unified /staff/login — it must NOT
+// reintroduce a bespoke standalone login shell.
+const GROUP_3 = {
+  grader: "client/src/pages/grader.tsx",
+  graderLogin: "client/src/pages/grader-login.tsx",
+} as const;
+
+describe("Group 3 grader surfaces are enforced onto the shared admin shell (no longer exceptions)", () => {
+  it("neither Group-3 file is still listed as a legacy exception", () => {
+    for (const f of Object.values(GROUP_3)) {
+      expect(LEGACY_EXCEPTIONS, `${f} must be enforced-unified, not excused`).not.toHaveProperty(f);
+    }
+  });
+  it("grader dashboard renders with the shared AdminHeaderRow and no standalone/legacy shell", () => {
+    const src = read(GROUP_3.grader);
+    expect(src).toContain('from "@/components/admin/AdminHeaderRow"');
+    expect(src).toContain("<AdminHeaderRow");
+    expect(src).toContain('testId="grader-header"'); // dashboard header
+    expect(src).toContain('testId="grader-grading-breadcrumb"'); // active-card breadcrumb
+    // shared design tokens, not raw brand hex or a raw black page ground
+    expect(src).toMatch(/bg-\[var\(--admin-bg\)\]/);
+    expect(src).not.toMatch(/min-h-screen[^"]*\bbg-black\b(?!\/)/); // no raw black page ground
+    expect(src).not.toMatch(/text-slate-\d|bg-slate-\d|border-slate-\d/); // no slate legacy theme
+    expect(src).not.toMatch(/#D4AF37|#E8E4DC/); // brand hex converted to var(--admin-*) tokens
+  });
+  it("grader dashboard preserves its exact /api/grader/* endpoints + PII-free MVGS mount (visual-only pass)", () => {
+    const src = read(GROUP_3.grader);
+    expect(src).toContain("/api/grader/session");
+    expect(src).toContain("/api/grader/queue");
+    expect(src).toContain("/api/grader/earnings");
+    expect(src).toContain("/api/grader/logout");
+    // the real MVGS panel, grader-scoped — apiBase + graderMode untouched
+    expect(src).toContain('apiBase="/api/grader"');
+    expect(src).toContain("graderMode");
+  });
+  it("grader login is a pure redirect into the already-unified /staff/login (no bespoke login shell)", () => {
+    const src = read(GROUP_3.graderLogin);
+    expect(src).toContain('navigate("/staff/login"');
+    // no standalone login form re-introduced, no raw brand hex
+    expect(src).not.toMatch(/<form\b/);
+    expect(src).not.toMatch(/type="password"/);
+    expect(src).not.toMatch(/#D4AF37|#E8E4DC/);
   });
 });
 

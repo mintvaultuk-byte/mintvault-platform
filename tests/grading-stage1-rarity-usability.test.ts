@@ -329,10 +329,16 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
   // server+shared mvgs-scoring.ts, shared/mvgs-input-builder.ts, mvgs-mark.tsx)
   // is UNTOUCHED and stays fully protected by the unchanged regex.
   const DISPLAY_ONLY_MVGS_PAGE = "client/src/pages/admin-mvgs-calibration.tsx";
+  // client/src/pages/grader.tsx matches the PROTECTED `grader\.ts` alternative by
+  // FILENAME only. The genuinely-protected grading engine is server/grader.ts +
+  // server/routes/grader.ts (UNTOUCHED). The 2026-07-19 Group-3 pass changed only
+  // this client page's SHELL — zero /api/grader/* endpoint, payload, session-gate,
+  // permission, or GradingPanel-prop change. Exempt this ONE display-only page.
+  const DISPLAY_ONLY_GRADER_PAGE = "client/src/pages/grader.tsx";
   it("no protected grading/schema/migration file changed by this pass", () => {
     if (!base) return;
     for (const f of changed) {
-      if (f === DISPLAY_ONLY_MVGS_PAGE) continue;
+      if (f === DISPLAY_ONLY_MVGS_PAGE || f === DISPLAY_ONLY_GRADER_PAGE) continue;
       expect(f, f).not.toMatch(PROTECTED);
     }
   });

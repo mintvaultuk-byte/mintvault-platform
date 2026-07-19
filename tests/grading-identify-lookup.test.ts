@@ -212,6 +212,11 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     // Visual-shell-only, no protected surface, no API/mutation change.
     "client/src/pages/admin-pokemon-knowledge.tsx",
     "client/src/pages/admin/community.tsx",
+    // Group 3 grader-surface unification (2026-07-19, same branch): shared
+    // AdminHeaderRow + design tokens on the grader entry pages. Visual-shell-
+    // only, no API/session/permission change (see grader filename note below).
+    "client/src/pages/grader.tsx",
+    "client/src/pages/grader-login.tsx",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {
@@ -234,10 +239,17 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
   // shared/mvgs-input-builder.ts, mvgs-mark.tsx) is UNTOUCHED and stays fully
   // protected by the unchanged regex. Exempt this ONE display-only page only.
   const DISPLAY_ONLY_MVGS_PAGE = "client/src/pages/admin-mvgs-calibration.tsx";
+  // client/src/pages/grader.tsx matches the PROTECTED `grader\.ts` alternative by
+  // FILENAME only. The genuinely-protected grading engine is server/grader.ts +
+  // server/routes/grader.ts (UNTOUCHED). The 2026-07-19 Group-3 pass changed only
+  // this client page's SHELL (AdminHeaderRow + var(--admin-*) tokens replacing its
+  // two ad-hoc headers) — zero /api/grader/* endpoint, payload, session-gate,
+  // permission, or GradingPanel-prop change. Exempt this ONE display-only page.
+  const DISPLAY_ONLY_GRADER_PAGE = "client/src/pages/grader.tsx";
   it("no protected grading/schema/migration file changed", () => {
     if (!base) return;
     for (const f of changed) {
-      if (f === DISPLAY_ONLY_MVGS_PAGE) continue;
+      if (f === DISPLAY_ONLY_MVGS_PAGE || f === DISPLAY_ONLY_GRADER_PAGE) continue;
       expect(f, f).not.toMatch(PROTECTED);
     }
   });
