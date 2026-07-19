@@ -26,6 +26,7 @@ export const PARTNER_MIGRATIONS = [
   "0006_partner_definer_role",
   "0007_partner_submissions",
   "0008_partner_connector_foundation",
+  "0009_partner_connector_validation",
 ] as const;
 
 export const MIGRATOR_ROLE = "pn_migrator";

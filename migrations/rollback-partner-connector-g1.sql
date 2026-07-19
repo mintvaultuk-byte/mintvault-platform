@@ -5,10 +5,24 @@
 -- Partner or MintVault table/role — those survive this rollback untouched. Owner-approved protected
 -- action only; rehearse on a disposable DB first. Idempotent (IF EXISTS everywhere).
 --
+-- REFUSES to run once migration 0009 (G2 validation) is present — G2's tables FK-reference
+-- partner_connector_records, so a bare CASCADE here would silently drop them and leave
+-- schema_migrations claiming 0009 is still "applied" over tables that no longer exist. This is the
+-- SAME refusal pattern rollback-0001-partner-foundation.sql already uses once 0002+ is present — use
+-- rollback-partner-connector-g2.sql first, or the comprehensive rollback-partner-network-phase1.sql
+-- for a full teardown.
+--
 -- Wrapped in a single transaction so a mid-script failure rolls the whole rollback back atomically
 -- (and so it behaves identically under `psql -f` and node-postgres).
 
 BEGIN;
+
+DO $$
+BEGIN
+  IF to_regclass('public.partner_connector_validation_runs') IS NOT NULL THEN
+    RAISE EXCEPTION 'rollback-partner-connector-g1.sql refuses to run: migration 0009 (G2 validation) is present and depends on partner_connector_records. Run rollback-partner-connector-g2.sql first, or use the comprehensive rollback-partner-network-phase1.sql for a full teardown.';
+  END IF;
+END$$;
 
 DROP TABLE IF EXISTS partner_connector_events CASCADE;
 DROP TABLE IF EXISTS partner_connector_records CASCADE;

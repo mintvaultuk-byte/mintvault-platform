@@ -77,11 +77,11 @@ async function applyAllRealistic(): Promise<void> {
       expect(rows[0].status).toBe("applied");
     });
 
-    it("all 8 partner migration journal rows are present and applied", async () => {
+    it("all 9 partner migration journal rows are present and applied", async () => {
       const { rows } = await admin.query(
         "SELECT filename, status FROM schema_migrations WHERE filename LIKE '000%_partner%' ORDER BY filename"
       );
-      expect(rows).toHaveLength(8);
+      expect(rows).toHaveLength(9);
       for (const r of rows) expect(r.status).toBe("applied");
     });
 
@@ -144,7 +144,31 @@ async function applyAllRealistic(): Promise<void> {
       expect(grantees.has("partner_connector_runtime")).toBe(true);
     });
 
-    it("G1 rollback removes exactly the two new tables and the new role, nothing else", async () => {
+    it("G1-only rollback REFUSES once migration 0009 (G2) is present, and changes nothing", async () => {
+      // Mirrors the established rollback-0001-partner-foundation.sql refusal pattern (see
+      // tests/partner-rollback.test.ts) — a G1-only rollback must not silently CASCADE-drop G2's
+      // dependent validation tables while leaving schema_migrations claiming 0009 is still applied.
+      await expect(admin.query(rb("rollback-partner-connector-g1.sql"))).rejects.toThrow(
+        /refuses to run.*migration 0009/i
+      );
+      // The refused script's own BEGIN was never matched by a COMMIT (it errored first), which
+      // leaves this connection's session in "aborted transaction" state for any further query —
+      // reset it explicitly before the next test reuses `admin`.
+      await admin.query("ROLLBACK").catch(() => {});
+
+      // Nothing changed: G1 objects, G2 objects, and the journal are all untouched by the refused attempt.
+      const records = await admin.query("SELECT to_regclass('public.partner_connector_records') r");
+      expect(records.rows[0].r).toBe("partner_connector_records");
+      const validationRuns = await admin.query("SELECT to_regclass('public.partner_connector_validation_runs') r");
+      expect(validationRuns.rows[0].r).toBe("partner_connector_validation_runs");
+      const journal = await admin.query(
+        "SELECT count(*)::int n FROM schema_migrations WHERE filename IN ('0008_partner_connector_foundation.sql','0009_partner_connector_validation.sql')"
+      );
+      expect(journal.rows[0].n).toBe(2);
+    });
+
+    it("rolling back G2 first, then G1, correctly removes both in order and preserves Phase 1/2 data", async () => {
+      await admin.query(rb("rollback-partner-connector-g2.sql"));
       await admin.query(rb("rollback-partner-connector-g1.sql"));
 
       const records = await admin.query("SELECT to_regclass('public.partner_connector_records') r");
@@ -170,17 +194,18 @@ async function applyAllRealistic(): Promise<void> {
       expect(certs.rows.map((r) => r.secret)).toEqual(["KEEP-A"]);
 
       const journal = await admin.query(
-        "SELECT count(*)::int n FROM schema_migrations WHERE filename = '0008_partner_connector_foundation.sql'"
+        "SELECT count(*)::int n FROM schema_migrations WHERE filename IN ('0008_partner_connector_foundation.sql','0009_partner_connector_validation.sql')"
       );
       expect(journal.rows[0].n).toBe(0);
     });
 
-    it("migration 0008 reapplies cleanly after rollback", async () => {
+    it("migrations 0008 and 0009 reapply cleanly after rollback", async () => {
       const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
       await migrator.connect();
       try {
         const { applied } = await applyMigrations(migrator, listMigrationFiles());
         expect(applied).toContain("0008_partner_connector_foundation.sql");
+        expect(applied).toContain("0009_partner_connector_validation.sql");
       } finally {
         await migrator.end();
       }

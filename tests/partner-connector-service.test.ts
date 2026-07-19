@@ -244,10 +244,10 @@ async function seedSubmissionWithHandoff(
         connectorId: rec.id,
         claimant: "worker-1",
         expectedVersion: rec.version,
-        toState: "awaiting_validation",
+        toState: "ready_for_import",
         eventType: "validated",
       });
-      expect(rec.state).toBe("awaiting_validation");
+      expect(rec.state).toBe("ready_for_import");
 
       const { rows } = await admin.query(
         "SELECT event_type, from_state, to_state FROM partner_connector_events WHERE connector_record_id=$1 ORDER BY created_at",
@@ -260,12 +260,12 @@ async function seedSubmissionWithHandoff(
       const svc = await import("../server/partner/connector-service");
       const { handoffId } = await seedSubmissionWithHandoff(A, L1, U1);
       const rec = await svc.ensureConnectorRecordForHandoff({ tenantId: A, handoffId: handoffId! });
-      // queued -> awaiting_validation is not legal
+      // queued -> ready_for_import is not legal
       await expect(
         svc.transitionConnectorState({
           connectorId: rec.id,
           expectedVersion: rec.version,
-          toState: "awaiting_validation",
+          toState: "ready_for_import",
           eventType: "bad",
         })
       ).rejects.toMatchObject({ code: "invalid_state_transition" });

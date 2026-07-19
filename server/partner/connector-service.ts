@@ -1,11 +1,14 @@
 /**
- * Trusted Intake Connector — Phase G1: connector foundation service.
+ * Trusted Intake Connector — Phase G1 foundation + G2 validation engine.
  *
  * Moves an approved Partner handoff (partner_submission_handoffs) into a tightly controlled internal
- * processing record, up to and including `awaiting_validation` — and NO FURTHER. No function in this
- * file can create a MintVault submission/certificate/payment/label, and none can transition a record
- * into `imported` (hard-blocked below, independent of the transition matrix). See
- * .claude/controlled-code-lead/tasks/partner-network-connector-g1/ARCHITECTURE.md for the full design.
+ * processing record, up to and including `ready_for_import` — and NO FURTHER (G3 is a follow-up,
+ * not-yet-built pass; see .claude/controlled-code-lead/tasks/partner-network-connector-g2-g5/
+ * PROGRAMME-PLAN.md). No function in this file can create a MintVault submission/certificate/
+ * payment/label, and none can transition a record into `imported` (hard-blocked below, independent
+ * of the transition matrix). `ready_for_import` renames G1's `awaiting_validation` (migration 0009)
+ * — same lifecycle position, renamed to match this programme's naming; safe because the connector
+ * flag has never been ON outside a disposable test database, so no real row ever held the old name.
  *
  * Every state-changing function: (1) checks the connector feature flag + emergency stop BEFORE
  * opening a transaction, (2) validates the current state against the legal-transition matrix,
@@ -23,7 +26,7 @@ export const CONNECTOR_STATES = [
   "queued",
   "claimed",
   "validating",
-  "awaiting_validation",
+  "ready_for_import",
   "rejected",
   "failed",
   "cancelled",
@@ -33,12 +36,16 @@ export type ConnectorState = (typeof CONNECTOR_STATES)[number];
 
 const TERMINAL_STATES = new Set<ConnectorState>(["rejected", "cancelled", "imported"]);
 
-/** The explicit legal-transition matrix — the single source of truth for every state change. */
+/**
+ * The explicit legal-transition matrix — the single source of truth for every state change.
+ * `ready_for_import -> validating` (G2C, explicit revalidation) is the one addition beyond a pure
+ * rename of G1's matrix.
+ */
 export const LEGAL_TRANSITIONS: Record<ConnectorState, ConnectorState[]> = {
   queued: ["claimed", "cancelled"],
   claimed: ["validating", "queued", "cancelled", "failed"],
-  validating: ["awaiting_validation", "rejected", "failed", "cancelled"],
-  awaiting_validation: ["cancelled"],
+  validating: ["ready_for_import", "rejected", "failed", "cancelled"],
+  ready_for_import: ["cancelled", "validating"],
   failed: ["queued", "cancelled"],
   rejected: [],
   cancelled: [],
@@ -553,6 +560,69 @@ export async function releaseConnectorClaim(params: {
       );
       if (upd.rows.length === 0) throw new ConnectorError("stale_claim", "Record changed since last read.");
       await writeEvent(client, connectorId, "claimed", "queued", "released", upd.rows[0].attempt_count, {}, claimant);
+      return mapRow(upd.rows[0]);
+    })
+  );
+}
+
+/**
+ * Phase G2C: extend an active `claimed` or `validating` lease before it expires. Closes the
+ * G1-documented gap where `validating` was never treated as reclaimable at all — a long-running
+ * validator can now keep its claim alive instead of racing an expiry it has no way to prevent.
+ * Only the current claimant, holding the current version, on a non-expired lease may renew.
+ */
+export async function renewConnectorClaimLease(params: {
+  connectorId: string;
+  claimant: string;
+  expectedVersion: number;
+  tenantId?: string;
+  leaseSeconds?: number;
+}): Promise<ConnectorRecord> {
+  await assertConnectorActive();
+  const { connectorId, claimant, expectedVersion, tenantId, leaseSeconds = DEFAULT_CLAIM_LEASE_SECONDS } = params;
+  return guarded(() =>
+    withConnectorTx(async (client) => {
+      const { rows } = await client.query<ConnectorRow>(
+        `SELECT * FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
+        [connectorId]
+      );
+      if (rows.length === 0) throw new ConnectorError("handoff_not_found", "Connector record not found.");
+      const rec = rows[0];
+      if (tenantId && rec.tenant_id !== tenantId) {
+        throw new ConnectorError("unauthorised", "This record does not belong to the specified tenant.");
+      }
+      if (rec.state !== "claimed" && rec.state !== "validating") {
+        throw new ConnectorError(
+          "invalid_state_transition",
+          "Only a claimed or validating record can have its lease renewed."
+        );
+      }
+      if (rec.claimed_by !== claimant) {
+        throw new ConnectorError("stale_claim", "Only the current claimant may renew this lease.");
+      }
+      const leaseExpired = rec.claim_expires_at != null && new Date(rec.claim_expires_at) < new Date();
+      if (leaseExpired) {
+        throw new ConnectorError("stale_claim", "This lease has already expired and may have been reclaimed.");
+      }
+      const upd = await client.query<ConnectorRow>(
+        `UPDATE partner_connector_records
+            SET claim_expires_at = now() + ($1 || ' seconds')::interval,
+                version = version + 1, updated_at = now()
+          WHERE id = $2 AND version = $3 AND claimed_by = $4 AND state = $5
+          RETURNING *`,
+        [leaseSeconds, connectorId, expectedVersion, claimant, rec.state]
+      );
+      if (upd.rows.length === 0) throw new ConnectorError("stale_claim", "Record changed since last read.");
+      await writeEvent(
+        client,
+        connectorId,
+        rec.state as ConnectorState,
+        rec.state as ConnectorState,
+        "lease_renewed",
+        upd.rows[0].attempt_count,
+        { leaseSeconds },
+        claimant
+      );
       return mapRow(upd.rows[0]);
     })
   );
