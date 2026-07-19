@@ -123,18 +123,30 @@ export default function AdminCommunityPage() {
       })()}
       <div className="flex items-center gap-1.5 shrink-0">
         {p.status !== "approved" && (
-          <AdminButton size="sm" onClick={() => patchMutation.mutate({ id: p.id, status: "approved" })}>
+          <AdminButton
+            size="sm"
+            aria-label="Approve post"
+            title="Approve post"
+            onClick={() => patchMutation.mutate({ id: p.id, status: "approved" })}
+          >
             <Check className="w-3.5 h-3.5" />
           </AdminButton>
         )}
         {p.status !== "rejected" && (
-          <AdminButton size="sm" onClick={() => patchMutation.mutate({ id: p.id, status: "rejected" })}>
+          <AdminButton
+            size="sm"
+            aria-label="Reject post"
+            title="Reject post"
+            onClick={() => patchMutation.mutate({ id: p.id, status: "rejected" })}
+          >
             <X className="w-3.5 h-3.5" />
           </AdminButton>
         )}
         <AdminButton
           size="sm"
           variant={p.featured ? "gold" : undefined}
+          aria-label={p.featured ? "Unfeature post" : "Feature post"}
+          title={p.featured ? "Unfeature post" : "Feature post"}
           onClick={() => patchMutation.mutate({ id: p.id, featured: !p.featured })}
         >
           <Star className="w-3.5 h-3.5" />
