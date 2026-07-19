@@ -18,12 +18,17 @@ branch `feat/partner-network-connector-g3f-final-scale`, starting HEAD
   `uq_partner_connector_import_attempts_completed` partial unique (exactly-once
   completed-evidence protection). Edit 0012 directly (unmerged, undeployed —
   no corrective migration for a local-only mistake).
-- **Files updated:** migration 0012, query-plan test (add absence + retained-
-  inventory assertions), PERFORMANCE-RESULTS.md, PROVENANCE-EVIDENCE-MODEL.md,
-  ROLLBACK-PLAN.md, FINAL-CONNECTOR-SAFETY-GATE.md. (0013 unaffected; G3F/
-  comprehensive rollback DROP the whole table via CASCADE, so they need no
-  per-index change; migration-idempotency/journal/parity unchanged since no
-  migration file is added or removed.)
+- **Files actually updated (verified against `git diff 8d1c42f6..HEAD`):**
+  migration 0012, query-plan test (add absence + retained-inventory assertions),
+  and PERFORMANCE-RESULTS.md (retained/removed index inventory).
+- **Files reviewed and deliberately NOT changed:** PROVENANCE-EVIDENCE-MODEL.md,
+  ROLLBACK-PLAN.md, and FINAL-CONNECTOR-SAFETY-GATE.md needed no edit — the
+  rollback scripts DROP the whole `partner_connector_import_attempts` table via
+  CASCADE (which removes any index automatically), and ROLLBACK-PLAN.md's
+  existing wording ("any new index are removed") already covers the trimmed set,
+  so removing three `CREATE INDEX` lines requires no rollback/plan change. 0013
+  is unaffected; migration-idempotency/journal/parity are unchanged since no
+  migration file is added or removed.
 - **Proving test:** `partner-connector-query-plan.test.ts` asserts the three
   index names are ABSENT after migration, the retained two are PRESENT, and
   the hot-path queries still avoid a seq scan.
