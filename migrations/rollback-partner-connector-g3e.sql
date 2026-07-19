@@ -7,8 +7,29 @@
 -- deletes or modifies any row in submissions/submission_items/users.
 --
 -- Idempotent. Owner-approved protected action only; rehearse on a disposable DB first.
+--
+-- REFUSES to run once migration 0012 (G3F import-attempt evidence) is present — 0012's table
+-- FK-references partner_connector_records/partner_connector_imports/partner_connector_validation_runs
+-- (all of which survive this G3E rollback, so 0012 would not be orphaned by dependency), but the
+-- reconciliation states this rollback narrows away are part of the state model 0012's evidence
+-- assumes; refuse and require the G3F rollback first so the teardown order stays unambiguous. Same
+-- refusal-guard pattern every earlier rollback in this family uses.
+--
+-- WARNING: if the refusal fires, this BEGIN is never matched by a COMMIT — the connection's session
+-- is left in "aborted transaction" state; a caller reusing a pooled connection must issue an
+-- explicit ROLLBACK before reuse (see tests/partner-connector-migration.test.ts for the pattern).
 
 BEGIN;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM schema_migrations
+     WHERE filename = '0012_partner_connector_import_attempts.sql' AND status = 'applied'
+  ) THEN
+    RAISE EXCEPTION 'rollback-partner-connector-g3e.sql refuses to run: migration 0012 (G3F import-attempt evidence) is present. Run rollback-partner-connector-g3f.sql first, or use the comprehensive rollback-partner-network-phase1.sql for a full teardown.';
+  END IF;
+END$$;
 
 -- Revert any 'reconciliation_required'/'manual_review' rows back to a G3-legal state before
 -- narrowing the CHECK. Both are genuinely reachable states (unlike 'importing'), so this is not

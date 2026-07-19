@@ -46,6 +46,12 @@ export const PARTNER_MIGRATIONS_WITH_G3E = [
   "0011_partner_connector_reconciliation",
 ] as const;
 
+/** G3F (0012) — append-only import-attempt evidence table. */
+export const PARTNER_MIGRATIONS_WITH_G3F = [
+  ...PARTNER_MIGRATIONS_WITH_G3E,
+  "0012_partner_connector_import_attempts",
+] as const;
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 

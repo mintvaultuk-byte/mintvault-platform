@@ -15,7 +15,7 @@ import { Client } from "pg";
 import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
-  PARTNER_MIGRATIONS_WITH_G3,
+  PARTNER_MIGRATIONS_WITH_G3F,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_CONNECTOR_IMPORT_RT_ADMIN;
@@ -178,7 +178,7 @@ async function seedReadyForImport(
       // pn_migrator must exist BEFORE seedMintVaultTables' ALTER TABLE ... OWNER TO pn_migrator runs.
       await provisionRealisticRoles(admin);
       await seedMintVaultTables();
-      await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_G3);
+      await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_G3F);
 
       await admin.query("DROP ROLE IF EXISTS partner_connector_import_test").catch(() => {});
       await admin.query("CREATE ROLE partner_connector_import_test LOGIN PASSWORD 'synthetic'");

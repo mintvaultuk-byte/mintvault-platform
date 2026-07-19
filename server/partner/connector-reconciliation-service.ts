@@ -396,8 +396,15 @@ export async function completeFromExistingDestination(params: {
   requireActorAndReason(actorId, reason);
   return guarded(() =>
     withConnectorTx(async (client) => {
-      const connRes = await client.query<{ state: string; version: number; tenant_id: string }>(
-        `SELECT state, version, tenant_id FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
+      const connRes = await client.query<{
+        state: string;
+        version: number;
+        tenant_id: string;
+        partner_submission_id: string;
+        handoff_id: string;
+      }>(
+        `SELECT state, version, tenant_id, partner_submission_id, handoff_id
+           FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
         [connectorId]
       );
       if (connRes.rows.length === 0) throw new ConnectorError("handoff_not_found", "Connector record not found.");
@@ -437,6 +444,54 @@ export async function completeFromExistingDestination(params: {
         { reason, destinationSubmissionId: mapping.destinationSubmissionId },
         actorId
       );
+
+      // G3F: if no completed attempt evidence exists yet for this connector (e.g. a mapping created
+      // before this table existed, or a corruption-repair case), append one reconciled/completed
+      // attempt so the evidence chain is complete. The connector row FOR UPDATE lock + the partial
+      // unique index guarantee at most one completed attempt — so guard on existence first.
+      const hasCompleted = await client.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM partner_connector_import_attempts
+          WHERE connector_record_id = $1 AND outcome = 'completed'`,
+        [connectorId]
+      );
+      if (hasCompleted.rows[0].n === 0) {
+        const mapRow = await client.query<{
+          partner_organisation_id: string;
+          validation_run_id: string | null;
+          source_fingerprint: string | null;
+          source_fingerprint_version: number | null;
+        }>(
+          `SELECT partner_organisation_id, validation_run_id, source_fingerprint, source_fingerprint_version
+             FROM partner_connector_imports WHERE id = $1`,
+          [mapping.id]
+        );
+        const m = mapRow.rows[0];
+        const numRes = await client.query<{ n: number }>(
+          `SELECT COALESCE(MAX(attempt_number),0)+1 AS n FROM partner_connector_import_attempts WHERE connector_record_id = $1`,
+          [connectorId]
+        );
+        await client.query(
+          `INSERT INTO partner_connector_import_attempts
+             (connector_record_id, import_mapping_id, partner_organisation_id, partner_submission_id,
+              partner_handoff_id, validation_run_id, source_fingerprint, source_fingerprint_version,
+              attempt_number, attempt_type, claimant, outcome, safe_error_code, destination_submission_id,
+              started_at, completed_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'reconciled',$10,'completed',NULL,$11, now(), now())`,
+          [
+            connectorId,
+            mapping.id,
+            m.partner_organisation_id,
+            connector.partner_submission_id,
+            connector.handoff_id,
+            m.validation_run_id,
+            m.source_fingerprint,
+            m.source_fingerprint_version,
+            numRes.rows[0].n,
+            actorId,
+            mapping.destinationSubmissionId,
+          ]
+        );
+      }
       return { destinationSubmissionId: mapping.destinationSubmissionId };
     }, tenantId)
   );
