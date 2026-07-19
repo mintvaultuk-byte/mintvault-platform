@@ -367,7 +367,13 @@ export async function reconcileConnector(params: {
   }
 
   requireActorAndReason(actorId, reason);
-  await markManualReview({ connectorId, actorId, reason, tenantId });
+  if (report.connectorState === "imported") {
+    // 'imported' is terminal and must never transition away, even to flag corruption — see
+    // flagMappingForManualReview's own doc comment.
+    await flagMappingForManualReview({ connectorId, actorId, reason, tenantId });
+  } else {
+    await markManualReview({ connectorId, actorId, reason, tenantId });
+  }
   return { action: "marked_manual_review", report };
 }
 
@@ -551,12 +557,72 @@ export async function recoverInterruptedImport(params: {
 const MANUAL_REVIEW_REACHABLE_FROM = new Set(["ready_for_import", "reconciliation_required", "failed", "importing"]);
 
 /**
+ * For corruption detected on an ALREADY-`imported` connector (RECONCILIATION-RUNBOOK.md scenarios
+ * 5-7) — `imported` is a hard terminal state (LEGAL_TRANSITIONS["imported"] = []), inherited
+ * unchanged from G1, and must stay terminal even when its mapping/destination turns out to be
+ * corrupted; un-terminaling it would contradict the "post-import cancellation is rejected" safety
+ * invariant the whole connector state machine relies on. So corruption on an imported connector is
+ * flagged at the MAPPING level instead (`partner_connector_imports.state = 'reconciliation_required'`
+ * — a legal mapping state since migration 0010, using the already-granted narrow column UPDATE) —
+ * the connector's own `state` column never changes. An audit event is still written on the connector
+ * (from_state = to_state = 'imported', since no real transition occurred) so the flag is visible in
+ * the immutable history either way.
+ */
+export async function flagMappingForManualReview(params: {
+  connectorId: string;
+  actorId: string;
+  reason: string;
+  tenantId?: string;
+}): Promise<void> {
+  await assertConnectorActive();
+  const { connectorId, actorId, reason, tenantId } = params;
+  requireActorAndReason(actorId, reason);
+  return guarded(() =>
+    withConnectorTx(async (client) => {
+      const connRes = await client.query<{ state: string; tenant_id: string }>(
+        `SELECT state, tenant_id FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
+        [connectorId]
+      );
+      if (connRes.rows.length === 0) throw new ConnectorError("handoff_not_found", "Connector record not found.");
+      const connector = connRes.rows[0];
+      if (tenantId && connector.tenant_id !== tenantId) {
+        throw new ConnectorError("unauthorised", "This record does not belong to the specified tenant.");
+      }
+      const mapping = await client.query<{ id: string }>(
+        `SELECT id FROM partner_connector_imports WHERE connector_record_id = $1`,
+        [connectorId]
+      );
+      if (mapping.rows.length > 0) {
+        await client.query(
+          `UPDATE partner_connector_imports
+              SET state = 'reconciliation_required', last_safe_error_code = 'corrupt_lineage',
+                  reconciled_at = now(), updated_at = now()
+            WHERE id = $1`,
+          [mapping.rows[0].id]
+        );
+      }
+      await writeReconciliationEvent(
+        client,
+        connectorId,
+        connector.state,
+        connector.state,
+        "reconciliation_manual_review",
+        { reason, mappingFlagged: mapping.rows.length > 0 },
+        actorId
+      );
+    }, tenantId)
+  );
+}
+
+/**
  * Moves a connector into `manual_review`. Reachable from `ready_for_import`/`importing`/`failed`
  * directly (escalation), or from `reconciliation_required` (the normal reconcileConnector path) —
  * internally always performs the legal `reconciliation_required` hop first when starting from
  * `ready_for_import`/`importing`, writing both transition events, so the underlying state machine's
  * "recoverable transitions only" contract in connector-service.ts's LEGAL_TRANSITIONS is honoured
- * even though this function's own external contract is simpler.
+ * even though this function's own external contract is simpler. Does NOT accept a connector already
+ * in the terminal `imported` state — use `flagMappingForManualReview` for that case instead (see its
+ * own doc comment for why `imported` must never transition away).
  */
 export async function markManualReview(params: {
   connectorId: string;
