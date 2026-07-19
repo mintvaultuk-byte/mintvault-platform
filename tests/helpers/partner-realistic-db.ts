@@ -46,10 +46,11 @@ export const PARTNER_MIGRATIONS_WITH_G3E = [
   "0011_partner_connector_reconciliation",
 ] as const;
 
-/** G3F (0012) — append-only import-attempt evidence table. */
+/** G3F — append-only import-attempt evidence table (0012) + hot-path claim-index correction (0013). */
 export const PARTNER_MIGRATIONS_WITH_G3F = [
   ...PARTNER_MIGRATIONS_WITH_G3E,
   "0012_partner_connector_import_attempts",
+  "0013_partner_connector_claim_index",
 ] as const;
 
 export const MIGRATOR_ROLE = "pn_migrator";

@@ -106,11 +106,11 @@ async function applyAllRealistic(): Promise<void> {
       expect(rows[0].status).toBe("applied");
     });
 
-    it("all 10 partner migration journal rows are present and applied", async () => {
+    it("all 13 partner migration journal rows are present and applied", async () => {
       const { rows } = await admin.query(
-        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '000%_partner%' OR filename LIKE '0010_partner%' OR filename LIKE '0011_partner%' ORDER BY filename"
+        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '00%_partner%' ORDER BY filename"
       );
-      expect(rows).toHaveLength(11);
+      expect(rows).toHaveLength(13);
       for (const r of rows) expect(r.status).toBe("applied");
     });
 
@@ -199,17 +199,13 @@ async function applyAllRealistic(): Promise<void> {
         "INSERT INTO submissions (user_id, tracking_number, status) VALUES ('rollback-proof-user', 'MV-SUB-ROLLBACK-1', 'draft')"
       );
 
-      // G3's own rollback now refuses while migration 0011 (G3E) is present — roll that back first.
-      const rollbackG3eSql = require("node:fs").readFileSync(
-        require("node:path").join(process.cwd(), "migrations", "rollback-partner-connector-g3e.sql"),
-        "utf8"
-      );
-      await admin.query(rollbackG3eSql);
-      const rollbackSql = require("node:fs").readFileSync(
-        require("node:path").join(process.cwd(), "migrations", "rollback-partner-connector-g3.sql"),
-        "utf8"
-      );
-      await admin.query(rollbackSql);
+      // Teardown order: G3F (0012/0013) first — the G3E rollback refuses while 0012 is present, and
+      // the G3 rollback refuses while 0011 is present. Roll back G3F, then G3E, then G3.
+      const readRb = (name: string) =>
+        require("node:fs").readFileSync(require("node:path").join(process.cwd(), "migrations", name), "utf8");
+      await admin.query(readRb("rollback-partner-connector-g3f.sql"));
+      await admin.query(readRb("rollback-partner-connector-g3e.sql"));
+      await admin.query(readRb("rollback-partner-connector-g3.sql"));
 
       const { rows } = await admin.query("SELECT status FROM submissions WHERE tracking_number = 'MV-SUB-ROLLBACK-1'");
       expect(rows).toHaveLength(1);
@@ -239,6 +235,8 @@ async function applyAllRealistic(): Promise<void> {
         const { applied } = await applyMigrations(migrator, listMigrationFiles());
         expect(applied).toContain("0010_partner_connector_import.sql");
         expect(applied).toContain("0011_partner_connector_reconciliation.sql");
+        expect(applied).toContain("0012_partner_connector_import_attempts.sql");
+        expect(applied).toContain("0013_partner_connector_claim_index.sql");
       } finally {
         await migrator.end();
       }

@@ -96,11 +96,11 @@ async function applyAllRealistic(): Promise<void> {
       expect(rows[0].status).toBe("applied");
     });
 
-    it("all 11 partner migration journal rows are present and applied", async () => {
+    it("all 13 partner migration journal rows are present and applied", async () => {
       const { rows } = await admin.query(
-        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '000%_partner%' OR filename LIKE '0010_partner%' OR filename LIKE '0011_partner%' ORDER BY filename"
+        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '00%_partner%' ORDER BY filename"
       );
-      expect(rows).toHaveLength(11);
+      expect(rows).toHaveLength(13);
       for (const r of rows) expect(r.status).toBe("applied");
     });
 
@@ -202,7 +202,8 @@ async function applyAllRealistic(): Promise<void> {
       expect(records.rows[0].r).toBe("partner_connector_records");
     });
 
-    it("G2 rollback removes exactly the two new tables and reverts the CHECK constraint, nothing else (after G3E+G3 rollback)", async () => {
+    it("G2 rollback removes exactly the two new tables and reverts the CHECK constraint, nothing else (after G3F+G3E+G3 rollback)", async () => {
+      await admin.query(rb("rollback-partner-connector-g3f.sql"));
       await admin.query(rb("rollback-partner-connector-g3e.sql"));
       await admin.query(rb("rollback-partner-connector-g3.sql"));
       await admin.query(rb("rollback-partner-connector-g2.sql"));
@@ -237,7 +238,7 @@ async function applyAllRealistic(): Promise<void> {
       expect(journal.rows[0].n).toBe(0);
     });
 
-    it("migrations 0009, 0010 and 0011 reapply cleanly after rollback", async () => {
+    it("migrations 0009–0013 reapply cleanly after rollback", async () => {
       const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
       await migrator.connect();
       try {
@@ -245,6 +246,8 @@ async function applyAllRealistic(): Promise<void> {
         expect(applied).toContain("0009_partner_connector_validation.sql");
         expect(applied).toContain("0010_partner_connector_import.sql");
         expect(applied).toContain("0011_partner_connector_reconciliation.sql");
+        expect(applied).toContain("0012_partner_connector_import_attempts.sql");
+        expect(applied).toContain("0013_partner_connector_claim_index.sql");
       } finally {
         await migrator.end();
       }

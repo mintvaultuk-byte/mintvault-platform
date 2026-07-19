@@ -1,4 +1,4 @@
--- COMPREHENSIVE ROLLBACK for Partner Network Phase 1+2+G1+G2+G3+G3E+G3F (migrations 0001–0012).
+-- COMPREHENSIVE ROLLBACK for Partner Network Phase 1+2+G1+G2+G3+G3E+G3F (migrations 0001–0013).
 -- NOT a forward migration (no NNNN_ prefix → the runner ignores it). Destructive (drops the whole
 -- partner_* family + helper functions + all THREE restricted roles: partner_runtime,
 -- partner_definer, partner_connector_runtime). Owner-approved protected action only; rehearse on a
@@ -74,7 +74,7 @@ DELETE FROM schema_migrations WHERE filename IN (
   '0004_partner_mfa_enrol.sql','0005_partner_mfa_replay_and_grants.sql','0006_partner_definer_role.sql',
   '0007_partner_submissions.sql','0008_partner_connector_foundation.sql','0009_partner_connector_validation.sql',
   '0010_partner_connector_import.sql','0011_partner_connector_reconciliation.sql',
-  '0012_partner_connector_import_attempts.sql'
+  '0012_partner_connector_import_attempts.sql','0013_partner_connector_claim_index.sql'
 );
 
 -- restricted roles (after their objects/grants are gone). Order does not matter now that all
