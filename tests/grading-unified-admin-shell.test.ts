@@ -143,7 +143,10 @@ const SCOPE_BASE = "0825544a";
 function changedSinceScopeBase(): string[] {
   try {
     execSync(`git rev-parse --verify ${SCOPE_BASE}`, { stdio: "pipe" });
-    return execSync(`git diff --name-only ${SCOPE_BASE}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+    return execSync(`git diff --name-only ${SCOPE_BASE}...HEAD`, { encoding: "utf8" })
+      .trim()
+      .split("\n")
+      .filter(Boolean);
   } catch {
     return [];
   }
@@ -157,11 +160,20 @@ describe("6. Stage 3 (protected) component source remains byte-for-byte untouche
   });
   it("no MVGS/centering/defect/grade-cap/rounding/cert-numbering/schema/migration file changed", () => {
     if (changed.length === 0) return;
-    const PROTECTED = /mvgs|scoring|centering|pristine|defect|grader\.ts|grading-prompt|labels\.ts|certificate-document|cert-id|shared\/schema\.ts|^migrations\/|partner/;
+    const PROTECTED =
+      /mvgs|scoring|centering|pristine|defect|grader\.ts|grading-prompt|labels\.ts|certificate-document|cert-id|shared\/schema\.ts|^migrations\/|partner/;
     for (const f of changed) expect(f, f).not.toMatch(PROTECTED);
   });
   it("the workstationSlot render site passes the protected component through UNCHANGED (no wrapper transform/scale)", () => {
-    const wrapper = FORM.slice(FORM.indexOf('data-workflow-stage="grade"'), FORM.indexOf('data-workflow-stage="grade"') + 900);
+    // Window widened from 900: the production-regression correction pass
+    // (2026-07-19) added an outer containment wrapper (max-h + overflow-y-auto,
+    // an explanatory comment, and its onKeyDown handler) around the slot — the
+    // slot itself is still passed through unchanged, just further from the
+    // "data-workflow-stage" anchor. See production-regression-correction-2026-07-19.test.ts.
+    const wrapper = FORM.slice(
+      FORM.indexOf('data-workflow-stage="grade"'),
+      FORM.indexOf('data-workflow-stage="grade"') + 1700
+    );
     expect(wrapper).toContain("{workstationSlot}");
     expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
   });

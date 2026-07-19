@@ -246,7 +246,13 @@ export default function CertificateForm({
   // so a box of the same set fills in one click. Display convenience only: it is
   // captured locally on Continue and only applied when the grader clicks it, and
   // it never overwrites a field that already has a value.
-  const [lastCardContext, setLastCardContext] = useState<{ cardGame: string; setName: string; setId: string; year: string; language: string } | null>(() => {
+  const [lastCardContext, setLastCardContext] = useState<{
+    cardGame: string;
+    setName: string;
+    setId: string;
+    year: string;
+    language: string;
+  } | null>(() => {
     try {
       const raw = JSON.parse(localStorage.getItem("mv.lastCardContext") || "null");
       return raw && typeof raw === "object" ? raw : null;
@@ -269,10 +275,22 @@ export default function CertificateForm({
     const filled: string[] = [];
     setForm((f) => {
       const next = { ...f };
-      if (!f.cardGame && lastCardContext.cardGame) { next.cardGame = lastCardContext.cardGame; filled.push("cardGame"); }
-      if (!f.setName && lastCardContext.setName) { next.setName = lastCardContext.setName; filled.push("setName"); }
-      if (!f.year && lastCardContext.year) { next.year = lastCardContext.year; filled.push("year"); }
-      if (!f.language && lastCardContext.language) { next.language = lastCardContext.language; filled.push("language"); }
+      if (!f.cardGame && lastCardContext.cardGame) {
+        next.cardGame = lastCardContext.cardGame;
+        filled.push("cardGame");
+      }
+      if (!f.setName && lastCardContext.setName) {
+        next.setName = lastCardContext.setName;
+        filled.push("setName");
+      }
+      if (!f.year && lastCardContext.year) {
+        next.year = lastCardContext.year;
+        filled.push("year");
+      }
+      if (!f.language && lastCardContext.language) {
+        next.language = lastCardContext.language;
+        filled.push("language");
+      }
       return next;
     });
     if (!setId && lastCardContext.setId) setSetId(lastCardContext.setId);
@@ -354,14 +372,14 @@ export default function CertificateForm({
       setRarityFavourites(favs);
       persistPrefs(favs, rarityRecent ?? []);
     },
-    [persistPrefs, rarityRecent],
+    [persistPrefs, rarityRecent]
   );
   const onRecentChange = useCallback(
     (rec: string[]) => {
       setRarityRecent(rec);
       persistPrefs(rarityFavourites ?? [], rec);
     },
-    [persistPrefs, rarityFavourites],
+    [persistPrefs, rarityFavourites]
   );
 
   // Stale-tab guard: snapshot of the metadata values this form loaded. Sent
@@ -1543,7 +1561,16 @@ export default function CertificateForm({
         subsetName: form.subsetName,
         gradeOverall: form.gradeOverall,
       }),
-    [form.cardName, form.setName, form.rarityCode, form.variant, form.finishVariant, form.promoType, form.subsetName, form.gradeOverall],
+    [
+      form.cardName,
+      form.setName,
+      form.rarityCode,
+      form.variant,
+      form.finishVariant,
+      form.promoType,
+      form.subsetName,
+      form.gradeOverall,
+    ]
   );
   // Stage gating is LOCAL UI STATE only: every stage's content stays mounted
   // (hidden with CSS) so moving Back/Next can never clear a field, trigger a
@@ -1557,7 +1584,9 @@ export default function CertificateForm({
     setWfStage(next);
     setWfMaxStage((m) => Math.max(m, next));
     if (typeof document !== "undefined") {
-      document.querySelector('[data-testid="grading-workflow-bar"]')?.scrollIntoView({ behavior: "smooth", block: "start" });
+      document
+        .querySelector('[data-testid="grading-workflow-bar"]')
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   };
   /** Hidden-not-unmounted: stage content keeps all React state while inactive. */
@@ -1574,7 +1603,10 @@ export default function CertificateForm({
     if (!testId) return;
     const active = document.activeElement;
     // Don't steal focus if the grader already put the cursor in a field.
-    const alreadyTyping = active && active !== document.body && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT");
+    const alreadyTyping =
+      active &&
+      active !== document.body &&
+      (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT");
     if (alreadyTyping) return;
     const t = window.setTimeout(() => {
       document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.focus();
@@ -1593,10 +1625,7 @@ export default function CertificateForm({
   const aiIdentifyAvailable = isEdit && !!certificate?.id && identifyEnabled;
 
   return (
-    <div
-      className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]"
-      data-testid="grading-workspace"
-    >
+    <div className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]" data-testid="grading-workspace">
       {/* Workstation shell — a fixed-height two-panel layout: a read-only card
           preview aside (stages 0/1 only) beside the control panel that holds the
           header strip + identification tools (fixed) and the scrollable form.
@@ -1627,10 +1656,14 @@ export default function CertificateForm({
             is a deliberate, evidence-based exception (see the architecture
             report), not an oversight — Stage 3 internals are never touched. */}
         {(wfStage <= 1 || wfStage === 3) && (
-          <WorkstationPreviewAside certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
+          <WorkstationPreviewAside
+            certificateId={certificate?.id ?? null}
+            frontFile={frontImage}
+            backFile={backImage}
+          />
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel">
-          <div className="shrink-0 space-y-1.5">
+          <div className="shrink-0 space-y-1">
             {/* Shared workstation header strip (WorkstationHeaderStrip) — 4-stage
                 workflow navigation + queue/session stats. ONE render site for
                 all four stages (outside the per-stage sections below), so
@@ -1646,86 +1679,91 @@ export default function CertificateForm({
               queue={queue}
               sessionCompleted={sessionCompleted}
             />
-      {isEdit && certificate?.id && (
-        <details className="border border-[var(--admin-gold)]/15 rounded-lg bg-[var(--admin-gold)]/[0.02] mb-1.5" data-testid="identification-tools">
-          <summary className="cursor-pointer list-none px-3 py-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]">
-            <Cpu size={12} /> Identification tools
-            <span className="ml-auto text-[9px] font-normal normal-case text-[var(--admin-ink-faint)]">AI Identify · AI Grade</span>
-          </summary>
-          <div className="px-3 pb-3 pt-1 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Identify */}
-            <button
-              type="button"
-              onClick={runIdentify}
-              disabled={!identifyEnabled || identifyLoading}
-              title={!identifyEnabled ? "Enabled in /admin → AI Learning" : "Card name, set, number, year"}
-              className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
-            >
-              <span className="flex items-center gap-2">
-                {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
-                <span>{identifyLoading ? "Identifying…" : "AI Identify"}</span>
-              </span>
-              <span className="text-[9px] font-normal normal-case opacity-70">name · set · number · year</span>
-            </button>
-
-            {/* Grade */}
-            <button
-              type="button"
-              onClick={runGrade}
-              disabled={!fullGradeEnabled || gradeLoading}
-              title={!fullGradeEnabled ? "Enabled in /admin → AI Learning" : "4 subgrades + overall (Opus)"}
-              className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-[var(--admin-panel2)] text-[var(--admin-gold)] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--admin-panel3)] transition-all"
-            >
-              <span className="flex items-center gap-2">
-                {gradeLoading ? <Loader2 size={13} className="animate-spin" /> : <Cpu size={13} />}
-                <span>{gradeLoading ? "Grading…" : "AI Grade"}</span>
-              </span>
-              <span className="text-[9px] font-normal normal-case opacity-60">4 subgrades + overall</span>
-            </button>
-          </div>
-
-          {(!identifyEnabled || !fullGradeEnabled) && (
-            <p className="text-[10px] text-[var(--admin-ink-faint)]">
-              {!identifyEnabled && !fullGradeEnabled
-                ? "Both AI actions disabled — toggle in /admin → AI Learning."
-                : !identifyEnabled
-                  ? "AI Identify disabled — toggle in /admin → AI Learning."
-                  : "AI Grade disabled — toggle in /admin → AI Learning."}
-            </p>
-          )}
-
-          {identifyConfidence && (
-            <div className="flex items-center gap-2 text-xs">
-              <span
-                className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
-              />
-              <span
-                className={
-                  identifyConfidence === "high"
-                    ? "text-[var(--admin-green)]"
-                    : identifyConfidence === "medium"
-                      ? "text-[var(--admin-amber)]"
-                      : "text-[var(--admin-red)]"
-                }
+            {isEdit && certificate?.id && (
+              <details
+                className="border border-[var(--admin-gold)]/15 rounded-lg bg-[var(--admin-gold)]/[0.02] mb-1"
+                data-testid="identification-tools"
               >
-                {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
-              </span>
-              {identifyConfidence !== "high" && !identifyVerified && identifyEnabled && (
-                <button
-                  type="button"
-                  onClick={runIdentify}
-                  disabled={identifyLoading}
-                  className="text-[var(--admin-gold)] text-[10px] hover:underline"
-                >
-                  Retry
-                </button>
-              )}
-            </div>
-          )}
-          </div>
-        </details>
-      )}
+                <summary className="cursor-pointer list-none px-3 py-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]">
+                  <Cpu size={12} /> Identification tools
+                  <span className="ml-auto text-[9px] font-normal normal-case text-[var(--admin-ink-faint)]">
+                    AI Identify · AI Grade
+                  </span>
+                </summary>
+                <div className="px-3 pb-3 pt-1 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* Identify */}
+                    <button
+                      type="button"
+                      onClick={runIdentify}
+                      disabled={!identifyEnabled || identifyLoading}
+                      title={!identifyEnabled ? "Enabled in /admin → AI Learning" : "Card name, set, number, year"}
+                      className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-all"
+                    >
+                      <span className="flex items-center gap-2">
+                        {identifyLoading ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />}
+                        <span>{identifyLoading ? "Identifying…" : "AI Identify"}</span>
+                      </span>
+                      <span className="text-[9px] font-normal normal-case opacity-70">name · set · number · year</span>
+                    </button>
+
+                    {/* Grade */}
+                    <button
+                      type="button"
+                      onClick={runGrade}
+                      disabled={!fullGradeEnabled || gradeLoading}
+                      title={!fullGradeEnabled ? "Enabled in /admin → AI Learning" : "4 subgrades + overall (Opus)"}
+                      className="flex items-center justify-between gap-3 px-4 py-3 rounded-lg border border-[var(--admin-gold)]/40 bg-[var(--admin-panel2)] text-[var(--admin-gold)] text-xs font-bold uppercase disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--admin-panel3)] transition-all"
+                    >
+                      <span className="flex items-center gap-2">
+                        {gradeLoading ? <Loader2 size={13} className="animate-spin" /> : <Cpu size={13} />}
+                        <span>{gradeLoading ? "Grading…" : "AI Grade"}</span>
+                      </span>
+                      <span className="text-[9px] font-normal normal-case opacity-60">4 subgrades + overall</span>
+                    </button>
+                  </div>
+
+                  {(!identifyEnabled || !fullGradeEnabled) && (
+                    <p className="text-[10px] text-[var(--admin-ink-faint)]">
+                      {!identifyEnabled && !fullGradeEnabled
+                        ? "Both AI actions disabled — toggle in /admin → AI Learning."
+                        : !identifyEnabled
+                          ? "AI Identify disabled — toggle in /admin → AI Learning."
+                          : "AI Grade disabled — toggle in /admin → AI Learning."}
+                    </p>
+                  )}
+
+                  {identifyConfidence && (
+                    <div className="flex items-center gap-2 text-xs">
+                      <span
+                        className={`w-2 h-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
+                      />
+                      <span
+                        className={
+                          identifyConfidence === "high"
+                            ? "text-[var(--admin-green)]"
+                            : identifyConfidence === "medium"
+                              ? "text-[var(--admin-amber)]"
+                              : "text-[var(--admin-red)]"
+                        }
+                      >
+                        {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
+                      </span>
+                      {identifyConfidence !== "high" && !identifyVerified && identifyEnabled && (
+                        <button
+                          type="button"
+                          onClick={runIdentify}
+                          disabled={identifyLoading}
+                          className="text-[var(--admin-gold)] text-[10px] hover:underline"
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </details>
+            )}
           </div>
           <form
             onSubmit={handleSubmit}
@@ -1749,1660 +1787,1778 @@ export default function CertificateForm({
             }}
             className="min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"
           >
-        {/* "✓ Saved" confirmation toast — fades ~2.5s after a successful save. */}
-        {savedToast && (
-          <div
-            className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-lg border border-[var(--admin-green)]/40 bg-[var(--admin-panel)] px-3 py-2 text-[12px] text-[var(--admin-green)] shadow-lg"
-            style={{ animation: "fadeIn 0.15s ease-out" }}
-            role="status"
-            data-testid="save-toast"
-          >
-            <CheckCircle2 size={14} /> Saved
-          </div>
-        )}
+            {/* "✓ Saved" confirmation toast — fades ~2.5s after a successful save. */}
+            {savedToast && (
+              <div
+                className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-lg border border-[var(--admin-green)]/40 bg-[var(--admin-panel)] px-3 py-2 text-[12px] text-[var(--admin-green)] shadow-lg"
+                style={{ animation: "fadeIn 0.15s ease-out" }}
+                role="status"
+                data-testid="save-toast"
+              >
+                <CheckCircle2 size={14} /> Saved
+              </div>
+            )}
 
-        {/* Post-save panel (only when a grading queue is provided) — Next Card is
+            {/* Post-save panel (only when a grading queue is provided) — Next Card is
             the primary action; the grader confirms before the next draft opens. */}
-        {showSavedPanel && queue && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Card saved" data-testid="saved-panel">
-            <div className="w-full max-w-sm rounded-xl border border-[var(--admin-gold)]/30 bg-[var(--admin-panel)] p-5 text-center">
-              <div className="mb-3 flex items-center justify-center gap-2 text-[var(--admin-green)]">
-                <CheckCircle2 size={20} /> <span className="text-sm font-bold uppercase tracking-wider">Card Saved</span>
+            {showSavedPanel && queue && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Card saved"
+                data-testid="saved-panel"
+              >
+                <div className="w-full max-w-sm rounded-xl border border-[var(--admin-gold)]/30 bg-[var(--admin-panel)] p-5 text-center">
+                  <div className="mb-3 flex items-center justify-center gap-2 text-[var(--admin-green)]">
+                    <CheckCircle2 size={20} />{" "}
+                    <span className="text-sm font-bold uppercase tracking-wider">Card Saved</span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      data-testid="button-next-card"
+                      disabled={!queue.hasNext}
+                      title={queue.hasNext ? "Open the next queued draft" : "No more cards in the queue"}
+                      onClick={() => {
+                        setShowSavedPanel(false);
+                        queue.onNext();
+                      }}
+                      className="w-full rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] px-4 py-2.5 text-xs font-bold uppercase text-[#1A1400] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {queue.hasNext ? "Next Card →" : "No more cards"}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="button-back-to-queue"
+                      onClick={() => {
+                        setShowSavedPanel(false);
+                        (queue.onBackToQueue ?? (() => onSuccess(undefined)))();
+                      }}
+                      className="w-full rounded-lg border border-[var(--admin-gold)]/30 px-4 py-2 text-xs font-bold uppercase text-[var(--admin-gold)]/80 hover:bg-[var(--admin-gold)]/10"
+                    >
+                      Back to Queue
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  data-testid="button-next-card"
-                  disabled={!queue.hasNext}
-                  title={queue.hasNext ? "Open the next queued draft" : "No more cards in the queue"}
-                  onClick={() => {
-                    setShowSavedPanel(false);
-                    queue.onNext();
-                  }}
-                  className="w-full rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] px-4 py-2.5 text-xs font-bold uppercase text-[#1A1400] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {queue.hasNext ? "Next Card →" : "No more cards"}
-                </button>
-                <button
-                  type="button"
-                  data-testid="button-back-to-queue"
-                  onClick={() => {
-                    setShowSavedPanel(false);
-                    (queue.onBackToQueue ?? (() => onSuccess(undefined)))();
-                  }}
-                  className="w-full rounded-lg border border-[var(--admin-gold)]/30 px-4 py-2 text-xs font-bold uppercase text-[var(--admin-gold)]/80 hover:bg-[var(--admin-gold)]/10"
-                >
-                  Back to Queue
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* Existing auto-save status, kept visible on every stage (reuses the
+            {/* Existing auto-save status, kept visible on every stage (reuses the
             pre-existing autoSaveStatus state — no new save system). */}
-        {autoSaveEligible && wfStage !== 3 && (
-          <div className="-mt-3 text-right text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]" data-testid="text-autosave-status-mini">
-            {autoSaveStatus === "saving" ? "Saving…" : autoSaveStatus === "error" ? "Save failed — retrying on next change" : autoSaveStatus === "saved" ? "Saved" : "Unsaved changes save automatically"}
-          </div>
-        )}
-        {!isEdit && (
-          <SubmissionItemLink
-            value={form.submissionItemId}
-            onChange={(itemId, item) => {
-              setForm((f) => ({
-                ...f,
-                submissionItemId: itemId,
-                ...(item
-                  ? {
-                      cardGame: slugifyCardGame(item.game) || f.cardGame,
-                      setName: item.card_set || f.setName,
-                      cardName: (item.card_name || "").toUpperCase() || f.cardName,
-                      cardNumber: item.card_number || f.cardNumber,
-                      year: item.year || f.year,
-                    }
-                  : {}),
-              }));
-            }}
-          />
-        )}
-        {/* Identify controls (stages 0 + 1). The card preview now lives in the
+            {autoSaveEligible && wfStage !== 3 && (
+              <div
+                className="-mt-3 text-right text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]"
+                data-testid="text-autosave-status-mini"
+              >
+                {autoSaveStatus === "saving"
+                  ? "Saving…"
+                  : autoSaveStatus === "error"
+                    ? "Save failed — retrying on next change"
+                    : autoSaveStatus === "saved"
+                      ? "Saved"
+                      : "Unsaved changes save automatically"}
+              </div>
+            )}
+            {!isEdit && (
+              <SubmissionItemLink
+                value={form.submissionItemId}
+                onChange={(itemId, item) => {
+                  setForm((f) => ({
+                    ...f,
+                    submissionItemId: itemId,
+                    ...(item
+                      ? {
+                          cardGame: slugifyCardGame(item.game) || f.cardGame,
+                          setName: item.card_set || f.setName,
+                          cardName: (item.card_name || "").toUpperCase() || f.cardName,
+                          cardNumber: item.card_number || f.cardNumber,
+                          year: item.year || f.year,
+                        }
+                      : {}),
+                  }));
+                }}
+              />
+            )}
+            {/* Identify controls (stages 0 + 1). The card preview now lives in the
             fixed workspace aside; this panel is just the stage controls. */}
-        <div data-workflow-stage="identify" className={`space-y-2.5 ${wfStage <= 1 ? "" : "hidden"}`}>
-          {/* ── STAGE 1 · CARD — identification fields only ── */}
-          <div className={`space-y-3 ${stageClass(0)}`}>
-
-          {/* AI-first card identification — the primary Card-stage experience.
+            <div data-workflow-stage="identify" className={`space-y-2.5 ${wfStage <= 1 ? "" : "hidden"}`}>
+              {/* ── STAGE 1 · CARD — identification fields only ── */}
+              <div className={`space-y-3 ${stageClass(0)}`}>
+                {/* AI-first card identification — the primary Card-stage experience.
               The grader runs AI Identify (the EXISTING runIdentify — logic
               unchanged), then VERIFIES the auto-filled result via read-only
               chips. The tall manual field grid below stays hidden until they
               choose Manual (or identify comes back low-confidence). */}
-          {aiIdentifyAvailable && (
-            <div
-              className={`rounded-lg border p-3 space-y-2.5 transition-colors ${
-                identifyConfidence === "high"
-                  ? "border-[var(--admin-green)]/40 bg-[var(--admin-green)]/[0.05]"
-                  : identifyConfidence === "medium"
-                    ? "border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/[0.05]"
-                    : identifyConfidence === "low"
-                      ? "border-[var(--admin-red)]/40 bg-[var(--admin-red)]/[0.05]"
-                      : "border-[var(--admin-gold)]/25 bg-[var(--admin-gold)]/[0.03]"
-              }`}
-              data-testid="ai-identify-panel"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
-                  <Cpu size={12} /> Card Identification
-                </span>
-                {identifyConfidence && (
-                  <span
-                    className={`flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                {aiIdentifyAvailable && (
+                  <div
+                    className={`rounded-lg border p-3 space-y-2.5 transition-colors ${
                       identifyConfidence === "high"
-                        ? "bg-[var(--admin-green)]/15 text-[var(--admin-green)]"
+                        ? "border-[var(--admin-green)]/40 bg-[var(--admin-green)]/[0.05]"
                         : identifyConfidence === "medium"
-                          ? "bg-[var(--admin-amber)]/15 text-[var(--admin-amber)]"
-                          : "bg-[var(--admin-red)]/15 text-[var(--admin-red)]"
+                          ? "border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/[0.05]"
+                          : identifyConfidence === "low"
+                            ? "border-[var(--admin-red)]/40 bg-[var(--admin-red)]/[0.05]"
+                            : "border-[var(--admin-gold)]/25 bg-[var(--admin-gold)]/[0.03]"
                     }`}
-                    data-testid="ai-identify-confidence"
+                    data-testid="ai-identify-panel"
                   >
-                    <span
-                      className={`h-2 w-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
-                    />
-                    {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
-                  </span>
-                )}
-              </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
+                        <Cpu size={12} /> Card Identification
+                      </span>
+                      {identifyConfidence && (
+                        <span
+                          className={`flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                            identifyConfidence === "high"
+                              ? "bg-[var(--admin-green)]/15 text-[var(--admin-green)]"
+                              : identifyConfidence === "medium"
+                                ? "bg-[var(--admin-amber)]/15 text-[var(--admin-amber)]"
+                                : "bg-[var(--admin-red)]/15 text-[var(--admin-red)]"
+                          }`}
+                          data-testid="ai-identify-confidence"
+                        >
+                          <span
+                            className={`h-2 w-2 rounded-full ${identifyConfidence === "high" ? "bg-[var(--admin-green)]" : identifyConfidence === "medium" ? "bg-[var(--admin-amber)]" : "bg-[var(--admin-red)]"}`}
+                          />
+                          {identifyConfidence} confidence{identifyVerified ? " · TCG API verified" : ""}
+                        </span>
+                      )}
+                    </div>
 
-              {/* Result summary. Three distinct states so stale certificate data is
+                    {/* Result summary. Three distinct states so stale certificate data is
                   NEVER shown as if it were a fresh identification:
                     • identifyResult set  → the PROPOSED result (from AI/TCGdex), verify chips.
                     • no result, cert has existing data → clearly labelled EXISTING data.
                     • otherwise → prompt to identify or enter manually. */}
-              {identifyResult ? (
-                <div className="space-y-1" data-testid="ai-identify-summary">
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/60">Proposed — verify</span>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {[
-                      identifyResult.name,
-                      displayCollectorNumber(identifyResult.number),
-                      identifyResult.year,
-                      identifyResult.language,
-                      identifyResult.rarity,
-                    ]
-                      .filter(Boolean)
-                      .map((chip, i) => (
-                        <span
-                          key={i}
-                          className="rounded border border-[var(--admin-gold)]/20 bg-[var(--admin-panel2)] px-2 py-1 text-[11px] text-[var(--admin-ink)]"
-                        >
-                          {chip}
+                    {identifyResult ? (
+                      <div className="space-y-1" data-testid="ai-identify-summary">
+                        <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/60">
+                          Proposed — verify
                         </span>
-                      ))}
-                    <button
-                      type="button"
-                      onClick={() => manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                      data-testid="button-verify-edit"
-                      title="The fields are always editable below — jump to them"
-                      className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]"
-                    >
-                      <Pencil size={10} /> Edit
-                    </button>
-                  </div>
-                </div>
-              ) : hasCardMeta ? (
-                <div className="space-y-1" data-testid="ai-existing-details">
-                  <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-faint)]">Existing certificate details</span>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {[form.cardName, displayCollectorNumber(form.cardNumber), form.setName, form.year]
-                      .filter(Boolean)
-                      .map((chip, i) => (
-                        <span
-                          key={i}
-                          className="rounded border border-[var(--admin-line)] bg-transparent px-2 py-1 text-[11px] text-[var(--admin-ink-dim)]"
-                        >
-                          {chip}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {[
+                            identifyResult.name,
+                            displayCollectorNumber(identifyResult.number),
+                            identifyResult.year,
+                            identifyResult.language,
+                            identifyResult.rarity,
+                          ]
+                            .filter(Boolean)
+                            .map((chip, i) => (
+                              <span
+                                key={i}
+                                className="rounded border border-[var(--admin-gold)]/20 bg-[var(--admin-panel2)] px-2 py-1 text-[11px] text-[var(--admin-ink)]"
+                              >
+                                {chip}
+                              </span>
+                            ))}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+                            }
+                            data-testid="button-verify-edit"
+                            title="The fields are always editable below — jump to them"
+                            className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]"
+                          >
+                            <Pencil size={10} /> Edit
+                          </button>
+                        </div>
+                      </div>
+                    ) : hasCardMeta ? (
+                      <div className="space-y-1" data-testid="ai-existing-details">
+                        <span className="text-[9px] font-bold uppercase tracking-widest text-[var(--admin-ink-faint)]">
+                          Existing certificate details
                         </span>
-                      ))}
-                  </div>
-                  <p className="text-[10px] text-[var(--admin-ink-faint)]">Run AI Identify to propose an update, or edit manually — these are not a new result.</p>
-                </div>
-              ) : (
-                <p className="text-[11px] text-[var(--admin-ink-faint)]">
-                  {identifyLoading
-                    ? "Identifying…"
-                    : "Run AI Identify to auto-fill the card details, or switch to Manual entry."}
-                </p>
-              )}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {[form.cardName, displayCollectorNumber(form.cardNumber), form.setName, form.year]
+                            .filter(Boolean)
+                            .map((chip, i) => (
+                              <span
+                                key={i}
+                                className="rounded border border-[var(--admin-line)] bg-transparent px-2 py-1 text-[11px] text-[var(--admin-ink-dim)]"
+                              >
+                                {chip}
+                              </span>
+                            ))}
+                        </div>
+                        <p className="text-[10px] text-[var(--admin-ink-faint)]">
+                          Run AI Identify to propose an update, or edit manually — these are not a new result.
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-[var(--admin-ink-faint)]">
+                        {identifyLoading
+                          ? "Identifying…"
+                          : "Run AI Identify to auto-fill the card details, or switch to Manual entry."}
+                      </p>
+                    )}
 
-              {/* Primary actions. Once a card is identified, Accept is the
+                    {/* Primary actions. Once a card is identified, Accept is the
                   strongest action (confirm & continue → Rarity); Search Again is
                   the secondary outline; Manual stays visually quiet. Before any
                   match exists, AI Identify is the strong primary. */}
-              <div className="flex flex-wrap items-center gap-2">
-                {(identifyResult || hasCardMeta) && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {(identifyResult || hasCardMeta) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Accepting a proposed result is the ONLY point where it
+                            // overwrites populated certificate fields (req: don't clobber
+                            // until the grader confirms). Manual-only flow just advances.
+                            if (identifyResult) {
+                              setForm((prev) => ({
+                                ...prev,
+                                cardName: identifyResult.name || prev.cardName,
+                                cardNumber: identifyResult.number || prev.cardNumber,
+                                year: identifyResult.year || prev.year,
+                                language: identifyResult.language || prev.language,
+                                rarity: identifyResult.rarity || prev.rarity,
+                                variant: identifyResult.variant || prev.variant,
+                              }));
+                            }
+                            captureLastCardContext();
+                            goToStage(1);
+                          }}
+                          disabled={
+                            identifyResult
+                              ? !(identifyResult.name || form.cardName.trim()) ||
+                                !(identifyResult.number || form.cardNumber.trim())
+                              : !form.cardName.trim() || !form.cardNumber.trim()
+                          }
+                          title={
+                            identifyResult ? "Accept the proposed identification and continue" : "Confirm and continue"
+                          }
+                          data-testid="button-accept-identify"
+                          className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-green)] bg-[var(--admin-green)] px-4 py-2 text-[12px] font-bold uppercase text-[#07130b] shadow-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                        >
+                          <Check size={14} /> Accept
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={runIdentify}
+                        disabled={identifyLoading}
+                        data-testid="button-ai-identify"
+                        className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[11px] font-bold uppercase transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                          hasCardMeta
+                            ? "border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10"
+                            : "border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] hover:opacity-90"
+                        }`}
+                      >
+                        {identifyLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                        {identifyLoading ? "Identifying…" : hasCardMeta ? "Search Again" : "AI Identify"}
+                      </button>
+                      {/* The manual fields are always visible below (not a hidden
+                    panel) — this just scrolls to them; there is nothing to
+                    "reveal". Kept as button-manual-entry for compatibility. */}
+                      <button
+                        type="button"
+                        onClick={() => manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                        data-testid="button-manual-entry"
+                        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/5 hover:text-[var(--admin-gold)] transition-colors"
+                      >
+                        Card fields ↓
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Same as last card — one-click quick-fill of the shared set/year/
+              language context (never overwrites a field that already has a value). */}
+                {lastCardContext && (lastCardContext.setName || lastCardContext.year) && (
+                  <div className="flex flex-wrap items-center gap-1.5" data-testid="last-card-quick-fill">
+                    {!form.setName && (
+                      <button
+                        type="button"
+                        onClick={applyLastCardContext}
+                        data-testid="button-same-as-last-card"
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/30 px-2.5 py-1.5 text-[11px] text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10 transition-colors"
+                        title="Fill game, set, year and language from the last card you processed"
+                      >
+                        <Copy size={12} /> Same as last card
+                        {lastCardContext.setName ? `: ${lastCardContext.setName}` : ""}
+                      </button>
+                    )}
+                    {lastCardContext.setName && (
+                      <button
+                        type="button"
+                        onClick={() => copyLastCardField("setName")}
+                        data-testid="button-copy-set"
+                        className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10"
+                        title={`Copy set: ${lastCardContext.setName}`}
+                      >
+                        Copy Set
+                      </button>
+                    )}
+                    {lastCardContext.year && (
+                      <button
+                        type="button"
+                        onClick={() => copyLastCardField("year")}
+                        data-testid="button-copy-year"
+                        className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10"
+                        title={`Copy year: ${lastCardContext.year}`}
+                      >
+                        Copy Year
+                      </button>
+                    )}
+                    {lastCardContext.language && (
+                      <button
+                        type="button"
+                        onClick={() => copyLastCardField("language")}
+                        data-testid="button-copy-language"
+                        className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10"
+                        title={`Copy language: ${lastCardContext.language}`}
+                      >
+                        Copy Language
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* TCG search + manual entry helpers — Search TCG is a compact outlined
+              utility button (TCGdex behaviour unchanged). */}
+                <div className="flex flex-wrap items-center gap-2 text-[10px]">
                   <button
                     type="button"
                     onClick={() => {
-                      // Accepting a proposed result is the ONLY point where it
-                      // overwrites populated certificate fields (req: don't clobber
-                      // until the grader confirms). Manual-only flow just advances.
-                      if (identifyResult) {
-                        setForm((prev) => ({
-                          ...prev,
-                          cardName: identifyResult.name || prev.cardName,
-                          cardNumber: identifyResult.number || prev.cardNumber,
-                          year: identifyResult.year || prev.year,
-                          language: identifyResult.language || prev.language,
-                          rarity: identifyResult.rarity || prev.rarity,
-                          variant: identifyResult.variant || prev.variant,
-                        }));
-                      }
-                      captureLastCardContext();
-                      goToStage(1);
+                      setTcgSearchOpen(true);
+                      setTcgQuery("");
+                      setTcgResults([]);
                     }}
-                    disabled={
-                      identifyResult
-                        ? !(identifyResult.name || form.cardName.trim()) || !(identifyResult.number || form.cardNumber.trim())
-                        : !form.cardName.trim() || !form.cardNumber.trim()
-                    }
-                    title={
-                      identifyResult ? "Accept the proposed identification and continue" : "Confirm and continue"
-                    }
-                    data-testid="button-accept-identify"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-green)] bg-[var(--admin-green)] px-4 py-2 text-[12px] font-bold uppercase text-[#07130b] shadow-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    disabled={!form.cardGame}
+                    title="Search the TCGdex card database"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-[var(--admin-gold)]/40 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                   >
-                    <Check size={14} /> Accept
+                    <Database size={11} />
+                    Search TCG
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={runIdentify}
-                  disabled={identifyLoading}
-                  data-testid="button-ai-identify"
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-[11px] font-bold uppercase transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
-                    hasCardMeta
-                      ? "border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10"
-                      : "border border-[var(--admin-gold)]/40 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] hover:opacity-90"
-                  }`}
-                >
-                  {identifyLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
-                  {identifyLoading ? "Identifying…" : hasCardMeta ? "Search Again" : "AI Identify"}
-                </button>
-                {/* The manual fields are always visible below (not a hidden
-                    panel) — this just scrolls to them; there is nothing to
-                    "reveal". Kept as button-manual-entry for compatibility. */}
-                <button
-                  type="button"
-                  onClick={() => manualEditorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-                  data-testid="button-manual-entry"
-                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/5 hover:text-[var(--admin-gold)] transition-colors"
-                >
-                  Card fields ↓
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Same as last card — one-click quick-fill of the shared set/year/
-              language context (never overwrites a field that already has a value). */}
-          {lastCardContext && (lastCardContext.setName || lastCardContext.year) && (
-            <div className="flex flex-wrap items-center gap-1.5" data-testid="last-card-quick-fill">
-              {!form.setName && (
-                <button
-                  type="button"
-                  onClick={applyLastCardContext}
-                  data-testid="button-same-as-last-card"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/30 px-2.5 py-1.5 text-[11px] text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10 transition-colors"
-                  title="Fill game, set, year and language from the last card you processed"
-                >
-                  <Copy size={12} /> Same as last card{lastCardContext.setName ? `: ${lastCardContext.setName}` : ""}
-                </button>
-              )}
-              {lastCardContext.setName && (
-                <button type="button" onClick={() => copyLastCardField("setName")} data-testid="button-copy-set" className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10" title={`Copy set: ${lastCardContext.setName}`}>
-                  Copy Set
-                </button>
-              )}
-              {lastCardContext.year && (
-                <button type="button" onClick={() => copyLastCardField("year")} data-testid="button-copy-year" className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10" title={`Copy year: ${lastCardContext.year}`}>
-                  Copy Year
-                </button>
-              )}
-              {lastCardContext.language && (
-                <button type="button" onClick={() => copyLastCardField("language")} data-testid="button-copy-language" className="rounded border border-[var(--admin-gold)]/20 px-2 py-1 text-[10px] text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10" title={`Copy language: ${lastCardContext.language}`}>
-                  Copy Language
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* TCG search + manual entry helpers — Search TCG is a compact outlined
-              utility button (TCGdex behaviour unchanged). */}
-          <div className="flex flex-wrap items-center gap-2 text-[10px]">
-            <button
-              type="button"
-              onClick={() => {
-                setTcgSearchOpen(true);
-                setTcgQuery("");
-                setTcgResults([]);
-              }}
-              disabled={!form.cardGame}
-              title="Search the TCGdex card database"
-              className="inline-flex items-center gap-1.5 rounded-md border border-[var(--admin-gold)]/40 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            >
-              <Database size={11} />
-              Search TCG
-            </button>
-            {!form.cardGame && <span className="text-[var(--admin-ink-faint)] italic">Select card game first</span>}
-            {manuallyVerified && (
-              <span className="flex items-center gap-1 text-[var(--admin-green)]">
-                <CheckCircle2 size={10} />
-                Manually verified
-              </span>
-            )}
-          </div>
-
-          {/* TCG Search Dialog */}
-          <Dialog open={tcgSearchOpen} onOpenChange={setTcgSearchOpen}>
-            <DialogContent className="max-w-lg p-0 overflow-hidden">
-              <div className="p-4 pb-2 border-b border-[var(--admin-line)]">
-                <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest mb-2">
-                  Search TCG Database
-                </p>
-                <div className="flex items-center gap-2 border border-[var(--admin-gold)]/30 rounded-lg px-3 py-2 focus-within:border-[var(--admin-gold)] transition-colors">
-                  <Search size={14} className="text-[var(--admin-gold)]/50 shrink-0" />
-                  <input
-                    type="text"
-                    value={tcgQuery}
-                    onChange={(e) => handleTcgSearch(e.target.value)}
-                    placeholder={`Type card name (e.g. Charizard ex, Kofu)...`}
-                    className="flex-1 bg-transparent text-sm text-[var(--admin-ink)] placeholder:text-[var(--admin-ink-faint)] outline-none"
-                    autoFocus
-                  />
-                  {tcgLoading && <Loader2 size={14} className="animate-spin text-[var(--admin-gold)]" />}
+                  {!form.cardGame && (
+                    <span className="text-[var(--admin-ink-faint)] italic">Select card game first</span>
+                  )}
+                  {manuallyVerified && (
+                    <span className="flex items-center gap-1 text-[var(--admin-green)]">
+                      <CheckCircle2 size={10} />
+                      Manually verified
+                    </span>
+                  )}
                 </div>
-                <p className="text-[var(--admin-ink-faint)] text-[9px] mt-1">
-                  Searching {(form.cardGame || "pokemon").toUpperCase()} database · Type 3+ characters
-                </p>
-              </div>
-              <div className="max-h-[320px] overflow-y-auto">
-                {/* Transport/provider failure — distinct from a legitimate no-result. */}
-                {tcgError && !tcgLoading && (
-                  <div className="py-8 text-center" data-testid="tcg-search-error">
-                    <p className="text-[var(--admin-red)] text-sm font-semibold">Search unavailable</p>
-                    <p className="text-[var(--admin-ink-faint)] text-[11px] mt-1 px-6">{tcgError}</p>
-                  </div>
-                )}
-                {!tcgError && tcgQuery.trim().length >= 3 && !tcgLoading && tcgResults.length === 0 && (
-                  <div className="py-8 text-center">
-                    <p className="text-[var(--admin-ink-faint)] text-sm">No cards found</p>
-                    <p className="text-[var(--admin-ink-faint)] text-[10px] mt-1">
-                      Check spelling or enter details manually
-                    </p>
-                  </div>
-                )}
-                {tcgResults.map((card) => (
-                  <button
-                    key={card.id}
-                    type="button"
-                    onClick={() => selectTcgCard(card)}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--admin-gold)]/5 transition-colors border-b border-[var(--admin-line)] last:border-0"
-                  >
-                    {card.imageUrl ? (
-                      <img src={card.imageUrl} alt="" className="w-10 h-14 object-contain rounded shrink-0" />
-                    ) : (
-                      <div className="w-10 h-14 bg-[var(--admin-panel2)] rounded shrink-0 flex items-center justify-center">
-                        <Search size={12} className="text-[var(--admin-ink-faint)]" />
+
+                {/* TCG Search Dialog */}
+                <Dialog open={tcgSearchOpen} onOpenChange={setTcgSearchOpen}>
+                  <DialogContent className="max-w-lg p-0 overflow-hidden">
+                    <div className="p-4 pb-2 border-b border-[var(--admin-line)]">
+                      <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest mb-2">
+                        Search TCG Database
+                      </p>
+                      <div className="flex items-center gap-2 border border-[var(--admin-gold)]/30 rounded-lg px-3 py-2 focus-within:border-[var(--admin-gold)] transition-colors">
+                        <Search size={14} className="text-[var(--admin-gold)]/50 shrink-0" />
+                        <input
+                          type="text"
+                          value={tcgQuery}
+                          onChange={(e) => handleTcgSearch(e.target.value)}
+                          placeholder={`Type card name (e.g. Charizard ex, Kofu)...`}
+                          className="flex-1 bg-transparent text-sm text-[var(--admin-ink)] placeholder:text-[var(--admin-ink-faint)] outline-none"
+                          autoFocus
+                        />
+                        {tcgLoading && <Loader2 size={14} className="animate-spin text-[var(--admin-gold)]" />}
                       </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[var(--admin-ink)] text-sm font-bold truncate">{card.name}</p>
-                      <p className="text-[var(--admin-ink-dim)] text-xs truncate">
-                        {card.setName}
-                        {card.number ? ` · ${displayCollectorNumber(card.number)}` : ""}
-                      </p>
-                      <p className="text-[var(--admin-ink-faint)] text-[10px]">
-                        {[card.rarity, card.year].filter(Boolean).join(" · ")}
+                      <p className="text-[var(--admin-ink-faint)] text-[9px] mt-1">
+                        Searching {(form.cardGame || "pokemon").toUpperCase()} database · Type 3+ characters
                       </p>
                     </div>
-                  </button>
-                ))}
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          {/* Manual card-detail fields — ALWAYS visible (this is the normal
-              verification process, not an exceptional fallback). AI Identify /
-              Search TCG above are helper tools that propose values into these
-              same fields; the grader can always read and edit them directly. */}
-          <div ref={manualEditorRef} className="space-y-3" data-testid="manual-card-editor">
-          {/* Card identity — mock-matching 3-column row (Game · Set · Set Code).
-              Set Code is its own full field (not a nested sub-input) to match the
-              workstation reference density at 1280px. */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <FormSelect
-              label="Card Game *"
-              value={form.cardGame}
-              onChange={(v) => updateField("cardGame", v)}
-              options={cardGames}
-              testId="select-card-game"
-            />
-            <div>
-              <PokemonSetPicker
-                value={form.setName}
-                onChange={(name, id) => {
-                  updateField("setName", name);
-                  if (id) setSetId(id);
-                }}
-                allowEditSet
-                testId="input-set-name"
-              />
-              <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set">The collection name printed on the card.</p>
-            </div>
-            <div>
-              <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
-                Set Code
-              </label>
-              <input
-                type="text"
-                value={setId}
-                onChange={(e) => setSetId(e.target.value)}
-                placeholder="e.g. MEW or SV8"
-                className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
-                data-testid="input-set-id"
-              />
-              <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set-code">Usually a short code such as MEW or SV8.</p>
-            </div>
-          </div>
-
-          {/* Row 2 — 4-column (Name · Card Number+Auto-fill · Year · Language) so
-              Language shares this row instead of a near-empty row of its own. The
-              tuned template keeps the Card Number cell (widest, 1.3fr) readable at
-              1280px. */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,1fr)]">
-            <FormInput
-              label="Card Name *"
-              value={form.cardName}
-              onChange={(v) => updateField("cardName", v)}
-              onBlur={() => setForm((f) => ({ ...f, cardName: f.cardName.toUpperCase() }))}
-              testId="input-card-name"
-              highlight={autofillRan && manuallyEdited.has("cardName")}
-            />
-            <div>
-              <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
-                Card Number *
-              </label>
-              <div className="flex gap-2">
-                <div className="flex-1 flex items-center bg-transparent border border-[var(--admin-gold)]/30 rounded overflow-hidden focus-within:border-[var(--admin-gold)] transition-colors">
-                  <span className="pl-3 text-[var(--admin-gold)]/50 text-sm select-none">#</span>
-                  <input
-                    type="text"
-                    value={form.cardNumber}
-                    onChange={(e) => updateField("cardNumber", e.target.value.replace(/^#+/, ""))}
-                    placeholder="e.g. 125/198"
-                    className="flex-1 bg-transparent px-2 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none"
-                    data-testid="input-card-number"
-                  />
-                </div>
-                <button
-                  type="button"
-                  disabled={!canAutofill || autofillLoading}
-                  onClick={() => handleAutofill(false)}
-                  className="px-3 py-2 border border-[var(--admin-gold)]/30 rounded text-[var(--admin-gold)] text-sm hover:bg-[var(--admin-gold)]/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
-                  data-testid="button-autofill"
-                  title="Auto-fill card details"
-                >
-                  <Search size={14} />
-                  {autofillLoading ? "..." : "Auto-fill"}
-                </button>
-              </div>
-              <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-card-number">The number at the bottom of the card, for example 063/165.</p>
-
-              {suggestions.length > 0 && (
-                <div
-                  className="mt-2 border border-[var(--admin-gold)]/20 rounded bg-[var(--admin-panel)] max-h-40 border border-[var(--admin-line)] overflow-y-auto"
-                  data-testid="autofill-suggestions"
-                >
-                  <p className="text-[var(--admin-gold)]/50 text-[10px] uppercase tracking-widest px-3 pt-2 pb-1">
-                    Suggestions
-                  </p>
-                  {suggestions.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => {
-                        setForm((f) => ({ ...f, cardNumber: s.cardNumber }));
-                        applyCardData(s, null);
-                        toast({ title: "Card details auto-filled" });
-                      }}
-                      className="w-full text-left px-3 py-1.5 text-sm text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink)] transition-colors"
-                      data-testid={`suggestion-${s.id}`}
-                    >
-                      <span className="text-[var(--admin-gold)]">{s.cardNumber}</span>
-                      {" – "}
-                      {s.cardName}
-                      {s.rarity && <span className="text-[var(--admin-ink-faint)]"> ({s.rarity})</span>}
-                    </button>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setSuggestions([])}
-                    className="w-full text-center text-[10px] text-[var(--admin-ink-faint)] py-1 hover:text-[var(--admin-ink-dim)]"
-                    data-testid="button-dismiss-suggestions"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-              )}
-
-              {fallbackMatch && (
-                <div
-                  className="mt-2 border border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/5 rounded p-3"
-                  data-testid="fallback-banner"
-                >
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle size={16} className="text-[var(--admin-amber)] mt-0.5 shrink-0" />
-                    <div className="flex-1">
-                      <p className="text-[var(--admin-amber)] text-sm font-medium">Match found in different language</p>
-                      <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
-                        Found: <span className="text-[var(--admin-ink)]">{fallbackMatch.cardName}</span> (
-                        {fallbackMatch.language})
-                      </p>
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          type="button"
-                          onClick={applyFallback}
-                          className="px-3 py-1 text-xs border border-[var(--admin-amber)]/40 text-[var(--admin-amber)] rounded hover:bg-[var(--admin-amber)]/10 transition-colors flex items-center gap-1"
-                          data-testid="button-apply-fallback"
-                        >
-                          <Check size={12} /> Apply Anyway
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setFallbackMatch(null)}
-                          className="px-3 py-1 text-xs text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)] transition-colors flex items-center gap-1"
-                          data-testid="button-dismiss-fallback"
-                        >
-                          <X size={12} /> Dismiss
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-            <FormInput
-              label="Year *"
-              value={form.year}
-              onChange={(v) => updateField("year", v)}
-              placeholder="e.g. 1999"
-              testId="input-year"
-              highlight={(autofillRan && manuallyEdited.has("year")) || flashFields.has("year")}
-            />
-            <div>
-              <FormInput
-                label="Language"
-                value={form.language}
-                onChange={(v) => {
-                  updateField("language", v);
-                  setLanguageChangedByFallback(false);
-                }}
-                testId="input-language"
-                highlight={languageChangedByFallback || flashFields.has("language")}
-              />
-              {languageChangedByFallback && (
-                <p className="text-[var(--admin-amber)] text-[10px] mt-1" data-testid="text-language-fallback-notice">
-                  Changed by fallback match
-                </p>
-              )}
-            </div>
-          </div>
-
-          {!fallbackMatch && canAutofill && !autofillLoading && suggestions.length === 0 && (
-            <button
-              type="button"
-              onClick={() => handleAutofill(true)}
-              className="text-[10px] text-[var(--admin-gold)]/40 hover:text-[var(--admin-gold)]/70 transition-colors underline"
-              data-testid="button-search-other-languages"
-            >
-              Search other languages
-            </button>
-          )}
-
-          {overwriteConfirm && (
-            <div
-              className="border border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/5 rounded p-3"
-              data-testid="overwrite-confirm"
-            >
-              <div className="flex items-start gap-2">
-                <AlertTriangle size={16} className="text-[var(--admin-amber)] mt-0.5 shrink-0" />
-                <div className="flex-1">
-                  <p className="text-[var(--admin-amber)] text-sm font-medium">Overwrite manually edited fields?</p>
-                  <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
-                    You edited: {overwriteConfirm.fields.join(", ")}
-                  </p>
-                  <div className="flex gap-2 mt-2">
-                    <button
-                      type="button"
-                      onClick={confirmOverwrite}
-                      className="px-3 py-1 text-xs border border-[var(--admin-amber)]/40 text-[var(--admin-amber)] rounded hover:bg-[var(--admin-amber)]/10 transition-colors"
-                      data-testid="button-confirm-overwrite"
-                    >
-                      Yes, overwrite
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setOverwriteConfirm(null)}
-                      className="px-3 py-1 text-xs text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)] transition-colors"
-                      data-testid="button-cancel-overwrite"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-            </div>
-
-          </div>
-          {/* ── STAGE 2 · RARITY — structured picker + finish + promo (+ legacy/advanced) ── */}
-          <div className={`space-y-3 ${stageClass(1)}`}>
-          {/* Legacy flat Variant control — superseded for daily grading by the
-              structured picker below. Kept fully functional (historical values,
-              save compatibility) but collapsed under Legacy / advanced. */}
-          <details className="rounded-lg border border-[var(--admin-gold)]/10 px-3 py-2" data-testid="legacy-variant-details">
-            <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
-              Legacy / advanced variant
-            </summary>
-            <div className="pt-2">
-          {(() => {
-            // Build merged option list: static (minus OTHER) + DB variants + localStorage custom + OTHER
-            // seenLabels uses BOTH labels ("reverse holo") AND codes ("reverse_holo") to prevent
-            // built-in DB-stored codes appearing as duplicate custom entries.
-            const builtInLabels = new Set(UNIFIED_OPTIONS.map((o) => o.label.toLowerCase()));
-            const builtInCodes = new Set(UNIFIED_OPTIONS.map((o) => o.code.toLowerCase()));
-            const seenLabels = new Set<string>([...builtInLabels, ...builtInCodes]);
-            const extraVariants: UnifiedOption[] = [];
-            // DB variants first (shared across all admins/devices)
-            for (const v of dbVariants) {
-              const key = v.toLowerCase();
-              if (!seenLabels.has(key)) {
-                seenLabels.add(key);
-                extraVariants.push({ value: `VARIANT:${v}`, label: v, category: "VARIANT" as const, code: v });
-              }
-            }
-            // localStorage custom variants (optimistic, same-device additions)
-            for (const v of customVariants) {
-              const key = v.toLowerCase();
-              if (!seenLabels.has(key)) {
-                seenLabels.add(key);
-                extraVariants.push({ value: `VARIANT:${v}`, label: v, category: "VARIANT" as const, code: v });
-              }
-            }
-            const otherOpt = UNIFIED_OPTIONS.find((o) => o.value === "OTHER")!;
-            const allOptions: UnifiedOption[] = [
-              ...UNIFIED_OPTIONS.filter((o) => o.value !== "OTHER"),
-              ...extraVariants,
-              otherOpt,
-            ];
-            const q = unifiedSearch.toLowerCase().trim();
-            const filteredOpts = allOptions.filter(
-              (o) => !q || o.label.toLowerCase().includes(q) || o.code.toLowerCase().includes(q)
-            );
-            const hasExactMatch =
-              !q || allOptions.some((o) => o.label.toLowerCase() === q || o.code.toLowerCase() === q);
-            const showAddButton = q.length > 1 && !hasExactMatch;
-
-            return (
-              <div ref={unifiedRef} className="relative">
-                <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
-                  Variant
-                </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setUnifiedOpen(!unifiedOpen);
-                    setUnifiedSearch("");
-                  }}
-                  className={`w-full bg-transparent border rounded px-3 py-2 text-sm text-left flex items-center justify-between transition-colors focus:outline-none focus:border-[var(--admin-gold)] ${autofillRan && (manuallyEdited.has("rarity") || manuallyEdited.has("variant")) ? "border-[var(--admin-amber)]/50" : "border-[var(--admin-gold)]/30"}`}
-                  data-testid="select-unified"
-                >
-                  <span className={form.unifiedSelect ? "text-[var(--admin-ink)]" : "text-[var(--admin-gold)]/20"}>
-                    {form.unifiedSelect
-                      ? form.unifiedSelect === "OTHER"
-                        ? "OTHER (manual)"
-                        : getUnifiedDisplayLabel(form.unifiedSelect)
-                      : "Select or type a variant..."}
-                  </span>
-                  <ChevronDown size={14} className="text-[var(--admin-gold)]/50" />
-                </button>
-                {unifiedOpen && (
-                  <div
-                    className="absolute z-50 left-0 right-0 mt-1 border border-[var(--admin-gold)]/30 bg-[var(--admin-panel)] rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col"
-                    data-testid="unified-dropdown"
-                  >
-                    <div className="p-2 border-b border-[var(--admin-gold)]/10">
-                      <input
-                        type="text"
-                        value={unifiedSearch}
-                        onChange={(e) => setUnifiedSearch(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            if (showAddButton) {
-                              addCustomVariant(unifiedSearch);
-                            } else if (filteredOpts.length === 1) {
-                              applyUnifiedSelection(filteredOpts[0].value);
-                              setUnifiedOpen(false);
-                              setUnifiedSearch("");
-                            }
-                          }
-                          if (e.key === "Escape") setUnifiedOpen(false);
-                        }}
-                        placeholder="Type to filter or add a new variant..."
-                        className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)]/50"
-                        autoFocus
-                        data-testid="input-unified-search"
-                      />
-                    </div>
-                    <div className="overflow-y-auto flex-1">
-                      {form.unifiedSelect && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            applyUnifiedSelection("");
-                            setUnifiedOpen(false);
-                          }}
-                          className="w-full text-left px-3 py-2 text-xs text-[var(--admin-ink-faint)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink-dim)] transition-colors border-b border-[var(--admin-gold)]/10"
-                          data-testid="unified-clear"
-                        >
-                          Clear selection
-                        </button>
+                    <div className="max-h-[320px] overflow-y-auto">
+                      {/* Transport/provider failure — distinct from a legitimate no-result. */}
+                      {tcgError && !tcgLoading && (
+                        <div className="py-8 text-center" data-testid="tcg-search-error">
+                          <p className="text-[var(--admin-red)] text-sm font-semibold">Search unavailable</p>
+                          <p className="text-[var(--admin-ink-faint)] text-[11px] mt-1 px-6">{tcgError}</p>
+                        </div>
                       )}
-                      {showAddButton && (
-                        <button
-                          type="button"
-                          onClick={() => addCustomVariant(unifiedSearch)}
-                          className="w-full text-left px-3 py-2 text-sm text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 transition-colors flex items-center gap-2 border-b border-[var(--admin-gold)]/10"
-                          data-testid="unified-add-custom"
-                        >
-                          <Plus size={13} />
-                          Add "{unifiedSearch}" as variant
-                        </button>
+                      {!tcgError && tcgQuery.trim().length >= 3 && !tcgLoading && tcgResults.length === 0 && (
+                        <div className="py-8 text-center">
+                          <p className="text-[var(--admin-ink-faint)] text-sm">No cards found</p>
+                          <p className="text-[var(--admin-ink-faint)] text-[10px] mt-1">
+                            Check spelling or enter details manually
+                          </p>
+                        </div>
                       )}
-                      {filteredOpts.map((o) => (
+                      {tcgResults.map((card) => (
                         <button
-                          key={o.value}
+                          key={card.id}
                           type="button"
-                          onClick={() => {
-                            applyUnifiedSelection(o.value);
-                            setUnifiedOpen(false);
-                            setUnifiedSearch("");
-                          }}
-                          className={`w-full text-left px-3 py-2 text-sm transition-colors group ${form.unifiedSelect === o.value ? "bg-[var(--admin-gold)]/15 text-[var(--admin-gold)]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink)]"}`}
-                          data-testid={`unified-option-${o.value}`}
+                          onClick={() => selectTcgCard(card)}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--admin-gold)]/5 transition-colors border-b border-[var(--admin-line)] last:border-0"
                         >
-                          <span className="block">{o.label}</span>
-                          {o.help && (
-                            <span className="block text-[10px] text-[var(--admin-ink-faint)] group-hover:text-[var(--admin-ink-dim)] mt-0.5">
-                              {o.help}
-                            </span>
+                          {card.imageUrl ? (
+                            <img src={card.imageUrl} alt="" className="w-10 h-14 object-contain rounded shrink-0" />
+                          ) : (
+                            <div className="w-10 h-14 bg-[var(--admin-panel2)] rounded shrink-0 flex items-center justify-center">
+                              <Search size={12} className="text-[var(--admin-ink-faint)]" />
+                            </div>
                           )}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[var(--admin-ink)] text-sm font-bold truncate">{card.name}</p>
+                            <p className="text-[var(--admin-ink-dim)] text-xs truncate">
+                              {card.setName}
+                              {card.number ? ` · ${displayCollectorNumber(card.number)}` : ""}
+                            </p>
+                            <p className="text-[var(--admin-ink-faint)] text-[10px]">
+                              {[card.rarity, card.year].filter(Boolean).join(" · ")}
+                            </p>
+                          </div>
                         </button>
                       ))}
                     </div>
-                  </div>
-                )}
-                {form.unifiedSelect &&
-                  (() => {
-                    const opt = allOptions.find((o) => o.value === form.unifiedSelect);
-                    return opt?.help ? (
-                      <p
-                        className="text-[var(--admin-ink-faint)] text-[10px] mt-1 flex items-center gap-1"
-                        data-testid="text-unified-help"
-                      >
-                        <HelpCircle size={10} className="shrink-0" /> {opt.help}
-                      </p>
-                    ) : null;
-                  })()}
-                {form.unifiedSelect === "OTHER" && (
-                  <div className="mt-2 space-y-2">
-                    <input
-                      type="text"
-                      value={form.otherText}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setForm((f) => ({ ...f, otherText: val, rarity: "OTHER", rarityOther: val }));
-                      }}
-                      placeholder="Enter custom rarity / variant / collection..."
-                      className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)]/50 transition-colors"
-                      data-testid="input-other-text"
+                  </DialogContent>
+                </Dialog>
+
+                {/* Manual card-detail fields — ALWAYS visible (this is the normal
+              verification process, not an exceptional fallback). AI Identify /
+              Search TCG above are helper tools that propose values into these
+              same fields; the grader can always read and edit them directly. */}
+                <div ref={manualEditorRef} className="space-y-3" data-testid="manual-card-editor">
+                  {/* Card identity — mock-matching 3-column row (Game · Set · Set Code).
+              Set Code is its own full field (not a nested sub-input) to match the
+              workstation reference density at 1280px. Set Name gets a wider share
+              of the row (it holds a searchable dropdown with long collection
+              names — "Chaos Rising", "Perfect Origins", etc — and was cramped to
+              an equal 1/3 column in production). */}
+                  <div className="grid grid-cols-1 sm:grid-cols-[0.8fr_2fr_0.9fr] gap-4">
+                    <FormSelect
+                      label="Card Game *"
+                      value={form.cardGame}
+                      onChange={(v) => updateField("cardGame", v)}
+                      options={cardGames}
+                      testId="select-card-game"
                     />
-                    {dbRarityOthers.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5" data-testid="rarity-other-suggestions">
-                        {dbRarityOthers
-                          .filter((v) => !form.otherText || v.toLowerCase().includes(form.otherText.toLowerCase()))
-                          .map((v) => (
+                    <div>
+                      <PokemonSetPicker
+                        value={form.setName}
+                        onChange={(name, id) => {
+                          updateField("setName", name);
+                          if (id) setSetId(id);
+                        }}
+                        allowEditSet
+                        testId="input-set-name"
+                      />
+                      <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set">
+                        The collection name printed on the card.
+                      </p>
+                    </div>
+                    <div>
+                      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                        Set Code
+                      </label>
+                      <input
+                        type="text"
+                        value={setId}
+                        onChange={(e) => setSetId(e.target.value)}
+                        placeholder="e.g. MEW or SV8"
+                        className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
+                        data-testid="input-set-id"
+                      />
+                      <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-set-code">
+                        Usually a short code such as MEW or SV8.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Row 2 — 4-column (Name · Card Number+Auto-fill · Year · Language) so
+              Language shares this row instead of a near-empty row of its own. The
+              tuned template keeps the Card Number cell (widest, 1.3fr) readable at
+              1280px. */}
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,0.7fr)_minmax(0,1fr)]">
+                    <FormInput
+                      label="Card Name *"
+                      value={form.cardName}
+                      onChange={(v) => updateField("cardName", v)}
+                      onBlur={() => setForm((f) => ({ ...f, cardName: f.cardName.toUpperCase() }))}
+                      testId="input-card-name"
+                      highlight={autofillRan && manuallyEdited.has("cardName")}
+                    />
+                    <div>
+                      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                        Card Number *
+                      </label>
+                      <div className="flex gap-2">
+                        <div className="flex-1 flex items-center bg-transparent border border-[var(--admin-gold)]/30 rounded overflow-hidden focus-within:border-[var(--admin-gold)] transition-colors">
+                          <span className="pl-3 text-[var(--admin-gold)]/50 text-sm select-none">#</span>
+                          <input
+                            type="text"
+                            value={form.cardNumber}
+                            onChange={(e) => updateField("cardNumber", e.target.value.replace(/^#+/, ""))}
+                            placeholder="e.g. 125/198"
+                            className="flex-1 bg-transparent px-2 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none"
+                            data-testid="input-card-number"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          disabled={!canAutofill || autofillLoading}
+                          onClick={() => handleAutofill(false)}
+                          className="px-3 py-2 border border-[var(--admin-gold)]/30 rounded text-[var(--admin-gold)] text-sm hover:bg-[var(--admin-gold)]/10 transition-colors disabled:opacity-30 disabled:cursor-not-allowed flex items-center gap-1.5"
+                          data-testid="button-autofill"
+                          title="Auto-fill card details"
+                        >
+                          <Search size={14} />
+                          {autofillLoading ? "..." : "Auto-fill"}
+                        </button>
+                      </div>
+                      <p className="text-[9px] text-[var(--admin-ink-faint)] mt-1" data-testid="help-card-number">
+                        The number at the bottom of the card, for example 063/165.
+                      </p>
+
+                      {suggestions.length > 0 && (
+                        <div
+                          className="mt-2 border border-[var(--admin-gold)]/20 rounded bg-[var(--admin-panel)] max-h-40 border border-[var(--admin-line)] overflow-y-auto"
+                          data-testid="autofill-suggestions"
+                        >
+                          <p className="text-[var(--admin-gold)]/50 text-[10px] uppercase tracking-widest px-3 pt-2 pb-1">
+                            Suggestions
+                          </p>
+                          {suggestions.map((s) => (
                             <button
-                              key={v}
+                              key={s.id}
                               type="button"
-                              onClick={() => setForm((f) => ({ ...f, otherText: v, rarity: "OTHER", rarityOther: v }))}
-                              className={`px-2 py-0.5 rounded text-xs border transition-colors ${form.otherText === v ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40 hover:text-[var(--admin-ink)]"}`}
-                              data-testid={`rarity-other-chip-${v}`}
+                              onClick={() => {
+                                setForm((f) => ({ ...f, cardNumber: s.cardNumber }));
+                                applyCardData(s, null);
+                                toast({ title: "Card details auto-filled" });
+                              }}
+                              className="w-full text-left px-3 py-1.5 text-sm text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink)] transition-colors"
+                              data-testid={`suggestion-${s.id}`}
                             >
-                              {v}
+                              <span className="text-[var(--admin-gold)]">{s.cardNumber}</span>
+                              {" – "}
+                              {s.cardName}
+                              {s.rarity && <span className="text-[var(--admin-ink-faint)]"> ({s.rarity})</span>}
                             </button>
                           ))}
-                      </div>
-                    )}
+                          <button
+                            type="button"
+                            onClick={() => setSuggestions([])}
+                            className="w-full text-center text-[10px] text-[var(--admin-ink-faint)] py-1 hover:text-[var(--admin-ink-dim)]"
+                            data-testid="button-dismiss-suggestions"
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      )}
+
+                      {fallbackMatch && (
+                        <div
+                          className="mt-2 border border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/5 rounded p-3"
+                          data-testid="fallback-banner"
+                        >
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle size={16} className="text-[var(--admin-amber)] mt-0.5 shrink-0" />
+                            <div className="flex-1">
+                              <p className="text-[var(--admin-amber)] text-sm font-medium">
+                                Match found in different language
+                              </p>
+                              <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
+                                Found: <span className="text-[var(--admin-ink)]">{fallbackMatch.cardName}</span> (
+                                {fallbackMatch.language})
+                              </p>
+                              <div className="flex gap-2 mt-2">
+                                <button
+                                  type="button"
+                                  onClick={applyFallback}
+                                  className="px-3 py-1 text-xs border border-[var(--admin-amber)]/40 text-[var(--admin-amber)] rounded hover:bg-[var(--admin-amber)]/10 transition-colors flex items-center gap-1"
+                                  data-testid="button-apply-fallback"
+                                >
+                                  <Check size={12} /> Apply Anyway
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setFallbackMatch(null)}
+                                  className="px-3 py-1 text-xs text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)] transition-colors flex items-center gap-1"
+                                  data-testid="button-dismiss-fallback"
+                                >
+                                  <X size={12} /> Dismiss
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    <FormInput
+                      label="Year *"
+                      value={form.year}
+                      onChange={(v) => updateField("year", v)}
+                      placeholder="e.g. 1999"
+                      testId="input-year"
+                      highlight={(autofillRan && manuallyEdited.has("year")) || flashFields.has("year")}
+                    />
+                    <div>
+                      <FormInput
+                        label="Language"
+                        value={form.language}
+                        onChange={(v) => {
+                          updateField("language", v);
+                          setLanguageChangedByFallback(false);
+                        }}
+                        testId="input-language"
+                        highlight={languageChangedByFallback || flashFields.has("language")}
+                      />
+                      {languageChangedByFallback && (
+                        <p
+                          className="text-[var(--admin-amber)] text-[10px] mt-1"
+                          data-testid="text-language-fallback-notice"
+                        >
+                          Changed by fallback match
+                        </p>
+                      )}
+                    </div>
                   </div>
-                )}
+
+                  {!fallbackMatch && canAutofill && !autofillLoading && suggestions.length === 0 && (
+                    <button
+                      type="button"
+                      onClick={() => handleAutofill(true)}
+                      className="text-[10px] text-[var(--admin-gold)]/40 hover:text-[var(--admin-gold)]/70 transition-colors underline"
+                      data-testid="button-search-other-languages"
+                    >
+                      Search other languages
+                    </button>
+                  )}
+
+                  {overwriteConfirm && (
+                    <div
+                      className="border border-[var(--admin-amber)]/40 bg-[var(--admin-amber)]/5 rounded p-3"
+                      data-testid="overwrite-confirm"
+                    >
+                      <div className="flex items-start gap-2">
+                        <AlertTriangle size={16} className="text-[var(--admin-amber)] mt-0.5 shrink-0" />
+                        <div className="flex-1">
+                          <p className="text-[var(--admin-amber)] text-sm font-medium">
+                            Overwrite manually edited fields?
+                          </p>
+                          <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
+                            You edited: {overwriteConfirm.fields.join(", ")}
+                          </p>
+                          <div className="flex gap-2 mt-2">
+                            <button
+                              type="button"
+                              onClick={confirmOverwrite}
+                              className="px-3 py-1 text-xs border border-[var(--admin-amber)]/40 text-[var(--admin-amber)] rounded hover:bg-[var(--admin-amber)]/10 transition-colors"
+                              data-testid="button-confirm-overwrite"
+                            >
+                              Yes, overwrite
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setOverwriteConfirm(null)}
+                              className="px-3 py-1 text-xs text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)] transition-colors"
+                              data-testid="button-cancel-overwrite"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-            );
-          })()}
+              {/* ── STAGE 2 · RARITY — structured picker + finish + promo (+ legacy/advanced) ── */}
+              <div className={`space-y-3 ${stageClass(1)}`}>
+                {/* Legacy flat Variant control — superseded for daily grading by the
+              structured picker below. Kept fully functional (historical values,
+              save compatibility) but collapsed under Legacy / advanced. */}
+                <details
+                  className="rounded-lg border border-[var(--admin-gold)]/10 px-3 py-2"
+                  data-testid="legacy-variant-details"
+                >
+                  <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
+                    Legacy / advanced variant
+                  </summary>
+                  <div className="pt-2">
+                    {(() => {
+                      // Build merged option list: static (minus OTHER) + DB variants + localStorage custom + OTHER
+                      // seenLabels uses BOTH labels ("reverse holo") AND codes ("reverse_holo") to prevent
+                      // built-in DB-stored codes appearing as duplicate custom entries.
+                      const builtInLabels = new Set(UNIFIED_OPTIONS.map((o) => o.label.toLowerCase()));
+                      const builtInCodes = new Set(UNIFIED_OPTIONS.map((o) => o.code.toLowerCase()));
+                      const seenLabels = new Set<string>([...builtInLabels, ...builtInCodes]);
+                      const extraVariants: UnifiedOption[] = [];
+                      // DB variants first (shared across all admins/devices)
+                      for (const v of dbVariants) {
+                        const key = v.toLowerCase();
+                        if (!seenLabels.has(key)) {
+                          seenLabels.add(key);
+                          extraVariants.push({
+                            value: `VARIANT:${v}`,
+                            label: v,
+                            category: "VARIANT" as const,
+                            code: v,
+                          });
+                        }
+                      }
+                      // localStorage custom variants (optimistic, same-device additions)
+                      for (const v of customVariants) {
+                        const key = v.toLowerCase();
+                        if (!seenLabels.has(key)) {
+                          seenLabels.add(key);
+                          extraVariants.push({
+                            value: `VARIANT:${v}`,
+                            label: v,
+                            category: "VARIANT" as const,
+                            code: v,
+                          });
+                        }
+                      }
+                      const otherOpt = UNIFIED_OPTIONS.find((o) => o.value === "OTHER")!;
+                      const allOptions: UnifiedOption[] = [
+                        ...UNIFIED_OPTIONS.filter((o) => o.value !== "OTHER"),
+                        ...extraVariants,
+                        otherOpt,
+                      ];
+                      const q = unifiedSearch.toLowerCase().trim();
+                      const filteredOpts = allOptions.filter(
+                        (o) => !q || o.label.toLowerCase().includes(q) || o.code.toLowerCase().includes(q)
+                      );
+                      const hasExactMatch =
+                        !q || allOptions.some((o) => o.label.toLowerCase() === q || o.code.toLowerCase() === q);
+                      const showAddButton = q.length > 1 && !hasExactMatch;
 
-            </div>
-          </details>
+                      return (
+                        <div ref={unifiedRef} className="relative">
+                          <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                            Variant
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setUnifiedOpen(!unifiedOpen);
+                              setUnifiedSearch("");
+                            }}
+                            className={`w-full bg-transparent border rounded px-3 py-2 text-sm text-left flex items-center justify-between transition-colors focus:outline-none focus:border-[var(--admin-gold)] ${autofillRan && (manuallyEdited.has("rarity") || manuallyEdited.has("variant")) ? "border-[var(--admin-amber)]/50" : "border-[var(--admin-gold)]/30"}`}
+                            data-testid="select-unified"
+                          >
+                            <span
+                              className={form.unifiedSelect ? "text-[var(--admin-ink)]" : "text-[var(--admin-gold)]/20"}
+                            >
+                              {form.unifiedSelect
+                                ? form.unifiedSelect === "OTHER"
+                                  ? "OTHER (manual)"
+                                  : getUnifiedDisplayLabel(form.unifiedSelect)
+                                : "Select or type a variant..."}
+                            </span>
+                            <ChevronDown size={14} className="text-[var(--admin-gold)]/50" />
+                          </button>
+                          {unifiedOpen && (
+                            <div
+                              className="absolute z-50 left-0 right-0 mt-1 border border-[var(--admin-gold)]/30 bg-[var(--admin-panel)] rounded-lg shadow-xl max-h-72 overflow-hidden flex flex-col"
+                              data-testid="unified-dropdown"
+                            >
+                              <div className="p-2 border-b border-[var(--admin-gold)]/10">
+                                <input
+                                  type="text"
+                                  value={unifiedSearch}
+                                  onChange={(e) => setUnifiedSearch(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      if (showAddButton) {
+                                        addCustomVariant(unifiedSearch);
+                                      } else if (filteredOpts.length === 1) {
+                                        applyUnifiedSelection(filteredOpts[0].value);
+                                        setUnifiedOpen(false);
+                                        setUnifiedSearch("");
+                                      }
+                                    }
+                                    if (e.key === "Escape") setUnifiedOpen(false);
+                                  }}
+                                  placeholder="Type to filter or add a new variant..."
+                                  className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-2 py-1.5 text-[var(--admin-ink)] text-xs placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)]/50"
+                                  autoFocus
+                                  data-testid="input-unified-search"
+                                />
+                              </div>
+                              <div className="overflow-y-auto flex-1">
+                                {form.unifiedSelect && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      applyUnifiedSelection("");
+                                      setUnifiedOpen(false);
+                                    }}
+                                    className="w-full text-left px-3 py-2 text-xs text-[var(--admin-ink-faint)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink-dim)] transition-colors border-b border-[var(--admin-gold)]/10"
+                                    data-testid="unified-clear"
+                                  >
+                                    Clear selection
+                                  </button>
+                                )}
+                                {showAddButton && (
+                                  <button
+                                    type="button"
+                                    onClick={() => addCustomVariant(unifiedSearch)}
+                                    className="w-full text-left px-3 py-2 text-sm text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 transition-colors flex items-center gap-2 border-b border-[var(--admin-gold)]/10"
+                                    data-testid="unified-add-custom"
+                                  >
+                                    <Plus size={13} />
+                                    Add "{unifiedSearch}" as variant
+                                  </button>
+                                )}
+                                {filteredOpts.map((o) => (
+                                  <button
+                                    key={o.value}
+                                    type="button"
+                                    onClick={() => {
+                                      applyUnifiedSelection(o.value);
+                                      setUnifiedOpen(false);
+                                      setUnifiedSearch("");
+                                    }}
+                                    className={`w-full text-left px-3 py-2 text-sm transition-colors group ${form.unifiedSelect === o.value ? "bg-[var(--admin-gold)]/15 text-[var(--admin-gold)]" : "text-[var(--admin-ink-dim)] hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-ink)]"}`}
+                                    data-testid={`unified-option-${o.value}`}
+                                  >
+                                    <span className="block">{o.label}</span>
+                                    {o.help && (
+                                      <span className="block text-[10px] text-[var(--admin-ink-faint)] group-hover:text-[var(--admin-ink-dim)] mt-0.5">
+                                        {o.help}
+                                      </span>
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {form.unifiedSelect &&
+                            (() => {
+                              const opt = allOptions.find((o) => o.value === form.unifiedSelect);
+                              return opt?.help ? (
+                                <p
+                                  className="text-[var(--admin-ink-faint)] text-[10px] mt-1 flex items-center gap-1"
+                                  data-testid="text-unified-help"
+                                >
+                                  <HelpCircle size={10} className="shrink-0" /> {opt.help}
+                                </p>
+                              ) : null;
+                            })()}
+                          {form.unifiedSelect === "OTHER" && (
+                            <div className="mt-2 space-y-2">
+                              <input
+                                type="text"
+                                value={form.otherText}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setForm((f) => ({ ...f, otherText: val, rarity: "OTHER", rarityOther: val }));
+                                }}
+                                placeholder="Enter custom rarity / variant / collection..."
+                                className="w-full bg-transparent border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)]/50 transition-colors"
+                                data-testid="input-other-text"
+                              />
+                              {dbRarityOthers.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5" data-testid="rarity-other-suggestions">
+                                  {dbRarityOthers
+                                    .filter(
+                                      (v) => !form.otherText || v.toLowerCase().includes(form.otherText.toLowerCase())
+                                    )
+                                    .map((v) => (
+                                      <button
+                                        key={v}
+                                        type="button"
+                                        onClick={() =>
+                                          setForm((f) => ({ ...f, otherText: v, rarity: "OTHER", rarityOther: v }))
+                                        }
+                                        className={`px-2 py-0.5 rounded text-xs border transition-colors ${form.otherText === v ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/40 hover:text-[var(--admin-ink)]"}`}
+                                        data-testid={`rarity-other-chip-${v}`}
+                                      >
+                                        {v}
+                                      </button>
+                                    ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </details>
 
-          {/* AI Card Identification removed from the daily grading UI (founder
+                {/* AI Card Identification removed from the daily grading UI (founder
               decision 2026-07-16): graders identify cards manually with TCGdex
               lookup + the visual picker. The feature stays flag-OFF and dormant
               server-side; nothing here calls a provider. */}
 
-          {/* Structured Pokémon rarity/variant picker (visual). Writes the new
+                {/* Structured Pokémon rarity/variant picker (visual). Writes the new
               nullable columns only; the legacy Variant control above is unchanged. */}
-          <div data-workflow-stage="rarity">
-            <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
-              Structured Rarity &amp; Variant (visual picker)
-              <a
-                href="/admin/pokemon-knowledge"
-                target="_blank"
-                rel="noreferrer"
-                className="ml-2 normal-case tracking-normal text-[10px] text-slate-400 underline hover:text-slate-200"
-                title="Open the Pokémon Knowledge Hub — set codes, rarity symbols, comparisons and the printable handbook"
-              >
-                Knowledge Hub ↗
-              </a>
-            </label>
-            <RarityVariantPicker
-              legacyVariant={form.variant || null}
-              value={{
-                language: languageByValueOrLabel(form.language)?.value ?? "en",
-                era: (form.era || null) as StructuredCardVariant["era"],
-                rarity: form.rarityCode || null,
-                finish: form.finishVariant || null,
-                promo: form.promoType || null,
-                subset: form.subsetName || null,
-              }}
-              onChange={handleStructuredChange}
-              favourites={rarityFavourites}
-              recent={rarityRecent}
-              onFavouritesChange={onFavouritesChange}
-              onRecentChange={onRecentChange}
-              onCustomRarityNote={(note) => updateField("rarityOther", note ?? "")}
-            />
-          </div>
+                <div data-workflow-stage="rarity">
+                  <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                    Structured Rarity &amp; Variant (visual picker)
+                    <a
+                      href="/admin/pokemon-knowledge"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="ml-2 normal-case tracking-normal text-[10px] text-slate-400 underline hover:text-slate-200"
+                      title="Open the Pokémon Knowledge Hub — set codes, rarity symbols, comparisons and the printable handbook"
+                    >
+                      Knowledge Hub ↗
+                    </a>
+                  </label>
+                  <RarityVariantPicker
+                    legacyVariant={form.variant || null}
+                    value={{
+                      language: languageByValueOrLabel(form.language)?.value ?? "en",
+                      era: (form.era || null) as StructuredCardVariant["era"],
+                      rarity: form.rarityCode || null,
+                      finish: form.finishVariant || null,
+                      promo: form.promoType || null,
+                      subset: form.subsetName || null,
+                    }}
+                    onChange={handleStructuredChange}
+                    favourites={rarityFavourites}
+                    recent={rarityRecent}
+                    onFavouritesChange={onFavouritesChange}
+                    onRecentChange={onRecentChange}
+                    onCustomRarityNote={(note) => updateField("rarityOther", note ?? "")}
+                  />
+                </div>
 
-          {/* Optional designations — collapsed by default so daily grading stays
+                {/* Optional designations — collapsed by default so daily grading stays
               compact. Auto-open when the cert already carries designations. */}
-          <details className="rounded-lg border border-[var(--admin-gold)]/10 px-3 py-2" open={designations.length > 0} data-testid="designations-details">
-            <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
-              Optional designations{designations.length > 0 ? ` (${designations.length})` : ""}
-            </summary>
-            <div className="pt-2 flex flex-wrap gap-2" data-testid="designations-chips">
-              {DESIGNATION_OPTIONS.map((d) => {
-                const active = designations.includes(d.code);
-                return (
+                <details
+                  className="rounded-lg border border-[var(--admin-gold)]/10 px-3 py-2"
+                  open={designations.length > 0}
+                  data-testid="designations-details"
+                >
+                  <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
+                    Optional designations{designations.length > 0 ? ` (${designations.length})` : ""}
+                  </summary>
+                  <div className="pt-2 flex flex-wrap gap-2" data-testid="designations-chips">
+                    {DESIGNATION_OPTIONS.map((d) => {
+                      const active = designations.includes(d.code);
+                      return (
+                        <button
+                          key={d.code}
+                          type="button"
+                          onClick={() => toggleDesignation(d.code)}
+                          className={`px-2.5 py-1 rounded-full text-xs border transition-all ${active ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-faint)] hover:border-[var(--admin-gold)]/30 hover:text-[var(--admin-ink-dim)]"}`}
+                          data-testid={`designation-${d.code}`}
+                          title={d.help}
+                        >
+                          {active && <Check size={10} className="inline mr-1" />}
+                          {d.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {designations.length > 0 && (
+                    <p
+                      className="text-[var(--admin-ink-faint)] text-[10px] mt-1.5"
+                      data-testid="text-designations-summary"
+                    >
+                      Selected: {designations.map((c) => getDesignationLabel(c)).join(", ")}
+                    </p>
+                  )}
+                </details>
+
+                {/* Stage 2 nav */}
+                <div className="flex items-center justify-between pt-1">
                   <button
-                    key={d.code}
                     type="button"
-                    onClick={() => toggleDesignation(d.code)}
-                    className={`px-2.5 py-1 rounded-full text-xs border transition-all ${active ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-faint)] hover:border-[var(--admin-gold)]/30 hover:text-[var(--admin-ink-dim)]"}`}
-                    data-testid={`designation-${d.code}`}
-                    title={d.help}
+                    onClick={() => goToStage(0)}
+                    data-testid="button-back-to-card"
+                    className="px-4 py-2 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
                   >
-                    {active && <Check size={10} className="inline mr-1" />}
-                    {d.label}
+                    ← Back to Card
                   </button>
-                );
-              })}
-            </div>
-            {designations.length > 0 && (
-              <p className="text-[var(--admin-ink-faint)] text-[10px] mt-1.5" data-testid="text-designations-summary">
-                Selected: {designations.map((c) => getDesignationLabel(c)).join(", ")}
-              </p>
-            )}
-          </details>
+                  <button
+                    type="button"
+                    onClick={() => goToStage(2)}
+                    data-testid="button-continue-to-grade"
+                    className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all"
+                  >
+                    Continue to Grade →
+                  </button>
+                </div>
+              </div>
 
-          {/* Stage 2 nav */}
-          <div className="flex items-center justify-between pt-1">
-            <button
-              type="button"
-              onClick={() => goToStage(0)}
-              data-testid="button-back-to-card"
-              className="px-4 py-2 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
-            >
-              ← Back to Card
-            </button>
-            <button
-              type="button"
-              onClick={() => goToStage(2)}
-              data-testid="button-continue-to-grade"
-              className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all"
-            >
-              Continue to Grade →
-            </button>
-          </div>
-          </div>
-
-          {/* ── stage 1 (card) nav — all card fields (incl. Year + Language) now
+              {/* ── stage 1 (card) nav — all card fields (incl. Year + Language) now
               live in the two dense rows above ── */}
-          <div className={`space-y-3 ${stageClass(0)}`}>
-          {/* Stage 1 nav */}
-          <div className="flex items-center justify-end pt-1">
-            <button
-              type="button"
-              onClick={() => {
-                captureLastCardContext();
-                goToStage(1);
-              }}
-              disabled={!form.cardName.trim() || !form.cardNumber.trim()}
-              title={!form.cardName.trim() || !form.cardNumber.trim() ? "Enter the card name and number first." : undefined}
-              data-testid="button-continue-to-rarity"
-              className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Continue to Rarity →
-            </button>
-          </div>
-          {(!form.cardName.trim() || !form.cardNumber.trim()) && (
-            <p className={`text-[10px] text-[var(--admin-ink-faint)] text-right ${stageClass(0)}`}>Enter the card name and number first.</p>
-          )}
-          </div>
-        </div>
+              <div className={`space-y-3 ${stageClass(0)}`}>
+                {/* Stage 1 nav */}
+                <div className="flex items-center justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      captureLastCardContext();
+                      goToStage(1);
+                    }}
+                    disabled={!form.cardName.trim() || !form.cardNumber.trim()}
+                    title={
+                      !form.cardName.trim() || !form.cardNumber.trim()
+                        ? "Enter the card name and number first."
+                        : undefined
+                    }
+                    data-testid="button-continue-to-rarity"
+                    className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    Continue to Rarity →
+                  </button>
+                </div>
+                {(!form.cardName.trim() || !form.cardNumber.trim()) && (
+                  <p className={`text-[10px] text-[var(--admin-ink-faint)] text-right ${stageClass(0)}`}>
+                    Enter the card name and number first.
+                  </p>
+                )}
+              </div>
+            </div>
 
-        {/* Grading workstation — card tool front/back + defect marking. Placed
+            {/* Grading workstation — card tool front/back + defect marking. Placed
             right after Card Details (owner directive, Option A 2026-07-02):
             AI Identify → Card Details → grade the card → Grade section. Rendered
             inside the <form> but every workstation button is type="button" and
             handleSubmit no-ops pre-approval, so it can never submit the form. */}
-        {/* Stage 3 · GRADE — the protected workstation renders UNCHANGED inside
+            {/* Stage 3 · GRADE — the protected workstation renders UNCHANGED inside
             this wrapper. Hidden with CSS only (never unmounted, never scaled or
             transformed): the card tool reads getBoundingClientRect live per
             event, so visibility toggling cannot alter its coordinate system. */}
-        <div data-workflow-stage="grade" className={stageClass(2)}>
-        {workstationSlot && (
-          <div
-            onKeyDown={(e) => {
-              // Workstation now lives inside the <form>. On an already-approved
-              // cert the explicit "Save Changes to Published Certificate" submit
-              // button exists, so Enter in a workstation text/number input would
-              // otherwise submit the form (save + close the editor, discarding
-              // the in-progress workstation edit). Swallow Enter's default for
-              // INPUT elements only — textareas keep newlines, selects/buttons
-              // are unaffected, and no grading input relies on Enter.
-              if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
-                e.preventDefault();
-              }
-            }}
-          >
-            {workstationSlot}
-          </div>
-        )}
+            <div data-workflow-stage="grade" className={stageClass(2)}>
+              {workstationSlot && (
+                // Outer-shell-only containment: bounds the protected workstation to
+                // the viewport and scrolls internally instead of stretching the
+                // whole page. GradingPanel's own internal layout (and its
+                // getBoundingClientRect-driven card tool) is untouched — this div
+                // only clips/scrolls around it.
+                <div
+                  className="max-h-[calc(100dvh-12rem)] overflow-y-auto"
+                  onKeyDown={(e) => {
+                    // Workstation now lives inside the <form>. On an already-approved
+                    // cert the explicit "Save Changes to Published Certificate" submit
+                    // button exists, so Enter in a workstation text/number input would
+                    // otherwise submit the form (save + close the editor, discarding
+                    // the in-progress workstation edit). Swallow Enter's default for
+                    // INPUT elements only — textareas keep newlines, selects/buttons
+                    // are unaffected, and no grading input relies on Enter.
+                    if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") {
+                      e.preventDefault();
+                    }
+                  }}
+                >
+                  {workstationSlot}
+                </div>
+              )}
 
-        <div className="space-y-4">
-          <div className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest mb-1">Grade</div>
+              <div className="space-y-4">
+                <div className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest mb-1">Grade</div>
 
-          <div>
-            <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
-              Grade Type *
-            </label>
-            <select
-              value={form.gradeType}
-              onChange={(e) => {
-                const gt = e.target.value;
-                setForm((f) => ({
-                  ...f,
-                  gradeType: gt,
-                  ...(isNonNumericGrade(gt)
-                    ? {
-                        gradeOverall: "",
-                        gradeCentering: "",
-                        gradeCorners: "",
-                        gradeEdges: "",
-                        gradeSurface: "",
-                      }
-                    : {
-                        gradeOverall: f.gradeOverall || "",
-                      }),
-                }));
-              }}
-              className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
-              data-testid="select-grade-type"
-            >
-              <option value="numeric" className="bg-[var(--admin-panel)]">
-                Numeric (1–10)
-              </option>
-              {NON_NUMERIC_GRADES.map((ng) => (
-                <option key={ng.value} value={ng.value} className="bg-[var(--admin-panel)]">
-                  {ng.value} – {ng.description}
-                </option>
-              ))}
-            </select>
-          </div>
+                <div>
+                  <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                    Grade Type *
+                  </label>
+                  <select
+                    value={form.gradeType}
+                    onChange={(e) => {
+                      const gt = e.target.value;
+                      setForm((f) => ({
+                        ...f,
+                        gradeType: gt,
+                        ...(isNonNumericGrade(gt)
+                          ? {
+                              gradeOverall: "",
+                              gradeCentering: "",
+                              gradeCorners: "",
+                              gradeEdges: "",
+                              gradeSurface: "",
+                            }
+                          : {
+                              gradeOverall: f.gradeOverall || "",
+                            }),
+                      }));
+                    }}
+                    className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
+                    data-testid="select-grade-type"
+                  >
+                    <option value="numeric" className="bg-[var(--admin-panel)]">
+                      Numeric (1–10)
+                    </option>
+                    {NON_NUMERIC_GRADES.map((ng) => (
+                      <option key={ng.value} value={ng.value} className="bg-[var(--admin-panel)]">
+                        {ng.value} – {ng.description}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-          {isNonNum && (
-            <div className="bg-[var(--admin-gold)]/5 border border-[var(--admin-gold)]/20 rounded-lg p-3">
-              <p className="text-[var(--admin-gold)] text-sm font-semibold">
-                {form.gradeType === "NO" || form.gradeType === "not_original"
-                  ? "AUTHENTIC – No Numerical Grade"
-                  : "AUTHENTIC ALTERED – No Numerical Grade"}
-              </p>
-              <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
-                {form.gradeType === "NO" || form.gradeType === "not_original"
-                  ? "Card verified as authentic. No numerical grade or subgrades assigned."
-                  : "Card verified as authentic but has been altered. No numerical grade or subgrades assigned."}
-              </p>
-            </div>
-          )}
+                {isNonNum && (
+                  <div className="bg-[var(--admin-gold)]/5 border border-[var(--admin-gold)]/20 rounded-lg p-3">
+                    <p className="text-[var(--admin-gold)] text-sm font-semibold">
+                      {form.gradeType === "NO" || form.gradeType === "not_original"
+                        ? "AUTHENTIC – No Numerical Grade"
+                        : "AUTHENTIC ALTERED – No Numerical Grade"}
+                    </p>
+                    <p className="text-[var(--admin-ink-dim)] text-xs mt-1">
+                      {form.gradeType === "NO" || form.gradeType === "not_original"
+                        ? "Card verified as authentic. No numerical grade or subgrades assigned."
+                        : "Card verified as authentic but has been altered. No numerical grade or subgrades assigned."}
+                    </p>
+                  </div>
+                )}
 
-          {!isNonNum && (
-            <>
-              <div>
-                <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
-                  Overall Grade
-                </label>
-                {/* Read-only (owner directive 2026-07-01): the grade is set 100%
+                {!isNonNum && (
+                  <>
+                    <div>
+                      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                        Overall Grade
+                      </label>
+                      {/* Read-only (owner directive 2026-07-01): the grade is set 100%
                     automatically by the MVGS grading workstation (card tool +
                     defect pins). No manual grade entry on the certificate form. */}
-                <div
-                  className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm"
-                  data-testid="display-grade-overall"
-                >
-                  {form.gradeOverall
-                    ? form.gradeOverall === "10" && form.labelType === "black"
-                      ? "★ 10 — Black Label (Gem Mint)"
-                      : form.gradeOverall
-                    : "Not yet graded"}
-                  <span className="text-[var(--admin-ink-dim)] text-xs ml-2">— set automatically by MVGS grading</span>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
-                  Service Tier
-                </label>
-                <select
-                  value={form.serviceTier}
-                  onChange={(e) => updateField("serviceTier", e.target.value)}
-                  className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
-                  data-testid="select-service-tier"
-                >
-                  <option value="" className="bg-[var(--admin-panel)]">
-                    Standard (default)
-                  </option>
-                  <option value="vault-queue" className="bg-[var(--admin-panel)]">
-                    Vault Queue — £19
-                  </option>
-                  <option value="standard" className="bg-[var(--admin-panel)]">
-                    Standard — £25
-                  </option>
-                  <option value="express" className="bg-[var(--admin-panel)]">
-                    Express — £45
-                  </option>
-                </select>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Stage 3 nav */}
-        <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => goToStage(1)}
-            data-testid="button-back-to-rarity"
-            className="px-4 py-2 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
-          >
-            ← Back to Rarity
-          </button>
-          <button
-            type="button"
-            onClick={() => goToStage(3)}
-            data-testid="button-review-card"
-            className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all"
-          >
-            Review Card →
-          </button>
-        </div>
-        </div>
-
-        {/* ── Card images and AI grading are handled by the GradingPanel workstation above ── */}
-
-        {/* ── Legacy Grading Images section (hidden — use Capture Wizard in workstation instead) ── */}
-        {false && isEdit && (
-          <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
-            <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-2">
-              <Upload size={12} />
-              Grading Images
-            </legend>
-
-            <p className="text-[var(--admin-ink-dim)] text-xs">
-              Upload high-res scans for AI analysis. Front and back are required. Images are auto-cropped and processed
-              into analysis variants.
-            </p>
-
-            {/* 2×2 upload grid */}
-            <div className="grid grid-cols-2 gap-3">
-              {(["front", "back", "angled", "closeup"] as const).map((angle) => {
-                const isRequired = angle === "front" || angle === "back";
-                const label =
-                  angle === "front"
-                    ? "Front (required)"
-                    : angle === "back"
-                      ? "Back (required)"
-                      : angle === "angled"
-                        ? "Angled (optional)"
-                        : "Closeup (optional)";
-                const existingUrl = gradingUrls[`${angle}_cropped`] || gradingUrls[`${angle}_original`] || null;
-                const previewUrl = gradingPreviewUrls[angle] || null;
-                const displayUrl = previewUrl || existingUrl;
-                return (
-                  <label
-                    key={angle}
-                    className={`relative border-2 border-dashed rounded-xl p-3 cursor-pointer transition-all flex flex-col items-center justify-center gap-2 min-h-[120px] text-center
-                      ${gradingImages[angle] ? "border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5" : "border-[var(--admin-line)] bg-[var(--admin-panel2)] hover:border-[var(--admin-gold)]/40 hover:bg-[var(--admin-panel)]"}`}
-                  >
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="sr-only"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) setGradingImages((prev) => ({ ...prev, [angle]: f }));
-                      }}
-                    />
-                    {displayUrl ? (
-                      <img src={displayUrl} alt={angle} className="w-full h-20 object-contain rounded" />
-                    ) : (
-                      <Upload
-                        size={20}
-                        className={isRequired ? "text-[var(--admin-gold)]/60" : "text-[var(--admin-ink-dim)]"}
-                      />
-                    )}
-                    <span
-                      className={`text-[10px] uppercase tracking-wider ${isRequired ? "text-[var(--admin-ink-dim)] font-semibold" : "text-[var(--admin-ink-faint)]"}`}
-                    >
-                      {label}
-                    </span>
-                    {gradingImages[angle] && (
-                      <span className="text-[9px] text-[var(--admin-gold)] truncate w-full">
-                        {gradingImages[angle]!.name}
-                      </span>
-                    )}
-                  </label>
-                );
-              })}
-            </div>
-
-            {/* Upload button */}
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={uploadGradingImages}
-                disabled={gradingUploading || (!gradingImages.front && !gradingImages.back)}
-                className="flex items-center gap-2 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[var(--admin-gold)]/20 disabled:opacity-40"
-              >
-                {gradingUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                {gradingUploading ? "Uploading…" : "Upload & Process"}
-              </button>
-              {gradingUploadDone && (
-                <span className="text-[var(--admin-green)] text-xs flex items-center gap-1">
-                  <CheckCircle2 size={12} /> Uploaded — variants generating in background
-                </span>
-              )}
-            </div>
-
-            {/* Quality check results */}
-            {Object.keys(gradingQuality).length > 0 && (
-              <div className="space-y-2">
-                <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">
-                  Image Quality Checks
-                </p>
-                {Object.entries(gradingQuality).map(([angle, q]: [string, any]) => (
-                  <div
-                    key={angle}
-                    className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3"
-                  >
-                    <p className="text-[var(--admin-ink)] text-[10px] font-bold uppercase mb-1">
-                      {angle} —{" "}
-                      {q.overall === "pass" ? (
-                        <span className="text-[var(--admin-green)]">PASS</span>
-                      ) : q.overall === "warn" ? (
-                        <span className="text-[var(--admin-amber)]">WARN</span>
-                      ) : (
-                        <span className="text-[var(--admin-red)]">FAIL</span>
-                      )}
-                    </p>
-                    <div className="space-y-0.5">
-                      {(q.checks || []).map((c: any, i: number) => (
-                        <p
-                          key={i}
-                          className={`text-[10px] ${c.status === "pass" ? "text-[var(--admin-ink-faint)]" : c.status === "warn" ? "text-[var(--admin-amber)]" : "text-[var(--admin-red)]"}`}
-                        >
-                          {c.status === "pass" ? "✓" : c.status === "warn" ? "⚠" : "✗"} {c.message}
-                        </p>
-                      ))}
+                      <div
+                        className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm"
+                        data-testid="display-grade-overall"
+                      >
+                        {form.gradeOverall
+                          ? form.gradeOverall === "10" && form.labelType === "black"
+                            ? "★ 10 — Black Label (Gem Mint)"
+                            : form.gradeOverall
+                          : "Not yet graded"}
+                        <span className="text-[var(--admin-ink-dim)] text-xs ml-2">
+                          — set automatically by MVGS grading
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
 
-            {/* Card database lookup */}
-            <div className="space-y-2 pt-2 border-t border-[var(--admin-line)]">
-              <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">Verify Card Identity</p>
-              <div className="flex gap-2">
-                <select
-                  value={cardLookupGame}
-                  onChange={(e) => setCardLookupGame(e.target.value)}
-                  className="bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1.5 focus:outline-none focus:border-[var(--admin-gold)]"
-                >
-                  <option value="pokemon">Pokémon</option>
-                  <option value="mtg">MTG</option>
-                  <option value="yugioh">Yu-Gi-Oh!</option>
-                </select>
-                <input
-                  type="text"
-                  value={cardLookupQuery}
-                  onChange={(e) => setCardLookupQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && runCardLookup()}
-                  placeholder="Card name…"
-                  className="flex-1 bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-3 py-1.5 placeholder-[var(--admin-ink-faint)] focus:outline-none focus:border-[var(--admin-gold)]"
-                />
+                    <div>
+                      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                        Service Tier
+                      </label>
+                      <select
+                        value={form.serviceTier}
+                        onChange={(e) => updateField("serviceTier", e.target.value)}
+                        className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
+                        data-testid="select-service-tier"
+                      >
+                        <option value="" className="bg-[var(--admin-panel)]">
+                          Standard (default)
+                        </option>
+                        <option value="vault-queue" className="bg-[var(--admin-panel)]">
+                          Vault Queue — £19
+                        </option>
+                        <option value="standard" className="bg-[var(--admin-panel)]">
+                          Standard — £25
+                        </option>
+                        <option value="express" className="bg-[var(--admin-panel)]">
+                          Express — £45
+                        </option>
+                      </select>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Stage 3 nav */}
+              <div className="flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={runCardLookup}
-                  disabled={cardLookupLoading || !cardLookupQuery.trim()}
-                  className="flex items-center gap-1 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-3 py-1.5 rounded text-xs font-bold disabled:opacity-40 hover:bg-[var(--admin-gold)]/20"
+                  onClick={() => goToStage(1)}
+                  data-testid="button-back-to-rarity"
+                  className="px-4 py-2 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
                 >
-                  {cardLookupLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                  ← Back to Rarity
+                </button>
+                <button
+                  type="button"
+                  onClick={() => goToStage(3)}
+                  data-testid="button-review-card"
+                  className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all"
+                >
+                  Review Card →
                 </button>
               </div>
-              {cardLookupResults.length > 0 && (
-                <div className="bg-[var(--admin-panel)] rounded-lg border border-[var(--admin-line)] max-h-48 overflow-y-auto">
-                  {cardLookupResults.map((r, i) => (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => {
-                        updateField("cardName", r.name);
-                        if (r.setName) updateField("setName", r.setName);
-                        if (r.year) updateField("year", r.year);
-                        if (r.number) updateField("cardNumber", r.number);
-                        if (r.rarity) updateField("rarity", r.rarity);
-                        setCardLookupResults([]);
-                        toast({ title: "Card details filled", description: `${r.name} from ${r.setName}` });
-                      }}
-                      className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--admin-gold)]/5 border-b border-[var(--admin-line)] last:border-0 flex items-start gap-3"
-                    >
-                      {r.imageUrl && (
-                        <img src={r.imageUrl} alt={r.name} className="w-8 h-10 object-contain rounded flex-shrink-0" />
-                      )}
-                      <div>
-                        <p className="text-[var(--admin-ink)] font-medium">{r.name}</p>
-                        <p className="text-[var(--admin-ink-dim)] text-[10px]">
-                          {r.setName}
-                          {r.number ? ` · ${displayCollectorNumber(r.number)}` : ""}
-                          {r.rarity ? ` · ${r.rarity}` : ""}
-                        </p>
-                        <p className="text-[var(--admin-ink-faint)] text-[9px]">{r.source}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-              {cardLookupResults.length === 0 && cardLookupQuery && !cardLookupLoading && (
-                <p className="text-[var(--admin-ink-faint)] text-[10px]">
-                  No results — check spelling or try a shorter name.
+            </div>
+
+            {/* ── Card images and AI grading are handled by the GradingPanel workstation above ── */}
+
+            {/* ── Legacy Grading Images section (hidden — use Capture Wizard in workstation instead) ── */}
+            {false && isEdit && (
+              <fieldset className="border border-[var(--admin-gold)]/20 rounded-lg p-4 space-y-4">
+                <legend className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest px-2 flex items-center gap-2">
+                  <Upload size={12} />
+                  Grading Images
+                </legend>
+
+                <p className="text-[var(--admin-ink-dim)] text-xs">
+                  Upload high-res scans for AI analysis. Front and back are required. Images are auto-cropped and
+                  processed into analysis variants.
                 </p>
-              )}
-            </div>
-          </fieldset>
-        )}
 
-        {/* ── Legacy AI Grading Panel (hidden — use workstation's ANALYZE WITH AI instead) ── */}
-        {false && isEdit && (
-          <fieldset className="border border-[var(--admin-gold)]/30 rounded-lg p-4 space-y-4">
-            <legend className="text-[var(--admin-gold)] text-xs uppercase tracking-widest px-2 flex items-center gap-2">
-              <Cpu size={12} />
-              AI-Assisted Grading
-            </legend>
-
-            <div className="flex items-center justify-between">
-              <p className="text-[var(--admin-ink-dim)] text-xs">
-                Analyze card photos with Claude Vision to generate a draft grade.
-              </p>
-              <button
-                type="button"
-                onClick={runAiAnalysis}
-                disabled={aiLoading}
-                className="flex items-center gap-2 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[var(--admin-gold)]/20 disabled:opacity-50"
-                data-testid="button-analyze-ai"
-              >
-                {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
-                {aiLoading ? "Analyzing…" : "Analyze with AI"}
-              </button>
-            </div>
-
-            {aiLoading && (
-              <div className="flex items-center gap-3 text-[var(--admin-gold)] text-xs bg-[var(--admin-gold)]/5 border border-[var(--admin-gold)]/20 rounded-lg p-3">
-                <Loader2 size={14} className="animate-spin shrink-0" />
-                Sending images to Claude Vision. This takes 15–30 seconds…
-              </div>
-            )}
-
-            {aiError && (
-              <div className="flex items-center gap-2 text-[var(--admin-red)] text-xs bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] rounded-lg p-3">
-                <AlertTriangle size={14} className="shrink-0" />
-                {aiError}
-              </div>
-            )}
-
-            {aiAnalysis && !aiLoading && (
-              <div className="space-y-4">
-                {/* Subgrade cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                  {(["centering", "corners", "edges", "surface"] as const).map((cat) => (
-                    <div
-                      key={cat}
-                      className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 text-center"
-                    >
-                      <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest mb-1">{cat}</p>
-                      <p className="text-2xl font-black mb-1" style={{ color: subgradeColor(aiDraft[cat]) }}>
-                        {aiDraft[cat] || "—"}
-                      </p>
-                      <input
-                        type="number"
-                        min="1"
-                        max="10"
-                        step="0.5"
-                        value={aiDraft[cat]}
-                        onChange={(e) => setAiDraft((d) => ({ ...d, [cat]: e.target.value }))}
-                        className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-[var(--admin-ink)] text-xs text-center focus:outline-none focus:border-[var(--admin-gold)]"
-                      />
-                      <p className="text-[var(--admin-ink-faint)] text-[9px] leading-tight mt-1.5 line-clamp-2">
-                        {aiAnalysis[cat]?.notes || ""}
-                      </p>
-                    </div>
-                  ))}
+                {/* 2×2 upload grid */}
+                <div className="grid grid-cols-2 gap-3">
+                  {(["front", "back", "angled", "closeup"] as const).map((angle) => {
+                    const isRequired = angle === "front" || angle === "back";
+                    const label =
+                      angle === "front"
+                        ? "Front (required)"
+                        : angle === "back"
+                          ? "Back (required)"
+                          : angle === "angled"
+                            ? "Angled (optional)"
+                            : "Closeup (optional)";
+                    const existingUrl = gradingUrls[`${angle}_cropped`] || gradingUrls[`${angle}_original`] || null;
+                    const previewUrl = gradingPreviewUrls[angle] || null;
+                    const displayUrl = previewUrl || existingUrl;
+                    return (
+                      <label
+                        key={angle}
+                        className={`relative border-2 border-dashed rounded-xl p-3 cursor-pointer transition-all flex flex-col items-center justify-center gap-2 min-h-[120px] text-center
+                      ${gradingImages[angle] ? "border-[var(--admin-gold)]/60 bg-[var(--admin-gold)]/5" : "border-[var(--admin-line)] bg-[var(--admin-panel2)] hover:border-[var(--admin-gold)]/40 hover:bg-[var(--admin-panel)]"}`}
+                      >
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="sr-only"
+                          onChange={(e) => {
+                            const f = e.target.files?.[0];
+                            if (f) setGradingImages((prev) => ({ ...prev, [angle]: f }));
+                          }}
+                        />
+                        {displayUrl ? (
+                          <img src={displayUrl} alt={angle} className="w-full h-20 object-contain rounded" />
+                        ) : (
+                          <Upload
+                            size={20}
+                            className={isRequired ? "text-[var(--admin-gold)]/60" : "text-[var(--admin-ink-dim)]"}
+                          />
+                        )}
+                        <span
+                          className={`text-[10px] uppercase tracking-wider ${isRequired ? "text-[var(--admin-ink-dim)] font-semibold" : "text-[var(--admin-ink-faint)]"}`}
+                        >
+                          {label}
+                        </span>
+                        {gradingImages[angle] && (
+                          <span className="text-[9px] text-[var(--admin-gold)] truncate w-full">
+                            {gradingImages[angle]!.name}
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
 
-                {/* Centering ratios */}
-                {aiAnalysis.centering && (
-                  <div className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {[
-                      ["Front L/R", aiAnalysis.centering.front_left_right],
-                      ["Front T/B", aiAnalysis.centering.front_top_bottom],
-                      ["Back L/R", aiAnalysis.centering.back_left_right],
-                      ["Back T/B", aiAnalysis.centering.back_top_bottom],
-                    ].map(([label, val]) => (
-                      <div key={label}>
-                        <p className="text-[var(--admin-ink-faint)] text-[9px] uppercase">{label}</p>
-                        <p className="text-[var(--admin-ink)] font-mono font-bold">{val || "—"}</p>
+                {/* Upload button */}
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={uploadGradingImages}
+                    disabled={gradingUploading || (!gradingImages.front && !gradingImages.back)}
+                    className="flex items-center gap-2 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[var(--admin-gold)]/20 disabled:opacity-40"
+                  >
+                    {gradingUploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                    {gradingUploading ? "Uploading…" : "Upload & Process"}
+                  </button>
+                  {gradingUploadDone && (
+                    <span className="text-[var(--admin-green)] text-xs flex items-center gap-1">
+                      <CheckCircle2 size={12} /> Uploaded — variants generating in background
+                    </span>
+                  )}
+                </div>
+
+                {/* Quality check results */}
+                {Object.keys(gradingQuality).length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">
+                      Image Quality Checks
+                    </p>
+                    {Object.entries(gradingQuality).map(([angle, q]: [string, any]) => (
+                      <div
+                        key={angle}
+                        className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3"
+                      >
+                        <p className="text-[var(--admin-ink)] text-[10px] font-bold uppercase mb-1">
+                          {angle} —{" "}
+                          {q.overall === "pass" ? (
+                            <span className="text-[var(--admin-green)]">PASS</span>
+                          ) : q.overall === "warn" ? (
+                            <span className="text-[var(--admin-amber)]">WARN</span>
+                          ) : (
+                            <span className="text-[var(--admin-red)]">FAIL</span>
+                          )}
+                        </p>
+                        <div className="space-y-0.5">
+                          {(q.checks || []).map((c: any, i: number) => (
+                            <p
+                              key={i}
+                              className={`text-[10px] ${c.status === "pass" ? "text-[var(--admin-ink-faint)]" : c.status === "warn" ? "text-[var(--admin-amber)]" : "text-[var(--admin-red)]"}`}
+                            >
+                              {c.status === "pass" ? "✓" : c.status === "warn" ? "⚠" : "✗"} {c.message}
+                            </p>
+                          ))}
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
 
-                {/* Defects */}
-                {aiDefects.length > 0 && (
-                  <div>
-                    <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest mb-2">
-                      Identified Defects
-                    </p>
-                    <div className="space-y-1.5">
-                      {aiDefects.map((d, i) => (
-                        <div
+                {/* Card database lookup */}
+                <div className="space-y-2 pt-2 border-t border-[var(--admin-line)]">
+                  <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest">
+                    Verify Card Identity
+                  </p>
+                  <div className="flex gap-2">
+                    <select
+                      value={cardLookupGame}
+                      onChange={(e) => setCardLookupGame(e.target.value)}
+                      className="bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1.5 focus:outline-none focus:border-[var(--admin-gold)]"
+                    >
+                      <option value="pokemon">Pokémon</option>
+                      <option value="mtg">MTG</option>
+                      <option value="yugioh">Yu-Gi-Oh!</option>
+                    </select>
+                    <input
+                      type="text"
+                      value={cardLookupQuery}
+                      onChange={(e) => setCardLookupQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && runCardLookup()}
+                      placeholder="Card name…"
+                      className="flex-1 bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-3 py-1.5 placeholder-[var(--admin-ink-faint)] focus:outline-none focus:border-[var(--admin-gold)]"
+                    />
+                    <button
+                      type="button"
+                      onClick={runCardLookup}
+                      disabled={cardLookupLoading || !cardLookupQuery.trim()}
+                      className="flex items-center gap-1 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-3 py-1.5 rounded text-xs font-bold disabled:opacity-40 hover:bg-[var(--admin-gold)]/20"
+                    >
+                      {cardLookupLoading ? <Loader2 size={12} className="animate-spin" /> : <Search size={12} />}
+                    </button>
+                  </div>
+                  {cardLookupResults.length > 0 && (
+                    <div className="bg-[var(--admin-panel)] rounded-lg border border-[var(--admin-line)] max-h-48 overflow-y-auto">
+                      {cardLookupResults.map((r, i) => (
+                        <button
                           key={i}
-                          className="flex items-start gap-2 bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded px-3 py-2"
+                          type="button"
+                          onClick={() => {
+                            updateField("cardName", r.name);
+                            if (r.setName) updateField("setName", r.setName);
+                            if (r.year) updateField("year", r.year);
+                            if (r.number) updateField("cardNumber", r.number);
+                            if (r.rarity) updateField("rarity", r.rarity);
+                            setCardLookupResults([]);
+                            toast({ title: "Card details filled", description: `${r.name} from ${r.setName}` });
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs hover:bg-[var(--admin-gold)]/5 border-b border-[var(--admin-line)] last:border-0 flex items-start gap-3"
                         >
-                          <div className="flex-1 min-w-0">
-                            <span className="text-[var(--admin-gold)] text-xs font-semibold uppercase">
-                              {d.type?.replace(/_/g, " ")}
-                            </span>
-                            <span className="text-[var(--admin-ink-dim)] text-xs mx-1.5">·</span>
-                            <span className="text-[var(--admin-ink-dim)] text-xs">{d.location}</span>
-                            <span className="text-[var(--admin-ink-dim)] text-xs mx-1.5">·</span>
-                            <span className="text-[var(--admin-ink-faint)] text-xs italic">{d.severity}</span>
-                            <p className="text-[var(--admin-ink-dim)] text-[11px] mt-0.5">{d.description}</p>
+                          {r.imageUrl && (
+                            <img
+                              src={r.imageUrl}
+                              alt={r.name}
+                              className="w-8 h-10 object-contain rounded flex-shrink-0"
+                            />
+                          )}
+                          <div>
+                            <p className="text-[var(--admin-ink)] font-medium">{r.name}</p>
+                            <p className="text-[var(--admin-ink-dim)] text-[10px]">
+                              {r.setName}
+                              {r.number ? ` · ${displayCollectorNumber(r.number)}` : ""}
+                              {r.rarity ? ` · ${r.rarity}` : ""}
+                            </p>
+                            <p className="text-[var(--admin-ink-faint)] text-[9px]">{r.source}</p>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setAiDefects((prev) => prev.filter((_, j) => j !== i))}
-                            className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-red)] transition-colors shrink-0 mt-0.5"
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        </div>
+                        </button>
                       ))}
                     </div>
-                  </div>
-                )}
-
-                {/* Overall grade + explanation */}
-                <div className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest">
-                        AI Draft Overall
-                      </p>
-                      <p className="text-3xl font-black" style={{ color: subgradeColor(aiDraft.overall) }}>
-                        {aiDraft.overall || "—"}
-                      </p>
-                      <p className="text-[var(--admin-gold)] text-xs">{aiAnalysis.grade_label || ""}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest mb-1">
-                        Override Overall
-                      </p>
-                      <input
-                        type="number"
-                        min="1"
-                        max="10"
-                        step="0.5"
-                        value={aiDraft.overall}
-                        onChange={(e) => setAiDraft((d) => ({ ...d, overall: e.target.value }))}
-                        className="w-24 bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-[var(--admin-ink)] text-sm text-center focus:outline-none focus:border-[var(--admin-gold)]"
-                      />
-                    </div>
-                  </div>
-                  {aiAnalysis.grade_explanation && (
-                    <p className="text-[var(--admin-ink-dim)] text-xs leading-relaxed border-t border-[var(--admin-line)] pt-3">
-                      {aiAnalysis.grade_explanation}
-                    </p>
                   )}
-                  {aiAnalysis.authentication_notes && (
-                    <p className="text-[var(--admin-ink-faint)] text-[11px] leading-relaxed mt-2 italic">
-                      {aiAnalysis.authentication_notes}
+                  {cardLookupResults.length === 0 && cardLookupQuery && !cardLookupLoading && (
+                    <p className="text-[var(--admin-ink-faint)] text-[10px]">
+                      No results — check spelling or try a shorter name.
                     </p>
                   )}
                 </div>
-
-                {/* Approve button */}
-                {!approved ? (
-                  <button
-                    type="button"
-                    onClick={approveGrade}
-                    disabled={approveLoading || !aiDraft.overall}
-                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] py-3 rounded font-bold text-sm uppercase tracking-widest disabled:opacity-50 hover:opacity-90 transition-opacity"
-                    data-testid="button-approve-grade"
-                  >
-                    {approveLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
-                    {approveLoading ? "Approving…" : "Approve Grade"}
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-2 text-[var(--admin-green)] text-sm font-semibold bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)] rounded-lg p-3">
-                    <CheckCircle2 size={16} />
-                    Grade approved
-                  </div>
-                )}
-              </div>
+              </fieldset>
             )}
 
-            <p className="text-[var(--admin-ink-faint)] text-[10px] leading-relaxed">
-              Upload high-res scans (1200+ DPI) for best results. Card must be outside the sleeve. Use even, diffuse
-              lighting — avoid shadows and hot-spots. Holo cards: photograph at an angle to reveal surface scratches.
-            </p>
-          </fieldset>
-        )}
+            {/* ── Legacy AI Grading Panel (hidden — use workstation's ANALYZE WITH AI instead) ── */}
+            {false && isEdit && (
+              <fieldset className="border border-[var(--admin-gold)]/30 rounded-lg p-4 space-y-4">
+                <legend className="text-[var(--admin-gold)] text-xs uppercase tracking-widest px-2 flex items-center gap-2">
+                  <Cpu size={12} />
+                  AI-Assisted Grading
+                </legend>
 
-        {error && (
-          <p className="text-[var(--admin-red)] text-sm" data-testid="text-form-error">
-            {error}
-          </p>
-        )}
+                <div className="flex items-center justify-between">
+                  <p className="text-[var(--admin-ink-dim)] text-xs">
+                    Analyze card photos with Claude Vision to generate a draft grade.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={runAiAnalysis}
+                    disabled={aiLoading}
+                    className="flex items-center gap-2 bg-[var(--admin-gold)]/10 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-all hover:bg-[var(--admin-gold)]/20 disabled:opacity-50"
+                    data-testid="button-analyze-ai"
+                  >
+                    {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Cpu size={14} />}
+                    {aiLoading ? "Analyzing…" : "Analyze with AI"}
+                  </button>
+                </div>
 
-        {/* Stage 4 · REVIEW & SAVE — moved grader notes (collapsed) + the existing
+                {aiLoading && (
+                  <div className="flex items-center gap-3 text-[var(--admin-gold)] text-xs bg-[var(--admin-gold)]/5 border border-[var(--admin-gold)]/20 rounded-lg p-3">
+                    <Loader2 size={14} className="animate-spin shrink-0" />
+                    Sending images to Claude Vision. This takes 15–30 seconds…
+                  </div>
+                )}
+
+                {aiError && (
+                  <div className="flex items-center gap-2 text-[var(--admin-red)] text-xs bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-red)_40%,transparent)] rounded-lg p-3">
+                    <AlertTriangle size={14} className="shrink-0" />
+                    {aiError}
+                  </div>
+                )}
+
+                {aiAnalysis && !aiLoading && (
+                  <div className="space-y-4">
+                    {/* Subgrade cards */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {(["centering", "corners", "edges", "surface"] as const).map((cat) => (
+                        <div
+                          key={cat}
+                          className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 text-center"
+                        >
+                          <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest mb-1">
+                            {cat}
+                          </p>
+                          <p className="text-2xl font-black mb-1" style={{ color: subgradeColor(aiDraft[cat]) }}>
+                            {aiDraft[cat] || "—"}
+                          </p>
+                          <input
+                            type="number"
+                            min="1"
+                            max="10"
+                            step="0.5"
+                            value={aiDraft[cat]}
+                            onChange={(e) => setAiDraft((d) => ({ ...d, [cat]: e.target.value }))}
+                            className="w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-[var(--admin-ink)] text-xs text-center focus:outline-none focus:border-[var(--admin-gold)]"
+                          />
+                          <p className="text-[var(--admin-ink-faint)] text-[9px] leading-tight mt-1.5 line-clamp-2">
+                            {aiAnalysis[cat]?.notes || ""}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Centering ratios */}
+                    {aiAnalysis.centering && (
+                      <div className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {[
+                          ["Front L/R", aiAnalysis.centering.front_left_right],
+                          ["Front T/B", aiAnalysis.centering.front_top_bottom],
+                          ["Back L/R", aiAnalysis.centering.back_left_right],
+                          ["Back T/B", aiAnalysis.centering.back_top_bottom],
+                        ].map(([label, val]) => (
+                          <div key={label}>
+                            <p className="text-[var(--admin-ink-faint)] text-[9px] uppercase">{label}</p>
+                            <p className="text-[var(--admin-ink)] font-mono font-bold">{val || "—"}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Defects */}
+                    {aiDefects.length > 0 && (
+                      <div>
+                        <p className="text-[var(--admin-ink-dim)] text-[10px] uppercase tracking-widest mb-2">
+                          Identified Defects
+                        </p>
+                        <div className="space-y-1.5">
+                          {aiDefects.map((d, i) => (
+                            <div
+                              key={i}
+                              className="flex items-start gap-2 bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded px-3 py-2"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <span className="text-[var(--admin-gold)] text-xs font-semibold uppercase">
+                                  {d.type?.replace(/_/g, " ")}
+                                </span>
+                                <span className="text-[var(--admin-ink-dim)] text-xs mx-1.5">·</span>
+                                <span className="text-[var(--admin-ink-dim)] text-xs">{d.location}</span>
+                                <span className="text-[var(--admin-ink-dim)] text-xs mx-1.5">·</span>
+                                <span className="text-[var(--admin-ink-faint)] text-xs italic">{d.severity}</span>
+                                <p className="text-[var(--admin-ink-dim)] text-[11px] mt-0.5">{d.description}</p>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setAiDefects((prev) => prev.filter((_, j) => j !== i))}
+                                className="text-[var(--admin-ink-dim)] hover:text-[var(--admin-red)] transition-colors shrink-0 mt-0.5"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Overall grade + explanation */}
+                    <div className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div>
+                          <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest">
+                            AI Draft Overall
+                          </p>
+                          <p className="text-3xl font-black" style={{ color: subgradeColor(aiDraft.overall) }}>
+                            {aiDraft.overall || "—"}
+                          </p>
+                          <p className="text-[var(--admin-gold)] text-xs">{aiAnalysis.grade_label || ""}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[var(--admin-ink-faint)] text-[10px] uppercase tracking-widest mb-1">
+                            Override Overall
+                          </p>
+                          <input
+                            type="number"
+                            min="1"
+                            max="10"
+                            step="0.5"
+                            value={aiDraft.overall}
+                            onChange={(e) => setAiDraft((d) => ({ ...d, overall: e.target.value }))}
+                            className="w-24 bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded px-2 py-1 text-[var(--admin-ink)] text-sm text-center focus:outline-none focus:border-[var(--admin-gold)]"
+                          />
+                        </div>
+                      </div>
+                      {aiAnalysis.grade_explanation && (
+                        <p className="text-[var(--admin-ink-dim)] text-xs leading-relaxed border-t border-[var(--admin-line)] pt-3">
+                          {aiAnalysis.grade_explanation}
+                        </p>
+                      )}
+                      {aiAnalysis.authentication_notes && (
+                        <p className="text-[var(--admin-ink-faint)] text-[11px] leading-relaxed mt-2 italic">
+                          {aiAnalysis.authentication_notes}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Approve button */}
+                    {!approved ? (
+                      <button
+                        type="button"
+                        onClick={approveGrade}
+                        disabled={approveLoading || !aiDraft.overall}
+                        className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] py-3 rounded font-bold text-sm uppercase tracking-widest disabled:opacity-50 hover:opacity-90 transition-opacity"
+                        data-testid="button-approve-grade"
+                      >
+                        {approveLoading ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />}
+                        {approveLoading ? "Approving…" : "Approve Grade"}
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2 text-[var(--admin-green)] text-sm font-semibold bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)] rounded-lg p-3">
+                        <CheckCircle2 size={16} />
+                        Grade approved
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <p className="text-[var(--admin-ink-faint)] text-[10px] leading-relaxed">
+                  Upload high-res scans (1200+ DPI) for best results. Card must be outside the sleeve. Use even, diffuse
+                  lighting — avoid shadows and hot-spots. Holo cards: photograph at an angle to reveal surface
+                  scratches.
+                </p>
+              </fieldset>
+            )}
+
+            {error && (
+              <p className="text-[var(--admin-red)] text-sm" data-testid="text-form-error">
+                {error}
+              </p>
+            )}
+
+            {/* Stage 4 · REVIEW & SAVE — moved grader notes (collapsed) + the existing
             explicit save action. Note content, templates and persistence are the
             EXACT pre-existing implementation, only relocated. */}
-        <div data-workflow-stage="review" className={`space-y-2.5 ${stageClass(3)}`}>
-        {/* Compact approval header — frames Stage 4 as a final dashboard and keeps
+            <div data-workflow-stage="review" className={`space-y-2.5 ${stageClass(3)}`}>
+              {/* Compact approval header — frames Stage 4 as a final dashboard and keeps
             Back to Grade as a quiet inline control instead of a chunky button row. */}
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">Final review &amp; approval</span>
-          <button
-            type="button"
-            onClick={() => goToStage(2)}
-            data-testid="button-back-to-grade"
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-gold)] transition-colors"
-          >
-            ← Back to Grade
-          </button>
-        </div>
-        {/* Read-only confirmation summary — every value comes from existing form
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
+                  Final review &amp; approval
+                </span>
+                <button
+                  type="button"
+                  onClick={() => goToStage(2)}
+                  data-testid="button-back-to-grade"
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-gold)] transition-colors"
+                >
+                  ← Back to Grade
+                </button>
+              </div>
+              {/* Read-only confirmation summary — every value comes from existing form
             state; Edit links only switch the local stage (no save/mutation). */}
-        <ReviewSummary
-          values={{
-            certificateId: certificate?.id ?? null,
-            frontFile: frontImage,
-            backFile: backImage,
-            cardGame: form.cardGame,
-            cardName: form.cardName,
-            setName: form.setName,
-            cardNumber: form.cardNumber,
-            year: form.year,
-            language: form.language,
-            rarityCode: form.rarityCode,
-            finishVariant: form.finishVariant,
-            promoType: form.promoType,
-            subsetName: form.subsetName,
-            era: form.era,
-            designations,
-            gradeOverall: form.gradeOverall,
-            labelType: form.labelType,
-            status: form.status,
-          }}
-          onEditCard={() => goToStage(0)}
-          onEditRarity={() => goToStage(1)}
-          onEditGrade={() => goToStage(2)}
-        />
-        {/* Authentication summary — shown only for non-numeric (Authentic /
+              <ReviewSummary
+                values={{
+                  certificateId: certificate?.id ?? null,
+                  frontFile: frontImage,
+                  backFile: backImage,
+                  cardGame: form.cardGame,
+                  cardName: form.cardName,
+                  setName: form.setName,
+                  cardNumber: form.cardNumber,
+                  year: form.year,
+                  language: form.language,
+                  rarityCode: form.rarityCode,
+                  finishVariant: form.finishVariant,
+                  promoType: form.promoType,
+                  subsetName: form.subsetName,
+                  era: form.era,
+                  designations,
+                  gradeOverall: form.gradeOverall,
+                  labelType: form.labelType,
+                  status: form.status,
+                }}
+                onEditCard={() => goToStage(0)}
+                onEditRarity={() => goToStage(1)}
+                onEditGrade={() => goToStage(2)}
+              />
+              {/* Authentication summary — shown only for non-numeric (Authentic /
             Authentic Altered) grade types, derived from the EXISTING form
             gradeType. No value is invented; numeric grades render nothing here. */}
-        {isNonNum && (
-          <div
-            className="flex items-center gap-2 rounded-lg border border-[var(--admin-gold)]/15 bg-[var(--admin-gold)]/[0.02] px-2.5 py-1.5"
-            data-testid="review-authentication"
-          >
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">Authentication</span>
-            <span className="text-[12px] font-bold text-[var(--admin-ink)]">
-              {NON_NUMERIC_GRADES.find((ng) => ng.value === form.gradeType)?.description ?? form.gradeType}
-            </span>
-          </div>
-        )}
-        {/* Grader Notes with preset helper — moved from Card Details, unchanged. */}
-        {notesOpen ? (
-          <div className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">
-            <div className="flex items-center gap-2">
-              <FileText size={13} className="text-[var(--admin-gold)]/60 shrink-0" />
-              <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider">Grader Notes</label>
-            </div>
+              {isNonNum && (
+                <div
+                  className="flex items-center gap-2 rounded-lg border border-[var(--admin-gold)]/15 bg-[var(--admin-gold)]/[0.02] px-2.5 py-1.5"
+                  data-testid="review-authentication"
+                >
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
+                    Authentication
+                  </span>
+                  <span className="text-[12px] font-bold text-[var(--admin-ink)]">
+                    {NON_NUMERIC_GRADES.find((ng) => ng.value === form.gradeType)?.description ?? form.gradeType}
+                  </span>
+                </div>
+              )}
+              {/* Grader Notes with preset helper — moved from Card Details, unchanged. */}
+              {notesOpen ? (
+                <div className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">
+                  <div className="flex items-center gap-2">
+                    <FileText size={13} className="text-[var(--admin-gold)]/60 shrink-0" />
+                    <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider">Grader Notes</label>
+                  </div>
 
-            {/* Template buttons */}
-            <div>
-              <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">
-                Insert template
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {NOTE_TEMPLATES.map((t) => (
-                  <button
-                    key={t.label}
-                    type="button"
-                    onClick={() => updateField("notes", t.text)}
-                    className="text-xs px-2.5 py-1 rounded border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 hover:border-[var(--admin-gold)]/60 hover:text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/5 transition-all"
-                    data-testid={`button-template-${t.label.toLowerCase().replace(" ", "-")}`}
-                  >
-                    {t.label} Notes
-                  </button>
-                ))}
-              </div>
-            </div>
+                  {/* Template buttons */}
+                  <div>
+                    <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">
+                      Insert template
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {NOTE_TEMPLATES.map((t) => (
+                        <button
+                          key={t.label}
+                          type="button"
+                          onClick={() => updateField("notes", t.text)}
+                          className="text-xs px-2.5 py-1 rounded border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 hover:border-[var(--admin-gold)]/60 hover:text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/5 transition-all"
+                          data-testid={`button-template-${t.label.toLowerCase().replace(" ", "-")}`}
+                        >
+                          {t.label} Notes
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-            {/* Notes textarea */}
-            <textarea
-              value={form.notes}
-              onChange={(e) => updateField("notes", e.target.value)}
-              rows={4}
-              placeholder="Grader notes appear on the public certificate page. Leave blank to hide."
-              className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors resize-none"
-              data-testid="input-cert-notes"
-            />
+                  {/* Notes textarea */}
+                  <textarea
+                    value={form.notes}
+                    onChange={(e) => updateField("notes", e.target.value)}
+                    rows={4}
+                    placeholder="Grader notes appear on the public certificate page. Leave blank to hide."
+                    className="w-full bg-transparent border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors resize-none"
+                    data-testid="input-cert-notes"
+                  />
 
-            {/* Preset chips */}
-            <div>
-              <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">Quick add</p>
-              <div className="flex flex-wrap gap-1.5">
-                {PRESET_NOTES.map((preset) => {
-                  const lines = form.notes
-                    .split("\n")
-                    .map((l) => l.trim())
-                    .filter(Boolean);
-                  const alreadyAdded = lines.includes(preset);
-                  return (
-                    <button
-                      key={preset}
-                      type="button"
-                      disabled={alreadyAdded}
-                      onClick={() => {
-                        const current = form.notes.trimEnd();
-                        updateField("notes", current ? `${current}\n${preset}` : preset);
-                      }}
-                      className={`text-[11px] px-2 py-0.5 rounded border transition-all flex items-center gap-1 ${
-                        alreadyAdded
-                          ? "border-[var(--admin-gold)]/15 text-[var(--admin-gold)]/25 cursor-default"
-                          : "border-[var(--admin-gold)]/25 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/50 hover:text-[var(--admin-ink)] hover:bg-[var(--admin-gold)]/5 cursor-pointer"
-                      }`}
-                      data-testid={`button-preset-${preset.toLowerCase().replace(/\s+/g, "-")}`}
-                    >
-                      {!alreadyAdded && <Plus size={10} className="shrink-0" />}
-                      {preset}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setNotesOpen(true)}
-            data-testid="button-add-grader-notes"
-            className="w-full px-4 py-2.5 rounded-lg border border-dashed border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/5 transition-colors"
-          >
-            + Add Grader Notes
-          </button>
-        )}
+                  {/* Preset chips */}
+                  <div>
+                    <p className="text-[var(--admin-gold)]/40 text-[10px] uppercase tracking-widest mb-1.5">
+                      Quick add
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {PRESET_NOTES.map((preset) => {
+                        const lines = form.notes
+                          .split("\n")
+                          .map((l) => l.trim())
+                          .filter(Boolean);
+                        const alreadyAdded = lines.includes(preset);
+                        return (
+                          <button
+                            key={preset}
+                            type="button"
+                            disabled={alreadyAdded}
+                            onClick={() => {
+                              const current = form.notes.trimEnd();
+                              updateField("notes", current ? `${current}\n${preset}` : preset);
+                            }}
+                            className={`text-[11px] px-2 py-0.5 rounded border transition-all flex items-center gap-1 ${
+                              alreadyAdded
+                                ? "border-[var(--admin-gold)]/15 text-[var(--admin-gold)]/25 cursor-default"
+                                : "border-[var(--admin-gold)]/25 text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/50 hover:text-[var(--admin-ink)] hover:bg-[var(--admin-gold)]/5 cursor-pointer"
+                            }`}
+                            data-testid={`button-preset-${preset.toLowerCase().replace(/\s+/g, "-")}`}
+                          >
+                            {!alreadyAdded && <Plus size={10} className="shrink-0" />}
+                            {preset}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setNotesOpen(true)}
+                  data-testid="button-add-grader-notes"
+                  className="w-full px-4 py-2.5 rounded-lg border border-dashed border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/5 transition-colors"
+                >
+                  + Add Grader Notes
+                </button>
+              )}
 
-        {/* Owner directive (2026-07-01): an existing, not-yet-approved
+              {/* Owner directive (2026-07-01): an existing, not-yet-approved
             certificate auto-saves silently (see autoSaveNow above) — no
             manual button, matching the grading workstation below it. Create
             flow (no certificate yet) and an already-approved/published
             certificate (server has no approval lock of its own — see
             autoSaveEligible) both keep an explicit save action. */}
-        {autoSaveEligible ? (
-          <div
-            className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-6"
-            data-testid="text-autosave-status"
-          >
-            {autoSaveStatus === "saving" && (
-              <span className="flex items-center gap-1.5">
-                <Loader2 size={10} className="animate-spin" /> Saving…
-              </span>
-            )}
-            {autoSaveStatus === "saved" && (
-              <span className="flex items-center gap-1.5 text-[var(--admin-green)]">
-                <CheckCircle2 size={10} /> Saved
-              </span>
-            )}
-            {autoSaveStatus === "error" && (
-              <span className="text-[var(--admin-red)]">Save failed — retrying on next change</span>
-            )}
-          </div>
-        ) : (
-          <GradientButton
-            as="button"
-            type="submit"
-            disabled={mutation.isPending}
-            height="48px"
-            className="w-full"
-            data-testid="button-save-cert"
-          >
-            <Save size={16} />
-            {mutation.isPending ? "Saving..." : isEdit ? "Save Changes to Published Certificate" : "Save Certificate"}
-          </GradientButton>
-        )}
-        </div>
+              {autoSaveEligible ? (
+                <div
+                  className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-6"
+                  data-testid="text-autosave-status"
+                >
+                  {autoSaveStatus === "saving" && (
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 size={10} className="animate-spin" /> Saving…
+                    </span>
+                  )}
+                  {autoSaveStatus === "saved" && (
+                    <span className="flex items-center gap-1.5 text-[var(--admin-green)]">
+                      <CheckCircle2 size={10} /> Saved
+                    </span>
+                  )}
+                  {autoSaveStatus === "error" && (
+                    <span className="text-[var(--admin-red)]">Save failed — retrying on next change</span>
+                  )}
+                </div>
+              ) : (
+                <GradientButton
+                  as="button"
+                  type="submit"
+                  disabled={mutation.isPending}
+                  height="48px"
+                  className="w-full"
+                  data-testid="button-save-cert"
+                >
+                  <Save size={16} />
+                  {mutation.isPending
+                    ? "Saving..."
+                    : isEdit
+                      ? "Save Changes to Published Certificate"
+                      : "Save Certificate"}
+                </GradientButton>
+              )}
+            </div>
           </form>
         </div>
       </div>
@@ -3890,7 +4046,11 @@ export function PokemonSetPicker({
         </button>
       )}
       {open && (
-        <div className="absolute z-30 left-0 right-0 mt-1 bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-lg shadow-lg max-h-72 overflow-y-auto">
+        // Width is allowed to exceed the (narrow) input column — real set
+        // names like "Chaos Rising" / "Perfect Origins" were being clipped
+        // to the input's own width in production. Floors at 26rem, caps at
+        // the viewport so it never overflows off-screen.
+        <div className="absolute z-30 left-0 mt-1 w-[max(100%,26rem)] max-w-[calc(100vw-2rem)] bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-lg shadow-lg max-h-72 overflow-y-auto">
           {/* Recently-used sets — one-click fill, pinned above the list when the
               grader hasn't typed a query yet. */}
           {!q && recentSets.length > 0 && (
@@ -3940,7 +4100,11 @@ export function PokemonSetPicker({
                   <span className="shrink-0 rounded bg-[var(--admin-gold)]/10 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-[var(--admin-gold)]">
                     {code || s.id}
                   </span>
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium text-[var(--admin-ink)]">{s.name}</span>
+                  {/* No truncate — full names must stay readable; the row may
+                      wrap to two lines rather than clip destructively. */}
+                  <span className="min-w-0 flex-1 text-xs font-medium leading-snug text-[var(--admin-ink)]">
+                    {s.name}
+                  </span>
                   {s.source === "custom" && (
                     <span className="shrink-0 rounded bg-[color-mix(in_srgb,var(--admin-green)_18%,transparent)] px-1 py-0.5 text-[8px] font-bold uppercase text-[var(--admin-green)]">
                       Custom
