@@ -325,11 +325,20 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     if (!base) return;
     for (const f of changed) expect(f, f).not.toMatch(PROTECTED);
   });
-  it("this pass's own new/changed files are exactly the expected Stage 1/2 usability surface (plus already-allowed prior-pass files)", () => {
-    if (!base) return;
-    for (const f of ["client/src/components/certificate-form.tsx", "client/src/components/rarity-picker/RarityVariantPicker.tsx", "client/src/components/rarity-picker/RaritySymbol.tsx", "shared/pokemon-rarity-catalogue.ts", "shared/collector-number-format.ts"]) {
-      expect(changed, f).toContain(f);
-    }
+  it("the Stage 1/2 usability pass is genuinely present in the current source (not just historically in some diff)", () => {
+    // unified-shell integration note: this original Stage 1/2 usability pass
+    // (rarity contrast, custom-rarity workflow, collector-number formatter)
+    // is already merged into origin/main via PR #216 — it is NOT part of
+    // this integration branch's own incremental delta, so it correctly does
+    // NOT appear in `changed` (diff against origin/main) any more. A content
+    // check on the current source is the right tool here, not diff
+    // membership — the invariant that matters is "the feature exists in the
+    // codebase," which a diff-membership check can no longer prove once the
+    // work has landed on main via a different path.
+    expect(read("shared/pokemon-rarity-catalogue.ts")).toContain("silver_star_rare");
+    expect(read("shared/pokemon-rarity-catalogue.ts")).toContain("custom_unlisted");
+    expect(read("shared/collector-number-format.ts")).toContain("displayCollectorNumber");
+    expect(FORM).toContain("<RarityVariantPicker");
   });
   it("does not touch payments, Vault Quest, or migrations", () => {
     if (!base) return;

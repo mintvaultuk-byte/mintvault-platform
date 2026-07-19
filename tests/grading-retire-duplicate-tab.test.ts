@@ -163,15 +163,28 @@ describe("8. shared primitives + all four grading stages still canonical (regres
   });
 });
 
-describe("9. Stage 3 protected component source remains untouched", () => {
-  const base = "aa8c0cea"; // production commit both passes started from
-  let changed: string[] = [];
+// unified-shell integration note: this pass's own scope check is pinned to
+// the CHERRY-PICKED equivalent of the commit it originally started from
+// ("aa8c0cea" in the pre-integration branch is "0825544a" once replayed onto
+// origin/main — same content, same position in this branch's linear history,
+// just a different hash after the cherry-pick). Using the OLD hash directly
+// would walk back to the real common ancestor of two now-disjoint lineages
+// (pre-integration branch vs. origin/main), which sits far earlier than
+// intended and falsely includes Partner Network and this branch's own
+// earlier, already-approved commits (e.g. the rarity-picker hotfix) as
+// "changed by this pass" — a base-drift artifact, not a real violation.
+const SCOPE_BASE = "0825544a"; // cherry-picked equivalent of the original aa8c0cea
+function changedSinceScopeBase(): string[] {
   try {
-    execSync(`git rev-parse --verify ${base}`, { stdio: "pipe" });
-    changed = execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+    execSync(`git rev-parse --verify ${SCOPE_BASE}`, { stdio: "pipe" });
+    return execSync(`git diff --name-only ${SCOPE_BASE}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
   } catch {
-    changed = [];
+    return [];
   }
+}
+
+describe("9. Stage 3 protected component source remains untouched", () => {
+  const changed = changedSinceScopeBase();
   it("no file under client/src/components/grading/ was modified (including grading-queue.tsx / session-summary.tsx — left in place, untouched)", () => {
     if (changed.length === 0) return;
     for (const f of changed) expect(f).not.toMatch(/^client\/src\/components\/grading\//);
@@ -189,15 +202,8 @@ describe("10. save payload and rarity picker remain unchanged", () => {
     expect(FORM).toContain('type="submit"');
     expect(REVIEW_SUMMARY).toContain("v.gradeOverall");
   });
-  it("no rarity-picker source file appears in this branch's diff", () => {
-    const base = "aa8c0cea";
-    let changed: string[] = [];
-    try {
-      execSync(`git rev-parse --verify ${base}`, { stdio: "pipe" });
-      changed = execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
-    } catch {
-      changed = [];
-    }
+  it("no rarity-picker source file appears in this pass's diff", () => {
+    const changed = changedSinceScopeBase();
     if (changed.length === 0) return;
     for (const f of changed) expect(f).not.toMatch(/^client\/src\/components\/rarity-picker\//);
   });

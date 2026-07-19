@@ -131,15 +131,26 @@ describe("5. the preview zone exists in Card, Rarity AND Review (Grade is a docu
   });
 });
 
-describe("6. Stage 3 (protected) component source remains byte-for-byte untouched", () => {
-  const base = "aa8c0cea"; // production commit this pass started from
-  let changed: string[] = [];
+// unified-shell integration note: pinned to the CHERRY-PICKED equivalent of
+// the commit this pass originally started from ("aa8c0cea" pre-integration
+// is "0825544a" once replayed onto origin/main — same content, same position
+// in this branch's linear history). The old hash now sits on a lineage
+// disjoint from origin/main, so a diff against it would walk back to the
+// real (much earlier) common ancestor and falsely include Partner Network
+// and this branch's own earlier commits (e.g. the rarity-picker hotfix) as
+// "changed by this pass" — a base-drift artifact, not a real violation.
+const SCOPE_BASE = "0825544a";
+function changedSinceScopeBase(): string[] {
   try {
-    execSync(`git rev-parse --verify ${base}`, { stdio: "pipe" });
-    changed = execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
+    execSync(`git rev-parse --verify ${SCOPE_BASE}`, { stdio: "pipe" });
+    return execSync(`git diff --name-only ${SCOPE_BASE}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
   } catch {
-    changed = [];
+    return [];
   }
+}
+
+describe("6. Stage 3 (protected) component source remains byte-for-byte untouched", () => {
+  const changed = changedSinceScopeBase();
   it("no file under client/src/components/grading/ appears in this branch's diff", () => {
     if (changed.length === 0) return;
     for (const f of changed) expect(f).not.toMatch(/^client\/src\/components\/grading\//);
@@ -252,29 +263,15 @@ describe("13. save payload remains unchanged", () => {
 });
 
 describe("14. rarity picker remains unchanged", () => {
-  const base = "aa8c0cea";
-  let changed: string[] = [];
-  try {
-    execSync(`git rev-parse --verify ${base}`, { stdio: "pipe" });
-    changed = execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
-  } catch {
-    changed = [];
-  }
-  it("no rarity-picker source file appears in this branch's diff", () => {
+  const changed = changedSinceScopeBase();
+  it("no rarity-picker source file appears in this pass's diff", () => {
     if (changed.length === 0) return;
     for (const f of changed) expect(f).not.toMatch(/^client\/src\/components\/rarity-picker\//);
   });
 });
 
-describe("15. no Partner Network files are present", () => {
-  const base = "aa8c0cea";
-  let changed: string[] = [];
-  try {
-    execSync(`git rev-parse --verify ${base}`, { stdio: "pipe" });
-    changed = execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
-  } catch {
-    changed = [];
-  }
+describe("15. no Partner Network files were touched by this pass", () => {
+  const changed = changedSinceScopeBase();
   it("no changed file matches a Partner Network path/name", () => {
     if (changed.length === 0) return;
     for (const f of changed) expect(f).not.toMatch(/partner/i);
