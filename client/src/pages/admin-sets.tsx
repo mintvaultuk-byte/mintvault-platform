@@ -485,7 +485,7 @@ export default function AdminSetsPage() {
                       <td className="px-3 py-3">
                         <div className="flex flex-wrap gap-1">
                           {row.archived && (
-                            <span className="inline-flex items-center gap-1 rounded bg-slate-700 px-2 py-0.5 text-xs">
+                            <span className="inline-flex items-center gap-1 rounded bg-[var(--admin-panel2)] px-2 py-0.5 text-xs text-[var(--admin-ink-dim)]">
                               <Archive className="h-3 w-3" /> Archived
                             </span>
                           )}
@@ -614,7 +614,7 @@ export default function AdminSetsPage() {
           aria-labelledby="set-editor-title"
           data-testid="set-editor-modal"
         >
-          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded border border-[var(--admin-gold)]/30 bg-[#090909] shadow-2xl">
+          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded border border-[var(--admin-gold)]/30 bg-[var(--admin-bg)] shadow-2xl">
             <div className="border-b border-[var(--admin-gold)]/15 p-5 pb-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -725,7 +725,7 @@ export default function AdminSetsPage() {
             </div>
 
             <div
-              className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--admin-gold)]/20 bg-[#090909] p-4 shadow-[0_-10px_24px_rgba(0,0,0,0.45)]"
+              className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--admin-gold)]/20 bg-[var(--admin-bg)] p-4 shadow-[0_-10px_24px_rgba(0,0,0,0.45)]"
               data-testid="set-editor-sticky-footer"
             >
               {editingSuggestion && (
