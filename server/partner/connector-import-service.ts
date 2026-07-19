@@ -71,10 +71,6 @@ interface ImportMappingRow {
   destination_submission_id: number | null;
 }
 
-function splitLocal(email: string | null): string | null {
-  return email;
-}
-
 /**
  * The exactly-once importer. Preconditions (all enforced BEFORE any write): connector flag ON,
  * emergency stop OFF, connector state `ready_for_import`, active matching claim, matching tenant,
@@ -293,7 +289,7 @@ export async function importValidatedConnector(params: {
       // ---- Owner resolution -------------------------------------------------------------------
       const owner = await resolveDestinationOwner(client, {
         partnerOrganisationId: connector.tenant_id,
-        customer: { id: rows.customer.id, fullName: rows.customer.full_name, email: splitLocal(rows.customer.email) },
+        customer: { id: rows.customer.id, fullName: rows.customer.full_name, email: rows.customer.email },
       });
 
       // ---- Service/price mapping (mapping version 1 — direct passthrough, see SERVICE-PRICE-MAPPING.md)

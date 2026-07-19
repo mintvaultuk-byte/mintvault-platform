@@ -28,7 +28,7 @@ narrow, explicit set of columns (state, destination_submission_id,
 completed_at, reconciled_at, last_safe_error_code — enforced by a
 column-level `REVOKE`+`GRANT` pair in the migration, not just documentation)
 so that a "reserved" row can be completed in a second statement within the
-*same* transaction as the reservation, without ever allowing a caller to
+_same_ transaction as the reservation, without ever allowing a caller to
 rewrite `partner_submission_id`/`partner_organisation_id`/`source_fingerprint`
 after the fact.
 
@@ -64,13 +64,21 @@ after the fact.
    not create another. This is what makes a retried call (duplicate HTTP
    request, retried background job) safe.
 9. If no row exists: `INSERT INTO partner_connector_imports (..., state)
-   VALUES (..., 'reserved')` — this is the point the `UNIQUE` constraints
+VALUES (..., 'reserved')` — this is the point the `UNIQUE` constraints
    above become load-bearing: if a concurrent transaction reserved first,
-   this INSERT raises a unique-violation, caught and treated as "someone
-   else is completing this" (re-read and either wait-free-return the
-   now-completed row, or surface a retryable "in progress" error if it's
-   still `reserved` — see the concurrency test for the exact behaviour
-   chosen).
+   this INSERT raises a unique-violation, rolled back to a savepoint and
+   surfaced as a retryable `import_mapping_conflict` (the actual
+   implemented behaviour — this path is only reachable via the
+   `submission_superseded`-style defence-in-depth case of two different
+   connector records racing for the same underlying handoff/submission,
+   never via two callers racing on the SAME connector record, which the
+   step-2 row lock already fully serialises before this INSERT is ever
+   reached). A caller hitting this retries the whole call; by then the
+   winning transaction has typically committed and step 8's early return
+   resolves it. Independent review (G3 pass) flagged that an eager re-read-
+   and-return-existing here would be a nicer caller experience than a bare
+   retryable error — accepted as a low-severity, non-blocking follow-up
+   since it has no effect on the exactly-once guarantee itself.
 10. Resolve the destination owner (`connector-owner-resolution.ts`) —
     look up or create the `users` row + `partner_connector_customer_links`
     row, in this same transaction.
@@ -82,7 +90,7 @@ after the fact.
 13. `INSERT INTO submission_items (...)` for every card (expanded by
     quantity, see `DESTINATION-BOUNDARY.md`).
 14. `UPDATE partner_connector_imports SET state = 'completed',
-    destination_submission_id = $1, completed_at = now() WHERE id = $2`.
+destination_submission_id = $1, completed_at = now() WHERE id = $2`.
 15. Transition the connector record to `imported` — via a dedicated
     UPDATE inside `connector-import-service.ts` itself (not
     `transitionConnectorState`, which hard-blocks `toState = 'imported'`
@@ -108,12 +116,12 @@ regardless of statement order between two concurrent transactions.
 
 ## Crash points and recovery
 
-| Crash point | State left behind | Recovery |
-| --- | --- | --- |
-| Before step 9 (before reservation) | Connector still `ready_for_import`, no mapping row | Safe to retry the whole import from scratch — nothing was created |
-| Between step 9 and step 14 (reserved, not completed) | Mapping row `state='reserved'`, `destination_submission_id` null | A retry re-enters the same transaction logic; since steps 10-13 haven't committed anything yet (same transaction, so a mid-transaction crash rolls all of it back), a retry is equivalent to starting fresh — the `reserved` row conflicts with a fresh INSERT attempt (step 9's `ON CONFLICT`), so the importer instead reuses the existing `reserved` row's id and proceeds from step 10 again |
-| Between step 14 and step 17 (all writes staged, not yet committed) | Nothing durable — Postgres only makes step-14-through-16's writes visible at COMMIT; a crash here is identical to a crash before step 9 from any *other* transaction's point of view | Same as above |
-| After step 17 (COMMIT succeeded) but caller never received the response (network/process failure) | Fully durable: mapping `completed`, `destination_submission_id` set, connector `imported`, event written | A retry (duplicate call) hits step 8 and returns the existing destination — no new work performed, no error |
+| Crash point                                                                                       | State left behind                                                                                                                                                                    | Recovery                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Before step 9 (before reservation)                                                                | Connector still `ready_for_import`, no mapping row                                                                                                                                   | Safe to retry the whole import from scratch — nothing was created                                                                                                                                                                                                                                                                                                                                |
+| Between step 9 and step 14 (reserved, not completed)                                              | Mapping row `state='reserved'`, `destination_submission_id` null                                                                                                                     | A retry re-enters the same transaction logic; since steps 10-13 haven't committed anything yet (same transaction, so a mid-transaction crash rolls all of it back), a retry is equivalent to starting fresh — the `reserved` row conflicts with a fresh INSERT attempt (step 9's `ON CONFLICT`), so the importer instead reuses the existing `reserved` row's id and proceeds from step 10 again |
+| Between step 14 and step 17 (all writes staged, not yet committed)                                | Nothing durable — Postgres only makes step-14-through-16's writes visible at COMMIT; a crash here is identical to a crash before step 9 from any _other_ transaction's point of view | Same as above                                                                                                                                                                                                                                                                                                                                                                                    |
+| After step 17 (COMMIT succeeded) but caller never received the response (network/process failure) | Fully durable: mapping `completed`, `destination_submission_id` set, connector `imported`, event written                                                                             | A retry (duplicate call) hits step 8 and returns the existing destination — no new work performed, no error                                                                                                                                                                                                                                                                                      |
 
 Every crash scenario above resolves to one of exactly two outcomes: "nothing
 was created, safe to retry" or "everything was created and committed, retry
@@ -155,8 +163,10 @@ sufficient, deliberately redundant:
    import, so a legitimate retry doesn't even reach the constraint-violation
    path in the normal case.
 
-Proved by the concurrency test (`tests/partner-connector-import-concurrency.test.ts`):
-N concurrent calls with the same `connectorId`, separate database
-connections, asserts exactly one `submissions` row, exactly one `completed`
-mapping row, and that every caller's returned destination reference is
-identical.
+Proved by the concurrency test in
+`tests/partner-connector-import-service.test.ts` ("N concurrent import
+calls for the SAME connector, separate connections, create exactly one
+destination"): 8 concurrent calls with the same `connectorId`, separate
+database connections, asserts exactly one `submissions` row, exactly one
+`completed` mapping row, and that every successful caller's returned
+destination reference is identical.
