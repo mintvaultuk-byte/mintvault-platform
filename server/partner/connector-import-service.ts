@@ -24,8 +24,65 @@ import { calculateSourceFingerprint, SOURCE_FINGERPRINT_VERSION } from "./connec
 import { loadValidationRows, toFingerprintSource, type ConnectorRow } from "./connector-validation-service";
 import { resolveDestinationOwner } from "./connector-owner-resolution";
 import { allocateReferenceAndInsert } from "./connector-reference";
+import { connectorHook, type ConnectorHookPoint, type ConnectorHookContext } from "./connector-instrumentation";
 
 const MAPPING_VERSION = 1;
+
+/**
+ * G3F: append ONE immutable evidence row for a committed import-attempt outcome (see
+ * PROVENANCE-EVIDENCE-MODEL.md). Written inside the importer's own transaction so it commits
+ * atomically with the outcome it records; a rolled-back attempt writes nothing. attempt_number is
+ * computed under the connector row lock the caller already holds, so it is race-free per connector.
+ */
+async function appendImportAttempt(
+  client: pg.PoolClient,
+  params: {
+    connectorId: string;
+    importMappingId: string | null;
+    partnerOrganisationId: string;
+    partnerSubmissionId: string;
+    partnerHandoffId: string;
+    validationRunId: string | null;
+    sourceFingerprint: string | null;
+    sourceFingerprintVersion: number | null;
+    attemptType: "initial" | "retry" | "resumed" | "reconciled" | "manual";
+    claimant: string | null;
+    outcome: "stale" | "failed" | "completed" | "reconciliation_required" | "cancelled";
+    safeErrorCode: string | null;
+    destinationSubmissionId: number | null;
+    startedAt: Date;
+  }
+): Promise<void> {
+  const numRes = await client.query<{ n: number }>(
+    `SELECT COALESCE(MAX(attempt_number),0)+1 AS n FROM partner_connector_import_attempts WHERE connector_record_id = $1`,
+    [params.connectorId]
+  );
+  await client.query(
+    `INSERT INTO partner_connector_import_attempts
+       (connector_record_id, import_mapping_id, partner_organisation_id, partner_submission_id,
+        partner_handoff_id, validation_run_id, source_fingerprint, source_fingerprint_version,
+        attempt_number, attempt_type, claimant, outcome, safe_error_code, destination_submission_id,
+        started_at, completed_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15, now())`,
+    [
+      params.connectorId,
+      params.importMappingId,
+      params.partnerOrganisationId,
+      params.partnerSubmissionId,
+      params.partnerHandoffId,
+      params.validationRunId,
+      params.sourceFingerprint,
+      params.sourceFingerprintVersion,
+      numRes.rows[0].n,
+      params.attemptType,
+      params.claimant,
+      params.outcome,
+      params.safeErrorCode,
+      params.destinationSubmissionId,
+      params.startedAt.toISOString(),
+    ]
+  );
+}
 
 interface FullConnectorRow extends ConnectorRow {
   claim_expires_at: string | null;
@@ -87,6 +144,11 @@ export async function importValidatedConnector(params: {
   const { connectorId, claimant, expectedVersion, tenantId } = params;
   return guarded(() =>
     withConnectorTx(async (client) => {
+      const attemptStartedAt = new Date(); // G3F: import-attempt start, recorded in evidence at commit
+      // G3F: fault/observation hook (no-op in production). Always carries the transaction client so a
+      // fault test can act on the importer's OWN connection (e.g. terminate its backend).
+      const hook = (point: ConnectorHookPoint, ctx: Omit<ConnectorHookContext, "client">) =>
+        connectorHook(point, { ...ctx, client });
       const connRes = await client.query<FullConnectorRow>(
         `SELECT * FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
         [connectorId]
@@ -195,6 +257,8 @@ export async function importValidatedConnector(params: {
         );
       }
 
+      await hook("before_validation_recheck", { connectorId, claimant });
+
       // Same GUC-scoping requirement loadValidationRows itself documents — must be set before any
       // FORCE-RLS'd Partner table read, using the connector's OWN (non-RLS'd) tenant_id, never a
       // caller-supplied value directly.
@@ -204,6 +268,22 @@ export async function importValidatedConnector(params: {
       const fingerprint = calculateSourceFingerprint(toFingerprintSource(rows));
       const fingerprintMatches =
         fingerprint === run.source_fingerprint && SOURCE_FINGERPRINT_VERSION === run.source_fingerprint_version;
+
+      await hook("after_validation_recheck", { connectorId, claimant });
+
+      // G3F: attempt_type — resumed if we resume an existing 'reserved' mapping, else retry if any
+      // prior attempt row exists for this connector, else initial. Computed here (before the branch)
+      // so both the stale and completed paths record the correct type.
+      const priorAttemptsRes = await client.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM partner_connector_import_attempts WHERE connector_record_id = $1`,
+        [connectorId]
+      );
+      const isResume = !!existingMap && existingMap.state === "reserved";
+      const attemptType: "initial" | "retry" | "resumed" = isResume
+        ? "resumed"
+        : priorAttemptsRes.rows[0].n > 0
+          ? "retry"
+          : "initial";
 
       if (!fingerprintMatches) {
         // Stale source at import time — same shape SOURCE-FINGERPRINT.md documents for validation
@@ -229,6 +309,24 @@ export async function importValidatedConnector(params: {
            VALUES ($1,'ready_for_import','validating','import_source_stale',$2,$3,'system',$4)`,
           [connectorId, connector.attempt_count, JSON.stringify({}), claimant]
         );
+        // G3F: record the stale attempt as immutable evidence, with the fresh fingerprint it computed
+        // and the latest validation run it checked against.
+        await appendImportAttempt(client, {
+          connectorId,
+          importMappingId: isResume ? existingMap!.id : null,
+          partnerOrganisationId: connector.tenant_id,
+          partnerSubmissionId: connector.partner_submission_id,
+          partnerHandoffId: connector.handoff_id,
+          validationRunId: run.id,
+          sourceFingerprint: fingerprint,
+          sourceFingerprintVersion: SOURCE_FINGERPRINT_VERSION,
+          attemptType,
+          claimant,
+          outcome: "stale",
+          safeErrorCode: "import_source_stale",
+          destinationSubmissionId: null,
+          startedAt: attemptStartedAt,
+        });
         return { outcome: "stale", destinationSubmissionId: null, destinationReference: null };
       }
 
@@ -251,6 +349,7 @@ export async function importValidatedConnector(params: {
       // uq_partner_connector_imports_connector and previously left the record stuck in an
       // unrecoverable retry loop (RECONCILIATION-RUNBOOK.md scenario 4, now genuinely recoverable
       // both automatically here and via recoverReservedImport for a stale abandoned reservation).
+      await hook("before_reservation", { connectorId, claimant });
       let mappingId: string;
       if (existingMap && existingMap.state === "reserved") {
         mappingId = existingMap.id;
@@ -296,11 +395,15 @@ export async function importValidatedConnector(params: {
         }
       }
 
+      await hook("after_reservation", { connectorId, claimant, mappingId });
+
       // ---- Owner resolution -------------------------------------------------------------------
       const owner = await resolveDestinationOwner(client, {
         partnerOrganisationId: connector.tenant_id,
         customer: { id: rows.customer.id, fullName: rows.customer.full_name, email: rows.customer.email },
       });
+
+      await hook("after_owner_resolution", { connectorId, claimant, mappingId });
 
       // ---- Service/price mapping (mapping version 1 — direct passthrough, see SERVICE-PRICE-MAPPING.md)
       const expandedItems = rows.cards.flatMap((card) =>
@@ -338,6 +441,13 @@ export async function importValidatedConnector(params: {
         return subRes.rows[0];
       });
 
+      await hook("after_submission_insert", {
+        connectorId,
+        claimant,
+        mappingId,
+        destinationSubmissionId: created.id,
+      });
+
       let cardIndex = 1;
       for (const card of expandedItems) {
         await client.query(
@@ -355,17 +465,38 @@ export async function importValidatedConnector(params: {
             card.declared_value_pence ?? 0,
           ]
         );
+        await hook("during_item_insert", {
+          connectorId,
+          claimant,
+          mappingId,
+          destinationSubmissionId: created.id,
+          itemIndex: cardIndex - 1,
+        });
       }
+
+      await hook("after_items", { connectorId, claimant, mappingId, destinationSubmissionId: created.id });
 
       // ---- Complete the mapping, then transition the connector (ready_for_import -> importing ->
       // imported, two UPDATEs, same transaction — see file header for why 'importing' is never
       // durably observable outside this transaction) ----------------------------------------------
+      await hook("before_mapping_completion", {
+        connectorId,
+        claimant,
+        mappingId,
+        destinationSubmissionId: created.id,
+      });
       await client.query(
         `UPDATE partner_connector_imports
             SET state = 'completed', destination_submission_id = $1, completed_at = now(), updated_at = now()
           WHERE id = $2`,
         [created.id, mappingId]
       );
+      await hook("after_mapping_completion", {
+        connectorId,
+        claimant,
+        mappingId,
+        destinationSubmissionId: created.id,
+      });
 
       const toImporting = await client.query<{ state: string }>(
         `UPDATE partner_connector_records
@@ -383,6 +514,13 @@ export async function importValidatedConnector(params: {
         [connectorId, connector.attempt_count, JSON.stringify({}), claimant]
       );
 
+      await hook("before_connector_imported", {
+        connectorId,
+        claimant,
+        mappingId,
+        destinationSubmissionId: created.id,
+      });
+
       const toImported = await client.query<{ version: number }>(
         `UPDATE partner_connector_records
             SET state = 'imported', version = version + 1, updated_at = now(), completed_at = now()
@@ -398,6 +536,29 @@ export async function importValidatedConnector(params: {
          VALUES ($1,'importing','imported','imported',$2,$3,'system',$4)`,
         [connectorId, connector.attempt_count, JSON.stringify({ destinationSubmissionId: created.id }), claimant]
       );
+
+      // G3F: the ONE authoritative completed-attempt evidence row — records the exact validation run
+      // and fingerprint that authorised THIS destination (captured at completion time, resolving the
+      // stale-reservation ambiguity: even on a resumed reservation, run.id/fingerprint here are the
+      // freshly-reverified latest values, not whatever the old reservation row stored).
+      await appendImportAttempt(client, {
+        connectorId,
+        importMappingId: mappingId,
+        partnerOrganisationId: connector.tenant_id,
+        partnerSubmissionId: connector.partner_submission_id,
+        partnerHandoffId: connector.handoff_id,
+        validationRunId: run.id,
+        sourceFingerprint: fingerprint,
+        sourceFingerprintVersion: SOURCE_FINGERPRINT_VERSION,
+        attemptType,
+        claimant,
+        outcome: "completed",
+        safeErrorCode: null,
+        destinationSubmissionId: created.id,
+        startedAt: attemptStartedAt,
+      });
+
+      await hook("before_commit", { connectorId, claimant, mappingId, destinationSubmissionId: created.id });
 
       return {
         outcome: "imported",
@@ -435,6 +596,70 @@ export async function getConnectorImport(connectorId: string): Promise<Connector
       completedAt: r.completed_at,
       reconciledAt: r.reconciled_at,
     };
+  });
+}
+
+export interface ImportAttemptRecord {
+  id: string;
+  connectorRecordId: string;
+  importMappingId: string | null;
+  validationRunId: string | null;
+  sourceFingerprint: string | null;
+  sourceFingerprintVersion: number | null;
+  attemptNumber: number;
+  attemptType: string;
+  outcome: string;
+  safeErrorCode: string | null;
+  destinationSubmissionId: number | null;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+/**
+ * Read-only (G3F). Returns the full append-only import-attempt evidence chain for a connector, in
+ * chronological order — the unambiguous record of which validation run + fingerprint authorised each
+ * committed attempt. Available regardless of flag/emergency-stop, matching every other status read.
+ */
+export async function getImportAttempts(connectorId: string): Promise<ImportAttemptRecord[]> {
+  return guarded(async () => {
+    const { rows } = await connectorQuery<{
+      id: string;
+      connector_record_id: string;
+      import_mapping_id: string | null;
+      validation_run_id: string | null;
+      source_fingerprint: string | null;
+      source_fingerprint_version: number | null;
+      attempt_number: number;
+      attempt_type: string;
+      outcome: string;
+      safe_error_code: string | null;
+      destination_submission_id: number | null;
+      started_at: string;
+      completed_at: string | null;
+    }>(
+      `SELECT id, connector_record_id, import_mapping_id, validation_run_id, source_fingerprint,
+              source_fingerprint_version, attempt_number, attempt_type, outcome, safe_error_code,
+              destination_submission_id, started_at, completed_at
+         FROM partner_connector_import_attempts
+        WHERE connector_record_id = $1
+        ORDER BY attempt_number ASC`,
+      [connectorId]
+    );
+    return rows.map((r) => ({
+      id: r.id,
+      connectorRecordId: r.connector_record_id,
+      importMappingId: r.import_mapping_id,
+      validationRunId: r.validation_run_id,
+      sourceFingerprint: r.source_fingerprint,
+      sourceFingerprintVersion: r.source_fingerprint_version,
+      attemptNumber: r.attempt_number,
+      attemptType: r.attempt_type,
+      outcome: r.outcome,
+      safeErrorCode: r.safe_error_code,
+      destinationSubmissionId: r.destination_submission_id,
+      startedAt: r.started_at,
+      completedAt: r.completed_at,
+    }));
   });
 }
 
