@@ -213,6 +213,10 @@ describe("10. protected Stage-3 / grading files remain untouched", () => {
     // only, no protected surface, no API/session/permission change.
     "client/src/pages/grader.tsx",
     "client/src/pages/grader-login.tsx",
+    // Group 3.5 canonical Staff/Grader login unification (2026-07-19, same
+    // branch): shared var(--admin-*) tokens on /staff/login. Visual-shell-only,
+    // no protected surface, no auth-flow/endpoint/permission change.
+    "client/src/pages/staff-login.tsx",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {

@@ -217,6 +217,10 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     // only, no API/session/permission change (see grader filename note below).
     "client/src/pages/grader.tsx",
     "client/src/pages/grader-login.tsx",
+    // Group 3.5 canonical Staff/Grader login unification (2026-07-19, same
+    // branch): shared var(--admin-*) tokens on /staff/login. Visual-shell-only,
+    // no auth-flow/endpoint/permission change (not PROTECTED by the regex).
+    "client/src/pages/staff-login.tsx",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {
