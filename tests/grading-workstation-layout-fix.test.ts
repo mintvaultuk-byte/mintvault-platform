@@ -191,7 +191,11 @@ describe("10. protected Stage-3 / grading files remain untouched", () => {
     "client/src/components/grading-workflow/WorkstationPreviewAside.tsx",
     "client/src/components/admin/AdminHeaderRow.tsx",
     "client/src/pages/staff.tsx",
-      "client/src/components/grading-workflow/CertificateToolsDrawer.tsx",
+    "client/src/components/grading-workflow/CertificateToolsDrawer.tsx",
+    // production-regression correction pass (2026-07-19, same branch):
+    // /admin/staff Review-overlay + Manual Identity Override shell
+    // unification — layout/token-only, no protected surface.
+    "client/src/pages/admin-staff.tsx",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {

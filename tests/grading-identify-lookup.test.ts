@@ -30,7 +30,9 @@ describe("structured, actionable lookup errors (spec 4-5)", () => {
     expect(a.message.toLowerCase()).toMatch(/server|connection|reach/);
     expect(a.message.toLowerCase()).toContain("manually"); // manual fallback advertised
     // Also matches non-TypeError network strings (Firefox/Safari wording).
-    expect(classifyLookupError({ thrown: new Error("NetworkError when attempting to fetch resource") }).kind).toBe("network");
+    expect(classifyLookupError({ thrown: new Error("NetworkError when attempting to fetch resource") }).kind).toBe(
+      "network"
+    );
     expect(classifyLookupError({ thrown: new Error("Load failed") }).kind).toBe("network");
   });
   it("HTTP statuses map to distinct, actionable kinds", () => {
@@ -43,14 +45,29 @@ describe("structured, actionable lookup errors (spec 4-5)", () => {
     expect(classifyLookupError({ status: 502 }).kind).toBe("server");
   });
   it("a provider/invalid message can carry the server's specific reason", () => {
-    expect(classifyLookupError({ status: 400, body: { error: "Invalid set code format" } }).message).toContain("Invalid set code format");
-    expect(classifyLookupError({ status: 503, body: { error: "Card lookup is disabled" } }).message).toContain("disabled");
+    expect(classifyLookupError({ status: 400, body: { error: "Invalid set code format" } }).message).toContain(
+      "Invalid set code format"
+    );
+    expect(classifyLookupError({ status: 503, body: { error: "Card lookup is disabled" } }).message).toContain(
+      "disabled"
+    );
   });
 });
 
 describe("collector numbers keep prefixes & slashes (spec: TG/SV/GG/RC)", () => {
   it("the accepted-format regex allows prefixed / slashed / long / promo numbers", () => {
-    for (const n of ["TG12/TG30", "SV114/SV122", "GG44/GG70", "RC29/RC32", "001/198", "037/091", "4/102", "SWSH284", "SVP-114", "SV107"]) {
+    for (const n of [
+      "TG12/TG30",
+      "SV114/SV122",
+      "GG44/GG70",
+      "RC29/RC32",
+      "001/198",
+      "037/091",
+      "4/102",
+      "SWSH284",
+      "SVP-114",
+      "SV107",
+    ]) {
       expect(COLLECTOR_NUMBER_RE.test(n), n).toBe(true);
     }
     // still rejects junk / over-length / whitespace / separators that could break URLs.
@@ -84,7 +101,7 @@ describe("runIdentify surfaces classified errors, not raw 'Failed to fetch' (spe
     expect(fn).toContain("classifyLookupError({ status: res.status, body: data })"); // non-2xx
     // the old raw pattern is gone.
     expect(fn).not.toContain('throw new Error(data.error || "Identify failed")');
-    expect(fn).not.toContain('description: e.message'); // no raw browser message in the toast
+    expect(fn).not.toContain("description: e.message"); // no raw browser message in the toast
   });
   it("a genuine zero-result is a distinct, non-error path (not a transport failure)", () => {
     const fn = FORM.slice(FORM.indexOf("async function runIdentify"), FORM.indexOf("async function runTcgdexPrefill"));
@@ -97,7 +114,10 @@ describe("existing vs proposed vs accepted — stale data never shown as a resul
   it("the panel result summary renders the PROPOSED result, not raw form values", () => {
     // The verify chips come from identifyResult (the proposal), gated on it.
     expect(FORM).toMatch(/\{identifyResult \?/);
-    const summary = FORM.slice(FORM.indexOf('data-testid="ai-identify-summary"'), FORM.indexOf('data-testid="ai-existing-details"'));
+    const summary = FORM.slice(
+      FORM.indexOf('data-testid="ai-identify-summary"'),
+      FORM.indexOf('data-testid="ai-existing-details"')
+    );
     expect(summary).toContain("identifyResult.name");
     expect(summary).toContain("Proposed");
   });
@@ -107,7 +127,10 @@ describe("existing vs proposed vs accepted — stale data never shown as a resul
     expect(FORM).toContain("not a new result");
   });
   it("Accept is the ONLY place a proposed result overwrites populated fields", () => {
-    const accept = FORM.slice(FORM.indexOf('data-testid="button-accept-identify"') - 1600, FORM.indexOf('data-testid="button-accept-identify"'));
+    const accept = FORM.slice(
+      FORM.indexOf('data-testid="button-accept-identify"') - 1600,
+      FORM.indexOf('data-testid="button-accept-identify"')
+    );
     expect(accept).toContain("if (identifyResult)");
     expect(accept).toContain("cardName: identifyResult.name");
     // identify itself only fills blanks (never clobbers) — no unconditional overwrite.
@@ -170,6 +193,12 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     "client/src/components/admin/AdminHeaderRow.tsx",
     "client/src/pages/staff.tsx",
     "client/src/components/grading-workflow/CertificateToolsDrawer.tsx",
+    // production-regression correction pass (2026-07-19, same branch): Set
+    // Name grid/dropdown + Grade outer-containment fixes in
+    // certificate-form.tsx, Staff shell fix in staff.tsx, plus the
+    // /admin/staff Review-overlay + Manual Identity Override shell
+    // unification — layout/token-only, no protected surface.
+    "client/src/pages/admin-staff.tsx",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {
