@@ -69,3 +69,23 @@ already terminal.
 - No G4 operator UI exists yet to actually invoke these functions outside
   a test or a future direct script — they are correct, tested, callable
   TypeScript functions with no HTTP surface, matching G1–G3's own posture.
+- **Resuming a stale `reserved` mapping does not refresh its own
+  `validation_run_id`/`source_fingerprint`/`source_fingerprint_version`
+  columns.** Found independently by two review panels during this pass.
+  When `importValidatedConnector` resumes an existing `reserved` row for
+  the same connector (`connector-import-service.ts`'s reservation block),
+  it always re-verifies the source against the _latest_ validation run
+  before writing anything — so the destination submission itself is never
+  built from stale data, and the exactly-once guarantee is unaffected.
+  But the resumed mapping row's own provenance columns are immutable by
+  design (`partner_connector_runtime`'s column-level UPDATE grant on
+  `partner_connector_imports`, migration 0010, deliberately excludes
+  them — see IDEMPOTENCY-AND-TRANSACTION.md) and are never rewritten on
+  resume, so if a newer validation run existed between the original
+  (interrupted) reservation and the resume, the completed mapping row can
+  permanently record an older `validation_run_id`/fingerprint than the one
+  actually verified at completion time. This is an audit-trail accuracy
+  gap, not a safety gap — accepted as-is rather than widening a
+  deliberate immutability control without owner sign-off; a future pass
+  could either extend the grant narrowly for this one case or accept the
+  inaccuracy as documented here.

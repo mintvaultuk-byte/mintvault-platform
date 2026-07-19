@@ -4,14 +4,21 @@
  *
  * SCOPE NOTE (stated honestly, same posture G2/G3 already established for this programme): the
  * brief's literal workload is "100 validated connectors, 10 workers." This test runs 20 connectors
- * with full concurrency (effectively as many workers as the connector pool allows — see
- * PARTNER_CONNECTOR_DB_POOL_MAX in connector-db.ts, default 4, raised here via env for this test) —
- * scaled down for CI/session runtime, not because the guarantee being proven is scale-dependent: the
- * exactly-once mechanism is a database UNIQUE constraint plus a row lock, neither of which behaves
- * differently at 20 connectors vs 100. What DOES scale-test meaningfully here is genuine concurrent
- * contention on the SAME row (duplicate-retry storms, expired-claim reclaim races) — those are run
- * with more concurrent callers per row (5-8) than callers overall, which is the dimension that
- * actually stresses the locking/constraint behaviour.
+ * with full concurrency — scaled down for CI/session runtime, not because the CORRECTNESS guarantee
+ * being proven is scale-dependent: the exactly-once mechanism is a database UNIQUE constraint plus a
+ * row lock, neither of which behaves differently at 20 connectors vs 100. What DOES scale-test
+ * meaningfully here is genuine concurrent contention on the SAME row (duplicate-retry storms,
+ * expired-claim reclaim races) — those are run with more concurrent callers per row (5-8) than
+ * callers overall, which is the dimension that actually stresses the locking/constraint behaviour.
+ *
+ * WHAT THIS DOES NOT PROVE (independent review finding, disclosed rather than fixed by inflating the
+ * test): this run sets PARTNER_CONNECTOR_DB_POOL_MAX=16 for the connector pool — 4x
+ * connector-db.ts's own coded default (4), and there is no repository-visible confirmation of what
+ * the deployed value actually is. Correctness (the UNIQUE constraint + row lock) does not depend on
+ * pool size, but CONNECTION-POOL EXHAUSTION / QUEUEING behaviour under real contention is a distinct
+ * concern this test does not exercise — a genuine 100-connector/10-worker run against the real
+ * deployed pool size (and against a shared, not single-tenant, database) would be needed to validate
+ * that dimension. Not attempted here; flagged as a gap for a future pass, not silently assumed away.
  *
  * Runs ONLY when PARTNER_CONNECTOR_RECON_LOAD_RT_ADMIN + PARTNER_CONNECTOR_RECON_LOAD_RT_URL are set.
  */
@@ -276,7 +283,12 @@ async function seedReadyForImport(claimant: string): Promise<{ connectorId: stri
                 tenantId: A,
               })
               .then(() => ({ ok: true as const, connectorId: s.connectorId, claimant: `reclaimer-${i}-${j}` }))
-              .catch(() => ({ ok: false as const, connectorId: s.connectorId, claimant: `reclaimer-${i}-${j}` }))
+              .catch((err) => ({
+                ok: false as const,
+                connectorId: s.connectorId,
+                claimant: `reclaimer-${i}-${j}`,
+                code: err?.code as string | undefined,
+              }))
           )
         )
       );
@@ -284,7 +296,15 @@ async function seedReadyForImport(claimant: string): Promise<{ connectorId: stri
       for (let i = 0; i < N; i++) {
         const forThisConnector = reclaimResults.filter((r) => r.connectorId === seededList[i].connectorId);
         const winners = forThisConnector.filter((r) => r.ok);
-        expect(winners.length).toBeGreaterThanOrEqual(1);
+        // Exactly one winner, not "at least one" — the row lock + version predicate in
+        // claimConnectorRecord makes this a hard guarantee (see connector-service.ts), and this
+        // assertion must actually distinguish that from a hypothetical multi-winner regression.
+        expect(winners.length).toBe(1);
+        const losers = forThisConnector.filter((r) => !r.ok) as Array<{ ok: false; code?: string }>;
+        expect(losers).toHaveLength(2);
+        for (const loser of losers) {
+          expect(["already_claimed", "stale_claim"]).toContain(loser.code);
+        }
       }
 
       const winningClaims = await seedSequentially(N, async (i) => {
