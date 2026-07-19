@@ -66,7 +66,11 @@ describe("bar component + form wiring (source assertions)", () => {
   });
 
   it("the form renders the persistent bar + the four scroll anchors", () => {
-    expect(FORM).toContain("<GradingWorkflowBar");
+    // unified-shell pass: GradingWorkflowBar is rendered via the shared
+    // WorkstationHeaderStrip component (ONE render site for all four stages).
+    expect(FORM).toContain("<WorkstationHeaderStrip");
+    const stripSrc = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
+    expect(stripSrc).toContain("<GradingWorkflowBar");
     for (const key of ["identify", "rarity", "grade", "review"]) {
       expect(FORM).toContain(`data-workflow-stage="${key}"`);
     }

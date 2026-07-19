@@ -3,10 +3,9 @@ import { classifyLookupError } from "@/lib/lookup-errors";
 import { displayCollectorNumber } from "@shared/collector-number-format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
-import { GradingWorkflowBar } from "@/components/grading-workflow/GradingWorkflowBar";
-import { CardPreviewPanel } from "@/components/grading-workflow/CardPreviewPanel";
 import { ReviewSummary } from "@/components/grading-workflow/ReviewSummary";
-import { SessionHud } from "@/components/grading-workflow/SessionHud";
+import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
+import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
 import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
@@ -1608,51 +1607,47 @@ export default function CertificateForm({
           button is type="button" and handleSubmit no-ops pre-approval, so it can
           never trigger a form submit. */}
       <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row">
-        {wfStage <= 1 && (
-          <aside className="min-h-0 max-md:max-h-[55vh] md:w-[40%] md:shrink-0" data-testid="grading-preview-panel">
-            <CardPreviewPanel fill certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
-          </aside>
+        {/* Preview aside — the SHARED WorkstationPreviewAside primitive (one
+            component, one width/breakpoint constant) — renders for Card,
+            Rarity AND Review (wfStage 0, 1, 3).
+            ARCHITECTURE NOTE (unified-shell pass): Grade (wfStage 2)
+            deliberately does NOT use this aside. The protected
+            client/src/components/grading/grading-panel.tsx workstation
+            already renders its own interactive card image + defect-marking
+            tool with its OWN internal two-column split
+            (`grid-cols-1 lg:grid-cols-[60%_40%]`, image left / controls
+            right). Mounting this aside alongside it would either duplicate
+            the card image (explicitly out of scope) or squeeze that
+            protected grid into a much narrower width, degrading defect/
+            centering placement precision — a real functional regression to
+            the grading task, not a cosmetic one. Grade's workstationSlot is
+            therefore rendered directly into the shared control-panel column
+            at full width, using GradingPanel's OWN protected internal
+            geometry as its "preview left / controls right" equivalent. This
+            is a deliberate, evidence-based exception (see the architecture
+            report), not an oversight — Stage 3 internals are never touched. */}
+        {(wfStage <= 1 || wfStage === 3) && (
+          <WorkstationPreviewAside certificateId={certificate?.id ?? null} frontFile={frontImage} backFile={backImage} />
         )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel">
-          <div className="shrink-0 space-y-2">
-            {/* Combined workstation header strip — 4-stage workflow (left) + queue /
-                session stats (right). Moved out of the <form> into the fixed
-                control-panel header so it stays put while the form scrolls.
-                Display-only: no queue-order or session-calc change. Inner content
-                unchanged from the former strip. */}
-            <div
-              className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/95 px-2 py-1.5"
-              data-testid="workstation-strip"
-            >
-              <div className="min-w-0 flex-1">
-                <GradingWorkflowBar embedded currentIndex={workflowCurrent} maxReached={workflowMax} onStageClick={(i) => goToStage(i)} />
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px]" data-testid="batch-header">
-                {batch?.customer && (
-                  <span className="text-[var(--admin-ink)]" title="Customer">
-                    <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Cust</span> {batch.customer}
-                  </span>
-                )}
-                {batch?.submissionId && (
-                  <span className="text-[var(--admin-ink)]" title="Submission">
-                    <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Sub</span> {batch.submissionId}
-                  </span>
-                )}
-                {typeof batch?.remaining === "number" && (
-                  <span className="text-[var(--admin-ink)]" title="Remaining in batch">
-                    <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Left</span> {batch.remaining}
-                  </span>
-                )}
-                {queue && (
-                  <span className="font-bold tabular-nums text-[var(--admin-gold)]" data-testid="queue-progress" title="Position in the grading queue">
-                    {queue.position} / {queue.total}
-                  </span>
-                )}
-                <SessionHud embedded completed={sessionCompleted} />
-              </div>
-            </div>
+          <div className="shrink-0 space-y-1.5">
+            {/* Shared workstation header strip (WorkstationHeaderStrip) — 4-stage
+                workflow navigation + queue/session stats. ONE render site for
+                all four stages (outside the per-stage sections below), so
+                every stage sees byte-identical header geometry. Moved out of
+                the <form> into the fixed control-panel header so it stays put
+                while the form scrolls. Display-only: no queue-order or
+                session-calc change. */}
+            <WorkstationHeaderStrip
+              workflowCurrent={workflowCurrent}
+              workflowMax={workflowMax}
+              onStageClick={(i) => goToStage(i)}
+              batch={batch}
+              queue={queue}
+              sessionCompleted={sessionCompleted}
+            />
       {isEdit && certificate?.id && (
-        <details className="border border-[var(--admin-gold)]/15 rounded-lg bg-[var(--admin-gold)]/[0.02] mb-2" data-testid="identification-tools">
+        <details className="border border-[var(--admin-gold)]/15 rounded-lg bg-[var(--admin-gold)]/[0.02] mb-1.5" data-testid="identification-tools">
           <summary className="cursor-pointer list-none px-3 py-1.5 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:text-[var(--admin-gold)]">
             <Cpu size={12} /> Identification tools
             <span className="ml-auto text-[9px] font-normal normal-case text-[var(--admin-ink-faint)]">AI Identify · AI Grade</span>

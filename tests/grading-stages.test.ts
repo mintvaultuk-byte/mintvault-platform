@@ -93,17 +93,21 @@ describe("card preview is read-only (spec 3)", () => {
   });
   it("workspace places the read-only preview aside beside stage controls (MacBook split)", () => {
     // Fixed-height workstation shell: preview lives in a dedicated aside beside
-    // the control panel (stages 0/1 only), not a sticky column inside the form.
+    // the control panel, not a sticky column inside the form. unified-shell
+    // pass: the aside is now the shared WorkstationPreviewAside component.
     expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
-    expect(FORM).toContain("md:w-[40%] md:shrink-0");
-    expect(FORM).toContain('data-testid="grading-preview-panel"');
-    expect(FORM).toContain("<CardPreviewPanel");
+    expect(FORM).toContain("<WorkstationPreviewAside");
+    const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
+    expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
+    expect(asideSrc).toContain('data-testid="grading-preview-panel"');
+    expect(asideSrc).toContain("<CardPreviewPanel");
   });
 });
 
 describe("compact chips v2 + region-aware defaults (spec 5-6)", () => {
-  it("chips shrank again (~40px high, 84-124px wide)", () => {
-    expect(PICKER).toContain("min-h-[40px] min-w-[84px] max-w-[124px]");
+  it("chips shrank again (v5 hotfix: ~28px high, dense auto-fill grid)", () => {
+    expect(PICKER).toContain("min-h-[28px]");
+    expect(PICKER).toContain("RARITY_TILE_GRID");
   });
   it("modern-English quick list has no Japanese-only codes; eastern list has them", () => {
     const west = PICKER.slice(PICKER.indexOf("QUICK_RARITIES_WESTERN"), PICKER.indexOf("QUICK_RARITIES_EASTERN"));

@@ -150,6 +150,19 @@ describe("protected surfaces untouched (hard rule)", () => {
     // workflow.
     "client/src/components/rarity-picker/RaritySymbol.tsx",
     "client/src/components/grading-workflow/ReviewSummary.tsx",
+    // workflow-header overlap hotfix (same branch): stage nav + session-stats
+    // zoning only — no protected/server file involved.
+    "client/src/components/grading-workflow/GradingWorkflowBar.tsx",
+    // compact-header + Review-layout hotfix (same branch): session-stats
+    // sizing only — no protected/server file involved.
+    "client/src/components/grading-workflow/SessionHud.tsx",
+    // unified-shell architecture pass (same branch): new shared primitives +
+    // the pages/component that adopt them. Layout-only, no protected surface.
+    "client/src/components/grading-workflow/WorkstationHeaderStrip.tsx",
+    "client/src/components/grading-workflow/WorkstationPreviewAside.tsx",
+    "client/src/components/admin/AdminHeaderRow.tsx",
+    "client/src/pages/staff.tsx",
+    "client/src/components/grading-workflow/CertificateToolsDrawer.tsx",
   ]);
 
   it("the grading release (PR #214) changed NO grading-protected / schema / migration file", () => {

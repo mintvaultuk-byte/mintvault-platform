@@ -24,6 +24,30 @@ export function certificateToolsStatus(cert: CertificateRecord | null) {
   };
 }
 
+/**
+ * Compact Certificate Tools launcher — a single shared utility-button
+ * primitive so every caller renders the SAME small pill (never a large
+ * isolated top-right control) beside the certificate breadcrumb/title.
+ * Function/behaviour unchanged: opens the drawer above; status text only.
+ */
+export function CertificateToolsButton({ cert, onOpen }: { cert: CertificateRecord; onOpen: () => void }) {
+  const s = certificateToolsStatus(cert);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-testid="button-certificate-tools"
+      className="flex items-center gap-1.5 rounded-lg border border-[var(--admin-gold)]/30 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10 transition-colors"
+      title="Ownership + NFC (done after grading)"
+    >
+      Certificate Tools
+      <span className="text-[8px] font-normal normal-case text-[var(--admin-ink-faint)]">
+        {s.ownership} · {s.nfc}
+      </span>
+    </button>
+  );
+}
+
 export function CertificateToolsDrawer({
   cert,
   open,

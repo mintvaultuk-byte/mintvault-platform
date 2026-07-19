@@ -45,8 +45,10 @@ describe("1. read-only preview fills the panel (spec 1)", () => {
     expect(PREVIEW).not.toContain("max-h-[56vh]");
     expect(PREVIEW).not.toContain("max-h-[44vh]");
     expect(PREVIEW).toContain("80vh"); // fullscreen still available for inspection
-    // the workstation aside opts in to fill
-    expect(FORM).toContain("<CardPreviewPanel fill");
+    // the workstation aside opts in to fill — now via the shared
+    // WorkstationPreviewAside primitive (extracted from certificate-form.tsx).
+    const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
+    expect(asideSrc).toContain("<CardPreviewPanel fill");
   });
   it("keeps front/back, button zoom, fit/reset, fullscreen controls", () => {
     expect(PREVIEW).toContain('(["front", "back"] as const)');
@@ -110,19 +112,27 @@ describe("2/3. Year + Language share one 4-column row (spec 2)", () => {
 });
 
 describe("4. one combined workflow/session/queue strip (spec 3)", () => {
-  const STRIP = slice(FORM, 'data-testid="workstation-strip"', "text-autosave-status-mini");
-  it("a single workstation-strip wraps the workflow bar + queue + session HUD", () => {
-    expect(FORM).toContain('data-testid="workstation-strip"');
-    expect(STRIP).toContain("<GradingWorkflowBar embedded");
-    expect(STRIP).toContain('data-testid="queue-progress"');
-    expect(STRIP).toContain("<SessionHud embedded");
-    expect(STRIP).toContain('data-testid="batch-header"');
+  // unified-shell pass: the strip is now the shared WorkstationHeaderStrip
+  // component, rendered from exactly ONE call site in certificate-form.tsx.
+  const STRIP_SRC = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
+  it("a single WorkstationHeaderStrip wraps the workflow bar + queue + session HUD", () => {
+    expect(FORM).toContain("<WorkstationHeaderStrip");
+    expect((FORM.match(/<WorkstationHeaderStrip/g) ?? []).length).toBe(1);
+    expect(STRIP_SRC).toContain('data-testid="workstation-strip"');
+    expect(STRIP_SRC).toContain("<GradingWorkflowBar embedded");
+    expect(STRIP_SRC).toContain('data-testid="queue-progress"');
+    expect(STRIP_SRC).toContain("<SessionHud embedded");
+    expect(STRIP_SRC).toContain('data-testid="batch-header"');
   });
   it("the three former separate strips are gone (no standalone SessionHud / bordered batch row)", () => {
     // No non-embedded SessionHud usage remains, and the workflow bar is embedded.
-    expect(FORM).not.toMatch(/<SessionHud completed=\{sessionCompleted\} \/>/);
-    expect((FORM.match(/<GradingWorkflowBar/g) ?? []).length).toBe(1);
-    expect(FORM).toContain("<GradingWorkflowBar embedded");
+    expect(STRIP_SRC).not.toMatch(/<SessionHud completed=\{sessionCompleted\} \/>/);
+    expect((STRIP_SRC.match(/<GradingWorkflowBar/g) ?? []).length).toBe(1);
+    expect(STRIP_SRC).toContain("<GradingWorkflowBar embedded");
+    // certificate-form.tsx no longer imports these directly — it delegates to
+    // the shared strip component instead.
+    expect(FORM).not.toContain('import { GradingWorkflowBar } from "@/components/grading-workflow/GradingWorkflowBar"');
+    expect(FORM).not.toContain('import { SessionHud } from "@/components/grading-workflow/SessionHud"');
   });
   it("workflow bar + HUD support an embedded (chrome-less) variant", () => {
     expect(BAR).toContain("embedded");
@@ -166,8 +176,14 @@ describe("9. Search TCG is a compact button, behaviour unchanged (spec 5)", () =
 
 describe("10/11. Certificate Tools + Ownership/NFC unchanged (spec 7)", () => {
   it("Certificate Tools launcher + drawer remain wired in admin-dashboard", () => {
-    expect(DASH).toContain('data-testid="button-certificate-tools"');
+    // unified-shell pass: the launcher button itself is now the shared
+    // CertificateToolsButton primitive (CertificateToolsDrawer.tsx) — verify
+    // admin-dashboard.tsx renders it, and the button itself still carries the
+    // same testid/behaviour.
+    expect(DASH).toContain("<CertificateToolsButton");
     expect(DASH).toContain("<CertificateToolsDrawer");
+    const drawerSrc = read("client/src/components/grading-workflow/CertificateToolsDrawer.tsx");
+    expect(drawerSrc).toContain('data-testid="button-certificate-tools"');
   });
   it("Ownership/NFC are NOT rendered inline beneath the grading form", () => {
     expect(DASH).not.toMatch(/<OwnershipSection\b/);
@@ -222,6 +238,13 @@ describe("15-20. protected surfaces, providers, credits", () => {
       "client/src/components/grading-workflow/ReviewSummary.tsx",
       "shared/pokemon-rarity-catalogue.ts",
       "shared/collector-number-format.ts",
+      // unified-shell architecture pass (same branch): new shared primitives +
+      // the pages/component that adopt them. Layout-only, no protected surface.
+      "client/src/components/grading-workflow/WorkstationHeaderStrip.tsx",
+      "client/src/components/grading-workflow/WorkstationPreviewAside.tsx",
+      "client/src/components/admin/AdminHeaderRow.tsx",
+      "client/src/pages/staff.tsx",
+      "client/src/components/grading-workflow/CertificateToolsDrawer.tsx",
     ]);
     for (const f of changed) {
       expect(f, `${f} must not be a protected/server/schema file`).not.toMatch(

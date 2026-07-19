@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import GradingPanel from "../components/grading/grading-panel";
 import InstallAppButton from "../components/install-app-button";
 import { PrintingConsole } from "./admin-printing";
+import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
 
 /**
  * Unified staff dashboard. Renders ONLY the tabs the logged-in person's
@@ -66,29 +67,43 @@ export default function StaffPage() {
   const tabs = allTabs.filter((t) => t.on);
 
   return (
-    <div className="min-h-screen bg-black text-[#E8E4DC]">
-      <header className="flex items-center justify-between px-5 py-3 border-b border-[#D4AF37]/20">
-        <div className="flex items-center gap-4">
-          <h1 className="text-[#D4AF37] font-extrabold tracking-wide">MintVault — Staff</h1>
-          <nav className="flex gap-1">
-            {tabs.map((t) => (
+    <div className="min-h-screen bg-[var(--admin-bg)] text-[var(--admin-ink)]">
+      {/* Same shared AdminHeaderRow primitive as the Super Admin dashboard and
+          grading workstation (breadcrumb/title left, compact actions right) —
+          Staff keeps its own tab nav and permission-gated content entirely;
+          only the outer row rhythm + design tokens are shared. */}
+      <header className="border-b border-[var(--admin-line)] px-3 py-2">
+        <AdminHeaderRow
+          testId="staff-header"
+          left={
+            <>
+              <h1 className="text-[var(--admin-gold)] text-sm font-extrabold tracking-wide">MintVault — Staff</h1>
+              <nav className="flex gap-1">
+                {tabs.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setTab(t.id)}
+                    className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg ${tab === t.id ? "bg-[var(--admin-gold)] text-[#1A1400]" : "border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10"}`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </nav>
+            </>
+          }
+          right={
+            <>
+              <InstallAppButton className="border border-[var(--admin-gold)]/30 rounded-lg px-2 py-1 text-[10px] hover:bg-[var(--admin-gold)]/10" />
+              <span className="text-[10px] text-[var(--admin-ink-faint)]">{email}</span>
               <button
-                key={t.id}
-                onClick={() => setTab(t.id)}
-                className={`text-xs px-3 py-1 rounded ${tab === t.id ? "bg-[#D4AF37] text-[#1A1400] font-bold" : "border border-[#D4AF37]/30 hover:bg-[#D4AF37]/10"}`}
+                onClick={logout}
+                className="border border-[var(--admin-gold)]/30 rounded-lg px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10"
               >
-                {t.label}
+                Sign out
               </button>
-            ))}
-          </nav>
-        </div>
-        <div className="flex items-center gap-3 text-xs">
-          <InstallAppButton className="border border-[#D4AF37]/30 rounded px-3 py-1 hover:bg-[#D4AF37]/10" />
-          <span className="text-[#E8E4DC]/60">{email}</span>
-          <button onClick={logout} className="border border-[#D4AF37]/30 rounded px-3 py-1 hover:bg-[#D4AF37]/10">
-            Sign out
-          </button>
-        </div>
+            </>
+          }
+        />
       </header>
       {tab === "grade" && <GradeTab />}
       {tab === "scan" && <ScanTab />}

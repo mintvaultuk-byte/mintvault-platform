@@ -75,7 +75,7 @@ const QUICK_PROMOS = ["black_star_promo", "trainer_gallery", "galarian_gallery"]
 function usePersistentList(
   key: string,
   controlled: string[] | undefined,
-  onControlledChange: ((next: string[]) => void) | undefined,
+  onControlledChange: ((next: string[]) => void) | undefined
 ): [string[], (next: string[]) => void] {
   const [local, setLocal] = useState<string[]>(() => {
     try {
@@ -109,6 +109,10 @@ function usePersistentList(
 // the stored value, so several different custom rarities can each be added
 // and re-selected without ever touching the database. ──────────────────────
 const CUSTOM_RARITY_VALUE = "custom_unlisted";
+
+// Dense, compact grid for rarity tiles — fits significantly more options on
+// screen at once than the previous flex-wrap of oversized cards.
+const RARITY_TILE_GRID = "grid grid-cols-[repeat(auto-fill,minmax(88px,1fr))] gap-1";
 
 type CustomSymbolType = "black" | "silver" | "gold" | "text_only" | "no_symbol";
 const CUSTOM_SYMBOL_TYPES: { value: CustomSymbolType; label: string }[] = [
@@ -258,21 +262,30 @@ export function RarityVariantPicker({
   // via a custom chip (below) or the "Add missing rarity" form, never as a bare
   // unlabelled catalogue entry mixed in with real printed rarities.
   const base = useMemo(
-    () => filterRarities({ language, era: showAll ? null : era || null }).filter((r) => r.value !== CUSTOM_RARITY_VALUE),
-    [language, era, showAll],
+    () =>
+      filterRarities({ language, era: showAll ? null : era || null }).filter((r) => r.value !== CUSTOM_RARITY_VALUE),
+    [language, era, showAll]
   );
-  const quickList = (languageByValueOrLabel(language)?.region ?? "western") === "western" ? QUICK_RARITIES_WESTERN : QUICK_RARITIES_EASTERN;
+  const quickList =
+    (languageByValueOrLabel(language)?.region ?? "western") === "western"
+      ? QUICK_RARITIES_WESTERN
+      : QUICK_RARITIES_EASTERN;
   const quickRarities = useMemo(
-    () => quickList.map(rarityByValue).filter((r): r is PokemonRarity => Boolean(r) && base.some((b) => b.value === r!.value)),
+    () =>
+      quickList
+        .map(rarityByValue)
+        .filter((r): r is PokemonRarity => Boolean(r) && base.some((b) => b.value === r!.value)),
     // quickList derives from `language`, so language stands in for it here.
-    [base, language],
+    [base, language]
   );
   const moreRarities = useMemo(() => {
     const quickSet = new Set(quickRarities.map((r) => r.value));
     const inRegion = base.filter((r) => !quickSet.has(r.value));
     // Everything else in the catalogue (all regions/eras) so nothing is ever
     // permanently hidden when set data is incomplete — region set shown first.
-    const otherRegion = POKEMON_RARITIES.filter((r) => r.value !== CUSTOM_RARITY_VALUE && !quickSet.has(r.value) && !base.some((b) => b.value === r.value));
+    const otherRegion = POKEMON_RARITIES.filter(
+      (r) => r.value !== CUSTOM_RARITY_VALUE && !quickSet.has(r.value) && !base.some((b) => b.value === r.value)
+    );
     return [...inRegion, ...otherRegion];
   }, [base, quickRarities]);
 
@@ -280,7 +293,7 @@ export function RarityVariantPicker({
 
   const structured = useMemo(
     () => buildStructuredVariant({ language, era: era || null, rarity, finish, promoOrSubset }),
-    [language, era, rarity, finish, promoOrSubset],
+    [language, era, rarity, finish, promoOrSubset]
   );
   useEffect(() => {
     onChange?.(structured);
@@ -297,7 +310,7 @@ export function RarityVariantPicker({
         era: structured.era,
         legacyVariant: legacyVariant ?? null,
       }),
-    [structured, legacyVariant],
+    [structured, legacyVariant]
   );
 
   const pickRarity = (v: string) => {
@@ -320,7 +333,15 @@ export function RarityVariantPicker({
   };
 
   function resetAddForm() {
-    setAddForm({ displayName: "", code: "", symbolDescription: "", symbolType: "black", starCount: "", category: "custom_other", note: "" });
+    setAddForm({
+      displayName: "",
+      code: "",
+      symbolDescription: "",
+      symbolType: "black",
+      starCount: "",
+      category: "custom_other",
+      note: "",
+    });
     setAddError(null);
   }
 
@@ -332,7 +353,9 @@ export function RarityVariantPicker({
     }
     const code = addForm.code.trim().toUpperCase();
     const starCount = addForm.starCount.trim() ? Math.max(1, Math.min(5, parseInt(addForm.starCount, 10) || 1)) : null;
-    const dedupeKey = [normCustom(displayName), normCustom(code), addForm.symbolType, String(starCount ?? "")].join("|");
+    const dedupeKey = [normCustom(displayName), normCustom(code), addForm.symbolType, String(starCount ?? "")].join(
+      "|"
+    );
     // Prevent accidental duplicates: same normalised name + code + symbol
     // combination re-selects the EXISTING entry instead of creating a new one.
     const existing = customRarities.find((c) => c.dedupeKey === dedupeKey);
@@ -376,17 +399,19 @@ export function RarityVariantPicker({
         onClick={() => pickRarity(rr.value)}
         title={`${rr.label} — ${rr.description}`}
         data-testid={`rarity-chip-${rr.value}`}
-        className={`group relative flex min-h-[40px] min-w-[84px] max-w-[124px] items-center gap-1 rounded-md border px-1.5 py-0.5 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${
+        className={`group relative flex min-h-[28px] min-w-0 items-center gap-1 rounded-md border px-1 py-0.5 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${
           selected
             ? "border-amber-400 bg-amber-500/25 ring-2 ring-amber-400 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]"
             : "border-slate-700 bg-slate-900/60 hover:border-amber-400/50 hover:bg-slate-800/70"
         }`}
       >
-        <RaritySymbol symbol={rr.symbol} size={17} />
+        <RaritySymbol symbol={rr.symbol} size={20} />
         {/* Code prominent, readable name beneath (beginner-friendly, matches the
             workstation reference: "IR" over "Illustration Rare"). */}
         <span className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-[11px] font-bold uppercase tracking-wide text-slate-100">{rr.codes[0] || rr.label}</span>
+          <span className="truncate text-[11px] font-bold uppercase tracking-wide text-slate-100">
+            {rr.codes[0] || rr.label}
+          </span>
           <span className="truncate text-[9px] font-normal text-slate-400">{rr.label}</span>
         </span>
         <span
@@ -422,15 +447,17 @@ export function RarityVariantPicker({
         onClick={() => pickCustomRarity(entry)}
         title={entry.composedNote}
         data-testid={`rarity-chip-custom-${entry.id}`}
-        className={`group relative flex min-h-[40px] min-w-[84px] max-w-[124px] items-center gap-1 rounded-md border px-1.5 py-0.5 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${
+        className={`group relative flex min-h-[28px] min-w-0 items-center gap-1 rounded-md border px-1 py-0.5 text-left transition outline-none focus-visible:ring-2 focus-visible:ring-amber-300 ${
           selected
             ? "border-amber-400 bg-amber-500/25 ring-2 ring-amber-400 shadow-[0_0_0_1px_rgba(251,191,36,0.35)]"
             : "border-dashed border-slate-600 bg-slate-900/60 hover:border-amber-400/50 hover:bg-slate-800/70"
         }`}
       >
-        <RaritySymbol symbol={symbol} size={17} />
+        <RaritySymbol symbol={symbol} size={20} />
         <span className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-[11px] font-bold uppercase tracking-wide text-slate-100">{entry.code || entry.displayName}</span>
+          <span className="truncate text-[11px] font-bold uppercase tracking-wide text-slate-100">
+            {entry.code || entry.displayName}
+          </span>
           <span className="truncate text-[9px] font-normal text-slate-400">{entry.displayName}</span>
         </span>
       </button>
@@ -443,7 +470,7 @@ export function RarityVariantPicker({
   const pill = <T extends { value: string; label: string; description?: string }>(
     item: T,
     active: boolean,
-    onPick: () => void,
+    onPick: () => void
   ) => (
     <button
       key={item.value}
@@ -522,7 +549,7 @@ export function RarityVariantPicker({
       {search && (
         <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-2" data-testid="rarity-search-results">
           <div className="mb-1 text-[11px] font-semibold text-slate-400">Search results</div>
-          <div className="flex flex-wrap gap-2">{search.rarities.map(chip)}</div>
+          <div className={RARITY_TILE_GRID}>{search.rarities.map(chip)}</div>
           <div className="mt-2 flex flex-wrap gap-2">
             {search.finishes.map((x) => pill(x, finish === x.value, () => setFinish(x.value)))}
             {search.promos.map((x) => pill(x, promoOrSubset === x.value, () => setPromoOrSubset(x.value)))}
@@ -535,13 +562,13 @@ export function RarityVariantPicker({
           {favouriteRarities.length > 0 && (
             <div>
               <div className="mb-1 text-[11px] font-semibold text-amber-300/80">★ Favourites</div>
-              <div className="flex flex-wrap gap-2">{favouriteRarities.map(chip)}</div>
+              <div className={RARITY_TILE_GRID}>{favouriteRarities.map(chip)}</div>
             </div>
           )}
           {recentRarities.length > 0 && (
             <div>
               <div className="mb-1 text-[11px] font-semibold text-slate-400">Recently used</div>
-              <div className="flex flex-wrap gap-2" data-testid="rarity-recent">
+              <div className={RARITY_TILE_GRID} data-testid="rarity-recent">
                 {recentRarities.map(chip)}
               </div>
             </div>
@@ -553,17 +580,28 @@ export function RarityVariantPicker({
       {!search && (
         <div>
           <div className="mb-1.5 flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Choose the symbol printed on the card</span>
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Choose the symbol printed on the card
+            </span>
             <label className="flex items-center gap-1 text-[10px] text-slate-400">
-              <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} data-testid="rarity-show-all" />
+              <input
+                type="checkbox"
+                checked={showAll}
+                onChange={(e) => setShowAll(e.target.checked)}
+                data-testid="rarity-show-all"
+              />
               Show all options
             </label>
           </div>
-          <div className="flex flex-wrap gap-1">{quickRarities.map(chip)}</div>
+          <div className={RARITY_TILE_GRID}>{quickRarities.map(chip)}</div>
           {customRarities.length > 0 && (
             <div className="mt-2">
-              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Custom / added by you</div>
-              <div className="flex flex-wrap gap-1" data-testid="rarity-custom-list">{customRarities.map(customChip)}</div>
+              <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                Custom / added by you
+              </div>
+              <div className={RARITY_TILE_GRID} data-testid="rarity-custom-list">
+                {customRarities.map(customChip)}
+              </div>
             </div>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -589,11 +627,14 @@ export function RarityVariantPicker({
               + Add missing rarity
             </button>
           </div>
-          {showMore && <div className="mt-2 flex flex-wrap gap-1 opacity-90">{moreRarities.map(chip)}</div>}
+          {showMore && <div className={`mt-2 opacity-90 ${RARITY_TILE_GRID}`}>{moreRarities.map(chip)}</div>}
           {/* Selected-item info line — the description lives here, not on every
               tile, and is never truncated so long descriptions stay readable. */}
           {selectedRarity && selectedRarity.value === CUSTOM_RARITY_VALUE && selectedCustom ? (
-            <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-800/40 bg-amber-950/10 px-2 py-1.5" data-testid="rarity-selected-info">
+            <div
+              className="mt-2 flex items-start gap-2 rounded-lg border border-amber-800/40 bg-amber-950/10 px-2 py-1.5"
+              data-testid="rarity-selected-info"
+            >
               <RaritySymbol symbol={buildCustomSymbol(selectedCustom.symbolType, selectedCustom.starCount)} size={18} />
               <span className="text-[11px] leading-tight text-slate-300">
                 <b className="text-slate-100">{selectedCustom.displayName}</b>
@@ -602,7 +643,10 @@ export function RarityVariantPicker({
             </div>
           ) : (
             selectedRarity && (
-              <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-800/40 bg-amber-950/10 px-2 py-1.5" data-testid="rarity-selected-info">
+              <div
+                className="mt-2 flex items-start gap-2 rounded-lg border border-amber-800/40 bg-amber-950/10 px-2 py-1.5"
+                data-testid="rarity-selected-info"
+              >
                 <RaritySymbol symbol={selectedRarity.symbol} size={18} />
                 <span className="text-[11px] leading-tight text-slate-300">
                   <b className="text-slate-100">{selectedRarity.label}</b>
@@ -636,9 +680,13 @@ export function RarityVariantPicker({
 
       {/* 3 · Promo / Subset */}
       <div>
-        <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Does the card have a promo or gallery mark?</div>
+        <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          Does the card have a promo or gallery mark?
+        </div>
         <div className="flex flex-wrap gap-1.5">
-          {quickPromos.map((x) => pill(x, promoOrSubset === x.value, () => setPromoOrSubset(promoOrSubset === x.value ? null : x.value)))}
+          {quickPromos.map((x) =>
+            pill(x, promoOrSubset === x.value, () => setPromoOrSubset(promoOrSubset === x.value ? null : x.value))
+          )}
         </div>
         <button
           type="button"
@@ -649,14 +697,19 @@ export function RarityVariantPicker({
         </button>
         {showMorePromo && (
           <div className="mt-2 flex flex-wrap gap-2 opacity-90">
-            {morePromos.map((x) => pill(x, promoOrSubset === x.value, () => setPromoOrSubset(promoOrSubset === x.value ? null : x.value)))}
+            {morePromos.map((x) =>
+              pill(x, promoOrSubset === x.value, () => setPromoOrSubset(promoOrSubset === x.value ? null : x.value))
+            )}
           </div>
         )}
       </div>
 
       {/* Warnings (Phase 9) — soft, non-blocking */}
       {validation.warnings.length > 0 && (
-        <div className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-2 text-[11px] text-amber-200" data-testid="rarity-warnings">
+        <div
+          className="rounded-lg border border-amber-700/50 bg-amber-950/20 p-2 text-[11px] text-amber-200"
+          data-testid="rarity-warnings"
+        >
           {validation.warnings.map((w, i) => (
             <div key={i}>⚠️ {w}</div>
           ))}
@@ -665,7 +718,10 @@ export function RarityVariantPicker({
 
       {/* Compact one-line summary + expandable details, clearly disclaimed */}
       <div className="rounded-lg border border-amber-800/40 bg-amber-950/10 px-2.5 py-1.5" data-testid="rarity-preview">
-        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-slate-200" data-testid="rarity-preview-line">
+        <div
+          className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-slate-200"
+          data-testid="rarity-preview-line"
+        >
           <span>{languageByValueOrLabel(structured.language)?.label ?? "—"}</span>
           {structured.era && <span>· {POKEMON_ERAS.find((e) => e.value === structured.era)?.label}</span>}
           {rarity && (
@@ -674,45 +730,59 @@ export function RarityVariantPicker({
             </span>
           )}
           <span>· {structured.finish ? finishByValue(structured.finish)?.label : "No finish"}</span>
-          <span>· {structured.promo ? promoByValue(structured.promo)?.label : structured.subset ? promoByValue(structured.subset)?.label : "No promo"}</span>
+          <span>
+            ·{" "}
+            {structured.promo
+              ? promoByValue(structured.promo)?.label
+              : structured.subset
+                ? promoByValue(structured.subset)?.label
+                : "No promo"}
+          </span>
         </div>
-        <div className="mt-0.5 text-[9px] uppercase tracking-wide text-amber-300/60">Preview only — printed label unchanged</div>
+        <div className="mt-0.5 text-[9px] uppercase tracking-wide text-amber-300/60">
+          Preview only — printed label unchanged
+        </div>
         <details className="mt-1">
-        <summary className="cursor-pointer text-[10px] text-slate-400 hover:text-slate-200">View details</summary>
-        <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-300 sm:grid-cols-3">
-          <div>
-            Language: <b className="text-slate-100">{languageByValueOrLabel(structured.language)?.label ?? "—"}</b>
+          <summary className="cursor-pointer text-[10px] text-slate-400 hover:text-slate-200">View details</summary>
+          <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-300 sm:grid-cols-3">
+            <div>
+              Language: <b className="text-slate-100">{languageByValueOrLabel(structured.language)?.label ?? "—"}</b>
+            </div>
+            <div>
+              Region: <b className="text-slate-100">{structured.region}</b>
+            </div>
+            <div>
+              Era:{" "}
+              <b className="text-slate-100">
+                {structured.era ? POKEMON_ERAS.find((e) => e.value === structured.era)?.label : "—"}
+              </b>
+            </div>
+            <div className="flex items-center gap-1.5">
+              Rarity:{" "}
+              {rarity ? (
+                <>
+                  <RaritySymbol symbol={rarityByValue(rarity)!.symbol} size={18} />
+                  <b className="text-slate-100">{rarityByValue(rarity)!.label}</b>
+                </>
+              ) : (
+                <span className="text-slate-500">—</span>
+              )}
+            </div>
+            <div>
+              Symbol colour: <b className="text-slate-100">{structured.symbolColour}</b>
+            </div>
+            <div>
+              Finish:{" "}
+              <b className="text-slate-100">{structured.finish ? finishByValue(structured.finish)?.label : "—"}</b>
+            </div>
+            <div>
+              Promo: <b className="text-slate-100">{structured.promo ? promoByValue(structured.promo)?.label : "—"}</b>
+            </div>
+            <div>
+              Subset:{" "}
+              <b className="text-slate-100">{structured.subset ? promoByValue(structured.subset)?.label : "—"}</b>
+            </div>
           </div>
-          <div>
-            Region: <b className="text-slate-100">{structured.region}</b>
-          </div>
-          <div>
-            Era: <b className="text-slate-100">{structured.era ? POKEMON_ERAS.find((e) => e.value === structured.era)?.label : "—"}</b>
-          </div>
-          <div className="flex items-center gap-1.5">
-            Rarity:{" "}
-            {rarity ? (
-              <>
-                <RaritySymbol symbol={rarityByValue(rarity)!.symbol} size={18} />
-                <b className="text-slate-100">{rarityByValue(rarity)!.label}</b>
-              </>
-            ) : (
-              <span className="text-slate-500">—</span>
-            )}
-          </div>
-          <div>
-            Symbol colour: <b className="text-slate-100">{structured.symbolColour}</b>
-          </div>
-          <div>
-            Finish: <b className="text-slate-100">{structured.finish ? finishByValue(structured.finish)?.label : "—"}</b>
-          </div>
-          <div>
-            Promo: <b className="text-slate-100">{structured.promo ? promoByValue(structured.promo)?.label : "—"}</b>
-          </div>
-          <div>
-            Subset: <b className="text-slate-100">{structured.subset ? promoByValue(structured.subset)?.label : "—"}</b>
-          </div>
-        </div>
         </details>
       </div>
 
@@ -732,13 +802,18 @@ export function RarityVariantPicker({
           >
             <div className="flex items-center justify-between">
               <p className="text-xs font-bold uppercase tracking-widest text-slate-100">Add missing rarity</p>
-              <button type="button" onClick={() => setShowAddRarity(false)} className="text-slate-400 hover:text-slate-200" aria-label="Close">
+              <button
+                type="button"
+                onClick={() => setShowAddRarity(false)}
+                className="text-slate-400 hover:text-slate-200"
+                aria-label="Close"
+              >
                 ✕
               </button>
             </div>
             <p className="text-[10px] text-slate-400">
-              For a genuine printed rarity that isn’t in the list yet. This does not change the standard taxonomy —
-              it stores your description alongside the certificate.
+              For a genuine printed rarity that isn’t in the list yet. This does not change the standard taxonomy — it
+              stores your description alongside the certificate.
             </p>
 
             <label className="block">
@@ -781,7 +856,9 @@ export function RarityVariantPicker({
             </div>
 
             <label className="block">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Symbol description</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Symbol description
+              </span>
               <input
                 type="text"
                 value={addForm.symbolDescription}
@@ -794,7 +871,9 @@ export function RarityVariantPicker({
 
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Symbol colour/type</span>
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                  Symbol colour/type
+                </span>
                 <select
                   value={addForm.symbolType}
                   onChange={(e) => setAddForm((f) => ({ ...f, symbolType: e.target.value as CustomSymbolType }))}
@@ -826,7 +905,9 @@ export function RarityVariantPicker({
             </div>
 
             <label className="block">
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Internal note (optional)</span>
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                Internal note (optional)
+              </span>
               <textarea
                 value={addForm.note}
                 onChange={(e) => setAddForm((f) => ({ ...f, note: e.target.value }))}

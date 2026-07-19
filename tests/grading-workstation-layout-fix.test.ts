@@ -105,7 +105,10 @@ describe("5. the read-only preview has NO wheel-zoom handler", () => {
 describe("6. desktop shell is a real two-column layout at desktop breakpoints", () => {
   it("the panels row becomes a two-column flex-row at md+ (engages on real laptops)", () => {
     expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
-    expect(FORM).toContain("md:w-[40%] md:shrink-0");
+    // unified-shell pass: the column-ratio class now lives in the shared
+    // WorkstationPreviewAside component.
+    const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
+    expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
     // the old lg-only breakpoint (which collapsed below 1024px) is gone.
     expect(FORM).not.toContain("gap-3 lg:flex-row");
   });
@@ -140,20 +143,22 @@ describe("8. no top-level workstation container traps page scrolling", () => {
 });
 
 describe("9. the workflow strip is in the controls column, not beneath the preview", () => {
-  it("workstation-strip + embedded workflow bar live inside the control panel header", () => {
+  it("WorkstationHeaderStrip (with the embedded workflow bar) lives inside the control panel header", () => {
     const controlHeader = slice(FORM, 'data-testid="grading-control-panel"', "onSubmit={handleSubmit}");
-    expect(controlHeader).toContain('data-testid="workstation-strip"');
-    expect(controlHeader).toContain("<GradingWorkflowBar embedded");
+    expect(controlHeader).toContain("<WorkstationHeaderStrip");
+    const stripSrc = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
+    expect(stripSrc).toContain('data-testid="workstation-strip"');
+    expect(stripSrc).toContain("<GradingWorkflowBar embedded");
   });
   it("preview aside and control panel are siblings in the same md flex-row (strip not under a full-width preview)", () => {
     const row = slice(FORM, "flex min-h-0 flex-1 flex-col gap-3 md:flex-row", "onSubmit={handleSubmit}");
-    expect(row).toContain('data-testid="grading-preview-panel"');
+    expect(row).toContain("<WorkstationPreviewAside");
     expect(row).toContain('data-testid="grading-control-panel"');
     // the strip sits AFTER the control-panel opening — i.e. in the right column,
     // not above/under both columns.
-    const asideIdx = row.indexOf('data-testid="grading-preview-panel"');
+    const asideIdx = row.indexOf("<WorkstationPreviewAside");
     const panelIdx = row.indexOf('data-testid="grading-control-panel"');
-    const stripIdx = row.indexOf('data-testid="workstation-strip"');
+    const stripIdx = row.indexOf("<WorkstationHeaderStrip");
     expect(asideIdx).toBeGreaterThan(-1);
     expect(panelIdx).toBeGreaterThan(asideIdx);
     expect(stripIdx).toBeGreaterThan(panelIdx);
@@ -174,6 +179,19 @@ describe("10. protected Stage-3 / grading files remain untouched", () => {
     "client/src/components/rarity-picker/RarityVariantPicker.tsx",
     "client/src/components/rarity-picker/RaritySymbol.tsx",
     "client/src/components/grading-workflow/ReviewSummary.tsx",
+    // workflow-header overlap hotfix (same branch): stage nav + session-stats
+    // zoning only — no protected/server file involved.
+    "client/src/components/grading-workflow/GradingWorkflowBar.tsx",
+    // compact-header + Review-layout hotfix (same branch): session-stats sizing
+    // only — no protected/server file involved.
+    "client/src/components/grading-workflow/SessionHud.tsx",
+    // unified-shell architecture pass (same branch): new shared primitives +
+    // the pages/component that adopt them. Layout-only, no protected surface.
+    "client/src/components/grading-workflow/WorkstationHeaderStrip.tsx",
+    "client/src/components/grading-workflow/WorkstationPreviewAside.tsx",
+    "client/src/components/admin/AdminHeaderRow.tsx",
+    "client/src/pages/staff.tsx",
+      "client/src/components/grading-workflow/CertificateToolsDrawer.tsx",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {

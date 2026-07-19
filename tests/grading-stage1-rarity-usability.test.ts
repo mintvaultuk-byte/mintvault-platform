@@ -46,12 +46,8 @@ function contrastRatio(hexA: string, hexB: string): number {
   const [l1, l2] = [relLuminance(hexA), relLuminance(hexB)].sort((a, b) => b - a);
   return (l1 + 0.05) / (l2 + 0.05);
 }
-/** Approximate dark tile background used throughout the picker (bg-slate-900/60
- *  over the panel's near-black backdrop) — a conservative dark reference. */
-const DARK_TILE = "#111827";
-
-/** Pull `colour: "<hex>"` out of the FILL/STROKE maps in RaritySymbol.tsx. */
-function extractColourMap(varName: "FILL" | "STROKE"): Record<SymbolColour, string> {
+/** Pull `colour: "<hex>"` out of a named map in RaritySymbol.tsx (FILL/STROKE/BADGE_BG/BADGE_RING). */
+function extractColourMap(varName: "FILL" | "STROKE" | "BADGE_BG" | "BADGE_RING"): Record<SymbolColour, string> {
   const start = SYMBOL.indexOf(`const ${varName}:`);
   expect(start, varName).toBeGreaterThan(-1);
   const end = SYMBOL.indexOf("};", start);
@@ -63,23 +59,32 @@ function extractColourMap(varName: "FILL" | "STROKE"): Record<SymbolColour, stri
   return out as Record<SymbolColour, string>;
 }
 
-describe("1. every rarity symbol/abbreviation has real contrast on the dark tile", () => {
+// NOTE (rarity-picker hotfix, superseding the earlier "recolour every symbol"
+// design): the symbol's FILL is now the REAL PRINTED colour (black stays
+// black, silver stays silver, gold stays gold) — it is intentionally NOT
+// contrast-checked against the dark page background any more. Legibility
+// comes from the fixed contrast BADGE drawn behind the symbol, so the correct
+// pairing to check is FILL vs its own BADGE_BG, not FILL vs the page's dark tile.
+describe("1. every rarity symbol has real contrast against its OWN badge (not the page background)", () => {
   const FILL = extractColourMap("FILL");
+  const BADGE_BG = extractColourMap("BADGE_BG");
 
-  it("no printed colour renders near-black on the dark tile (min 4.5:1, matching WCAG AA text)", () => {
+  it("every printed colour has WCAG AA-level contrast against its badge background (min 4.5:1)", () => {
     for (const [colour, hex] of Object.entries(FILL)) {
       if (colour === "none" || hex.startsWith("url(")) continue; // transparent / gradient
-      const ratio = contrastRatio(hex, DARK_TILE);
-      expect(ratio, `${colour} (${hex}) vs dark tile`).toBeGreaterThanOrEqual(4.5);
+      const badgeBg = BADGE_BG[colour as SymbolColour];
+      expect(badgeBg, `badge bg for ${colour}`).toBeTruthy();
+      const ratio = contrastRatio(hex, badgeBg);
+      expect(ratio, `${colour} (${hex}) vs its badge (${badgeBg})`).toBeGreaterThanOrEqual(4.5);
     }
   });
   it("the literal near-black fill (#1b1b1f) that made ACE/RR/RRR/PR invisible is gone", () => {
     expect(SYMBOL).not.toContain("#1b1b1f");
-    expect(SYMBOL).not.toContain('"#000"');
   });
-  it("the text-glyph branch never special-cases colour==='black' back to a dark fill", () => {
-    expect(SYMBOL).not.toMatch(/symbol\.colour === "black" \? "#1b1b1f"/);
-    // Always the (contrast-safe) display fill/stroke, uniformly for every colour.
+  it("black/uncommon/rare symbols render their REAL printed colour (true black), not a recoloured display tone", () => {
+    expect(FILL.black).toBe("#000000");
+  });
+  it("the text-glyph branch always uses the symbol's own printed fill — never a hardcoded override", () => {
     expect(SYMBOL).toMatch(/<text[^>]*fill=\{fill\}[^>]*stroke=\{stroke\}/);
   });
   it("gold vs silver vs black-print vs white-print remain visually distinct hex values", () => {
@@ -92,14 +97,15 @@ describe("1b. selection/hover/focus states never reduce rarity readability", () 
   it("chip has a visible keyboard focus ring and does not depend on hover for the label", () => {
     expect(PICKER).toContain("focus-visible:ring-2 focus-visible:ring-amber-300");
     // Codes/labels are always rendered, not conditionally shown on hover.
-    expect(PICKER).toContain('text-slate-100">{rr.codes[0] || rr.label}');
+    expect(PICKER).toContain("{rr.codes[0] || rr.label}");
   });
   it("the selected description panel is never truncated (no `truncate` on the info line)", () => {
     const infoBlock = PICKER.slice(PICKER.indexOf('data-testid="rarity-selected-info"', PICKER.indexOf("selectedRarity.value === CUSTOM_RARITY_VALUE")), PICKER.indexOf("</span>\n              </div>\n            )\n          )}"));
     expect(infoBlock).not.toContain("truncate");
   });
-  it("chips wrap (flex-wrap) instead of overflowing the picker horizontally", () => {
-    expect(PICKER).toContain('<div className="flex flex-wrap gap-1">{quickRarities.map(chip)}</div>');
+  it("chips render in the dense grid instead of overflowing the picker horizontally", () => {
+    expect(PICKER).toContain("RARITY_TILE_GRID");
+    expect(PICKER).toMatch(/grid-cols-\[repeat\(auto-fill,\s*minmax\(88px,\s*1fr\)\)\]/);
   });
 });
 
@@ -135,9 +141,10 @@ describe("2. single-silver-star rarity is a distinct, stable catalogue member", 
     const values = POKEMON_RARITIES.map((r) => r.value);
     expect(new Set(values).size).toBe(values.length);
   });
-  it("remains visible in dark mode — its display colour is not near-black", () => {
+  it("remains visible in dark mode via its contrast badge (real silver fill, dark badge + silver halo)", () => {
     const FILL = extractColourMap("FILL");
-    const ratio = contrastRatio(FILL.silver, DARK_TILE);
+    const BADGE_BG = extractColourMap("BADGE_BG");
+    const ratio = contrastRatio(FILL.silver, BADGE_BG.silver);
     expect(ratio).toBeGreaterThanOrEqual(4.5);
   });
 });
@@ -232,9 +239,13 @@ describe("4. Stage 1 manual card-detail fields are visible by default", () => {
     expect(FORM).toContain('data-testid="manual-card-editor"');
   });
   it("preview stays on the left / identification tools on the right (unchanged two-column shell)", () => {
-    expect(FORM).toContain('data-testid="grading-preview-panel"');
+    // unified-shell pass: the preview aside is now the shared
+    // WorkstationPreviewAside component.
+    expect(FORM).toContain("<WorkstationPreviewAside");
     expect(FORM).toContain('data-testid="grading-control-panel"');
-    expect(FORM).toContain("md:w-[40%] md:shrink-0");
+    const asideSrc = readFileSync(join(process.cwd(), "client/src/components/grading-workflow/WorkstationPreviewAside.tsx"), "utf8");
+    expect(asideSrc).toContain('data-testid="grading-preview-panel"');
+    expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
   });
   it("proposed AI/TCGdex result stays visually distinct from existing certificate details", () => {
     expect(FORM).toContain('data-testid="ai-identify-summary"');
@@ -314,11 +325,20 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     if (!base) return;
     for (const f of changed) expect(f, f).not.toMatch(PROTECTED);
   });
-  it("this pass's own new/changed files are exactly the expected Stage 1/2 usability surface (plus already-allowed prior-pass files)", () => {
-    if (!base) return;
-    for (const f of ["client/src/components/certificate-form.tsx", "client/src/components/rarity-picker/RarityVariantPicker.tsx", "client/src/components/rarity-picker/RaritySymbol.tsx", "shared/pokemon-rarity-catalogue.ts", "shared/collector-number-format.ts"]) {
-      expect(changed, f).toContain(f);
-    }
+  it("the Stage 1/2 usability pass is genuinely present in the current source (not just historically in some diff)", () => {
+    // unified-shell integration note: this original Stage 1/2 usability pass
+    // (rarity contrast, custom-rarity workflow, collector-number formatter)
+    // is already merged into origin/main via PR #216 — it is NOT part of
+    // this integration branch's own incremental delta, so it correctly does
+    // NOT appear in `changed` (diff against origin/main) any more. A content
+    // check on the current source is the right tool here, not diff
+    // membership — the invariant that matters is "the feature exists in the
+    // codebase," which a diff-membership check can no longer prove once the
+    // work has landed on main via a different path.
+    expect(read("shared/pokemon-rarity-catalogue.ts")).toContain("silver_star_rare");
+    expect(read("shared/pokemon-rarity-catalogue.ts")).toContain("custom_unlisted");
+    expect(read("shared/collector-number-format.ts")).toContain("displayCollectorNumber");
+    expect(FORM).toContain("<RarityVariantPicker");
   });
   it("does not touch payments, Vault Quest, or migrations", () => {
     if (!base) return;

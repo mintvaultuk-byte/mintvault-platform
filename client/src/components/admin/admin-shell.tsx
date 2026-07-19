@@ -62,6 +62,10 @@ type NavLeaf = {
   key: AdminTab;
   label: string;
   icon: typeof LayoutDashboard;
+  /** Optional hover tooltip — used for nav entries whose click behaviour
+   *  isn't a simple "switch to this tab" (e.g. "grading" jumps straight into
+   *  the canonical CertificateForm workstation instead of a persistent view). */
+  title?: string;
 };
 type NavLink = {
   href: string;
@@ -92,7 +96,7 @@ const NAV: NavSection[] = [
       { href: "/admin/vault-quest/card-factory", label: "Card Factory", icon: PackageCheck },
       { key: "learning", label: "AI Learning", icon: Brain },
       { key: "divergence", label: "AI Divergence", icon: TrendingUp },
-      { key: "grading", label: "Grading", icon: BarChart3 },
+      { key: "grading", label: "Grading", icon: BarChart3, title: "Open the oldest ungraded certificate in the grading workstation" },
       { key: "capture-health", label: "Capture Health", icon: Activity },
     ],
   },
@@ -225,6 +229,7 @@ export default function AdminShell({
                     onClick={() => onTabChange(item.key)}
                     className={`admin-nav-i ${activeTab === item.key ? "is-on" : ""}`.trim()}
                     data-testid={`nav-${item.key}`}
+                    title={item.title}
                   >
                     <Icon /> {item.label}
                   </button>
