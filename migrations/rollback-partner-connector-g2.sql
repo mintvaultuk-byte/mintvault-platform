@@ -5,8 +5,24 @@
 -- partner_connector_records data beyond that CHECK-constraint reversion, and does not touch any
 -- Phase 1/2 table, partner_connector_events, or any MintVault-internal table. Owner-approved
 -- protected action only; rehearse on a disposable DB first. Idempotent (IF EXISTS everywhere).
+--
+-- REFUSES to run once migration 0010 (G3 import) is present — G3's partner_connector_imports FK-
+-- references partner_connector_validation_runs, so a bare DROP here would silently orphan it. Same
+-- refusal pattern rollback-partner-connector-g1.sql already uses once 0009+ is present — use
+-- rollback-partner-connector-g3.sql first, or the comprehensive rollback-partner-network-phase1.sql.
+--
+-- ⚠️ If the refusal fires, the aborted transaction leaves a pooled connection in "current transaction
+-- is aborted" state for any further query on it — issue an explicit ROLLBACK before reuse. Same
+-- caveat rollback-partner-connector-g1.sql documents.
 
 BEGIN;
+
+DO $$
+BEGIN
+  IF to_regclass('public.partner_connector_imports') IS NOT NULL THEN
+    RAISE EXCEPTION 'rollback-partner-connector-g2.sql refuses to run: migration 0010 (G3 import) is present and depends on partner_connector_validation_runs. Run rollback-partner-connector-g3.sql first, or use the comprehensive rollback-partner-network-phase1.sql for a full teardown.';
+  END IF;
+END$$;
 
 DROP TABLE IF EXISTS partner_connector_validation_findings CASCADE;
 DROP TABLE IF EXISTS partner_connector_validation_runs CASCADE;

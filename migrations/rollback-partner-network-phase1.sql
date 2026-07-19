@@ -1,4 +1,4 @@
--- COMPREHENSIVE ROLLBACK for Partner Network Phase 1+2+G1+G2 (migrations 0001–0009).
+-- COMPREHENSIVE ROLLBACK for Partner Network Phase 1+2+G1+G2+G3 (migrations 0001–0010).
 -- NOT a forward migration (no NNNN_ prefix → the runner ignores it). Destructive (drops the whole
 -- partner_* family + helper functions + all THREE restricted roles: partner_runtime,
 -- partner_definer, partner_connector_runtime). Owner-approved protected action only; rehearse on a
@@ -13,7 +13,15 @@
 
 BEGIN;
 
--- G2 validation tables (0009) — dropped first: deepest children (FK to partner_connector_records,
+-- G3 provenance tables (0010) — dropped first: deepest children (FK to partner_connector_records/
+-- partner_connector_validation_runs, dropped next). Never touches submissions/submission_items/users
+-- data — see ROLLBACK-PLAN.md. Grants on those MintVault-internal tables are removed below by
+-- DROP OWNED BY partner_connector_runtime, not by any DELETE/UPDATE against the tables themselves.
+DROP TABLE IF EXISTS partner_connector_imports CASCADE;
+DROP TABLE IF EXISTS partner_connector_customer_links CASCADE;
+DROP SEQUENCE IF EXISTS partner_connector_submission_ref_seq;
+
+-- G2 validation tables (0009) — dropped next: deepest children (FK to partner_connector_records,
 -- dropped next).
 DROP TABLE IF EXISTS partner_connector_validation_findings CASCADE;
 DROP TABLE IF EXISTS partner_connector_validation_runs CASCADE;
@@ -59,7 +67,8 @@ DROP FUNCTION IF EXISTS partner_current_tenant();
 DELETE FROM schema_migrations WHERE filename IN (
   '0001_partner_foundation.sql','0002_partner_auth_support.sql','0003_partner_auth_hardening.sql',
   '0004_partner_mfa_enrol.sql','0005_partner_mfa_replay_and_grants.sql','0006_partner_definer_role.sql',
-  '0007_partner_submissions.sql','0008_partner_connector_foundation.sql','0009_partner_connector_validation.sql'
+  '0007_partner_submissions.sql','0008_partner_connector_foundation.sql','0009_partner_connector_validation.sql',
+  '0010_partner_connector_import.sql'
 );
 
 -- restricted roles (after their objects/grants are gone). Order does not matter now that all
