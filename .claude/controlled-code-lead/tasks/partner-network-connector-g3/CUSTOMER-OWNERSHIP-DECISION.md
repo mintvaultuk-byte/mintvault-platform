@@ -19,7 +19,7 @@ paid MintVault checkouts) does resolve owners by `getUserByEmail` +
 `createUser` fallback — but that is a single-tenant context: one MintVault
 customer, one email, no cross-tenant concern. Partner is different:
 multiple independent Partner organisations, each with their own customer
-list, can plausibly contain the same email address for two *different*
+list, can plausibly contain the same email address for two _different_
 real people (a shared family inbox, a common `info@` collection-shop
 address used as the "customer" contact by more than one shop, a customer
 who is genuinely a customer of two unrelated Partner shops under the same
@@ -27,7 +27,7 @@ email). Matching only by email would silently merge those into one MintVault
 `users` row and one order history — a genuine cross-tenant data-mixing risk
 the brief explicitly calls out ("no email-only cross-tenant linking unless
 explicitly guaranteed"). Nothing in the schema guarantees email uniqueness
-*per Partner organisation* today (`partner_customers` has no such
+_per Partner organisation_ today (`partner_customers` has no such
 constraint checked), so this risk is real, not hypothetical.
 
 ### Chosen mechanism
@@ -38,7 +38,7 @@ UNIQUE on the pair). On first import for a given Partner customer:
 
 1. Look up the link. If found, reuse its `mintvault_user_id` — no new
    `users` row, no rewrite of the existing one's snapshot fields.
-2. If not found, INSERT a new `users` row using the *validated* Partner
+2. If not found, INSERT a new `users` row using the _validated_ Partner
    customer snapshot (`full_name` split into `firstName`/`lastName` best-
    effort, `email`, no `passwordHash` set — this account can never log in
    via password, matching "prevent login where appropriate" for a
@@ -58,7 +58,7 @@ application code).
 
 ### Why not the other options
 
-- **Option A alone (caller-supplied owner ID)** doesn't answer *who* — the
+- **Option A alone (caller-supplied owner ID)** doesn't answer _who_ — the
   connector has no logged-in MintVault user to supply; it needed its own
   resolution strategy regardless, so this is folded into the chosen
   mechanism rather than being a separate option.
@@ -73,6 +73,25 @@ application code).
   for the same Partner customer behave consistently") is naturally satisfied
   by per-customer accounts and actively worked against by a single shared
   one.
+
+### Implementation correction: `users.email` is left NULL
+
+`users.email` carries a DB-level `UNIQUE` constraint (`shared/schema.ts:71`).
+If two different Partner organisations' customers happen to share an email
+address, inserting the second connector-created `users` row with that same
+email would fail the constraint — or, worse, an implementation that
+"resolved" this by reusing the existing row would silently re-introduce the
+exact cross-tenant merging this document rejects above. Neither is
+acceptable, so the connector-created `users` row leaves `email` **NULL**.
+The real email is preserved in two other places instead:
+`partner_connector_customer_links.email_snapshot` (new column, this table
+only, no uniqueness constraint) and `submissions.customerEmail` (the
+existing per-submission contact-snapshot column every normal submission
+already carries). Lookup of an existing link is always by
+`(partner_organisation_id, partner_customer_id)`, never by email, so this
+has no effect on the resolution algorithm's determinism — it only means the
+`users` row itself doesn't carry a queryable email, matching the fact that
+it also can't carry a password and isn't meant to be logged into directly.
 
 ## Cross-tenant protection
 
@@ -90,10 +109,10 @@ database-security review already verified for `validateConnectorRecord`).
 ## Historical customer details
 
 Not linked live — **snapshotted**. The `users` row created on first import
-captures the Partner customer's name/email *as validated at import time*
+captures the Partner customer's name/email _as validated at import time_
 and is never rewritten by a later Partner-side edit (the G2 validation
 engine already treats any later Partner customer edit as a fingerprint
-change requiring revalidation, which is a *different* submission's concern,
+change requiring revalidation, which is a _different_ submission's concern,
 not a retroactive edit to an already-imported one). This matches
 `ROLLBACK-AND-RECONCILIATION.md`'s existing "completed mapping is
 read-only after creation" principle, extended to the `users` row it
