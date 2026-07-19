@@ -102,17 +102,18 @@ function isUnified(src: string): boolean {
 // back to a standalone shell fails the test instead of being silently excused).
 // A route resolving to a file NOT in this list and NOT unified fails the test —
 // i.e. new routes must be unified or explicitly logged here.
+// Group 2 (admin-pokemon-knowledge, admin/community) was unified in the
+// 2026-07-19 Group-2 pass and is now ENFORCED below — deliberately absent here
+// so a regression back to a standalone shell fails the test instead of being
+// silently excused.
 const LEGACY_EXCEPTIONS: Record<string, string> = {
-  "client/src/pages/admin-pokemon-knowledge.tsx":
-    "own slate-theme reference hub — Group 2 backlog, audited 2026-07-19",
   "client/src/pages/vault-quest-studio.tsx":
     "separate Vault Quest product surface, own design language — audited 2026-07-19",
   "client/src/pages/admin-vault-quest-card-factory.tsx":
     "separate Vault Quest product surface, own design language — audited 2026-07-19",
   "client/src/pages/admin-vault-quest.tsx":
     "separate Vault Quest product surface, own design language — audited 2026-07-19",
-  "client/src/pages/admin/community.tsx": "raw-hex community tool — Group 2 backlog, audited 2026-07-19",
-  "client/src/pages/grader.tsx": "legacy pre-Staff-portal grader UI — Group 2 backlog, audited 2026-07-19",
+  "client/src/pages/grader.tsx": "legacy pre-Staff-portal grader UI — Group 3 backlog, audited 2026-07-19",
   "client/src/pages/logbook.tsx":
     "public cert-lookup page reused at /admin/cert/:id, intentionally the public light theme",
 };
@@ -158,6 +159,53 @@ describe("Group 1 routes are enforced onto the shared admin shell (no longer exc
     expect(src).not.toMatch(/min-h-screen[^"]*\bbg-black\b(?!\/)/); // no raw black page ground
     expect(src).not.toMatch(/text-slate-\d|bg-slate-\d|border-slate-\d/); // no slate legacy theme
     expect(src).not.toMatch(/#D4AF37|#E8E4DC/); // no raw brand hex — converted to var(--admin-*) tokens
+  });
+});
+
+// Group 2 (2026-07-19): the two knowledge/community admin routes brought onto
+// the shared design system in this pass. ENFORCED coverage — same standard as
+// Group 1, stricter than isUnified(): each must render in the .admin-root token
+// scope, use the shared AdminHeaderRow with its stable testId, and NOT
+// reintroduce a raw page ground, slate legacy theme, or raw brand hex.
+const GROUP_2 = {
+  pokemonKnowledge: "client/src/pages/admin-pokemon-knowledge.tsx",
+  community: "client/src/pages/admin/community.tsx",
+} as const;
+
+describe("Group 2 routes are enforced onto the shared admin shell (no longer exceptions)", () => {
+  it("neither Group-2 file is still listed as a legacy exception", () => {
+    for (const f of Object.values(GROUP_2)) {
+      expect(LEGACY_EXCEPTIONS, `${f} must be enforced-unified, not excused`).not.toHaveProperty(f);
+    }
+  });
+  it.each([
+    ["pokemon-knowledge", GROUP_2.pokemonKnowledge, "pokemon-knowledge-header"],
+    ["community", GROUP_2.community, "community-header"],
+  ])("%s renders in .admin-root with a shared AdminHeaderRow and no standalone/legacy shell", (_name, file, testId) => {
+    const src = read(file);
+    expect(src).toMatch(/className="admin-root/);
+    expect(src).toContain('from "@/components/admin/AdminHeaderRow"');
+    expect(src).toContain("<AdminHeaderRow");
+    expect(src).toContain(`testId="${testId}"`);
+    // no reintroduced standalone application shell / raw legacy page markup
+    expect(src).not.toMatch(/min-h-screen[^"]*\bbg-black\b(?!\/)/); // no raw black page ground
+    expect(src).not.toMatch(/text-slate-\d|bg-slate-\d|border-slate-\d/); // no slate legacy theme (pokemon-knowledge)
+    expect(src).not.toMatch(/bg-amber-\d|text-amber-\d|border-amber-\d/); // no raw amber gold-substitute
+    expect(src).not.toMatch(/#D4AF37|#E8E4DC|#0A0A0A/); // no raw brand/page hex — tokens only
+  });
+  it("both Group-2 pages preserve their exact API endpoint strings (visual-only pass)", () => {
+    const pk = read(GROUP_2.pokemonKnowledge);
+    expect(pk).toContain("/api/admin/pokemon-knowledge/overview");
+    expect(pk).toContain("/api/admin/pokemon-knowledge/sets");
+    expect(pk).toContain("/api/admin/pokemon-knowledge/review-queue");
+    expect(pk).toContain("/decision"); // import + review-queue decision POSTs
+    const cm = read(GROUP_2.community);
+    expect(cm).toContain("/api/admin/community");
+    expect(cm).toContain("/api/admin/share/prewarm");
+    // moderation actions preserved (approve/reject soft-status + feature toggle)
+    expect(cm).toContain('status: "approved"');
+    expect(cm).toContain('status: "rejected"');
+    expect(cm).toContain("featured: !p.featured");
   });
 });
 

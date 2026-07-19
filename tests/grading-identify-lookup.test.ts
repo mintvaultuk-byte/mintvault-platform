@@ -207,6 +207,11 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     "client/src/pages/admin-mvgs-calibration.tsx",
     "client/src/pages/admin-legacy-review.tsx",
     "client/src/pages/admin-sets.tsx",
+    // Group 2 admin-route unification (2026-07-19, same branch): shared
+    // AdminHeaderRow + design tokens on the knowledge/community pages.
+    // Visual-shell-only, no protected surface, no API/mutation change.
+    "client/src/pages/admin-pokemon-knowledge.tsx",
+    "client/src/pages/admin/community.tsx",
   ]);
   const base = ["origin/main", "main"].find((r) => {
     try {
