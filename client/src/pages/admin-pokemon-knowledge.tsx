@@ -8,7 +8,8 @@
  */
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Panel, AdminButton } from "@/components/admin";
+import { Panel, AdminButton, Badge, type AdminBadgeVariant } from "@/components/admin";
+import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
 import { RaritySymbol } from "@/components/rarity-picker/RaritySymbol";
 import {
   POKEMON_RARITIES,
@@ -78,15 +79,12 @@ interface SetRow {
   version: number;
 }
 
-const statusBadge = (status: string) => (
-  <span
-    className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
-      status === "verified" ? "bg-emerald-500/15 text-emerald-300" : status === "provisional" ? "bg-amber-500/15 text-amber-300" : "bg-red-500/15 text-red-300"
-    }`}
-  >
-    {status.replace(/_/g, " ")}
-  </span>
-);
+// Shared admin Badge (token-styled) instead of a bespoke emerald/amber/red
+// span — verified → act (green), provisional → wait (amber), else → red.
+const statusBadge = (status: string) => {
+  const variant: AdminBadgeVariant = status === "verified" ? "act" : status === "provisional" ? "wait" : "red";
+  return <Badge variant={variant}>{status.replace(/_/g, " ")}</Badge>;
+};
 
 export default function AdminPokemonKnowledgePage() {
   const [section, setSection] = useState<Section>("Overview");
@@ -165,19 +163,19 @@ export default function AdminPokemonKnowledgePage() {
     const prov = provenanceFor(kind, value);
     const note = knowledgeNoteFor(kind, value);
     return (
-      <div className="flex-1 rounded-xl border border-slate-700 bg-slate-900/60 p-4">
+      <div className="flex-1 rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/60 p-4">
         <div className="flex h-12 items-center justify-center">
-          {rarity ? <RaritySymbol symbol={rarity.symbol} size={36} /> : <span className="text-2xl text-slate-500">{finish ? "◈" : "★"}</span>}
+          {rarity ? <RaritySymbol symbol={rarity.symbol} size={36} /> : <span className="text-2xl text-[var(--admin-ink-faint)]">{finish ? "◈" : "★"}</span>}
         </div>
-        <div className="mt-2 text-center text-sm font-bold text-slate-100">{label}</div>
-        {rarity && <div className="text-center text-[11px] text-slate-400">{describeSymbol(rarity.symbol)}</div>}
-        <div className="mt-2 space-y-1 text-[11px] text-slate-300">
+        <div className="mt-2 text-center text-sm font-bold text-[var(--admin-ink)]">{label}</div>
+        {rarity && <div className="text-center text-[11px] text-[var(--admin-ink-faint)]">{describeSymbol(rarity.symbol)}</div>}
+        <div className="mt-2 space-y-1 text-[11px] text-[var(--admin-ink-dim)]">
           <div>Type: <b>{kind === "promo" ? (promo?.kind ?? "promo") : kind}</b></div>
           {rarity && <div>Regions: <b>{rarity.regions === "all" ? "all" : rarity.regions.join(", ")}</b></div>}
           {rarity && <div>Eras: <b>{rarity.eras === "all" ? "all" : rarity.eras.join(", ")}</b></div>}
-          <div>Status: {statusBadge(prov.status)} <span className="text-slate-500">({prov.confidence})</span></div>
-          {(rarity?.description || finish?.description || promo?.description) && <div className="text-slate-400">{rarity?.description ?? finish?.description ?? promo?.description}</div>}
-          {note?.commonMistakes[0] && <div className="text-amber-300/90">Watch: {note.commonMistakes[0]}</div>}
+          <div>Status: {statusBadge(prov.status)} <span className="text-[var(--admin-ink-faint)]">({prov.confidence})</span></div>
+          {(rarity?.description || finish?.description || promo?.description) && <div className="text-[var(--admin-ink-faint)]">{rarity?.description ?? finish?.description ?? promo?.description}</div>}
+          {note?.commonMistakes[0] && <div className="text-[var(--admin-gold)]">Watch: {note.commonMistakes[0]}</div>}
         </div>
       </div>
     );
@@ -191,20 +189,20 @@ export default function AdminPokemonKnowledgePage() {
           onChange={(e) => { setSetQuery(e.target.value); setSetPage(1); }}
           placeholder="Search sets, codes, aliases (e.g. SV8, 151, evolving skies)…"
           data-testid="knowledge-set-search"
-          className="w-72 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
+          className="w-72 rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)] px-2 py-1.5 text-xs text-[var(--admin-ink)]"
         />
-        <select value={setLang} onChange={(e) => { setSetLang(e.target.value); setSetPage(1); }} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100">
+        <select value={setLang} onChange={(e) => { setSetLang(e.target.value); setSetPage(1); }} className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)] px-2 py-1.5 text-xs text-[var(--admin-ink)]">
           <option value="">All languages</option>
           {POKEMON_LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
         </select>
-        <select value={setEra} onChange={(e) => { setSetEra(e.target.value); setSetPage(1); }} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100">
+        <select value={setEra} onChange={(e) => { setSetEra(e.target.value); setSetPage(1); }} className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)] px-2 py-1.5 text-xs text-[var(--admin-ink)]">
           <option value="">All eras</option>
           {POKEMON_ERAS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
         </select>
       </div>
       <table className="w-full text-left text-xs">
         <thead>
-          <tr className="border-b border-slate-700 text-[10px] uppercase tracking-wide text-slate-400">
+          <tr className="border-b border-[var(--admin-line)] text-[10px] uppercase tracking-wide text-[var(--admin-ink-faint)]">
             <th className="py-1.5 pr-2">Code</th>
             <th className="py-1.5 pr-2">Set</th>
             <th className="py-1.5 pr-2">Year</th>
@@ -219,10 +217,10 @@ export default function AdminPokemonKnowledgePage() {
             <tr
               key={`${s.setKey}:${s.language}`}
               onClick={() => setDetailKey({ setKey: s.setKey, language: s.language })}
-              className="cursor-pointer border-b border-slate-800/60 text-slate-200 hover:bg-slate-800/40"
+              className="cursor-pointer border-b border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:bg-[var(--admin-panel2)]/40"
               data-testid={`set-row-${s.setKey}-${s.language}`}
             >
-              <td className="py-1.5 pr-2 font-bold text-amber-200">{s.setCode ?? s.setKey}</td>
+              <td className="py-1.5 pr-2 font-bold text-[var(--admin-gold)]">{s.setCode ?? s.setKey}</td>
               <td className="py-1.5 pr-2">{s.canonicalName}</td>
               <td className="py-1.5 pr-2">{s.year ?? "—"}</td>
               <td className="py-1.5 pr-2">{s.language} / {s.region ?? "—"}</td>
@@ -234,12 +232,12 @@ export default function AdminPokemonKnowledgePage() {
         </tbody>
       </table>
       {sets.data && sets.data.total === 0 && (
-        <div className="mt-4 text-xs text-slate-400">
+        <div className="mt-4 text-xs text-[var(--admin-ink-faint)]">
           No sets yet — use <b>Review Queue → Load starter set data</b> to create a reviewable import draft.
         </div>
       )}
       {sets.data && sets.data.total > sets.data.pageSize && (
-        <div className="mt-3 flex items-center gap-2 text-xs text-slate-300">
+        <div className="mt-3 flex items-center gap-2 text-xs text-[var(--admin-ink-dim)]">
           <AdminButton size="sm" type="button" disabled={setPage <= 1} onClick={() => setSetPage((p) => p - 1)}>Prev</AdminButton>
           Page {sets.data.page} / {Math.ceil(sets.data.total / sets.data.pageSize)}
           <AdminButton size="sm" type="button" disabled={setPage >= Math.ceil(sets.data.total / sets.data.pageSize)} onClick={() => setSetPage((p) => p + 1)}>Next</AdminButton>
@@ -250,29 +248,29 @@ export default function AdminPokemonKnowledgePage() {
         <Panel className="mt-4">
           <div className="flex items-start justify-between">
             <div>
-              <div className="text-sm font-bold text-slate-100">
-                {detail.data.set.canonicalName} <span className="text-amber-200">[{detail.data.set.setCode ?? detail.data.set.setKey}]</span> {statusBadge(detail.data.set.status)}
+              <div className="text-sm font-bold text-[var(--admin-ink)]">
+                {detail.data.set.canonicalName} <span className="text-[var(--admin-gold)]">[{detail.data.set.setCode ?? detail.data.set.setKey}]</span> {statusBadge(detail.data.set.status)}
               </div>
-              <div className="mt-1 text-[11px] text-slate-400">
+              <div className="mt-1 text-[11px] text-[var(--admin-ink-faint)]">
                 {detail.data.set.series ?? "—"} · {detail.data.set.era ?? "era ?"} · {detail.data.set.region ?? "region ?"} · {detail.data.set.language} · {detail.data.set.year ?? "year ?"} ·
                 Cards: {detail.data.set.mainCount ?? "?"}{detail.data.set.secretCount ? ` (+${detail.data.set.secretCount} secret)` : ""} ·
                 Numbers: {detail.data.set.collectorNumberFormat ?? "—"} · Source: {detail.data.set.sourceType} ({detail.data.set.confidence}) · v{detail.data.set.version}
               </div>
-              {detail.data.set.notes && <div className="mt-1 text-[11px] text-slate-300">{detail.data.set.notes}</div>}
+              {detail.data.set.notes && <div className="mt-1 text-[11px] text-[var(--admin-ink-dim)]">{detail.data.set.notes}</div>}
               {detail.data.aliases.length > 0 && (
-                <div className="mt-1 text-[11px] text-slate-400">Aliases: {detail.data.aliases.map((a) => `${a.aliasValue} (${a.aliasType})`).join(", ")}</div>
+                <div className="mt-1 text-[11px] text-[var(--admin-ink-faint)]">Aliases: {detail.data.aliases.map((a) => `${a.aliasValue} (${a.aliasType})`).join(", ")}</div>
               )}
               {detail.data.related.length > 0 && (
-                <div className="mt-1 text-[11px] text-slate-400">
+                <div className="mt-1 text-[11px] text-[var(--admin-ink-faint)]">
                   Regional editions / related: {detail.data.related.map((r) => (
-                    <button key={`${r.setKey}:${r.language}`} type="button" className="mr-2 underline hover:text-slate-200" onClick={() => setDetailKey({ setKey: r.setKey, language: r.language })}>
+                    <button key={`${r.setKey}:${r.language}`} type="button" className="mr-2 underline hover:text-[var(--admin-ink-dim)]" onClick={() => setDetailKey({ setKey: r.setKey, language: r.language })}>
                       {r.canonicalName} [{r.language}]
                     </button>
                   ))}
                 </div>
               )}
               {detail.data.revisions.length > 0 && (
-                <div className="mt-2 text-[11px] text-slate-500">
+                <div className="mt-2 text-[11px] text-[var(--admin-ink-faint)]">
                   History: {detail.data.revisions.slice(0, 5).map((rv) => `v${rv.revisionNumber} (${rv.reason ?? "edit"} — ${rv.editedBy ?? "?"})`).join(" · ")}
                 </div>
               )}
@@ -289,16 +287,35 @@ export default function AdminPokemonKnowledgePage() {
   );
 
   return (
-    <div className="min-h-screen bg-slate-950 p-6 text-slate-100">
-      <div className="mx-auto max-w-6xl">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-extrabold text-[var(--admin-gold,#D4AF37)]">Pokémon Knowledge</h1>
-            <div className="text-[11px] text-slate-400">One shared catalogue powering the grading picker, this Hub and the PDF handbook · v{KNOWLEDGE_CATALOGUE_VERSION}</div>
-          </div>
-          <a href="/admin" className="text-xs text-slate-400 underline hover:text-slate-200">← Admin</a>
-        </div>
-
+    // Shared admin shell: the .admin-root token scope + AdminHeaderRow header
+    // (same design system as the Super Admin dashboard and the Group-1 admin
+    // routes). Previously this page rendered its own standalone slate-950
+    // theme with a bespoke header. All catalogue data, queries, imports and
+    // review-decision POSTs below are unchanged.
+    <div className="admin-root min-h-screen bg-[var(--admin-bg)] text-[var(--admin-ink)]">
+      <header className="border-b border-[var(--admin-line)] px-4 py-2">
+        <AdminHeaderRow
+          testId="pokemon-knowledge-header"
+          left={
+            <div className="min-w-0">
+              <h1 className="text-sm font-extrabold tracking-wide text-[var(--admin-gold)]">Pokémon Knowledge</h1>
+              <div className="text-[11px] text-[var(--admin-ink-faint)]">
+                One shared catalogue powering the grading picker, this Hub and the PDF handbook · v
+                {KNOWLEDGE_CATALOGUE_VERSION}
+              </div>
+            </div>
+          }
+          right={
+            <a
+              href="/admin"
+              className="rounded-lg border border-[var(--admin-gold)]/30 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/90 hover:bg-[var(--admin-gold)]/10"
+            >
+              ← Admin
+            </a>
+          }
+        />
+      </header>
+      <div className="mx-auto max-w-6xl p-6">
         <div className="mb-4 flex flex-wrap gap-1.5" data-testid="knowledge-nav">
           {SECTIONS.map((s) => (
             <button
@@ -306,7 +323,7 @@ export default function AdminPokemonKnowledgePage() {
               type="button"
               onClick={() => setSection(s)}
               className={`rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-                section === s ? "border-amber-500 bg-amber-500/10 text-amber-200" : "border-slate-700 bg-slate-900/60 text-slate-300 hover:border-slate-500"
+                section === s ? "border-[var(--admin-gold)] bg-[var(--admin-gold)]/10 text-[var(--admin-gold)]" : "border-[var(--admin-line)] bg-[var(--admin-panel)]/60 text-[var(--admin-ink-dim)] hover:border-[var(--admin-line)]"
               }`}
             >
               {s}
@@ -328,22 +345,22 @@ export default function AdminPokemonKnowledgePage() {
                 ["Subsets", POKEMON_PROMOS.filter((p) => p.kind === "subset").length],
               ].map(([label, value]) => (
                 <Panel key={String(label)}>
-                  <div className="text-2xl font-extrabold text-amber-200">{String(value)}</div>
-                  <div className="text-[11px] uppercase tracking-wide text-slate-400">{String(label)}</div>
+                  <div className="text-2xl font-extrabold text-[var(--admin-gold)]">{String(value)}</div>
+                  <div className="text-[11px] uppercase tracking-wide text-[var(--admin-ink-faint)]">{String(label)}</div>
                 </Panel>
               ))}
             </div>
             <Panel>
-              <div className="mb-2 text-sm font-bold text-slate-100">Quick actions</div>
+              <div className="mb-2 text-sm font-bold text-[var(--admin-ink)]">Quick actions</div>
               <div className="flex flex-wrap gap-2">
                 <AdminButton size="sm" type="button" onClick={() => setSection("Sets")}>Search everything</AdminButton>
                 <AdminButton size="sm" type="button" onClick={() => setSection("Review Queue")}>Review pending records</AdminButton>
-                <a href="/api/admin/pokemon-knowledge/handbook.pdf" download className="inline-flex items-center rounded-lg border border-amber-600 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-200 hover:bg-amber-500/20">
+                <a href="/api/admin/pokemon-knowledge/handbook.pdf" download className="inline-flex items-center rounded-lg border border-[var(--admin-gold)] bg-[var(--admin-gold)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/20">
                   Generate handbook (PDF)
                 </a>
               </div>
               {(overview.data?.latest?.length ?? 0) > 0 && (
-                <div className="mt-3 text-[11px] text-slate-400">Latest sets: {overview.data!.latest.map((l) => l.canonicalName).join(" · ")}</div>
+                <div className="mt-3 text-[11px] text-[var(--admin-ink-faint)]">Latest sets: {overview.data!.latest.map((l) => l.canonicalName).join(" · ")}</div>
               )}
             </Panel>
           </div>
@@ -352,7 +369,7 @@ export default function AdminPokemonKnowledgePage() {
         {section === "Sets" && <Panel>{setsTable(false)}</Panel>}
         {section === "Set Codes" && (
           <Panel>
-            <div className="mb-2 text-[11px] text-slate-400">Code-first lookup — search by exact/partial code, name, alias, year or number pattern.</div>
+            <div className="mb-2 text-[11px] text-[var(--admin-ink-faint)]">Code-first lookup — search by exact/partial code, name, alias, year or number pattern.</div>
             {setsTable(true)}
           </Panel>
         )}
@@ -360,10 +377,10 @@ export default function AdminPokemonKnowledgePage() {
         {section === "Rarities" && (
           <Panel>
             <div className="mb-3 flex flex-wrap gap-2">
-              <select value={dirLang} onChange={(e) => setDirLang(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs">
+              <select value={dirLang} onChange={(e) => setDirLang(e.target.value)} className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)] px-2 py-1.5 text-xs">
                 {POKEMON_LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
               </select>
-              <select value={dirEra} onChange={(e) => setDirEra(e.target.value as PokemonEra | "")} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs">
+              <select value={dirEra} onChange={(e) => setDirEra(e.target.value as PokemonEra | "")} className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)] px-2 py-1.5 text-xs">
                 <option value="">Any era</option>
                 {POKEMON_ERAS.map((x) => <option key={x.value} value={x.value}>{x.label}</option>)}
               </select>
@@ -376,32 +393,36 @@ export default function AdminPokemonKnowledgePage() {
                     key={r.value}
                     type="button"
                     onClick={() => setSelectedRarity(r)}
-                    className="flex flex-col items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/60 p-4 hover:border-amber-500/60"
+                    className="flex flex-col items-center gap-1.5 rounded-xl border border-[var(--admin-line)] bg-[var(--admin-panel)]/60 p-4 hover:border-[var(--admin-gold)]/60"
                     aria-label={`${r.label} — ${describeSymbol(r.symbol)}`}
                   >
                     <RaritySymbol symbol={r.symbol} size={42} />
-                    <div className="text-xs font-bold text-slate-100">{r.label} {r.codes[0] ? <span className="text-amber-200">[{r.codes[0]}]</span> : null}</div>
-                    <div className="text-[10px] text-slate-400">{describeSymbol(r.symbol)}</div>
+                    <div className="text-xs font-bold text-[var(--admin-ink)]">{r.label} {r.codes[0] ? <span className="text-[var(--admin-gold)]">[{r.codes[0]}]</span> : null}</div>
+                    <div className="text-[10px] text-[var(--admin-ink-faint)]">{describeSymbol(r.symbol)}</div>
                     {statusBadge(prov.status)}
                   </button>
                 );
               })}
             </div>
             {selectedRarity && (
-              <div className="mt-4 rounded-xl border border-amber-800/40 bg-amber-950/10 p-4">
+              <div className="mt-4 rounded-xl border border-[var(--admin-gold)]/30 bg-[var(--admin-gold)]/[0.06] p-4">
                 <div className="flex items-center gap-3">
                   <RaritySymbol symbol={selectedRarity.symbol} size={34} />
                   <div className="text-sm font-bold">{selectedRarity.label}</div>
                   {statusBadge(provenanceFor("rarity", selectedRarity.value).status)}
-                  <button type="button" className="ml-auto text-xs text-slate-400 underline" onClick={() => setSelectedRarity(null)}>Close</button>
+                  <span className="ml-auto">
+                    <AdminButton size="sm" type="button" onClick={() => setSelectedRarity(null)}>
+                      Close
+                    </AdminButton>
+                  </span>
                 </div>
-                <div className="mt-2 grid gap-1 text-[11px] text-slate-300 sm:grid-cols-2">
+                <div className="mt-2 grid gap-1 text-[11px] text-[var(--admin-ink-dim)] sm:grid-cols-2">
                   <div>{selectedRarity.description}</div>
                   <div>Codes: {selectedRarity.codes.join(", ") || "—"} · Aliases: {selectedRarity.aliases.slice(0, 5).join(", ")}</div>
                   <div>Regions: {selectedRarity.regions === "all" ? "all" : selectedRarity.regions.join(", ")} · Eras: {selectedRarity.eras === "all" ? "all" : selectedRarity.eras.join(", ")}</div>
                   <div>Source: {provenanceFor("rarity", selectedRarity.value).sources.map((s) => s.sourceType).join(", ")} · confidence {provenanceFor("rarity", selectedRarity.value).confidence}</div>
                   {knowledgeNoteFor("rarity", selectedRarity.value)?.commonMistakes[0] && (
-                    <div className="text-amber-300/90 sm:col-span-2">Watch: {knowledgeNoteFor("rarity", selectedRarity.value)!.commonMistakes[0]}</div>
+                    <div className="text-[var(--admin-gold)] sm:col-span-2">Watch: {knowledgeNoteFor("rarity", selectedRarity.value)!.commonMistakes[0]}</div>
                   )}
                 </div>
               </div>
@@ -415,11 +436,11 @@ export default function AdminPokemonKnowledgePage() {
               {POKEMON_FINISHES.map((f) => {
                 const note = knowledgeNoteFor("finish", f.value);
                 return (
-                  <div key={f.value} className="rounded-lg border border-slate-800 bg-slate-900/50 p-3">
-                    <div className="flex items-center gap-2 text-xs font-bold text-slate-100">{f.label} {statusBadge(provenanceFor("finish", f.value).status)}</div>
-                    <div className="mt-0.5 text-[11px] text-slate-400">{f.description} {note?.identification}</div>
-                    {note?.commonMistakes[0] && <div className="text-[11px] text-amber-300/90">Watch: {note.commonMistakes[0]}</div>}
-                    {note?.compatibility && <div className="text-[11px] text-slate-500">Where: {note.compatibility}</div>}
+                  <div key={f.value} className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/50 p-3">
+                    <div className="flex items-center gap-2 text-xs font-bold text-[var(--admin-ink)]">{f.label} {statusBadge(provenanceFor("finish", f.value).status)}</div>
+                    <div className="mt-0.5 text-[11px] text-[var(--admin-ink-faint)]">{f.description} {note?.identification}</div>
+                    {note?.commonMistakes[0] && <div className="text-[11px] text-[var(--admin-gold)]">Watch: {note.commonMistakes[0]}</div>}
+                    {note?.compatibility && <div className="text-[11px] text-[var(--admin-ink-faint)]">Where: {note.compatibility}</div>}
                   </div>
                 );
               })}
@@ -431,14 +452,14 @@ export default function AdminPokemonKnowledgePage() {
           <div className="grid gap-4 sm:grid-cols-2">
             {(["promo", "subset"] as const).map((kind) => (
               <Panel key={kind}>
-                <div className="mb-2 text-sm font-bold text-slate-100">{kind === "promo" ? "Promo programmes" : "Subsets"}</div>
+                <div className="mb-2 text-sm font-bold text-[var(--admin-ink)]">{kind === "promo" ? "Promo programmes" : "Subsets"}</div>
                 <div className="space-y-2">
                   {POKEMON_PROMOS.filter((p) => p.kind === kind).map((p) => {
                     const note = knowledgeNoteFor("promo", p.value);
                     return (
-                      <div key={p.value} className="rounded-lg border border-slate-800 bg-slate-900/50 p-2.5">
-                        <div className="flex items-center gap-2 text-xs font-bold text-slate-100">{p.label} {statusBadge(provenanceFor("promo", p.value).status)}</div>
-                        <div className="text-[11px] text-slate-400">{p.description} {note?.identification} <i>Not a printed rarity.</i></div>
+                      <div key={p.value} className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/50 p-2.5">
+                        <div className="flex items-center gap-2 text-xs font-bold text-[var(--admin-ink)]">{p.label} {statusBadge(provenanceFor("promo", p.value).status)}</div>
+                        <div className="text-[11px] text-[var(--admin-ink-faint)]">{p.description} {note?.identification} <i>Not a printed rarity.</i></div>
                       </div>
                     );
                   })}
@@ -453,15 +474,15 @@ export default function AdminPokemonKnowledgePage() {
             {LANGUAGE_GUIDE.map((l) => (
               <Panel key={l.key}>
                 <div className="flex items-center justify-between">
-                  <div className="text-sm font-bold text-slate-100">{l.label}</div>
-                  <div className="text-[10px] uppercase tracking-wide text-slate-500">{l.region}</div>
+                  <div className="text-sm font-bold text-[var(--admin-ink)]">{l.label}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-[var(--admin-ink-faint)]">{l.region}</div>
                 </div>
-                <div className="mt-1 rounded bg-slate-900/70 px-2 py-1 text-xs text-amber-100/90">{l.sampleScript}</div>
-                <div className="mt-2 space-y-0.5 text-[11px] text-slate-400">
+                <div className="mt-1 rounded bg-[var(--admin-panel)]/70 px-2 py-1 text-xs text-[var(--admin-gold-hi)]">{l.sampleScript}</div>
+                <div className="mt-2 space-y-0.5 text-[11px] text-[var(--admin-ink-faint)]">
                   <div>Set codes: {l.setCodeFormat}</div>
                   <div>Rarity format: {l.rarityFormat}</div>
                   {l.tips.map((t, i) => <div key={i}>• {t}</div>)}
-                  {l.commonMistakes[0] && <div className="text-amber-300/90">Watch: {l.commonMistakes[0]}</div>}
+                  {l.commonMistakes[0] && <div className="text-[var(--admin-gold)]">Watch: {l.commonMistakes[0]}</div>}
                 </div>
               </Panel>
             ))}
@@ -474,21 +495,21 @@ export default function AdminPokemonKnowledgePage() {
               {ERA_TIMELINE.filter((e) => e.key !== "future").map((e, i, arr) => (
                 <div key={e.key} className="relative flex gap-4 pb-6">
                   <div className="flex flex-col items-center">
-                    <div className="h-3 w-3 rounded-full border border-amber-600 bg-amber-400" />
-                    {i < arr.length - 1 && <div className="w-px flex-1 bg-slate-700" />}
+                    <div className="h-3 w-3 rounded-full border border-[var(--admin-gold)] bg-[var(--admin-gold)]" />
+                    {i < arr.length - 1 && <div className="w-px flex-1 bg-[var(--admin-panel3)]" />}
                   </div>
                   <div className="-mt-0.5">
-                    <div className="text-sm font-bold text-slate-100">{e.label} <span className="font-normal text-slate-400">· {e.yearsApprox}</span> <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] text-slate-300">{e.catalogueEra}</span></div>
-                    <div className="mt-1 grid gap-0.5 text-[11px] text-slate-400 sm:grid-cols-2">
-                      <div><b className="text-slate-300">Rarities:</b> {e.raritySystemNotes}</div>
-                      <div><b className="text-slate-300">Codes:</b> {e.codeFormatNotes}</div>
-                      <div><b className="text-slate-300">Finishes:</b> {e.finishNotes}</div>
-                      <div><b className="text-slate-300">Promos:</b> {e.promoNotes}</div>
+                    <div className="text-sm font-bold text-[var(--admin-ink)]">{e.label} <span className="font-normal text-[var(--admin-ink-faint)]">· {e.yearsApprox}</span> <span className="rounded bg-[var(--admin-panel2)] px-1.5 py-0.5 text-[10px] text-[var(--admin-ink-dim)]">{e.catalogueEra}</span></div>
+                    <div className="mt-1 grid gap-0.5 text-[11px] text-[var(--admin-ink-faint)] sm:grid-cols-2">
+                      <div><b className="text-[var(--admin-ink-dim)]">Rarities:</b> {e.raritySystemNotes}</div>
+                      <div><b className="text-[var(--admin-ink-dim)]">Codes:</b> {e.codeFormatNotes}</div>
+                      <div><b className="text-[var(--admin-ink-dim)]">Finishes:</b> {e.finishNotes}</div>
+                      <div><b className="text-[var(--admin-ink-dim)]">Promos:</b> {e.promoNotes}</div>
                     </div>
                   </div>
                 </div>
               ))}
-              <div className="text-[11px] text-slate-500">Future eras are added as catalogue data — no code change needed.</div>
+              <div className="text-[11px] text-[var(--admin-ink-faint)]">Future eras are added as catalogue data — no code change needed.</div>
             </div>
           </Panel>
         )}
@@ -501,18 +522,18 @@ export default function AdminPokemonKnowledgePage() {
                   key={c.key}
                   type="button"
                   onClick={() => { setCompareLeft(`${c.left.kind}:${c.left.value}`); setCompareRight(`${c.right.kind}:${c.right.value}`); }}
-                  className="rounded-lg border border-slate-700 bg-slate-900/60 px-2.5 py-1 text-[11px] text-slate-300 hover:border-amber-500/60"
+                  className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/60 px-2.5 py-1 text-[11px] text-[var(--admin-ink-dim)] hover:border-[var(--admin-gold)]/60"
                 >
                   {c.title}
                 </button>
               ))}
             </div>
             <div className="mb-3 flex flex-wrap gap-2">
-              <select value={compareLeft} onChange={(e) => setCompareLeft(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs" data-testid="compare-left">
+              <select value={compareLeft} onChange={(e) => setCompareLeft(e.target.value)} className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)] px-2 py-1.5 text-xs" data-testid="compare-left">
                 {allCompareOptions.map((o) => <option key={`${o.kind}:${o.value}`} value={`${o.kind}:${o.value}`}>{o.label}</option>)}
               </select>
-              <span className="self-center text-xs font-bold text-slate-500">VS</span>
-              <select value={compareRight} onChange={(e) => setCompareRight(e.target.value)} className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs" data-testid="compare-right">
+              <span className="self-center text-xs font-bold text-[var(--admin-ink-faint)]">VS</span>
+              <select value={compareRight} onChange={(e) => setCompareRight(e.target.value)} className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)] px-2 py-1.5 text-xs" data-testid="compare-right">
                 {allCompareOptions.map((o) => <option key={`${o.kind}:${o.value}`} value={`${o.kind}:${o.value}`}>{o.label}</option>)}
               </select>
             </div>
@@ -522,9 +543,9 @@ export default function AdminPokemonKnowledgePage() {
                 (c) => `${c.left.kind}:${c.left.value}` === compareLeft && `${c.right.kind}:${c.right.value}` === compareRight,
               );
               return preset ? (
-                <div className="mt-3 rounded-lg border border-amber-800/40 bg-amber-950/10 p-3 text-[11px] text-slate-300">
-                  <b className="text-amber-200">How to tell:</b> {preset.howToTell}
-                  <div className="mt-1 text-amber-300/90">Common mistake: {preset.commonMistake}</div>
+                <div className="mt-3 rounded-lg border border-[var(--admin-gold)]/30 bg-[var(--admin-gold)]/[0.06] p-3 text-[11px] text-[var(--admin-ink-dim)]">
+                  <b className="text-[var(--admin-gold)]">How to tell:</b> {preset.howToTell}
+                  <div className="mt-1 text-[var(--admin-gold)]">Common mistake: {preset.commonMistake}</div>
                 </div>
               ) : null;
             })()}
@@ -535,7 +556,7 @@ export default function AdminPokemonKnowledgePage() {
           <div className="space-y-4">
             <Panel>
               <div className="mb-2 flex items-center justify-between">
-                <div className="text-sm font-bold text-slate-100">Import drafts</div>
+                <div className="text-sm font-bold text-[var(--admin-ink)]">Import drafts</div>
                 <AdminButton
                   size="sm"
                   type="button"
@@ -549,7 +570,7 @@ export default function AdminPokemonKnowledgePage() {
               </div>
               <div className="space-y-2">
                 {(imports.data ?? []).map((run) => (
-                  <div key={run.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/50 p-2.5 text-xs">
+                  <div key={run.id} className="flex items-center justify-between rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/50 p-2.5 text-xs">
                     <div>
                       <b>#{run.id} · {run.source}</b> — {run.recordsTotal} records ({run.recordsAdded} new, {run.recordsChanged} existing, {run.conflicts.length} conflicts) {statusBadge(run.status === "applied" ? "verified" : run.status === "draft" ? "provisional" : "needs_review")}
                     </div>
@@ -561,17 +582,17 @@ export default function AdminPokemonKnowledgePage() {
                     )}
                   </div>
                 ))}
-                {(imports.data ?? []).length === 0 && <div className="text-xs text-slate-500">No import drafts yet.</div>}
+                {(imports.data ?? []).length === 0 && <div className="text-xs text-[var(--admin-ink-faint)]">No import drafts yet.</div>}
               </div>
             </Panel>
             <Panel>
-              <div className="mb-2 text-sm font-bold text-slate-100">Knowledge review queue</div>
+              <div className="mb-2 text-sm font-bold text-[var(--admin-ink)]">Knowledge review queue</div>
               <div className="space-y-2">
                 {(reviewQueue.data ?? []).map((item) => (
-                  <div key={item.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-900/50 p-2.5 text-xs">
+                  <div key={item.id} className="flex items-center justify-between rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/50 p-2.5 text-xs">
                     <div>
-                      <b className="text-amber-200">{item.kind.replace(/_/g, " ")}</b> — {item.entityKey}
-                      <span className="ml-2 text-slate-500">{JSON.stringify(item.details).slice(0, 120)}</span>
+                      <b className="text-[var(--admin-gold)]">{item.kind.replace(/_/g, " ")}</b> — {item.entityKey}
+                      <span className="ml-2 text-[var(--admin-ink-faint)]">{JSON.stringify(item.details).slice(0, 120)}</span>
                     </div>
                     <div className="flex gap-2">
                       {(["approved", "rejected", "ignored"] as const).map((d) => (
@@ -582,21 +603,21 @@ export default function AdminPokemonKnowledgePage() {
                     </div>
                   </div>
                 ))}
-                {(reviewQueue.data ?? []).length === 0 && <div className="text-xs text-slate-500">Nothing pending review.</div>}
+                {(reviewQueue.data ?? []).length === 0 && <div className="text-xs text-[var(--admin-ink-faint)]">Nothing pending review.</div>}
               </div>
-              <div className="mt-2 text-[10px] text-slate-500">Decisions record the knowledge rule only — no certificate is ever rewritten from here.</div>
+              <div className="mt-2 text-[10px] text-[var(--admin-ink-faint)]">Decisions record the knowledge rule only — no certificate is ever rewritten from here.</div>
             </Panel>
           </div>
         )}
 
         {section === "Handbook" && (
           <Panel>
-            <div className="mb-2 text-sm font-bold text-slate-100">Generated documents</div>
-            <div className="mb-3 text-[11px] text-slate-400">
+            <div className="mb-2 text-sm font-bold text-[var(--admin-ink)]">Generated documents</div>
+            <div className="mb-3 text-[11px] text-[var(--admin-ink-faint)]">
               Generated from this same catalogue (v{KNOWLEDGE_CATALOGUE_VERSION}). Provisional records are labelled inside the PDFs. No customer data is included.
             </div>
             <div className="flex flex-wrap gap-2">
-              <a href="/api/admin/pokemon-knowledge/handbook.pdf" download className="rounded-lg border border-amber-600 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-200 hover:bg-amber-500/20" data-testid="btn-handbook">
+              <a href="/api/admin/pokemon-knowledge/handbook.pdf" download className="rounded-lg border border-[var(--admin-gold)] bg-[var(--admin-gold)]/10 px-3 py-2 text-xs font-bold text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/20" data-testid="btn-handbook">
                 Full Handbook (PDF)
               </a>
               {([
@@ -606,14 +627,14 @@ export default function AdminPokemonKnowledgePage() {
                 ["setcodes", "Set Code Quick Directory"],
                 ["languages", "Language Identification"],
               ] as const).map(([kind, label]) => (
-                <a key={kind} href={`/api/admin/pokemon-knowledge/desk-sheet/${kind}.pdf`} download className="rounded-lg border border-slate-600 bg-slate-900/60 px-3 py-2 text-xs font-semibold text-slate-200 hover:border-slate-400">
+                <a key={kind} href={`/api/admin/pokemon-knowledge/desk-sheet/${kind}.pdf`} download className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/60 px-3 py-2 text-xs font-semibold text-[var(--admin-ink-dim)] hover:border-[var(--admin-line)]">
                   {label}
                 </a>
               ))}
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
-              <a href="/api/admin/pokemon-knowledge/export.csv" download className="text-[11px] text-slate-400 underline hover:text-slate-200">Export catalogue CSV</a>
-              <a href="/api/admin/pokemon-knowledge/export.json" download className="text-[11px] text-slate-400 underline hover:text-slate-200">Export catalogue JSON</a>
+              <a href="/api/admin/pokemon-knowledge/export.csv" download className="text-[11px] text-[var(--admin-ink-faint)] underline hover:text-[var(--admin-ink-dim)]">Export catalogue CSV</a>
+              <a href="/api/admin/pokemon-knowledge/export.json" download className="text-[11px] text-[var(--admin-ink-faint)] underline hover:text-[var(--admin-ink-dim)]">Export catalogue JSON</a>
             </div>
           </Panel>
         )}
