@@ -18,5 +18,17 @@ push, deploy, migration APPLICATION (authored migration is fine locally on dispo
 
 ## Stage log
 - Stage 0 baseline: COMPLETE.
-- Stage 1 review plan (discovery): 4 read-only specialist reviewers dispatched (admin auth/API; DB/audit/flags/migrations; admin UI shell; G3F service entry points).
-- Next authorised action: receive + verify discovery reports → write G4-DISCOVERY.md → Phase 3 design docs. No code, no migration application, no protected action.
+- Stage 1-3 discovery: COMPLETE. 4 reviewers returned; synthesized G4-DISCOVERY.md; Lead verified the three architecture-blocking findings (no global-flag write path; no per-connector pause state; live-claim force-release unsafe) and set the deferral decisions.
+- Phase 3 design: COMPLETE. 11 docs authored.
+- Phase 5 audit migration 0014: COMPLETE + LOCALLY VERIFIED. `partner_connector_admin_actions` append-only table + rollback + migration test; 8/8 on fresh disposable PG; existing migration test 13->14 green (14/14). Commits 1551b9ca (docs), 43c02e01 (migration).
+
+## CHECKPOINT (proof levels)
+- Phases 1,2,3,5: COMPLETE — design docs (Design) + migration 0014 (Local Proof on disposable PG). No live migration applied.
+- Phase 4 (authz model): DESIGNED (matrix) — not implemented (no routes yet).
+- Phases 6-7 (operations API/service/routes): DESIGNED (API contract + action matrix) — NOT implemented.
+- Phases 8-9 (Super Admin UI): DESIGNED (UI spec) — NOT implemented.
+- Phase 14 (test matrix): Group A (migration) done; B-K NOT implemented.
+- Phases 15-18 (reviews, gates, commits-for-code, controlled merge): NOT started (no code to review/merge beyond the migration).
+
+## Next authorised action (carry-forward)
+Implement `connector-admin-service.ts` (audit wrapper over the verified G3F service signatures) → `connector-admin-routes.ts` (requireAdmin, /api/super-admin/connector-ops) → wire one line in server/routes.ts → integration tests (Groups B-K) on disposable PG → UI (Phases 8-9) → 7 review panels → gates → controlled merge review. NO deploy, NO live migration, NO flag flip, NO portal mount — all remain owner-gated.
