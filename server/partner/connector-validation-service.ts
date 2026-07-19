@@ -85,7 +85,8 @@ export interface ValidationRunResult {
   findings: ValidationFinding[];
 }
 
-interface ConnectorRow {
+/** Exported for the same reason as loadValidationRows above. */
+export interface ConnectorRow {
   id: string;
   tenant_id: string;
   partner_submission_id: string;
@@ -128,7 +129,12 @@ function isBlank(v: string | null | undefined): boolean {
  * every table read here is FORCE ROW LEVEL SECURITY, so a caller-claimed tenantId that doesn't
  * match the real row's tenant_id yields zero rows, never another tenant's data.
  */
-async function loadValidationRows(client: pg.PoolClient, connector: ConnectorRow) {
+/**
+ * Exported (not just internal) so the G3 importer's mandatory pre-import fingerprint recheck reuses
+ * the EXACT SAME loader and field mapping validation used — reimplementing a second, parallel loader
+ * would risk the two drifting apart, which would silently defeat the staleness check's own purpose.
+ */
+export async function loadValidationRows(client: pg.PoolClient, connector: ConnectorRow) {
   const orgRes = await client.query<{ id: string; status: string }>(
     `SELECT id, status FROM partner_organisations WHERE id = $1`,
     [connector.tenant_id]
@@ -221,7 +227,7 @@ async function loadValidationRows(client: pg.PoolClient, connector: ConnectorRow
   };
 }
 
-type LoadedRows = Awaited<ReturnType<typeof loadValidationRows>>;
+export type LoadedRows = Awaited<ReturnType<typeof loadValidationRows>>;
 
 /** Pure rule evaluation over already-loaded rows — no I/O, fully unit-testable. */
 function evaluateRules(connector: ConnectorRow, rows: LoadedRows): ValidationFinding[] {
@@ -509,7 +515,8 @@ function evaluateRules(connector: ConnectorRow, rows: LoadedRows): ValidationFin
   return findings;
 }
 
-function toFingerprintSource(rows: LoadedRows): FingerprintSource {
+/** Exported for the same reason as loadValidationRows above. */
+export function toFingerprintSource(rows: LoadedRows): FingerprintSource {
   return {
     submission: {
       locationId: rows.submission?.location_id ?? "",
