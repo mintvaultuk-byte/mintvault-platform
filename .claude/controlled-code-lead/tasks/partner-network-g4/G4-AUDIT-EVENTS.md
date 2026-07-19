@@ -24,7 +24,9 @@ Constraint: partial UNIQUE `(idempotency_key) WHERE idempotency_key IS NOT NULL 
 Indexes (only real query paths): `(connector_record_id, created_at)` history lookup; `(partner_organisation_id, created_at)` partner audit view; partial unique on idempotency_key.
 
 ## action_type set (deterministic)
-`retry_import, retry_interrupted, resume_reserved, request_reconciliation, reconcile_retain, reconcile_retry, reconcile_mark_manual, manual_review_retry, manual_review_cancel, ack_permanent_failure, release_expired_claim, batch_retry`.
+`retry_import, retry_interrupted, resume_reserved, request_revalidation, request_reconciliation, reconcile_retain, reconcile_retry, reconcile_mark_manual, manual_review_retry, manual_review_cancel, ack_permanent_failure, release_expired_claim, batch_retry`.
+
+Emitted by the current service: `request_revalidation` (opRequestRevalidation), `request_reconciliation` (opRequestReconciliation), `resume_reserved` / `retry_interrupted` (opRetryRecord, per dispatched recovery service), `reconcile_mark_manual` (opMarkManualReview), `manual_review_retry` / `manual_review_cancel` (opResolveManualReview), `ack_permanent_failure` (opAckPermanentFailure), `release_expired_claim` (opReleaseExpiredClaim). The remainder (`retry_import`, `reconcile_retain`, `reconcile_retry`, `batch_retry`) are reserved forward values in the CHECK set for later operations.
 
 ## Recording protocol (two-pool split)
 1. Before delegating: INSERT a row `result='attempted'` with before_state, action_type, actor, request_id, idempotency_key, reason (own admin-pool txn — commits so the attempt is durable even if the service call dies).

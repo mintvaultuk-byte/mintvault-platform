@@ -302,6 +302,40 @@ const OPS = "/api/super-admin/connector-ops";
     expect(succeededCount2.rows[0].n).toBe(1); // still exactly one — no duplicate effect
   });
 
+  it("request-revalidation records a DISTINCT action_type (not the mark-manual label)", async () => {
+    const ac = await adminCookie();
+    // seed a fresh 'failed' record (revalidation-eligible), self-contained for this assertion
+    const sub = await admin.query<{ id: string }>(
+      `INSERT INTO partner_submissions (tenant_id, location_id, created_by, service_tier_code, estimated_price_pence, card_count, status)
+       VALUES ($1,$2,$3,'standard',3000,1,'submitted_to_mintvault') RETURNING id`,
+      [A, LA1, UA]
+    );
+    const h = await admin.query<{ id: string }>(
+      "INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending','{}'::jsonb) RETURNING id",
+      [A, sub.rows[0].id]
+    );
+    const rec = await admin.query<{ id: string }>(
+      `INSERT INTO partner_connector_records (tenant_id, partner_submission_id, handoff_id, state, version)
+       VALUES ($1,$2,$3,'failed',1) RETURNING id`,
+      [A, sub.rows[0].id, h.rows[0].id]
+    );
+    const rid = rec.rows[0].id;
+    const r = await apost(
+      `${OPS}/records/${rid}/revalidate`,
+      { reason: "operator revalidate", expectedVersion: 1 },
+      ac
+    );
+    expect(r.status).toBe(200);
+    // the append-only audit records the operation under its OWN label, not the manual-review label
+    const audit = await admin.query<{ action_type: string }>(
+      "SELECT DISTINCT action_type FROM partner_connector_admin_actions WHERE connector_record_id=$1",
+      [rid]
+    );
+    const types = audit.rows.map((x) => x.action_type);
+    expect(types).toContain("request_revalidation");
+    expect(types).not.toContain("reconcile_mark_manual");
+  });
+
   it("runtime role cannot mutate the append-only admin-actions table", async () => {
     const rt = new Client({ connectionString: process.env.PARTNER_CONNECTOR_DATABASE_URL });
     await rt.connect();

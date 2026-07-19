@@ -35,9 +35,10 @@ CREATE TABLE IF NOT EXISTS partner_connector_admin_actions (
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT chk_partner_connector_admin_actions_type
     CHECK (action_type IN (
-      'retry_import','retry_interrupted','resume_reserved','request_reconciliation',
-      'reconcile_retain','reconcile_retry','reconcile_mark_manual','manual_review_retry',
-      'manual_review_cancel','ack_permanent_failure','release_expired_claim','batch_retry'
+      'retry_import','retry_interrupted','resume_reserved','request_revalidation',
+      'request_reconciliation','reconcile_retain','reconcile_retry','reconcile_mark_manual',
+      'manual_review_retry','manual_review_cancel','ack_permanent_failure','release_expired_claim',
+      'batch_retry'
     )),
   CONSTRAINT chk_partner_connector_admin_actions_result
     CHECK (result IN ('attempted','succeeded','failed','no_op'))
@@ -51,11 +52,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_partner_connector_admin_actions_idem
   ON partner_connector_admin_actions(idempotency_key)
   WHERE idempotency_key IS NOT NULL AND result = 'succeeded';
 
--- Real read paths only: the record audit-history view (record detail) and the partner audit view.
+-- Real read path only: the record audit-history view (record detail / getRecordAuditHistory), keyed
+-- by connector_record_id. No code path reads this table filtered by partner_organisation_id yet, so no
+-- index on that column is added (it would be speculative — a future partner-scoped audit view can add
+-- it when the query that needs it actually exists; same discipline as migration 0012's index set).
 CREATE INDEX IF NOT EXISTS idx_partner_connector_admin_actions_record
   ON partner_connector_admin_actions(connector_record_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_partner_connector_admin_actions_org
-  ON partner_connector_admin_actions(partner_organisation_id, created_at);
 
 -- Grants: append-only (SELECT + INSERT, no UPDATE/DELETE). No PUBLIC. partner_runtime gets nothing.
 GRANT SELECT, INSERT ON partner_connector_admin_actions TO partner_connector_runtime;

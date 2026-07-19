@@ -32,7 +32,7 @@ import {
   acknowledgePermanentFailure,
   inspectConnectorConsistency,
 } from "./connector-reconciliation-service";
-import { G4RequestError, MAX_BATCH_RETRY } from "./connector-admin-errors";
+import { G4RequestError } from "./connector-admin-errors";
 
 export interface ActorContext {
   actorUserId: string;
@@ -83,6 +83,7 @@ type AdminActionType =
   | "retry_import"
   | "retry_interrupted"
   | "resume_reserved"
+  | "request_revalidation"
   | "request_reconciliation"
   | "reconcile_retain"
   | "reconcile_retry"
@@ -188,6 +189,15 @@ async function withAudit<T>(
     );
     return { result, alreadyCompleted: false };
   } catch (err) {
+    // Concurrency: two same-idempotency-key requests can both pass priorSuccess and both delegate;
+    // the second succeeded-terminal INSERT hits the partial-unique (pg 23505). The delegate already
+    // completed and another request recorded the canonical success, so this is an idempotent replay,
+    // not a failure — return alreadyCompleted WITHOUT writing a spurious 'failed' row. (Any raw 23505
+    // reaching here is from recordTerminal's succeeded INSERT: the G3F delegates surface only
+    // ConnectorError, never a raw pg error.)
+    if ((err as { code?: string }).code === "23505") {
+      return { result: null, alreadyCompleted: true };
+    }
     const { toG4Error } = await import("./connector-admin-errors");
     const g4 = toG4Error(err);
     await recordTerminal(
@@ -214,7 +224,7 @@ export async function opRequestRevalidation(
   reason: string,
   expectedVersion: number
 ) {
-  return withAudit(actor, "reconcile_mark_manual", recordId, reason, async (rec) => {
+  return withAudit(actor, "request_revalidation", recordId, reason, async (rec) => {
     await requestConnectorRevalidation({
       connectorId: rec.id,
       claimant: claimantOf(actor),
@@ -231,34 +241,35 @@ export async function opRequestReconciliation(actor: ActorContext, recordId: str
   });
 }
 
-/** Retry an eligible record: dispatch to the correct recovery service by mapping/record state. */
+/**
+ * Retry an eligible record: dispatch to the correct recovery service by mapping/record state, and
+ * record the audit under the label of the service that actually ran (resume_reserved vs
+ * retry_interrupted) so the append-only ledger identifies which recovery path was taken. The branch
+ * is resolved from a pre-read; the actual exactly-once guarantee still lives in the delegated,
+ * version-guarded G3F service, and withAudit's idempotency short-circuit prevents any second effect.
+ */
 export async function opRetryRecord(actor: ActorContext, recordId: string, reason: string, expectedVersion: number) {
-  return withAudit(actor, "retry_import", recordId, reason, async (rec) => {
-    const mapping = await getConnectorImport(rec.id);
-    if (mapping && mapping.state === "reserved") {
-      return recoverReservedImport({
-        connectorId: rec.id,
-        claimant: claimantOf(actor),
-        expectedVersion,
-        actorId: actor.actorUserId,
-        reason,
-        tenantId: rec.tenant_id,
-      });
-    }
-    if (rec.state === "ready_for_import" || rec.state === "importing") {
-      return recoverInterruptedImport({
-        connectorId: rec.id,
-        claimant: claimantOf(actor),
-        expectedVersion,
-        actorId: actor.actorUserId,
-        reason,
-        tenantId: rec.tenant_id,
-      });
-    }
+  const rec = await loadRecord(recordId);
+  const mapping = await getConnectorImport(rec.id);
+  const isReserved = mapping?.state === "reserved";
+  const isInterrupted = rec.state === "ready_for_import" || rec.state === "importing";
+  if (!isReserved && !isInterrupted) {
     throw new G4RequestError(
       "RETRY_NOT_ALLOWED",
       "This record is not in a directly retryable state; use reconcile, revalidate, or release-claim first."
     );
+  }
+  const label: AdminActionType = isReserved ? "resume_reserved" : "retry_interrupted";
+  return withAudit(actor, label, recordId, reason, async (fresh) => {
+    const args = {
+      connectorId: fresh.id,
+      claimant: claimantOf(actor),
+      expectedVersion,
+      actorId: actor.actorUserId,
+      reason,
+      tenantId: fresh.tenant_id,
+    };
+    return isReserved ? recoverReservedImport(args) : recoverInterruptedImport(args);
   });
 }
 
@@ -500,5 +511,3 @@ function projectRecord(rec: RecordRow) {
     updatedAt: rec.updated_at,
   };
 }
-
-export { MAX_BATCH_RETRY };

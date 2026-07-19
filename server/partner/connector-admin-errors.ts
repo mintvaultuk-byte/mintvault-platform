@@ -190,6 +190,3 @@ export function optionalStateFilter(raw: unknown): string | undefined {
   if (!RECORD_STATES.has(s)) throw new G4RequestError("BAD_REQUEST", "Unknown state filter.");
   return s;
 }
-
-/** The bounded batch-retry cap. */
-export const MAX_BATCH_RETRY = 25;

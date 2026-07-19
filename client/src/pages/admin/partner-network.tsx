@@ -25,9 +25,14 @@ import {
   canReconcile,
   canReleaseClaim,
   reasonValid,
+  requiresTypedConfirm,
+  unavailableReason,
   opsKeys,
   recordsQueryString,
 } from "./partner-network-helpers";
+
+/** The phrase an operator must type to confirm a high-risk (destructive) action. */
+const TYPED_CONFIRM_PHRASE = "CONFIRM";
 
 const BASE = "/api/super-admin/connector-ops";
 
@@ -117,7 +122,24 @@ export default function PartnerNetworkOpsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [modal, setModal] = useState<{ action: ActionSpec; rec: RecordRow } | null>(null);
   const [reason, setReason] = useState("");
+  const [typedConfirm, setTypedConfirm] = useState("");
   const [banner, setBanner] = useState<string | null>(null);
+
+  const closeModal = () => {
+    setModal(null);
+    setReason("");
+    setTypedConfirm("");
+  };
+
+  // Escape closes the reason modal (accessibility / keyboard dismissal).
+  useEffect(() => {
+    if (!modal) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeModal();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [modal]);
 
   useEffect(() => {
     let live = true;
@@ -156,8 +178,7 @@ export default function PartnerNetworkOpsPage() {
     },
     onSuccess: (data) => {
       setBanner(data?.alreadyCompleted ? "Already completed (idempotent)." : "Action completed.");
-      setModal(null);
-      setReason("");
+      closeModal();
       queryClient.invalidateQueries({ queryKey: [`${BASE}/records`] });
       queryClient.invalidateQueries({ queryKey: opsKeys.workerStatus() });
       if (selected) queryClient.invalidateQueries({ queryKey: opsKeys.record(selected) });
@@ -178,7 +199,7 @@ export default function PartnerNetworkOpsPage() {
         style={{ display: "grid", placeItems: "center", minHeight: "60vh" }}
         data-testid="pn-loading"
       >
-        <span style={{ color: "#D4AF37" }}>Loading…</span>
+        <span style={{ color: "var(--admin-gold, #D4AF37)" }}>Loading…</span>
       </div>
     );
   }
@@ -197,7 +218,13 @@ export default function PartnerNetworkOpsPage() {
         {banner && (
           <div
             data-testid="pn-banner"
-            style={{ marginBottom: 12, color: "#1A1400", background: "#D4AF37", padding: "8px 12px", borderRadius: 8 }}
+            style={{
+              marginBottom: 12,
+              color: "var(--admin-gold-text, #1A1400)",
+              background: "var(--admin-gold, #D4AF37)",
+              padding: "8px 12px",
+              borderRadius: 8,
+            }}
           >
             {banner}
           </div>
@@ -205,7 +232,13 @@ export default function PartnerNetworkOpsPage() {
         {h.featureEnabled === false && (
           <div
             data-testid="pn-disabled-banner"
-            style={{ marginBottom: 12, color: "#fff", background: "#7a1f1f", padding: "8px 12px", borderRadius: 8 }}
+            style={{
+              marginBottom: 12,
+              color: "#fff",
+              background: "var(--admin-red, #cd8073)",
+              padding: "8px 12px",
+              borderRadius: 8,
+            }}
           >
             Connector processing is globally DISABLED (read-only). Enabling is deferred and owner-gated.
           </div>
@@ -310,6 +343,7 @@ export default function PartnerNetworkOpsPage() {
                       size="sm"
                       variant={avail ? "gold" : "ghost"}
                       disabled={!avail}
+                      title={avail ? undefined : unavailableReason(a.key, selectedRec.state)}
                       onClick={() => avail && setModal({ action: a, rec: selectedRec })}
                       data-testid={`pn-action-${a.key}`}
                     >
@@ -325,50 +359,104 @@ export default function PartnerNetworkOpsPage() {
           </Panel>
         )}
 
-        {modal && (
-          <div
-            role="dialog"
-            aria-modal="true"
-            data-testid="pn-reason-modal"
-            style={{
-              position: "fixed",
-              inset: 0,
-              background: "rgba(0,0,0,.6)",
-              display: "grid",
-              placeItems: "center",
-              zIndex: 50,
-            }}
-          >
-            <div style={{ background: "#141414", padding: 20, borderRadius: 12, width: "min(520px,92vw)" }}>
-              <h3 style={{ marginBottom: 8 }}>{modal.action.label}</h3>
-              <p style={{ fontSize: 13, opacity: 0.8, marginBottom: 8 }}>
-                A reason is required and recorded in the append-only admin audit.
-              </p>
-              <textarea
-                data-testid="pn-reason-input"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                rows={3}
-                style={{ width: "100%", background: "#0d0d0d", color: "#fff", borderRadius: 8, padding: 8 }}
-                placeholder="Operator reason…"
-              />
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
-                <AdminButton size="sm" variant="ghost" onClick={() => setModal(null)} data-testid="pn-modal-cancel">
-                  Cancel
-                </AdminButton>
-                <AdminButton
-                  size="sm"
-                  variant="gold"
-                  disabled={!reasonValid(reason) || mutation.isPending}
-                  onClick={() => mutation.mutate({ action: modal.action, rec: modal.rec, reason })}
-                  data-testid="pn-modal-confirm"
+        {modal &&
+          (() => {
+            const highRisk = requiresTypedConfirm(modal.action.key);
+            const confirmOk =
+              reasonValid(reason) && (!highRisk || typedConfirm.trim() === TYPED_CONFIRM_PHRASE) && !mutation.isPending;
+            return (
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="pn-modal-title"
+                data-testid="pn-reason-modal"
+                style={{
+                  position: "fixed",
+                  inset: 0,
+                  background: "rgba(0,0,0,.6)",
+                  display: "grid",
+                  placeItems: "center",
+                  zIndex: 50,
+                }}
+              >
+                <div
+                  style={{
+                    background: "var(--admin-panel, #141414)",
+                    padding: 20,
+                    borderRadius: 12,
+                    width: "min(520px,92vw)",
+                  }}
                 >
-                  {mutation.isPending ? "Working…" : "Confirm"}
-                </AdminButton>
+                  <h3 id="pn-modal-title" style={{ marginBottom: 8 }}>
+                    {modal.action.label}
+                  </h3>
+                  <p style={{ fontSize: 13, opacity: 0.8, marginBottom: 8 }}>
+                    A reason is required and recorded in the append-only admin audit.
+                  </p>
+                  <label
+                    htmlFor="pn-reason-input"
+                    style={{ display: "block", fontSize: 12, opacity: 0.8, marginBottom: 4 }}
+                  >
+                    Operator reason
+                  </label>
+                  <textarea
+                    id="pn-reason-input"
+                    data-testid="pn-reason-input"
+                    autoFocus
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    rows={3}
+                    style={{
+                      width: "100%",
+                      background: "var(--admin-bg, #0d0d0d)",
+                      color: "#fff",
+                      borderRadius: 8,
+                      padding: 8,
+                    }}
+                    placeholder="Operator reason…"
+                  />
+                  {highRisk && (
+                    <div style={{ marginTop: 10 }} data-testid="pn-typed-confirm-wrap">
+                      <label
+                        htmlFor="pn-typed-confirm"
+                        style={{ display: "block", fontSize: 12, color: "var(--admin-red, #cd8073)", marginBottom: 4 }}
+                      >
+                        This is a destructive action. Type {TYPED_CONFIRM_PHRASE} to proceed.
+                      </label>
+                      <input
+                        id="pn-typed-confirm"
+                        data-testid="pn-typed-confirm"
+                        value={typedConfirm}
+                        onChange={(e) => setTypedConfirm(e.target.value)}
+                        style={{
+                          width: "100%",
+                          background: "var(--admin-bg, #0d0d0d)",
+                          color: "#fff",
+                          borderRadius: 8,
+                          padding: 8,
+                        }}
+                        placeholder={TYPED_CONFIRM_PHRASE}
+                      />
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+                    <AdminButton size="sm" variant="ghost" onClick={closeModal} data-testid="pn-modal-cancel">
+                      Cancel
+                    </AdminButton>
+                    <AdminButton
+                      size="sm"
+                      variant="gold"
+                      disabled={!confirmOk}
+                      onClick={() => mutation.mutate({ action: modal.action, rec: modal.rec, reason })}
+                      data-testid="pn-modal-confirm"
+                    >
+                      {mutation.isPending ? "Working…" : "Confirm"}
+                    </AdminButton>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
+            );
+          })()}
       </div>
     </AdminShell>
   );

@@ -103,6 +103,7 @@ describe("G4 ops page source assertions", () => {
       "pn-detail",
       "pn-reason-modal",
       "pn-reason-input",
+      "pn-typed-confirm",
       "pn-modal-confirm",
     ]) {
       expect(src).toContain(id);
@@ -111,7 +112,21 @@ describe("G4 ops page source assertions", () => {
 
   it("gates the mutation confirm on a valid reason (no optimistic completion)", () => {
     expect(src).toContain("reasonValid(reason)");
-    expect(src).toContain("disabled={!reasonValid(reason) || mutation.isPending}");
+    expect(src).toContain("disabled={!confirmOk}");
+    // confirmOk requires a valid reason and, for high-risk actions, the typed phrase
+    expect(src).toContain("requiresTypedConfirm(modal.action.key)");
+    expect(src).toContain("typedConfirm.trim() === TYPED_CONFIRM_PHRASE");
+  });
+
+  it("modal is accessible: labelled dialog, associated reason label, and Escape-to-close", () => {
+    expect(src).toContain('aria-labelledby="pn-modal-title"');
+    expect(src).toContain('id="pn-modal-title"');
+    expect(src).toContain('htmlFor="pn-reason-input"');
+    expect(src).toContain('e.key === "Escape"');
+  });
+
+  it("wires unavailableReason into disabled action buttons", () => {
+    expect(src).toContain("unavailableReason(a.key, selectedRec.state)");
   });
 
   it("does NOT expose the deferred controls (pause/disable/global emergency-stop write)", () => {
