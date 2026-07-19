@@ -40,6 +40,12 @@ export const PARTNER_MIGRATIONS = [
  */
 export const PARTNER_MIGRATIONS_WITH_G3 = [...PARTNER_MIGRATIONS, "0010_partner_connector_import"] as const;
 
+/** G3E (0011) also needs users/submissions/submission_items pre-created — same reason as G3. */
+export const PARTNER_MIGRATIONS_WITH_G3E = [
+  ...PARTNER_MIGRATIONS_WITH_G3,
+  "0011_partner_connector_reconciliation",
+] as const;
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 

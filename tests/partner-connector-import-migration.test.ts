@@ -108,9 +108,9 @@ async function applyAllRealistic(): Promise<void> {
 
     it("all 10 partner migration journal rows are present and applied", async () => {
       const { rows } = await admin.query(
-        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '000%_partner%' OR filename LIKE '0010_partner%' ORDER BY filename"
+        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '000%_partner%' OR filename LIKE '0010_partner%' OR filename LIKE '0011_partner%' ORDER BY filename"
       );
-      expect(rows).toHaveLength(10);
+      expect(rows).toHaveLength(11);
       for (const r of rows) expect(r.status).toBe("applied");
     });
 
@@ -199,6 +199,12 @@ async function applyAllRealistic(): Promise<void> {
         "INSERT INTO submissions (user_id, tracking_number, status) VALUES ('rollback-proof-user', 'MV-SUB-ROLLBACK-1', 'draft')"
       );
 
+      // G3's own rollback now refuses while migration 0011 (G3E) is present — roll that back first.
+      const rollbackG3eSql = require("node:fs").readFileSync(
+        require("node:path").join(process.cwd(), "migrations", "rollback-partner-connector-g3e.sql"),
+        "utf8"
+      );
+      await admin.query(rollbackG3eSql);
       const rollbackSql = require("node:fs").readFileSync(
         require("node:path").join(process.cwd(), "migrations", "rollback-partner-connector-g3.sql"),
         "utf8"
@@ -232,6 +238,7 @@ async function applyAllRealistic(): Promise<void> {
       try {
         const { applied } = await applyMigrations(migrator, listMigrationFiles());
         expect(applied).toContain("0010_partner_connector_import.sql");
+        expect(applied).toContain("0011_partner_connector_reconciliation.sql");
       } finally {
         await migrator.end();
       }
