@@ -19,7 +19,10 @@ import { importValidatedConnector } from "./connector-import-service";
 import { ConnectorError } from "./connector-errors";
 
 /** Test-only injection seam for the claim function (defaults to the real claimNextConnectorRecord). */
-type ClaimFn = (claimant: string, leaseSeconds?: number) => Promise<Awaited<ReturnType<typeof claimNextConnectorRecord>>>;
+type ClaimFn = (
+  claimant: string,
+  leaseSeconds?: number
+) => Promise<Awaited<ReturnType<typeof claimNextConnectorRecord>>>;
 
 export interface WorkerPoolOptions {
   workerCount: number;

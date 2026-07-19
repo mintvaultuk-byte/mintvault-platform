@@ -12,7 +12,11 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Client } from "pg";
-import { applyMigrationsRealistic, provisionRealisticRoles, PARTNER_MIGRATIONS_WITH_G3F } from "./helpers/partner-realistic-db";
+import {
+  applyMigrationsRealistic,
+  provisionRealisticRoles,
+  PARTNER_MIGRATIONS_WITH_G3F,
+} from "./helpers/partner-realistic-db";
 import { ConnectorError } from "../server/partner/connector-errors";
 
 const ADMIN = process.env.PARTNER_CONNECTOR_BLOCKER_RT_ADMIN;
@@ -56,38 +60,91 @@ async function seedMintVaultTables(): Promise<void> {
 }
 
 async function seedTenant(): Promise<void> {
-  await admin.query("INSERT INTO partner_organisations (id, public_ref, legal_name, status) VALUES ($1,'blkA','blkA','ACTIVE') ON CONFLICT DO NOTHING", [A]);
-  await admin.query("INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name, status) VALUES ($1,'blkA-loc',$2,$2,'HQ','ACTIVE') ON CONFLICT DO NOTHING", [L1, A]);
-  await admin.query("INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status, mfa_required) VALUES ($1,'blkA-user',$2,$2,'blkA@example.com','x','ACTIVE',false) ON CONFLICT DO NOTHING", [U1, A]);
-  await admin.query("INSERT INTO partner_service_tiers (tenant_id, tier_code, label, price_per_card_pence, turnaround_days, is_active) VALUES ($1,'standard','Standard',1500,10,true) ON CONFLICT DO NOTHING", [A]);
+  await admin.query(
+    "INSERT INTO partner_organisations (id, public_ref, legal_name, status) VALUES ($1,'blkA','blkA','ACTIVE') ON CONFLICT DO NOTHING",
+    [A]
+  );
+  await admin.query(
+    "INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name, status) VALUES ($1,'blkA-loc',$2,$2,'HQ','ACTIVE') ON CONFLICT DO NOTHING",
+    [L1, A]
+  );
+  await admin.query(
+    "INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status, mfa_required) VALUES ($1,'blkA-user',$2,$2,'blkA@example.com','x','ACTIVE',false) ON CONFLICT DO NOTHING",
+    [U1, A]
+  );
+  await admin.query(
+    "INSERT INTO partner_service_tiers (tenant_id, tier_code, label, price_per_card_pence, turnaround_days, is_active) VALUES ($1,'standard','Standard',1500,10,true) ON CONFLICT DO NOTHING",
+    [A]
+  );
 }
 
 /** Seed → claim → validate → ready_for_import. Returns ids + the validation run and fingerprint. */
-async function seedReady(claimant: string): Promise<{ connectorId: string; version: number; customerId: string; submissionId: string; handoffId: string; runA: string; fpA: string }> {
+async function seedReady(
+  claimant: string
+): Promise<{
+  connectorId: string;
+  version: number;
+  customerId: string;
+  submissionId: string;
+  handoffId: string;
+  runA: string;
+  fpA: string;
+}> {
   seq += 1;
   const subId = uuid(seq);
   const custId = uuid(seq + 500_000);
-  await admin.query("INSERT INTO partner_customers (id, tenant_id, full_name, email) VALUES ($1,$2,$3,$4)", [custId, A, `Blk Customer ${seq}`, `blk${seq}@example.com`]);
+  await admin.query("INSERT INTO partner_customers (id, tenant_id, full_name, email) VALUES ($1,$2,$3,$4)", [
+    custId,
+    A,
+    `Blk Customer ${seq}`,
+    `blk${seq}@example.com`,
+  ]);
   await admin.query(
     `INSERT INTO partner_submissions (id, tenant_id, location_id, created_by, customer_id, service_tier_code, estimated_price_pence, card_count, status)
      VALUES ($1,$2,$3,$4,$5,'standard',1500,1,'submitted_to_mintvault')`,
     [subId, A, L1, U1, custId]
   );
-  await admin.query(`INSERT INTO partner_submission_cards (tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity) VALUES ($1,$2,1,'Card 1',50000,1)`, [A, subId]);
-  const h = await admin.query("INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending','{}'::jsonb) RETURNING id", [A, subId]);
+  await admin.query(
+    `INSERT INTO partner_submission_cards (tenant_id, submission_id, sequence_number, card_name, declared_value_pence, quantity) VALUES ($1,$2,1,'Card 1',50000,1)`,
+    [A, subId]
+  );
+  const h = await admin.query(
+    "INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending','{}'::jsonb) RETURNING id",
+    [A, subId]
+  );
   const svc = await import("../server/partner/connector-service");
   const validation = await import("../server/partner/connector-validation-service");
   let rec = await svc.ensureConnectorRecordForHandoff({ tenantId: A, handoffId: h.rows[0].id });
   rec = await svc.claimConnectorRecord(rec.id, claimant, 300, A);
-  rec = await svc.transitionConnectorState({ connectorId: rec.id, claimant, tenantId: A, expectedVersion: rec.version, toState: "validating", eventType: "validating" });
-  const run = await validation.validateConnectorRecord({ connectorId: rec.id, claimant, expectedVersion: rec.version, tenantId: A });
+  rec = await svc.transitionConnectorState({
+    connectorId: rec.id,
+    claimant,
+    tenantId: A,
+    expectedVersion: rec.version,
+    toState: "validating",
+    eventType: "validating",
+  });
+  const run = await validation.validateConnectorRecord({
+    connectorId: rec.id,
+    claimant,
+    expectedVersion: rec.version,
+    tenantId: A,
+  });
   expect(run.outcome).toBe("valid");
   const { rows } = await admin.query("SELECT version FROM partner_connector_records WHERE id = $1", [rec.id]);
   const runRow = await admin.query<{ id: string; source_fingerprint: string }>(
     "SELECT id, source_fingerprint FROM partner_connector_validation_runs WHERE connector_record_id = $1 ORDER BY created_at DESC LIMIT 1",
     [rec.id]
   );
-  return { connectorId: rec.id, version: rows[0].version, customerId: custId, submissionId: subId, handoffId: h.rows[0].id, runA: runRow.rows[0].id, fpA: runRow.rows[0].source_fingerprint };
+  return {
+    connectorId: rec.id,
+    version: rows[0].version,
+    customerId: custId,
+    submissionId: subId,
+    handoffId: h.rows[0].id,
+    runA: runRow.rows[0].id,
+    fpA: runRow.rows[0].source_fingerprint,
+  };
 }
 
 (isLocal ? describe : describe.skip)("Trusted Intake Connector G3F — blocker remediation proofs", () => {
@@ -111,7 +168,9 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
     flagUrl.password = "synthetic";
     process.env.PARTNER_DATABASE_URL = flagUrl.toString();
     await seedTenant();
-    await admin.query("INSERT INTO partner_feature_flags (flag, tenant_id, location_id, enabled) VALUES ('partner_connector_enabled', NULL, NULL, true), ('partner_emergency_stop', NULL, NULL, false)");
+    await admin.query(
+      "INSERT INTO partner_feature_flags (flag, tenant_id, location_id, enabled) VALUES ('partner_connector_enabled', NULL, NULL, true), ('partner_emergency_stop', NULL, NULL, false)"
+    );
   }, 60_000);
 
   afterAll(async () => {
@@ -157,7 +216,9 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
       expect(who.rows[0].su).toBe(false);
       expect(who.rows[0].brls).toBe(false);
       // membership in partner_connector_runtime
-      const mem = await runtime.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.roleid JOIN pg_roles g ON g.oid=m.member WHERE r.rolname='partner_connector_runtime' AND g.rolname=current_user");
+      const mem = await runtime.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.roleid JOIN pg_roles g ON g.oid=m.member WHERE r.rolname='partner_connector_runtime' AND g.rolname=current_user"
+      );
       expect(mem.rows[0].n).toBe(1);
     });
 
@@ -174,14 +235,20 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
       } finally {
         await runtime.query("RESET ROLE");
       }
-      const n = await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM partner_connector_import_attempts WHERE connector_record_id = $1", [seededConnectorId]);
+      const n = await admin.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM partner_connector_import_attempts WHERE connector_record_id = $1",
+        [seededConnectorId]
+      );
       expect(n.rows[0].n).toBeGreaterThanOrEqual(1);
     });
 
     it("authorised SELECT succeeds", async () => {
       await runtime.query("SET ROLE partner_connector_runtime");
       try {
-        const r = await runtime.query("SELECT id FROM partner_connector_import_attempts WHERE connector_record_id = $1", [seededConnectorId]);
+        const r = await runtime.query(
+          "SELECT id FROM partner_connector_import_attempts WHERE connector_record_id = $1",
+          [seededConnectorId]
+        );
         expect(r.rows.length).toBeGreaterThanOrEqual(1);
       } finally {
         await runtime.query("RESET ROLE");
@@ -191,7 +258,9 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
     it("UPDATE is denied", async () => {
       await runtime.query("SET ROLE partner_connector_runtime");
       try {
-        await expect(runtime.query("UPDATE partner_connector_import_attempts SET outcome = 'completed'")).rejects.toMatchObject({ code: "42501" });
+        await expect(
+          runtime.query("UPDATE partner_connector_import_attempts SET outcome = 'completed'")
+        ).rejects.toMatchObject({ code: "42501" });
       } finally {
         await runtime.query("RESET ROLE");
       }
@@ -200,7 +269,9 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
     it("DELETE is denied", async () => {
       await runtime.query("SET ROLE partner_connector_runtime");
       try {
-        await expect(runtime.query("DELETE FROM partner_connector_import_attempts")).rejects.toMatchObject({ code: "42501" });
+        await expect(runtime.query("DELETE FROM partner_connector_import_attempts")).rejects.toMatchObject({
+          code: "42501",
+        });
       } finally {
         await runtime.query("RESET ROLE");
       }
@@ -209,7 +280,9 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
     it("TRUNCATE is denied", async () => {
       await runtime.query("SET ROLE partner_connector_runtime");
       try {
-        await expect(runtime.query("TRUNCATE partner_connector_import_attempts")).rejects.toMatchObject({ code: "42501" });
+        await expect(runtime.query("TRUNCATE partner_connector_import_attempts")).rejects.toMatchObject({
+          code: "42501",
+        });
       } finally {
         await runtime.query("RESET ROLE");
       }
@@ -218,10 +291,16 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
     it("ALTER TABLE / DROP TABLE / ownership transfer / DISABLE TRIGGER are denied", async () => {
       await runtime.query("SET ROLE partner_connector_runtime");
       try {
-        await expect(runtime.query("ALTER TABLE partner_connector_import_attempts ADD COLUMN hacked text")).rejects.toBeTruthy();
+        await expect(
+          runtime.query("ALTER TABLE partner_connector_import_attempts ADD COLUMN hacked text")
+        ).rejects.toBeTruthy();
         await expect(runtime.query("DROP TABLE partner_connector_import_attempts")).rejects.toBeTruthy();
-        await expect(runtime.query("ALTER TABLE partner_connector_import_attempts OWNER TO partner_connector_runtime")).rejects.toBeTruthy();
-        await expect(runtime.query("ALTER TABLE partner_connector_import_attempts DISABLE TRIGGER ALL")).rejects.toBeTruthy();
+        await expect(
+          runtime.query("ALTER TABLE partner_connector_import_attempts OWNER TO partner_connector_runtime")
+        ).rejects.toBeTruthy();
+        await expect(
+          runtime.query("ALTER TABLE partner_connector_import_attempts DISABLE TRIGGER ALL")
+        ).rejects.toBeTruthy();
       } finally {
         await runtime.query("RESET ROLE");
       }
@@ -232,25 +311,37 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
       // genuinely fails by confirming the role still cannot UPDATE after attempting to grant itself UPDATE.
       await runtime.query("SET ROLE partner_connector_runtime");
       try {
-        await runtime.query("GRANT UPDATE ON partner_connector_import_attempts TO partner_connector_runtime").catch(() => {});
+        await runtime
+          .query("GRANT UPDATE ON partner_connector_import_attempts TO partner_connector_runtime")
+          .catch(() => {});
         // still no UPDATE privilege
-        const has = await runtime.query<{ has: boolean }>("SELECT has_table_privilege('partner_connector_runtime','partner_connector_import_attempts','UPDATE') AS has");
+        const has = await runtime.query<{ has: boolean }>(
+          "SELECT has_table_privilege('partner_connector_runtime','partner_connector_import_attempts','UPDATE') AS has"
+        );
         expect(has.rows[0].has).toBe(false);
         // and an actual UPDATE still fails
-        await expect(runtime.query("UPDATE partner_connector_import_attempts SET outcome='completed'")).rejects.toMatchObject({ code: "42501" });
+        await expect(
+          runtime.query("UPDATE partner_connector_import_attempts SET outcome='completed'")
+        ).rejects.toMatchObject({ code: "42501" });
       } finally {
         await runtime.query("RESET ROLE");
       }
     });
 
     it("PUBLIC has no privilege; runtime does NOT own the table; runtime privileges are narrower than the owner", async () => {
-      const pub = await admin.query<{ has: boolean }>("SELECT has_table_privilege('public','partner_connector_import_attempts','SELECT') AS has");
+      const pub = await admin.query<{ has: boolean }>(
+        "SELECT has_table_privilege('public','partner_connector_import_attempts','SELECT') AS has"
+      );
       expect(pub.rows[0].has).toBe(false);
-      const owner = await admin.query<{ owner: string }>("SELECT tableowner AS owner FROM pg_tables WHERE tablename='partner_connector_import_attempts'");
+      const owner = await admin.query<{ owner: string }>(
+        "SELECT tableowner AS owner FROM pg_tables WHERE tablename='partner_connector_import_attempts'"
+      );
       expect(owner.rows[0].owner).not.toBe("partner_connector_runtime");
       expect(owner.rows[0].owner).toBe("pn_migrator");
       // runtime privileges: SELECT+INSERT only, strictly fewer than owner's full set
-      const rt = await admin.query<{ p: string }>("SELECT privilege_type AS p FROM information_schema.role_table_grants WHERE grantee='partner_connector_runtime' AND table_name='partner_connector_import_attempts' ORDER BY p");
+      const rt = await admin.query<{ p: string }>(
+        "SELECT privilege_type AS p FROM information_schema.role_table_grants WHERE grantee='partner_connector_runtime' AND table_name='partner_connector_import_attempts' ORDER BY p"
+      );
       expect(rt.rows.map((r) => r.p).sort()).toEqual(["INSERT", "SELECT"]);
     });
 
@@ -259,7 +350,9 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
       // partner_connector_records/_events/_imports — see ARCHITECTURE §7). Tenant isolation is
       // enforced at the service layer: every read is by connector_record_id, itself resolved from a
       // tenant-scoped upstream. Assert the table genuinely has RLS DISABLED (so no false RLS claim).
-      const rls = await admin.query<{ relrowsecurity: boolean }>("SELECT relrowsecurity FROM pg_class WHERE relname='partner_connector_import_attempts'");
+      const rls = await admin.query<{ relrowsecurity: boolean }>(
+        "SELECT relrowsecurity FROM pg_class WHERE relname='partner_connector_import_attempts'"
+      );
       expect(rls.rows[0].relrowsecurity).toBe(false);
     });
   });
@@ -293,28 +386,72 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
       // Revalidate: first revalidation is STALE vs run A (different fingerprint), second is VALID
       // (source unchanged since the stale run) — producing a newer VALID run with the new fingerprint.
       let cur = await admin.query("SELECT version FROM partner_connector_records WHERE id = $1", [s.connectorId]);
-      let rec = await svc.transitionConnectorState({ connectorId: s.connectorId, claimant, tenantId: A, expectedVersion: cur.rows[0].version, toState: "validating", eventType: "revalidate" });
-      const stale = await validation.validateConnectorRecord({ connectorId: s.connectorId, claimant, expectedVersion: rec.version, tenantId: A });
+      let rec = await svc.transitionConnectorState({
+        connectorId: s.connectorId,
+        claimant,
+        tenantId: A,
+        expectedVersion: cur.rows[0].version,
+        toState: "validating",
+        eventType: "revalidate",
+      });
+      const stale = await validation.validateConnectorRecord({
+        connectorId: s.connectorId,
+        claimant,
+        expectedVersion: rec.version,
+        tenantId: A,
+      });
       expect(stale.outcome).toBe("stale");
       // stale routed connector to 'failed'; go validating -> valid
       cur = await admin.query("SELECT version, state FROM partner_connector_records WHERE id = $1", [s.connectorId]);
-      rec = await svc.transitionConnectorState({ connectorId: s.connectorId, claimant, tenantId: A, expectedVersion: cur.rows[0].version, toState: "validating", eventType: "revalidate2" });
-      const valid = await validation.validateConnectorRecord({ connectorId: s.connectorId, claimant, expectedVersion: rec.version, tenantId: A });
+      rec = await svc.transitionConnectorState({
+        connectorId: s.connectorId,
+        claimant,
+        tenantId: A,
+        expectedVersion: cur.rows[0].version,
+        toState: "validating",
+        eventType: "revalidate2",
+      });
+      const valid = await validation.validateConnectorRecord({
+        connectorId: s.connectorId,
+        claimant,
+        expectedVersion: rec.version,
+        tenantId: A,
+      });
       expect(valid.outcome).toBe("valid");
 
-      const runB = (await admin.query<{ id: string; source_fingerprint: string }>("SELECT id, source_fingerprint FROM partner_connector_validation_runs WHERE connector_record_id = $1 AND outcome='valid' ORDER BY created_at DESC LIMIT 1", [s.connectorId])).rows[0];
+      const runB = (
+        await admin.query<{ id: string; source_fingerprint: string }>(
+          "SELECT id, source_fingerprint FROM partner_connector_validation_runs WHERE connector_record_id = $1 AND outcome='valid' ORDER BY created_at DESC LIMIT 1",
+          [s.connectorId]
+        )
+      ).rows[0];
       expect(runB.id).not.toBe(runA); // newer run
       expect(runB.source_fingerprint).not.toBe(fpA); // newer fingerprint
 
       // Resume the import (the importer resumes the existing 'reserved' mapping in place).
       cur = await admin.query("SELECT version FROM partner_connector_records WHERE id = $1", [s.connectorId]);
-      const result = await importer.importValidatedConnector({ connectorId: s.connectorId, claimant, expectedVersion: cur.rows[0].version, tenantId: A });
+      const result = await importer.importValidatedConnector({
+        connectorId: s.connectorId,
+        claimant,
+        expectedVersion: cur.rows[0].version,
+        tenantId: A,
+      });
       expect(result.outcome).toBe("imported");
       const destId = result.destinationSubmissionId!;
 
       // exactly one destination / mapping / completed attempt
-      expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM submissions WHERE id = $1", [destId])).rows[0].n).toBe(1);
-      expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM partner_connector_imports WHERE connector_record_id = $1 AND state='completed'", [s.connectorId])).rows[0].n).toBe(1);
+      expect(
+        (await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM submissions WHERE id = $1", [destId])).rows[0]
+          .n
+      ).toBe(1);
+      expect(
+        (
+          await admin.query<{ n: number }>(
+            "SELECT count(*)::int AS n FROM partner_connector_imports WHERE connector_record_id = $1 AND state='completed'",
+            [s.connectorId]
+          )
+        ).rows[0].n
+      ).toBe(1);
       const attempts = await importer.getImportAttempts(s.connectorId);
       const completed = attempts.filter((a) => a.outcome === "completed");
       expect(completed).toHaveLength(1);
@@ -330,7 +467,11 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
 
       // The reservation-turned-completed mapping row PRESERVES its original (stale) fp A, immutable —
       // this is exactly the ambiguity the attempt evidence resolves.
-      const mapRow = await admin.query<{ source_fingerprint: string; validation_run_id: string; destination_submission_id: number }>(
+      const mapRow = await admin.query<{
+        source_fingerprint: string;
+        validation_run_id: string;
+        destination_submission_id: number;
+      }>(
         "SELECT source_fingerprint, validation_run_id, destination_submission_id FROM partner_connector_imports WHERE connector_record_id = $1",
         [s.connectorId]
       );
@@ -340,10 +481,17 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
 
       // Retry converges on the same destination; no new submission; no historical overwrite.
       const beforeSubs = (await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM submissions")).rows[0].n;
-      const retry = await importer.importValidatedConnector({ connectorId: s.connectorId, claimant, expectedVersion: cur.rows[0].version, tenantId: A });
+      const retry = await importer.importValidatedConnector({
+        connectorId: s.connectorId,
+        claimant,
+        expectedVersion: cur.rows[0].version,
+        tenantId: A,
+      });
       expect(retry.outcome).toBe("already_completed");
       expect(retry.destinationSubmissionId).toBe(destId);
-      expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM submissions")).rows[0].n).toBe(beforeSubs);
+      expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM submissions")).rows[0].n).toBe(
+        beforeSubs
+      );
       const attemptsAfter = await importer.getImportAttempts(s.connectorId);
       expect(attemptsAfter.filter((a) => a.outcome === "completed")).toHaveLength(1); // still one, not overwritten/duplicated
 
@@ -355,8 +503,15 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
       await runtime.connect();
       try {
         await runtime.query("SET ROLE partner_connector_runtime");
-        await expect(runtime.query("UPDATE partner_connector_import_attempts SET source_fingerprint = 'x' WHERE connector_record_id = $1", [s.connectorId])).rejects.toMatchObject({ code: "42501" });
-        await expect(runtime.query("DELETE FROM partner_connector_import_attempts WHERE connector_record_id = $1", [s.connectorId])).rejects.toMatchObject({ code: "42501" });
+        await expect(
+          runtime.query(
+            "UPDATE partner_connector_import_attempts SET source_fingerprint = 'x' WHERE connector_record_id = $1",
+            [s.connectorId]
+          )
+        ).rejects.toMatchObject({ code: "42501" });
+        await expect(
+          runtime.query("DELETE FROM partner_connector_import_attempts WHERE connector_record_id = $1", [s.connectorId])
+        ).rejects.toMatchObject({ code: "42501" });
       } finally {
         await runtime.query("RESET ROLE").catch(() => {});
         await runtime.end();
@@ -366,7 +521,10 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
       expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM certificates")).rows[0].n).toBe(1);
       expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM labels")).rows[0].n).toBe(1);
       expect((await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM payments")).rows[0].n).toBe(1);
-      const destRow = await admin.query<{ payment_intent_id: string | null; status: string; payment_status: string }>("SELECT payment_intent_id, status, payment_status FROM submissions WHERE id = $1", [destId]);
+      const destRow = await admin.query<{ payment_intent_id: string | null; status: string; payment_status: string }>(
+        "SELECT payment_intent_id, status, payment_status FROM submissions WHERE id = $1",
+        [destId]
+      );
       expect(destRow.rows[0].payment_intent_id).toBeNull();
       expect(destRow.rows[0].status).toBe("draft");
       expect(destRow.rows[0].payment_status).toBe("unpaid");
@@ -379,7 +537,10 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
   describe("4 — bounded transient claim retry in the worker pool", () => {
     async function expireAndReady(claimant: string): Promise<string> {
       const s = await seedReady(claimant);
-      await admin.query("UPDATE partner_connector_records SET claim_expires_at = now() - interval '1 hour' WHERE id = $1", [s.connectorId]);
+      await admin.query(
+        "UPDATE partner_connector_records SET claim_expires_at = now() - interval '1 hour' WHERE id = $1",
+        [s.connectorId]
+      );
       return s.connectorId;
     }
 
@@ -406,10 +567,18 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
       expect(res.failures).toEqual([]);
       // pool healthy afterwards (proves no client leak stranded it)
       const s2 = await expireAndReady("wr-A2");
-      const c = await admin.query<{ claimed_by: string; version: number }>("SELECT claimed_by, version FROM partner_connector_records WHERE id = $1", [s2]);
+      const c = await admin.query<{ claimed_by: string; version: number }>(
+        "SELECT claimed_by, version FROM partner_connector_records WHERE id = $1",
+        [s2]
+      );
       // claim it via the real path and import to confirm the pool still works
       const claimed = await svc.claimConnectorRecord(s2, "wr-A2b", 120, A);
-      const ok = await importer.importValidatedConnector({ connectorId: s2, claimant: "wr-A2b", expectedVersion: claimed.version, tenantId: A });
+      const ok = await importer.importValidatedConnector({
+        connectorId: s2,
+        claimant: "wr-A2b",
+        expectedVersion: claimed.version,
+        tenantId: A,
+      });
       expect(ok.outcome).toBe("imported");
       void c;
     }, 30_000);
@@ -482,14 +651,25 @@ async function seedReady(claimant: string): Promise<{ connectorId: string; versi
       expect(res.claimRetries).toBe(1);
       expect(res.imported).toBe(1);
       expect(res.failures).toEqual([]);
-      const dests = await admin.query<{ n: number }>("SELECT count(*)::int AS n FROM partner_connector_imports WHERE connector_record_id = $1 AND state='completed'", [connectorId]);
+      const dests = await admin.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM partner_connector_imports WHERE connector_record_id = $1 AND state='completed'",
+        [connectorId]
+      );
       expect(dests.rows[0].n).toBe(1); // exactly one, no duplicate
     }, 30_000);
 
     it("numeric config: non-finite / negative / malformed values fall back to safe defaults", async () => {
       const { runConnectorWorkerPool } = await import("../server/partner/connector-worker");
       // Infinity/NaN/negative/decimal/string must NOT hang or throw — they fall back to bounded defaults.
-      for (const bad of [Infinity, -Infinity, NaN, -5, 2.7, "abc" as unknown as number, undefined as unknown as number]) {
+      for (const bad of [
+        Infinity,
+        -Infinity,
+        NaN,
+        -5,
+        2.7,
+        "abc" as unknown as number,
+        undefined as unknown as number,
+      ]) {
         const res = await runConnectorWorkerPool({
           workerCount: 1,
           maxClaimRetries: bad,
