@@ -22,12 +22,32 @@ function getPool(): pg.Pool {
     throw new Error("PARTNER_CONNECTOR_DATABASE_URL is not configured — connector refuses to start (fail closed).");
   }
   if (!pool) {
+    // G3F: optional, env-gated bounded acquisition timeout. Unset (the default) preserves prior
+    // behaviour (node-postgres waits indefinitely for a free client); when set, an exhausted pool
+    // rejects `connect()` with a bounded error instead of hanging — proven by the pool-saturation
+    // fault test. `max` unchanged (default 4).
+    const acquireMs = Number(process.env.PARTNER_CONNECTOR_ACQUIRE_TIMEOUT_MS ?? 0);
     pool = new pg.Pool({
       connectionString: process.env.PARTNER_CONNECTOR_DATABASE_URL,
       max: Number(process.env.PARTNER_CONNECTOR_DB_POOL_MAX ?? 4),
+      ...(acquireMs > 0 ? { connectionTimeoutMillis: acquireMs } : {}),
     });
   }
   return pool;
+}
+
+/**
+ * G3F: optional, env-gated per-transaction statement/lock timeouts. Both unset (the default) preserve
+ * prior behaviour (server defaults, typically unbounded). When set, a runaway statement or a blocked
+ * `FOR UPDATE` fails fast with a bounded error rather than hanging a pooled connection — proven by
+ * the transaction-timeout / lock-timeout fault tests. Applied as SET LOCAL so they scope to this
+ * transaction only.
+ */
+async function applyOptionalTimeouts(client: pg.PoolClient): Promise<void> {
+  const stmtMs = Number(process.env.PARTNER_CONNECTOR_STATEMENT_TIMEOUT_MS ?? 0);
+  const lockMs = Number(process.env.PARTNER_CONNECTOR_LOCK_TIMEOUT_MS ?? 0);
+  if (stmtMs > 0) await client.query(`SET LOCAL statement_timeout = ${Math.floor(stmtMs)}`);
+  if (lockMs > 0) await client.query(`SET LOCAL lock_timeout = ${Math.floor(lockMs)}`);
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -50,6 +70,7 @@ export async function withConnectorTx<T>(fn: (client: pg.PoolClient) => Promise<
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    await applyOptionalTimeouts(client);
     if (tenantId) {
       await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
     }
