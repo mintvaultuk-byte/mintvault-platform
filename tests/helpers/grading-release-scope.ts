@@ -45,6 +45,33 @@ export const GRADING_RELEASE = {
 } as const;
 
 /**
+ * Immutable metadata for the LATER unified-admin-shell pass (the AdminHeaderRow /
+ * WorkstationHeaderStrip / WorkstationPreviewAside primitives + the retire-
+ * duplicate-tab refactor + its own base-drift-fix commit).
+ *
+ * WHY THIS EXISTS — same base-drift bug, one level deeper. The two unified-shell
+ * guard files (grading-unified-admin-shell.test.ts, grading-retire-duplicate-tab.test.ts)
+ * each carried a LOCAL `changedSinceScopeBase()` pinned to `0825544a...HEAD`.
+ * `0825544a` is an ancestor of main, so `...HEAD` degenerates to `0825544a..HEAD`
+ * — every commit merged to main AFTER that SHA (all the Partner Network work:
+ * migrations 0010/0011, server/partner/*, .claude/.../partner-network-*) leaks
+ * into the "changed by this pass" set and trips the `partner`/`^migrations/`
+ * protected-path matcher. That is a moving-window base, not a fact about the pass.
+ *
+ * Pinning BOTH endpoints to fixed SHAs makes it an immutable fact — exactly the
+ * pattern GRADING_RELEASE already uses. `0825544a..a7cac275` contains ONLY the
+ * unified-shell pass's own files (admin shell/header primitives, certificate-form,
+ * admin-dashboard, staff.tsx, and its tests) and NO protected/partner/server/
+ * migration file, so the guards prove the real thing and never fire on unrelated
+ * future main history.
+ */
+export const UNIFIED_ADMIN_SHELL = {
+  id: "unified-admin-shell + retire-duplicate-tab pass",
+  base: "0825544a", // main immediately BEFORE the unified-shell pass (825a61b8)
+  final: "a7cac275", // final commit of the pass (post-integration base-drift fix)
+} as const;
+
+/**
  * Canonical protected-path matcher — the UNION of the individual grading guards' protections, so it
  * is at least as strict as any single guard. Genuinely grading-owned + broad safety nets (server,
  * migrations) are all retained: within the FIXED grading footprint they are correct (the grading
@@ -94,6 +121,16 @@ export function releaseChangedFiles(base: string, final: string, cwd?: string): 
 /** Files changed by the grading release, from the FIXED historical range (never HEAD). */
 export function gradingReleaseChangedFiles(): string[] {
   return releaseChangedFiles(GRADING_RELEASE.base, GRADING_RELEASE.final);
+}
+
+/**
+ * Files changed by the unified-admin-shell pass, from its FIXED historical range
+ * (0825544a..a7cac275) — never `...HEAD`. Replaces the fragile per-file
+ * `changedSinceScopeBase()` helpers that used a moving-window base and tripped on
+ * unrelated Partner Network commits that landed on main afterwards.
+ */
+export function unifiedAdminShellChangedFiles(): string[] {
+  return releaseChangedFiles(UNIFIED_ADMIN_SHELL.base, UNIFIED_ADMIN_SHELL.final);
 }
 
 /** Diff of ONE file across the grading release range (for content-scope assertions). */

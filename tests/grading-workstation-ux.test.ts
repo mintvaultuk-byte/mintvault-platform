@@ -14,7 +14,11 @@ const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const VIEWER = read("client/src/components/grading-workflow/CardPreviewPanel.tsx");
 const FORM = read("client/src/components/certificate-form.tsx");
 const PICKER = read("client/src/components/rarity-picker/RarityVariantPicker.tsx");
-const stripComments = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const stripComments = (s: string) =>
+  s
+    .replace(/\{\/\*[\s\S]*?\*\/\}/g, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
 
 describe("floating card viewer is read-only with zoom controls (spec 1)", () => {
   it("has front/back tabs, button zoom (wheel does NOT zoom), fit/reset, and a fullscreen modal", () => {
@@ -43,7 +47,13 @@ describe("floating card viewer is read-only with zoom controls (spec 1)", () => 
 
 describe("auto-focus first field on stage open (spec 7)", () => {
   it("focuses Card Name when the Card stage opens, guarded against stealing focus", () => {
-    const eff = FORM.slice(FORM.indexOf("Auto-focus the first logical field"), FORM.indexOf("Auto-focus the first logical field") + 900);
+    // Window widened from 900: a prettier pass (2026-07-19) reflowed this
+    // effect's condition onto more lines, pushing .focus() further from the
+    // anchor — assertion logic below is unchanged.
+    const eff = FORM.slice(
+      FORM.indexOf("Auto-focus the first logical field"),
+      FORM.indexOf("Auto-focus the first logical field") + 1100
+    );
     expect(eff).toContain("input-card-name");
     expect(eff).toContain("alreadyTyping"); // won't steal focus mid-typing
     expect(eff).toContain(".focus()");
@@ -70,13 +80,19 @@ describe("same as last card quick-fill (spec 9) — never overwrites (spec 5)", 
     expect(FORM).toContain('data-testid="button-same-as-last-card"');
   });
   it("applyLastCardContext only fills EMPTY fields (guarded by !f.x)", () => {
-    const fn = FORM.slice(FORM.indexOf("function applyLastCardContext"), FORM.indexOf("function applyLastCardContext") + 800);
+    const fn = FORM.slice(
+      FORM.indexOf("function applyLastCardContext"),
+      FORM.indexOf("function applyLastCardContext") + 800
+    );
     expect(fn).toMatch(/if \(!f\.setName && lastCardContext\.setName\)/);
     expect(fn).toMatch(/if \(!f\.year && lastCardContext\.year\)/);
     expect(fn).toMatch(/if \(!f\.language && lastCardContext\.language\)/);
   });
   it("only remembers the shared context, NOT the per-card name/number", () => {
-    const fn = FORM.slice(FORM.indexOf("function captureLastCardContext"), FORM.indexOf("function captureLastCardContext") + 500);
+    const fn = FORM.slice(
+      FORM.indexOf("function captureLastCardContext"),
+      FORM.indexOf("function captureLastCardContext") + 500
+    );
     expect(fn).not.toContain("cardName");
     expect(fn).not.toContain("cardNumber");
   });

@@ -33,6 +33,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { execSync } from "child_process";
 import { join } from "path";
+import { unifiedAdminShellChangedFiles } from "./helpers/grading-release-scope";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
@@ -131,23 +132,14 @@ describe("5. the preview zone exists in Card, Rarity AND Review (Grade is a docu
   });
 });
 
-// unified-shell integration note: pinned to the CHERRY-PICKED equivalent of
-// the commit this pass originally started from ("aa8c0cea" pre-integration
-// is "0825544a" once replayed onto origin/main — same content, same position
-// in this branch's linear history). The old hash now sits on a lineage
-// disjoint from origin/main, so a diff against it would walk back to the
-// real (much earlier) common ancestor and falsely include Partner Network
-// and this branch's own earlier commits (e.g. the rarity-picker hotfix) as
-// "changed by this pass" — a base-drift artifact, not a real violation.
-const SCOPE_BASE = "0825544a";
-function changedSinceScopeBase(): string[] {
-  try {
-    execSync(`git rev-parse --verify ${SCOPE_BASE}`, { stdio: "pipe" });
-    return execSync(`git diff --name-only ${SCOPE_BASE}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
-}
+// This pass's scope check is pinned to the unified-shell pass's IMMUTABLE
+// commit range (0825544a..a7cac275), resolved by the shared helper — never
+// `<base>...HEAD`. The old local helper used `0825544a...HEAD`; because
+// 0825544a is an ancestor of main, that degenerates to `0825544a..HEAD` and
+// every commit merged to main afterwards (all the Partner Network work) leaked
+// in and tripped the `partner`/`^migrations/` matcher. See
+// tests/helpers/grading-release-scope.ts (UNIFIED_ADMIN_SHELL) for the full why.
+const changedSinceScopeBase = unifiedAdminShellChangedFiles;
 
 describe("6. Stage 3 (protected) component source remains byte-for-byte untouched", () => {
   const changed = changedSinceScopeBase();
@@ -157,11 +149,20 @@ describe("6. Stage 3 (protected) component source remains byte-for-byte untouche
   });
   it("no MVGS/centering/defect/grade-cap/rounding/cert-numbering/schema/migration file changed", () => {
     if (changed.length === 0) return;
-    const PROTECTED = /mvgs|scoring|centering|pristine|defect|grader\.ts|grading-prompt|labels\.ts|certificate-document|cert-id|shared\/schema\.ts|^migrations\/|partner/;
+    const PROTECTED =
+      /mvgs|scoring|centering|pristine|defect|grader\.ts|grading-prompt|labels\.ts|certificate-document|cert-id|shared\/schema\.ts|^migrations\/|partner/;
     for (const f of changed) expect(f, f).not.toMatch(PROTECTED);
   });
   it("the workstationSlot render site passes the protected component through UNCHANGED (no wrapper transform/scale)", () => {
-    const wrapper = FORM.slice(FORM.indexOf('data-workflow-stage="grade"'), FORM.indexOf('data-workflow-stage="grade"') + 900);
+    // Window widened from 900: the production-regression correction pass
+    // (2026-07-19) added an outer containment wrapper (max-h + overflow-y-auto,
+    // an explanatory comment, and its onKeyDown handler) around the slot — the
+    // slot itself is still passed through unchanged, just further from the
+    // "data-workflow-stage" anchor. See production-regression-correction-2026-07-19.test.ts.
+    const wrapper = FORM.slice(
+      FORM.indexOf('data-workflow-stage="grade"'),
+      FORM.indexOf('data-workflow-stage="grade"') + 1700
+    );
     expect(wrapper).toContain("{workstationSlot}");
     expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
   });

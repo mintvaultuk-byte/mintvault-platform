@@ -8,8 +8,8 @@ export default function GraderLoginPage() {
     navigate("/staff/login", { replace: true });
   }, [navigate]);
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center">
-      <div className="animate-pulse h-8 w-40 bg-[#D4AF37]/10 rounded" />
+    <div className="min-h-screen bg-[var(--admin-bg)] flex items-center justify-center">
+      <div className="animate-pulse h-8 w-40 bg-[var(--admin-gold)]/10 rounded" />
     </div>
   );
 }

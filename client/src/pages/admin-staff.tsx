@@ -4,6 +4,7 @@ import { Pencil, Trash2 } from "lucide-react";
 import GradingPanel from "../components/grading/grading-panel";
 import { PokemonSetPicker } from "@/components/certificate-form";
 import { VariantPicker, TcgCardSearch, type TcgCardPick } from "@/components/identity-tools";
+import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
 
 /**
  * Admin staff hub (evolves admin-graders). One staff account list with per-person
@@ -1068,75 +1069,100 @@ export default function AdminStaffPage() {
       </div>
 
       {reviewCert && (
-        <div className="fixed inset-0 z-50 bg-black/90 overflow-auto" data-testid="grade-review-overlay">
+        // Mounted inside the shared admin-root token scope (same design system as
+        // Super Admin / corrected Staff shell) rather than raw hex — this overlay
+        // previously ran its own standalone bg-black/#E8E4DC visual language.
+        <div className="admin-root fixed inset-0 z-50 overflow-auto bg-black/90" data-testid="grade-review-overlay">
           <div className="min-h-screen p-3">
-            <div className="max-w-6xl mx-auto bg-black border border-[#D4AF37]/30 rounded-lg">
-              <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-[#D4AF37]/20 sticky top-0 bg-black z-10">
-                <h3 className="text-[#D4AF37] font-semibold text-sm truncate">
-                  Review {reviewCert.certIdStr} — {reviewCert.cardName || "Unidentified"}
-                  <span className="text-[#E8E4DC]/50 font-normal">
-                    {[
-                      reviewCert.setName,
-                      reviewCert.cardNumber ? `#${reviewCert.cardNumber}` : null,
-                      reviewCert.year,
-                      reviewCert.variant,
-                    ]
-                      .filter(Boolean)
-                      .map((x) => ` · ${x}`)
-                      .join("")}
-                  </span>
-                </h3>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {!showReject && (
-                    <button
-                      type="button"
-                      onClick={() => setShowReject(true)}
-                      disabled={reviewBusy}
-                      data-testid="button-reject-grade"
-                      className="border border-red-700/60 text-red-400 px-3 py-1.5 rounded text-xs hover:bg-red-950/40 disabled:opacity-50"
-                    >
-                      Reject…
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={closeReview}
-                    className="text-[#E8E4DC]/50 hover:text-[#E8E4DC] text-xl leading-none px-2"
-                    aria-label="Close review"
-                  >
-                    ×
-                  </button>
-                </div>
+            <div className="mx-auto max-w-6xl rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]">
+              <div className="sticky top-0 z-10 px-4 py-2.5 border-b border-[var(--admin-line)] bg-[var(--admin-panel)]">
+                <AdminHeaderRow
+                  testId="grade-review-header"
+                  left={
+                    <h3 className="truncate text-sm font-semibold text-[var(--admin-gold)]">
+                      Review {reviewCert.certIdStr} — {reviewCert.cardName || "Unidentified"}
+                      <span className="font-normal text-[var(--admin-ink-faint)]">
+                        {[
+                          reviewCert.setName,
+                          reviewCert.cardNumber ? `#${reviewCert.cardNumber}` : null,
+                          reviewCert.year,
+                          reviewCert.variant,
+                        ]
+                          .filter(Boolean)
+                          .map((x) => ` · ${x}`)
+                          .join("")}
+                      </span>
+                    </h3>
+                  }
+                  right={
+                    <>
+                      {!showReject && (
+                        <button
+                          type="button"
+                          onClick={() => setShowReject(true)}
+                          disabled={reviewBusy}
+                          data-testid="button-reject-grade"
+                          className="rounded border border-red-700/60 px-3 py-1.5 text-xs text-red-400 hover:bg-red-950/40 disabled:opacity-50"
+                        >
+                          Reject…
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={closeReview}
+                        className="px-2 text-xl leading-none text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink)]"
+                        aria-label="Close review"
+                      >
+                        ×
+                      </button>
+                    </>
+                  }
+                />
+                {/* err/msg previously only rendered in the page underneath this
+                    z-50 overlay — invisible while the overlay was open (e.g. a
+                    failed Reject gave no visible feedback). Surfaced here too. */}
+                {msg && (
+                  <div className="mt-2 rounded border border-emerald-900 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-400">
+                    {msg}
+                  </div>
+                )}
+                {err && (
+                  <div className="mt-2 rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-400">
+                    {err}
+                  </div>
+                )}
               </div>
               {/* Manual card-identity override — admin sets the real name/set/year
                   for cards that never auto-ID'd (or auto-ID'd empty/wrong). */}
-              <div className="px-4 py-2.5 border-b border-[#D4AF37]/15 bg-[#D4AF37]/[0.03]">
+              <div className="border-b border-[var(--admin-line)] bg-[var(--admin-gold)]/[0.03] px-4 py-2.5">
                 {!idoOpen ? (
                   <button
                     type="button"
                     onClick={() => setIdoOpen(true)}
                     data-testid="button-edit-identity"
-                    className="text-[#D4AF37]/80 hover:text-[#D4AF37] text-xs underline underline-offset-2"
+                    className="text-xs text-[var(--admin-gold)]/80 underline underline-offset-2 hover:text-[var(--admin-gold)]"
                   >
                     Edit card identity…
                   </button>
                 ) : (
                   <div className="space-y-2">
-                    <div className="text-[11px] uppercase tracking-wide text-[#E8E4DC]/50 font-bold">
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--admin-ink-faint)]">
                       Manual card identity override
                     </div>
                     {/* TCGdex re-run + card-search by name — parity with the grader
                         identity editor. Both call the shared /api/staff/* endpoints. */}
                     <div className="space-y-1.5">
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/40">Identify tools</span>
+                        <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
+                          Identify tools
+                        </span>
                         <button
                           type="button"
                           onClick={rerunIdentityOverride}
                           disabled={idoRerunBusy}
                           title="Re-run TCGdex identification on this card (identify only — never grades)"
                           data-testid="button-override-rerun"
-                          className="border border-[#D4AF37]/40 text-[#D4AF37] text-[10px] font-bold uppercase px-2 py-1 rounded hover:bg-[#D4AF37]/10 disabled:opacity-40"
+                          className="rounded border border-[var(--admin-gold)]/40 px-2 py-1 text-[10px] font-bold uppercase text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 disabled:opacity-40"
                         >
                           {idoRerunBusy ? "Re-running…" : "Re-run TCGdex"}
                         </button>
@@ -1200,7 +1226,7 @@ export default function AdminStaffPage() {
                         onClick={saveIdentityOverride}
                         disabled={idoBusy}
                         data-testid="button-save-identity"
-                        className="bg-[#D4AF37] text-black font-bold px-4 py-1.5 rounded text-xs hover:bg-[#e5c14e] disabled:opacity-50"
+                        className="rounded bg-[var(--admin-gold)] px-4 py-1.5 text-xs font-bold text-[#1A1400] hover:bg-[var(--admin-gold-hi)] disabled:opacity-50"
                       >
                         {idoBusy ? "Saving…" : "Save identity"}
                       </button>
@@ -1208,12 +1234,12 @@ export default function AdminStaffPage() {
                         type="button"
                         onClick={() => setIdoOpen(false)}
                         disabled={idoBusy}
-                        className="border border-[#D4AF37]/40 px-4 py-1.5 rounded text-xs hover:bg-[#D4AF37]/10"
+                        className="rounded border border-[var(--admin-gold)]/40 px-4 py-1.5 text-xs hover:bg-[var(--admin-gold)]/10"
                       >
                         Cancel
                       </button>
                     </div>
-                    <div className="text-[10px] text-[#E8E4DC]/40">
+                    <div className="text-[10px] text-[var(--admin-ink-faint)]">
                       Overwrites card name / set / number / year / variant. Flows to the operator queue, the public cert
                       page, and the slab/PDF. Logged.
                     </div>
@@ -1221,7 +1247,7 @@ export default function AdminStaffPage() {
                 )}
               </div>
               {showReject && (
-                <div className="px-4 py-3 border-b border-red-900/40 bg-red-950/20 space-y-2">
+                <div className="space-y-2 border-b border-red-900/40 bg-red-950/20 px-4 py-3">
                   <textarea
                     className="ss-input min-h-[60px]"
                     placeholder="Reason for rejection (shown to the grader) — required"
@@ -1242,7 +1268,7 @@ export default function AdminStaffPage() {
                       type="button"
                       onClick={() => setShowReject(false)}
                       disabled={reviewBusy}
-                      className="border border-[#D4AF37]/40 px-4 py-2 rounded text-sm hover:bg-[#D4AF37]/10"
+                      className="rounded border border-[var(--admin-gold)]/40 px-4 py-2 text-sm hover:bg-[var(--admin-gold)]/10"
                     >
                       Cancel
                     </button>

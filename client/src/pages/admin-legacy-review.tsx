@@ -9,6 +9,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Panel, AdminButton, Badge } from "@/components/admin";
+import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
 
 type Classification = "rarity" | "finish" | "promo" | "subset" | "ambiguous";
 type Status = "pending" | "approved" | "rejected" | "ignored";
@@ -74,23 +75,34 @@ export default function AdminLegacyReviewPage() {
   const pendingCount = useMemo(() => items.filter((i) => i.status === "pending").length, [items]);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-4 text-slate-100">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-bold">Legacy Variant Review</h1>
-          <p className="text-xs text-slate-400">
-            Map historical variant values onto the structured catalogue. Approving records the mapping{" "}
-            <b>rule only</b> — no certificate is changed and no data is backfilled.
-          </p>
-        </div>
-        <AdminButton type="button" size="sm" onClick={() => refetch()} disabled={isFetching}>
-          {isFetching ? "Refreshing…" : "Refresh"}
-        </AdminButton>
-      </div>
+    // Shared admin shell: .admin-root token scope + AdminHeaderRow header (same
+    // design system as the Super Admin dashboard and the corrected Staff
+    // screens). Previously this page rendered its own standalone slate-themed
+    // layout (text-slate-* / bg-slate-*). All review data, decision mutations,
+    // and API payloads below are unchanged.
+    <div className="admin-root min-h-screen bg-[var(--admin-bg)] text-[var(--admin-ink)]">
+      <header className="border-b border-[var(--admin-line)] px-4 py-2">
+        <AdminHeaderRow
+          testId="legacy-review-header"
+          left={
+            <h1 className="text-sm font-extrabold tracking-wide text-[var(--admin-gold)]">Legacy Variant Review</h1>
+          }
+          right={
+            <AdminButton type="button" size="sm" onClick={() => refetch()} disabled={isFetching}>
+              {isFetching ? "Refreshing…" : "Refresh"}
+            </AdminButton>
+          }
+        />
+      </header>
+      <div className="mx-auto max-w-6xl space-y-4 p-4">
+        <p className="text-xs text-[var(--admin-ink-dim)]">
+          Map historical variant values onto the structured catalogue. Approving records the mapping <b>rule only</b> —
+          no certificate is changed and no data is backfilled.
+        </p>
 
-      {summary && (
+        {summary && (
         <Panel>
-          <div className="flex flex-wrap gap-4 text-xs text-slate-300">
+          <div className="flex flex-wrap gap-4 text-xs text-[var(--admin-ink-dim)]">
             <span>{summary.distinctValues} distinct value(s)</span>
             <span>{summary.totalRecords} certificate(s)</span>
             <span className="text-emerald-300">{summary.high} high-confidence</span>
@@ -113,11 +125,11 @@ export default function AdminLegacyReviewPage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
-                    <code className="rounded bg-slate-800 px-1.5 py-0.5 text-xs font-bold">{item.legacyValue}</code>
-                    <span className="text-xs text-slate-400">{item.recordCount} cert(s)</span>
+                    <code className="rounded bg-[var(--admin-panel2)] px-1.5 py-0.5 text-xs font-bold">{item.legacyValue}</code>
+                    <span className="text-xs text-[var(--admin-ink-dim)]">{item.recordCount} cert(s)</span>
                     <Badge variant={STATUS_VARIANT[item.status]}>{item.status}</Badge>
                   </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-300">
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--admin-ink-dim)]">
                     <span>
                       → <b>{item.classification}</b>
                       {item.proposedValue ? `: ${item.proposedValue}` : ""}
@@ -125,9 +137,9 @@ export default function AdminLegacyReviewPage() {
                     <Badge variant={CONF_VARIANT[item.confidence] ?? "neu"}>{item.confidence}</Badge>
                     {item.reviewRequired && <span className="text-amber-300">needs review</span>}
                   </div>
-                  <div className="mt-1 text-[11px] text-slate-500">{item.reason}</div>
+                  <div className="mt-1 text-[11px] text-[var(--admin-ink-faint)]">{item.reason}</div>
                   {item.exampleCertIds.length > 0 && (
-                    <div className="mt-1 text-[11px] text-slate-500">e.g. {item.exampleCertIds.join(", ")}</div>
+                    <div className="mt-1 text-[11px] text-[var(--admin-ink-faint)]">e.g. {item.exampleCertIds.join(", ")}</div>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -189,8 +201,8 @@ export default function AdminLegacyReviewPage() {
               </div>
 
               {edit && (
-                <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-slate-700 bg-slate-900/60 p-2">
-                  <label className="flex flex-col gap-1 text-[11px] text-slate-400">
+                <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]/60 p-2">
+                  <label className="flex flex-col gap-1 text-[11px] text-[var(--admin-ink-dim)]">
                     Classification
                     <select
                       value={edit.classification}
@@ -200,7 +212,7 @@ export default function AdminLegacyReviewPage() {
                           [item.legacyValue]: { ...edit, classification: ev.target.value as Classification },
                         }))
                       }
-                      className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                      className="rounded border border-[var(--admin-line)] bg-[var(--admin-panel)] px-2 py-1 text-xs text-[var(--admin-ink)]"
                     >
                       {(["rarity", "finish", "promo", "subset", "ambiguous"] as Classification[]).map((c) => (
                         <option key={c} value={c}>
@@ -209,7 +221,7 @@ export default function AdminLegacyReviewPage() {
                       ))}
                     </select>
                   </label>
-                  <label className="flex flex-1 flex-col gap-1 text-[11px] text-slate-400">
+                  <label className="flex flex-1 flex-col gap-1 text-[11px] text-[var(--admin-ink-dim)]">
                     Canonical value
                     <input
                       value={edit.proposedValue}
@@ -220,7 +232,7 @@ export default function AdminLegacyReviewPage() {
                         }))
                       }
                       placeholder="e.g. reverse_holo"
-                      className="rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100"
+                      className="rounded border border-[var(--admin-line)] bg-[var(--admin-panel)] px-2 py-1 text-xs text-[var(--admin-ink)]"
                     />
                   </label>
                   <AdminButton
@@ -243,6 +255,7 @@ export default function AdminLegacyReviewPage() {
             </Panel>
           );
         })}
+      </div>
       </div>
     </div>
   );
