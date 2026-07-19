@@ -96,11 +96,11 @@ async function applyAllRealistic(): Promise<void> {
       expect(rows[0].status).toBe("applied");
     });
 
-    it("all 10 partner migration journal rows are present and applied", async () => {
+    it("all 11 partner migration journal rows are present and applied", async () => {
       const { rows } = await admin.query(
-        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '000%_partner%' OR filename LIKE '0010_partner%' ORDER BY filename"
+        "SELECT filename, status FROM schema_migrations WHERE filename LIKE '000%_partner%' OR filename LIKE '0010_partner%' OR filename LIKE '0011_partner%' ORDER BY filename"
       );
-      expect(rows).toHaveLength(10);
+      expect(rows).toHaveLength(11);
       for (const r of rows) expect(r.status).toBe("applied");
     });
 
@@ -195,7 +195,17 @@ async function applyAllRealistic(): Promise<void> {
       expect(imports.rows[0].r).toBe("partner_connector_imports");
     });
 
-    it("rolling back G3, then G2, then G1, correctly removes all three in order and preserves Phase 1/2 data", async () => {
+    it("G3 rollback REFUSES once migration 0011 (G3E) is present, and changes nothing", async () => {
+      await expect(admin.query(rb("rollback-partner-connector-g3.sql"))).rejects.toThrow(
+        /refuses to run.*migration 0011/i
+      );
+      await admin.query("ROLLBACK").catch(() => {});
+      const records = await admin.query("SELECT to_regclass('public.partner_connector_records') r");
+      expect(records.rows[0].r).toBe("partner_connector_records");
+    });
+
+    it("rolling back G3E, then G3, then G2, then G1, correctly removes all four in order and preserves Phase 1/2 data", async () => {
+      await admin.query(rb("rollback-partner-connector-g3e.sql"));
       await admin.query(rb("rollback-partner-connector-g3.sql"));
       await admin.query(rb("rollback-partner-connector-g2.sql"));
       await admin.query(rb("rollback-partner-connector-g1.sql"));
@@ -228,7 +238,7 @@ async function applyAllRealistic(): Promise<void> {
       expect(journal.rows[0].n).toBe(0);
     });
 
-    it("migrations 0008, 0009 and 0010 reapply cleanly after rollback", async () => {
+    it("migrations 0008, 0009, 0010 and 0011 reapply cleanly after rollback", async () => {
       const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
       await migrator.connect();
       try {
@@ -236,6 +246,7 @@ async function applyAllRealistic(): Promise<void> {
         expect(applied).toContain("0008_partner_connector_foundation.sql");
         expect(applied).toContain("0009_partner_connector_validation.sql");
         expect(applied).toContain("0010_partner_connector_import.sql");
+        expect(applied).toContain("0011_partner_connector_reconciliation.sql");
       } finally {
         await migrator.end();
       }

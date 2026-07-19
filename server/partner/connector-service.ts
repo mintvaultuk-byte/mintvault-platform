@@ -28,6 +28,8 @@ export const CONNECTOR_STATES = [
   "validating",
   "ready_for_import",
   "importing",
+  "reconciliation_required",
+  "manual_review",
   "rejected",
   "failed",
   "cancelled",
@@ -55,14 +57,25 @@ const TERMINAL_STATES = new Set<ConnectorState>(["rejected", "cancelled", "impor
  * generic caller may request — only importValidatedConnector()'s own final UPDATE (in the same
  * transaction as the destination-creation writes) may ever write `imported`, exactly mirroring how
  * G1 already hard-blocks `toState === "imported"` in transitionConnectorState() below.
+ *
+ * G3E additions: `reconciliation_required` and `manual_review` are two new NON-terminal states with
+ * deliberately narrow, explicit exits — "recoverable transitions only, no arbitrary state editing"
+ * per RECONCILIATION-RUNBOOK.md. Both `toState`s are hard-blocked from this generic function's own
+ * transitionConnectorState() (same mechanism as `imported`/`importing`) — only
+ * connector-reconciliation-service.ts's own dedicated, actor+reason-requiring, immutable-event-
+ * writing functions may ever write either. `importing -> reconciliation_required` is listed for
+ * schema completeness (the brief explicitly names it) even though it is structurally unreachable
+ * given G3D's single-transaction design — see G3E-G3F-PLAN.md.
  */
 export const LEGAL_TRANSITIONS: Record<ConnectorState, ConnectorState[]> = {
   queued: ["claimed", "cancelled"],
   claimed: ["validating", "queued", "cancelled", "failed"],
   validating: ["ready_for_import", "rejected", "failed", "cancelled"],
-  ready_for_import: ["cancelled", "validating", "importing"],
-  importing: ["failed"],
-  failed: ["queued", "cancelled", "validating"],
+  ready_for_import: ["cancelled", "validating", "importing", "reconciliation_required"],
+  importing: ["failed", "reconciliation_required"],
+  reconciliation_required: ["ready_for_import", "manual_review", "cancelled"],
+  manual_review: ["queued", "cancelled"],
+  failed: ["queued", "cancelled", "validating", "manual_review"],
   rejected: [],
   cancelled: [],
   imported: [],
@@ -296,11 +309,19 @@ export async function getConnectorStatus(params: {
 /**
  * Claim ONE queued (or expired-claim) record across ALL tenants — the global work-queue primitive a
  * future worker polls. FOR UPDATE SKIP LOCKED guarantees two concurrent callers never claim the same
- * row. Returns null when nothing is claimable (not an error). An expired lease on EITHER `claimed`
- * or `validating` is reclaimable (G2C — closes the G1-documented gap where a `validating` record
- * was never treated as reclaimable at all); a reclaim always resets state to `claimed`, so the new
+ * row. Returns null when nothing is claimable (not an error). An expired lease on `claimed` or
+ * `validating` is reclaimable (G2C — closes the G1-documented gap where a `validating` record was
+ * never treated as reclaimable at all); reclaiming either resets state to `claimed`, so the new
  * claimant explicitly re-enters `validating` itself rather than inheriting an unknown mid-validation
  * state from whichever worker's lease just lapsed.
+ *
+ * G3E: an expired lease on `ready_for_import` is ALSO reclaimable now — this closes a real,
+ * previously-undetected gap (the record is already validated; a worker that died between validating
+ * it and calling the importer left it permanently unclaimable by anyone else, since neither this
+ * function nor claimConnectorRecord ever treated `ready_for_import` as having a reclaimable lease at
+ * all). Unlike the `claimed`/`validating` case, reclaiming a `ready_for_import` record does NOT reset
+ * its state — downgrading it to `claimed` would force a wasteful, unnecessary re-validation of source
+ * data that is still valid; the new claimant can call the importer directly.
  */
 export async function claimNextConnectorRecord(
   claimedBy: string,
@@ -311,7 +332,8 @@ export async function claimNextConnectorRecord(
     withConnectorTx(async (client) => {
       const { rows } = await client.query<ConnectorRow>(
         `SELECT * FROM partner_connector_records
-        WHERE state = 'queued' OR (state IN ('claimed','validating') AND claim_expires_at < now())
+        WHERE state = 'queued'
+           OR (state IN ('claimed','validating','ready_for_import') AND claim_expires_at < now())
         ORDER BY created_at ASC
         FOR UPDATE SKIP LOCKED
         LIMIT 1`
@@ -320,7 +342,8 @@ export async function claimNextConnectorRecord(
       const rec = rows[0];
       const upd = await client.query<ConnectorRow>(
         `UPDATE partner_connector_records
-          SET state = 'claimed', claimed_by = $1, claimed_at = now(),
+          SET state = CASE WHEN state = 'ready_for_import' THEN state ELSE 'claimed' END,
+              claimed_by = $1, claimed_at = now(),
               claim_expires_at = now() + ($2 || ' seconds')::interval,
               attempt_count = attempt_count + 1, version = version + 1, updated_at = now()
         WHERE id = $3 AND version = $4
@@ -334,7 +357,7 @@ export async function claimNextConnectorRecord(
         client,
         rec.id,
         rec.state as ConnectorState,
-        "claimed",
+        upd.rows[0].state as ConnectorState,
         "claimed",
         upd.rows[0].attempt_count,
         {},
@@ -373,15 +396,18 @@ export async function claimConnectorRecord(
       if (TERMINAL_STATES.has(rec.state as ConnectorState)) {
         throw new ConnectorError("invalid_state_transition", `Cannot claim a record in terminal state ${rec.state}.`);
       }
+      // G3E: 'ready_for_import' is now included — see claimNextConnectorRecord's doc comment for why
+      // this closes a real gap rather than being merely defensive.
       const leaseExpired =
-        (rec.state === "claimed" || rec.state === "validating") &&
+        (rec.state === "claimed" || rec.state === "validating" || rec.state === "ready_for_import") &&
         rec.claim_expires_at != null &&
         new Date(rec.claim_expires_at) < new Date();
       const claimable = rec.state === "queued" || leaseExpired;
       if (!claimable) throw new ConnectorError("already_claimed", "Record is already claimed by another processor.");
       const upd = await client.query<ConnectorRow>(
         `UPDATE partner_connector_records
-          SET state = 'claimed', claimed_by = $1, claimed_at = now(),
+          SET state = CASE WHEN state = 'ready_for_import' THEN state ELSE 'claimed' END,
+              claimed_by = $1, claimed_at = now(),
               claim_expires_at = now() + ($2 || ' seconds')::interval,
               attempt_count = attempt_count + 1, version = version + 1, updated_at = now()
         WHERE id = $3 AND version = $4
@@ -393,7 +419,7 @@ export async function claimConnectorRecord(
         client,
         connectorId,
         rec.state as ConnectorState,
-        "claimed",
+        upd.rows[0].state as ConnectorState,
         "claimed",
         upd.rows[0].attempt_count,
         {},
@@ -411,11 +437,14 @@ export async function claimConnectorRecord(
  * single-transaction logic may perform either move (mirroring how requestConnectorRevalidation()
  * already bypasses this function for its own atomic claim+transition). Allowing a generic caller to
  * flip a record into `importing` without also creating the reservation row in the same transaction
- * would strand it there with no valid exit but `failed`. `tenantId`, when supplied, is checked
- * against the record's actual tenant before anything else. Moving INTO `queued` (an explicit release
- * or a failed→queued retry) clears claimed_by/claimed_at/claim_expires_at/next_retry_at — the same
- * fields releaseConnectorClaim clears — so a requeued record never carries a stale claimant or a
- * stale retry time forward.
+ * would strand it there with no valid exit but `failed`. `toState = "reconciliation_required"` and
+ * `toState = "manual_review"` (G3E) are hard-blocked for the same reason — only
+ * connector-reconciliation-service.ts's own actor+reason-requiring, immutable-event-writing
+ * functions may ever write either, never a bare generic transition with no audit trail. `tenantId`,
+ * when supplied, is checked against the record's actual tenant before anything else. Moving INTO
+ * `queued` (an explicit release or a failed→queued retry) clears claimed_by/claimed_at/
+ * claim_expires_at/next_retry_at — the same fields releaseConnectorClaim clears — so a requeued
+ * record never carries a stale claimant or a stale retry time forward.
  */
 export async function transitionConnectorState(params: {
   connectorId: string;
@@ -426,10 +455,15 @@ export async function transitionConnectorState(params: {
   eventType: string;
   metadata?: Record<string, unknown>;
 }): Promise<ConnectorRecord> {
-  if (params.toState === "imported" || params.toState === "importing") {
+  if (
+    params.toState === "imported" ||
+    params.toState === "importing" ||
+    params.toState === "reconciliation_required" ||
+    params.toState === "manual_review"
+  ) {
     throw new ConnectorError(
       "invalid_state_transition",
-      "Only the dedicated importer may transition a record into 'importing' or 'imported'."
+      "Only the dedicated importer/reconciliation engine may transition a record into this state."
     );
   }
   await assertConnectorActive();

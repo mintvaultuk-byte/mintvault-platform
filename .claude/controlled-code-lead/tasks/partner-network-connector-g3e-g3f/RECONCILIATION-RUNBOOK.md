@@ -1,0 +1,91 @@
+# Trusted Intake Connector — G3E Reconciliation Runbook (supersedes the
+
+G3-pass placeholder of the same name — this is what's actually built)
+
+## Scenario table
+
+| #   | Scenario                                                               | Reachable in normal operation?                                                                                                             | Detected by                                                                                         | Recovered by                                                                                                                                                                                                              |
+| --- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `ready_for_import`, completed mapping exists                           | No — step 8 of the importer always returns the existing destination before a second reservation; the connector would already be `imported` | `inspectConnectorConsistency` (invariant assertion)                                                 | N/A                                                                                                                                                                                                                       |
+| 2   | `importing` observed durably by another session                        | No — collapsed into one transaction                                                                                                        | `inspectConnectorConsistency`                                                                       | N/A                                                                                                                                                                                                                       |
+| 3   | `importing`, destination + completed mapping exist                     | No — same transaction                                                                                                                      | as above                                                                                            | N/A                                                                                                                                                                                                                       |
+| 4   | Mapping `reserved`, no destination                                     | No in normal operation (same reasoning); reachable only via direct DB tampering                                                            | `inspectImportMapping`                                                                              | `recoverReservedImport` (defensive; tested via forced corruption)                                                                                                                                                         |
+| 5   | Mapping `completed`, destination missing                               | Only via corruption (manual delete, future bug)                                                                                            | `inspectImportMapping`                                                                              | `reconcileConnector` → `manual_review` (never auto-repaired — no safe way to know if a destination "should" be recreated)                                                                                                 |
+| 6   | Connector `imported`, mapping missing                                  | Only via corruption                                                                                                                        | `inspectConnectorConsistency`                                                                       | `reconcileConnector` → `manual_review`                                                                                                                                                                                    |
+| 7   | Connector `imported`, destination missing                              | Only via corruption                                                                                                                        | `inspectDestinationSubmission`                                                                      | `manual_review`                                                                                                                                                                                                           |
+| 8   | Destination exists, final connector event missing                      | Only via corruption (same-transaction event write)                                                                                         | `inspectConnectorEvidence`                                                                          | `completeFromExistingDestination` (writes the missing event, touches nothing else — this is the ONE genuinely safe auto-repair, since the destination and mapping already agree; only the event log itself is incomplete) |
+| 9   | Timeout after commit / lost response                                   | **Reachable, common**                                                                                                                      | N/A (not an inconsistency — see idempotency doc)                                                    | `recoverInterruptedImport` (thin wrapper around a retried `importValidatedConnector` call, with its own audit event)                                                                                                      |
+| 10  | Concurrent duplicate import request                                    | **Reachable, by design**                                                                                                                   | N/A                                                                                                 | Handled by G3D's own `UNIQUE(connector_record_id)` serialisation; G3E adds no new logic here                                                                                                                              |
+| 11  | Stale claimant                                                         | **Reachable**                                                                                                                              | Existing G1 claim/version check                                                                     | Rejected outright (unchanged from G1/G3)                                                                                                                                                                                  |
+| 12  | **Claim expires on `ready_for_import` (worker died before importing)** | **Reachable — REAL, previously unfixed gap**                                                                                               | `inspectConnectorConsistency` flags `claim_expired`/`claim_lost`                                    | `recoverExpiredImportClaim` — fixes `claimConnectorRecord`/`claimNextConnectorRecord` to treat an expired `ready_for_import` lease as reclaimable, exactly like `claimed`/`validating` already are                        |
+| 13  | Source changes after validation                                        | **Reachable**                                                                                                                              | Already handled by G3D's own fingerprint recheck                                                    | N/A — not a G3E concern                                                                                                                                                                                                   |
+| 14  | Cancellation before import                                             | **Reachable**                                                                                                                              | N/A                                                                                                 | Normal `transitionConnectorState` (unchanged)                                                                                                                                                                             |
+| 15  | Cancellation after import                                              | **Rejected outright**                                                                                                                      | N/A                                                                                                 | `imported` stays terminal (unchanged)                                                                                                                                                                                     |
+| 16  | Destination manually altered                                           | **Reachable** (unrelated admin edit)                                                                                                       | Out of scope — the mapping only proves a destination was created once, not its current field values | N/A                                                                                                                                                                                                                       |
+| 17  | Destination manually deleted                                           | **Reachable** (hard delete)                                                                                                                | `inspectDestinationSubmission`                                                                      | `manual_review`                                                                                                                                                                                                           |
+| 18  | Duplicate mapping / duplicate destination row                          | Only via a hypothetical future constraint weakening                                                                                        | `sweepConnectorLineageIntegrity` (global, all-records)                                              | `manual_review` — never auto-merged/auto-deleted                                                                                                                                                                          |
+| 19  | Orphaned validation run / orphaned connector record                    | Prevented by `ON DELETE RESTRICT` FKs; sweep exists as defence in depth                                                                    | `sweepConnectorLineageIntegrity`                                                                    | `manual_review`                                                                                                                                                                                                           |
+| 20  | Unknown/corrupt state                                                  | Catch-all                                                                                                                                  | `reconcileConnector`'s default branch                                                               | `manual_review`, evidence preserved, no guess made                                                                                                                                                                        |
+
+## Forbidden destructive recovery actions (unchanged from G3)
+
+- Never automatically `DELETE` a valid destination `submissions` row.
+- Never create a second destination "just in case."
+- Never silently repair a `needs_review`/`manual_review` mapping without
+  an authorised, reasoned, audited manual action.
+- Never auto-merge or auto-delete a detected duplicate mapping/destination.
+
+## Manual review flow
+
+`markManualReview({connectorId, actorId, reason})` moves a connector into
+`manual_review` (a new, non-terminal state — recoverable only via
+`resolveManualReview`). `resolveManualReview({connectorId, actorId,
+reason, resolution})` accepts exactly two resolutions: `"retry"` (→
+`queued`, re-enters the normal pipeline from scratch) or `"cancel"` (→
+`cancelled`, terminal). No arbitrary state editing is possible — these are
+the only two exits, both requiring `actorId` + `reason`, both writing an
+immutable event.
+
+`acknowledgePermanentFailure({connectorId, actorId, reason})` — for a
+`failed` record an operator has decided will never succeed (e.g. the
+source submission is permanently unrecoverable). Transitions `failed →
+cancelled` with the reason recorded in the event metadata; does not
+introduce a new terminal state since `cancelled` already exists and is
+already terminal.
+
+## Recovery limitations (stated honestly)
+
+- `recoverReservedImport` and the "duplicate mapping/destination" sweep
+  repair paths are **defensive code with no reachable trigger in normal
+  operation** given G3D's single-transaction design. They are tested via
+  deliberate corruption (the same technique G3's own tests already used),
+  not via a naturally-occurring scenario — this is disclosed, not hidden.
+- `manual_review` resolution is deliberately narrow (retry or cancel
+  only) — it cannot, for example, retroactively attach a manually-created
+  destination to a connector record. That is a conscious safety choice
+  (per "never guess"), not an oversight; a case needing that would need a
+  human to use normal MintVault admin tooling on the `submissions` row
+  directly, entirely outside the connector's provenance tracking.
+- No G4 operator UI exists yet to actually invoke these functions outside
+  a test or a future direct script — they are correct, tested, callable
+  TypeScript functions with no HTTP surface, matching G1–G3's own posture.
+- **Resuming a stale `reserved` mapping does not refresh its own
+  `validation_run_id`/`source_fingerprint`/`source_fingerprint_version`
+  columns.** Found independently by two review panels during this pass.
+  When `importValidatedConnector` resumes an existing `reserved` row for
+  the same connector (`connector-import-service.ts`'s reservation block),
+  it always re-verifies the source against the _latest_ validation run
+  before writing anything — so the destination submission itself is never
+  built from stale data, and the exactly-once guarantee is unaffected.
+  But the resumed mapping row's own provenance columns are immutable by
+  design (`partner_connector_runtime`'s column-level UPDATE grant on
+  `partner_connector_imports`, migration 0010, deliberately excludes
+  them — see IDEMPOTENCY-AND-TRANSACTION.md) and are never rewritten on
+  resume, so if a newer validation run existed between the original
+  (interrupted) reservation and the resume, the completed mapping row can
+  permanently record an older `validation_run_id`/fingerprint than the one
+  actually verified at completion time. This is an audit-trail accuracy
+  gap, not a safety gap — accepted as-is rather than widening a
+  deliberate immutability control without owner sign-off; a future pass
+  could either extend the grant narrowly for this one case or accept the
+  inaccuracy as documented here.

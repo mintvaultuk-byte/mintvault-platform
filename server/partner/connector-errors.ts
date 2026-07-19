@@ -41,6 +41,19 @@ export const CONNECTOR_ERROR_CODES = [
   "import_cancelled",
   "import_emergency_stopped",
   "unknown_import_error",
+  // G3E — reconciliation and recovery.
+  "destination_missing",
+  "mapping_missing",
+  "mapping_duplicate",
+  "destination_duplicate",
+  "import_interrupted",
+  "claim_expired",
+  "claim_lost",
+  "stale_validation",
+  "stale_fingerprint",
+  "manual_review_required",
+  "corrupt_lineage",
+  "unknown_reconciliation_error",
 ] as const;
 export type ConnectorErrorCode = (typeof CONNECTOR_ERROR_CODES)[number];
 
@@ -84,6 +97,21 @@ const RETRYABLE_BY_CODE: Record<ConnectorErrorCode, boolean> = {
   import_cancelled: false,
   import_emergency_stopped: false,
   unknown_import_error: true,
+  // G3E — reconciliation and recovery. Every one of these requires a human/reconciliation-engine
+  // decision, not a bare retry — retrying an inconsistent-state read never resolves the
+  // inconsistency itself.
+  destination_missing: false,
+  mapping_missing: false,
+  mapping_duplicate: false,
+  destination_duplicate: false,
+  import_interrupted: true, // a genuine crash/timeout — recoverInterruptedImport's retry is safe
+  claim_expired: true, // caller may reclaim (recoverExpiredImportClaim) and retry
+  claim_lost: false, // a different worker now holds it — not the caller's to retry
+  stale_validation: false, // must revalidate first
+  stale_fingerprint: false, // must revalidate first
+  manual_review_required: false,
+  corrupt_lineage: false,
+  unknown_reconciliation_error: true,
 };
 
 /**
@@ -207,6 +235,67 @@ export const IMPORT_ERROR_GUIDANCE: Partial<
   },
   unknown_import_error: {
     publicMessage: "An internal error occurred while importing this record.",
+    operatorAction: "Retry; if this persists, escalate for investigation.",
+    requiresReconciliation: false,
+  },
+  destination_missing: {
+    publicMessage: "The recorded destination could not be found.",
+    operatorAction: "Escalate for manual review — do not retry, do not recreate.",
+    requiresReconciliation: true,
+  },
+  mapping_missing: {
+    publicMessage: "No import mapping exists for a connector marked imported.",
+    operatorAction: "Escalate for manual review.",
+    requiresReconciliation: true,
+  },
+  mapping_duplicate: {
+    publicMessage: "More than one import mapping was found where only one should exist.",
+    operatorAction: "Escalate for manual review — never auto-merge or auto-delete.",
+    requiresReconciliation: true,
+  },
+  destination_duplicate: {
+    publicMessage: "More than one destination submission was found for a single connector record.",
+    operatorAction: "Escalate for manual review — never auto-merge or auto-delete.",
+    requiresReconciliation: true,
+  },
+  import_interrupted: {
+    publicMessage: "The previous import attempt did not complete.",
+    operatorAction:
+      "Retry via recoverInterruptedImport; safe because nothing was created if interrupted before commit.",
+    requiresReconciliation: false,
+  },
+  claim_expired: {
+    publicMessage: "The processing claim on this record has expired.",
+    operatorAction: "Reclaim via recoverExpiredImportClaim and retry.",
+    requiresReconciliation: false,
+  },
+  claim_lost: {
+    publicMessage: "This record is now claimed by a different worker.",
+    operatorAction: "No action — the new claimant will proceed.",
+    requiresReconciliation: false,
+  },
+  stale_validation: {
+    publicMessage: "The recorded validation is no longer current.",
+    operatorAction: "Revalidate before attempting import again.",
+    requiresReconciliation: false,
+  },
+  stale_fingerprint: {
+    publicMessage: "The source data has changed since it was last validated.",
+    operatorAction: "Revalidate before attempting import again.",
+    requiresReconciliation: false,
+  },
+  manual_review_required: {
+    publicMessage: "This record requires manual review before it can proceed.",
+    operatorAction: "Use resolveManualReview with an explicit actor and reason.",
+    requiresReconciliation: true,
+  },
+  corrupt_lineage: {
+    publicMessage: "The provenance chain for this record is inconsistent.",
+    operatorAction: "Escalate for manual review — evidence preserved, no automatic repair.",
+    requiresReconciliation: true,
+  },
+  unknown_reconciliation_error: {
+    publicMessage: "An internal error occurred while reconciling this record.",
     operatorAction: "Retry; if this persists, escalate for investigation.",
     requiresReconciliation: false,
   },

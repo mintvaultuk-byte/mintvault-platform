@@ -14,8 +14,28 @@
 --
 -- Idempotent (IF EXISTS everywhere). Owner-approved protected action only; rehearse on a disposable
 -- DB first.
+--
+-- REFUSES to run once migration 0011 (G3E reconciliation) is present — 0011 widens
+-- partner_connector_records.state to permit 'reconciliation_required'/'manual_review'; this
+-- script's own CHECK-constraint narrowing does not know how to migrate rows sitting in either new
+-- state back down safely (unlike 'importing', both are genuinely reachable states, not merely
+-- defensive), so it refuses rather than guess. Run rollback-partner-connector-g3e.sql first.
+--
+-- ⚠️ If the refusal fires, the aborted transaction leaves a pooled connection in "current
+-- transaction is aborted" state for any further query on it — issue an explicit ROLLBACK before
+-- reuse. Same caveat every earlier refusal guard in this migration family documents.
 
 BEGIN;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM schema_migrations
+     WHERE filename = '0011_partner_connector_reconciliation.sql' AND status = 'applied'
+  ) THEN
+    RAISE EXCEPTION 'rollback-partner-connector-g3.sql refuses to run: migration 0011 (G3E reconciliation) is present. Run rollback-partner-connector-g3e.sql first, or use the comprehensive rollback-partner-network-phase1.sql for a full teardown.';
+  END IF;
+END$$;
 
 DROP TABLE IF EXISTS partner_connector_imports CASCADE;
 DROP TABLE IF EXISTS partner_connector_customer_links CASCADE;

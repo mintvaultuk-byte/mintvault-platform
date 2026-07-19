@@ -244,46 +244,56 @@ export async function importValidatedConnector(params: {
       }
 
       // ---- Reservation ----------------------------------------------------------------------
-      await client.query("SAVEPOINT connector_import_reserve");
+      // G3E fix: if a 'reserved' (not completed) mapping row ALREADY exists for THIS connector —
+      // only reachable via a prior interrupted/corrupted attempt, since step 2's row lock means no
+      // concurrent transaction for the same connector can be racing us here — resume it in place
+      // rather than attempting a fresh INSERT, which would always conflict on
+      // uq_partner_connector_imports_connector and previously left the record stuck in an
+      // unrecoverable retry loop (RECONCILIATION-RUNBOOK.md scenario 4, now genuinely recoverable
+      // both automatically here and via recoverReservedImport for a stale abandoned reservation).
       let mappingId: string;
-      try {
-        const reserveRes = await client.query<{ id: string }>(
-          `INSERT INTO partner_connector_imports
-             (connector_record_id, partner_organisation_id, partner_location_id, partner_submission_id,
-              partner_handoff_id, validation_run_id, source_fingerprint, source_fingerprint_version,
-              mapping_version, import_attempt, state)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'reserved')
-           RETURNING id`,
-          [
-            connectorId,
-            connector.tenant_id,
-            rows.location?.id ?? null,
-            connector.partner_submission_id,
-            connector.handoff_id,
-            run.id,
-            fingerprint,
-            SOURCE_FINGERPRINT_VERSION,
-            MAPPING_VERSION,
-            connector.attempt_count,
-          ]
-        );
-        await client.query("RELEASE SAVEPOINT connector_import_reserve");
-        mappingId = reserveRes.rows[0].id;
-      } catch (err) {
-        await client.query("ROLLBACK TO SAVEPOINT connector_import_reserve");
-        const pgErr = err as { code?: string };
-        if (pgErr?.code === "23505") {
-          // Lost a reservation race — a concurrent transaction for this SAME connector got there
-          // first. It holds (or held) the row lock we also hold, so by the time we observe the
-          // conflict it has either committed (re-check below) or rolled back (nothing to find, and
-          // this whole transaction is about to fail anyway since we can no longer proceed safely).
-          throw new ConnectorError(
-            "import_mapping_conflict",
-            "A concurrent import attempt for this record is already in progress or complete.",
-            true
+      if (existingMap && existingMap.state === "reserved") {
+        mappingId = existingMap.id;
+      } else {
+        await client.query("SAVEPOINT connector_import_reserve");
+        try {
+          const reserveRes = await client.query<{ id: string }>(
+            `INSERT INTO partner_connector_imports
+               (connector_record_id, partner_organisation_id, partner_location_id, partner_submission_id,
+                partner_handoff_id, validation_run_id, source_fingerprint, source_fingerprint_version,
+                mapping_version, import_attempt, state)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'reserved')
+             RETURNING id`,
+            [
+              connectorId,
+              connector.tenant_id,
+              rows.location?.id ?? null,
+              connector.partner_submission_id,
+              connector.handoff_id,
+              run.id,
+              fingerprint,
+              SOURCE_FINGERPRINT_VERSION,
+              MAPPING_VERSION,
+              connector.attempt_count,
+            ]
           );
+          await client.query("RELEASE SAVEPOINT connector_import_reserve");
+          mappingId = reserveRes.rows[0].id;
+        } catch (err) {
+          await client.query("ROLLBACK TO SAVEPOINT connector_import_reserve");
+          const pgErr = err as { code?: string };
+          if (pgErr?.code === "23505") {
+            // Lost a reservation race — a concurrent transaction for a DIFFERENT connector racing
+            // for the same underlying handoff/submission got there first (the SAME-connector case is
+            // handled by the existingMap branch above, never reaches this INSERT at all).
+            throw new ConnectorError(
+              "import_mapping_conflict",
+              "A concurrent import attempt for this record is already in progress or complete.",
+              true
+            );
+          }
+          throw new ConnectorError("import_destination_conflict", "Could not reserve an import mapping.", false);
         }
-        throw new ConnectorError("import_destination_conflict", "Could not reserve an import mapping.", false);
       }
 
       // ---- Owner resolution -------------------------------------------------------------------
