@@ -35,8 +35,8 @@ Seeded population (exactly matching LOAD-MODEL.md): 100 connectors = 70 valid
 | Worker-reported failures                                            | 0                           |
 | Worker retries                                                      | 0                           |
 | Deadlocks                                                           | 0                           |
-| Total wall-clock (worker pool run)                                  | ~78 ms                      |
-| Per-import duration min / median / p95 / max                        | ~2.7 / 6.0 / 14.2 / 14.9 ms |
+| Total wall-clock (worker pool run)                                  | ~77 ms                      |
+| Per-import duration min / median / p95 / max                        | ~2.5 / 6.0 / 13.9 / 14.9 ms |
 
 Durations measured with a single monotonic clock (`performance.now()`) around
 each `importValidatedConnector` call in the worker (`WorkerPoolResult.importDurationsMs`)
@@ -45,7 +45,7 @@ each `importValidatedConnector` call in the worker (`WorkerPoolResult.importDura
 ### Pool-wait
 
 In the correctness run the pool is sized (12) ≥ workers (10), so pool-wait is
-effectively zero (no client contention) — confirmed by total elapsed (~78 ms
+effectively zero (no client contention) — confirmed by total elapsed (~77 ms
 for 90 processed records across 10 workers). Bounded pool-wait under genuine
 saturation is proven separately by the pool-saturation fault test (pool max 1 +
 a 200 ms acquisition timeout): excess concurrent callers reject with a bounded
@@ -53,13 +53,17 @@ acquisition error rather than hanging, and the pool works normally afterward.
 
 ## Failure-injection run (tests/partner-connector-fault-injection.test.ts)
 
-18 assertions, all green. Nine transaction-rollback points, genuine
-mid-transaction backend termination (`pg_terminate_backend` on the importer's
-own connection), `statement_timeout` (150 ms) aborting a slow in-transaction
-statement, `lock_timeout` (200 ms) on a blocked `FOR UPDATE`, pool saturation,
-lost-response idempotency, worker-death reclaim, stale-source routing, and
-emergency-stop / flag-OFF fail-closed. Every fault left zero partial
-destination and a working pool.
+21 assertions, all green. Twelve transaction-rollback points — every hook point
+the importer actually emits (`before_validation_recheck`, `after_validation_recheck`,
+`before_reservation`, `after_reservation`, `after_owner_resolution`,
+`after_submission_insert`, `during_item_insert`, `after_items`,
+`before_mapping_completion`, `after_mapping_completion`, `before_connector_imported`,
+`before_commit`) — plus genuine mid-transaction backend termination
+(`pg_terminate_backend` on the importer's own connection), `statement_timeout`
+(150 ms) aborting a slow in-transaction statement, `lock_timeout` (200 ms) on a
+blocked `FOR UPDATE`, pool saturation, lost-response idempotency, worker-death
+reclaim, stale-source routing, and emergency-stop / flag-OFF fail-closed. Every
+fault left zero partial destination and a working pool.
 
 ## EXPLAIN / index findings (tests/partner-connector-query-plan.test.ts)
 
@@ -99,7 +103,42 @@ no redundant index added):**
 | provenance attempt history    | `idx_partner_connector_import_attempts_connector`  | No                       |
 | completed-attempt lookup      | `uq_partner_connector_import_attempts_completed`   | No                       |
 
-Index changes were made ONLY where EXPLAIN evidence justified them; no index was
-added speculatively, and the dataset (2000 rows) is large enough to make the
-planner's index-vs-seq-scan choice meaningful (a tiny table would always prefer
-seq scan and hide the gap).
+### `partner_connector_import_attempts` retained index inventory
+
+The append-only provenance table carries **exactly** these indexes — nothing more:
+
+| Index                                             | Definition                                                   | Query path that needs it                                                                                                                                     |
+| ------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `partner_connector_import_attempts_pkey`          | PRIMARY KEY (`id`)                                            | row identity / FK targets                                                                                                                                     |
+| `uq_partner_connector_import_attempts_completed`  | UNIQUE (`connector_record_id`) WHERE `outcome = 'completed'` | the exactly-once completed-evidence backstop, and the importer's completed-attempt existence check                                                            |
+| `idx_partner_connector_import_attempts_connector` | (`connector_record_id`, `created_at`)                        | the only history read path — `getImportAttempts`, the reconciliation completed-check, and the importer's `attempt_number` / existing-attempt reads by record |
+
+### Removed speculative indexes (Blocker 1 correction)
+
+An earlier draft of migration 0012 also created three indexes that **no code path
+uses** — `idx_partner_connector_import_attempts_mapping` (on `import_mapping_id`),
+`idx_partner_connector_import_attempts_run` (on `validation_run_id`), and
+`idx_partner_connector_import_attempts_destination` (on `destination_submission_id`).
+No production, reconciliation, support, or audit query filters or joins the
+attempts table by any of those columns (verified by code search; the table is
+read solely by `connector_record_id` + `outcome`). They were pure speculation
+about a future G4 operator lookup, so they were **removed** from 0012 before merge.
+A future query that genuinely needs one of those access paths can add the matching
+index when it exists. `tests/partner-connector-query-plan.test.ts` asserts the
+three removed names are absent and the retained inventory is exactly the three
+rows above.
+
+An earlier revision of this document claimed "no index was added speculatively";
+that claim was false at the time it was written (the three indexes above were
+present in 0012). It is true only after the Blocker 1 removal, and is now stated
+as a removal, not as an absence.
+
+### Scope of these numbers
+
+Index changes were made ONLY where EXPLAIN evidence justified them, and the
+dataset (2000 rows) is large enough to make the planner's index-vs-seq-scan
+choice meaningful (a tiny table would always prefer seq scan and hide the gap).
+All numbers in this document describe a **controlled local test environment**
+(disposable Homebrew PostgreSQL 16 on Apple Silicon, loopback), not production
+or managed-Postgres (Neon) throughput; they characterise correctness and relative
+query-plan behaviour, not a production capacity guarantee.
