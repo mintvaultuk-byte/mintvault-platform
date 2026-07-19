@@ -39,6 +39,13 @@ export interface WorkerPoolResult {
   retries: number;
   stoppedEarly: boolean;
   failures: Array<{ connectorId: string; code: string }>;
+  /**
+   * Per-import wall-clock durations (ms), measured with a single monotonic clock (performance.now())
+   * around each importValidatedConnector call — same clock source both ends, so accurate at sub-ms
+   * scale (unlike subtracting a DB now() from a JS Date). One entry per import call attempt that
+   * returned an outcome (imported / already_completed / stale).
+   */
+  importDurationsMs: number[];
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -62,6 +69,7 @@ export async function runConnectorWorkerPool(opts: WorkerPoolOptions): Promise<W
     retries: 0,
     stoppedEarly: false,
     failures: [],
+    importDurationsMs: [],
   };
 
   async function worker(workerIndex: number): Promise<void> {
@@ -102,12 +110,14 @@ export async function runConnectorWorkerPool(opts: WorkerPoolOptions): Promise<W
       let attempt = 0;
       for (;;) {
         try {
+          const t0 = performance.now();
           const outcome = await importValidatedConnector({
             connectorId: rec.id,
             claimant: workerId,
             expectedVersion: rec.version,
             tenantId: rec.tenantId,
           });
+          result.importDurationsMs.push(performance.now() - t0);
           if (outcome.outcome === "imported") result.imported += 1;
           else if (outcome.outcome === "already_completed") result.alreadyCompleted += 1;
           else if (outcome.outcome === "stale") result.stale += 1;
