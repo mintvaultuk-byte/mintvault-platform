@@ -203,4 +203,25 @@ async function explain(sql: string, params: unknown[] = []): Promise<string> {
     );
     expect(completed).not.toMatch(/Seq Scan on partner_connector_import_attempts/);
   });
+
+  it("partner_connector_import_attempts has EXACTLY the two evidence-backed indexes — no speculative index remains", async () => {
+    const { rows } = await admin.query<{ indexname: string }>(
+      "SELECT indexname FROM pg_indexes WHERE tablename = 'partner_connector_import_attempts' ORDER BY indexname"
+    );
+    const names = rows.map((r) => r.indexname);
+    // pkey + the connector history index + the completed partial unique. NOTHING else.
+    expect(names).toEqual([
+      "idx_partner_connector_import_attempts_connector",
+      "partner_connector_import_attempts_pkey",
+      "uq_partner_connector_import_attempts_completed",
+    ]);
+    // the three removed speculative indexes are absent
+    for (const removed of [
+      "idx_partner_connector_import_attempts_mapping",
+      "idx_partner_connector_import_attempts_run",
+      "idx_partner_connector_import_attempts_destination",
+    ]) {
+      expect(names).not.toContain(removed);
+    }
+  });
 });

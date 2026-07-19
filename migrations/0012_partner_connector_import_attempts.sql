@@ -49,14 +49,14 @@ CREATE TABLE IF NOT EXISTS partner_connector_import_attempts (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_partner_connector_import_attempts_completed
   ON partner_connector_import_attempts(connector_record_id) WHERE outcome = 'completed';
 
+-- Only the evidence-backed history-lookup index. The append-only chain is read solely by
+-- connector_record_id (getImportAttempts, the reconciliation completed-check, and the importer's
+-- attempt_number/existing-completed reads) — all covered here or by the partial unique above. No
+-- code path filters by import_mapping_id / validation_run_id / destination_submission_id, so no
+-- index on those columns is added (they would be speculative — a future G4 operator lookup by those
+-- provenance dimensions can add them when the query that needs them actually exists).
 CREATE INDEX IF NOT EXISTS idx_partner_connector_import_attempts_connector
   ON partner_connector_import_attempts(connector_record_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_partner_connector_import_attempts_mapping
-  ON partner_connector_import_attempts(import_mapping_id);
-CREATE INDEX IF NOT EXISTS idx_partner_connector_import_attempts_run
-  ON partner_connector_import_attempts(validation_run_id);
-CREATE INDEX IF NOT EXISTS idx_partner_connector_import_attempts_destination
-  ON partner_connector_import_attempts(destination_submission_id);
 
 -- Grants: append-only (SELECT + INSERT, no UPDATE/DELETE). No PUBLIC. partner_runtime gets nothing.
 GRANT SELECT, INSERT ON partner_connector_import_attempts TO partner_connector_runtime;
