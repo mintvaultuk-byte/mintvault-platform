@@ -259,6 +259,60 @@ describe("Group 3 grader surfaces are enforced onto the shared admin shell (no l
   });
 });
 
+// Group 3.5 (2026-07-19): the canonical Staff/Grader login surface
+// (/staff/login) brought onto the shared design system. This is the ONE
+// operator login — /grader/login redirects into it (Group 3), so unifying it
+// closes the visual gap the Group-3 report left open. It is a FOCUSED
+// unauthenticated page: it must use var(--admin-*) tokens + a raised panel and
+// must NOT mount the authenticated AdminShell / AdminHeaderRow / sidebar. Routes
+// in the children-form (`<Route path="/staff/login"><StaffLoginPage/></Route>`)
+// are not captured by the ROUTE_RE table above, so this block enforces the
+// auth-surface directly rather than via isUnified().
+const GROUP_3_5 = {
+  staffLogin: "client/src/pages/staff-login.tsx",
+} as const;
+
+describe("Group 3.5 — canonical Staff/Grader login is on the shared design system (auth-surface enforced)", () => {
+  it("staff-login is not silently a legacy exception", () => {
+    expect(LEGACY_EXCEPTIONS).not.toHaveProperty(GROUP_3_5.staffLogin);
+  });
+  it("renders on the shared var(--admin-*) tokens with no raw black ground / brand hex / slate theme", () => {
+    const src = read(GROUP_3_5.staffLogin);
+    expect(src).toMatch(/bg-\[var\(--admin-bg\)\]/); // shared ground token
+    expect(src).toMatch(/bg-\[var\(--admin-panel\)\]/); // raised panel token
+    expect(src).toMatch(/text-\[var\(--admin-gold\)\]/); // brand-gold heading token
+    expect(src).not.toMatch(/min-h-screen[^"]*\bbg-black\b(?!\/)/); // no raw black page ground
+    expect(src).not.toMatch(/text-slate-\d|bg-slate-\d|border-slate-\d/); // no slate legacy theme
+    expect(src).not.toMatch(/#D4AF37|#E8E4DC|#0c0c0c/); // brand/panel hex → tokens
+  });
+  it("stays a FOCUSED login: no authenticated AdminShell / AdminHeaderRow / sidebar", () => {
+    const src = read(GROUP_3_5.staffLogin);
+    expect(src).not.toMatch(/<AdminShell\b/);
+    expect(src).not.toMatch(/<AdminHeaderRow\b/);
+    expect(src).not.toMatch(/admin-side\b/); // no sidebar markup
+  });
+  it("preserves the exact auth contract (endpoint / method / payload / redirect) — visual-only pass", () => {
+    const src = read(GROUP_3_5.staffLogin);
+    expect(src).toContain('fetch("/api/staff/login"');
+    expect(src).toContain('method: "POST"');
+    expect(src).toContain('credentials: "include"');
+    expect(src).toContain("JSON.stringify({ email, password })");
+    expect(src).toContain('navigate("/staff", { replace: true })');
+  });
+  it("keeps correct password-field semantics + autocomplete + safe generic errors", () => {
+    const src = read(GROUP_3_5.staffLogin);
+    expect(src).toContain('type="password"');
+    expect(src).toContain('autoComplete="current-password"');
+    expect(src).toContain('autoComplete="username"');
+    // safe, non-technical error copy (no stack/status leakage) + rate-limit branch
+    expect(src).toContain("Invalid email or password.");
+    expect(src).toContain("res.status === 429");
+    expect(src).toContain('role="alert"');
+    // no Super Admin claim on the shared operator login
+    expect(src).not.toMatch(/super\s*admin/i);
+  });
+});
+
 describe("every admin/staff/grader route is either unified or an explicitly-logged exception", () => {
   it.each(routes)("$path → $component ($file)", ({ file }) => {
     if (!file) throw new Error("unresolved route — should have failed the sanity check above");

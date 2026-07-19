@@ -37,14 +37,19 @@ export default function StaffLoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center px-4">
+    // Shared MintVault operator design language (var(--admin-*) tokens) — the
+    // canonical Staff/Grader login. Focused unauthenticated panel: NO AdminShell,
+    // NO AdminHeaderRow, no authenticated sidebar. Same dark/gold system as the
+    // /staff + /grader workspaces so the login visibly belongs to the operator
+    // product. Auth flow (endpoint/payload/redirect/errors) is unchanged.
+    <div className="min-h-screen bg-[var(--admin-bg)] flex items-center justify-center px-4">
       <form
         onSubmit={onSubmit}
-        className="w-full max-w-sm border border-[#D4AF37]/30 rounded-xl p-6 bg-[#0c0c0c] space-y-4"
+        className="w-full max-w-sm border border-[var(--admin-gold)]/30 rounded-xl p-6 bg-[var(--admin-panel)] space-y-4"
       >
         <div className="text-center">
-          <h1 className="text-[#D4AF37] text-xl font-extrabold tracking-wide">Staff Sign In</h1>
-          <p className="text-[#E8E4DC]/60 text-xs mt-1">MintVault staff workspace</p>
+          <h1 className="text-[var(--admin-gold)] text-xl font-extrabold tracking-wide">Staff Sign In</h1>
+          <p className="text-[var(--admin-ink)]/60 text-xs mt-1">MintVault staff workspace</p>
         </div>
         {error && (
           <div className="text-red-400 text-xs bg-red-950/40 border border-red-900 rounded px-3 py-2" role="alert">
@@ -52,31 +57,31 @@ export default function StaffLoginPage() {
           </div>
         )}
         <label className="block">
-          <span className="text-[#E8E4DC] text-xs">Email</span>
+          <span className="text-[var(--admin-ink)] text-xs">Email</span>
           <input
             type="email"
             autoComplete="username"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            className="mt-1 w-full bg-black border border-[#D4AF37]/30 rounded px-3 py-2 text-[#E8E4DC] text-sm focus:border-[#D4AF37] outline-none"
+            className="mt-1 w-full bg-[var(--admin-bg)] border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:border-[var(--admin-gold)] outline-none"
           />
         </label>
         <label className="block">
-          <span className="text-[#E8E4DC] text-xs">Password</span>
+          <span className="text-[var(--admin-ink)] text-xs">Password</span>
           <input
             type="password"
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            className="mt-1 w-full bg-black border border-[#D4AF37]/30 rounded px-3 py-2 text-[#E8E4DC] text-sm focus:border-[#D4AF37] outline-none"
+            className="mt-1 w-full bg-[var(--admin-bg)] border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:border-[var(--admin-gold)] outline-none"
           />
         </label>
         <button
           type="submit"
           disabled={busy}
-          className="w-full bg-[#D4AF37] text-[#1A1400] font-bold py-2.5 rounded hover:bg-[#B8960C] transition-colors disabled:opacity-50"
+          className="w-full bg-[var(--admin-gold)] text-[#1A1400] font-bold py-2.5 rounded hover:bg-[#B8960C] transition-colors disabled:opacity-50 outline-none focus-visible:ring-2 focus-visible:ring-[var(--admin-gold)]/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--admin-bg)]"
         >
           {busy ? "Signing in…" : "Sign In"}
         </button>
