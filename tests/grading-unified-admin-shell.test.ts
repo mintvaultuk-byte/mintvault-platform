@@ -132,7 +132,6 @@ describe("5. the preview zone exists in Card, Rarity AND Review (Grade is a docu
   });
 });
 
-// unified-shell integration note: pinned to the CHERRY-PICKED equivalent of
 // unified-shell scope check — pinned to the pass's IMMUTABLE historical range
 // (UNIFIED_ADMIN_SHELL 0825544a..a7cac275) via the shared helper, NOT a moving
 // `${base}...HEAD` window. The old moving window drifted once origin/main
@@ -154,11 +153,20 @@ describe("6. Stage 3 (protected) component source remains byte-for-byte untouche
   });
   it("no MVGS/centering/defect/grade-cap/rounding/cert-numbering/schema/migration file changed", () => {
     if (changed.length === 0) return;
-    const PROTECTED = /mvgs|scoring|centering|pristine|defect|grader\.ts|grading-prompt|labels\.ts|certificate-document|cert-id|shared\/schema\.ts|^migrations\/|partner/;
+    const PROTECTED =
+      /mvgs|scoring|centering|pristine|defect|grader\.ts|grading-prompt|labels\.ts|certificate-document|cert-id|shared\/schema\.ts|^migrations\/|partner/;
     for (const f of changed) expect(f, f).not.toMatch(PROTECTED);
   });
   it("the workstationSlot render site passes the protected component through UNCHANGED (no wrapper transform/scale)", () => {
-    const wrapper = FORM.slice(FORM.indexOf('data-workflow-stage="grade"'), FORM.indexOf('data-workflow-stage="grade"') + 900);
+    // Window widened from 900: the production-regression correction pass
+    // (2026-07-19) added an outer containment wrapper (max-h + overflow-y-auto,
+    // an explanatory comment, and its onKeyDown handler) around the slot — the
+    // slot itself is still passed through unchanged, just further from the
+    // "data-workflow-stage" anchor. See production-regression-correction-2026-07-19.test.ts.
+    const wrapper = FORM.slice(
+      FORM.indexOf('data-workflow-stage="grade"'),
+      FORM.indexOf('data-workflow-stage="grade"') + 1700
+    );
     expect(wrapper).toContain("{workstationSlot}");
     expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
   });

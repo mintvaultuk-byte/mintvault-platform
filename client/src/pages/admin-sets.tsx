@@ -94,9 +94,9 @@ const FILTER_OPTIONS = [
 ] as const;
 
 const inputCls =
-  "rounded border border-[#D4AF37]/25 bg-black px-3 py-2 text-sm text-[#E8E4DC] outline-none focus:border-[#D4AF37]";
+  "rounded border border-[var(--admin-gold)]/25 bg-black px-3 py-2 text-sm text-[var(--admin-ink)] outline-none focus:border-[var(--admin-gold)]";
 const compactBtn =
-  "inline-flex items-center gap-1 rounded border border-[#D4AF37]/25 bg-black px-2.5 py-1.5 text-xs font-semibold text-[#E8E4DC] hover:border-[#D4AF37]/60 disabled:opacity-50";
+  "inline-flex items-center gap-1 rounded border border-[var(--admin-gold)]/25 bg-black px-2.5 py-1.5 text-xs font-semibold text-[var(--admin-ink)] hover:border-[var(--admin-gold)]/60 disabled:opacity-50";
 
 function sourceLabel(source: SetSource): string {
   if (source === "tcgdex") return "TCGdex";
@@ -335,7 +335,7 @@ export default function AdminSetsPage() {
   if (authed !== true) {
     return (
       <div className="admin-root flex min-h-screen items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#D4AF37] border-t-transparent" />
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[var(--admin-gold)] border-t-transparent" />
       </div>
     );
   }
@@ -351,11 +351,11 @@ export default function AdminSetsPage() {
       crumb="MINTVAULT · RECORDS"
     >
       <div className="space-y-4">
-        <section className="rounded border border-[#D4AF37]/20 bg-black/55 p-4">
+        <section className="rounded border border-[var(--admin-gold)]/20 bg-black/55 p-4">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <h1 className="text-xl font-semibold text-[#E8E4DC]">Set Library</h1>
-              <p className="mt-1 max-w-3xl text-sm text-[#E8E4DC]/60">
+              <h1 className="text-xl font-semibold text-[var(--admin-ink)]">Set Library</h1>
+              <p className="mt-1 max-w-3xl text-sm text-[var(--admin-ink)]/60">
                 Search, review and correct existing TCG set records without creating duplicates.
               </p>
             </div>
@@ -368,7 +368,7 @@ export default function AdminSetsPage() {
                     setTab(key);
                     setPage(1);
                   }}
-                  className={`${compactBtn} ${tab === key ? "border-[#D4AF37] text-[#D4AF37]" : ""}`}
+                  className={`${compactBtn} ${tab === key ? "border-[var(--admin-gold)] text-[var(--admin-gold)]" : ""}`}
                 >
                   {key === "all" ? "All Sets" : key === "needs_attention" ? "Needs Attention" : "Archived"}
                 </button>
@@ -378,7 +378,7 @@ export default function AdminSetsPage() {
 
           <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(220px,1fr)_220px]">
             <label className="relative block">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#D4AF37]" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--admin-gold)]" />
               <input
                 className={`${inputCls} w-full pl-9`}
                 value={q}
@@ -413,13 +413,13 @@ export default function AdminSetsPage() {
                 key={value}
                 className={`inline-flex cursor-pointer items-center gap-2 rounded border px-2.5 py-1.5 text-xs ${
                   filters.has(value)
-                    ? "border-[#D4AF37] bg-[#D4AF37]/10 text-[#D4AF37]"
-                    : "border-[#D4AF37]/20 text-[#E8E4DC]/70"
+                    ? "border-[var(--admin-gold)] bg-[var(--admin-gold)]/10 text-[var(--admin-gold)]"
+                    : "border-[var(--admin-gold)]/20 text-[var(--admin-ink)]/70"
                 }`}
               >
                 <input
                   type="checkbox"
-                  className="accent-[#D4AF37]"
+                  className="accent-[var(--admin-gold)]"
                   checked={filters.has(value)}
                   onChange={() => toggleFilter(value)}
                 />
@@ -441,8 +441,8 @@ export default function AdminSetsPage() {
           </div>
         )}
 
-        <section className="overflow-hidden rounded border border-[#D4AF37]/20 bg-black/55">
-          <div className="flex items-center justify-between border-b border-[#D4AF37]/15 px-4 py-3 text-sm text-[#E8E4DC]/70">
+        <section className="overflow-hidden rounded border border-[var(--admin-gold)]/20 bg-black/55">
+          <div className="flex items-center justify-between border-b border-[var(--admin-gold)]/15 px-4 py-3 text-sm text-[var(--admin-ink)]/70">
             <span>{loading ? "Loading sets..." : `${data?.total ?? 0} matching sets`}</span>
             <span>
               Page {data?.page ?? 1} of {data?.totalPages ?? 1}
@@ -450,7 +450,7 @@ export default function AdminSetsPage() {
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
-              <thead className="bg-[#D4AF37]/10 text-xs uppercase tracking-wide text-[#D4AF37]">
+              <thead className="bg-[var(--admin-gold)]/10 text-xs uppercase tracking-wide text-[var(--admin-gold)]">
                 <tr>
                   <th className="px-3 py-2">Set name</th>
                   <th className="px-3 py-2">Set code</th>
@@ -466,14 +466,14 @@ export default function AdminSetsPage() {
                   <th className="px-3 py-2">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#D4AF37]/10">
+              <tbody className="divide-y divide-[var(--admin-gold)]/10">
                 {rows.map((row) => {
                   const issues = activeIssues(row);
                   return (
-                    <tr key={row.uid} className="align-top text-[#E8E4DC]">
+                    <tr key={row.uid} className="align-top text-[var(--admin-ink)]">
                       <td className="max-w-[280px] px-3 py-3">
                         <div className="font-semibold">{row.setName}</div>
-                        {row.subset && <div className="mt-1 text-xs text-[#D4AF37]">Subset: {row.subset}</div>}
+                        {row.subset && <div className="mt-1 text-xs text-[var(--admin-gold)]">Subset: {row.subset}</div>}
                       </td>
                       <td className="px-3 py-3 font-mono text-xs">{row.setId}</td>
                       <td className="px-3 py-3">{TCG_OPTIONS.find((o) => o.value === row.tcg)?.label || row.tcg}</td>
@@ -485,7 +485,7 @@ export default function AdminSetsPage() {
                       <td className="px-3 py-3">
                         <div className="flex flex-wrap gap-1">
                           {row.archived && (
-                            <span className="inline-flex items-center gap-1 rounded bg-slate-700 px-2 py-0.5 text-xs">
+                            <span className="inline-flex items-center gap-1 rounded bg-[var(--admin-panel2)] px-2 py-0.5 text-xs text-[var(--admin-ink-dim)]">
                               <Archive className="h-3 w-3" /> Archived
                             </span>
                           )}
@@ -507,8 +507,8 @@ export default function AdminSetsPage() {
                         {issues.length > 0 && (
                           <div className="mt-2 space-y-1">
                             {issues.slice(0, 2).map((issue) => (
-                              <div key={issue.key} className="rounded border border-[#D4AF37]/10 p-2">
-                                <div className="mb-1 text-[11px] text-[#E8E4DC]/55">
+                              <div key={issue.key} className="rounded border border-[var(--admin-gold)]/10 p-2">
+                                <div className="mb-1 text-[11px] text-[var(--admin-ink)]/55">
                                   Current: {JSON.stringify(issue.current)} Suggested: {JSON.stringify(issue.suggested)}
                                 </div>
                                 <div className="flex flex-wrap gap-1">
@@ -577,7 +577,7 @@ export default function AdminSetsPage() {
                 })}
                 {!loading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={12} className="px-3 py-10 text-center text-[#E8E4DC]/55">
+                    <td colSpan={12} className="px-3 py-10 text-center text-[var(--admin-ink)]/55">
                       No sets match the current search.
                     </td>
                   </tr>
@@ -585,7 +585,7 @@ export default function AdminSetsPage() {
               </tbody>
             </table>
           </div>
-          <div className="flex items-center justify-between border-t border-[#D4AF37]/15 px-4 py-3">
+          <div className="flex items-center justify-between border-t border-[var(--admin-gold)]/15 px-4 py-3">
             <button
               type="button"
               className={compactBtn}
@@ -614,14 +614,14 @@ export default function AdminSetsPage() {
           aria-labelledby="set-editor-title"
           data-testid="set-editor-modal"
         >
-          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded border border-[#D4AF37]/30 bg-[#090909] shadow-2xl">
-            <div className="border-b border-[#D4AF37]/15 p-5 pb-4">
+          <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded border border-[var(--admin-gold)]/30 bg-[var(--admin-bg)] shadow-2xl">
+            <div className="border-b border-[var(--admin-gold)]/15 p-5 pb-4">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <h2 id="set-editor-title" className="text-lg font-semibold text-[#E8E4DC]">
+                  <h2 id="set-editor-title" className="text-lg font-semibold text-[var(--admin-ink)]">
                     Edit Set
                   </h2>
-                  <p className="mt-1 text-sm text-[#E8E4DC]/55">
+                  <p className="mt-1 text-sm text-[var(--admin-ink)]/55">
                     Updates the existing {sourceLabel(editing.row.source)} record only.
                   </p>
                 </div>
@@ -639,7 +639,7 @@ export default function AdminSetsPage() {
 
             <div className="grid gap-3 overflow-y-auto p-5 sm:grid-cols-2">
               <label className="space-y-1">
-                <span className="text-xs font-semibold uppercase text-[#D4AF37]">Set name</span>
+                <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">Set name</span>
                 <input
                   className={`${inputCls} w-full`}
                   value={editing.draft.setName}
@@ -647,7 +647,7 @@ export default function AdminSetsPage() {
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs font-semibold uppercase text-[#D4AF37]">Set code</span>
+                <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">Set code</span>
                 <input
                   className={`${inputCls} w-full`}
                   value={editing.draft.setId}
@@ -655,7 +655,7 @@ export default function AdminSetsPage() {
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs font-semibold uppercase text-[#D4AF37]">Year</span>
+                <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">Year</span>
                 <input
                   className={`${inputCls} w-full`}
                   inputMode="numeric"
@@ -664,7 +664,7 @@ export default function AdminSetsPage() {
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs font-semibold uppercase text-[#D4AF37]">Series</span>
+                <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">Series</span>
                 <input
                   className={`${inputCls} w-full`}
                   value={editing.draft.series}
@@ -672,7 +672,7 @@ export default function AdminSetsPage() {
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs font-semibold uppercase text-[#D4AF37]">TCG / Brand</span>
+                <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">TCG / Brand</span>
                 <select
                   className={`${inputCls} w-full`}
                   value={editing.draft.tcg}
@@ -688,7 +688,7 @@ export default function AdminSetsPage() {
                 </select>
               </label>
               <label className="space-y-1">
-                <span className="text-xs font-semibold uppercase text-[#D4AF37]">Published card count</span>
+                <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">Published card count</span>
                 <input
                   className={`${inputCls} w-full`}
                   inputMode="numeric"
@@ -697,24 +697,24 @@ export default function AdminSetsPage() {
                 />
               </label>
               <label className="space-y-1 sm:col-span-2">
-                <span className="text-xs font-semibold uppercase text-[#D4AF37]">Subset / review classification</span>
+                <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">Subset / review classification</span>
                 <input
                   className={`${inputCls} w-full`}
                   value={editing.draft.subset}
                   onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, subset: e.target.value } })}
                 />
               </label>
-              <label className="inline-flex items-center gap-2 text-sm text-[#E8E4DC]">
+              <label className="inline-flex items-center gap-2 text-sm text-[var(--admin-ink)]">
                 <input
                   type="checkbox"
-                  className="accent-[#D4AF37]"
+                  className="accent-[var(--admin-gold)]"
                   checked={editing.draft.archived}
                   onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, archived: e.target.checked } })}
                 />
                 Archived
               </label>
               <label className="space-y-1 sm:col-span-2">
-                <span className="text-xs font-semibold uppercase text-[#D4AF37]">Audit reason</span>
+                <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">Audit reason</span>
                 <textarea
                   className={`${inputCls} min-h-[72px] w-full`}
                   value={editing.draft.reason}
@@ -725,7 +725,7 @@ export default function AdminSetsPage() {
             </div>
 
             <div
-              className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 border-t border-[#D4AF37]/20 bg-[#090909] p-4 shadow-[0_-10px_24px_rgba(0,0,0,0.45)]"
+              className="sticky bottom-0 z-10 flex flex-wrap items-center justify-end gap-2 border-t border-[var(--admin-gold)]/20 bg-[var(--admin-bg)] p-4 shadow-[0_-10px_24px_rgba(0,0,0,0.45)]"
               data-testid="set-editor-sticky-footer"
             >
               {editingSuggestion && (

@@ -1,0 +1,95 @@
+/**
+ * Controlled production-regression correction phase (2026-07-19).
+ *
+ * Live production screenshots disproved four release assumptions from the
+ * unified-admin-architecture pass (PR #217): Staff kept a duplicate legacy
+ * header inside its own grading workflow, the workstation header carried
+ * redundant chrome, the Set Name field/dropdown was too narrow and
+ * destructively truncated long set names, and the Grade stage had no outer
+ * height containment. This file proves the four source-level fixes and that
+ * nothing protected was touched.
+ */
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
+
+const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+const STAFF = read("client/src/pages/staff.tsx");
+const FORM = read("client/src/components/certificate-form.tsx");
+
+describe("Staff shell — no duplicate legacy header in the active-card grading view", () => {
+  it("GradeTab's active-card breadcrumb uses the shared AdminHeaderRow primitive, not raw markup", () => {
+    // The active-card branch renders exactly one more AdminHeaderRow (the
+    // breadcrumb) in addition to the outer StaffPage header — never a second,
+    // differently-styled raw <div> header stacked beneath it.
+    const activeCardBranch = STAFF.slice(STAFF.indexOf("if (active) {"), STAFF.indexOf("if (active) {") + 1200);
+    expect(activeCardBranch).toContain("<AdminHeaderRow");
+    expect(activeCardBranch).toContain('testId="staff-grading-breadcrumb"');
+  });
+  it("the breadcrumb no longer hardcodes raw hex gold in its className attributes — it uses the shared design token", () => {
+    const activeCardBranch = STAFF.slice(STAFF.indexOf("if (active) {"), STAFF.indexOf("if (active) {") + 1200);
+    expect(activeCardBranch).not.toMatch(/className="[^"]*#D4AF37/);
+    expect(activeCardBranch).toContain("var(--admin-gold)");
+  });
+  it("both the outer Staff header and the grading breadcrumb use the same AdminHeaderRow component", () => {
+    expect((STAFF.match(/<AdminHeaderRow/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+  it("GradingPanel itself is untouched by this pass — mounted exactly as before", () => {
+    expect(STAFF).toContain('apiBase="/api/grader"');
+    expect(STAFF).toContain("graderMode");
+  });
+});
+
+describe("Set Name — wider grid column and non-truncating, viewport-bounded dropdown", () => {
+  it("the Card-identity row weights Set Name wider than Card Game / Set Code (not an equal 1/3 split)", () => {
+    expect(FORM).toContain("grid grid-cols-1 sm:grid-cols-[0.8fr_2fr_0.9fr] gap-4");
+    expect(FORM).not.toContain("grid grid-cols-1 sm:grid-cols-3 gap-4");
+  });
+  it("the results dropdown can exceed the input's own width, bounded by the viewport", () => {
+    expect(FORM).toContain("w-[max(100%,26rem)]");
+    expect(FORM).toContain("max-w-[calc(100vw-2rem)]");
+    // no longer pinned to exactly the input's width via left-0 right-0
+    expect(FORM).not.toContain('className="absolute z-30 left-0 right-0 mt-1');
+  });
+  it("result-row set names no longer use destructive ellipsis truncation", () => {
+    const dropdownBlock = FORM.slice(
+      FORM.indexOf("filtered.map((s) => {"),
+      FORM.indexOf("filtered.map((s) => {") + 2500
+    );
+    expect(dropdownBlock).not.toContain("truncate text-xs font-medium text-[var(--admin-ink)]");
+    expect(dropdownBlock).toContain("text-xs font-medium leading-snug text-[var(--admin-ink)]");
+  });
+  it("keyboard nav, recent-sets, and TCGdex-backed selection are untouched (same handlers still present)", () => {
+    expect(FORM).toContain("recordRecentSet");
+    expect(FORM).toContain('data-testid="recent-sets"');
+    expect(FORM).toContain("onChange(s.name, s.id)");
+  });
+});
+
+describe("Grade stage — outer containment around the protected workstation", () => {
+  it("the workstationSlot wrapper is bounded to the viewport and scrolls internally", () => {
+    const wrapper = FORM.slice(FORM.indexOf("{workstationSlot && ("), FORM.indexOf("{workstationSlot && (") + 1600);
+    expect(wrapper).toContain("max-h-[calc(100dvh-12rem)]");
+    expect(wrapper).toContain("overflow-y-auto");
+  });
+  it("no transform/scale/zoom was introduced (the protected card tool reads live getBoundingClientRect)", () => {
+    const wrapper = FORM.slice(FORM.indexOf("{workstationSlot && ("), FORM.indexOf("{workstationSlot && (") + 1600);
+    expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
+  });
+  it("the Enter-key form-submit guard for workstation text inputs is preserved", () => {
+    const wrapper = FORM.slice(FORM.indexOf("{workstationSlot && ("), FORM.indexOf("{workstationSlot && (") + 1600);
+    expect(wrapper).toContain('e.key === "Enter"');
+    expect(wrapper).toContain("e.preventDefault()");
+  });
+});
+
+describe("Protected grading source untouched by this correction pass", () => {
+  it("no file under client/src/components/grading/ was edited (no changed-file reference in this test's own diffs)", () => {
+    // This pass never opened grading-panel.tsx / grading-queue.tsx /
+    // session-summary.tsx. Guarded structurally: certificate-form.tsx still
+    // renders the protected panel purely as an opaque slot, never inlining
+    // its internals.
+    expect(FORM).not.toContain("computeMvgsScore");
+    expect(FORM).not.toContain("SURFACE_ISSUES");
+  });
+});

@@ -124,7 +124,6 @@ export function gradingReleaseChangedFiles(): string[] {
 export function unifiedAdminShellChangedFiles(): string[] {
   return releaseChangedFiles(UNIFIED_ADMIN_SHELL.base, UNIFIED_ADMIN_SHELL.final);
 }
-
 /** Diff of ONE file across the grading release range (for content-scope assertions). */
 export function gradingReleaseFileDiff(path: string): string {
   assertRangeValid(GRADING_RELEASE.base, GRADING_RELEASE.final);

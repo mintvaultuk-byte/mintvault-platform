@@ -393,17 +393,27 @@ function GradeTab() {
     const c = active.card;
     return (
       <div>
-        <div className="px-5 py-2 flex items-center gap-3 border-b border-[#D4AF37]/10">
-          <button onClick={() => setActive(null)} className="text-[#D4AF37] text-xs hover:underline">
-            ← Back
-          </button>
-          <span className="text-[#D4AF37] font-mono text-xs">{active.ref}</span>
-          {c.gradingStatus === "pending_review" && (
-            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300">
-              Submitted · editing (stays pending review)
-            </span>
-          )}
-        </div>
+        {/* Same shared AdminHeaderRow primitive as the outer Staff header and
+            Super Admin — this breadcrumb previously used raw ad-hoc markup
+            (hardcoded #D4AF37 hex, no shared row rhythm), which is exactly
+            what made the live grading workflow look like a second, legacy
+            standalone shell stacked beneath the real header. */}
+        <AdminHeaderRow
+          testId="staff-grading-breadcrumb"
+          left={
+            <>
+              <button onClick={() => setActive(null)} className="text-[var(--admin-gold)] text-xs hover:underline">
+                ← Back
+              </button>
+              <span className="text-[var(--admin-gold)] font-mono text-xs">{active.ref}</span>
+              {c.gradingStatus === "pending_review" && (
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                  Submitted · editing (stays pending review)
+                </span>
+              )}
+            </>
+          }
+        />
         {c.rejectionReason && (
           <div className="mx-auto max-w-3xl mt-3 px-4">
             <div className="border border-amber-500/50 bg-amber-950/30 text-amber-300 rounded-lg px-4 py-2 text-sm">
