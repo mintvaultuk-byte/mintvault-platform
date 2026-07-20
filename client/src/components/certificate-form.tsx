@@ -2821,13 +2821,11 @@ export default function CertificateForm({
             event, so visibility toggling cannot alter its coordinate system. */}
             <div data-workflow-stage="grade" className={stageClass(2)}>
               {workstationSlot && (
-                // Outer-shell-only containment: bounds the protected workstation to
-                // the viewport and scrolls internally instead of stretching the
-                // whole page. GradingPanel's own internal layout (and its
-                // getBoundingClientRect-driven card tool) is untouched — this div
-                // only clips/scrolls around it.
+                // Plain in-flow wrapper — exists ONLY for the Enter-key guard below.
+                // It must not size or scroll: a height cap here becomes a second
+                // scrollport that clips the protected workstation. Full rationale +
+                // measurements in tests/grading-grade-stage-layout.test.ts.
                 <div
-                  className="max-h-[calc(100dvh-12rem)] overflow-y-auto"
                   onKeyDown={(e) => {
                     // Workstation now lives inside the <form>. On an already-approved
                     // cert the explicit "Save Changes to Published Certificate" submit

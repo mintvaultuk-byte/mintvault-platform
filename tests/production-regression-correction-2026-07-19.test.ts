@@ -66,11 +66,25 @@ describe("Set Name — wider grid column and non-truncating, viewport-bounded dr
   });
 });
 
-describe("Grade stage — outer containment around the protected workstation", () => {
-  it("the workstationSlot wrapper is bounded to the viewport and scrolls internally", () => {
+describe("Grade stage — containment lives on the outer shell, not the workstation wrapper (superseded 2026-07-20)", () => {
+  // SUPERSEDED 2026-07-20. This block previously asserted the workstationSlot
+  // wrapper carried `max-h-[calc(100dvh-12rem)]` + `overflow-y-auto`. Live
+  // authenticated staging testing proved that cap WAS the defect, not the fix:
+  // it created a second scrollport ~120px shorter than the space available,
+  // clipping the protected GradingPanel mid-content so the Grade form appeared
+  // to overlay half the workspace. Containment was never missing — the shell
+  // root and the <form> already provided it, and both predate dfc5b946.
+  // The assertion is inverted here so the regression can never be reintroduced;
+  // the sibling geometry/Enter-guard assertions below are unchanged and still valid.
+  it("the workstationSlot wrapper does NOT introduce a competing scrollport", () => {
     const wrapper = FORM.slice(FORM.indexOf("{workstationSlot && ("), FORM.indexOf("{workstationSlot && (") + 1600);
-    expect(wrapper).toContain("max-h-[calc(100dvh-12rem)]");
-    expect(wrapper).toContain("overflow-y-auto");
+    const jsx = wrapper.slice(wrapper.indexOf("<div"));
+    expect(jsx).not.toContain("max-h-[calc(100dvh-12rem)]");
+    expect(jsx).not.toMatch(/className="[^"]*overflow-y-auto/);
+  });
+  it("containment still lives on the outer shell (root fixed height + the form as the single scrollport)", () => {
+    expect(FORM).toContain("md:h-[calc(100dvh-4.5rem)]");
+    expect(FORM).toContain("min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1");
   });
   it("no transform/scale/zoom was introduced (the protected card tool reads live getBoundingClientRect)", () => {
     const wrapper = FORM.slice(FORM.indexOf("{workstationSlot && ("), FORM.indexOf("{workstationSlot && (") + 1600);
