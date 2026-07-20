@@ -205,6 +205,23 @@ function useCustomRarities(): [CustomRarityEntry[], (next: CustomRarityEntry[]) 
   return [list, set];
 }
 
+/**
+ * Optional single-select decision for a printed-rarity-symbol click.
+ * Clicking the currently-selected catalogue rarity clears it (returns null —
+ * rules 3+4: zero selection is valid); any other click selects the clicked
+ * value. `hasCustomSelected` short-circuits the toggle so that, when a custom
+ * ("Add missing rarity") entry is active, clicking a normal catalogue chip
+ * switches to it rather than being read as a same-value toggle. Pure + exported
+ * so the single-select contract is unit-testable without a DOM.
+ */
+export function nextCatalogueRarity(
+  current: string | null,
+  clicked: string,
+  hasCustomSelected: boolean
+): string | null {
+  return current === clicked && !hasCustomSelected ? null : clicked;
+}
+
 export function RarityVariantPicker({
   value,
   onChange,
@@ -314,6 +331,14 @@ export function RarityVariantPicker({
   );
 
   const pickRarity = (v: string) => {
+    // Optional single-select: clicking the already-selected catalogue rarity
+    // clears it (rules 3 + 4 — zero selection is valid). A custom selection
+    // (rarity === CUSTOM_RARITY_VALUE, tracked by selectedCustomId) is never a
+    // catalogue `v`, so this only toggles the same catalogue chip off.
+    if (nextCatalogueRarity(rarity, v, !!selectedCustomId) === null) {
+      setRarity(null);
+      return;
+    }
     setRarity(v);
     setRecent(addRecent(recent, v));
     // Switching to a normal catalogue rarity leaves any previous custom note
@@ -326,6 +351,13 @@ export function RarityVariantPicker({
   };
 
   const pickCustomRarity = (entry: CustomRarityEntry) => {
+    // Clicking the already-selected custom rarity clears it (same toggle rule).
+    if (rarity === CUSTOM_RARITY_VALUE && selectedCustomId === entry.id) {
+      setRarity(null);
+      setSelectedCustomId(null);
+      onCustomRarityNote?.(null);
+      return;
+    }
     setRarity(CUSTOM_RARITY_VALUE);
     setSelectedCustomId(entry.id);
     setRecent(addRecent(recent, CUSTOM_RARITY_VALUE));
