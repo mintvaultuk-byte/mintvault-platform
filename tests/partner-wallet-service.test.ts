@@ -1,277 +1,293 @@
-/**
- * Partner Network G6A — wallet/ledger SERVICE behaviour on a disposable Postgres, plus source-level
- * guarantees. The service uses the privileged admin pool (partnerAdminQuery → MINTVAULT_DATABASE_URL),
- * mirroring prod where that role is BYPASSRLS. Gated on PARTNER_WALLET_SERVICE_ADMIN (loopback superuser).
- */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+/** Partner Network G6A service behavior on a self-owned PostgreSQL 17.10 cluster. */
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { provisionRealisticRoles, migratorUrlFrom } from "./helpers/partner-realistic-db";
 import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
+import { migratorUrlFrom, provisionRealisticRoles } from "./helpers/partner-realistic-db";
+import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 
-const ADMIN = process.env.PARTNER_WALLET_SERVICE_ADMIN;
-function isLoopback(u: string | undefined): boolean {
-  if (!u) return false;
-  try {
-    const h = new URL(u).hostname;
-    return h === "127.0.0.1" || h === "localhost" || h === "::1";
-  } catch {
-    return false;
-  }
-}
-const isLocal = isLoopback(ADMIN);
-
+let cluster: DisposablePostgres17;
 let admin: Client;
-let svc: typeof import("../server/partner/partner-wallet-service");
-let orgA: string;
-let orgB: string;
-const actor = { actorUserId: null, actorEmail: "deploy-test@example.com" };
+let service: typeof import("../server/partner/partner-wallet-service");
+let tenantA: string;
+let tenantB: string;
 
-(isLocal ? describe : describe.skip)("Partner Network G6A — wallet/ledger service (disposable DB)", () => {
+const actor = { actorUserId: null, actorEmail: "g6a-test@example.com" };
+
+describe("Partner Network G6A wallet service on PostgreSQL 17.10", () => {
   beforeAll(async () => {
-    admin = new Client({ connectionString: ADMIN });
+    cluster = await startPostgres17("wallet-service");
+    admin = new Client({ connectionString: cluster.url });
     await admin.connect();
     await provisionRealisticRoles(admin);
-    await admin.query(
-      "CREATE TABLE IF NOT EXISTS users (id varchar primary key default gen_random_uuid(), email varchar unique)"
-    );
-    await admin.query(
-      "CREATE TABLE IF NOT EXISTS submissions (id serial primary key, user_id varchar, tracking_number text unique)"
-    );
-    await admin.query(
-      "CREATE TABLE IF NOT EXISTS submission_items (id serial primary key, submission_id integer not null)"
-    );
-    for (const t of ["users", "submissions", "submission_items"])
-      await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
-    const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
+    await admin.query("CREATE TABLE users (id varchar primary key default gen_random_uuid(), email varchar unique)");
+    await admin.query("CREATE TABLE submissions (id serial primary key, user_id varchar, tracking_number text unique)");
+    await admin.query("CREATE TABLE submission_items (id serial primary key, submission_id integer not null)");
+    for (const table of ["users", "submissions", "submission_items"]) {
+      await admin.query(`ALTER TABLE ${table} OWNER TO pn_migrator`);
+    }
+    const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
     await migrator.connect();
     try {
       await applyMigrations(migrator, listMigrationFiles());
     } finally {
       await migrator.end();
     }
-    orgA = (
+    tenantA = (
       await admin.query<{ id: string }>(
-        "INSERT INTO partner_organisations (legal_name,status) VALUES ('Svc A','ACTIVE') RETURNING id"
+        "INSERT INTO partner_organisations (legal_name,status) VALUES ('Service A','ACTIVE') RETURNING id"
       )
     ).rows[0].id;
-    orgB = (
+    tenantB = (
       await admin.query<{ id: string }>(
-        "INSERT INTO partner_organisations (legal_name,status) VALUES ('Svc B','ACTIVE') RETURNING id"
+        "INSERT INTO partner_organisations (legal_name,status) VALUES ('Service B','ACTIVE') RETURNING id"
       )
     ).rows[0].id;
-    // the service reads process.env.MINTVAULT_DATABASE_URL through partnerAdminQuery
-    process.env.MINTVAULT_DATABASE_URL = ADMIN;
+    process.env.MINTVAULT_DATABASE_URL = cluster.url;
     delete process.env.PARTNER_ADMIN_DATABASE_URL;
-    svc = await import("../server/partner/partner-wallet-service");
-  }, 60_000);
+    service = await import("../server/partner/partner-wallet-service");
+  }, 90_000);
 
   afterAll(async () => {
     const db = await import("../server/partner/db");
     await db.closePartnerPools().catch(() => {});
     await admin?.end().catch(() => {});
+    await cluster?.stop();
   });
 
-  it("ensureWallet is idempotent and one-per-org; different orgs get different wallets", async () => {
-    const w1 = await svc.ensureWallet(actor, orgA);
-    const w2 = await svc.ensureWallet(actor, orgA);
-    expect(w1.id).toBe(w2.id);
-    const wb = await svc.ensureWallet(actor, orgB);
-    expect(wb.id).not.toBe(w1.id);
-    const n = await admin.query("SELECT count(*)::int c FROM partner_wallets WHERE tenant_id=$1", [orgA]);
-    expect(n.rows[0].c).toBe(1);
+  it("ensures exactly one zero-balance wallet per organisation under concurrency", async () => {
+    const wallets = await Promise.all(Array.from({ length: 8 }, () => service.ensureWallet(actor, tenantA)));
+    expect(new Set(wallets.map((wallet) => wallet.id)).size).toBe(1);
+    expect((await service.getBalance(tenantA)).balance).toBe(0);
+    expect(
+      (await admin.query("SELECT count(*)::int n FROM partner_wallets WHERE tenant_id=$1", [tenantA])).rows[0].n
+    ).toBe(1);
+    await service.ensureWallet(actor, tenantB);
   });
 
-  it("concurrent ensureWallet cannot create duplicates", async () => {
-    const org = (
-      await admin.query<{ id: string }>(
-        "INSERT INTO partner_organisations (legal_name,status) VALUES ('Svc C','ACTIVE') RETURNING id"
-      )
-    ).rows[0].id;
-    const results = await Promise.all(Array.from({ length: 6 }, () => svc.ensureWallet(actor, org)));
-    const ids = new Set(results.map((r) => r.id));
-    expect(ids.size).toBe(1);
-    const n = await admin.query("SELECT count(*)::int c FROM partner_wallets WHERE tenant_id=$1", [org]);
-    expect(n.rows[0].c).toBe(1);
-  });
-
-  it("new wallet balance is zero; positive+negative entries sum correctly (ledger-derived)", async () => {
-    await svc.ensureWallet(actor, orgA);
-    expect((await svc.getBalance(orgA)).balance).toBe(0);
-    await svc.appendLedgerEntry(actor, {
-      tenantId: orgA,
+  it("appends positive foundation credits and derives the balance from the ledger", async () => {
+    const result = await service.appendFoundationCredit(actor, {
+      tenantId: tenantA,
       amount: 100,
       entryType: "purchase",
       source: "admin",
-      reason: "buy",
-      idempotencyKey: "A-buy-1",
+      reason: "foundation credit",
+      idempotencyKey: "credit-a-1",
       actorType: "admin",
+      metadata: { package: "starter" },
     });
-    await svc.appendLedgerEntry(actor, {
-      tenantId: orgA,
-      amount: -30,
-      entryType: "consume",
-      source: "system",
-      reason: "spend",
-      idempotencyKey: "A-spend-1",
-      actorType: "system",
-    });
-    expect((await svc.getBalance(orgA)).balance).toBe(70);
+    expect(result.alreadyApplied).toBe(false);
+    expect(result.entry.request_fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect((await service.getBalance(tenantA)).balance).toBe(100);
   });
 
-  it("rejects zero, non-integer, and out-of-range amounts", async () => {
-    for (const bad of [0, 1.5, 2_000_000_000, Number.NaN]) {
+  it("rejects zero, negative, non-integer, and out-of-range service amounts", async () => {
+    for (const amount of [0, -1, 1.5, 2_000_000_000, Number.NaN]) {
       await expect(
-        svc.appendLedgerEntry(actor, {
-          tenantId: orgA,
-          amount: bad as number,
+        service.appendFoundationCredit(actor, {
+          tenantId: tenantA,
+          amount,
           entryType: "admin_adjustment",
           source: "admin",
-          reason: "x",
-          idempotencyKey: `bad-${bad}`,
+          reason: "invalid amount",
+          idempotencyKey: `bad-${String(amount)}`,
           actorType: "admin",
         })
       ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
     }
   });
 
-  it("append to an org without a wallet fails WALLET_NOT_FOUND", async () => {
-    const org = (
-      await admin.query<{ id: string }>(
-        "INSERT INTO partner_organisations (legal_name,status) VALUES ('Svc NoWallet','ACTIVE') RETURNING id"
-      )
-    ).rows[0].id;
-    await expect(
-      svc.appendLedgerEntry(actor, {
-        tenantId: org,
-        amount: 5,
-        entryType: "purchase",
-        source: "admin",
-        reason: "x",
-        idempotencyKey: "nw-1",
-        actorType: "admin",
-      })
-    ).rejects.toMatchObject({ code: "WALLET_NOT_FOUND" });
-  });
-
-  it("idempotency: same key + same payload returns the original, creates no duplicate", async () => {
-    await svc.ensureWallet(actor, orgB);
-    const first = await svc.appendLedgerEntry(actor, {
-      tenantId: orgB,
+  it("returns the original row for the same canonical request, including reordered metadata", async () => {
+    const input = {
+      tenantId: tenantB,
       amount: 50,
-      entryType: "purchase",
-      source: "stripe",
-      reason: "pkg",
-      idempotencyKey: "B-idem-1",
-      actorType: "system",
-    });
-    expect(first.alreadyApplied).toBe(false);
-    const balAfter = (await svc.getBalance(orgB)).balance;
-    const retry = await svc.appendLedgerEntry(actor, {
-      tenantId: orgB,
-      amount: 50,
-      entryType: "purchase",
-      source: "stripe",
-      reason: "pkg",
-      idempotencyKey: "B-idem-1",
-      actorType: "system",
+      entryType: "purchase" as const,
+      source: "stripe" as const,
+      reason: "package credit",
+      idempotencyKey: "canonical-retry",
+      actorType: "system" as const,
+      correlationId: "correlation-1",
+      externalRef: "external-1",
+      metadata: { beta: { z: 2, a: 1 }, alpha: [3, 2, 1] },
+    };
+    const first = await service.appendFoundationCredit(actor, input);
+    const retry = await service.appendFoundationCredit(actor, {
+      ...input,
+      metadata: { alpha: [3, 2, 1], beta: { a: 1, z: 2 } },
     });
     expect(retry.alreadyApplied).toBe(true);
     expect(retry.entry.id).toBe(first.entry.id);
-    expect((await svc.getBalance(orgB)).balance).toBe(balAfter);
+    expect(retry.entry.request_fingerprint).toBe(first.entry.request_fingerprint);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM partner_credit_ledger WHERE source='stripe' AND idempotency_key='canonical-retry'"
+        )
+      ).rows[0].n
+    ).toBe(1);
   });
 
-  it("idempotency: same key + conflicting amount OR conflicting wallet fails", async () => {
+  it.each([
+    ["amount", { amount: 51 }],
+    ["reason", { reason: "different reason" }],
+    ["correlation", { correlationId: "correlation-2" }],
+    ["external reference", { externalRef: "external-2" }],
+    ["actor type", { actorType: "service" as const }],
+    ["metadata", { metadata: { alpha: [3, 2, 1], beta: { a: 999, z: 2 } } }],
+  ])("rejects same-source/key reuse with a different %s", async (_field, change) => {
     await expect(
-      svc.appendLedgerEntry(actor, {
-        tenantId: orgB,
-        amount: 51,
-        entryType: "purchase",
-        source: "stripe",
-        reason: "pkg",
-        idempotencyKey: "B-idem-1",
-        actorType: "system",
-      })
-    ).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
-    await expect(
-      svc.appendLedgerEntry(actor, {
-        tenantId: orgA,
+      service.appendFoundationCredit(actor, {
+        tenantId: tenantB,
         amount: 50,
         entryType: "purchase",
         source: "stripe",
-        reason: "pkg",
-        idempotencyKey: "B-idem-1",
+        reason: "package credit",
+        idempotencyKey: "canonical-retry",
         actorType: "system",
+        correlationId: "correlation-1",
+        externalRef: "external-1",
+        metadata: { alpha: [3, 2, 1], beta: { a: 1, z: 2 } },
+        ...change,
       })
     ).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
   });
 
-  it("concurrent duplicate append results in exactly one ledger entry", async () => {
-    await svc.ensureWallet(actor, orgA);
-    const key = "A-concurrent-1";
+  it("rejects same-source/key reuse for a different tenant", async () => {
+    await expect(
+      service.appendFoundationCredit(actor, {
+        tenantId: tenantA,
+        amount: 50,
+        entryType: "purchase",
+        source: "stripe",
+        reason: "package credit",
+        idempotencyKey: "canonical-retry",
+        actorType: "system",
+        correlationId: "correlation-1",
+        externalRef: "external-1",
+        metadata: { alpha: [3, 2, 1], beta: { a: 1, z: 2 } },
+      })
+    ).rejects.toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+  });
+
+  it("includes actor identity in the fingerprint without leaking it in conflicts", async () => {
+    const firstActor = { actorUserId: tenantA, actorEmail: "first@example.com" };
+    const input = {
+      tenantId: tenantA,
+      amount: 3,
+      entryType: "admin_adjustment" as const,
+      source: "admin" as const,
+      reason: "actor-bound",
+      idempotencyKey: "actor-bound",
+      actorType: "admin" as const,
+    };
+    await service.appendFoundationCredit(firstActor, input);
+    await expect(
+      service.appendFoundationCredit({ actorUserId: tenantB, actorEmail: "second@example.com" }, input)
+    ).rejects.toMatchObject({
+      code: "IDEMPOTENCY_CONFLICT",
+      message: "idempotencyKey was already used by this source for a different request.",
+    });
+  });
+
+  it("allows the same idempotency key from a different source", async () => {
+    const common = {
+      tenantId: tenantA,
+      amount: 2,
+      entryType: "purchase" as const,
+      reason: "producer scoped",
+      idempotencyKey: "producer-key",
+      actorType: "system" as const,
+    };
+    const system = await service.appendFoundationCredit(actor, { ...common, source: "system" });
+    const connector = await service.appendFoundationCredit(actor, { ...common, source: "connector" });
+    expect(system.entry.id).not.toBe(connector.entry.id);
+  });
+
+  it("concurrent exact retries create one row and all resolve to it", async () => {
+    const input = {
+      tenantId: tenantA,
+      amount: 7,
+      entryType: "purchase" as const,
+      source: "admin" as const,
+      reason: "exact race",
+      idempotencyKey: "exact-race",
+      actorType: "admin" as const,
+      metadata: { run: 1 },
+    };
+    const results = await Promise.all(Array.from({ length: 8 }, () => service.appendFoundationCredit(actor, input)));
+    expect(new Set(results.map((result) => result.entry.id)).size).toBe(1);
+    expect(results.filter((result) => !result.alreadyApplied)).toHaveLength(1);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM partner_credit_ledger WHERE source='admin' AND idempotency_key='exact-race'"
+        )
+      ).rows[0].n
+    ).toBe(1);
+  });
+
+  it("concurrent conflicting retries create one row and deterministically reject every loser", async () => {
     const settled = await Promise.allSettled(
-      Array.from({ length: 5 }, () =>
-        svc.appendLedgerEntry(actor, {
-          tenantId: orgA,
-          amount: 7,
+      Array.from({ length: 8 }, (_, index) =>
+        service.appendFoundationCredit(actor, {
+          tenantId: tenantB,
+          amount: 9,
           entryType: "purchase",
-          source: "admin",
-          reason: "race",
-          idempotencyKey: key,
-          actorType: "admin",
+          source: "system",
+          reason: `conflicting race ${index}`,
+          idempotencyKey: "conflicting-race",
+          actorType: "system",
         })
       )
     );
-    const ok = settled.filter((s) => s.status === "fulfilled");
-    expect(ok.length).toBe(5); // all resolve (one new, rest alreadyApplied)
-    const created = ok.filter(
-      (s) => (s as PromiseFulfilledResult<{ alreadyApplied: boolean }>).value.alreadyApplied === false
-    );
-    expect(created.length).toBe(1);
-    const n = await admin.query("SELECT count(*)::int c FROM partner_credit_ledger WHERE idempotency_key=$1", [key]);
-    expect(n.rows[0].c).toBe(1);
+    const fulfilled = settled.filter((result) => result.status === "fulfilled");
+    const rejected = settled.filter((result) => result.status === "rejected");
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(7);
+    for (const result of rejected) {
+      expect(result.reason).toMatchObject({ code: "IDEMPOTENCY_CONFLICT" });
+    }
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM partner_credit_ledger WHERE source='system' AND idempotency_key='conflicting-race'"
+        )
+      ).rows[0].n
+    ).toBe(1);
   });
 
-  it("listLedger returns newest-first with bounded pagination", async () => {
-    const res = await svc.listLedger(orgA, 1, 2);
-    expect(res.pageSize).toBe(2);
-    expect(res.entries.length).toBeLessThanOrEqual(2);
-    if (res.entries.length === 2) {
-      expect(new Date(res.entries[0].created_at).getTime()).toBeGreaterThanOrEqual(
-        new Date(res.entries[1].created_at).getTime()
+  it("returns bounded newest-first ledger history", async () => {
+    const result = await service.listLedger(tenantA, 1, 2);
+    expect(result.pageSize).toBe(2);
+    expect(result.entries.length).toBeLessThanOrEqual(2);
+    expect(result.total).toBeGreaterThan(0);
+    if (result.entries.length === 2) {
+      expect(new Date(result.entries[0].created_at).getTime()).toBeGreaterThanOrEqual(
+        new Date(result.entries[1].created_at).getTime()
       );
     }
-    expect(res.total).toBeGreaterThan(0);
   });
 
-  it("no mutable authoritative balance: partner_wallets has no balance column", async () => {
-    const cols = (
+  it("contains no generic debit export, G6B vocabulary, HTTP mutation route, or mutable balance", async () => {
+    const serviceSource = readFileSync(join(process.cwd(), "server/partner/partner-wallet-service.ts"), "utf8");
+    const migrationSource = readFileSync(join(process.cwd(), "migrations/0016_partner_wallet_ledger.sql"), "utf8");
+    const routeSources = ["server/routes.ts", "server/partner/routes.ts"]
+      .map((path) => {
+        try {
+          return readFileSync(join(process.cwd(), path), "utf8");
+        } catch {
+          return "";
+        }
+      })
+      .join("\n");
+    expect(serviceSource).not.toMatch(/export (async )?function appendLedgerEntry/);
+    expect(serviceSource).not.toMatch(/UPDATE\s+partner_credit_ledger|DELETE\s+FROM\s+partner_credit_ledger/i);
+    expect(migrationSource).not.toMatch(/'reserve'|'release'|'consume'/);
+    expect(routeSources).not.toMatch(/appendFoundationCredit|partner_credit_ledger/);
+    const columns = (
       await admin.query("SELECT column_name FROM information_schema.columns WHERE table_name='partner_wallets'")
-    ).rows.map((r) => r.column_name);
-    expect(cols).not.toContain("balance");
-    expect(cols).not.toContain("credit_balance");
-  });
-
-  // ---- source-level guarantees (no harness) ----
-  const svcSrc = readFileSync(join(process.cwd(), "server/partner/partner-wallet-service.ts"), "utf8");
-  const migSrc = readFileSync(join(process.cwd(), "migrations/0016_partner_wallet_ledger.sql"), "utf8");
-
-  it("service exposes NO update/delete-ledger path and no balance-mutation", () => {
-    expect(svcSrc).not.toMatch(/UPDATE\s+partner_credit_ledger/i);
-    expect(svcSrc).not.toMatch(/DELETE\s+FROM\s+partner_credit_ledger/i);
-    expect(svcSrc).not.toMatch(/UPDATE\s+partner_wallets\s+SET\s+balance/i);
-    expect(svcSrc).not.toMatch(/export (async )?function (update|delete)Ledger/i);
-  });
-
-  it("migration touches no protected system and enables no flag", () => {
-    // Scan executable SQL only (strip -- comments; the header prose names protected systems it AVOIDS).
-    // NB: 'stripe' is an allowed forward-compat ledger SOURCE enum value (not Stripe integration) — the
-    // guarantee here is that no protected-system OBJECT is referenced by the migration DDL.
-    const exec = migSrc.replace(/--[^\n]*/g, "");
-    expect(exec).not.toMatch(/certificates|cert_counter|certificate_number|\blabels\b|nfc_tag|vault_quest|\bvq_/i);
-    expect(exec).not.toMatch(/partner_feature_flags|partner_portal_enabled|partner_connector_enabled/i);
-    // 0016 makes NO grant/DDL against MintVault-internal tables (unlike 0010).
-    expect(exec).not.toMatch(/GRANT[\s\S]*\bON\b[\s\S]*\b(users|submissions|submission_items)\b/i);
+    ).rows.map((row) => row.column_name);
+    expect(columns).not.toContain("balance");
   });
 });

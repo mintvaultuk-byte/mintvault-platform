@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS partner_wallets (
   updated_at timestamptz NOT NULL DEFAULT now(),
   suspended_at timestamptz,
   closed_at timestamptz,
+  CONSTRAINT uq_partner_wallets_identity UNIQUE (id, tenant_id),
   CONSTRAINT chk_partner_wallets_status CHECK (status IN ('active','suspended','closed')),
   CONSTRAINT chk_partner_wallets_unit CHECK (credit_unit IN ('grading_credit'))
 );
@@ -45,12 +46,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_partner_wallets_tenant ON partner_wallets(t
 -- ---- 2. partner_credit_ledger (immutable append-only; balance = SUM(amount)) ----------------------
 CREATE TABLE IF NOT EXISTS partner_credit_ledger (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  wallet_id uuid NOT NULL REFERENCES partner_wallets(id) ON DELETE RESTRICT,
-  -- denormalised tenant_id: enforces tenant integrity (FK + RLS) and lets a partner read its own
-  -- ledger under RLS without a join. A CHECK-by-trigger would be overkill; the service always sets it
-  -- to the wallet's tenant_id, and the wallet_id→tenant_id FK pair makes cross-tenant mixing impossible
-  -- in practice (both reference partner_organisations; the service asserts wallet.tenant_id == tenant_id).
-  tenant_id uuid NOT NULL REFERENCES partner_organisations(id) ON DELETE RESTRICT,
+  wallet_id uuid NOT NULL,
+  -- The composite FK makes wallet_id and tenant_id one database-enforced identity. Privileged callers
+  -- cannot associate a wallet with another tenant, even if application validation is bypassed.
+  tenant_id uuid NOT NULL,
   amount bigint NOT NULL,                 -- signed WHOLE credits (+credit / -debit). Never zero. Never float.
   entry_type text NOT NULL,
   idempotency_key text NOT NULL,          -- required for every financial movement (dedupe backbone)
@@ -62,29 +61,55 @@ CREATE TABLE IF NOT EXISTS partner_credit_ledger (
   actor_email text,
   external_ref text,                      -- e.g. Stripe fulfilment reference (G6+)
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  request_fingerprint text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   -- Whole-credit, non-zero, overflow-safe magnitude (single entry bounded well below bigint range;
   -- realistic grading-credit movements are small — this blocks absurd/overflow entries).
+  CONSTRAINT fk_partner_credit_ledger_wallet_identity
+    FOREIGN KEY (wallet_id, tenant_id) REFERENCES partner_wallets(id, tenant_id) ON DELETE RESTRICT,
   CONSTRAINT chk_partner_credit_ledger_amount CHECK (amount <> 0 AND amount BETWEEN -1000000000 AND 1000000000),
   CONSTRAINT chk_partner_credit_ledger_entry_type CHECK (entry_type IN (
-    'opening_balance','purchase','admin_adjustment','reversal','refund','reserve','release','consume','expiry'
+    'opening_balance','purchase','admin_adjustment','refund'
   )),
   CONSTRAINT chk_partner_credit_ledger_source CHECK (source IN ('admin','system','connector','stripe','portal','migration')),
-  CONSTRAINT chk_partner_credit_ledger_actor_type CHECK (actor_type IN ('admin','system','partner_user','service'))
+  CONSTRAINT chk_partner_credit_ledger_actor_type CHECK (actor_type IN ('admin','system','partner_user','service')),
+  CONSTRAINT chk_partner_credit_ledger_fingerprint CHECK (request_fingerprint ~ '^[0-9a-f]{64}$')
 );
 -- History read path + balance SUM: keyed by wallet then time.
 CREATE INDEX IF NOT EXISTS idx_partner_credit_ledger_wallet ON partner_credit_ledger(wallet_id, created_at);
 -- Tenant-scoped read path (portal / partner audit).
 CREATE INDEX IF NOT EXISTS idx_partner_credit_ledger_tenant ON partner_credit_ledger(tenant_id, created_at);
--- DB-ENFORCED IDEMPOTENCY: the idempotency key is GLOBALLY unique across the whole ledger. A duplicate
--- financial event (same key) cannot create a second movement (23505). The service resolves an exact
--- retry (same wallet + amount + entry_type) to the existing row, and REJECTS a conflicting reuse of the
--- key against a different wallet or a different amount — so a replayed key can never post to the wrong
--- wallet or a different value. Global (not per-wallet) scope makes that cross-wallet check enforceable.
+-- DB-enforced producer-scoped idempotency. Independent producers may use the same key, while a producer
+-- cannot create two movements for one key. The immutable request_fingerprint distinguishes exact retries
+-- from any materially different reuse without storing the canonical request payload.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_partner_credit_ledger_idem
-  ON partner_credit_ledger(idempotency_key);
+  ON partner_credit_ledger(source, idempotency_key);
 
--- ---- 3. Immutability: block UPDATE / DELETE / TRUNCATE for EVERY role (owner included) -------------
+-- ---- 3. Immutability: wallet identity + append-only ledger ----------------------------------------
+CREATE OR REPLACE FUNCTION partner_wallet_identity_no_mutate() RETURNS trigger
+  LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+     OR NEW.credit_unit IS DISTINCT FROM OLD.credit_unit
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'partner_wallet identity fields are immutable'
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_partner_wallet_identity_no_mutate'
+                 AND tgrelid = 'partner_wallets'::regclass) THEN
+    EXECUTE 'CREATE TRIGGER trg_partner_wallet_identity_no_mutate'
+         || ' BEFORE UPDATE ON partner_wallets'
+         || ' FOR EACH ROW EXECUTE FUNCTION partner_wallet_identity_no_mutate()';
+  END IF;
+END$$;
+
 CREATE OR REPLACE FUNCTION partner_credit_ledger_no_mutate() RETURNS trigger
   LANGUAGE plpgsql AS $$
 BEGIN
@@ -127,7 +152,7 @@ CREATE OR REPLACE VIEW partner_wallet_balances WITH (security_invoker = true) AS
          COALESCE(SUM(l.amount), 0)::bigint AS balance,
          COUNT(l.id)::bigint AS ledger_entry_count
     FROM partner_wallets w
-    LEFT JOIN partner_credit_ledger l ON l.wallet_id = w.id
+    LEFT JOIN partner_credit_ledger l ON l.wallet_id = w.id AND l.tenant_id = w.tenant_id
    GROUP BY w.id, w.tenant_id, w.status, w.credit_unit;
 
 -- ---- 5. RLS on the tenant-owned tables (0001 idiom) ----------------------------------------------

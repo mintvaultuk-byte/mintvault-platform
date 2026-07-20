@@ -6,16 +6,18 @@
  * statement — the tenant id is NEVER trusted from an untrusted client; callers pass a server-resolved
  * organisation id. Reads are deterministic/bounded/parameterised. The only write is an append to the
  * immutable ledger; there is NO update/delete method and NO balance-mutation path — the authoritative
- * balance is always SUM(amount) over the ledger.
+ * balance is always SUM(amount) over the ledger. G6A's write boundary accepts positive credit events
+ * only; debit, reserve, consume, and release semantics remain deferred.
  *
  * G6A exposes: ensureWallet, getWallet, getBalance, listLedger, and a tightly-controlled internal
- * appendLedgerEntry() for later G6 phases to build on. It does NOT expose a partner-facing mutation
+ * appendFoundationCredit() for trusted server-side foundation callers. It does NOT expose a partner-facing mutation
  * route, an admin adjustment UI, reserve/consume/release semantics, Stripe, or submission linkage.
  */
+import { createHash } from "node:crypto";
 import { partnerAdminQuery } from "./db";
 import {
   WalletRequestError,
-  validateAmount,
+  validateCreditAmount,
   validateEntryType,
   validateSource,
   validateActorType,
@@ -23,6 +25,7 @@ import {
   requireIdempotencyKey,
   requireTenantId,
   optionalText,
+  optionalUuid,
   validateMetadata,
   parseBalance,
   clampPagination,
@@ -73,12 +76,13 @@ export interface LedgerEntry {
   actor_email: string | null;
   external_ref: string | null;
   metadata: Record<string, unknown>;
+  request_fingerprint: string;
   created_at: string;
 }
 
-export interface AppendLedgerInput {
+export interface AppendFoundationCreditInput {
   tenantId: string; // server-resolved organisation id
-  amount: number; // signed whole credits
+  amount: number; // positive whole credits; debits are outside G6A
   entryType: LedgerEntryType;
   source: LedgerSource;
   reason: string;
@@ -91,7 +95,21 @@ export interface AppendLedgerInput {
 
 const WALLET_COLS = "id, tenant_id, status, credit_unit, created_at, updated_at, suspended_at, closed_at";
 const LEDGER_COLS =
-  "id, wallet_id, tenant_id, amount, entry_type, idempotency_key, correlation_id, source, reason, actor_type, actor_user_id, actor_email, external_ref, metadata, created_at";
+  "id, wallet_id, tenant_id, amount, entry_type, idempotency_key, correlation_id, source, reason, actor_type, actor_user_id, actor_email, external_ref, metadata, request_fingerprint, created_at";
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableJson(object[key])}`)
+    .join(",")}}`;
+}
+
+function requestFingerprint(payload: Record<string, unknown>): string {
+  return createHash("sha256").update(stableJson(payload), "utf8").digest("hex");
+}
 
 /** node-pg returns bigint as string; coerce the amount column of a ledger row to an exact JS integer. */
 function normalizeEntry(row: Record<string, unknown>): LedgerEntry {
@@ -181,17 +199,16 @@ export async function listLedger(
 }
 
 /**
- * The single controlled internal append. NOT a public/partner-facing route — later G6 phases call
- * this to record purchases/adjustments/reversals/etc. It validates everything, resolves the wallet
- * from the SERVER-supplied organisation id (never a client wallet id), enforces global idempotency,
- * and returns the existing row on a safe exact retry. Immutability is DB-enforced (no update/delete).
+ * The single G6A write boundary. It is imported only by trusted server code and has no HTTP route.
+ * It records positive foundation credits; all debit/spend/reservation behavior remains out of scope.
+ * Producer-scoped idempotency compares an immutable fingerprint over every material request field.
  */
-export async function appendLedgerEntry(
+export async function appendFoundationCredit(
   actor: WalletActor,
-  input: AppendLedgerInput
+  input: AppendFoundationCreditInput
 ): Promise<{ entry: LedgerEntry; alreadyApplied: boolean }> {
   const tenantId = requireTenantId(input.tenantId);
-  const amount = validateAmount(input.amount);
+  const amount = validateCreditAmount(input.amount);
   const entryType = validateEntryType(input.entryType);
   const source = validateSource(input.source);
   const actorType = validateActorType(input.actorType);
@@ -200,6 +217,8 @@ export async function appendLedgerEntry(
   const correlationId = optionalText(input.correlationId, "correlationId");
   const externalRef = optionalText(input.externalRef, "externalRef");
   const metadata = validateMetadata(input.metadata);
+  const actorUserId = optionalUuid(actor.actorUserId, "actorUserId");
+  const actorEmail = optionalText(actor.actorEmail, "actorEmail", 320);
 
   // Resolve the wallet from the trusted tenant id; it must exist and be active.
   const wallet = await getWallet(tenantId);
@@ -210,12 +229,27 @@ export async function appendLedgerEntry(
     );
   }
 
+  const fingerprint = requestFingerprint({
+    wallet_id: wallet.id,
+    tenant_id: wallet.tenant_id,
+    amount,
+    entry_type: entryType,
+    source,
+    correlation_id: correlationId,
+    external_ref: externalRef,
+    actor_type: actorType,
+    actor_user_id: actorUserId,
+    actor_email: actorEmail,
+    reason,
+    metadata,
+  });
+
   try {
     const r = await partnerAdminQuery<Record<string, unknown>>(
       `INSERT INTO partner_credit_ledger
          (wallet_id, tenant_id, amount, entry_type, idempotency_key, correlation_id, source, reason,
-          actor_type, actor_user_id, actor_email, external_ref, metadata)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+          actor_type, actor_user_id, actor_email, external_ref, metadata, request_fingerprint)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb,$14)
        RETURNING ${LEDGER_COLS}`,
       [
         wallet.id,
@@ -227,30 +261,30 @@ export async function appendLedgerEntry(
         source,
         reason,
         actorType,
-        actor.actorUserId,
-        actor.actorEmail,
+        actorUserId,
+        actorEmail,
         externalRef,
         JSON.stringify(metadata),
+        fingerprint,
       ]
     );
     return { entry: normalizeEntry(r.rows[0]), alreadyApplied: false };
   } catch (err) {
     const pg = err as { code?: string };
     if (pg?.code === "23505") {
-      // Global idempotency-key collision. Resolve safely: exact retry (same wallet + amount + type)
-      // returns the original; any conflicting reuse (different wallet or amount) is a hard error.
+      // Resolve a producer-scoped race. Only an identical canonical request returns the original.
       const existing = await partnerAdminQuery<Record<string, unknown>>(
-        `SELECT ${LEDGER_COLS} FROM partner_credit_ledger WHERE idempotency_key = $1`,
-        [idempotencyKey]
+        `SELECT ${LEDGER_COLS} FROM partner_credit_ledger WHERE source = $1 AND idempotency_key = $2`,
+        [source, idempotencyKey]
       );
       if (existing.rowCount && existing.rows[0]) {
         const e = normalizeEntry(existing.rows[0]);
-        if (e.wallet_id === wallet.id && e.amount === amount && e.entry_type === entryType) {
+        if (e.request_fingerprint === fingerprint) {
           return { entry: e, alreadyApplied: true };
         }
         throw new WalletRequestError(
           "IDEMPOTENCY_CONFLICT",
-          "idempotencyKey was already used for a different wallet or amount."
+          "idempotencyKey was already used by this source for a different request."
         );
       }
     }

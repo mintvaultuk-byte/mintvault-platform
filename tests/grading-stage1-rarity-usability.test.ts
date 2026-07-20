@@ -20,10 +20,10 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
-import { execSync } from "child_process";
 import { join } from "path";
 import { POKEMON_RARITIES, rarityByValue, describeSymbol, type SymbolColour } from "../shared/pokemon-rarity-catalogue";
 import { formatCollectorNumber, displayCollectorNumber } from "../shared/collector-number-format";
+import { unifiedAdminShellChangedFiles } from "./helpers/grading-release-scope";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
@@ -100,7 +100,13 @@ describe("1b. selection/hover/focus states never reduce rarity readability", () 
     expect(PICKER).toContain("{rr.codes[0] || rr.label}");
   });
   it("the selected description panel is never truncated (no `truncate` on the info line)", () => {
-    const infoBlock = PICKER.slice(PICKER.indexOf('data-testid="rarity-selected-info"', PICKER.indexOf("selectedRarity.value === CUSTOM_RARITY_VALUE")), PICKER.indexOf("</span>\n              </div>\n            )\n          )}"));
+    const infoBlock = PICKER.slice(
+      PICKER.indexOf(
+        'data-testid="rarity-selected-info"',
+        PICKER.indexOf("selectedRarity.value === CUSTOM_RARITY_VALUE")
+      ),
+      PICKER.indexOf("</span>\n              </div>\n            )\n          )}")
+    );
     expect(infoBlock).not.toContain("truncate");
   });
   it("chips render in the dense grid instead of overflowing the picker horizontally", () => {
@@ -193,10 +199,14 @@ describe("3. controlled 'Add missing rarity' workflow — no schema change, no f
     }
   });
   it("symbol colour/type options match the required set (black/silver/gold/text-only/no symbol)", () => {
-    expect(PICKER).toMatch(/CUSTOM_SYMBOL_TYPES[\s\S]{0,400}"black"[\s\S]{0,200}"silver"[\s\S]{0,200}"gold"[\s\S]{0,200}"text_only"[\s\S]{0,200}"no_symbol"/);
+    expect(PICKER).toMatch(
+      /CUSTOM_SYMBOL_TYPES[\s\S]{0,400}"black"[\s\S]{0,200}"silver"[\s\S]{0,200}"gold"[\s\S]{0,200}"text_only"[\s\S]{0,200}"no_symbol"/
+    );
   });
   it("regional/system category options match the required set", () => {
-    expect(PICKER).toMatch(/CUSTOM_CATEGORIES[\s\S]{0,400}"international"[\s\S]{0,200}"japanese"[\s\S]{0,200}"promo"[\s\S]{0,200}"legacy"[\s\S]{0,200}"custom_other"/);
+    expect(PICKER).toMatch(
+      /CUSTOM_CATEGORIES[\s\S]{0,400}"international"[\s\S]{0,200}"japanese"[\s\S]{0,200}"promo"[\s\S]{0,200}"legacy"[\s\S]{0,200}"custom_other"/
+    );
   });
   it("validates the display name (rejects empty/near-empty) before adding", () => {
     expect(PICKER).toContain("displayName.length < 2");
@@ -207,12 +217,18 @@ describe("3. controlled 'Add missing rarity' workflow — no schema change, no f
     expect(PICKER).toContain("normCustom(displayName)");
     expect(PICKER).toContain("customRarities.find((c) => c.dedupeKey === dedupeKey)");
     // A duplicate re-selects the existing entry rather than creating a new one.
-    const dedupeBlock = PICKER.slice(PICKER.indexOf("const existing = customRarities.find"), PICKER.indexOf("const base = {"));
+    const dedupeBlock = PICKER.slice(
+      PICKER.indexOf("const existing = customRarities.find"),
+      PICKER.indexOf("const base = {")
+    );
     expect(dedupeBlock).toContain("if (existing)");
     expect(dedupeBlock).toContain("pickCustomRarity(existing)");
   });
   it("a new custom entry becomes selectable immediately (pushed to state + picked)", () => {
-    const submitFn = PICKER.slice(PICKER.indexOf("function submitAddRarity"), PICKER.indexOf("function submitAddRarity") + 1800);
+    const submitFn = PICKER.slice(
+      PICKER.indexOf("function submitAddRarity"),
+      PICKER.indexOf("function submitAddRarity") + 1800
+    );
     expect(submitFn).toContain("setCustomRarities([...customRarities, entry])");
     expect(submitFn).toContain("pickCustomRarity(entry)");
   });
@@ -243,7 +259,10 @@ describe("4. Stage 1 manual card-detail fields are visible by default", () => {
     // WorkstationPreviewAside component.
     expect(FORM).toContain("<WorkstationPreviewAside");
     expect(FORM).toContain('data-testid="grading-control-panel"');
-    const asideSrc = readFileSync(join(process.cwd(), "client/src/components/grading-workflow/WorkstationPreviewAside.tsx"), "utf8");
+    const asideSrc = readFileSync(
+      join(process.cwd(), "client/src/components/grading-workflow/WorkstationPreviewAside.tsx"),
+      "utf8"
+    );
     expect(asideSrc).toContain('data-testid="grading-preview-panel"');
     expect(asideSrc).toContain("md:w-[40%] md:shrink-0");
   });
@@ -309,17 +328,7 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     "shared/pokemon-rarity-catalogue.ts",
     "shared/collector-number-format.ts",
   ]);
-  const base = ["origin/main", "main"].find((r) => {
-    try {
-      execSync(`git rev-parse --verify ${r}`, { stdio: "pipe" });
-      return true;
-    } catch {
-      return false;
-    }
-  });
-  const changed = base
-    ? execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean)
-    : [];
+  const changed = unifiedAdminShellChangedFiles();
 
   // admin-mvgs-calibration.tsx matches the PROTECTED `mvgs` alternative by
   // FILENAME only. The 2026-07-19 Group-1 pass changed that page's SHELL
@@ -336,7 +345,6 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
   // permission, or GradingPanel-prop change. Exempt this ONE display-only page.
   const DISPLAY_ONLY_GRADER_PAGE = "client/src/pages/grader.tsx";
   it("no protected grading/schema/migration file changed by this pass", () => {
-    if (!base) return;
     for (const f of changed) {
       if (f === DISPLAY_ONLY_MVGS_PAGE || f === DISPLAY_ONLY_GRADER_PAGE) continue;
       expect(f, f).not.toMatch(PROTECTED);
@@ -358,18 +366,18 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     expect(FORM).toContain("<RarityVariantPicker");
   });
   it("does not touch payments, Vault Quest, or migrations", () => {
-    if (!base) return;
     for (const f of changed) {
       expect(f).not.toMatch(/stripe|payment|vault-quest|vault_quest|^migrations\//i);
     }
   });
   it("every client/shared (non-test) file this pass could plausibly touch is on the allow-list", () => {
-    if (!base) return;
     // The exhaustive allow-list for the WHOLE branch diff (incl. prior-pass
     // files) is enforced by the sibling grading-*.test.ts guards; this check
     // is scoped to files under the Stage 1/2 usability surface specifically.
     const stage12Surface = changed.filter(
-      (f) => !f.startsWith("tests/") && (f.includes("rarity-picker") || f.includes("collector-number-format") || f.includes("pokemon-rarity-catalogue")),
+      (f) =>
+        !f.startsWith("tests/") &&
+        (f.includes("rarity-picker") || f.includes("collector-number-format") || f.includes("pokemon-rarity-catalogue"))
     );
     for (const f of stage12Surface) {
       expect(ALLOWED.has(f), f).toBe(true);

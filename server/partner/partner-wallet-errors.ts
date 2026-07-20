@@ -5,7 +5,7 @@
  * a stable code union, a request-shaping error class, an error→shape mapper that never leaks SQL/stack,
  * and the integer-safe amount / metadata / field validators the wallet service reuses.
  *
- * Financial-safety invariants encoded here: credits are WHOLE integers, never zero, magnitude-bounded
+ * Financial-safety invariants encoded here: G6A service credits are positive WHOLE integers, magnitude-bounded
  * (overflow-safe and far inside JS Number.isSafeInteger); metadata is a bounded plain object; every
  * movement carries a required reason + idempotency key.
  */
@@ -70,17 +70,7 @@ export function walletStatusFor(code: WalletErrorCode): number {
 }
 
 // ---- Domain vocabularies (kept in lock-step with migration 0016 CHECK constraints) ---------------
-export const LEDGER_ENTRY_TYPES = [
-  "opening_balance",
-  "purchase",
-  "admin_adjustment",
-  "reversal",
-  "refund",
-  "reserve",
-  "release",
-  "consume",
-  "expiry",
-] as const;
+export const LEDGER_ENTRY_TYPES = ["opening_balance", "purchase", "admin_adjustment", "refund"] as const;
 export type LedgerEntryType = (typeof LEDGER_ENTRY_TYPES)[number];
 
 export const LEDGER_SOURCES = ["admin", "system", "connector", "stripe", "portal", "migration"] as const;
@@ -98,14 +88,14 @@ export const MAX_ENTRY_MAGNITUDE = 1_000_000_000;
 const MAX_METADATA_BYTES = 4096;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** A signed WHOLE credit amount: integer, non-zero, magnitude-bounded. Rejects floats/NaN/strings. */
-export function validateAmount(raw: unknown): number {
+/** A positive G6A credit amount. Signed/debit operations are deliberately deferred to later phases. */
+export function validateCreditAmount(raw: unknown): number {
   if (typeof raw !== "number" || !Number.isInteger(raw)) {
     throw new WalletRequestError("VALIDATION_ERROR", "amount must be a whole integer number of credits.");
   }
-  if (raw === 0) throw new WalletRequestError("VALIDATION_ERROR", "amount must be non-zero.");
-  if (raw < -MAX_ENTRY_MAGNITUDE || raw > MAX_ENTRY_MAGNITUDE) {
-    throw new WalletRequestError("VALIDATION_ERROR", `amount magnitude must be <= ${MAX_ENTRY_MAGNITUDE}.`);
+  if (raw <= 0) throw new WalletRequestError("VALIDATION_ERROR", "amount must be a positive credit.");
+  if (raw > MAX_ENTRY_MAGNITUDE) {
+    throw new WalletRequestError("VALIDATION_ERROR", `amount must be <= ${MAX_ENTRY_MAGNITUDE}.`);
   }
   return raw;
 }
@@ -145,6 +135,12 @@ export function requireTenantId(raw: unknown): string {
   throw new WalletRequestError("VALIDATION_ERROR", "tenantId must be a valid organisation id.");
 }
 
+export function optionalUuid(raw: unknown, field: string): string | null {
+  if (raw === undefined || raw === null || raw === "") return null;
+  if (typeof raw === "string" && UUID_RE.test(raw)) return raw.toLowerCase();
+  throw new WalletRequestError("VALIDATION_ERROR", `${field} must be a valid UUID.`);
+}
+
 export function optionalText(raw: unknown, field: string, max = 500): string | null {
   if (raw === undefined || raw === null || raw === "") return null;
   if (typeof raw !== "string") throw new WalletRequestError("VALIDATION_ERROR", `${field} must be text.`);
@@ -159,11 +155,17 @@ export function validateMetadata(raw: unknown): Record<string, unknown> {
   if (typeof raw !== "object" || Array.isArray(raw)) {
     throw new WalletRequestError("VALIDATION_ERROR", "metadata must be a plain object.");
   }
-  const bytes = Buffer.byteLength(JSON.stringify(raw), "utf8");
+  let json: string;
+  try {
+    json = JSON.stringify(raw);
+  } catch {
+    throw new WalletRequestError("VALIDATION_ERROR", "metadata must be valid JSON.");
+  }
+  const bytes = Buffer.byteLength(json, "utf8");
   if (bytes > MAX_METADATA_BYTES) {
     throw new WalletRequestError("VALIDATION_ERROR", `metadata is too large (max ${MAX_METADATA_BYTES} bytes).`);
   }
-  return raw as Record<string, unknown>;
+  return JSON.parse(json) as Record<string, unknown>;
 }
 
 /** Parse a bigint SUM (node-pg returns bigint columns as strings) into an exact JS integer. */

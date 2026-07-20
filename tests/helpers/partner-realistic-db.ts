@@ -60,20 +60,14 @@ export const PARTNER_MIGRATIONS_WITH_G4 = [
 ] as const;
 
 /** G5 — internal Super-Admin partner-management tables (0015). */
-export const PARTNER_MIGRATIONS_WITH_G5 = [
-  ...PARTNER_MIGRATIONS_WITH_G4,
-  "0015_partner_management",
-] as const;
+export const PARTNER_MIGRATIONS_WITH_G5 = [...PARTNER_MIGRATIONS_WITH_G4, "0015_partner_management"] as const;
 
 /**
  * G6A — partner wallet + immutable append-only credit ledger (0016). Like the G3+ lists this includes
  * 0010, so callers must pre-create users/submissions/submission_items before applying (0010 grants on
  * them). See tests/partner-wallet-migration.test.ts's seedMintVaultTables().
  */
-export const PARTNER_MIGRATIONS_WITH_G6A = [
-  ...PARTNER_MIGRATIONS_WITH_G5,
-  "0016_partner_wallet_ledger",
-] as const;
+export const PARTNER_MIGRATIONS_WITH_G6A = [...PARTNER_MIGRATIONS_WITH_G5, "0016_partner_wallet_ledger"] as const;
 
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
@@ -84,22 +78,30 @@ function migrationSql(name: string): string {
 
 /** Provision the realistic roles using an already-connected SUPERUSER admin client. Idempotent. */
 export async function provisionRealisticRoles(admin: pg.Client): Promise<void> {
-  await admin.query(
-    `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='${MIGRATOR_ROLE}') THEN
-       CREATE ROLE ${MIGRATOR_ROLE} LOGIN PASSWORD '${MIGRATOR_PASSWORD}' NOSUPERUSER CREATEROLE NOBYPASSRLS;
-     END IF; END$$;`
-  );
-  // Elevated one-time provisioning of the BYPASSRLS definer role (the documented requirement).
-  await admin.query(
-    `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='partner_definer') THEN
-       CREATE ROLE partner_definer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
-     END IF; END$$;`
-  );
-  await admin.query("GRANT partner_definer TO " + MIGRATOR_ROLE);
-  // pn_migrator owns the schema (as a managed-PG project owner would) so it can grant schema USAGE.
-  await admin.query("ALTER SCHEMA public OWNER TO " + MIGRATOR_ROLE);
-  const { rows } = await admin.query<{ db: string }>("SELECT current_database() AS db");
-  await admin.query(`GRANT CREATE ON DATABASE "${rows[0].db}" TO ${MIGRATOR_ROLE}`);
+  const roleProvisionLock = 4_150_206;
+  await admin.query("SELECT pg_advisory_lock($1)", [roleProvisionLock]);
+  try {
+    await admin.query(
+      `DO $$ BEGIN
+         CREATE ROLE ${MIGRATOR_ROLE} LOGIN PASSWORD '${MIGRATOR_PASSWORD}' NOSUPERUSER CREATEROLE NOBYPASSRLS;
+       EXCEPTION WHEN duplicate_object THEN NULL;
+       END$$;`
+    );
+    // Elevated one-time provisioning of the BYPASSRLS definer role (the documented requirement).
+    await admin.query(
+      `DO $$ BEGIN
+         CREATE ROLE partner_definer NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+       EXCEPTION WHEN duplicate_object THEN NULL;
+       END$$;`
+    );
+    await admin.query("GRANT partner_definer TO " + MIGRATOR_ROLE);
+    // pn_migrator owns the schema (as a managed-PG project owner would) so it can grant schema USAGE.
+    await admin.query("ALTER SCHEMA public OWNER TO " + MIGRATOR_ROLE);
+    const { rows } = await admin.query<{ db: string }>("SELECT current_database() AS db");
+    await admin.query(`GRANT CREATE ON DATABASE "${rows[0].db}" TO ${MIGRATOR_ROLE}`);
+  } finally {
+    await admin.query("SELECT pg_advisory_unlock($1)", [roleProvisionLock]).catch(() => {});
+  }
 }
 
 /** Build a pn_migrator connection URL from a superuser admin URL (same host/port/db). */

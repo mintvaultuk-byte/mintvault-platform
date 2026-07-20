@@ -15,10 +15,10 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
-import { execSync } from "child_process";
 import { join } from "path";
 import { classifyLookupError } from "../client/src/lib/lookup-errors";
 import { COLLECTOR_NUMBER_RE, parseCollectorNumber } from "../server/services/collector-number";
+import { unifiedAdminShellChangedFiles } from "./helpers/grading-release-scope";
 
 const FORM = readFileSync(join(process.cwd(), "client/src/components/certificate-form.tsx"), "utf8");
 
@@ -222,17 +222,7 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
     // no auth-flow/endpoint/permission change (not PROTECTED by the regex).
     "client/src/pages/staff-login.tsx",
   ]);
-  const base = ["origin/main", "main"].find((r) => {
-    try {
-      execSync(`git rev-parse --verify ${r}`, { stdio: "pipe" });
-      return true;
-    } catch {
-      return false;
-    }
-  });
-  const changed = base
-    ? execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean)
-    : [];
+  const changed = unifiedAdminShellChangedFiles();
 
   // admin-mvgs-calibration.tsx matches the PROTECTED `mvgs` alternative by
   // FILENAME only. The 2026-07-19 Group-1 pass changed that page's SHELL
@@ -251,14 +241,12 @@ describe("protected Stage-3 / grading / schema / migration untouched", () => {
   // permission, or GradingPanel-prop change. Exempt this ONE display-only page.
   const DISPLAY_ONLY_GRADER_PAGE = "client/src/pages/grader.tsx";
   it("no protected grading/schema/migration file changed", () => {
-    if (!base) return;
     for (const f of changed) {
       if (f === DISPLAY_ONLY_MVGS_PAGE || f === DISPLAY_ONLY_GRADER_PAGE) continue;
       expect(f, f).not.toMatch(PROTECTED);
     }
   });
   it("every non-test change is a known non-protected file (no server/routes.ts, storage, etc.)", () => {
-    if (!base) return;
     for (const f of changed.filter((f) => !f.startsWith("tests/"))) {
       expect(ALLOWED.has(f), `unexpected file: ${f}`).toBe(true);
     }

@@ -16,8 +16,8 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
-import { execSync } from "child_process";
 import { join } from "path";
+import { unifiedAdminShellChangedFiles } from "./helpers/grading-release-scope";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const PREVIEW = read("client/src/components/grading-workflow/CardPreviewPanel.tsx");
@@ -218,17 +218,7 @@ describe("10. protected Stage-3 / grading files remain untouched", () => {
     // no protected surface, no auth-flow/endpoint/permission change.
     "client/src/pages/staff-login.tsx",
   ]);
-  const base = ["origin/main", "main"].find((r) => {
-    try {
-      execSync(`git rev-parse --verify ${r}`, { stdio: "pipe" });
-      return true;
-    } catch {
-      return false;
-    }
-  });
-  const changed = base
-    ? execSync(`git diff --name-only ${base}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean)
-    : [];
+  const changed = unifiedAdminShellChangedFiles();
 
   // admin-mvgs-calibration.tsx matches the PROTECTED `mvgs` alternative by
   // FILENAME only. The 2026-07-19 Group-1 pass changed that page's SHELL
@@ -245,14 +235,12 @@ describe("10. protected Stage-3 / grading files remain untouched", () => {
   // permission, or GradingPanel-prop change. Exempt this ONE display-only page.
   const DISPLAY_ONLY_GRADER_PAGE = "client/src/pages/grader.tsx";
   it("this fix changed NO protected grading/schema/server/migration file", () => {
-    if (!base) return;
     for (const f of changed) {
       if (f === DISPLAY_ONLY_MVGS_PAGE || f === DISPLAY_ONLY_GRADER_PAGE) continue;
       expect(f, f).not.toMatch(PROTECTED);
     }
   });
   it("client edits stay within the allowed layout/preview files", () => {
-    if (!base) return;
     for (const f of changed.filter((f) => f.startsWith("client/"))) {
       expect(ALLOWED_CLIENT.has(f), `unexpected client file: ${f}`).toBe(true);
     }
