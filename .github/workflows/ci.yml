@@ -15,7 +15,12 @@ jobs:
       MINTVAULT_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_vq_phase10_local
     services:
       postgres:
-        image: postgres:16
+        # pgvector-enabled Postgres 16 (official pgvector image, same server as
+        # postgres:16 + the `vector` extension available). shared/schema.ts
+        # declares a `vector(1536)` embedding column (RAG pipeline), so the plain
+        # postgres:16 image failed `drizzle-kit push` at DB setup with
+        # `type "vector" does not exist`. The extension is still CREATEd below.
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_DB: mintvault_vq_phase10_local
           POSTGRES_USER: postgres
@@ -62,6 +67,10 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y postgresql-client
           fi
+          # pgvector must exist before drizzle-kit push, which creates the
+          # shared/schema.ts `vector(1536)` embedding column. Idempotent; the
+          # pgvector/pgvector image ships the extension files.
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
           npx drizzle-kit push --force
           for migration in migrations-vq/*.sql; do
             echo "[ci-db] applying ${migration}"
