@@ -191,6 +191,9 @@ async function applyAllRealistic(): Promise<void> {
       const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
       await migrator.connect();
       try {
+        // A later migration (0015) is now part of the chain; its rollback must be run first, since the
+        // G4 rollback correctly refuses while a later dependent migration is applied.
+        await migrator.query(rb("rollback-partner-management.sql"));
         await migrator.query(rb("rollback-partner-connector-admin-actions.sql"));
         const exists = await admin.query("SELECT to_regclass($1) AS t", [TABLE]);
         expect(exists.rows[0].t).toBeNull();

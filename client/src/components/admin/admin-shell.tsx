@@ -88,6 +88,7 @@ const NAV: NavSection[] = [
       { href: "/admin/staff", label: "Staff", icon: Users },
       { href: "/admin/security", label: "Security", icon: ShieldCheck },
       { href: "/admin/partner-network", label: "Partner Connectors", icon: PackageCheck },
+      { href: "/admin/partner-network/partners", label: "Partners", icon: Users },
     ],
   },
   {

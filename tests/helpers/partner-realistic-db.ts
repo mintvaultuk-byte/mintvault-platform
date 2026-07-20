@@ -59,6 +59,12 @@ export const PARTNER_MIGRATIONS_WITH_G4 = [
   "0014_partner_connector_admin_actions",
 ] as const;
 
+/** G5 — internal Super-Admin partner-management tables (0015). */
+export const PARTNER_MIGRATIONS_WITH_G5 = [
+  ...PARTNER_MIGRATIONS_WITH_G4,
+  "0015_partner_management",
+] as const;
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 
