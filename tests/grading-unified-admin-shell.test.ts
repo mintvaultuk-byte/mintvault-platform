@@ -132,14 +132,18 @@ describe("5. the preview zone exists in Card, Rarity AND Review (Grade is a docu
   });
 });
 
-// This pass's scope check is pinned to the unified-shell pass's IMMUTABLE
-// commit range (0825544a..a7cac275), resolved by the shared helper — never
-// `<base>...HEAD`. The old local helper used `0825544a...HEAD`; because
-// 0825544a is an ancestor of main, that degenerates to `0825544a..HEAD` and
-// every commit merged to main afterwards (all the Partner Network work) leaked
-// in and tripped the `partner`/`^migrations/` matcher. See
-// tests/helpers/grading-release-scope.ts (UNIFIED_ADMIN_SHELL) for the full why.
-const changedSinceScopeBase = unifiedAdminShellChangedFiles;
+// unified-shell scope check — pinned to the pass's IMMUTABLE historical range
+// (UNIFIED_ADMIN_SHELL 0825544a..a7cac275) via the shared helper, NOT a moving
+// `${base}...HEAD` window. The old moving window drifted once origin/main
+// advanced past the base (Partner Network G2–G4: server/partner/*, migrations
+// 0009–0014, partner pages, and .claude task docs), pulling all that unrelated
+// later work into the diff and false-tripping the protected-path matcher. The
+// fixed range contains ONLY this pass's own files, so the guard again measures
+// exactly "did THIS pass touch protected files?" — and still fails closed if it
+// ever did (the PROTECTED regex is unchanged and still applied to that set).
+function changedSinceScopeBase(): string[] {
+  return unifiedAdminShellChangedFiles();
+}
 
 describe("6. Stage 3 (protected) component source remains byte-for-byte untouched", () => {
   const changed = changedSinceScopeBase();
