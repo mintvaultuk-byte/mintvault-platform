@@ -44,9 +44,20 @@ export class G5RequestError extends Error {
 /** Map any thrown value to a safe G5 error shape. Never leaks SQL/stack; unknown → INTERNAL_ERROR. */
 export function toG5Error(err: unknown): G5ErrorShape {
   if (err instanceof G5RequestError) return { code: err.code, message: err.message };
-  // Postgres unique-violation surfaced past the service guards → conflict, not a 500.
-  if ((err as { code?: string })?.code === "23505") {
+  const pg = err as { code?: string; constraint?: string };
+  // Postgres unique-violation surfaced past the service guards → a friendly 409 by constraint.
+  if (pg?.code === "23505") {
+    if (pg.constraint === "uq_partner_contacts_primary") {
+      return {
+        code: "DUPLICATE_PRIMARY_CONTACT",
+        message: "An active primary contact already exists for this partner.",
+      };
+    }
     return { code: "IDEMPOTENCY_CONFLICT", message: "A conflicting record already exists." };
+  }
+  // Postgres check-violation (e.g. an out-of-allow-list enum value that slipped past validation) → 400.
+  if (pg?.code === "23514") {
+    return { code: "VALIDATION_ERROR", message: "A field value is not permitted." };
   }
   return { code: "INTERNAL_ERROR", message: "An internal error occurred." };
 }
@@ -100,6 +111,14 @@ function toPosInt(v: unknown, fallback: number): number {
 export function requireReason(raw: unknown): string {
   const reason = typeof raw === "string" ? raw.trim() : "";
   if (reason.length === 0) throw new G5RequestError("REASON_REQUIRED", "A reason is required for this action.");
+  if (reason.length > 2000) throw new G5RequestError("BAD_REQUEST", "Reason is too long.");
+  return reason;
+}
+
+/** An optional reason: a non-blank trimmed value bounded to 2000 chars, else the supplied default. */
+export function optionalReason(raw: unknown, fallback: string): string {
+  const reason = typeof raw === "string" ? raw.trim() : "";
+  if (reason.length === 0) return fallback;
   if (reason.length > 2000) throw new G5RequestError("BAD_REQUEST", "Reason is too long.");
   return reason;
 }

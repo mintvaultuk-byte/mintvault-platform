@@ -19,11 +19,13 @@ import {
   g5StatusFor,
   clampPagination,
   requireReason,
+  optionalReason,
   requireVersion,
   requireNonEmpty,
   optionalText,
   requireContactType,
   optionalOrganisationKind,
+  optionalBrandingStatus,
   isPartnerStatus,
   G5RequestError,
 } from "./partner-management-errors";
@@ -146,8 +148,7 @@ export function partnerManagementRouter(): Router {
     try {
       const actor = actorOf(req);
       const legalName = requireNonEmpty(req.body?.legalName, "legalName");
-      const reason =
-        typeof req.body?.reason === "string" && req.body.reason.trim() ? req.body.reason.trim() : "partner created";
+      const reason = optionalReason(req.body?.reason, "partner created");
       mutationResponse(res, actor.requestId, await svc.createPartner(actor, { legalName }, reason));
     } catch (err) {
       sendError(res, err);
@@ -158,8 +159,7 @@ export function partnerManagementRouter(): Router {
     try {
       const actor = actorOf(req);
       const version = requireVersion(req.body?.expectedVersion);
-      const reason =
-        typeof req.body?.reason === "string" && req.body.reason.trim() ? req.body.reason.trim() : "profile updated";
+      const reason = optionalReason(req.body?.reason, "profile updated");
       // validate any provided constrained fields
       if ("organisation_kind" in (req.body ?? {})) optionalOrganisationKind(req.body.organisation_kind);
       const fields = extractProfileFields(req.body ?? {});
@@ -193,8 +193,7 @@ export function partnerManagementRouter(): Router {
   r.post("/partners/:partnerId/contacts", async (req, res) => {
     try {
       const actor = actorOf(req);
-      const reason =
-        typeof req.body?.reason === "string" && req.body.reason.trim() ? req.body.reason.trim() : "contact added";
+      const reason = optionalReason(req.body?.reason, "contact added");
       const input = {
         fullName: requireNonEmpty(req.body?.fullName, "fullName"),
         contactType: requireContactType(req.body?.contactType),
@@ -213,8 +212,7 @@ export function partnerManagementRouter(): Router {
     try {
       const actor = actorOf(req);
       const version = requireVersion(req.body?.expectedVersion);
-      const reason =
-        typeof req.body?.reason === "string" && req.body.reason.trim() ? req.body.reason.trim() : "contact updated";
+      const reason = optionalReason(req.body?.reason, "contact updated");
       const b = req.body ?? {};
       const fields: Record<string, unknown> = {};
       if ("fullName" in b) fields.fullName = requireNonEmpty(b.fullName, "fullName");
@@ -236,8 +234,7 @@ export function partnerManagementRouter(): Router {
   r.post("/partners/:partnerId/contacts/:contactId/deactivate", async (req, res) => {
     try {
       const actor = actorOf(req);
-      const reason =
-        typeof req.body?.reason === "string" && req.body.reason.trim() ? req.body.reason.trim() : "contact deactivated";
+      const reason = optionalReason(req.body?.reason, "contact deactivated");
       mutationResponse(
         res,
         actor.requestId,
@@ -251,8 +248,9 @@ export function partnerManagementRouter(): Router {
   r.put("/partners/:partnerId/branding", async (req, res) => {
     try {
       const actor = actorOf(req);
-      const reason =
-        typeof req.body?.reason === "string" && req.body.reason.trim() ? req.body.reason.trim() : "branding updated";
+      const reason = optionalReason(req.body?.reason, "branding updated");
+      // validate the constrained field up front → a friendly 400 rather than a DB CHECK 500
+      if ("branding_status" in (req.body ?? {})) optionalBrandingStatus(req.body.branding_status);
       const expectedVersion = req.body?.expectedVersion === undefined ? null : requireVersion(req.body.expectedVersion);
       mutationResponse(
         res,

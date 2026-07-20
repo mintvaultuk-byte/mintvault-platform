@@ -306,6 +306,28 @@ const PM = "/api/super-admin/partner-management";
     expect(s.unavailable).toEqual(expect.arrayContaining(["certificatesCount", "gradedCount"]));
   });
 
+  it("create is idempotent for a repeated key: no duplicate org, second call alreadyCompleted", async () => {
+    const c = await cookie();
+    const key = "create-key-1";
+    const r1 = await post(`${PM}/partners`, { legalName: "Idem Cards Ltd", idempotencyKey: key }, c);
+    expect(r1.status).toBe(200);
+    const r2 = await post(`${PM}/partners`, { legalName: "Idem Cards Ltd", idempotencyKey: key }, c);
+    expect(r2.status).toBe(200);
+    expect((await r2.json()).alreadyCompleted).toBe(true);
+    // exactly ONE org was created for this name (the org insert is now behind the idempotency pre-check)
+    const n = await admin.query<{ n: number }>(
+      "SELECT count(*)::int n FROM partner_organisations WHERE legal_name='Idem Cards Ltd'"
+    );
+    expect(n.rows[0].n).toBe(1);
+  });
+
+  it("invalid branding_status is a friendly 400 VALIDATION_ERROR, not a 500", async () => {
+    const c = await cookie();
+    const r = await put(`${PM}/partners/${A}/branding`, { branding_status: "not_a_status" }, c);
+    expect(r.status).toBe(400);
+    expect((await r.json()).error.code).toBe("VALIDATION_ERROR");
+  });
+
   it("not-found + redaction: unknown partner 404; no secret in any read payload", async () => {
     const c = await cookie();
     expect((await g(`${PM}/partners/00000000-0000-0000-0000-0000000000ff`, c)).status).toBe(404);

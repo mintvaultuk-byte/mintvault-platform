@@ -492,9 +492,18 @@ export default function PartnerManagementDetailPage() {
               />
               <Field label="Last connector activity" v={statistics.data?.lastConnectorActivityAt} />
               <div data-testid="pm-stat-unavailable" style={{ marginTop: 8 }}>
-                <Chip active={false} onClick={() => {}}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    fontSize: 12,
+                    opacity: 0.75,
+                    padding: "4px 8px",
+                    border: "1px dashed rgba(255,255,255,.2)",
+                    borderRadius: 8,
+                  }}
+                >
                   Certificates / graded: {UNAVAILABLE_LABEL}
-                </Chip>
+                </span>
               </div>
               <div style={{ marginTop: 8 }}>
                 <AdminButton

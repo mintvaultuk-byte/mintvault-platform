@@ -163,7 +163,12 @@ async function withAudit<T>(
     await recordTerminal(actor, tenantId, action, d.entityType, d.entityId, d.afterState, reason, "succeeded");
     return { result: d.result, alreadyCompleted: false };
   } catch (err) {
-    if ((err as { code?: string })?.code === "23505" && actor.idempotencyKey) {
+    // Only the AUDIT idempotency-key collision means "another same-key request already recorded
+    // success" → an idempotent replay. A domain unique-violation (e.g. uq_partner_contacts_primary)
+    // must NOT be swallowed as alreadyCompleted — it falls through to toG5Error which maps it to the
+    // friendly DUPLICATE_PRIMARY_CONTACT and records a terminal 'failed' row.
+    const pg = err as { code?: string; constraint?: string };
+    if (pg?.code === "23505" && pg.constraint === "uq_partner_management_audit_idem" && actor.idempotencyKey) {
       return { result: null, alreadyCompleted: true };
     }
     const { toG5Error } = await import("./partner-management-errors");
@@ -184,6 +189,11 @@ export async function createPartner(
   input: { legalName: string; profile?: Record<string, unknown> },
   reason: string
 ) {
+  // Idempotency for create: the org INSERT below has no natural unique key, so a same-key retry would
+  // otherwise create a duplicate org before withAudit's own priorSuccess check. Short-circuit here,
+  // BEFORE any write, when a prior succeeded action already used this key (create's key namespace is
+  // pre-tenant, so this pre-check is global — matching the ledger's global idempotency namespace).
+  if (await priorSuccess(actor.idempotencyKey)) return { result: null, alreadyCompleted: true };
   // create the org (super-admin only) then its 1:1 profile
   const org = await partnerAdminQuery<{ id: string }>(
     `INSERT INTO partner_organisations (legal_name, status) VALUES ($1,'PENDING') RETURNING id`,
@@ -270,18 +280,22 @@ export async function changeStatus(
   }
   await loadOrInitProfileVersion(org.id);
   return withAudit(actor, org.id, "status_changed", reason, { from: org.status }, async () => {
-    // bump the aggregate version under optimistic lock, then set the status (business-label only — no
-    // flags, portal, wallet, slots, users, devices, or sessions are touched).
-    const v = await partnerAdminQuery(
-      `UPDATE partner_profiles SET version = version + 1, updated_at = now() WHERE tenant_id = $1 AND version = $2`,
-      [org.id, expectedVersion]
+    // Bump the aggregate version under optimistic lock AND set the status in ONE data-modifying-CTE
+    // statement, so the two writes are atomic (no "version bumped but status unchanged" window) without
+    // a transaction helper. If the version no longer matches, the CTE yields no rows and the org UPDATE
+    // affects 0 rows → VERSION_CONFLICT. Business-label only — no flags, portal, wallet, slots, users,
+    // devices, or sessions are touched.
+    const r = await partnerAdminQuery(
+      `WITH bumped AS (
+         UPDATE partner_profiles SET version = version + 1, updated_at = now()
+           WHERE tenant_id = $1 AND version = $2 RETURNING tenant_id
+       )
+       UPDATE partner_organisations o SET status = $3, updated_at = now()
+         FROM bumped WHERE o.id = bumped.tenant_id`,
+      [org.id, expectedVersion, toStatus]
     );
-    if (v.rowCount === 0)
+    if (r.rowCount === 0)
       throw new G5RequestError("VERSION_CONFLICT", "The partner was modified by someone else; reload and retry.");
-    await partnerAdminQuery(`UPDATE partner_organisations SET status = $2, updated_at = now() WHERE id = $1`, [
-      org.id,
-      toStatus,
-    ]);
     return {
       result: { status: toStatus as PartnerStatus },
       entityType: "partner",
@@ -543,7 +557,8 @@ export async function listContacts(partnerId: string) {
   const org = await loadPartner(partnerId);
   const { rows } = await partnerAdminQuery(
     `SELECT id, full_name, title, email, phone, contact_type, is_primary, active, version, created_at, updated_at
-       FROM partner_contacts WHERE tenant_id = $1 ORDER BY is_primary DESC, active DESC, full_name ASC, id ASC`,
+       FROM partner_contacts WHERE tenant_id = $1 ORDER BY is_primary DESC, active DESC, full_name ASC, id ASC
+      LIMIT 500`,
     [org.id]
   );
   return { contacts: rows };
