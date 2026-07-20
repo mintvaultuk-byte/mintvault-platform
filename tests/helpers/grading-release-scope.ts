@@ -45,6 +45,25 @@ export const GRADING_RELEASE = {
 } as const;
 
 /**
+ * Immutable metadata for the unified-AdminShell grading pass (the AdminHeaderRow /
+ * WorkstationHeaderStrip / WorkstationPreviewAside primitives + the retire-
+ * duplicate-tab refactor + its own base-drift-fix commit). Pinning BOTH endpoints
+ * to fixed SHAs makes the "did THIS pass touch protected files?" scope an immutable
+ * historical fact — the same de-drift pattern GRADING_RELEASE already uses. The
+ * two guards (grading-retire-duplicate-tab, grading-unified-admin-shell) previously
+ * used a LOCAL moving-window `${base}...HEAD`; once origin/main advanced past the
+ * base (Partner Network G2–G4: server/partner/*, migrations 0009–0014, partner
+ * pages, .claude task docs), that window drifted to include all that unrelated
+ * later work and false-tripped the protected-path matcher. `0825544a..a7cac275`
+ * contains ONLY this pass's own files and NO partner/migration/.claude file.
+ */
+export const UNIFIED_ADMIN_SHELL = {
+  id: "unified-admin-shell + retire-duplicate-tab pass",
+  base: "0825544a", // main immediately BEFORE the unified-shell pass
+  final: "a7cac275", // final commit of the pass (post-integration base-drift fix)
+} as const;
+
+/**
  * Canonical protected-path matcher — the UNION of the individual grading guards' protections, so it
  * is at least as strict as any single guard. Genuinely grading-owned + broad safety nets (server,
  * migrations) are all retained: within the FIXED grading footprint they are correct (the grading
@@ -94,6 +113,16 @@ export function releaseChangedFiles(base: string, final: string, cwd?: string): 
 /** Files changed by the grading release, from the FIXED historical range (never HEAD). */
 export function gradingReleaseChangedFiles(): string[] {
   return releaseChangedFiles(GRADING_RELEASE.base, GRADING_RELEASE.final);
+}
+
+/**
+ * Files changed by the unified-AdminShell pass, from its FIXED historical range
+ * (0825544a..a7cac275) — never `...HEAD`. Replaces the fragile per-file
+ * moving-window base that drifted to include unrelated later Partner Network /
+ * migration / documentation commits once origin/main advanced past the base.
+ */
+export function unifiedAdminShellChangedFiles(): string[] {
+  return releaseChangedFiles(UNIFIED_ADMIN_SHELL.base, UNIFIED_ADMIN_SHELL.final);
 }
 
 /** Diff of ONE file across the grading release range (for content-scope assertions). */
