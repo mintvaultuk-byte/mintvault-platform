@@ -33,6 +33,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { execSync } from "child_process";
 import { join } from "path";
+import { unifiedAdminShellChangedFiles } from "./helpers/grading-release-scope";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
@@ -132,21 +133,17 @@ describe("5. the preview zone exists in Card, Rarity AND Review (Grade is a docu
 });
 
 // unified-shell integration note: pinned to the CHERRY-PICKED equivalent of
-// the commit this pass originally started from ("aa8c0cea" pre-integration
-// is "0825544a" once replayed onto origin/main — same content, same position
-// in this branch's linear history). The old hash now sits on a lineage
-// disjoint from origin/main, so a diff against it would walk back to the
-// real (much earlier) common ancestor and falsely include Partner Network
-// and this branch's own earlier commits (e.g. the rarity-picker hotfix) as
-// "changed by this pass" — a base-drift artifact, not a real violation.
-const SCOPE_BASE = "0825544a";
+// unified-shell scope check — pinned to the pass's IMMUTABLE historical range
+// (UNIFIED_ADMIN_SHELL 0825544a..a7cac275) via the shared helper, NOT a moving
+// `${base}...HEAD` window. The old moving window drifted once origin/main
+// advanced past the base (Partner Network G2–G4: server/partner/*, migrations
+// 0009–0014, partner pages, and .claude task docs), pulling all that unrelated
+// later work into the diff and false-tripping the protected-path matcher. The
+// fixed range contains ONLY this pass's own files, so the guard again measures
+// exactly "did THIS pass touch protected files?" — and still fails closed if it
+// ever did (the PROTECTED regex is unchanged and still applied to that set).
 function changedSinceScopeBase(): string[] {
-  try {
-    execSync(`git rev-parse --verify ${SCOPE_BASE}`, { stdio: "pipe" });
-    return execSync(`git diff --name-only ${SCOPE_BASE}...HEAD`, { encoding: "utf8" }).trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
+  return unifiedAdminShellChangedFiles();
 }
 
 describe("6. Stage 3 (protected) component source remains byte-for-byte untouched", () => {
