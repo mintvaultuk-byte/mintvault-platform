@@ -65,6 +65,16 @@ export const PARTNER_MIGRATIONS_WITH_G5 = [
   "0015_partner_management",
 ] as const;
 
+/**
+ * G6A — partner wallet + immutable append-only credit ledger (0016). Like the G3+ lists this includes
+ * 0010, so callers must pre-create users/submissions/submission_items before applying (0010 grants on
+ * them). See tests/partner-wallet-migration.test.ts's seedMintVaultTables().
+ */
+export const PARTNER_MIGRATIONS_WITH_G6A = [
+  ...PARTNER_MIGRATIONS_WITH_G5,
+  "0016_partner_wallet_ledger",
+] as const;
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 
