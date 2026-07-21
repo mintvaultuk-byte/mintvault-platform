@@ -168,11 +168,102 @@ CREATE OR REPLACE FUNCTION partner_destination_credit_hold_guard() RETURNS trigg
   SECURITY DEFINER
   SET search_path = pg_catalog, public, pg_temp
 AS $$
+DECLARE
+  v_old jsonb := CASE WHEN TG_OP = 'UPDATE' THEN to_jsonb(OLD) ELSE '{}'::jsonb END;
+  v_new jsonb := to_jsonb(NEW);
 BEGIN
-  IF NEW.status IS DISTINCT FROM OLD.status
-     AND EXISTS (
+  IF EXISTS (
        SELECT 1 FROM public.partner_submission_credit_holds h
         WHERE h.destination_submission_id = NEW.id AND h.released_at IS NULL
+     )
+     AND (
+       v_new->>'status' IS DISTINCT FROM v_old->>'status'
+       OR v_new->>'grading_status' IS DISTINCT FROM v_old->>'grading_status'
+       OR v_new->>'assigned_grader_id' IS DISTINCT FROM v_old->>'assigned_grader_id'
+       OR v_new->>'scan_status' IS DISTINCT FROM v_old->>'scan_status'
+       OR v_new->>'scan_assigned_to' IS DISTINCT FROM v_old->>'scan_assigned_to'
+       OR v_new->>'shipped_at' IS DISTINCT FROM v_old->>'shipped_at'
+       OR v_new->>'delivered_at' IS DISTINCT FROM v_old->>'delivered_at'
+       OR v_new->>'completed_at' IS DISTINCT FROM v_old->>'completed_at'
+       OR v_new->>'return_tracking' IS DISTINCT FROM v_old->>'return_tracking'
+       OR v_new->>'return_carrier' IS DISTINCT FROM v_old->>'return_carrier'
+       OR v_new->>'return_service' IS DISTINCT FROM v_old->>'return_service'
+     ) THEN
+    RAISE EXCEPTION 'Partner destination is blocked pending authorised credit recovery'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION partner_certificate_destination_submission_id(
+  p_card_id integer,
+  p_submission_item_id integer
+) RETURNS integer
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_destination_id integer;
+BEGIN
+  IF p_card_id IS NOT NULL AND to_regclass('public.cards') IS NOT NULL THEN
+    SELECT c.submission_id INTO v_destination_id
+      FROM public.cards c
+     WHERE c.id = p_card_id
+     LIMIT 1;
+  END IF;
+  IF v_destination_id IS NULL AND p_submission_item_id IS NOT NULL AND to_regclass('public.submission_items') IS NOT NULL THEN
+    SELECT si.submission_id INTO v_destination_id
+      FROM public.submission_items si
+     WHERE si.id = p_submission_item_id
+     LIMIT 1;
+  END IF;
+  RETURN v_destination_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION partner_certificate_credit_hold_guard() RETURNS trigger
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_destination_id integer;
+BEGIN
+  v_destination_id := public.partner_certificate_destination_submission_id(NEW.card_id, NEW.submission_item_id);
+  IF v_destination_id IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM public.partner_submission_credit_holds h
+        WHERE h.destination_submission_id = v_destination_id AND h.released_at IS NULL
+     ) THEN
+    RAISE EXCEPTION 'Partner destination is blocked pending authorised credit recovery'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION partner_label_print_credit_hold_guard() RETURNS trigger
+  LANGUAGE plpgsql
+  SECURITY DEFINER
+  SET search_path = pg_catalog, public, pg_temp
+AS $$
+DECLARE
+  v_destination_id integer;
+BEGIN
+  IF to_regclass('public.certificates') IS NULL THEN
+    RETURN NEW;
+  END IF;
+  SELECT public.partner_certificate_destination_submission_id(c.card_id, c.submission_item_id)
+    INTO v_destination_id
+    FROM public.certificates c
+   WHERE c.certificate_number = NEW.cert_id
+   LIMIT 1;
+  IF v_destination_id IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM public.partner_submission_credit_holds h
+        WHERE h.destination_submission_id = v_destination_id AND h.released_at IS NULL
      ) THEN
     RAISE EXCEPTION 'Partner destination is blocked pending authorised credit recovery'
       USING ERRCODE = 'check_violation';
@@ -183,14 +274,23 @@ $$;
 
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_trigger
-     WHERE tgname = 'trg_partner_destination_credit_hold_guard'
-       AND tgrelid = 'public.submissions'::regclass
-  ) THEN
-    EXECUTE 'CREATE TRIGGER trg_partner_destination_credit_hold_guard'
-         || ' BEFORE UPDATE OF status ON public.submissions'
-         || ' FOR EACH ROW EXECUTE FUNCTION public.partner_destination_credit_hold_guard()';
+  EXECUTE 'DROP TRIGGER IF EXISTS trg_partner_destination_credit_hold_guard ON public.submissions';
+  EXECUTE 'CREATE TRIGGER trg_partner_destination_credit_hold_guard'
+       || ' BEFORE UPDATE ON public.submissions'
+       || ' FOR EACH ROW EXECUTE FUNCTION public.partner_destination_credit_hold_guard()';
+
+  IF to_regclass('public.certificates') IS NOT NULL THEN
+    EXECUTE 'DROP TRIGGER IF EXISTS trg_partner_certificate_credit_hold_guard ON public.certificates';
+    EXECUTE 'CREATE TRIGGER trg_partner_certificate_credit_hold_guard'
+         || ' BEFORE INSERT OR UPDATE ON public.certificates'
+         || ' FOR EACH ROW EXECUTE FUNCTION public.partner_certificate_credit_hold_guard()';
+  END IF;
+
+  IF to_regclass('public.label_prints') IS NOT NULL THEN
+    EXECUTE 'DROP TRIGGER IF EXISTS trg_partner_label_print_credit_hold_guard ON public.label_prints';
+    EXECUTE 'CREATE TRIGGER trg_partner_label_print_credit_hold_guard'
+         || ' BEFORE INSERT OR UPDATE ON public.label_prints'
+         || ' FOR EACH ROW EXECUTE FUNCTION public.partner_label_print_credit_hold_guard()';
   END IF;
 END$$;
 
@@ -249,6 +349,21 @@ GRANT SELECT ON partner_connector_imports,
                 partner_submissions,
                 submissions
   TO partner_credit_lifecycle_definer;
+DO $$
+BEGIN
+  IF to_regclass('public.cards') IS NOT NULL THEN
+    GRANT SELECT ON public.cards TO partner_credit_lifecycle_definer;
+  END IF;
+  IF to_regclass('public.submission_items') IS NOT NULL THEN
+    GRANT SELECT ON public.submission_items TO partner_credit_lifecycle_definer;
+  END IF;
+  IF to_regclass('public.certificates') IS NOT NULL THEN
+    GRANT SELECT ON public.certificates TO partner_credit_lifecycle_definer;
+  END IF;
+  IF to_regclass('public.label_prints') IS NOT NULL THEN
+    GRANT SELECT ON public.label_prints TO partner_credit_lifecycle_definer;
+  END IF;
+END$$;
 GRANT SELECT, UPDATE (status, released_at, expired_at, updated_at)
   ON partner_credit_reservations TO partner_credit_lifecycle_definer;
 GRANT SELECT ON partner_credit_reservation_events TO partner_credit_lifecycle_definer;
@@ -508,13 +623,28 @@ ALTER FUNCTION partner_connector_release_submission_credit(uuid, uuid, uuid, tex
   OWNER TO partner_credit_lifecycle_definer;
 ALTER FUNCTION partner_destination_credit_hold_guard()
   OWNER TO partner_credit_lifecycle_definer;
+ALTER FUNCTION partner_certificate_destination_submission_id(integer, integer)
+  OWNER TO partner_credit_lifecycle_definer;
+ALTER FUNCTION partner_certificate_credit_hold_guard()
+  OWNER TO partner_credit_lifecycle_definer;
+ALTER FUNCTION partner_label_print_credit_hold_guard()
+  OWNER TO partner_credit_lifecycle_definer;
 REVOKE CREATE ON SCHEMA public FROM partner_credit_lifecycle_definer;
 ALTER FUNCTION partner_connector_release_submission_credit(uuid, uuid, uuid, text)
   SET search_path = pg_catalog, public, pg_temp;
 ALTER FUNCTION partner_destination_credit_hold_guard()
   SET search_path = pg_catalog, public, pg_temp;
+ALTER FUNCTION partner_certificate_destination_submission_id(integer, integer)
+  SET search_path = pg_catalog, public, pg_temp;
+ALTER FUNCTION partner_certificate_credit_hold_guard()
+  SET search_path = pg_catalog, public, pg_temp;
+ALTER FUNCTION partner_label_print_credit_hold_guard()
+  SET search_path = pg_catalog, public, pg_temp;
 REVOKE ALL ON FUNCTION partner_connector_release_submission_credit(uuid, uuid, uuid, text) FROM PUBLIC;
 REVOKE ALL ON FUNCTION partner_destination_credit_hold_guard() FROM PUBLIC;
+REVOKE ALL ON FUNCTION partner_certificate_destination_submission_id(integer, integer) FROM PUBLIC;
+REVOKE ALL ON FUNCTION partner_certificate_credit_hold_guard() FROM PUBLIC;
+REVOKE ALL ON FUNCTION partner_label_print_credit_hold_guard() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION partner_connector_release_submission_credit(uuid, uuid, uuid, text)
   TO partner_connector_runtime;
 

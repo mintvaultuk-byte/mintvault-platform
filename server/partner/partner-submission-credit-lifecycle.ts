@@ -7,7 +7,11 @@
  * for authorised reconciliation/recovery.
  */
 import type pg from "pg";
-import { assertPartnerAccountingDatabaseTopology, withPartnerAdminTransaction } from "./db";
+import {
+  assertPartnerAccountingDatabaseTopology,
+  withPartnerAccountingAuditTransaction,
+  withPartnerAdminTransaction,
+} from "./db";
 import { assertPartnerCreditDefinerModel } from "./definer-guard";
 import {
   CreditReservationError,
@@ -662,7 +666,16 @@ async function failClosedAccountingException(
   code: string,
   details: Record<string, unknown>
 ): Promise<never> {
-  await withPartnerAdminTransaction((client) => auditAccountingException(client, destination, status, code, details));
+  try {
+    await withPartnerAccountingAuditTransaction((client) =>
+      auditAccountingException(client, destination, status, code, details)
+    );
+  } catch (error) {
+    if (error instanceof PartnerSubmissionCreditLifecycleError && error.code === "credit_schema_incomplete") {
+      throw error;
+    }
+    // Evidence persistence is best-effort under operational failure; it must never permit grading.
+  }
   throw new PartnerSubmissionCreditLifecycleError(
     "Partner credit settlement requires reconciliation before the destination status can change.",
     "credit_settlement_required"
@@ -794,9 +807,11 @@ export async function settlePartnerCreditForDestinationStatus(
     }
 
     if ((await partnerCreditSchemaState(client)) === "legacy_missing_credit_schema") {
-      // A truly pre-G6A deployment has no credit contract/evidence table. It retains the established
-      // legacy behaviour; any mixed or post-G6A deployment is handled explicitly below.
-      return updateDestinationStatus(client, destinationSubmissionId, status, extra);
+      return failClosedAccountingException(destination, status, "partner_credit_schema_missing", {
+        partner_submission_id: link.partner_submission_id,
+        tenant_id: link.tenant_id,
+        connector_id: link.connector_id,
+      });
     }
 
     await assertPartnerCreditLifecycleReady(client);

@@ -39,13 +39,31 @@ BEGIN
   IF to_regprocedure('public.partner_destination_credit_hold_guard()') IS NOT NULL THEN
     EXECUTE 'REVOKE ALL ON FUNCTION public.partner_destination_credit_hold_guard() FROM PUBLIC';
   END IF;
+  IF to_regprocedure('public.partner_certificate_destination_submission_id(integer,integer)') IS NOT NULL THEN
+    EXECUTE 'REVOKE ALL ON FUNCTION public.partner_certificate_destination_submission_id(integer, integer) FROM PUBLIC';
+  END IF;
+  IF to_regprocedure('public.partner_certificate_credit_hold_guard()') IS NOT NULL THEN
+    EXECUTE 'REVOKE ALL ON FUNCTION public.partner_certificate_credit_hold_guard() FROM PUBLIC';
+  END IF;
+  IF to_regprocedure('public.partner_label_print_credit_hold_guard()') IS NOT NULL THEN
+    EXECUTE 'REVOKE ALL ON FUNCTION public.partner_label_print_credit_hold_guard() FROM PUBLIC';
+  END IF;
   IF to_regclass('public.submissions') IS NOT NULL THEN
     EXECUTE 'DROP TRIGGER IF EXISTS trg_partner_destination_credit_hold_guard ON public.submissions';
+  END IF;
+  IF to_regclass('public.certificates') IS NOT NULL THEN
+    EXECUTE 'DROP TRIGGER IF EXISTS trg_partner_certificate_credit_hold_guard ON public.certificates';
+  END IF;
+  IF to_regclass('public.label_prints') IS NOT NULL THEN
+    EXECUTE 'DROP TRIGGER IF EXISTS trg_partner_label_print_credit_hold_guard ON public.label_prints';
   END IF;
 END$$;
 
 DROP FUNCTION IF EXISTS public.partner_connector_release_submission_credit(uuid, uuid, uuid, text);
 DROP FUNCTION IF EXISTS public.partner_destination_credit_hold_guard();
+DROP FUNCTION IF EXISTS public.partner_certificate_destination_submission_id(integer, integer);
+DROP FUNCTION IF EXISTS public.partner_certificate_credit_hold_guard();
+DROP FUNCTION IF EXISTS public.partner_label_print_credit_hold_guard();
 
 -- Revoke grants and every membership of the dedicated no-login owner, then
 -- drop it. Dynamic relation checks keep this safe for a partially applied or
@@ -75,6 +93,10 @@ BEGIN
     'partner_connector_imports',
     'partner_submissions',
     'submissions',
+    'cards',
+    'submission_items',
+    'certificates',
+    'label_prints',
     'partner_credit_reservations',
     'partner_credit_reservation_events',
     'partner_submission_credit_holds'

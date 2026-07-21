@@ -175,6 +175,7 @@ export async function partnerAdminQuery<T extends pg.QueryResultRow = pg.QueryRe
   sql: string,
   params: unknown[] = []
 ): Promise<pg.QueryResult<T>> {
+  assertPartnerAccountingDatabaseTopology();
   const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
   if (!url) throw new Error("No admin DB URL configured for partner control shell.");
   if (!adminPool) adminPool = new pg.Pool({ connectionString: url, max: 4 });
@@ -183,10 +184,44 @@ export async function partnerAdminQuery<T extends pg.QueryResultRow = pg.QueryRe
 
 /** Privileged partner-schema transaction helper for domain services that need row locks. */
 export async function withPartnerAdminTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  assertPartnerAccountingDatabaseTopology();
   const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
   if (!url) throw new Error("No admin DB URL configured for partner control shell.");
   if (!adminPool) adminPool = new pg.Pool({ connectionString: url, max: 4 });
   const client = await adminPool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Durable fail-closed evidence uses a separate tiny pool, so an accounting exception raised inside
+ * a Partner settlement transaction cannot exhaust the same admin pool it is currently holding.
+ */
+let accountingAuditPool: pg.Pool | null = null;
+export async function withPartnerAccountingAuditTransaction<T>(
+  fn: (client: pg.PoolClient) => Promise<T>
+): Promise<T> {
+  assertPartnerAccountingDatabaseTopology();
+  const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
+  if (!url) throw new Error("No admin DB URL configured for partner accounting audit.");
+  if (!accountingAuditPool) {
+    accountingAuditPool = new pg.Pool({
+      connectionString: url,
+      max: Number(process.env.PARTNER_ACCOUNTING_AUDIT_POOL_MAX ?? 2),
+      connectionTimeoutMillis: Number(process.env.PARTNER_ACCOUNTING_AUDIT_CONNECT_TIMEOUT_MS ?? 1_000),
+      query_timeout: Number(process.env.PARTNER_ACCOUNTING_AUDIT_QUERY_TIMEOUT_MS ?? 2_000),
+    } as pg.PoolConfig);
+  }
+  const client = await accountingAuditPool.connect();
   try {
     await client.query("BEGIN");
     const result = await fn(client);
@@ -225,6 +260,8 @@ export async function withPartnerAdminTenantTransaction<T>(
 export async function closePartnerPools(): Promise<void> {
   await pool?.end().catch(() => {});
   await adminPool?.end().catch(() => {});
+  await accountingAuditPool?.end().catch(() => {});
   pool = null;
   adminPool = null;
+  accountingAuditPool = null;
 }
