@@ -184,6 +184,29 @@ export function clearAuthCookie(res: Response) {
   clearSessionCookie(res);
 }
 
+export function superAdminEmails(): Set<string> {
+  const configured = (process.env.SUPER_ADMIN_EMAILS || ADMIN_EMAIL)
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+  return new Set(configured.length > 0 ? configured : [ADMIN_EMAIL.toLowerCase()]);
+}
+
+export function isSuperAdminEmail(email: unknown): boolean {
+  if (typeof email !== "string") return false;
+  return superAdminEmails().has(email.trim().toLowerCase());
+}
+
+export async function requireSuperAdmin(req: Request, res: Response, next: NextFunction) {
+  await requireAdmin(req, res, () => {
+    const email = (req.session as any)?.adminEmail;
+    if (!isSuperAdminEmail(email)) {
+      return res.status(403).json({ error: "Forbidden: Super Admin required" });
+    }
+    return next();
+  });
+}
+
 export function adminIpAllowlist(req: Request, res: Response, next: NextFunction) {
   const allowlist = process.env.ADMIN_IP_ALLOWLIST;
   if (!allowlist) return next();

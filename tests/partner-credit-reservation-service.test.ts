@@ -26,7 +26,18 @@ async function seedMintVaultTables(): Promise<void> {
   await admin.query("CREATE TABLE users (id varchar primary key default gen_random_uuid(), email varchar unique)");
   await admin.query("CREATE TABLE submissions (id serial primary key, user_id varchar, tracking_number text unique)");
   await admin.query("CREATE TABLE submission_items (id serial primary key, submission_id integer not null)");
-  for (const table of ["users", "submissions", "submission_items"]) {
+  // The complete numbered inventory also includes the Correction Mode audit index migration.
+  // audit_log is application-owned legacy schema, so provide its required shape in this isolated
+  // Partner fixture before the migrator applies every numbered migration.
+  await admin.query(`
+    CREATE TABLE audit_log (
+      id serial PRIMARY KEY,
+      entity_type text NOT NULL,
+      entity_id text NOT NULL,
+      action text NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )`);
+  for (const table of ["users", "submissions", "submission_items", "audit_log"]) {
     await admin.query(`ALTER TABLE ${table} OWNER TO pn_migrator`);
   }
 }
@@ -705,7 +716,12 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     ).toBe(1);
   });
 
-  it("refuses the G6B rollback script when reservation data exists", async () => {
+  it("refuses the G6B rollback script when a later migration or reservation evidence exists", async () => {
+    await expect(admin.query(rollbackSql)).rejects.toThrow(/later migration \(0018\+\) is applied/);
+    await admin.query("ROLLBACK").catch(() => {});
+    // Reach the evidence guard exactly as a correct reverse-order rollback would: 0018 is
+    // no longer journalled, while G6B's immutable lifecycle evidence remains intact.
+    await admin.query("DELETE FROM schema_migrations WHERE filename = '0018_correction_audit_index.sql'");
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );

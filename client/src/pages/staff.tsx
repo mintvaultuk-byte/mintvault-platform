@@ -135,6 +135,11 @@ type GCard = {
   backUrl: string | null;
 };
 type GItem = { submissionRef: string; submissionCreatedAt: string | null; cards: GCard[] };
+type CorrectionFeedback = {
+  corrected: boolean;
+  correctedAt?: string | null;
+  changes: { field: string; before: unknown; after: unknown }[];
+};
 type StaffQueueSort =
   | "queue-oldest"
   | "queue-newest"
@@ -305,6 +310,7 @@ function GradeAnalytics({ a, loading }: { a: Analytics | null; loading: boolean 
 function GradeTab() {
   const [queue, setQueue] = useState<GItem[]>([]);
   const [active, setActive] = useState<{ ref: string; card: GCard } | null>(null);
+  const [correctionFeedback, setCorrectionFeedback] = useState<CorrectionFeedback | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [aLoading, setALoading] = useState(true);
   const [queueSort, setQueueSort] = useState<StaffQueueSort>(loadStaffQueueSort);
@@ -325,6 +331,27 @@ function GradeTab() {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const certId = active?.card.certId;
+    if (!certId || active.card.gradingStatus !== "approved") {
+      setCorrectionFeedback(null);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await fetch(`/api/grader/certificates/${certId}/corrections`, { credentials: "include" });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled) setCorrectionFeedback(res.ok ? data : null);
+      } catch {
+        if (!cancelled) setCorrectionFeedback(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [active?.card.certId, active?.card.gradingStatus]);
 
   function updateQueueSort(next: StaffQueueSort) {
     setQueueSort(next);
@@ -438,6 +465,7 @@ function GradeTab() {
           cardVariant={c.variant}
           cardGame={c.cardGame || undefined}
           existingGrade={c.grade}
+          correctionFeedback={correctionFeedback}
           onGradeApproved={async () => {
             await load();
             setActive(null);
@@ -528,9 +556,18 @@ function GradeTab() {
           </button>
         </div>
       ) : card.gradingStatus === "approved" ? (
-        <div className="flex flex-col items-end gap-0.5 shrink-0">
+        <div className="flex flex-col items-end gap-1 shrink-0">
           <span className="text-[10px] uppercase tracking-wider text-emerald-400">Approved</span>
           {card.grade && <span className="text-[#D4AF37] text-sm font-bold leading-none">{card.grade}</span>}
+          {card.gradedByMe && (
+            <button
+              onClick={() => setActive({ ref, card })}
+              data-testid={`btn-view-approved-${card.certId}`}
+              className="border border-[#D4AF37]/50 text-[#D4AF37] text-xs font-bold px-3 py-1.5 rounded hover:bg-[#D4AF37]/10"
+            >
+              View
+            </button>
+          )}
         </div>
       ) : card.gradingStatus === "unassigned" ? (
         <span className="text-[10px] uppercase tracking-wider text-[#E8E4DC]/50 shrink-0">

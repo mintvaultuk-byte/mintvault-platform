@@ -23,6 +23,9 @@ type OperatorStat = {
   avgOperatorGrade: number | null;
   avgFinalGrade: number | null;
   gradeDistribution: Record<string, number>;
+  corrected: number;
+  correctionPercentage: number;
+  mostCorrectedField: string | null;
 };
 
 function fmtGrade(n: number | null): string {
@@ -72,6 +75,33 @@ function Stat({ label, value, sub }: { label: string; value: React.ReactNode; su
       {sub && <span className="text-[10px] text-[var(--admin-ink)]/40">{sub}</span>}
     </div>
   );
+}
+
+function labelField(field: string | null): string {
+  if (!field) return "—";
+  const labels: Record<string, string> = {
+    cardName: "Card name",
+    setName: "Set",
+    year: "Year",
+    cardNumber: "Card number",
+    variant: "Variant",
+    rarity: "Rarity",
+    language: "Language",
+    game: "Game",
+    collection: "Collection",
+    grade: "Grade",
+    centering: "Centering",
+    corners: "Corners",
+    edges: "Edges",
+    surface: "Surface",
+    defects: "Defects",
+    authStatus: "Auth status",
+    authNotes: "Auth notes",
+    gradeExplanation: "Notes",
+    frontImage: "Front image",
+    backImage: "Back image",
+  };
+  return labels[field] || field;
 }
 
 export default function AdminOperatorStatsPage() {
@@ -156,16 +186,14 @@ export default function AdminOperatorStatsPage() {
         />
       </header>
       <div className="mx-auto max-w-4xl space-y-6 px-4 py-6">
-        {err && (
-          <div className="rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-400">{err}</div>
-        )}
+        {err && <div className="rounded border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-400">{err}</div>}
 
         {/* Empty-state note — current reality: nearly everything is assigned, not
             graded-by-operator yet. Shown until at least one operator has grades. */}
         {!loading && !anyGraded && (
           <div className="text-[var(--admin-ink)]/70 text-xs bg-[var(--admin-gold)]/[0.06] border border-[var(--admin-gold)]/20 rounded px-3 py-2.5">
-            No operator grades recorded yet — stats populate as cards are graded. Every operator is listed below
-            with their live scan/queue counts; graded figures fill in once operators start submitting grades.
+            No operator grades recorded yet — stats populate as cards are graded. Every operator is listed below with
+            their live scan/queue counts; graded figures fill in once operators start submitting grades.
           </div>
         )}
 
@@ -188,7 +216,9 @@ export default function AdminOperatorStatsPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="font-semibold text-[var(--admin-gold)] truncate">{o.displayName || o.email}</div>
-                      {o.displayName && <div className="text-[11px] text-[var(--admin-ink)]/50 truncate">{o.email}</div>}
+                      {o.displayName && (
+                        <div className="text-[11px] text-[var(--admin-ink)]/50 truncate">{o.email}</div>
+                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <div className="text-[10px] uppercase tracking-wider text-[var(--admin-ink)]/50">Review %</div>
@@ -204,6 +234,8 @@ export default function AdminOperatorStatsPage() {
                     <>
                       <div className="grid grid-cols-3 gap-2 border-t border-[var(--admin-gold)]/10 pt-3">
                         <Stat label="Graded" value={o.graded} />
+                        <Stat label="Corrected" value={o.corrected || 0} />
+                        <Stat label="Correction %" value={`${o.correctionPercentage || 0}%`} />
                         <Stat label="Scanned" value={o.scanned} />
                         <Stat label="In queue" value={o.pending} />
                         <Stat
@@ -217,6 +249,7 @@ export default function AdminOperatorStatsPage() {
                           value={`${o.graded ? Math.round((o.reviewFlagged / o.graded) * 100) : 0}%`}
                           sub={`${o.reviewFlagged}/${o.graded}`}
                         />
+                        <Stat label="Common fix" value={labelField(o.mostCorrectedField)} />
                       </div>
                       <div className="flex items-end justify-between gap-3 border-t border-[var(--admin-gold)]/10 pt-3">
                         <div className="min-w-0">
@@ -235,8 +268,11 @@ export default function AdminOperatorStatsPage() {
                   {o.graded === 0 && (
                     <div className="grid grid-cols-3 gap-2 border-t border-[var(--admin-gold)]/10 pt-3">
                       <Stat label="Graded" value={0} />
+                      <Stat label="Corrected" value={o.corrected || 0} />
+                      <Stat label="Correction %" value={`${o.correctionPercentage || 0}%`} />
                       <Stat label="Scanned" value={o.scanned} />
                       <Stat label="In queue" value={o.pending} />
+                      <Stat label="Common fix" value={labelField(o.mostCorrectedField)} />
                     </div>
                   )}
                 </section>

@@ -157,6 +157,12 @@ interface Props {
    *  audits) instead of /submit — so an edit can NEVER publish or auto-approve.
    *  Only meaningful with graderMode. */
   graderEdit?: boolean;
+  correctionMode?: boolean;
+  onCorrectionGradingReady?: (getPayload: () => Record<string, unknown>) => void;
+  correctionFeedback?: {
+    corrected: boolean;
+    changes: Array<{ field: string; before: unknown; after: unknown }>;
+  } | null;
 }
 
 // Zone arrays default to 0 = "not yet marked" — keeps buildPayload's hasContent
@@ -249,6 +255,9 @@ export default function GradingPanel({
   graderMode = false,
   adminReview = false,
   graderEdit = false,
+  correctionMode = false,
+  onCorrectionGradingReady,
+  correctionFeedback,
 }: Props) {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -879,6 +888,18 @@ export default function GradingPanel({
     setEditMode(false);
   }
 
+  useEffect(() => {
+    if (correctionMode && gradeApprovedAt && !editMode) {
+      editSnapshotRef.current = captureEditSnapshot();
+      setEditMode(true);
+    }
+    if (!correctionMode && editMode && editSnapshotRef.current) {
+      restoreEditSnapshot(editSnapshotRef.current);
+      editSnapshotRef.current = null;
+      setEditMode(false);
+    }
+  }, [correctionMode, gradeApprovedAt]);
+
   async function saveEditedGrade(): Promise<void> {
     setEditSaving(true);
     try {
@@ -1449,6 +1470,10 @@ export default function GradingPanel({
 
   const isNonNumeric = authStatus === "authentic_altered" || authStatus === "not_original";
   const finalGradeOverall = isNonNumeric ? (authStatus === "authentic_altered" ? "AA" : "NO") : String(overall);
+  const correctedFields = useMemo(
+    () => new Set((correctionFeedback?.changes || []).map((change) => change.field)),
+    [correctionFeedback]
+  );
 
   function buildPayload() {
     // Companion to server-side COALESCE fix (PR #14): omit fields that don't
@@ -1541,6 +1566,43 @@ export default function GradingPanel({
 
     return out;
   }
+
+  useEffect(() => {
+    if (!onCorrectionGradingReady) return;
+    onCorrectionGradingReady(() => {
+      const payload = buildPayload();
+      delete (payload as any).private_notes;
+      return payload;
+    });
+    return () => onCorrectionGradingReady(() => ({}));
+  }, [
+    onCorrectionGradingReady,
+    finalGradeOverall,
+    authStatus,
+    authNotes,
+    gradeExplanation,
+    sub.centering,
+    sub.corners,
+    sub.edges,
+    sub.surface,
+    frontLR,
+    frontTB,
+    backLR,
+    backTB,
+    corners,
+    edges,
+    surface,
+    defects,
+    defectCandidates,
+    darkBorderFront,
+    darkBorderBack,
+    eyeAppealModifier,
+    whiteningLines,
+    creaseLines,
+    creaseSpanPct,
+    wrinkleSeverity,
+    tearSeverity,
+  ]);
 
   const hasFront = !!(imageData?.urls?.front_display || imageData?.urls?.front_original);
   const hasBack = !!(imageData?.urls?.back_display || imageData?.urls?.back_original);
@@ -1861,6 +1923,31 @@ export default function GradingPanel({
           </div>
         </div>
       )}
+      {correctionFeedback?.corrected && (
+        <div
+          className="bg-[var(--admin-amber)]/10 border border-[var(--admin-amber)]/45 rounded-xl p-3 space-y-2"
+          data-testid="staff-correction-feedback"
+          data-changed-count={correctedFields.size}
+        >
+          <p className="text-[var(--admin-amber)] text-xs font-bold uppercase tracking-widest">
+            This grading has been corrected by Admin.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {correctionFeedback.changes.map((change) => (
+              <div
+                key={change.field}
+                className="rounded border border-[var(--admin-amber)]/25 bg-black/20 px-2.5 py-2 text-xs"
+                data-testid={`correction-change-${change.field}`}
+              >
+                <div className="font-bold text-[var(--admin-ink)]">{change.field}</div>
+                <div className="text-[var(--admin-ink-dim)] break-words">{String(change.before ?? "blank")}</div>
+                <div className="text-[var(--admin-amber)] text-[10px] uppercase tracking-widest">↓</div>
+                <div className="text-[var(--admin-ink)] break-words">{String(change.after ?? "blank")}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {/* AI card-IDENTIFICATION toggle (per-device, localStorage). Identify step
           ONLY — the AI never grades. ON = auto-identify on open + TCGdex confirm;
           OFF = no AI call, enter identity manually. NOT graderMode-gated → the
@@ -2132,7 +2219,7 @@ export default function GradingPanel({
           corrupting the per-operator drift stats. The identify banner + AI-identify
           toggle are SEPARATE (rendered above, ungated) so graders keep the
           identification help that fills the set — they just can't AI-grade. */}
-      {!adminReview && !graderMode && (
+      {!adminReview && !graderMode && !correctionMode && (
         <div className="flex items-start gap-3">
           <div className="flex-1">
             <AiPanel
@@ -2380,7 +2467,7 @@ export default function GradingPanel({
               button that flips into explicit-save edit mode. Auto-save is
               disabled post-approval (see autoSave useEffect gate) so any
               edit-mode change requires the SAVE CHANGES button below. */}
-          {gradeApprovedAt && !editMode && (
+          {gradeApprovedAt && !editMode && !graderMode && !correctionMode && (
             <div className="bg-[var(--admin-green)]/10 border border-[var(--admin-green)]/40 rounded-lg p-3 flex items-start justify-between gap-3">
               <div className="space-y-1 min-w-0">
                 <p className="text-[var(--admin-green)] text-xs font-bold uppercase tracking-widest">

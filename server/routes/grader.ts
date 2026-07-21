@@ -47,6 +47,7 @@ import {
 } from "../grader";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "../lib/correction-fields";
 import { graderEditSubmissionRateLimit } from "../lib/rate-limiters";
 import { createDbCustomSetEditorStore, editCustomSetDetails, CustomSetEditError } from "../services/custom-set-editor";
 import {
@@ -92,9 +93,30 @@ async function authorizeGraderCert(
   certId: number
 ): Promise<{ ok: true; gradingStatus: string } | { ok: false; status: number; error: string }> {
   const graderId = (req.session as any).graderId as string;
+  if (!graderId) return { ok: false, status: 401, error: "Unauthorized" };
   const a = await getCertAssignment(certId);
   if (!a) return { ok: false, status: 404, error: "Not found" };
   if (a.assignedGraderId !== graderId || a.gradingStatus === "approved") {
+    return { ok: false, status: 403, error: "This card is not assigned to you" };
+  }
+  return { ok: true, gradingStatus: a.gradingStatus };
+}
+
+async function authorizeGraderCertRead(
+  req: Request,
+  certId: number
+): Promise<{ ok: true; gradingStatus: string } | { ok: false; status: number; error: string }> {
+  const graderId = (req.session as any).graderId as string;
+  if (!graderId) return { ok: false, status: 401, error: "Unauthorized" };
+  const a = await getCertAssignment(certId);
+  if (!a) return { ok: false, status: 404, error: "Not found" };
+  if (a.gradingStatus === "approved") {
+    if (String(a.gradedBy || "") !== String(graderId)) {
+      return { ok: false, status: 404, error: "Not found" };
+    }
+    return { ok: true, gradingStatus: a.gradingStatus };
+  }
+  if (a.assignedGraderId !== graderId) {
     return { ok: false, status: 403, error: "This card is not assigned to you" };
   }
   return { ok: true, gradingStatus: a.gradingStatus };
@@ -274,7 +296,7 @@ export function registerGraderRoutes(app: Express): void {
   // ── Grader cert reads (ownership-scoped, PII-free) ──────────────────────────
   app.get("/api/grader/certificates/:id/images", requireCapability("grade"), async (req: Request, res: Response) => {
     const certId = parseInt(String(req.params.id), 10);
-    const auth = await authorizeGraderCert(req, certId);
+    const auth = await authorizeGraderCertRead(req, certId);
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
     const payload = await buildCertImagesPayload(certId);
     if (!payload) return res.status(404).json({ error: "Certificate not found" });
@@ -283,10 +305,11 @@ export function registerGraderRoutes(app: Express): void {
 
   app.get("/api/grader/certificates/:id/grading", requireCapability("grade"), async (req: Request, res: Response) => {
     const certId = parseInt(String(req.params.id), 10);
-    const auth = await authorizeGraderCert(req, certId);
+    const auth = await authorizeGraderCertRead(req, certId);
     if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
     let payload = await buildCertGradingPayload(certId);
     if (!payload) return res.status(404).json({ error: "Certificate not found" });
+    if (auth.gradingStatus === "approved") return res.json(payload);
     // Card IDENTIFICATION is deferred off the scan path. If it hasn't run for this
     // cert, compute it NOW (bounded ~20s) and re-read, so it's present on first
     // paint — the grader sees a computing state during the wait, never silently
@@ -311,6 +334,43 @@ export function registerGraderRoutes(app: Express): void {
     }
     return res.json(payload);
   });
+
+  app.get(
+    "/api/grader/certificates/:id/corrections",
+    requireCapability("grade"),
+    async (req: Request, res: Response) => {
+      try {
+        const certId = parseInt(String(req.params.id), 10);
+        const auth = await authorizeGraderCertRead(req, certId);
+        if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+        if (auth.gradingStatus !== "approved") return res.json({ corrected: false, changes: [] });
+        const r = await db.execute(sql`
+        SELECT id, details, created_at
+        FROM audit_log
+        WHERE entity_type = 'certificate'
+          AND action = 'cert_live_record_edit'
+          AND entity_id = ${String(certId)}
+        ORDER BY created_at DESC
+        LIMIT 1
+      `);
+        const row = r.rows[0] as any;
+        if (!row) return res.json({ corrected: false, changes: [] });
+        const details = row.details && typeof row.details === "object" ? row.details : {};
+        const changesRaw = details.changes && typeof details.changes === "object" ? details.changes : {};
+        const changes = Object.entries(changesRaw)
+          .filter(([field]) => !CORRECTION_DISPLAY_EXCLUDED_FIELDS.has(field))
+          .map(([field, change]: [string, any]) => ({
+            field,
+            before: change?.before ?? null,
+            after: change?.after ?? null,
+          }));
+        return res.json({ corrected: changes.length > 0, correctedAt: row.created_at ?? null, changes });
+      } catch (e: any) {
+        console.error("[grader] corrections read error:", e.message);
+        return sendServerError(res, e);
+      }
+    }
+  );
 
   // ── Grader DRAFT save (repeatable; status stays 'assigned') ─────────────────
   app.put("/api/grader/certificates/:id/grade", requireCapability("grade"), async (req: Request, res: Response) => {

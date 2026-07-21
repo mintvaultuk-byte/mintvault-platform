@@ -1,0 +1,54 @@
+-- migrate:no-transaction
+-- migrate:ensure-valid-concurrent-index public.idx_audit_log_cert_correction_recent
+--
+-- Super Admin Correction Mode — operator-statistics support index.
+--
+-- Serves the correction-stats CTE in server/grader.ts (getOperatorStats):
+--
+--   SELECT entity_id, details, created_at
+--   FROM audit_log
+--   WHERE entity_type = 'certificate'
+--     AND action     = 'cert_live_record_edit'
+--     AND created_at >= NOW() - INTERVAL '180 days'
+--   ORDER BY created_at DESC
+--   LIMIT 10000
+--
+-- The pre-existing idx_audit_log_entity_action (entity_id, action, created_at DESC,
+-- created at boot in server/routes.ts) cannot serve this query: its leading column is
+-- entity_id, on which this query has no predicate. Without the index below the query
+-- degrades to a sequential scan of the whole audit_log table plus a sort — the
+-- LIMIT 10000 caps rows *returned*, not rows *scanned*.
+--
+-- Leading created_at DESC serves both the range predicate and the ORDER BY directly
+-- from the index; entity_id is carried so the join back to certificates is covered.
+-- The partial predicate matches the WHERE clause exactly and uses only constant
+-- comparisons (no now()/STABLE call), which a partial-index predicate requires.
+--
+-- CONCURRENTLY: audit_log is written on essentially every admin mutation, including
+-- the correction path itself. A plain CREATE INDEX takes an ACCESS EXCLUSIVE lock for
+-- the whole build and would stall admin writes platform-wide. CONCURRENTLY cannot run
+-- inside a transaction block, hence the migrate:no-transaction marker above — see
+-- server/lib/perf-indexes.ts, where a plain CREATE INDEX already failed at boot for
+-- this exact reason.
+--
+-- ROLLBACK: DROP INDEX CONCURRENTLY IF EXISTS idx_audit_log_cert_correction_recent;
+--   (index-only, additive — no data is read, written or moved by this migration.)
+--
+-- INVALID-INDEX RETRY: a CONCURRENTLY build that fails leaves an INVALID index behind.
+-- The migrate:ensure-valid-concurrent-index directive is implemented by scripts/db/migrate.ts:
+-- it accepts an existing valid index unchanged; drops an invalid index with DROP INDEX
+-- CONCURRENTLY; creates this index; and checks indisvalid before completing the migration.
+-- The directive is necessary because concurrent DDL cannot be conditionally run inside a
+-- transaction, DO block, or PL/pgSQL function.
+--
+-- POST-APPLY CHECK (also enforced by the runner):
+--
+--   SELECT i.indisvalid
+--   FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid
+--   WHERE c.relname = 'idx_audit_log_cert_correction_recent';
+--
+-- If indisvalid is false: DROP INDEX CONCURRENTLY and re-run.
+
+CREATE INDEX CONCURRENTLY idx_audit_log_cert_correction_recent
+ON audit_log (created_at DESC, entity_id)
+WHERE entity_type = 'certificate' AND action = 'cert_live_record_edit';

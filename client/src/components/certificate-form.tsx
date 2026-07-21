@@ -74,6 +74,8 @@ interface Props {
   };
   /** Optional read-only batch header (customer / submission / remaining). */
   batch?: { customer?: string; submissionId?: string; remaining?: number };
+  correctionMode?: boolean;
+  onCorrectionMetadataReady?: (getFormData: () => FormData) => void;
 }
 
 /**
@@ -170,6 +172,8 @@ export default function CertificateForm({
   workstationSlot,
   queue,
   batch,
+  correctionMode = false,
+  onCorrectionMetadataReady,
 }: Props) {
   const isEdit = !!certificate;
   const { toast } = useToast();
@@ -1173,6 +1177,12 @@ export default function CertificateForm({
     return formData;
   }
 
+  useEffect(() => {
+    if (!onCorrectionMetadataReady) return;
+    onCorrectionMetadataReady(() => buildCertFormData(false));
+    return () => onCorrectionMetadataReady(() => new FormData());
+  }, [onCorrectionMetadataReady, form, designations, frontImage, backImage, loadedSnapshotRef.current]);
+
   const mutation = useMutation({
     mutationFn: async () => {
       // Only the "edit an already-approved certificate" path needs to confirm
@@ -1333,6 +1343,8 @@ export default function CertificateForm({
     // navigates away via onSuccess. Only the create flow and the
     // already-approved "Save Changes" flow use this explicit submit path.
     if (autoSaveEligible) return;
+
+    if (correctionMode) return;
 
     if (!form.cardGame || !form.setName || !form.cardName || !form.cardNumber || !form.year) {
       setError("Please fill in all required fields: Game, Set, Card Name, Card Number, Year");
@@ -3520,7 +3532,14 @@ export default function CertificateForm({
             flow (no certificate yet) and an already-approved/published
             certificate (server has no approval lock of its own — see
             autoSaveEligible) both keep an explicit save action. */}
-              {autoSaveEligible ? (
+              {correctionMode ? (
+                <div
+                  className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-6"
+                  data-testid="text-correction-save-owned-by-parent"
+                >
+                  Correction Mode uses the Save Correction button.
+                </div>
+              ) : autoSaveEligible ? (
                 <div
                   className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-6"
                   data-testid="text-autosave-status"
