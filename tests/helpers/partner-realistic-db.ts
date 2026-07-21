@@ -166,32 +166,49 @@ export async function applyMigrationsRealistic(
 ): Promise<void> {
   await provisionRealisticRoles(admin);
   if (migrations.includes("0019_partner_submission_credit_lifecycle")) {
-    // Model the deployed separation between a schema owner and the migration
-    // login. Ownership otherwise masks privilege mistakes: PostgreSQL owners
-    // can mutate a table even after every explicit DML grant is revoked.
+    // Provision the dedicated G6D definer as an elevated one-time operation,
+    // then let the migration login grant and revoke its own temporary
+    // membership. The post-migration assertion proves no SET ROLE path remains.
+    await admin.query(
+      `DO $$ BEGIN
+         CREATE ROLE partner_credit_lifecycle_definer
+           NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+       EXCEPTION WHEN duplicate_object THEN NULL;
+       END$$;`
+    );
     await admin.query(
       `DO $$ BEGIN
          CREATE ROLE pn_credit_schema_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
        EXCEPTION WHEN duplicate_object THEN NULL;
        END$$;`
     );
-    for (const table of ["partner_credit_reservations", "partner_credit_reservation_events"]) {
-      await admin.query(`ALTER TABLE public.${table} OWNER TO pn_credit_schema_owner`);
-    }
   }
   const migrator = new pg.Client({ connectionString: migratorUrlFrom(adminUrl) });
   await migrator.connect();
   try {
     for (const name of migrations) {
-      // PostgreSQL 16+ tracks the grantor for role memberships. A non-superuser
-      // migration role cannot safely revoke a temporary membership that an elevated
-      // operator granted it, so 0019 is deliberately run by the deployment owner:
-      // it creates, uses and revokes its own temporary definer membership atomically.
-      // All earlier Partner migrations remain exercised as the realistic restricted
-      // migration role.
-      await (name === "0019_partner_submission_credit_lifecycle" ? admin : migrator).query(migrationSql(name));
+      await migrator.query(migrationSql(name));
     }
   } finally {
     await migrator.end();
+  }
+  if (migrations.includes("0019_partner_submission_credit_lifecycle")) {
+    const membership = await admin.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM pg_auth_members m
+         JOIN pg_roles role ON role.oid=m.roleid
+         JOIN pg_roles member ON member.oid=m.member
+        WHERE role.rolname='partner_credit_lifecycle_definer'
+          AND member.rolname=$1`,
+      [MIGRATOR_ROLE]
+    );
+    if (membership.rows[0]?.count !== "0") {
+      throw new Error("0019 left pn_migrator as a member of partner_credit_lifecycle_definer.");
+    }
+    // Model the deployed separation between a schema owner and the migration
+    // login only after migrations have created the accounting tables.
+    for (const table of ["partner_credit_reservations", "partner_credit_reservation_events"]) {
+      await admin.query(`ALTER TABLE public.${table} OWNER TO pn_credit_schema_owner`);
+    }
   }
 }

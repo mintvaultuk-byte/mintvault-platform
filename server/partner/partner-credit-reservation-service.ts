@@ -713,6 +713,87 @@ export async function expireReservedCredit(
   return transitionReservation(actor, { ...input, source: input.source ?? "system" }, "expired");
 }
 
+async function createDestinationHoldForExpiredReservation(
+  client: pg.PoolClient,
+  tenantId: string,
+  reservationId: string
+): Promise<void> {
+  if (
+    (await client.query("SELECT to_regclass('public.partner_submission_credit_holds')::text AS relation")).rows[0]
+      ?.relation == null
+  ) {
+    return;
+  }
+  const rows = await client.query<{
+    reservation_id: string;
+    partner_submission_id: string;
+    destination_submission_id: number;
+    connector_record_id: string | null;
+    connector_import_id: string | null;
+  }>(
+    `SELECT r.id AS reservation_id,
+            r.submission_reference AS partner_submission_id,
+            i.destination_submission_id,
+            i.connector_record_id,
+            i.id AS connector_import_id
+       FROM partner_credit_reservations r
+       JOIN partner_connector_imports i
+         ON i.partner_organisation_id = r.tenant_id
+        AND i.partner_submission_id::text = r.submission_reference
+        AND i.state = 'completed'
+        AND (to_jsonb(i)->>'deleted_at') IS NULL
+       JOIN submissions s
+         ON s.id = i.destination_submission_id
+        AND s.deleted_at IS NULL
+      WHERE r.id=$1
+        AND r.tenant_id=$2
+        AND r.source='portal'
+        AND r.status='active'
+      ORDER BY i.completed_at DESC NULLS LAST, i.id DESC
+      LIMIT 2
+      FOR UPDATE OF r, i, s`,
+    [reservationId, tenantId]
+  );
+  if (rows.rowCount === 0) return;
+  if (rows.rowCount !== 1) {
+    throw new CreditReservationError(
+      "INTERNAL_ERROR",
+      "Expired Partner reservation has ambiguous destination mapping and requires reconciliation."
+    );
+  }
+  const link = rows.rows[0];
+  const existing = await client.query<{ reservation_id: string }>(
+    `SELECT reservation_id
+       FROM partner_submission_credit_holds
+      WHERE destination_submission_id=$1 AND released_at IS NULL
+      FOR UPDATE`,
+    [link.destination_submission_id]
+  );
+  if ((existing.rowCount ?? 0) > 0) {
+    if (existing.rows[0].reservation_id !== reservationId) {
+      throw new CreditReservationError(
+        "INTERNAL_ERROR",
+        "Expired Partner reservation conflicts with an existing destination hold."
+      );
+    }
+    return;
+  }
+  await client.query(
+    `INSERT INTO partner_submission_credit_holds
+       (tenant_id, partner_submission_id, destination_submission_id, reservation_id,
+        connector_record_id, connector_import_id, reason_code)
+     VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::uuid,'partner_reservation_expired')`,
+    [
+      tenantId,
+      link.partner_submission_id,
+      link.destination_submission_id,
+      reservationId,
+      link.connector_record_id,
+      link.connector_import_id,
+    ]
+  );
+}
+
 export async function expireExpiredReservations(
   input: {
     now?: Date;
@@ -755,14 +836,18 @@ export async function expireExpiredReservations(
   const expired: string[] = [];
   for (const row of rows.rows) {
     try {
-      const result = await expireReservedCredit(actor, {
-        tenantId: row.tenant_id,
-        reservationId: row.id,
-        idempotencyKey: `reservation-expiry:${row.id}`,
-        source: "system",
-        reason: "reservation expired",
-        actorType: "system",
-        now,
+      const result = await withPartnerAdminTransaction(async (client) => {
+        await client.query("SELECT set_config('app.tenant_id', $1, true)", [row.tenant_id]);
+        await createDestinationHoldForExpiredReservation(client, row.tenant_id, row.id);
+        return expireReservedCreditInTransaction(client, actor, {
+          tenantId: row.tenant_id,
+          reservationId: row.id,
+          idempotencyKey: `reservation-expiry:${row.id}`,
+          source: "system",
+          reason: "reservation expired",
+          actorType: "system",
+          now,
+        });
       });
       expired.push(result.reservation.id);
     } catch (err) {

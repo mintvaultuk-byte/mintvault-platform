@@ -467,6 +467,7 @@ export async function getPartnerSubmissionCreditProjection(tenantId: string, par
     try {
       if ((await partnerCreditSchemaState(client)) === "legacy_missing_credit_schema") return null;
       await assertPartnerCreditLifecycleReady(client);
+      await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
     } catch (error) {
       if (error instanceof PartnerSubmissionCreditLifecycleError && error.code === "credit_schema_incomplete") {
         return {
@@ -476,6 +477,19 @@ export async function getPartnerSubmissionCreditProjection(tenantId: string, par
         };
       }
       throw error;
+    }
+    const conflicts = await client.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM partner_credit_reservations
+        WHERE tenant_id=$1 AND submission_reference=$2 AND source='portal'`,
+      [tenantId, partnerSubmissionId]
+    );
+    if (Number(conflicts.rows[0]?.count ?? "0") > 1) {
+      return {
+        error: "reservation_link_inconsistent",
+        message: "Partner submission has more than one authoritative credit reservation and requires reconciliation.",
+        reservationLinkConflict: true,
+      };
     }
     const { rows } = await client.query<{
       reservation_id: string;
@@ -515,18 +529,12 @@ export async function getPartnerSubmissionCreditProjection(tenantId: string, par
         LIMIT 1`,
       [tenantId, partnerSubmissionId]
     );
-    const conflicts = await client.query<{ count: string }>(
-      `SELECT count(*)::text AS count
-         FROM partner_credit_reservations
-        WHERE tenant_id=$1 AND submission_reference=$2 AND source='portal'`,
-      [tenantId, partnerSubmissionId]
-    );
     const reservation = rows[0];
     if (!reservation && holds.rows.length === 0) return null;
     return {
       ...(reservation ?? {}),
       destinationCreditHold: holds.rows[0] ?? null,
-      reservationLinkConflict: Number(conflicts.rows[0]?.count ?? "0") > 1,
+      reservationLinkConflict: false,
     };
   });
 }
