@@ -16,7 +16,11 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { Client } from "pg";
 import bcrypt from "bcryptjs";
-import { applyMigrationsRealistic } from "./helpers/partner-realistic-db";
+import {
+  applyMigrationsRealistic,
+  PARTNER_MIGRATIONS_WITH_G6D,
+  provisionRealisticRoles,
+} from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_RT_ADMIN;
 const RUNTIME = process.env.PARTNER_RT_RUNTIME;
@@ -35,6 +39,19 @@ let server: http.Server;
 let base: string;
 let admin: Client;
 
+async function seedMintVaultTables(): Promise<void> {
+  await admin.query("CREATE TABLE users (id varchar primary key default gen_random_uuid(), email varchar unique)");
+  await admin.query("CREATE TABLE submissions (id serial primary key, user_id varchar, tracking_number text unique)");
+  await admin.query("CREATE TABLE submission_items (id serial primary key, submission_id integer not null)");
+  await admin.query(`CREATE TABLE audit_log (
+    id serial primary key, entity_type text not null, entity_id text not null, action text not null,
+    admin_user text, details jsonb, created_at timestamptz not null default now()
+  )`);
+  for (const table of ["users", "submissions", "submission_items", "audit_log"]) {
+    await admin.query(`ALTER TABLE ${table} OWNER TO pn_migrator`);
+  }
+}
+
 (isLocal ? describe : describe.skip)("Partner submission workflow (disposable DB, real HTTP)", () => {
   beforeAll(async () => {
     admin = new Client({ connectionString: ADMIN });
@@ -49,7 +66,9 @@ let admin: Client;
     await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
     await admin.query("CREATE SCHEMA public");
     await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
-    await applyMigrationsRealistic(admin, ADMIN!);
+    await provisionRealisticRoles(admin);
+    await seedMintVaultTables();
+    await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_G6D);
     await admin.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
     await admin.query("CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic'");
     await admin.query("GRANT partner_runtime TO partner_app_test");
@@ -72,6 +91,25 @@ let admin: Client;
        ($4,'wfub1',$6,$6,'owner@wfb.com',$5,'ACTIVE',false)`,
       [OWNER_A, RECEPTION_A, A, OWNER_B, pw, B]
     );
+    const wallet = await import("../server/partner/partner-wallet-service");
+    for (const [tenantId, idempotencyKey] of [
+      [A, "g6d-workflow-wallet-a"],
+      [B, "g6d-workflow-wallet-b"],
+    ] as const) {
+      await wallet.ensureWallet({ actorUserId: null, actorEmail: "workflow@example.com" }, tenantId);
+      await wallet.appendFoundationCredit(
+        { actorUserId: null, actorEmail: "workflow@example.com" },
+        {
+          tenantId,
+          amount: 100,
+          entryType: "purchase",
+          source: "admin",
+          reason: "Submission workflow regression credits",
+          idempotencyKey,
+          actorType: "admin",
+        }
+      );
+    }
     const roleId = async (code: string) =>
       (await admin.query<{ id: string }>("SELECT id FROM partner_roles WHERE code=$1", [code])).rows[0].id;
     const owner = await roleId("PARTNER_OWNER");
@@ -118,7 +156,7 @@ let admin: Client;
   });
 
   afterAll(async () => {
-    await new Promise<void>((r) => server?.close(() => r()));
+    if (server) await new Promise<void>((r) => server.close(() => r()));
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools();
     await admin?.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});

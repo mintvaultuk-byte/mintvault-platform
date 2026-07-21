@@ -106,6 +106,12 @@ export const PARTNER_MIGRATIONS_WITH_RBAC_SEED = [
   "0034_partner_rbac_seed",
 ] as const;
 
+/** G6D — Partner submission credit reservation, consumption and release integration. */
+export const PARTNER_MIGRATIONS_WITH_G6D = [
+  ...PARTNER_MIGRATIONS_WITH_G6B,
+  "0018_correction_audit_index",
+  "0019_partner_submission_credit_lifecycle",
+] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 
@@ -159,11 +165,31 @@ export async function applyMigrationsRealistic(
   migrations: readonly string[] = PARTNER_MIGRATIONS
 ): Promise<void> {
   await provisionRealisticRoles(admin);
+  if (migrations.includes("0019_partner_submission_credit_lifecycle")) {
+    // Model the deployed separation between a schema owner and the migration
+    // login. Ownership otherwise masks privilege mistakes: PostgreSQL owners
+    // can mutate a table even after every explicit DML grant is revoked.
+    await admin.query(
+      `DO $$ BEGIN
+         CREATE ROLE pn_credit_schema_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+       EXCEPTION WHEN duplicate_object THEN NULL;
+       END$$;`
+    );
+    for (const table of ["partner_credit_reservations", "partner_credit_reservation_events"]) {
+      await admin.query(`ALTER TABLE public.${table} OWNER TO pn_credit_schema_owner`);
+    }
+  }
   const migrator = new pg.Client({ connectionString: migratorUrlFrom(adminUrl) });
   await migrator.connect();
   try {
     for (const name of migrations) {
-      await migrator.query(migrationSql(name));
+      // PostgreSQL 16+ tracks the grantor for role memberships. A non-superuser
+      // migration role cannot safely revoke a temporary membership that an elevated
+      // operator granted it, so 0019 is deliberately run by the deployment owner:
+      // it creates, uses and revokes its own temporary definer membership atomically.
+      // All earlier Partner migrations remain exercised as the realistic restricted
+      // migration role.
+      await (name === "0019_partner_submission_credit_lifecycle" ? admin : migrator).query(migrationSql(name));
     }
   } finally {
     await migrator.end();

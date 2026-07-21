@@ -18,6 +18,12 @@ import {
   type FingerprintSource,
 } from "./connector-fingerprint";
 import type { ConnectorState } from "./connector-service";
+import {
+  PartnerSubmissionCreditLifecycleError,
+  releasePartnerReservationForConnectorTerminalState,
+  type ConnectorReservationReleaseResult,
+} from "./partner-submission-credit-lifecycle";
+import { recordConnectorCreditLifecycleFailure } from "./connector-credit-lifecycle-audit";
 
 const MAX_CARDS_PER_SUBMISSION = 200;
 const MAX_QUANTITY = 1000; // matches server/partner/submission-routes.ts's MAX_QUANTITY exactly
@@ -631,220 +637,277 @@ export async function validateConnectorRecord(params: {
 }): Promise<ValidationRunResult> {
   await assertConnectorActive();
   const { connectorId, claimant, expectedVersion, tenantId } = params;
-  return guarded(() =>
-    withConnectorTx(async (client) => {
-      const connRes = await client.query<ConnectorRow>(
-        `SELECT * FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
-        [connectorId]
-      );
-      if (connRes.rows.length === 0) throw new ConnectorError("handoff_not_found", "Connector record not found.");
-      const connector = connRes.rows[0];
-      if (tenantId && connector.tenant_id !== tenantId) {
-        throw new ConnectorError("unauthorised", "This record does not belong to the specified tenant.");
-      }
-      if (connector.state !== "validating") {
-        throw new ConnectorError(
-          "invalid_state_transition",
-          `Cannot validate a record in state ${connector.state}; must be validating.`
+  let lifecycleTenantId: string | null = null;
+  try {
+    return await guarded(() =>
+      withConnectorTx(async (client) => {
+        const connRes = await client.query<ConnectorRow>(
+          `SELECT * FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
+          [connectorId]
         );
-      }
-      if (connector.claimed_by !== claimant) {
-        throw new ConnectorError("stale_claim", "Only the current claimant may validate this record.");
-      }
-      if (connector.version !== expectedVersion) {
-        throw new ConnectorError("stale_claim", "Record changed since last read.");
-      }
+        if (connRes.rows.length === 0) throw new ConnectorError("handoff_not_found", "Connector record not found.");
+        const connector = connRes.rows[0];
+        if (tenantId && connector.tenant_id !== tenantId) {
+          throw new ConnectorError("unauthorised", "This record does not belong to the specified tenant.");
+        }
+        lifecycleTenantId = connector.tenant_id;
+        if (connector.state !== "validating") {
+          throw new ConnectorError(
+            "invalid_state_transition",
+            `Cannot validate a record in state ${connector.state}; must be validating.`
+          );
+        }
+        if (connector.claimed_by !== claimant) {
+          throw new ConnectorError("stale_claim", "Only the current claimant may validate this record.");
+        }
+        if (connector.version !== expectedVersion) {
+          throw new ConnectorError("stale_claim", "Record changed since last read.");
+        }
 
-      // withConnectorTx only sets the app.tenant_id GUC when a tenantId is known BEFORE the
-      // transaction opens — but here the connector's tenant is only known after reading the
-      // (non-RLS'd) connector record above. Set it now, transaction-local, before touching any of
-      // the FORCE-RLS'd tables loadValidationRows reads (organisations, locations, customers,
-      // service tiers, cards) — without this, every one of those reads would return zero rows
-      // regardless of the WHERE clause (RLS resolves partner_current_tenant() to NULL and no row's
-      // tenant_id ever equals NULL), making every validation appear to reference missing entities.
-      await client.query("SELECT set_config('app.tenant_id', $1, true)", [connector.tenant_id]);
+        // withConnectorTx only sets the app.tenant_id GUC when a tenantId is known BEFORE the
+        // transaction opens — but here the connector's tenant is only known after reading the
+        // (non-RLS'd) connector record above. Set it now, transaction-local, before touching any of
+        // the FORCE-RLS'd tables loadValidationRows reads (organisations, locations, customers,
+        // service tiers, cards) — without this, every one of those reads would return zero rows
+        // regardless of the WHERE clause (RLS resolves partner_current_tenant() to NULL and no row's
+        // tenant_id ever equals NULL), making every validation appear to reference missing entities.
+        await client.query("SELECT set_config('app.tenant_id', $1, true)", [connector.tenant_id]);
 
-      // Do ALL the work first — load, fingerprint, evaluate — then write the run ONCE with its
-      // final values. partner_connector_validation_runs is granted SELECT+INSERT only (no UPDATE),
-      // matching "immutable after completion": there is no half-written row to ever update, so
-      // there is nothing to reconcile if the process crashes before the single INSERT commits.
-      let outcome: ValidationOutcome;
-      let findings: ValidationFinding[] = [];
-      let fingerprint: string | null = null;
-      let sourceSubmissionVersion = 0;
-      let sourceHandoffStatus = "unknown";
+        // Do ALL the work first — load, fingerprint, evaluate — then write the run ONCE with its
+        // final values. partner_connector_validation_runs is granted SELECT+INSERT only (no UPDATE),
+        // matching "immutable after completion": there is no half-written row to ever update, so
+        // there is nothing to reconcile if the process crashes before the single INSERT commits.
+        let outcome: ValidationOutcome;
+        let findings: ValidationFinding[] = [];
+        let fingerprint: string | null = null;
+        let sourceSubmissionVersion = 0;
+        let sourceHandoffStatus = "unknown";
 
-      try {
-        const rows = await loadValidationRows(client, connector);
-        sourceSubmissionVersion = rows.submission?.version ?? 0;
-        sourceHandoffStatus = rows.handoff?.status ?? "unknown";
+        try {
+          const rows = await loadValidationRows(client, connector);
+          sourceSubmissionVersion = rows.submission?.version ?? 0;
+          sourceHandoffStatus = rows.handoff?.status ?? "unknown";
 
-        if (rows.submission?.status === "cancelled") {
-          outcome = "cancelled";
-        } else {
-          // Staleness check: compare against the immediately-prior COMPLETED run, if any.
-          const priorRes = await client.query<{ source_submission_version: number; source_fingerprint: string | null }>(
-            `SELECT source_submission_version, source_fingerprint FROM partner_connector_validation_runs
+          if (rows.submission?.status === "cancelled") {
+            outcome = "cancelled";
+          } else {
+            // Staleness check: compare against the immediately-prior COMPLETED run, if any.
+            const priorRes = await client.query<{
+              source_submission_version: number;
+              source_fingerprint: string | null;
+            }>(
+              `SELECT source_submission_version, source_fingerprint FROM partner_connector_validation_runs
               WHERE connector_record_id = $1 AND completed_at IS NOT NULL
               ORDER BY created_at DESC LIMIT 1`,
-            [connectorId]
-          );
-          const prior = priorRes.rows[0] ?? null;
-          fingerprint = calculateSourceFingerprint(toFingerprintSource(rows));
+              [connectorId]
+            );
+            const prior = priorRes.rows[0] ?? null;
+            fingerprint = calculateSourceFingerprint(toFingerprintSource(rows));
 
-          if (prior && prior.source_submission_version !== sourceSubmissionVersion) {
-            outcome = "stale";
-            findings = [
-              {
-                severity: "blocking",
-                code: "source_version_mismatch",
-                entityType: "submission",
-                safeEntityReference: connector.partner_submission_id,
-                safeFieldName: "version",
-                safeMetadata: {},
-              },
-            ];
-          } else if (prior && prior.source_fingerprint !== null && prior.source_fingerprint !== fingerprint) {
-            outcome = "stale";
-            findings = [
-              {
-                severity: "blocking",
-                code: "source_fingerprint_mismatch",
-                entityType: "submission",
-                safeEntityReference: connector.partner_submission_id,
-                safeFieldName: null,
-                safeMetadata: {},
-              },
-            ];
-          } else {
-            findings = evaluateRules(connector, rows);
-            // submission_superseded: defence in depth against another connector record existing for
-            // the same Partner submission. Migration 0008's UNIQUE(handoff_id) already makes this
-            // structurally impossible under the current schema (one handoff -> at most one connector
-            // record, and a submission cannot produce two live 'pending' handoffs) — this check exists
-            // for the day that invariant is weakened by a future migration or a bug elsewhere, not
-            // because it currently fires in practice.
-            const supersededRes = await client.query<{ id: string }>(
-              `SELECT id FROM partner_connector_records
+            if (prior && prior.source_submission_version !== sourceSubmissionVersion) {
+              outcome = "stale";
+              findings = [
+                {
+                  severity: "blocking",
+                  code: "source_version_mismatch",
+                  entityType: "submission",
+                  safeEntityReference: connector.partner_submission_id,
+                  safeFieldName: "version",
+                  safeMetadata: {},
+                },
+              ];
+            } else if (prior && prior.source_fingerprint !== null && prior.source_fingerprint !== fingerprint) {
+              outcome = "stale";
+              findings = [
+                {
+                  severity: "blocking",
+                  code: "source_fingerprint_mismatch",
+                  entityType: "submission",
+                  safeEntityReference: connector.partner_submission_id,
+                  safeFieldName: null,
+                  safeMetadata: {},
+                },
+              ];
+            } else {
+              findings = evaluateRules(connector, rows);
+              // submission_superseded: defence in depth against another connector record existing for
+              // the same Partner submission. Migration 0008's UNIQUE(handoff_id) already makes this
+              // structurally impossible under the current schema (one handoff -> at most one connector
+              // record, and a submission cannot produce two live 'pending' handoffs) — this check exists
+              // for the day that invariant is weakened by a future migration or a bug elsewhere, not
+              // because it currently fires in practice.
+              const supersededRes = await client.query<{ id: string }>(
+                `SELECT id FROM partner_connector_records
                 WHERE partner_submission_id = $1 AND id != $2 AND state NOT IN ('rejected','cancelled')
                 LIMIT 1`,
-              [connector.partner_submission_id, connector.id]
-            );
-            if (supersededRes.rows.length > 0) {
-              findings.push({
-                severity: "blocking",
-                code: "submission_superseded",
-                entityType: "submission",
-                safeEntityReference: connector.partner_submission_id,
-                safeFieldName: null,
-                safeMetadata: {},
-              });
+                [connector.partner_submission_id, connector.id]
+              );
+              if (supersededRes.rows.length > 0) {
+                findings.push({
+                  severity: "blocking",
+                  code: "submission_superseded",
+                  entityType: "submission",
+                  safeEntityReference: connector.partner_submission_id,
+                  safeFieldName: null,
+                  safeMetadata: {},
+                });
+              }
+              outcome = findings.some((f) => f.severity === "blocking") ? "invalid" : "valid";
             }
-            outcome = findings.some((f) => f.severity === "blocking") ? "invalid" : "valid";
           }
+        } catch (err) {
+          if (err instanceof ConnectorError) throw err;
+          outcome = "failed";
+          findings = [
+            {
+              severity: "blocking",
+              code: "unknown_validation_error",
+              entityType: "connector_record",
+              safeEntityReference: connectorId,
+              safeFieldName: null,
+              safeMetadata: {},
+            },
+          ];
         }
-      } catch (err) {
-        if (err instanceof ConnectorError) throw err;
-        outcome = "failed";
-        findings = [
-          {
-            severity: "blocking",
-            code: "unknown_validation_error",
-            entityType: "connector_record",
-            safeEntityReference: connectorId,
-            safeFieldName: null,
-            safeMetadata: {},
-          },
-        ];
-      }
 
-      const blockingCount = findings.filter((f) => f.severity === "blocking").length;
-      const warningCount = findings.filter((f) => f.severity === "warning").length;
+        const blockingCount = findings.filter((f) => f.severity === "blocking").length;
+        const warningCount = findings.filter((f) => f.severity === "warning").length;
 
-      const runRes = await client.query<{ id: string }>(
-        `INSERT INTO partner_connector_validation_runs
+        const runRes = await client.query<{ id: string }>(
+          `INSERT INTO partner_connector_validation_runs
            (connector_record_id, validation_attempt, source_submission_version, source_handoff_status,
             source_fingerprint, source_fingerprint_version, outcome, blocking_error_count, warning_count, completed_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now())
          RETURNING id`,
-        [
-          connectorId,
-          connector.attempt_count,
-          sourceSubmissionVersion,
-          sourceHandoffStatus,
-          fingerprint,
-          fingerprint ? SOURCE_FINGERPRINT_VERSION : null,
-          outcome,
-          blockingCount,
-          warningCount,
-        ]
-      );
-      const runId = runRes.rows[0].id;
-      for (const f of findings) {
-        await client.query(
-          `INSERT INTO partner_connector_validation_findings
-             (validation_run_id, severity, code, entity_type, safe_entity_reference, safe_field_name, safe_metadata)
-           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [
-            runId,
-            f.severity,
-            f.code,
-            f.entityType,
-            f.safeEntityReference,
-            f.safeFieldName,
-            JSON.stringify(f.safeMetadata ?? {}),
+            connectorId,
+            connector.attempt_count,
+            sourceSubmissionVersion,
+            sourceHandoffStatus,
+            fingerprint,
+            fingerprint ? SOURCE_FINGERPRINT_VERSION : null,
+            outcome,
+            blockingCount,
+            warningCount,
           ]
         );
-      }
+        const runId = runRes.rows[0].id;
+        for (const f of findings) {
+          await client.query(
+            `INSERT INTO partner_connector_validation_findings
+             (validation_run_id, severity, code, entity_type, safe_entity_reference, safe_field_name, safe_metadata)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [
+              runId,
+              f.severity,
+              f.code,
+              f.entityType,
+              f.safeEntityReference,
+              f.safeFieldName,
+              JSON.stringify(f.safeMetadata ?? {}),
+            ]
+          );
+        }
 
-      const toState: ConnectorState =
-        outcome === "valid"
-          ? "ready_for_import"
-          : outcome === "cancelled"
-            ? "cancelled"
-            : outcome === "invalid"
-              ? "rejected"
-              : "failed";
-      const nextRetryClause = toState === "failed" ? `now() + interval '300 seconds'` : "NULL";
-      const errorCategory = toState === "failed" ? (outcome === "stale" ? "stale_source" : "validation_error") : null;
-      const errorCode = toState === "failed" ? (findings[0]?.code ?? "unknown_validation_error") : null;
+        const toState: ConnectorState =
+          outcome === "valid"
+            ? "ready_for_import"
+            : outcome === "cancelled"
+              ? "cancelled"
+              : outcome === "invalid"
+                ? "rejected"
+                : "failed";
+        const nextRetryClause = toState === "failed" ? `now() + interval '300 seconds'` : "NULL";
+        const errorCategory = toState === "failed" ? (outcome === "stale" ? "stale_source" : "validation_error") : null;
+        const errorCode = toState === "failed" ? (findings[0]?.code ?? "unknown_validation_error") : null;
 
-      const upd = await client.query<{ state: string }>(
-        `UPDATE partner_connector_records
+        let creditSettlement: ConnectorReservationReleaseResult | null = null;
+        if (toState === "rejected" || toState === "cancelled") {
+          try {
+            creditSettlement = await releasePartnerReservationForConnectorTerminalState(
+              client,
+              { id: connector.id, tenantId: connector.tenant_id, partnerSubmissionId: connector.partner_submission_id },
+              toState === "rejected" ? "validation_rejected" : "validation_cancelled"
+            );
+          } catch (err) {
+            if (err instanceof PartnerSubmissionCreditLifecycleError) {
+              throw new ConnectorError(
+                "credit_lifecycle_invariant",
+                "The validation terminal transition was blocked because its credit linkage requires reconciliation."
+              );
+            }
+            throw err;
+          }
+        }
+
+        const upd = await client.query<{ state: string }>(
+          `UPDATE partner_connector_records
             SET state = $1, version = version + 1, updated_at = now(),
                 last_error_category = $2, last_error_code = $3,
                 next_retry_at = ${nextRetryClause}
           WHERE id = $4 AND version = $5 AND state = 'validating'
           RETURNING state`,
-        [toState, errorCategory, errorCode, connectorId, expectedVersion]
-      );
-      if (upd.rows.length === 0) throw new ConnectorError("stale_claim", "Record changed since last read.");
+          [toState, errorCategory, errorCode, connectorId, expectedVersion]
+        );
+        if (upd.rows.length === 0) throw new ConnectorError("stale_claim", "Record changed since last read.");
 
-      await client.query(
-        `INSERT INTO partner_connector_events
+        await client.query(
+          `INSERT INTO partner_connector_events
            (connector_record_id, from_state, to_state, event_type, attempt_number, metadata, actor_type, actor_id)
          VALUES ($1,'validating',$2,'validated',$3,$4,'system',$5)`,
-        [
-          connectorId,
-          toState,
-          connector.attempt_count,
-          JSON.stringify({ outcome, blockingCount, warningCount }),
-          claimant,
-        ]
-      );
+          [
+            connectorId,
+            toState,
+            connector.attempt_count,
+            JSON.stringify({
+              outcome,
+              blockingCount,
+              warningCount,
+              ...(creditSettlement
+                ? {
+                    credit_settlement: {
+                      outcome: creditSettlement.outcome,
+                      reservation_id: creditSettlement.reservationId,
+                    },
+                  }
+                : {}),
+            }),
+            claimant,
+          ]
+        );
 
-      return {
-        id: runId,
-        connectorRecordId: connectorId,
-        outcome,
-        blockingErrorCount: blockingCount,
-        warningCount,
-        sourceFingerprint: fingerprint,
-        sourceFingerprintVersion: fingerprint ? SOURCE_FINGERPRINT_VERSION : null,
-        findings,
-      };
-    })
-  );
+        return {
+          id: runId,
+          connectorRecordId: connectorId,
+          outcome,
+          blockingErrorCount: blockingCount,
+          warningCount,
+          sourceFingerprint: fingerprint,
+          sourceFingerprintVersion: fingerprint ? SOURCE_FINGERPRINT_VERSION : null,
+          findings,
+        };
+      })
+    );
+  } catch (err) {
+    if (err instanceof ConnectorError && err.code === "credit_lifecycle_invariant") {
+      try {
+        if (!lifecycleTenantId) throw new Error("connector tenant was not established");
+        await recordConnectorCreditLifecycleFailure({
+          connectorId,
+          tenantId: lifecycleTenantId,
+          expectedVersion,
+          actorId: claimant,
+        });
+      } catch {
+        throw new ConnectorError(
+          "transient_database_error",
+          "The validation terminal transition was blocked and its reconciliation evidence could not be recorded.",
+          true
+        );
+      }
+    }
+    throw err;
+  }
 }
 
 /**

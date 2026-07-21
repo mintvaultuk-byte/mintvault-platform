@@ -123,6 +123,11 @@ describe("partner schema ↔ migration parity", () => {
       // deliberately named rollback-0034-partner-rbac-seed.sql (non-numbered) so the runner never
       // applies it.
       "0034_partner_rbac_seed.sql",
+      // G6D grants the trusted connector only the reservation-release privileges needed to
+      // settle a terminal Partner submission; it creates no mutable wallet balance. The source
+      // package currently carries the migration at its pre-integration number; the landing commit
+      // renumbers it above the applied staging maximum before deployment.
+      "0019_partner_submission_credit_lifecycle.sql",
     ]);
   });
 

@@ -101,6 +101,7 @@ describe("G4 ops page source assertions", () => {
       "pn-stat-enabled",
       "pn-records-table",
       "pn-detail",
+      "pn-credit-detail",
       "pn-reason-modal",
       "pn-reason-input",
       "pn-typed-confirm",
@@ -139,5 +140,13 @@ describe("G4 ops page source assertions", () => {
   it("renders the read-only global-disabled banner", () => {
     expect(src).toContain("pn-disabled-banner");
     expect(src).toContain("globally DISABLED");
+  });
+
+  it("renders automatic Partner credit details without adding manual accounting controls", () => {
+    expect(src).toContain("detail.data?.partnerCredit");
+    expect(src).toContain("partnerCredit.error");
+    expect(src).toContain("Credit reservation:");
+    expect(src).toContain("Wallet:");
+    expect(src).not.toMatch(/manual credit|adjust credits|credit adjustment/i);
   });
 });

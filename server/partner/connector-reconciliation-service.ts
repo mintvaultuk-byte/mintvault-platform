@@ -19,6 +19,12 @@ import type pg from "pg";
 import { withConnectorTx, connectorQuery } from "./connector-db";
 import { resolveGlobalFlag } from "./flags";
 import { ConnectorError, toConnectorError } from "./connector-errors";
+import {
+  PartnerSubmissionCreditLifecycleError,
+  releasePartnerReservationForConnectorTerminalState,
+  type ConnectorReservationReleaseResult,
+} from "./partner-submission-credit-lifecycle";
+import { recordConnectorCreditLifecycleFailure } from "./connector-credit-lifecycle-audit";
 import { calculateSourceFingerprint, SOURCE_FINGERPRINT_VERSION } from "./connector-fingerprint";
 import { loadValidationRows, toFingerprintSource, type ConnectorRow } from "./connector-validation-service";
 import { getConnectorImport, importValidatedConnector, type ConnectorImportRecord } from "./connector-import-service";
@@ -765,43 +771,101 @@ export async function resolveManualReview(params: {
   const { connectorId, actorId, reason, resolution, tenantId, expectedVersion } = params;
   requireActorAndReason(actorId, reason);
   const toState = resolution === "retry" ? "queued" : "cancelled";
-  return guarded(() =>
-    withConnectorTx(async (client) => {
-      const connRes = await client.query<{ state: string; tenant_id: string }>(
-        `SELECT state, tenant_id FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
-        [connectorId]
-      );
-      if (connRes.rows.length === 0) throw new ConnectorError("handoff_not_found", "Connector record not found.");
-      const connector = connRes.rows[0];
-      if (tenantId && connector.tenant_id !== tenantId) {
-        throw new ConnectorError("unauthorised", "This record does not belong to the specified tenant.");
-      }
-      if (connector.state !== "manual_review") {
-        throw new ConnectorError(
-          "invalid_state_transition",
-          `Cannot resolve manual_review from state ${connector.state}.`
+  let lifecycleTenantId: string | null = null;
+  try {
+    return await guarded(() =>
+      withConnectorTx(async (client) => {
+        const connRes = await client.query<{
+          id: string;
+          state: string;
+          tenant_id: string;
+          partner_submission_id: string;
+        }>(
+          `SELECT id, state, tenant_id, partner_submission_id FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
+          [connectorId]
         );
-      }
-      const upd = await client.query(
-        `UPDATE partner_connector_records
+        if (connRes.rows.length === 0) throw new ConnectorError("handoff_not_found", "Connector record not found.");
+        const connector = connRes.rows[0];
+        if (tenantId && connector.tenant_id !== tenantId) {
+          throw new ConnectorError("unauthorised", "This record does not belong to the specified tenant.");
+        }
+        lifecycleTenantId = connector.tenant_id;
+        if (connector.state !== "manual_review") {
+          throw new ConnectorError(
+            "invalid_state_transition",
+            `Cannot resolve manual_review from state ${connector.state}.`
+          );
+        }
+        let creditSettlement: ConnectorReservationReleaseResult | null = null;
+        if (resolution === "cancel") {
+          try {
+            creditSettlement = await releasePartnerReservationForConnectorTerminalState(
+              client,
+              { id: connector.id, tenantId: connector.tenant_id, partnerSubmissionId: connector.partner_submission_id },
+              "reconciliation_cancelled"
+            );
+          } catch (err) {
+            if (err instanceof PartnerSubmissionCreditLifecycleError) {
+              throw new ConnectorError(
+                "credit_lifecycle_invariant",
+                "The reconciliation cancellation was blocked because its credit linkage requires reconciliation."
+              );
+            }
+            throw err;
+          }
+        }
+        const upd = await client.query(
+          `UPDATE partner_connector_records
             SET state = $1, version = version + 1, updated_at = now(),
                 claimed_by = NULL, claimed_at = NULL, claim_expires_at = NULL, next_retry_at = NULL,
                 completed_at = CASE WHEN $1 = 'cancelled' THEN now() ELSE completed_at END
           WHERE id = $2 AND version = $3`,
-        [toState, connectorId, expectedVersion]
-      );
-      if (upd.rowCount === 0) throw new ConnectorError("import_version_conflict", "Record changed since last read.");
-      await writeReconciliationEvent(
-        client,
-        connectorId,
-        "manual_review",
-        toState,
-        "reconciliation_resolved",
-        { reason, resolution },
-        actorId
-      );
-    }, tenantId)
-  );
+          [toState, connectorId, expectedVersion]
+        );
+        if (upd.rowCount === 0) throw new ConnectorError("import_version_conflict", "Record changed since last read.");
+        await writeReconciliationEvent(
+          client,
+          connectorId,
+          "manual_review",
+          toState,
+          "reconciliation_resolved",
+          {
+            reason,
+            resolution,
+            ...(creditSettlement
+              ? {
+                  credit_settlement: {
+                    outcome: creditSettlement.outcome,
+                    reservation_id: creditSettlement.reservationId,
+                  },
+                }
+              : {}),
+          },
+          actorId
+        );
+      }, tenantId)
+    );
+  } catch (err) {
+    if (err instanceof ConnectorError && err.code === "credit_lifecycle_invariant") {
+      try {
+        if (!lifecycleTenantId) throw new Error("connector tenant was not established");
+        await recordConnectorCreditLifecycleFailure({
+          connectorId,
+          tenantId: lifecycleTenantId,
+          expectedVersion,
+          actorId,
+          actorType: "operator",
+        });
+      } catch {
+        throw new ConnectorError(
+          "transient_database_error",
+          "The reconciliation cancellation was blocked and its evidence could not be recorded.",
+          true
+        );
+      }
+    }
+    throw err;
+  }
 }
 
 /**
@@ -818,40 +882,91 @@ export async function acknowledgePermanentFailure(params: {
   await assertConnectorActive();
   const { connectorId, actorId, reason, tenantId, expectedVersion } = params;
   requireActorAndReason(actorId, reason);
-  return guarded(() =>
-    withConnectorTx(async (client) => {
-      const connRes = await client.query<{ state: string; tenant_id: string }>(
-        `SELECT state, tenant_id FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
-        [connectorId]
-      );
-      if (connRes.rows.length === 0) throw new ConnectorError("handoff_not_found", "Connector record not found.");
-      const connector = connRes.rows[0];
-      if (tenantId && connector.tenant_id !== tenantId) {
-        throw new ConnectorError("unauthorised", "This record does not belong to the specified tenant.");
-      }
-      if (connector.state !== "failed") {
-        throw new ConnectorError(
-          "invalid_state_transition",
-          `Cannot acknowledge permanent failure from state ${connector.state}.`
+  let lifecycleTenantId: string | null = null;
+  try {
+    return await guarded(() =>
+      withConnectorTx(async (client) => {
+        const connRes = await client.query<{
+          id: string;
+          state: string;
+          tenant_id: string;
+          partner_submission_id: string;
+        }>(
+          `SELECT id, state, tenant_id, partner_submission_id FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
+          [connectorId]
         );
-      }
-      const upd = await client.query(
-        `UPDATE partner_connector_records
+        if (connRes.rows.length === 0) throw new ConnectorError("handoff_not_found", "Connector record not found.");
+        const connector = connRes.rows[0];
+        if (tenantId && connector.tenant_id !== tenantId) {
+          throw new ConnectorError("unauthorised", "This record does not belong to the specified tenant.");
+        }
+        lifecycleTenantId = connector.tenant_id;
+        if (connector.state !== "failed") {
+          throw new ConnectorError(
+            "invalid_state_transition",
+            `Cannot acknowledge permanent failure from state ${connector.state}.`
+          );
+        }
+        let creditSettlement: ConnectorReservationReleaseResult;
+        try {
+          creditSettlement = await releasePartnerReservationForConnectorTerminalState(
+            client,
+            { id: connector.id, tenantId: connector.tenant_id, partnerSubmissionId: connector.partner_submission_id },
+            "permanent_failure_cancelled"
+          );
+        } catch (err) {
+          if (err instanceof PartnerSubmissionCreditLifecycleError) {
+            throw new ConnectorError(
+              "credit_lifecycle_invariant",
+              "The permanent-failure cancellation was blocked because its credit linkage requires reconciliation."
+            );
+          }
+          throw err;
+        }
+        const upd = await client.query(
+          `UPDATE partner_connector_records
             SET state = 'cancelled', version = version + 1, updated_at = now(), completed_at = now(),
                 claimed_by = NULL, claimed_at = NULL, claim_expires_at = NULL, next_retry_at = NULL
           WHERE id = $1 AND version = $2`,
-        [connectorId, expectedVersion]
-      );
-      if (upd.rowCount === 0) throw new ConnectorError("import_version_conflict", "Record changed since last read.");
-      await writeReconciliationEvent(
-        client,
-        connectorId,
-        "failed",
-        "cancelled",
-        "reconciliation_permanent_failure_acknowledged",
-        { reason },
-        actorId
-      );
-    }, tenantId)
-  );
+          [connectorId, expectedVersion]
+        );
+        if (upd.rowCount === 0) throw new ConnectorError("import_version_conflict", "Record changed since last read.");
+        await writeReconciliationEvent(
+          client,
+          connectorId,
+          "failed",
+          "cancelled",
+          "reconciliation_permanent_failure_acknowledged",
+          {
+            reason,
+            credit_settlement: {
+              outcome: creditSettlement.outcome,
+              reservation_id: creditSettlement.reservationId,
+            },
+          },
+          actorId
+        );
+      }, tenantId)
+    );
+  } catch (err) {
+    if (err instanceof ConnectorError && err.code === "credit_lifecycle_invariant") {
+      try {
+        if (!lifecycleTenantId) throw new Error("connector tenant was not established");
+        await recordConnectorCreditLifecycleFailure({
+          connectorId,
+          tenantId: lifecycleTenantId,
+          expectedVersion,
+          actorId,
+          actorType: "operator",
+        });
+      } catch {
+        throw new ConnectorError(
+          "transient_database_error",
+          "The permanent-failure cancellation was blocked and its evidence could not be recorded.",
+          true
+        );
+      }
+    }
+    throw err;
+  }
 }

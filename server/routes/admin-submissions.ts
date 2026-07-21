@@ -13,6 +13,7 @@ import {
 } from "../email";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { PartnerSubmissionCreditLifecycleError } from "../partner/partner-submission-credit-lifecycle";
 
 function getSignedUrlSecret(): string {
   const s = process.env.SIGNED_URL_SECRET;
@@ -182,6 +183,7 @@ export function registerAdminSubmissionRoutes(app: Express): void {
         returnCarrier,
         returnService,
         returnPostageCost: returnPostageCost ? parseInt(returnPostageCost, 10) : undefined,
+        creditActorEmail: req.session.adminEmail || "admin",
       });
 
       await storage.writeAuditLog(
@@ -219,7 +221,13 @@ export function registerAdminSubmissionRoutes(app: Express): void {
       if (newStatus === "received" && emailData.email) {
         sendCardsReceived(emailData).catch((e: any) =>
           storage
-            .writeAuditLog("submission", String(submission.id ?? submission.submissionId), "email_cards_received_failed", null, { error: e?.message })
+            .writeAuditLog(
+              "submission",
+              String(submission.id ?? submission.submissionId),
+              "email_cards_received_failed",
+              null,
+              { error: e?.message }
+            )
             .catch(() => {})
         );
       } else if (newStatus === "in_grading" && emailData.email) {
@@ -232,13 +240,25 @@ export function registerAdminSubmissionRoutes(app: Express): void {
           turnaroundDays: submission.turnaroundDays ?? null,
         }).catch((e: any) =>
           storage
-            .writeAuditLog("submission", String(submission.id ?? submission.submissionId), "email_grading_started_failed", null, { error: e?.message })
+            .writeAuditLog(
+              "submission",
+              String(submission.id ?? submission.submissionId),
+              "email_grading_started_failed",
+              null,
+              { error: e?.message }
+            )
             .catch(() => {})
         );
       } else if ((newStatus === "completed" || newStatus === "ready_to_return") && emailData.email) {
         sendGradingComplete(emailData).catch((e: any) =>
           storage
-            .writeAuditLog("submission", String(submission.id ?? submission.submissionId), "email_grading_complete_failed", null, { error: e?.message })
+            .writeAuditLog(
+              "submission",
+              String(submission.id ?? submission.submissionId),
+              "email_grading_complete_failed",
+              null,
+              { error: e?.message }
+            )
             .catch(() => {})
         );
       } else if (newStatus === "shipped" && emailData.email) {
@@ -249,7 +269,13 @@ export function registerAdminSubmissionRoutes(app: Express): void {
           service: returnService || (submission as any).returnService || undefined,
         }).catch((e: any) =>
           storage
-            .writeAuditLog("submission", String(submission.id ?? submission.submissionId), "email_shipped_failed", null, { error: e?.message })
+            .writeAuditLog(
+              "submission",
+              String(submission.id ?? submission.submissionId),
+              "email_shipped_failed",
+              null,
+              { error: e?.message }
+            )
             .catch(() => {})
         );
       } else if (newStatus === "delivered" && emailData.email) {
@@ -259,13 +285,22 @@ export function registerAdminSubmissionRoutes(app: Express): void {
           submissionId: emailData.submissionId,
         }).catch((e: any) =>
           storage
-            .writeAuditLog("submission", String(submission.id ?? submission.submissionId), "email_delivered_failed", null, { error: e?.message })
+            .writeAuditLog(
+              "submission",
+              String(submission.id ?? submission.submissionId),
+              "email_delivered_failed",
+              null,
+              { error: e?.message }
+            )
             .catch(() => {})
         );
       }
 
       res.json({ success: true, submission: updated });
     } catch (error: any) {
+      if (error instanceof PartnerSubmissionCreditLifecycleError) {
+        return res.status(409).json({ error: error.message });
+      }
       console.error("Update submission status error:", error.message);
       res.status(500).json({ error: "Failed to update submission status" });
     }
@@ -640,6 +675,31 @@ export function registerAdminSubmissionRoutes(app: Express): void {
         return res.status(404).json({ error: "Submission not found" });
       }
       const current = String(submission.status || "").toLowerCase();
+
+      // G6D consumes the Partner credit when grading completes. Rewinding one of those destination
+      // submissions would make the physical lifecycle appear pre-settlement while the immutable
+      // debit remains consumed. There is no compensating-credit workflow in this endpoint, so fail
+      // explicitly rather than creating an irreversible overcharge. A pre-connector database has
+      // no mapping table and retains its established step-back behaviour.
+      const partnerMappingTable = await db.execute(sql`
+        SELECT to_regclass('public.partner_connector_imports') AS relation
+      `);
+      if ((partnerMappingTable.rows[0] as { relation?: string | null } | undefined)?.relation) {
+        const partnerLink = await db.execute(sql`
+          SELECT 1
+            FROM partner_connector_imports
+           WHERE destination_submission_id = ${typeof submission.id === "string" ? parseInt(submission.id, 10) : submission.id}
+           LIMIT 1
+        `);
+        if (partnerLink.rows.length > 0) {
+          return res.status(409).json({
+            error:
+              "Partner-linked submissions cannot be stepped back because their grading credit is immutable. Use the approved credit-adjustment or reconciliation path.",
+            code: "partner_credit_lifecycle_conflict",
+            currentStatus: current,
+          });
+        }
+      }
 
       // Single source of truth for backward pairs — must match the trigger.
       const PREV: Record<string, string> = {

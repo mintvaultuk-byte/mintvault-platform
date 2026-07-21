@@ -43,7 +43,12 @@ describe("Partner Network G6A wallet service on PostgreSQL 17.10", () => {
     const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
     await migrator.connect();
     try {
-      await applyMigrations(migrator, listMigrationFiles());
+      // G6A wallet coverage intentionally stops before reservation/lifecycle
+      // migrations; G6D has its own owner-operated PostgreSQL suite.
+      await applyMigrations(
+        migrator,
+        listMigrationFiles().filter((file) => Number(file.number) <= 16)
+      );
     } finally {
       await migrator.end();
     }
