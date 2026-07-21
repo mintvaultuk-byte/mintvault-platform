@@ -69,6 +69,12 @@ export const PARTNER_MIGRATIONS_WITH_G5 = [...PARTNER_MIGRATIONS_WITH_G4, "0015_
  */
 export const PARTNER_MIGRATIONS_WITH_G6A = [...PARTNER_MIGRATIONS_WITH_G5, "0016_partner_wallet_ledger"] as const;
 
+/** G6B — partner credit reservation lifecycle + append-only reservation event evidence. */
+export const PARTNER_MIGRATIONS_WITH_G6B = [
+  ...PARTNER_MIGRATIONS_WITH_G6A,
+  "0017_partner_credit_reservations",
+] as const;
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 

@@ -39,7 +39,10 @@ async function migrate(): Promise<void> {
   const migrator = new Client({ connectionString: migratorUrlFrom(adminUrl) });
   await migrator.connect();
   try {
-    await applyMigrations(migrator, listMigrationFiles());
+    await applyMigrations(
+      migrator,
+      listMigrationFiles().filter((file) => Number(file.number) <= 16)
+    );
   } finally {
     await migrator.end();
   }
@@ -136,7 +139,10 @@ describe("Partner Network G6A migration on PostgreSQL 17.10", () => {
     const migrator = new Client({ connectionString: migratorUrlFrom(adminUrl) });
     await migrator.connect();
     try {
-      const plan = await planMigrations(migrator, listMigrationFiles());
+      const plan = await planMigrations(
+        migrator,
+        listMigrationFiles().filter((file) => Number(file.number) <= 16)
+      );
       expect(plan.pending).toHaveLength(0);
       expect(plan.checksumMismatches).toHaveLength(0);
     } finally {

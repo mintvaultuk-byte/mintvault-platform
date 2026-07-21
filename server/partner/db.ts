@@ -85,7 +85,7 @@ export async function withTenant<T>(ctx: TenantContext, fn: (client: pg.PoolClie
  */
 export async function partnerRuntimeQuery<T extends pg.QueryResultRow = pg.QueryResultRow>(
   sql: string,
-  params: unknown[] = [],
+  params: unknown[] = []
 ): Promise<pg.QueryResult<T>> {
   const client = await getPool().connect();
   try {
@@ -106,12 +106,31 @@ export function partnerAdminDbConfigured(): boolean {
 }
 export async function partnerAdminQuery<T extends pg.QueryResultRow = pg.QueryResultRow>(
   sql: string,
-  params: unknown[] = [],
+  params: unknown[] = []
 ): Promise<pg.QueryResult<T>> {
   const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
   if (!url) throw new Error("No admin DB URL configured for partner control shell.");
   if (!adminPool) adminPool = new pg.Pool({ connectionString: url, max: 4 });
   return adminPool.query<T>(sql, params);
+}
+
+/** Privileged partner-schema transaction helper for domain services that need row locks. */
+export async function withPartnerAdminTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
+  if (!url) throw new Error("No admin DB URL configured for partner control shell.");
+  if (!adminPool) adminPool = new pg.Pool({ connectionString: url, max: 4 });
+  const client = await adminPool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /** Test/shutdown helper. */
