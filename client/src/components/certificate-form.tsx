@@ -47,6 +47,7 @@ import {
   type UnifiedOption,
 } from "@/lib/unifiedCardOptions";
 import { DESIGNATION_OPTIONS, getDesignationLabel } from "@/lib/designationOptions";
+import { readLastCardContext, writeLastCardContext, type LastCardContext } from "@/lib/last-card-context";
 import GradientButton from "@/components/ui/gradient-button";
 
 interface Props {
@@ -250,16 +251,10 @@ export default function CertificateForm({
   // so a box of the same set fills in one click. Display convenience only: it is
   // captured locally on Continue and only applied when the grader clicks it, and
   // it never overwrites a field that already has a value.
-  const [lastCardContext, setLastCardContext] = useState<{
-    cardGame: string;
-    setName: string;
-    setId: string;
-    year: string;
-    language: string;
-  } | null>(() => {
+  const [lastCardContext, setLastCardContext] = useState<LastCardContext | null>(() => {
+    if (typeof window === "undefined") return null;
     try {
-      const raw = JSON.parse(localStorage.getItem("mv.lastCardContext") || "null");
-      return raw && typeof raw === "object" ? raw : null;
+      return readLastCardContext(window.sessionStorage);
     } catch {
       return null;
     }
@@ -267,12 +262,8 @@ export default function CertificateForm({
   function captureLastCardContext() {
     const ctx = { cardGame: form.cardGame, setName: form.setName, setId, year: form.year, language: form.language };
     if (!ctx.setName && !ctx.year) return; // nothing worth remembering yet
-    try {
-      localStorage.setItem("mv.lastCardContext", JSON.stringify(ctx));
-    } catch {
-      /* private mode */
-    }
-    setLastCardContext(ctx);
+    const safeContext = typeof window === "undefined" ? ctx : writeLastCardContext(window.sessionStorage, ctx);
+    setLastCardContext(safeContext);
   }
   function applyLastCardContext() {
     if (!lastCardContext) return;

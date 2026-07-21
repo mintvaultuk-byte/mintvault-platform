@@ -1,4 +1,5 @@
 import rateLimit from "express-rate-limit";
+import type { Request } from "express";
 
 // The admin's email, exempt from certain public rate-limits via the
 // x-mv-admin-email header. Relocated here from routes.ts so the reissue/estimate
@@ -227,3 +228,70 @@ export function createGraderEditSubmissionRateLimit(options: { windowMs?: number
 }
 
 export const graderEditSubmissionRateLimit = createGraderEditSubmissionRateLimit();
+
+export const GRADER_CERTIFICATE_IMAGES_READ_RATE_LIMIT_MAX = 60;
+export const GRADER_CERTIFICATE_GRADING_READ_RATE_LIMIT_MAX = 20;
+export const GRADER_CORRECTION_HISTORY_READ_RATE_LIMIT_MAX = 60;
+export const GRADER_CERTIFICATE_READ_RATE_LIMIT_WINDOW_MS = 60_000;
+
+interface GraderCertificateReadRateLimitOptions {
+  windowMs?: number;
+  max?: number;
+}
+
+/** Prefer a stable authenticated identity; req.ip honours the app's trusted-proxy configuration. */
+function graderRequesterKey(req: Request): string {
+  const session = req.session as { staffId?: unknown; graderId?: unknown } | undefined;
+  const staffId = session?.staffId || session?.graderId;
+  if (staffId) return `staff:${staffId}`;
+  return `ip:${req.ip || req.socket.remoteAddress || "unknown"}`;
+}
+
+function createGraderCertificateReadRateLimit(
+  bucket: string,
+  message: string,
+  defaults: Required<GraderCertificateReadRateLimitOptions>,
+  options: GraderCertificateReadRateLimitOptions = {}
+) {
+  return rateLimit({
+    windowMs: options.windowMs ?? defaults.windowMs,
+    max: options.max ?? defaults.max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    validate: false,
+    message: { error: message },
+    // Each route has its own limiter instance and bucket, so read budgets never couple.
+    keyGenerator: (req) => `${bucket}:${graderRequesterKey(req)}`,
+  });
+}
+
+export function createGraderCertificateImagesReadRateLimit(options: GraderCertificateReadRateLimitOptions = {}) {
+  return createGraderCertificateReadRateLimit(
+    "grader-certificate-images-read",
+    "Too many certificate image requests — please slow down and try again shortly.",
+    { windowMs: GRADER_CERTIFICATE_READ_RATE_LIMIT_WINDOW_MS, max: GRADER_CERTIFICATE_IMAGES_READ_RATE_LIMIT_MAX },
+    options
+  );
+}
+
+export function createGraderCertificateGradingReadRateLimit(options: GraderCertificateReadRateLimitOptions = {}) {
+  return createGraderCertificateReadRateLimit(
+    "grader-certificate-grading-read",
+    "Too many grading requests — please slow down and try again shortly.",
+    { windowMs: GRADER_CERTIFICATE_READ_RATE_LIMIT_WINDOW_MS, max: GRADER_CERTIFICATE_GRADING_READ_RATE_LIMIT_MAX },
+    options
+  );
+}
+
+export function createGraderCorrectionHistoryReadRateLimit(options: GraderCertificateReadRateLimitOptions = {}) {
+  return createGraderCertificateReadRateLimit(
+    "grader-correction-history-read",
+    "Too many correction-history requests — please slow down and try again shortly.",
+    { windowMs: GRADER_CERTIFICATE_READ_RATE_LIMIT_WINDOW_MS, max: GRADER_CORRECTION_HISTORY_READ_RATE_LIMIT_MAX },
+    options
+  );
+}
+
+export const graderCertificateImagesReadRateLimit = createGraderCertificateImagesReadRateLimit();
+export const graderCertificateGradingReadRateLimit = createGraderCertificateGradingReadRateLimit();
+export const graderCorrectionHistoryReadRateLimit = createGraderCorrectionHistoryReadRateLimit();

@@ -231,7 +231,7 @@ describe("correction route, audit, image, stats, and UI wiring", () => {
 
   it("approved grader reads are pure and staff writes remain fail-closed", () => {
     const readHandler = graderRoutes.slice(
-      graderRoutes.indexOf('app.get("/api/grader/certificates/:id/grading"'),
+      graderRoutes.indexOf('"/api/grader/certificates/:id/grading"'),
       graderRoutes.indexOf('app.put("/api/grader/certificates/:id/edit-submission"')
     );
     expect(readHandler).toContain("authorizeGraderCertRead");

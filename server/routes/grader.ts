@@ -48,7 +48,12 @@ import {
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "../lib/correction-fields";
-import { graderEditSubmissionRateLimit } from "../lib/rate-limiters";
+import {
+  graderCertificateGradingReadRateLimit,
+  graderCertificateImagesReadRateLimit,
+  graderCorrectionHistoryReadRateLimit,
+  graderEditSubmissionRateLimit,
+} from "../lib/rate-limiters";
 import { createDbCustomSetEditorStore, editCustomSetDetails, CustomSetEditError } from "../services/custom-set-editor";
 import {
   STAFF_ABSOLUTE_SESSION_MS,
@@ -294,50 +299,61 @@ export function registerGraderRoutes(app: Express): void {
   });
 
   // ── Grader cert reads (ownership-scoped, PII-free) ──────────────────────────
-  app.get("/api/grader/certificates/:id/images", requireCapability("grade"), async (req: Request, res: Response) => {
-    const certId = parseInt(String(req.params.id), 10);
-    const auth = await authorizeGraderCertRead(req, certId);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-    const payload = await buildCertImagesPayload(certId);
-    if (!payload) return res.status(404).json({ error: "Certificate not found" });
-    return res.json(payload);
-  });
-
-  app.get("/api/grader/certificates/:id/grading", requireCapability("grade"), async (req: Request, res: Response) => {
-    const certId = parseInt(String(req.params.id), 10);
-    const auth = await authorizeGraderCertRead(req, certId);
-    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
-    let payload = await buildCertGradingPayload(certId);
-    if (!payload) return res.status(404).json({ error: "Certificate not found" });
-    if (auth.gradingStatus === "approved") return res.json(payload);
-    // Card IDENTIFICATION is deferred off the scan path. If it hasn't run for this
-    // cert, compute it NOW (bounded ~20s) and re-read, so it's present on first
-    // paint — the grader sees a computing state during the wait, never silently
-    // absent until refresh. Fails gracefully (cert still served).
-    // Per-device AI-identify toggle: the client sends ?aiIdentify=0 when OFF, which
-    // SKIPS the identify call entirely (grader enters the identity manually).
-    const aiIdentifyOff = req.query.aiIdentify === "0";
-    const ai = (payload as any).aiAnalysis;
-    if (!aiIdentifyOff && (!ai || (typeof ai === "object" && Object.keys(ai).length === 0))) {
-      const { ensureAiDraft } = await import("../scan-ingest-service");
-      await ensureAiDraft(certId);
-      payload = (await buildCertGradingPayload(certId)) ?? payload;
+  app.get(
+    "/api/grader/certificates/:id/images",
+    requireCapability("grade"),
+    graderCertificateImagesReadRateLimit,
+    async (req: Request, res: Response) => {
+      const certId = parseInt(String(req.params.id), 10);
+      const auth = await authorizeGraderCertRead(req, certId);
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      const payload = await buildCertImagesPayload(certId);
+      if (!payload) return res.status(404).json({ error: "Certificate not found" });
+      return res.json(payload);
     }
-    // Self-heal a card_name that was clobbered to "" (the on-open identify wrote
-    // the real name to the snapshot, but a downstream save emptied the column).
-    // Cheap, deterministic, no AI re-run. Re-read so the grader sees the fix now.
-    if (!aiIdentifyOff && (!(payload as any).cardName || String((payload as any).cardName).trim() === "")) {
-      const { repairEmptyIdentityFromSnapshot } = await import("../scan-ingest-service");
-      if (await repairEmptyIdentityFromSnapshot(certId)) {
+  );
+
+  app.get(
+    "/api/grader/certificates/:id/grading",
+    requireCapability("grade"),
+    graderCertificateGradingReadRateLimit,
+    async (req: Request, res: Response) => {
+      const certId = parseInt(String(req.params.id), 10);
+      const auth = await authorizeGraderCertRead(req, certId);
+      if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+      let payload = await buildCertGradingPayload(certId);
+      if (!payload) return res.status(404).json({ error: "Certificate not found" });
+      if (auth.gradingStatus === "approved") return res.json(payload);
+      // Card IDENTIFICATION is deferred off the scan path. If it hasn't run for this
+      // cert, compute it NOW (bounded ~20s) and re-read, so it's present on first
+      // paint — the grader sees a computing state during the wait, never silently
+      // absent until refresh. Fails gracefully (cert still served).
+      // Per-device AI-identify toggle: the client sends ?aiIdentify=0 when OFF, which
+      // SKIPS the identify call entirely (grader enters the identity manually).
+      const aiIdentifyOff = req.query.aiIdentify === "0";
+      const ai = (payload as any).aiAnalysis;
+      if (!aiIdentifyOff && (!ai || (typeof ai === "object" && Object.keys(ai).length === 0))) {
+        const { ensureAiDraft } = await import("../scan-ingest-service");
+        await ensureAiDraft(certId);
         payload = (await buildCertGradingPayload(certId)) ?? payload;
       }
+      // Self-heal a card_name that was clobbered to "" (the on-open identify wrote
+      // the real name to the snapshot, but a downstream save emptied the column).
+      // Cheap, deterministic, no AI re-run. Re-read so the grader sees the fix now.
+      if (!aiIdentifyOff && (!(payload as any).cardName || String((payload as any).cardName).trim() === "")) {
+        const { repairEmptyIdentityFromSnapshot } = await import("../scan-ingest-service");
+        if (await repairEmptyIdentityFromSnapshot(certId)) {
+          payload = (await buildCertGradingPayload(certId)) ?? payload;
+        }
+      }
+      return res.json(payload);
     }
-    return res.json(payload);
-  });
+  );
 
   app.get(
     "/api/grader/certificates/:id/corrections",
     requireCapability("grade"),
+    graderCorrectionHistoryReadRateLimit,
     async (req: Request, res: Response) => {
       try {
         const certId = parseInt(String(req.params.id), 10);
