@@ -14,6 +14,13 @@ export const WALLET_ERROR_CODES = [
   "UNAUTHENTICATED",
   "ORG_NOT_FOUND",
   "WALLET_NOT_FOUND",
+  "WALLET_CLOSED",
+  "INSUFFICIENT_AVAILABLE_CREDITS",
+  "ACTOR_REQUIRED",
+  "INVALID_AMOUNT",
+  "INVALID_REASON",
+  "INVALID_IDEMPOTENCY_KEY",
+  "INVALID_PAGINATION",
   "VALIDATION_ERROR",
   "IDEMPOTENCY_CONFLICT",
   "LEDGER_IMMUTABLE",
@@ -58,9 +65,12 @@ export function walletStatusFor(code: WalletErrorCode): number {
     case "ORG_NOT_FOUND":
     case "WALLET_NOT_FOUND":
       return 404;
+    case "ACTOR_REQUIRED":
+      return 401;
     case "IDEMPOTENCY_CONFLICT":
-      return 409;
     case "LEDGER_IMMUTABLE":
+    case "WALLET_CLOSED":
+    case "INSUFFICIENT_AVAILABLE_CREDITS":
       return 409;
     case "INTERNAL_ERROR":
       return 500;
