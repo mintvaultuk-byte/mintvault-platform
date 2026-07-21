@@ -15,6 +15,7 @@ import {
   clearPendingAdmin,
   ADMIN_EMAIL,
   FAILED_LOGIN_DELAY_MS,
+  isSuperAdminEmail,
 } from "../auth";
 import { createMagicToken, verifyMagicToken, requireCustomer } from "../customer-auth";
 import { sendMagicLink, sendPinResetLink } from "../email";
@@ -256,7 +257,7 @@ export function registerAuthRoutes(app: Express): void {
         await clearAdminSession(req, res, "admin_session_expired");
         return res.status(401).json({ authenticated: false, reason: "session_expired" });
       }
-      return res.json({ authenticated: true, email: status.email });
+      return res.json({ authenticated: true, email: status.email, isSuperAdmin: isSuperAdminEmail(status.email) });
     }
 
     if (status.reason === "session_expired") {

@@ -47,6 +47,7 @@ import {
   type UnifiedOption,
 } from "@/lib/unifiedCardOptions";
 import { DESIGNATION_OPTIONS, getDesignationLabel } from "@/lib/designationOptions";
+import { readLastCardContext, writeLastCardContext, type LastCardContext } from "@/lib/last-card-context";
 import GradientButton from "@/components/ui/gradient-button";
 
 interface Props {
@@ -74,6 +75,8 @@ interface Props {
   };
   /** Optional read-only batch header (customer / submission / remaining). */
   batch?: { customer?: string; submissionId?: string; remaining?: number };
+  correctionMode?: boolean;
+  onCorrectionMetadataReady?: (getFormData: () => FormData) => void;
 }
 
 /**
@@ -170,6 +173,8 @@ export default function CertificateForm({
   workstationSlot,
   queue,
   batch,
+  correctionMode = false,
+  onCorrectionMetadataReady,
 }: Props) {
   const isEdit = !!certificate;
   const { toast } = useToast();
@@ -246,16 +251,10 @@ export default function CertificateForm({
   // so a box of the same set fills in one click. Display convenience only: it is
   // captured locally on Continue and only applied when the grader clicks it, and
   // it never overwrites a field that already has a value.
-  const [lastCardContext, setLastCardContext] = useState<{
-    cardGame: string;
-    setName: string;
-    setId: string;
-    year: string;
-    language: string;
-  } | null>(() => {
+  const [lastCardContext, setLastCardContext] = useState<LastCardContext | null>(() => {
+    if (typeof window === "undefined") return null;
     try {
-      const raw = JSON.parse(localStorage.getItem("mv.lastCardContext") || "null");
-      return raw && typeof raw === "object" ? raw : null;
+      return readLastCardContext(window.sessionStorage);
     } catch {
       return null;
     }
@@ -263,12 +262,8 @@ export default function CertificateForm({
   function captureLastCardContext() {
     const ctx = { cardGame: form.cardGame, setName: form.setName, setId, year: form.year, language: form.language };
     if (!ctx.setName && !ctx.year) return; // nothing worth remembering yet
-    try {
-      localStorage.setItem("mv.lastCardContext", JSON.stringify(ctx));
-    } catch {
-      /* private mode */
-    }
-    setLastCardContext(ctx);
+    const safeContext = typeof window === "undefined" ? ctx : writeLastCardContext(window.sessionStorage, ctx);
+    setLastCardContext(safeContext);
   }
   function applyLastCardContext() {
     if (!lastCardContext) return;
@@ -1173,6 +1168,12 @@ export default function CertificateForm({
     return formData;
   }
 
+  useEffect(() => {
+    if (!onCorrectionMetadataReady) return;
+    onCorrectionMetadataReady(() => buildCertFormData(false));
+    return () => onCorrectionMetadataReady(() => new FormData());
+  }, [onCorrectionMetadataReady, form, designations, frontImage, backImage, loadedSnapshotRef.current]);
+
   const mutation = useMutation({
     mutationFn: async () => {
       // Only the "edit an already-approved certificate" path needs to confirm
@@ -1333,6 +1334,8 @@ export default function CertificateForm({
     // navigates away via onSuccess. Only the create flow and the
     // already-approved "Save Changes" flow use this explicit submit path.
     if (autoSaveEligible) return;
+
+    if (correctionMode) return;
 
     if (!form.cardGame || !form.setName || !form.cardName || !form.cardNumber || !form.year) {
       setError("Please fill in all required fields: Game, Set, Card Name, Card Number, Year");
@@ -3520,7 +3523,14 @@ export default function CertificateForm({
             flow (no certificate yet) and an already-approved/published
             certificate (server has no approval lock of its own — see
             autoSaveEligible) both keep an explicit save action. */}
-              {autoSaveEligible ? (
+              {correctionMode ? (
+                <div
+                  className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-6"
+                  data-testid="text-correction-save-owned-by-parent"
+                >
+                  Correction Mode uses the Save Correction button.
+                </div>
+              ) : autoSaveEligible ? (
                 <div
                   className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-6"
                   data-testid="text-autosave-status"

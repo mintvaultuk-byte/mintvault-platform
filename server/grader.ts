@@ -18,6 +18,7 @@ import { sql } from "drizzle-orm";
 import { storage } from "./storage";
 import { getR2SignedUrl } from "./r2";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
+import { CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "./lib/correction-fields";
 
 /**
  * AUTO-PUBLISH FLIP. When false (default) a grader's submit moves the card to
@@ -188,6 +189,7 @@ export async function getSubmissionIdForCert(certId: number): Promise<number | n
 export interface CertAssignment {
   certId: number;
   assignedGraderId: string | null;
+  gradedBy: string | null;
   gradingStatus: GradingStatus;
   redoCount: number;
   rejectionReason: string | null;
@@ -196,7 +198,7 @@ export interface CertAssignment {
 /** Cert-level assignment/workflow read (grader v2 — no submission join). */
 export async function getCertAssignment(certId: number): Promise<CertAssignment | null> {
   const r = await db.execute(sql`
-    SELECT id, assigned_grader_id, grader_status, redo_count, rejection_reason
+    SELECT id, assigned_grader_id, graded_by, grader_status, redo_count, rejection_reason
     FROM certificates WHERE id = ${certId} AND deleted_at IS NULL LIMIT 1
   `);
   const row = r.rows[0] as any;
@@ -204,6 +206,7 @@ export async function getCertAssignment(certId: number): Promise<CertAssignment 
   return {
     certId: Number(row.id),
     assignedGraderId: row.assigned_grader_id ?? null,
+    gradedBy: row.graded_by ?? null,
     gradingStatus: (row.grader_status ?? "unassigned") as GradingStatus,
     redoCount: Number(row.redo_count ?? 0),
     rejectionReason: row.rejection_reason ?? null,
@@ -1098,9 +1101,7 @@ export async function getGraderEarnings(graderId: string) {
 export async function getOperatorReviewRate(userId: string | null): Promise<number> {
   if (!userId) return 100;
   try {
-    const r = await db.execute(
-      sql`SELECT review_rate FROM users WHERE id = ${userId} AND deleted_at IS NULL LIMIT 1`
-    );
+    const r = await db.execute(sql`SELECT review_rate FROM users WHERE id = ${userId} AND deleted_at IS NULL LIMIT 1`);
     const row = r.rows[0] as any;
     if (!row || row.review_rate == null) return 100;
     const n = Number(row.review_rate);
@@ -1149,6 +1150,9 @@ export interface OperatorStat {
   avgOperatorGrade: number | null;
   avgFinalGrade: number | null;
   gradeDistribution: Record<string, number>;
+  corrected: number;
+  correctionPercentage: number;
+  mostCorrectedField: string | null;
 }
 
 /**
@@ -1224,14 +1228,116 @@ export async function getOperatorStats(): Promise<OperatorStat[]> {
     distMap.set(r.graded_by, d);
   }
 
+  // Correction stats semantics:
+  // - corrected   = distinct certificates corrected after publication whose graded_by is
+  //                 this operator, scoped by the SAME three predicates as the `graded`
+  //                 denominator above (graded_by NOT NULL, deleted_at NULL, status active),
+  //                 so the numerator population is a strict subset of the denominator.
+  // - field counts exclude internal/private fields (CORRECTION_DISPLAY_EXCLUDED_FIELDS).
+  //
+  // KNOWN ASYMMETRY: `graded` is all-time while `corrected` is bounded to the last 180 days
+  // and the 10k most recent correction rows (the audit table is unbounded and this query
+  // runs on a dashboard). correctionPercentage therefore UNDER-reports for operators with
+  // history older than the window — it is a recent-quality signal, not a lifetime rate.
+  // The Math.min(100, ...) below is defensive only; because the numerator is a subset of the
+  // denominator the ratio cannot legitimately exceed 100.
+  //
+  // Supported by idx_audit_log_cert_correction_recent (migrations/0017), whose partial
+  // predicate matches this WHERE clause exactly. Without it this is a full sequential scan
+  // of audit_log — the LIMIT caps rows returned, not rows scanned.
+  const corrections = (
+    await db.execute(sql`
+      WITH recent AS (
+        SELECT entity_id, details, created_at
+        FROM audit_log
+        WHERE entity_type = 'certificate'
+          AND action = 'cert_live_record_edit'
+          AND created_at >= NOW() - INTERVAL '180 days'
+        ORDER BY created_at DESC
+        LIMIT 10000
+      )
+      SELECT cert.graded_by, cert.id AS cert_id, recent.details
+      FROM recent
+      JOIN certificates cert ON recent.entity_id = cert.id::text
+      WHERE cert.graded_by IS NOT NULL
+        AND cert.deleted_at IS NULL
+        AND cert.status = 'active'
+    `)
+  ).rows as any[];
+  // No silent caps: if the window is saturated the figures below are a floor, not a total.
+  if (corrections.length >= 10000) {
+    console.warn(
+      "[operator-stats] correction window saturated at 10000 rows — correction counts are a lower bound; widen the cap or narrow the interval"
+    );
+  }
+  const correctedCertsByOperator = new Map<string, Set<number>>();
+  const correctedFieldsByOperator = new Map<string, Map<string, number>>();
+  const fieldOrder = [
+    "cardName",
+    "setName",
+    "year",
+    "cardNumber",
+    "variant",
+    "rarity",
+    "language",
+    "game",
+    "collection",
+    "grade",
+    "centering",
+    "corners",
+    "edges",
+    "surface",
+    "defects",
+    "frontImage",
+    "backImage",
+  ];
+  // Shared with the correction feedback UI so the two can never drift apart.
+  const excludedFields = CORRECTION_DISPLAY_EXCLUDED_FIELDS;
+  for (const row of corrections) {
+    const operatorId = String(row.graded_by || "");
+    if (!operatorId) continue;
+    const certSet = correctedCertsByOperator.get(operatorId) ?? new Set<number>();
+    certSet.add(Number(row.cert_id));
+    correctedCertsByOperator.set(operatorId, certSet);
+
+    const details = row.details && typeof row.details === "object" ? row.details : {};
+    const fields = Array.isArray(details.changed_fields)
+      ? details.changed_fields
+      : details.changes && typeof details.changes === "object"
+        ? Object.keys(details.changes)
+        : [];
+    const fieldMap = correctedFieldsByOperator.get(operatorId) ?? new Map<string, number>();
+    for (const rawField of fields) {
+      const field = String(rawField);
+      if (!field || excludedFields.has(field)) continue;
+      fieldMap.set(field, (fieldMap.get(field) ?? 0) + 1);
+    }
+    correctedFieldsByOperator.set(operatorId, fieldMap);
+  }
+
+  function commonField(operatorId: string): string | null {
+    const counts = correctedFieldsByOperator.get(operatorId);
+    if (!counts || counts.size === 0) return null;
+    return [...counts.entries()].sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      const ai = fieldOrder.indexOf(a[0]);
+      const bi = fieldOrder.indexOf(b[0]);
+      if (ai !== bi) return (ai === -1 ? Number.MAX_SAFE_INTEGER : ai) - (bi === -1 ? Number.MAX_SAFE_INTEGER : bi);
+      return a[0].localeCompare(b[0]);
+    })[0][0];
+  }
+
   return ops.map((u) => {
     const g = gradedMap.get(u.id) as any;
+    const gradedCount = g ? Number(g.graded) : 0;
+    const correctedCount = correctedCertsByOperator.get(u.id)?.size ?? 0;
+    const correctionPercentage = gradedCount > 0 ? Math.min(100, Math.round((correctedCount / gradedCount) * 100)) : 0;
     return {
       id: u.id,
       email: u.email,
       displayName: u.display_name ?? null,
       reviewRate: u.review_rate == null ? 100 : Number(u.review_rate),
-      graded: g ? Number(g.graded) : 0,
+      graded: gradedCount,
       scanned: scannedMap.get(u.id) ?? 0,
       pending: pendingMap.get(u.id) ?? 0,
       reviewFlagged: g ? Number(g.review_flagged) : 0,
@@ -1239,6 +1345,9 @@ export async function getOperatorStats(): Promise<OperatorStat[]> {
       avgOperatorGrade: g && g.avg_operator != null ? Number(g.avg_operator) : null,
       avgFinalGrade: g && g.avg_final != null ? Number(g.avg_final) : null,
       gradeDistribution: distMap.get(u.id) ?? {},
+      corrected: correctedCount,
+      correctionPercentage,
+      mostCorrectedField: commonField(u.id),
     };
   });
 }

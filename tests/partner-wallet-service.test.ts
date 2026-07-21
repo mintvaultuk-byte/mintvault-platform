@@ -24,7 +24,18 @@ describe("Partner Network G6A wallet service on PostgreSQL 17.10", () => {
     await admin.query("CREATE TABLE users (id varchar primary key default gen_random_uuid(), email varchar unique)");
     await admin.query("CREATE TABLE submissions (id serial primary key, user_id varchar, tracking_number text unique)");
     await admin.query("CREATE TABLE submission_items (id serial primary key, submission_id integer not null)");
-    for (const table of ["users", "submissions", "submission_items"]) {
+    // The complete numbered inventory also includes the Correction Mode audit index migration.
+    // audit_log is application-owned legacy schema, so provide its required shape before the
+    // migrator applies every numbered migration in this isolated Partner fixture.
+    await admin.query(`
+      CREATE TABLE audit_log (
+        id serial PRIMARY KEY,
+        entity_type text NOT NULL,
+        entity_id text NOT NULL,
+        action text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now()
+      )`);
+    for (const table of ["users", "submissions", "submission_items", "audit_log"]) {
       await admin.query(`ALTER TABLE ${table} OWNER TO pn_migrator`);
     }
     const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });

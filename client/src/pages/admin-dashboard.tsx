@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { CertificateRecord } from "@shared/schema";
@@ -146,6 +146,14 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     }
   }, []);
   const [previewCert, setPreviewCert] = useState<CertificateRecord | null>(null);
+  const [correctionMode, setCorrectionMode] = useState(false);
+  const [correctionSaving, setCorrectionSaving] = useState(false);
+  const correctionMetadataRef = useRef<() => FormData>(() => new FormData());
+  const correctionGradingRef = useRef<() => Record<string, unknown>>(() => ({}));
+  const correctionVersionRef = useRef("");
+
+  const correctionVersionFor = (cert: CertificateRecord | Record<string, unknown> | null) =>
+    String((cert as any)?.correctionVersion || (cert as any)?.updatedAt || "");
 
   const { data: certs = [], isLoading } = useQuery<CertificateRecord[]>({
     queryKey: ["/api/admin/certificates"],
@@ -153,6 +161,10 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
 
   const { data: stats } = useQuery<DashboardStats>({
     queryKey: ["/api/admin/stats"],
+  });
+
+  const { data: adminSession } = useQuery<{ authenticated: boolean; isSuperAdmin?: boolean }>({
+    queryKey: ["/api/admin/session"],
   });
 
   const [voidTarget, setVoidTarget] = useState<CertificateRecord | null>(null);
@@ -187,6 +199,8 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
 
   const handleEdit = (cert: CertificateRecord) => {
     setEditingCert(cert);
+    setCorrectionMode(false);
+    correctionVersionRef.current = "";
     setShowForm(true);
     setActiveTab("certs");
     const ids = certs.filter((c) => !(c as any).gradeApprovedAt).map((c) => c.id);
@@ -218,6 +232,8 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     }
     const ids = queue.map((c) => c.id);
     setEditingCert(queue[0]);
+    setCorrectionMode(false);
+    correctionVersionRef.current = "";
     setShowForm(true);
     // No setActiveTab("certs") here — the workstation renders via `showForm`
     // (an independent early return), and the caller (the activeTab==="grading"
@@ -245,6 +261,8 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     if (!nextCert) return; // never skip — if it can't be resolved, do nothing
     setGradeQueue({ ids: gradeQueue.ids, pos: gradeQueue.pos + 1 });
     setEditingCert(nextCert);
+    setCorrectionMode(false);
+    correctionVersionRef.current = "";
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
     queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
@@ -254,19 +272,85 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     if (newCert && newCert.id) {
       // A new cert was just created — switch to edit mode so workstation mounts
       setEditingCert(newCert);
+      setCorrectionMode(false);
+      correctionVersionRef.current = "";
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
       return; // stay in showForm=true with the new cert loaded
     }
     setShowForm(false);
     setEditingCert(null);
+    setCorrectionMode(false);
+    correctionVersionRef.current = "";
     queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
     queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+  };
+
+  const refetchEditingCert = async (id: number) => {
+    const r = await fetch(`/api/admin/certificates?includeId=${id}`, { credentials: "include" });
+    if (!r.ok) throw new Error(`Unable to refresh certificate (${r.status})`);
+    const list = await r.json();
+    const updated = (Array.isArray(list) ? list : []).find((c: any) => c.id === id);
+    if (updated) setEditingCert(updated);
+    return updated;
+  };
+
+  const saveCorrection = async () => {
+    if (!editingCert?.id) return;
+    setCorrectionSaving(true);
+    try {
+      const formData = correctionMetadataRef.current();
+      formData.append("expectedVersion", correctionVersionRef.current || correctionVersionFor(editingCert));
+      formData.append("certId", editingCert.certId);
+      formData.append("gradingPayload", JSON.stringify(correctionGradingRef.current()));
+      const res = await fetch(`/api/admin/certificates/${editingCert.id}/correction`, {
+        method: "PUT",
+        credentials: "include",
+        body: formData,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      await refetchEditingCert(editingCert.id);
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/operator-stats"] });
+      toast({
+        title: data.noChange ? "No correction needed" : "Correction saved",
+        description: data.noChange
+          ? "No material field changes were detected."
+          : "Changes were saved atomically and audit logged.",
+      });
+      setCorrectionMode(false);
+      correctionVersionRef.current = "";
+    } catch (e: any) {
+      toast({ title: "Correction failed", description: e.message, variant: "destructive" });
+    } finally {
+      setCorrectionSaving(false);
+    }
+  };
+
+  const toggleCorrectionMode = async () => {
+    if (!editingCert?.id) return;
+    if (correctionMode) {
+      setCorrectionMode(false);
+      correctionVersionRef.current = "";
+      return;
+    }
+    try {
+      const updated = await refetchEditingCert(editingCert.id);
+      if (!updated) throw new Error("Unable to refresh certificate before correction.");
+      correctionVersionRef.current = correctionVersionFor(updated);
+      setCorrectionMode(true);
+    } catch (e: any) {
+      toast({ title: "Correction Mode unavailable", description: e.message, variant: "destructive" });
+    }
   };
 
   const handleNewCert = () => {
     // Open blank form — no DB row created until user saves with real data
     setEditingCert(null);
+    setCorrectionMode(false);
+    correctionVersionRef.current = "";
     setShowForm(true);
     setActiveTab("certs");
   };
@@ -317,7 +401,11 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
                   &larr; Certificates
                 </button>
                 {editingCert?.certId && (
-                  <span className="text-sm font-bold tracking-wide text-[var(--admin-gold)]" style={{ fontFamily: "var(--admin-mono)" }} data-testid="grading-header-cert">
+                  <span
+                    className="text-sm font-bold tracking-wide text-[var(--admin-gold)]"
+                    style={{ fontFamily: "var(--admin-mono)" }}
+                    data-testid="grading-header-cert"
+                  >
                     {editingCert.certId}
                   </span>
                 )}
@@ -325,7 +413,32 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
             }
             right={
               editingCert && editingCert.id ? (
-                <CertificateToolsButton cert={editingCert} onOpen={() => setCertToolsOpen(true)} />
+                <div className="flex items-center gap-2">
+                  {editingCert.gradeApprovedAt && adminSession?.isSuperAdmin && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={toggleCorrectionMode}
+                        className="rounded border border-[var(--admin-gold)]/40 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10"
+                        data-testid="button-correction-mode"
+                      >
+                        {correctionMode ? "Exit Correction Mode" : "Correction Mode"}
+                      </button>
+                      {correctionMode && (
+                        <button
+                          type="button"
+                          onClick={saveCorrection}
+                          disabled={correctionSaving}
+                          className="rounded bg-[var(--admin-gold)] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-black disabled:opacity-60"
+                          data-testid="button-save-correction"
+                        >
+                          {correctionSaving ? "Saving..." : "Save Correction"}
+                        </button>
+                      )}
+                    </>
+                  )}
+                  <CertificateToolsButton cert={editingCert} onOpen={() => setCertToolsOpen(true)} />
+                </div>
               ) : undefined
             }
           />
@@ -335,76 +448,84 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
               Card Details → Grade — with Ownership + NFC in the tools drawer.
               The form fills the remaining height (fixed-height workstation). */}
           <div className="min-h-0 flex-1">
-          <CertificateForm
-            certificate={editingCert}
-            onSuccess={handleFormClose}
-            queue={
-              gradeQueue && editingCert && gradeQueue.ids[gradeQueue.pos] === editingCert.id
-                ? {
-                    position: gradeQueue.pos + 1,
-                    total: gradeQueue.ids.length,
-                    hasNext: gradeQueue.pos < gradeQueue.ids.length - 1,
-                    onNext: openNextQueuedCard,
-                    onBackToQueue: () => handleFormClose(),
-                  }
-                : undefined
-            }
-            batch={editingCert?.submissionItemId ? { submissionId: String(editingCert.submissionItemId) } : undefined}
-            externalIdentification={externalIdentification}
-            onExternalIdentificationConsumed={() => setExternalIdentification(null)}
-            onIdentifyAndGrade={(result) => {
-              // Push analysis to GradingPanel so it populates subgrades, defects, etc.
-              setPendingAnalysis(result);
-              // Also refetch cert for list updates
-              if (editingCert) {
-                fetch(`/api/admin/certificates?includeId=${editingCert.id}`, { credentials: "include" })
-                  .then((r) => r.json())
-                  .then((certs) => {
-                    const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
-                    if (updated) setEditingCert(updated);
-                  })
-                  .catch(() => {});
+            <CertificateForm
+              certificate={editingCert}
+              onSuccess={handleFormClose}
+              queue={
+                gradeQueue && editingCert && gradeQueue.ids[gradeQueue.pos] === editingCert.id
+                  ? {
+                      position: gradeQueue.pos + 1,
+                      total: gradeQueue.ids.length,
+                      hasNext: gradeQueue.pos < gradeQueue.ids.length - 1,
+                      onNext: openNextQueuedCard,
+                      onBackToQueue: () => handleFormClose(),
+                    }
+                  : undefined
               }
-              queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-            }}
-            workstationSlot={
-              editingCert && editingCert.id ? (
-                <GradingPanel
-                  certId={editingCert.id}
-                  cardName={editingCert.cardName || ""}
-                  cardSet={editingCert.setName || ""}
-                  cardGame={editingCert.cardGame || ""}
-                  existingGrade={editingCert.gradeOverall}
-                  pendingAnalysis={pendingAnalysis}
-                  onPendingAnalysisConsumed={() => setPendingAnalysis(null)}
-                  onManualIdentification={(id) => {
-                    // Sync AI panel's manual identification to the cert form
-                    setExternalIdentification(id);
-                  }}
-                  onGradeApproved={() => {
-                    queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-                    // Return to cert list
-                    setShowForm(false);
-                    setEditingCert(null);
-                  }}
-                  onCertUpdated={async () => {
-                    // Refetch the cert to get AI-autofilled fields (card name, set, number, etc.)
-                    try {
-                      const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, {
-                        credentials: "include",
-                      });
-                      const certs = await r.json();
+              batch={editingCert?.submissionItemId ? { submissionId: String(editingCert.submissionItemId) } : undefined}
+              correctionMode={correctionMode}
+              onCorrectionMetadataReady={(getFormData) => {
+                correctionMetadataRef.current = getFormData;
+              }}
+              externalIdentification={externalIdentification}
+              onExternalIdentificationConsumed={() => setExternalIdentification(null)}
+              onIdentifyAndGrade={(result) => {
+                // Push analysis to GradingPanel so it populates subgrades, defects, etc.
+                setPendingAnalysis(result);
+                // Also refetch cert for list updates
+                if (editingCert) {
+                  fetch(`/api/admin/certificates?includeId=${editingCert.id}`, { credentials: "include" })
+                    .then((r) => r.json())
+                    .then((certs) => {
                       const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
                       if (updated) setEditingCert(updated);
-                    } catch {
-                      /* ignore */
-                    }
-                    queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-                  }}
-                />
-              ) : null
-            }
-          />
+                    })
+                    .catch(() => {});
+                }
+                queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+              }}
+              workstationSlot={
+                editingCert && editingCert.id ? (
+                  <GradingPanel
+                    certId={editingCert.id}
+                    cardName={editingCert.cardName || ""}
+                    cardSet={editingCert.setName || ""}
+                    cardGame={editingCert.cardGame || ""}
+                    existingGrade={editingCert.gradeOverall}
+                    pendingAnalysis={pendingAnalysis}
+                    onPendingAnalysisConsumed={() => setPendingAnalysis(null)}
+                    onManualIdentification={(id) => {
+                      // Sync AI panel's manual identification to the cert form
+                      setExternalIdentification(id);
+                    }}
+                    onGradeApproved={() => {
+                      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                      // Return to cert list
+                      setShowForm(false);
+                      setEditingCert(null);
+                    }}
+                    onCertUpdated={async () => {
+                      // Refetch the cert to get AI-autofilled fields (card name, set, number, etc.)
+                      try {
+                        const r = await fetch(`/api/admin/certificates?includeId=${editingCert.id}`, {
+                          credentials: "include",
+                        });
+                        const certs = await r.json();
+                        const updated = (Array.isArray(certs) ? certs : []).find((c: any) => c.id === editingCert.id);
+                        if (updated) setEditingCert(updated);
+                      } catch {
+                        /* ignore */
+                      }
+                      queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
+                    }}
+                    correctionMode={correctionMode}
+                    onCorrectionGradingReady={(getPayload) => {
+                      correctionGradingRef.current = getPayload;
+                    }}
+                  />
+                ) : null
+              }
+            />
           </div>
           {/* Ownership + NFC moved OUT of the grading scroll into the drawer above. */}
           {editingCert && editingCert.id && (

@@ -75,7 +75,8 @@ describe("recent sets (spec 3)", () => {
 
 describe("same as last card quick-fill (spec 9) — never overwrites (spec 5)", () => {
   it("captures shared context on Continue and applies only on click", () => {
-    expect(FORM).toContain('localStorage.setItem("mv.lastCardContext"');
+    expect(FORM).toContain("writeLastCardContext(window.sessionStorage, ctx)");
+    expect(FORM).not.toContain('localStorage.setItem("mv.lastCardContext"');
     expect(FORM).toContain("captureLastCardContext");
     expect(FORM).toContain('data-testid="button-same-as-last-card"');
   });

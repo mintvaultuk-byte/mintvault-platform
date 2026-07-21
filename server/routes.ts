@@ -74,6 +74,7 @@ import { registerPromotionRoutes } from "./routes/admin/promotions";
 import { migratePromotionsSchema } from "./services/promotionService";
 import { migratePaymentIdempotencySchema } from "./webhookHandlers";
 import { registerGraderRoutes } from "./routes/grader";
+import { registerCorrectionModeRoutes } from "./correction-mode";
 import { migrateGraderSchema, migrateGraderCertSchema, migratePerOperatorSchema, isGraderLocked } from "./grader";
 import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
 import { registerStaffRoutes } from "./routes/staff";
@@ -90,6 +91,7 @@ import {
   SUBMISSION_STATUS_LABELS,
   serviceTierToPricingTier,
   auditLog,
+  certificates,
 } from "@shared/schema";
 import { mvgsTierName } from "@shared/mvgs-scoring";
 import type { PublicCertificate, ServiceTierRecord } from "@shared/schema";
@@ -1411,6 +1413,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerPublicRoutes(app);
   registerAuthRoutes(app);
   registerGraderRoutes(app);
+  registerCorrectionModeRoutes(app);
   registerStaffRoutes(app);
   registerSubmissionRoutes(app);
   registerAdminSubmissionRoutes(app);
@@ -3736,6 +3739,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (c.status === "draft" && !c.cardName && !c.frontImagePath && !c.gradeOverall) return false;
         return true;
       });
+      const certIds = certs.map((c: any) => Number(c.id)).filter((id) => Number.isInteger(id) && id > 0);
+      const correctionVersions = new Map<number, string>();
+      if (certIds.length > 0) {
+        const rows = await db
+          .select({
+            id: certificates.id,
+            correctionVersion: sql<string>`EXTRACT(EPOCH FROM ${certificates.updatedAt})::text`,
+          })
+          .from(certificates)
+          .where(inArray(certificates.id, certIds));
+        for (const row of rows) correctionVersions.set(Number(row.id), row.correctionVersion);
+      }
       const certsWithUrls = await Promise.all(
         certs.map(async (c: any) => {
           let frontImageUrl: string | null = null;
@@ -3754,7 +3769,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               console.error("R2 sign failed (admin back):", c.backImagePath, e);
             }
           }
-          return { ...c, certId: normalizeCertId(c.certId), frontImageUrl, backImageUrl };
+          const correctionVersion = correctionVersions.get(Number(c.id)) ?? null;
+          return { ...c, certId: normalizeCertId(c.certId), correctionVersion, frontImageUrl, backImageUrl };
         })
       );
       res.json(certsWithUrls);
