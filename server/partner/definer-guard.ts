@@ -23,6 +23,21 @@ export const DEFINER_FUNCTIONS = [
 
 export const DEFINER_ROLE = "partner_definer";
 export const RUNTIME_ROLE = "partner_runtime";
+export const CREDIT_LIFECYCLE_DEFINER_ROLE = "partner_credit_lifecycle_definer";
+export const CONNECTOR_RUNTIME_ROLE = "partner_connector_runtime";
+
+const CREDIT_LIFECYCLE_FUNCTIONS = [
+  {
+    name: "partner_connector_release_submission_credit",
+    arguments: "uuid, uuid, uuid, text",
+    runtimeRole: CONNECTOR_RUNTIME_ROLE,
+  },
+  {
+    name: "partner_destination_credit_hold_guard",
+    arguments: "",
+    runtimeRole: null,
+  },
+] as const;
 
 /**
  * Returns a list of human-readable violations of the definer ownership model. Empty array = healthy.
@@ -97,5 +112,106 @@ export async function assertDefinerModel(query: DbQuery): Promise<void> {
       `Partner Network definer ownership model is broken (DB-F1). Partner authentication would fail closed. ` +
         `Apply migration 0006 with a role that can provision ${DEFINER_ROLE}. Violations: ${violations.join("; ")}`
     );
+  }
+}
+
+/**
+ * G6D's definer is deliberately separate from authentication. These checks are
+ * invoked only by G6D lifecycle work, so an unavailable credit schema cannot
+ * prevent the normal Partner Portal from starting or authenticating users.
+ */
+export async function partnerCreditDefinerModelViolations(query: DbQuery): Promise<string[]> {
+  const violations: string[] = [];
+  const role = await query(
+    `SELECT rolbypassrls, rolcanlogin, rolsuper, rolcreaterole, rolcreatedb, rolreplication
+       FROM pg_roles WHERE rolname=$1`,
+    [CREDIT_LIFECYCLE_DEFINER_ROLE]
+  );
+  if (role.rows.length !== 1) {
+    violations.push(`role ${CREDIT_LIFECYCLE_DEFINER_ROLE} is missing`);
+  } else {
+    const r = role.rows[0] as Record<string, boolean>;
+    if (!r.rolbypassrls) violations.push(`${CREDIT_LIFECYCLE_DEFINER_ROLE} must have BYPASSRLS`);
+    if (r.rolcanlogin) violations.push(`${CREDIT_LIFECYCLE_DEFINER_ROLE} must be NOLOGIN`);
+    if (r.rolsuper) violations.push(`${CREDIT_LIFECYCLE_DEFINER_ROLE} must be NOSUPERUSER`);
+    if (r.rolcreaterole) violations.push(`${CREDIT_LIFECYCLE_DEFINER_ROLE} must be NOCREATEROLE`);
+    if (r.rolcreatedb) violations.push(`${CREDIT_LIFECYCLE_DEFINER_ROLE} must be NOCREATEDB`);
+    if (r.rolreplication) violations.push(`${CREDIT_LIFECYCLE_DEFINER_ROLE} must be NOREPLICATION`);
+  }
+
+  const members = await query(
+    `SELECT member.rolname
+       FROM pg_auth_members membership
+       JOIN pg_roles role ON role.oid=membership.roleid
+       JOIN pg_roles member ON member.oid=membership.member
+      WHERE role.rolname=$1
+      ORDER BY member.rolname`,
+    [CREDIT_LIFECYCLE_DEFINER_ROLE]
+  );
+  if (members.rows.length > 0) {
+    violations.push(
+      `${CREDIT_LIFECYCLE_DEFINER_ROLE} must have no member roles (found ${members.rows
+        .map((row) => String(row.rolname))
+        .join(", ")})`
+    );
+  }
+
+  for (const fn of CREDIT_LIFECYCLE_FUNCTIONS) {
+    const functions = await query(
+      `SELECT p.prosecdef,
+              pg_get_userbyid(p.proowner) AS owner,
+              COALESCE(array_to_string(p.proconfig, ','), '') AS config,
+              has_function_privilege('public', p.oid, 'EXECUTE') AS public_exec,
+              CASE WHEN $3::text IS NULL THEN false
+                   ELSE has_function_privilege($3, p.oid, 'EXECUTE') END AS runtime_exec,
+              COALESCE(string_agg(grantee.rolname, ',') FILTER (
+                WHERE acl.privilege_type='EXECUTE'
+                  AND acl.grantee <> 0
+                  AND acl.grantee <> p.proowner
+                  AND ($3::text IS NULL OR acl.grantee <> to_regrole($3))
+              ), '') AS unexpected_execute_grantees
+         FROM pg_proc p
+         JOIN pg_namespace n ON n.oid=p.pronamespace
+         LEFT JOIN LATERAL aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) acl ON true
+         LEFT JOIN pg_roles grantee ON grantee.oid=acl.grantee
+        WHERE n.nspname='public'
+          AND p.oid = to_regprocedure('public.' || $1 || '(' || $2 || ')')
+        GROUP BY p.oid`,
+      [fn.name, fn.arguments, fn.runtimeRole]
+    );
+    if (functions.rows.length !== 1) {
+      violations.push(`function ${fn.name}(${fn.arguments}) is missing`);
+      continue;
+    }
+    const row = functions.rows[0] as Record<string, unknown>;
+    if (!row.prosecdef) violations.push(`${fn.name} must be SECURITY DEFINER`);
+    if (row.owner !== CREDIT_LIFECYCLE_DEFINER_ROLE) {
+      violations.push(`${fn.name} must be owned by ${CREDIT_LIFECYCLE_DEFINER_ROLE} (is ${String(row.owner)})`);
+    }
+    if (row.config !== "search_path=pg_catalog, public, pg_temp") {
+      violations.push(`${fn.name} must pin search_path to pg_catalog, public, pg_temp`);
+    }
+    if (row.public_exec) violations.push(`${fn.name} must NOT be executable by PUBLIC`);
+    if (fn.runtimeRole && !row.runtime_exec) violations.push(`${fn.name} must be executable by ${fn.runtimeRole}`);
+    const unexpected = String(row.unexpected_execute_grantees ?? "");
+    if (unexpected) {
+      violations.push(`${fn.name} has unexpected EXECUTE grantee(s): ${unexpected}`);
+    }
+  }
+
+  const recordUpdate = await query(
+    `SELECT has_table_privilege($1, 'partner_connector_records', 'UPDATE') AS update_grant`,
+    [CREDIT_LIFECYCLE_DEFINER_ROLE]
+  );
+  if ((recordUpdate.rows[0] as Record<string, boolean> | undefined)?.update_grant) {
+    violations.push(`${CREDIT_LIFECYCLE_DEFINER_ROLE} must not have UPDATE on partner_connector_records`);
+  }
+  return violations;
+}
+
+export async function assertPartnerCreditDefinerModel(query: DbQuery): Promise<void> {
+  const violations = await partnerCreditDefinerModelViolations(query);
+  if (violations.length > 0) {
+    throw new Error(`Partner G6D lifecycle definer model is broken. Violations: ${violations.join("; ")}`);
   }
 }

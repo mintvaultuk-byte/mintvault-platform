@@ -211,7 +211,12 @@ describe("Partner Network G6C Super Admin credit adjustments on PostgreSQL 17.10
     const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
     await migrator.connect();
     try {
-      await applyMigrations(migrator, listMigrationFiles());
+      // Keep the G6B admin-service fixture on its declared schema boundary;
+      // G6D requires the separate owner-operated 0019 deployment path.
+      await applyMigrations(
+        migrator,
+        listMigrationFiles().filter((file) => Number(file.number) < 19)
+      );
     } finally {
       await migrator.end();
     }

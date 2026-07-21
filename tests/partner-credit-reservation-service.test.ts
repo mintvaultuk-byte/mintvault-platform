@@ -96,7 +96,12 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
     await migrator.connect();
     try {
-      await applyMigrations(migrator, listMigrationFiles());
+      // This is explicit G6B coverage. G6D's privileged lifecycle owner is
+      // intentionally tested in its dedicated owner-operated migration suite.
+      await applyMigrations(
+        migrator,
+        listMigrationFiles().filter((file) => Number(file.number) < 19)
+      );
     } finally {
       await migrator.end();
     }
@@ -719,9 +724,14 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
   it("refuses the G6B rollback script when a later migration or reservation evidence exists", async () => {
     await expect(admin.query(rollbackSql)).rejects.toThrow(/later migration \(0018\+\) is applied/);
     await admin.query("ROLLBACK").catch(() => {});
-    // Reach the evidence guard exactly as a correct reverse-order rollback would: 0018 is
-    // no longer journalled, while G6B's immutable lifecycle evidence remains intact.
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0018_correction_audit_index.sql'");
+    // Reach the evidence guard exactly as a correct reverse-order rollback would: every later
+    // numbered migration is no longer journalled, while G6B's immutable lifecycle evidence remains
+    // intact. Keep this numeric rather than naming 0018 so later additive migrations (such as G6D)
+    // do not accidentally mask the guard this regression is meant to exercise.
+    await admin.query(
+      `DELETE FROM schema_migrations
+        WHERE CASE WHEN filename ~ '^[0-9]+_' THEN substring(filename FROM '^([0-9]+)_')::integer > 17 ELSE false END`
+    );
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );

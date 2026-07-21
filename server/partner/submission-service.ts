@@ -1,8 +1,12 @@
 /**
  * Partner Portal — submission service (Phase 2).
  *
- * All queries run inside withTenant() so RLS scopes every statement to the caller's tenant (the
- * floor). Location scoping — reception/technician see only their assigned location(s); org-wide
+ * Most queries run inside withTenant() so RLS scopes every statement to the caller's tenant (the
+ * floor). Submit/cancel use a deliberately narrow privileged transaction because G6B's immutable
+ * accounting writes need the wallet row lock and lifecycle-event permissions denied to the Partner
+ * runtime. Those paths carry explicit tenant predicates and cross-table tenant invariants; their
+ * app.tenant_id context is observability/defence in depth, never a substitute for RLS. Location
+ * scoping — reception/technician see only their assigned location(s); org-wide
  * roles (owner/manager/finance-viewer) see the whole organisation — is enforced HERE in application
  * SQL, exactly as documented in migration 0001: "the DB tenant boundary is the floor."
  *
@@ -14,9 +18,14 @@
  * No other transition is permitted. Every transition writes a partner_submission_events row.
  */
 import type { PoolClient } from "pg";
-import { withTenant } from "./db";
+import { withPartnerAdminTenantTransaction, withTenant } from "./db";
 import { writePartnerAudit } from "./audit";
 import type { PartnerPrincipal } from "./session";
+import { CreditReservationError, reserveCreditInTransaction } from "./partner-credit-reservation-service";
+import {
+  PartnerSubmissionCreditLifecycleError,
+  releasePartnerReservationForPartnerCancellation,
+} from "./partner-submission-credit-lifecycle";
 
 export class SubmissionError extends Error {
   constructor(
@@ -40,6 +49,10 @@ const SERVICE_TIER_UNAVAILABLE = () =>
     "This service is no longer available. Choose an available service before submitting."
   );
 
+/** Kept deliberately longer than MintVault's published grading turnaround; expiry remains the
+ * G6B safety backstop, while normal settlement is driven by the grading lifecycle below. */
+const PARTNER_SUBMISSION_CREDIT_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+
 /** Location-scope predicate, appended to every submission query. Org-wide roles see everything;
  *  everyone else is restricted to their assigned locations via partner_user_locations.
  *  `paramOffset` is the count of placeholders already used earlier in the caller's query, so the
@@ -52,8 +65,12 @@ async function locationScopeSql(
 ): Promise<{ sql: string; params: unknown[] }> {
   if (principal.orgWide) return { sql: "TRUE", params: [] };
   const { rows } = await c.query<{ location_id: string }>(
-    "SELECT location_id FROM partner_user_locations WHERE user_id = $1",
-    [principal.userId]
+    `SELECT pul.location_id
+       FROM partner_user_locations pul
+       JOIN partner_users u ON u.id=pul.user_id AND u.tenant_id=pul.tenant_id
+       JOIN partner_locations l ON l.id=pul.location_id AND l.tenant_id=pul.tenant_id
+      WHERE pul.user_id=$1 AND pul.tenant_id=$2`,
+    [principal.userId, principal.tenantId]
   );
   const ids = rows.map((r) => r.location_id);
   if (ids.length === 0) return { sql: "FALSE", params: [] }; // no assignment = no visibility, fail closed
@@ -152,10 +169,14 @@ export async function createSubmissionDraft(
     ]);
     if (assigned.rowCount !== 1) throw VALIDATION("Selected location is not available.");
     if (!principal.orgWide) {
-      const own = await c.query("SELECT 1 FROM partner_user_locations WHERE user_id=$1 AND location_id=$2", [
-        principal.userId,
-        input.locationId,
-      ]);
+      const own = await c.query(
+        `SELECT 1
+           FROM partner_user_locations pul
+           JOIN partner_users u ON u.id=pul.user_id AND u.tenant_id=pul.tenant_id
+           JOIN partner_locations l ON l.id=pul.location_id AND l.tenant_id=pul.tenant_id
+          WHERE pul.user_id=$1 AND pul.location_id=$2 AND pul.tenant_id=$3`,
+        [principal.userId, input.locationId, principal.tenantId]
+      );
       if (own.rowCount !== 1) throw FORBIDDEN();
     }
     await verifyCustomerOwnership(c, principal.tenantId, input.customerId ?? null);
@@ -260,16 +281,24 @@ async function loadSubmissionForUpdate(
   idempotency_key: string | null;
 } | null> {
   const { rows } = await c.query(
-    `SELECT id, location_id, status, version, idempotency_key FROM partner_submissions WHERE id=$1 FOR UPDATE`,
-    [submissionId]
+    `SELECT s.id, s.location_id, s.status, s.version, s.idempotency_key
+       FROM partner_submissions s
+       JOIN partner_locations l ON l.id=s.location_id AND l.tenant_id=s.tenant_id
+      WHERE s.id=$1 AND s.tenant_id=$2
+      FOR UPDATE OF s`,
+    [submissionId, principal.tenantId]
   );
   if (rows.length !== 1) return null;
   const row = rows[0];
   if (!principal.orgWide) {
-    const own = await c.query("SELECT 1 FROM partner_user_locations WHERE user_id=$1 AND location_id=$2", [
-      principal.userId,
-      row.location_id,
-    ]);
+    const own = await c.query(
+      `SELECT 1
+         FROM partner_user_locations pul
+         JOIN partner_users u ON u.id=pul.user_id AND u.tenant_id=pul.tenant_id
+         JOIN partner_locations l ON l.id=pul.location_id AND l.tenant_id=pul.tenant_id
+        WHERE pul.user_id=$1 AND pul.location_id=$2 AND pul.tenant_id=$3`,
+      [principal.userId, row.location_id, principal.tenantId]
+    );
     if (own.rowCount !== 1) return null; // fail closed as not-found, not forbidden (no existence leak)
   }
   return row;
@@ -344,19 +373,53 @@ export async function cancelSubmission(
   reason: string
 ): Promise<SubmissionSummary> {
   if (!reason || !reason.trim()) throw VALIDATION("A cancellation reason is required.");
-  return withTenant({ tenantId: principal.tenantId }, async (c) => {
-    const row = await loadSubmissionForUpdate(c, principal, submissionId);
-    if (!row) throw NOT_FOUND();
-    if (row.status === "cancelled") throw NOT_DRAFT();
-    const { rows } = await c.query(
-      `UPDATE partner_submissions SET status='cancelled', cancelled_reason=$2, cancelled_at=now(), version=version+1, updated_at=now()
-       WHERE id=$1 RETURNING id, public_ref, location_id, customer_id, internal_reference, service_tier_code,
-                 estimated_price_pence, card_count, status, version, created_at, updated_at, submitted_at`,
-      [submissionId, reason]
-    );
-    await writeEvent(c, principal, submissionId, "cancelled", row.status, "cancelled", reason);
-    return toSummary(rows[0]);
-  });
+  try {
+    return await withPartnerAdminTenantTransaction({ tenantId: principal.tenantId }, async (c) => {
+      const row = await loadSubmissionForUpdate(c, principal, submissionId);
+      if (!row) throw NOT_FOUND();
+      if (row.status === "cancelled") throw NOT_DRAFT();
+
+      const actor = await c.query<{ email: string; status: string }>(
+        `SELECT email, status FROM partner_users WHERE id=$1 AND tenant_id=$2 FOR KEY SHARE`,
+        [principal.userId, principal.tenantId]
+      );
+      if (actor.rowCount !== 1 || actor.rows[0].status !== "ACTIVE") throw FORBIDDEN();
+
+      const release = await releasePartnerReservationForPartnerCancellation(c, {
+        tenantId: principal.tenantId,
+        partnerSubmissionId: submissionId,
+        actorUserId: principal.userId,
+        actorEmail: actor.rows[0].email,
+      });
+      const { rows } = await c.query(
+        `UPDATE partner_submissions
+            SET status='cancelled', cancelled_reason=$2, cancelled_at=now(), version=version+1, updated_at=now()
+          WHERE id=$1 AND tenant_id=$3
+          RETURNING id, public_ref, location_id, customer_id, internal_reference, service_tier_code,
+                    estimated_price_pence, card_count, status, version, created_at, updated_at, submitted_at`,
+        [submissionId, reason, principal.tenantId]
+      );
+      await writeEvent(c, principal, submissionId, "cancelled", row.status, "cancelled", reason);
+      await writePartnerAudit(c, {
+        tenantId: principal.tenantId,
+        locationId: row.location_id,
+        actorUserId: principal.userId,
+        action: "submission.cancelled",
+        recordType: "partner_submission",
+        recordId: submissionId,
+        before: { status: row.status },
+        after: { status: "cancelled", reservationReleased: release.released },
+        reason,
+        correlationId: release.reservationId,
+      });
+      return toSummary(rows[0]);
+    });
+  } catch (err) {
+    if (err instanceof PartnerSubmissionCreditLifecycleError) {
+      throw new SubmissionError("credit_settlement_required", err.message);
+    }
+    throw err;
+  }
 }
 
 export interface CardInput {
@@ -534,25 +597,25 @@ export async function getSubmissionDetail(principal: PartnerPrincipal, submissio
  * read back its pre-commit 'draft' status instead of the 'submitted_to_mintvault' it just wrote.
  */
 async function buildDetail(c: PoolClient, principal: PartnerPrincipal, submissionId: string) {
-  const scope = await locationScopeSql(c, principal, 1); // $1 is submissionId
+  const scope = await locationScopeSql(c, principal, 2); // $1 is submissionId; $2 is tenantId
   const { rows } = await c.query(
     `SELECT id, public_ref, location_id, customer_id, internal_reference, service_tier_code,
             estimated_price_pence, card_count, status, version, created_at, updated_at, submitted_at,
             cancelled_reason, cancelled_at
-       FROM partner_submissions WHERE id=$1 AND ${scope.sql}`,
-    [submissionId, ...scope.params]
+       FROM partner_submissions WHERE id=$1 AND tenant_id=$2 AND ${scope.sql}`,
+    [submissionId, principal.tenantId, ...scope.params]
   );
   if (rows.length !== 1) throw NOT_FOUND();
   const cards = await c.query(
     `SELECT id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
             declared_value_pence, quantity, customer_notes, intake_notes, created_at
-       FROM partner_submission_cards WHERE submission_id=$1 AND removed_at IS NULL ORDER BY sequence_number`,
-    [submissionId]
+       FROM partner_submission_cards WHERE submission_id=$1 AND tenant_id=$2 AND removed_at IS NULL ORDER BY sequence_number`,
+    [submissionId, principal.tenantId]
   );
   const events = await c.query(
     `SELECT id, event_type, from_status, to_status, reason, created_at, actor_user_id
-       FROM partner_submission_events WHERE submission_id=$1 ORDER BY created_at`,
-    [submissionId]
+       FROM partner_submission_events WHERE submission_id=$1 AND tenant_id=$2 ORDER BY created_at`,
+    [submissionId, principal.tenantId]
   );
   return { submission: toSummary(rows[0]), cards: cards.rows, events: events.rows };
 }
@@ -564,108 +627,160 @@ async function buildDetail(c: PoolClient, principal: PartnerPrincipal, submissio
  */
 export async function submitSubmission(principal: PartnerPrincipal, submissionId: string, idempotencyKey: string) {
   if (!idempotencyKey || !idempotencyKey.trim()) throw VALIDATION("An idempotency key is required.");
-  return withTenant({ tenantId: principal.tenantId }, async (c) => {
-    // Idempotency short-circuit: same key already used for a submission → return that result as-is,
-    // never re-execute the handoff logic.
-    const already = await c.query(
-      `SELECT id, status FROM partner_submissions WHERE tenant_id=$1 AND idempotency_key=$2`,
-      [principal.tenantId, idempotencyKey]
-    );
-    if (already.rowCount === 1) {
-      if (already.rows[0].id !== submissionId) {
-        throw new SubmissionError(
-          "idempotency_conflict",
-          "This idempotency key was already used for a different submission."
-        );
-      }
-      return buildDetail(c, principal, submissionId);
-    }
-
-    const row = await loadSubmissionForUpdate(c, principal, submissionId);
-    if (!row) throw NOT_FOUND();
-    if (row.status !== "draft") {
-      // RACE FIX: two concurrent submits with the SAME key can both reach here — the first commits
-      // (setting idempotency_key + status) before this transaction's FOR UPDATE lock is granted, so
-      // the pre-lock "already" check above can miss it. Re-check the NOW-committed row's own
-      // idempotency_key (inside the lock, so it reflects the committed truth) before concluding
-      // this is a genuine not-draft error — that is what makes concurrent identical-key submits
-      // both return the same success rather than one erroring.
-      if (row.idempotency_key === idempotencyKey) {
+  try {
+    return await withPartnerAdminTenantTransaction({ tenantId: principal.tenantId }, async (c) => {
+      // Idempotency short-circuit: same key already used for a submission → return that result as-is,
+      // never re-execute the handoff logic.
+      const already = await c.query(
+        `SELECT id, status FROM partner_submissions WHERE tenant_id=$1 AND idempotency_key=$2`,
+        [principal.tenantId, idempotencyKey]
+      );
+      if (already.rowCount === 1) {
+        if (already.rows[0].id !== submissionId) {
+          throw new SubmissionError(
+            "idempotency_conflict",
+            "This idempotency key was already used for a different submission."
+          );
+        }
         return buildDetail(c, principal, submissionId);
       }
-      throw NOT_DRAFT();
-    }
 
-    const cards = await c.query(
-      `SELECT count(*)::int n FROM partner_submission_cards WHERE submission_id=$1 AND removed_at IS NULL`,
-      [submissionId]
-    );
-    if (cards.rows[0].n < 1) throw VALIDATION("Add at least one card before submitting.");
+      const row = await loadSubmissionForUpdate(c, principal, submissionId);
+      if (!row) throw NOT_FOUND();
+      if (row.status !== "draft") {
+        // RACE FIX: two concurrent submits with the SAME key can both reach here — the first commits
+        // (setting idempotency_key + status) before this transaction's FOR UPDATE lock is granted, so
+        // the pre-lock "already" check above can miss it. Re-check the NOW-committed row's own
+        // idempotency_key (inside the lock, so it reflects the committed truth) before concluding
+        // this is a genuine not-draft error — that is what makes concurrent identical-key submits
+        // both return the same success rather than one erroring.
+        if (row.idempotency_key === idempotencyKey) {
+          return buildDetail(c, principal, submissionId);
+        }
+        throw NOT_DRAFT();
+      }
 
-    const full = await c.query(
-      `SELECT s.*, (SELECT json_agg(row_to_json(sc)) FROM (
+      const cards = await c.query(
+        `SELECT count(*)::int n FROM partner_submission_cards
+          WHERE submission_id=$1 AND tenant_id=$2 AND removed_at IS NULL`,
+        [submissionId, principal.tenantId]
+      );
+      if (cards.rows[0].n < 1) throw VALIDATION("Add at least one card before submitting.");
+
+      const full = await c.query(
+        `SELECT s.*, (SELECT json_agg(row_to_json(sc)) FROM (
           SELECT id, sequence_number, card_name, game, card_set, card_number, year, variant, language,
                  declared_value_pence, quantity, customer_notes, intake_notes
-            FROM partner_submission_cards WHERE submission_id=s.id AND removed_at IS NULL ORDER BY sequence_number
+            FROM partner_submission_cards
+           WHERE submission_id=s.id AND tenant_id=s.tenant_id AND removed_at IS NULL
+           ORDER BY sequence_number
         ) sc) AS cards
-       FROM partner_submissions s WHERE s.id=$1`,
-      [submissionId]
-    );
-    const snapshot = full.rows[0];
-
-    // Submission-time revalidation: a tier chosen at draft time may have been disabled since (e.g.
-    // a super-admin turned it off). Re-check it is STILL active right before creating the handoff —
-    // a stored tier code is never trusted as still-valid just because it passed validation earlier.
-    if (snapshot.service_tier_code) {
-      const stillActive = await c.query<{ n: number }>(
-        `SELECT count(*)::int n FROM partner_service_tiers WHERE tier_code=$1 AND is_active AND (tenant_id=$2 OR tenant_id IS NULL)`,
-        [snapshot.service_tier_code, principal.tenantId]
+       FROM partner_submissions s WHERE s.id=$1 AND s.tenant_id=$2`,
+        [submissionId, principal.tenantId]
       );
-      if (stillActive.rows[0].n < 1) throw SERVICE_TIER_UNAVAILABLE();
-    }
+      const snapshot = full.rows[0];
 
-    // Locking the row (loadSubmissionForUpdate did FOR UPDATE) + the unique index on submission_id
-    // in partner_submission_handoffs together make this INSERT impossible to duplicate under
-    // concurrent retries: a second concurrent submit blocks on the row lock, then sees status is no
-    // longer 'draft' and throws NOT_DRAFT() instead of inserting a second handoff.
-    await c.query(
-      `INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending',$3)`,
-      [principal.tenantId, submissionId, JSON.stringify(snapshot)]
-    );
-    let updated;
-    try {
-      updated = await c.query(
-        `UPDATE partner_submissions SET status='submitted_to_mintvault', submitted_at=now(), idempotency_key=$2, version=version+1, updated_at=now()
-         WHERE id=$1 RETURNING id`,
-        [submissionId, idempotencyKey]
+      // Submission-time revalidation: a tier chosen at draft time may have been disabled since (e.g.
+      // a super-admin turned it off). Re-check it is STILL active right before creating the handoff —
+      // a stored tier code is never trusted as still-valid just because it passed validation earlier.
+      if (snapshot.service_tier_code) {
+        const stillActive = await c.query<{ n: number }>(
+          `SELECT count(*)::int n FROM partner_service_tiers WHERE tier_code=$1 AND is_active AND (tenant_id=$2 OR tenant_id IS NULL)`,
+          [snapshot.service_tier_code, principal.tenantId]
+        );
+        if (stillActive.rows[0].n < 1) throw SERVICE_TIER_UNAVAILABLE();
+      }
+
+      // Resolve the actor again from the trusted database inside this transaction. The HTTP middleware
+      // has already authenticated the session, and this check makes the financial write fail closed if
+      // that user or organisation has changed between request authentication and submission acceptance.
+      const actor = await c.query<{ email: string; status: string }>(
+        `SELECT email, status FROM partner_users WHERE id=$1 AND tenant_id=$2 FOR KEY SHARE`,
+        [principal.userId, principal.tenantId]
       );
-    } catch (err) {
-      // RACE: the SAME idempotency key was concurrently attached to a DIFFERENT submission (the
-      // pre-lock "already used?" check above can miss an in-flight sibling transaction, since
-      // FOR UPDATE locks are per-submission-row, not per-key). uq_partner_submissions_idem
-      // (tenant_id, idempotency_key) is the backstop; translate its violation into the same clean
-      // 409 the sequential (non-racing) case already returns, instead of a raw 500.
-      if ((err as { code?: string }).code === "23505") {
+      if (actor.rowCount !== 1 || actor.rows[0].status !== "ACTIVE") throw FORBIDDEN();
+
+      // Reserve exactly one credit before the handoff/status transition becomes visible. This shares
+      // the same database transaction as every acceptance write below, so an insufficient/suspended/
+      // closed wallet rolls back the handoff and leaves the Partner submission in draft.
+      const reservation = await reserveCreditInTransaction(
+        c,
+        { actorUserId: principal.userId, actorEmail: actor.rows[0].email },
+        {
+          tenantId: principal.tenantId,
+          locationId: row.location_id,
+          cardReference: `partner-submission:${submissionId}`,
+          submissionReference: submissionId,
+          expiresAt: new Date(Date.now() + PARTNER_SUBMISSION_CREDIT_TTL_MS),
+          idempotencyKey: `partner-submission-credit:${submissionId}`,
+          source: "portal",
+          reason: "Reserved one grading credit for Partner submission acceptance.",
+          actorType: "partner_user",
+          externalRef: snapshot.public_ref ?? null,
+          metadata: { partner_submission_id: submissionId, partner_public_ref: snapshot.public_ref ?? null },
+        }
+      );
+
+      // Locking the row (loadSubmissionForUpdate did FOR UPDATE) + the unique index on submission_id
+      // in partner_submission_handoffs together make this INSERT impossible to duplicate under
+      // concurrent retries: a second concurrent submit blocks on the row lock, then sees status is no
+      // longer 'draft' and throws NOT_DRAFT() instead of inserting a second handoff.
+      await c.query(
+        `INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending',$3)`,
+        [principal.tenantId, submissionId, JSON.stringify(snapshot)]
+      );
+      let updated;
+      try {
+        updated = await c.query(
+          `UPDATE partner_submissions SET status='submitted_to_mintvault', submitted_at=now(), idempotency_key=$2, version=version+1, updated_at=now()
+         WHERE id=$1 AND tenant_id=$3 RETURNING id`,
+          [submissionId, idempotencyKey, principal.tenantId]
+        );
+      } catch (err) {
+        // RACE: the SAME idempotency key was concurrently attached to a DIFFERENT submission (the
+        // pre-lock "already used?" check above can miss an in-flight sibling transaction, since
+        // FOR UPDATE locks are per-submission-row, not per-key). uq_partner_submissions_idem
+        // (tenant_id, idempotency_key) is the backstop; translate its violation into the same clean
+        // 409 the sequential (non-racing) case already returns, instead of a raw 500.
+        if ((err as { code?: string }).code === "23505") {
+          throw new SubmissionError(
+            "idempotency_conflict",
+            "This idempotency key was already used for a different submission."
+          );
+        }
+        throw err;
+      }
+      if (updated.rowCount !== 1) throw STALE();
+      await writeEvent(c, principal, submissionId, "submitted", "draft", "submitted_to_mintvault", null);
+      await writePartnerAudit(c, {
+        tenantId: principal.tenantId,
+        locationId: row.location_id,
+        actorUserId: principal.userId,
+        action: "submission.submitted",
+        recordType: "partner_submission",
+        recordId: submissionId,
+        after: { status: "submitted_to_mintvault" },
+        correlationId: reservation.reservation.id,
+      });
+      return buildDetail(c, principal, submissionId);
+    });
+  } catch (err) {
+    if (err instanceof CreditReservationError) {
+      if (err.code === "INSUFFICIENT_CREDITS" || err.code === "WALLET_INACTIVE" || err.code === "WALLET_NOT_FOUND") {
         throw new SubmissionError(
-          "idempotency_conflict",
-          "This idempotency key was already used for a different submission."
+          "credit_unavailable",
+          "A grading credit is not currently available for this submission."
         );
       }
-      throw err;
+      if (err.code === "IDEMPOTENCY_CONFLICT") {
+        throw new SubmissionError(
+          "idempotency_conflict",
+          "This submission credit reservation conflicts with an earlier request."
+        );
+      }
     }
-    if (updated.rowCount !== 1) throw STALE();
-    await writeEvent(c, principal, submissionId, "submitted", "draft", "submitted_to_mintvault", null);
-    await writePartnerAudit(c, {
-      tenantId: principal.tenantId,
-      locationId: row.location_id,
-      actorUserId: principal.userId,
-      action: "submission.submitted",
-      recordType: "partner_submission",
-      recordId: submissionId,
-      after: { status: "submitted_to_mintvault" },
-    });
-    return buildDetail(c, principal, submissionId);
-  });
+    throw err;
+  }
 }
 
 export interface AvailableServiceTier {

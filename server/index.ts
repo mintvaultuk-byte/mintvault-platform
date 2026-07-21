@@ -20,6 +20,7 @@ import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
 import pg from "pg";
 import path from "path";
+import { partnerAccountingTopologyReadiness } from "./partner/db";
 
 const app = express();
 const httpServer = createServer(app);
@@ -407,6 +408,14 @@ async function runTransferV2Sweep() {
 }
 
 (async () => {
+  // G6D is transactional only when the MintVault and Partner role URLs address the same database.
+  // Keep the main server available: individual G6D lifecycle calls fail closed until an operator
+  // reconciles a split topology, rather than turning a Partner URL configuration error into an
+  // application-wide outage.
+  if (!partnerAccountingTopologyReadiness().ready) {
+    log("[partner-credit] G6D settlement unavailable: database topology requires reconciliation.", "partner-credit");
+  }
+
   // Phase 2 (forward-port from remediation-release) — same-origin CSRF defense for
   // cookie-authenticated, state-changing requests. Registered after the module-level
   // middleware (raw-body Stripe webhook, express.json, session) and before the route
@@ -451,6 +460,19 @@ async function runTransferV2Sweep() {
   const guardedTransferV2Sweep = guard("transfer-v2-sweep", runTransferV2Sweep);
   trackTimeout(guardedTransferV2Sweep, 30_000);
   trackInterval(guardedTransferV2Sweep, 60 * 60 * 1000);
+
+  // Partner credit reservations are a temporary hold, never a manual-maintenance obligation. The
+  // domain service treats a pre-0017 database as a no-op for application-first rollout; once G6B
+  // exists this hourly, advisory-locked tick expires every due reservation automatically.
+  const guardedPartnerCreditReservationExpiry = guard("partner-credit-reservation-expiry", async () => {
+    const { runPartnerCreditReservationExpiry } = await import("./jobs/partner-credit-reservation-expiry");
+    const result = await runPartnerCreditReservationExpiry();
+    if (result.processed > 0) {
+      log(`processed=${result.processed} expired=${result.expired.length}`, "partner-credit-reservation-expiry");
+    }
+  });
+  guardedPartnerCreditReservationExpiry();
+  trackInterval(guardedPartnerCreditReservationExpiry, 60 * 60 * 1000);
 
   // RAG Phase 0 — hourly embed-corpus tick. First run after 60s so the
   // server is fully serving before we touch OpenAI; thereafter every

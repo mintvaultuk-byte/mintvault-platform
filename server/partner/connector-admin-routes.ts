@@ -189,6 +189,16 @@ export function connectorOpsRouter(): Router {
     }
   });
 
+  r.post("/records/:recordId/recover-credit", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(res, actor.requestId, await svc.opRecoverSubmissionCredit(actor, req.params.recordId, reason));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
   r.post("/records/:recordId/retry", async (req, res) => {
     try {
       const actor = actorOf(req);
