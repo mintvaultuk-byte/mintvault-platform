@@ -919,11 +919,16 @@ function SheetPrintingPanel() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const base = useContext(PrintApiBase);
+  const printParams =
+    typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const initialPrintFilter = printParams.get("print");
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pendingSheetRef, setPending] = useState<string | null>(null);
-  const [filterMode, setFilterMode] = useState<FilterMode>("all");
-  const [search, setSearch] = useState("");
+  const [filterMode, setFilterMode] = useState<FilterMode>(() =>
+    initialPrintFilter === "unprinted" || initialPrintFilter === "printed" ? initialPrintFilter : "all"
+  );
+  const [search, setSearch] = useState(() => printParams.get("search") ?? "");
   const [reprintingId, setReprintingId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<{ certId: string; cert: CertificateRecord } | null>(null);
 

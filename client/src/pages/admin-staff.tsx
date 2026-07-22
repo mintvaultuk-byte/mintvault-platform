@@ -77,6 +77,7 @@ function adminBlockedMsg(status: number, err?: string): string | null {
 
 export default function AdminStaffPage() {
   const [, navigate] = useLocation();
+  const queueFromUrl = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("queue") : null;
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [staff, setStaff] = useState<Staff[]>([]);
   // Rate is a STRING buffer so decimals type cleanly. A controlled type=number
@@ -301,7 +302,9 @@ export default function AdminStaffPage() {
   }
 
   // GRADE assignment — cross-submission grading queue (cert-level)
-  const [qFilter, setQFilter] = useState<string>("needs_grading");
+  const [qFilter, setQFilter] = useState<string>(() =>
+    QUEUE_FILTERS.some((filter) => filter.key === queueFromUrl) ? queueFromUrl! : "needs_grading"
+  );
   const [queue, setQueue] = useState<QueueRow[]>([]);
   const [qMeta, setQMeta] = useState<{ total: number; cap: number; capped: boolean } | null>(null);
   const [qLoading, setQLoading] = useState(false);

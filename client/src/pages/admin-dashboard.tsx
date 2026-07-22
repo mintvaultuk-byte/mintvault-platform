@@ -107,6 +107,7 @@ interface DbInfo {
 import CertificateForm from "@/components/certificate-form";
 import { CertificateToolsDrawer, CertificateToolsButton } from "@/components/grading-workflow/CertificateToolsDrawer";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
+import OperationsDashboard from "@/components/admin/operations-dashboard";
 import GradingPanel from "@/components/grading/grading-panel";
 import { useToast } from "@/hooks/use-toast";
 
@@ -139,8 +140,12 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
   // pre-fills the search (exact cert-number match) and lands on the certs tab.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const q = new URLSearchParams(window.location.search).get("search");
-    if (q) {
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("search");
+    // A submission search carries `tab=submissions`; do not steal it for the
+    // certificate list's legacy scanner deep link.
+    const tab = params.get("tab");
+    if (q && (!tab || tab === "certs")) {
       setSearchQuery(q);
       setActiveTab("certs");
     }
@@ -553,6 +558,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
       {activeTab === "dashboard" && (
         <DashboardView
           stats={stats}
+          isSuperAdmin={adminSession?.isSuperAdmin === true}
           onNewCert={handleNewCert}
           onGoToCerts={handleGoToCerts}
           onTabChange={setActiveTab}
@@ -841,11 +847,13 @@ function StolenReportsSection() {
 
 function DashboardView({
   stats,
+  isSuperAdmin,
   onNewCert,
   onGoToCerts,
   onTabChange,
 }: {
   stats?: DashboardStats;
+  isSuperAdmin: boolean;
   onNewCert: () => void;
   onGoToCerts: (filter?: CertsFilter) => void;
   onTabChange: (t: "dashboard" | "certs" | "submissions" | "intake" | "pricing" | "capacity" | "printing") => void;
@@ -1030,6 +1038,8 @@ function DashboardView({
           onClick={() => onGoToCerts({ gradeType: "authentic" })}
         />
       </div>
+
+      {isSuperAdmin && <OperationsDashboard onTabChange={onTabChange} />}
 
       <div className="admin-toolbar" style={{ marginTop: 22 }}>
         <div className="flex items-center gap-2">
@@ -1322,6 +1332,10 @@ function CertsView({
     if (g === "graded") return "graded";
     return "all";
   });
+  const [attentionFilter, setAttentionFilter] = useState<"all" | "missing_images">(() => {
+    if (typeof window === "undefined") return "all";
+    return new URLSearchParams(window.location.search).get("attention") === "missing-images" ? "missing_images" : "all";
+  });
 
   // Persist both filters to the URL query string. replaceState (not pushState)
   // so the back button isn't polluted with one history entry per click.
@@ -1334,12 +1348,14 @@ function CertsView({
     else params.set("grading", gradingStatusFilter.replace(/_/g, "-"));
     if (ownershipFilter === "all") params.delete("ownership");
     else params.set("ownership", ownershipFilter);
+    if (attentionFilter === "all") params.delete("attention");
+    else params.set("attention", "missing-images");
     const qs = params.toString();
     const newUrl = qs
       ? `${window.location.pathname}?${qs}${window.location.hash}`
       : `${window.location.pathname}${window.location.hash}`;
     window.history.replaceState(null, "", newUrl);
-  }, [gradingStatusFilter, ownershipFilter]);
+  }, [gradingStatusFilter, ownershipFilter, attentionFilter]);
 
   const filtered = certs.filter((c) => {
     if (statusFilter === "voided" && c.status !== "voided") return false;
@@ -1369,6 +1385,10 @@ function CertsView({
       if (ownershipFilter === "unclaimed" && os === "claimed") return false;
     }
     if (gradingStatusFilter !== "all" && gradingStatus(c) !== gradingStatusFilter) return false;
+    if (attentionFilter === "missing_images") {
+      const hasCard = Boolean(c.cardName);
+      if (c.status === "voided" || !hasCard || (c.frontImagePath && c.backImagePath)) return false;
+    }
     return true;
   });
 
@@ -1382,7 +1402,8 @@ function CertsView({
     dateTo ||
     searchQuery ||
     ownershipFilter !== "all" ||
-    gradingStatusFilter !== "all";
+    gradingStatusFilter !== "all" ||
+    attentionFilter !== "all";
 
   // Counts for the grading filter tabs — reflect statusFilter + gradeTypeFilter
   // only (not the grading filter itself, not date/grade/ownership/search), so
@@ -1489,6 +1510,14 @@ function CertsView({
             {g === "all" ? "All" : GRADING_STATUS_LABEL[g]}
           </Chip>
         ))}
+        <span className="admin-filters__div" />
+        <Chip
+          active={attentionFilter === "missing_images"}
+          onClick={() => setAttentionFilter(attentionFilter === "missing_images" ? "all" : "missing_images")}
+          testId="filter-attention-missing-images"
+        >
+          Missing images
+        </Chip>
       </div>
 
       <div className="admin-daterow">
@@ -1527,6 +1556,7 @@ function CertsView({
               setSearchQuery("");
               setOwnershipFilter("all");
               setGradingStatusFilter("all");
+              setAttentionFilter("all");
             }}
             className={adminButtonClass({ variant: "ghost", size: "sm" })}
             data-testid="button-clear-filters-certs"

@@ -6,8 +6,16 @@ export default function AdminPage() {
   const [authenticated, setAuthenticated] = useState<boolean | null>(null);
   const [authReason, setAuthReason] = useState<string>("");
   const [location, navigate] = useLocation();
-  // Deep-link: /admin/promotions opens the dashboard on the Promotions tab.
-  const initialTab = location === "/admin/promotions" ? ("promotions" as const) : undefined;
+  // Existing links may open an embedded admin screen directly. Keep query
+  // deep-links client-routed so dashboard controls can point to the canonical
+  // list, printing, and submissions views without a full-page reload.
+  const requestedTab = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("tab") : null;
+  const initialTab =
+    location === "/admin/promotions"
+      ? ("promotions" as const)
+      : requestedTab === "certs" || requestedTab === "submissions" || requestedTab === "printing"
+        ? requestedTab
+        : undefined;
 
   useEffect(() => {
     let cancelled = false;

@@ -114,8 +114,18 @@ function statusColor(status: string) {
 
 export default function AdminSubmissions() {
   const [selectedSub, setSelectedSub] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  // Dashboard operation links use these existing filters rather than creating
+  // a parallel submissions screen. Values are allow-listed before becoming UI
+  // state, so malformed URLs simply use the normal all-records view.
+  const initialParams =
+    typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const initialStatus = initialParams.get("status");
+  const [searchQuery, setSearchQuery] = useState(() => initialParams.get("search") ?? "");
+  const [statusFilter, setStatusFilter] = useState(() =>
+    ["new", "paid", "received", "in_grading", "ready_to_return", "shipped", "completed"].includes(initialStatus ?? "")
+      ? initialStatus!
+      : "all"
+  );
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
