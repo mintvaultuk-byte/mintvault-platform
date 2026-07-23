@@ -11,6 +11,15 @@ import { db } from "../db";
 import { sql } from "drizzle-orm";
 
 /**
+ * Minimal DB executor surface used by the credit primitives. Defaults to the
+ * shared `db` in production; a test can inject a cluster-backed executor so the
+ * exact SQL semantics are verified against a real PostgreSQL without touching
+ * the production SSL connection config. Injection is READ-ONLY plumbing — it
+ * changes no runtime behaviour (every production caller passes nothing).
+ */
+type SqlExecutor = Pick<typeof db, "execute">;
+
+/**
  * Atomically RESERVE one available credit for a checkout that's about to create
  * a discounted PaymentIntent. Returns the reserved credit id, or null if none
  * is available (already used / expired / reserved by a concurrent checkout).
@@ -19,8 +28,12 @@ import { sql } from "drizzle-orm";
  * the fix for the credit double-spend race. Reservation is TTL'd (30 min): an
  * abandoned checkout auto-frees the credit, so there is no sweeper to run.
  */
-export async function reserveCredit(userId: string, creditType: string): Promise<number | null> {
-  const result = await db.execute(sql`
+export async function reserveCredit(
+  userId: string,
+  creditType: string,
+  runner: SqlExecutor = db
+): Promise<number | null> {
+  const result = await runner.execute(sql`
     UPDATE member_credits
     SET reserved_at = NOW(), reserved_until = NOW() + INTERVAL '30 minutes'
     WHERE id = (
@@ -38,32 +51,47 @@ export async function reserveCredit(userId: string, creditType: string): Promise
   return result.rows.length > 0 ? Number((result.rows[0] as any).id) : null;
 }
 
-/** Consume a single credit of the given type. Returns true if consumed.
- *  If reservedCreditId is given (the row reserved at PaymentIntent creation),
- *  consume that exact row; otherwise fall back to claiming any available credit
- *  (covers PaymentIntents created before the reservation change shipped). */
+/**
+ * Consume the EXACT credit row reserved at PaymentIntent creation. Fails closed:
+ * if that specific reservation is no longer available (already used / gone) this
+ * returns false and NEVER claims a different credit. The reserved row's own
+ * user_id is the server-derived owner of the credit; when the reserving user's
+ * identity was also bound into the PI metadata (creditOwnerUserId) we additionally
+ * pin `user_id = ownerUserId` as belt-and-braces, so a discounted order can only
+ * ever burn the reserving user's own reserved credit — never one derived from the
+ * customer-supplied submission email. Single atomic UPDATE.
+ */
+async function consumeReservedCredit(
+  reservedCreditId: number,
+  submissionId: number,
+  ownerUserId: string | null,
+  runner: SqlExecutor = db
+): Promise<boolean> {
+  const r = await runner.execute(sql`
+    UPDATE member_credits
+    SET used_at = NOW(), used_for_submission_id = ${submissionId}
+    WHERE id = ${reservedCreditId}
+      AND used_at IS NULL
+      ${ownerUserId ? sql`AND user_id = ${ownerUserId}` : sql``}
+    RETURNING id
+  `);
+  return r.rows.length > 0;
+}
+
+/** Claim any one available credit of the given type for a KNOWN server-side user.
+ *  Used only for the legacy fallback (PaymentIntents created before reserve-at-
+ *  checkout shipped, which carry neither a reservedCreditId nor a bound owner).
+ *  FOR UPDATE SKIP LOCKED makes two simultaneous callers lock + claim DIFFERENT
+ *  unused credits (rather than both picking the same row), and the outer
+ *  `AND used_at IS NULL` is a belt-and-braces guard so a re-selected row can never
+ *  be consumed twice. Single statement, so it's atomic. */
 async function consumeCredit(
   userId: string,
   creditType: string,
   submissionId: number,
-  reservedCreditId?: number | null
+  runner: SqlExecutor = db
 ): Promise<boolean> {
-  if (reservedCreditId) {
-    const r = await db.execute(sql`
-      UPDATE member_credits
-      SET used_at = NOW(), used_for_submission_id = ${submissionId}
-      WHERE id = ${reservedCreditId} AND user_id = ${userId} AND used_at IS NULL
-      RETURNING id
-    `);
-    if (r.rows.length > 0) return true;
-    // Reserved row already used/gone (rare) — fall through to the generic claim.
-  }
-  // Phase 3 — prevent credit double-spend under concurrency. FOR UPDATE SKIP LOCKED
-  // makes two simultaneous callers lock + claim DIFFERENT unused credits (rather than
-  // both picking the same row), and the outer `AND used_at IS NULL` is a belt-and-
-  // braces guard so a re-selected row can never be consumed twice. Single statement,
-  // so it's atomic; behaviour for the normal (uncontended) path is unchanged.
-  const result = await db.execute(sql`
+  const result = await runner.execute(sql`
     UPDATE member_credits
     SET used_at = NOW(), used_for_submission_id = ${submissionId}
     WHERE id = (
@@ -134,13 +162,19 @@ async function getTierCapacity(tierSlug: string): Promise<CapacityEntry> {
 export async function fulfilPaidSubmission(
   submission: any,
   piMeta: Record<string, string | undefined>,
-  piAmount: number
+  piAmount: number,
+  deps: { storage?: typeof storage; exec?: SqlExecutor } = {}
 ): Promise<{ fulfilled: boolean }> {
+  // Dependency injection is backward-compatible test plumbing: production callers
+  // (/api/confirm-payment and the Stripe webhook) pass nothing and get the real
+  // storage + DB. It changes NO runtime behaviour.
+  const store = deps.storage ?? storage;
+  const exec = deps.exec ?? db;
   const sid: string = submission.submissionId;
   const numId = Number(submission.id);
 
   // ATOMIC GATE — only the first transition to paid wins.
-  const won = await storage.markSubmissionAsPaid(numId);
+  const won = await store.markSubmissionAsPaid(numId);
   if (!won) {
     console.log(`[fulfil] submission ${sid} already paid, skipping (idempotent no-op)`);
     return { fulfilled: false };
@@ -150,53 +184,69 @@ export async function fulfilPaidSubmission(
   // Awaited (was fire-and-forget) so a failed UPDATE surfaces in this
   // request's logs before fulfilment reports success. Still non-fatal:
   // a missing estimate date must not fail a paid fulfilment.
-  await storage
+  await store
     .setEstimatedCompletionDate(numId)
     .catch((e: any) => console.error(`[fulfil] submission ${sid} setEstimatedCompletionDate error:`, e?.message || e));
 
   // Consume a Vault Club credit if one was applied at checkout.
-  if (piMeta.creditApplied === "true" && piMeta.creditType && submission.email) {
+  //
+  // SECURITY (PKG-1) — the credit owner is DERIVED FROM SERVER STATE, never from
+  // submission.email (which the customer supplies and can point at another
+  // account). At checkout we reserve the credit against the authenticated session
+  // user and bind BOTH the reserved row id (reservedCreditId) and that user's
+  // immutable id (creditOwnerUserId) into the trusted PaymentIntent metadata.
+  // Fulfilment consumes ONLY that exact reserved row, pinned to that owner. If the
+  // exact reservation cannot be consumed we FAIL CLOSED: we never claim a
+  // different credit, and we record reconciliation evidence — a discounted order
+  // is never silently completed with someone else's credit or with no credit.
+  if (piMeta.creditApplied === "true" && piMeta.creditType) {
     try {
-      const creditUser = await storage.getUserByEmail(submission.email);
-      if (creditUser) {
-        // Consume the exact credit reserved at checkout (reservedCreditId). The
-        // reservation already claimed it atomically, so this should always
-        // succeed; consumeCredit falls back to a generic claim for legacy PIs
-        // created before the reservation shipped.
-        const reservedId = piMeta.reservedCreditId ? Number(piMeta.reservedCreditId) : null;
-        const consumed = await consumeCredit(
-          creditUser.id,
-          piMeta.creditType,
-          numId,
-          Number.isInteger(reservedId) && (reservedId as number) > 0 ? reservedId : null
-        );
-        if (!consumed) {
-          // Charged the discounted price but no credit was available to burn
-          // (the credit was consumed by a concurrent order between quote and
-          // fulfilment). Charge already succeeded — never fail/refund here.
-          // Record an audit row so finance can reconcile the leak; mirrors the
-          // over_cap audit that redeemPromoCode already writes for promos.
-          console.error(
-            `[fulfil] submission ${sid} credit NOT consumed (none available for ${piMeta.creditType}) — reconcile`
-          );
-          await storage
-            .writeAuditLog("submission", String(numId), "CREDIT_CONSUME_FAILED", null, {
-              reason: "no_credit_available",
-              creditType: piMeta.creditType,
-              creditAmountPence: piMeta.creditAmountPence ?? null,
-              userId: creditUser.id,
-            })
-            .catch((e: any) => console.error(`[fulfil] submission ${sid} credit-fail audit error:`, e?.message || e));
+      const reservedIdNum = piMeta.reservedCreditId ? Number(piMeta.reservedCreditId) : NaN;
+      const reservedCreditId = Number.isInteger(reservedIdNum) && reservedIdNum > 0 ? reservedIdNum : null;
+      const ownerUserId = (piMeta.creditOwnerUserId ?? "").trim() || null;
+
+      let consumed = false;
+      let failReason = "unknown";
+
+      if (reservedCreditId) {
+        // Primary path (all PIs since reserve-at-checkout shipped). Consume the
+        // exact reserved row, pinned to the bound owner when present. Fail closed.
+        consumed = await consumeReservedCredit(reservedCreditId, numId, ownerUserId, exec);
+        failReason = "reserved_credit_unavailable";
+      } else if (ownerUserId) {
+        // Owner bound but no reserved id (defensive; not produced by current
+        // checkout). Claim one of the OWNER's own credits — still never email.
+        consumed = await consumeCredit(ownerUserId, piMeta.creditType, numId, exec);
+        failReason = "no_credit_available";
+      } else if (submission.email) {
+        // Truly-legacy PI (pre-reservation, pre-owner-binding). No server-bound
+        // identity exists on the payment, so fall back to the historical
+        // email-derived lookup. New PIs never reach this branch.
+        const creditUser = await store.getUserByEmail(submission.email);
+        if (creditUser) {
+          consumed = await consumeCredit(creditUser.id, piMeta.creditType, numId, exec);
+          failReason = "no_credit_available";
         } else {
-          console.log(`[fulfil] submission ${sid} consumed 1 ${piMeta.creditType} credit`);
+          failReason = "no_user_for_email";
         }
       } else {
-        console.error(`[fulfil] submission ${sid} creditApplied but no user for ${submission.email} — reconcile`);
-        await storage
+        failReason = "no_owner_identity";
+      }
+
+      if (consumed) {
+        console.log(`[fulfil] submission ${sid} consumed 1 ${piMeta.creditType} credit`);
+      } else {
+        // Charge already succeeded — never fail/refund here. Record an audit row
+        // so finance can reconcile; mirrors the over_cap audit redeemPromoCode
+        // writes for promos.
+        console.error(`[fulfil] submission ${sid} credit NOT consumed (${failReason}) — reconcile`);
+        await store
           .writeAuditLog("submission", String(numId), "CREDIT_CONSUME_FAILED", null, {
-            reason: "no_user_for_email",
+            reason: failReason,
             creditType: piMeta.creditType,
             creditAmountPence: piMeta.creditAmountPence ?? null,
+            reservedCreditId: reservedCreditId ?? null,
+            userId: ownerUserId,
           })
           .catch((e: any) => console.error(`[fulfil] submission ${sid} credit-fail audit error:`, e?.message || e));
       }
@@ -214,7 +264,7 @@ export async function fulfilPaidSubmission(
     if (Number.isInteger(codeId) && codeId > 0) {
       try {
         if (piMeta.promoReservedAtCheckout === "true") {
-          await storage
+          await store
             .writeAuditLog("promo_code", String(codeId), "PROMO_CODE_REDEEMED", null, {
               code: piMeta.promoCode || null,
               percent: piMeta.promoCodePercent ? Number(piMeta.promoCodePercent) : null,
@@ -241,15 +291,15 @@ export async function fulfilPaidSubmission(
   // Link (or create) the customer user record.
   if (submission.email) {
     try {
-      let user = await storage.getUserByEmail(submission.email);
+      let user = await store.getUserByEmail(submission.email);
       if (!user) {
-        user = await storage.createUser({
+        user = await store.createUser({
           email: submission.email,
           firstName: submission.firstName || submission.first_name || undefined,
           lastName: submission.lastName || submission.last_name || undefined,
         });
       }
-      await storage.updateSubmission(submission.id, { userId: user.id });
+      await store.updateSubmission(submission.id, { userId: user.id });
     } catch (e: any) {
       console.error(`[fulfil] submission ${sid} user-link error:`, e?.message || e);
     }
@@ -756,6 +806,13 @@ export function registerSubmissionRoutes(app: Express): void {
                 // The specific credit reserved at checkout — fulfilment consumes
                 // exactly this row (empty ⇒ legacy PI / no reservation).
                 reservedCreditId: reservedCreditId != null ? String(reservedCreditId) : "",
+                // PKG-1 — the reserving user's immutable, server-derived id. This
+                // BINDS credit ownership to the authenticated session that reserved
+                // it, so fulfilment never re-derives the owner from the
+                // customer-supplied submission email. It's an opaque internal id
+                // (not personal data). Empty only if somehow reserved without a
+                // session (not produced by this route).
+                creditOwnerUserId: sessionUserId ? String(sessionUserId) : "",
               }
             : {}),
           ...(type === "crossover" && crossoverCompany
