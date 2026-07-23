@@ -115,7 +115,12 @@ import {
   resolveBackgroundVariant,
   type SocialStudioBackgroundId,
 } from "@shared/social-studio";
-import { storage, deductAiCredits } from "./storage";
+import { storage } from "./storage";
+import {
+  consumeEstimateCredit,
+  getEstimateCreditBalance,
+  buildEstimateCheckoutMetadata,
+} from "./estimate-credit-consumption";
 import { getUncachableStripeClient, getStripePublishableKey } from "./stripeClient";
 import {
   verifyAdminPassword,
@@ -8828,22 +8833,20 @@ Defects (admin-confirmed): ${defectLines}`;
   // the header set.
 
   // GET /api/tools/estimate/credits?email=
-  // H3 — strict per-IP rate limit. The estimate tool is anonymous (no session to
-  // own an email against), so ownership isn't viable without breaking the flow;
-  // the limiter caps balance-enumeration by email. (no-account and a zero-balance
-  // account already both return {credits:0}, so only a positive balance is an
-  // oracle — and that has to be shown to the tool's legitimate user.)
+  // Owner-bound (PKG-3). An AUTHENTICATED caller always sees ONLY their own
+  // balance, derived from the session identity — a conflicting ?email= is ignored,
+  // so a logged-in user cannot enumerate another customer's balance. Anonymous
+  // callers keep the minimal legacy per-email lookup (rate-limited: a positive
+  // balance is the only oracle, and that must be shown to the tool's own user).
   app.get("/api/tools/estimate/credits", lookupRateLimit, async (req, res) => {
-    const email = ((req.query.email as string) || "").trim().toLowerCase();
-    if (!email) return res.status(400).json({ error: "Email required" });
     try {
-      const rows = await db.execute(sql`
-        SELECT credits_remaining, credits_purchased, credits_used
-        FROM estimate_credits WHERE email = ${email}
-      `);
-      if (rows.rows.length === 0) return res.json({ credits: 0, email });
-      const row = rows.rows[0] as any;
-      res.json({ credits: row.credits_remaining, email });
+      const result = await getEstimateCreditBalance({
+        sessionUserId: (req.session as any)?.userId,
+        sessionUserEmail: (req.session as any)?.userEmail,
+        queryEmail: (req.query.email as string) || null,
+      });
+      if (!result.ok) return res.status(result.status).json({ error: result.error });
+      res.json({ credits: result.credits, email: result.email });
     } catch (err: any) {
       console.error("[estimate/credits] error:", err.message);
       res.status(500).json({ error: "Failed to check credits" });
@@ -8852,7 +8855,15 @@ Defects (admin-confirmed): ${defectLines}`;
 
   // POST /api/tools/estimate/checkout  { email, package: "5"|"15"|"100", return_path?: "/tools/centering" }
   app.post("/api/tools/estimate/checkout", async (req, res) => {
-    const email = (req.body.email || "").trim().toLowerCase();
+    // Ownership is server-derived from the trusted session. For a logged-in buyer
+    // we stamp the authenticated user id into metadata so PKG-2 fulfilment binds
+    // the purchased credits to their account (users.ai_credits_user_balance). A
+    // browser-supplied user_id is never read. Email is retained for the receipt
+    // and the legacy anonymous fulfilment path; when authenticated we default it
+    // to the session's verified email so the receipt is correct.
+    const sessionUserId = (req.session as any)?.userId || null;
+    const sessionUserEmail = ((req.session as any)?.userEmail || "").trim().toLowerCase();
+    const email = (req.body.email || "").trim().toLowerCase() || sessionUserEmail;
     const pkg = req.body.package as string;
     const returnPath = (req.body.return_path as string) || "/tools/estimate";
     if (!email) return res.status(400).json({ error: "Email required" });
@@ -8861,6 +8872,7 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       const stripe = await getUncachableStripeClient();
       const origin = (req.headers.origin as string) || APP_BASE_URL;
+      const metadata = buildEstimateCheckoutMetadata({ sessionUserId, email, credits: pkgInfo.credits });
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ["card"],
         mode: "payment",
@@ -8878,11 +8890,7 @@ Defects (admin-confirmed): ${defectLines}`;
             quantity: 1,
           },
         ],
-        metadata: {
-          type: "estimate_credits",
-          email,
-          credits: String(pkgInfo.credits),
-        },
+        metadata,
         success_url: `${origin}${returnPath}?payment=success&email=${encodeURIComponent(email)}`,
         cancel_url: `${origin}${returnPath}?payment=cancelled`,
       });
@@ -8920,121 +8928,28 @@ Defects (admin-confirmed): ${defectLines}`;
       const email = (req.body.email || "").trim().toLowerCase();
       const isAdminFree = email === ADMIN_FREE_EMAIL;
 
-      // Logged-in users: check ai_credits_user_balance first, then fall back to email credits
-      const sessionUserId = (req.session as any)?.userId;
-      let usedUserBalance = false;
+      // PKG-3 — owner-bound, atomic credit consumption. The paid Anthropic call
+      // below runs ONLY when this resolves to ok, i.e. the database has proven
+      // exactly one credit was consumed against the correct owner. Authenticated
+      // authority comes solely from the session; a caller-supplied req.body.email
+      // never grants a logged-in caller spending authority over another pool.
+      // IP is hashed (SHA-256) before storage for the anonymous free tier — never
+      // store a raw IP, per privacy rules.
+      const ipRaw =
+        (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
+      const ipHash = crypto.createHash("sha256").update(ipRaw).digest("hex");
+      const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD UTC
 
-      if (!isAdminFree) {
-        if (sessionUserId) {
-          // Try user-level AI credit balance first
-          const deduction = await deductAiCredits(sessionUserId, 1, "ai_grading_estimate");
-          if (deduction.ok) {
-            usedUserBalance = true;
-          } else if (deduction.reason === "no_user") {
-            return res.status(401).json({ error: "User account not found." });
-          } else if (email) {
-            // Fall back to email-based credits (e.g. pre-account purchases)
-            const rows = await db.execute(sql`
-              SELECT id, credits_remaining FROM estimate_credits WHERE email = ${email}
-            `);
-            if (rows.rows.length === 0 || (rows.rows[0] as any).credits_remaining <= 0) {
-              await db
-                .insert(auditLog)
-                .values({
-                  entityType: "estimate",
-                  entityId: sessionUserId,
-                  action: "402_insufficient",
-                  adminUser: null,
-                  details: { path: "user_then_email_empty", email },
-                })
-                .catch(() => {});
-              return res.status(402).json({ error: "No credits remaining. Purchase more estimates to continue." });
-            }
-            await db.execute(sql`
-              UPDATE estimate_credits
-              SET credits_remaining = credits_remaining - 1,
-                  credits_used = credits_used + 1,
-                  updated_at = NOW()
-              WHERE email = ${email} AND credits_remaining > 0
-            `);
-          } else {
-            await db
-              .insert(auditLog)
-              .values({
-                entityType: "estimate",
-                entityId: sessionUserId,
-                action: "402_insufficient",
-                adminUser: null,
-                details: { path: "user_no_balance_no_email" },
-              })
-              .catch(() => {});
-            return res
-              .status(402)
-              .json({ error: "No AI credits remaining. Buy a pack or join Vault Club Silver when it reopens." });
-          }
-        } else if (email) {
-          // Anonymous with email — use email credits only
-          const rows = await db.execute(sql`
-            SELECT id, credits_remaining FROM estimate_credits WHERE email = ${email}
-          `);
-          if (rows.rows.length === 0 || (rows.rows[0] as any).credits_remaining <= 0) {
-            await db
-              .insert(auditLog)
-              .values({
-                entityType: "estimate",
-                entityId: email,
-                action: "402_insufficient",
-                adminUser: null,
-                details: { path: "anon_email_empty" },
-              })
-              .catch(() => {});
-            return res.status(402).json({ error: "No credits remaining. Purchase more estimates to continue." });
-          }
-          await db.execute(sql`
-            UPDATE estimate_credits
-            SET credits_remaining = credits_remaining - 1,
-                credits_used = credits_used + 1,
-                updated_at = NOW()
-            WHERE email = ${email} AND credits_remaining > 0
-          `);
-        } else {
-          // Anonymous + no email — server-side free tier: 1 estimate per IP per UTC day.
-          // IP hashed SHA-256 before storage (never raw, per privacy rules).
-          const ipRaw =
-            (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket.remoteAddress || "unknown";
-          const ipHash = crypto.createHash("sha256").update(ipRaw).digest("hex");
-          const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD UTC
-          const upsert = await db.execute(sql`
-            INSERT INTO estimate_free_uses (ip_hash, last_used_at, count_today)
-            VALUES (${ipHash}, NOW(), 1)
-            ON CONFLICT (ip_hash) DO UPDATE SET
-              count_today = CASE
-                WHEN to_char(estimate_free_uses.last_used_at, 'YYYY-MM-DD') = ${today}
-                THEN estimate_free_uses.count_today + 1
-                ELSE 1
-              END,
-              last_used_at = NOW()
-            RETURNING count_today
-          `);
-          const countToday = Number((upsert.rows[0] as any).count_today);
-          if (countToday > 1) {
-            await db
-              .insert(auditLog)
-              .values({
-                entityType: "estimate",
-                entityId: ipHash,
-                action: "402_insufficient",
-                adminUser: null,
-                details: { path: "anon_ip_day_limit", countToday },
-              })
-              .catch(() => {});
-            return res.status(402).json({
-              error: "Free estimate used for today. Add an email to buy a credit pack from £2 for 5 estimates.",
-              freeLimit: 1,
-              windowResetAt: "midnight UTC",
-            });
-          }
-        }
+      const consume = await consumeEstimateCredit({
+        sessionUserId: (req.session as any)?.userId,
+        sessionUserEmail: (req.session as any)?.userEmail,
+        bodyEmail: email,
+        isAdminFree,
+        ipHash,
+        today,
+      });
+      if (!consume.ok) {
+        return res.status(consume.status).json({ error: consume.error, ...(consume.extra || {}) });
       }
 
       const { PRE_GRADE_PROMPT } = await import("./grading-prompt");
@@ -9104,15 +9019,10 @@ Defects (admin-confirmed): ${defectLines}`;
         confidence: sub.surface?.confidence ?? estimate.confidence ?? "medium",
       };
 
-      // Return remaining credits with response
-      let creditsLeft: number | undefined;
-      if (usedUserBalance && sessionUserId) {
-        const cr = await db.execute(sql`SELECT ai_credits_user_balance FROM users WHERE id = ${sessionUserId}`);
-        creditsLeft = cr.rows.length ? (cr.rows[0] as any).ai_credits_user_balance : 0;
-      } else if (email && !isAdminFree) {
-        const cr = await db.execute(sql`SELECT credits_remaining FROM estimate_credits WHERE email = ${email}`);
-        creditsLeft = cr.rows.length ? (cr.rows[0] as any).credits_remaining : 0;
-      }
+      // Return remaining credits with response. The atomic decrement already
+      // reported the post-spend balance (null for admin-free / anonymous-free
+      // paths, which don't track a per-caller balance).
+      const creditsLeft: number | undefined = consume.remaining ?? undefined;
       // Merge: new structured fields + compat fields + credits
       res.json({ ...estimate, ...compat, credits_remaining: creditsLeft });
     } catch (err: any) {

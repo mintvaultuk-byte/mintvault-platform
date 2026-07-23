@@ -3017,6 +3017,14 @@ export class DatabaseStorage implements IStorage {
 export const storage = new DatabaseStorage();
 
 /**
+ * Minimal executor surface deductAiCredits needs. Production callers pass nothing
+ * and use the real `db`; tests inject a disposable-cluster drizzle instance so the
+ * conditional-UPDATE atomicity is exercised against real PostgreSQL. No runtime
+ * behaviour changes for production callers.
+ */
+export type AiCreditExec = Pick<typeof db, "execute" | "insert">;
+
+/**
  * Deduct AI credits from a user's balance. Returns { ok: true, remaining } if successful,
  * or { ok: false, reason: 'insufficient' | 'no_user' } if the deduction failed.
  * Uses a conditional UPDATE so deductions are atomic and can't go negative.
@@ -3024,11 +3032,12 @@ export const storage = new DatabaseStorage();
 export async function deductAiCredits(
   userId: string,
   amount: number,
-  reason: string
+  reason: string,
+  exec: AiCreditExec = db
 ): Promise<{ ok: true; remaining: number } | { ok: false; reason: "insufficient" | "no_user" }> {
   if (amount <= 0) throw new Error("deductAiCredits: amount must be positive");
 
-  const result = await db.execute(sql`
+  const result = await exec.execute(sql`
     UPDATE users
        SET ai_credits_user_balance = ai_credits_user_balance - ${amount},
            updated_at = NOW()
@@ -3039,7 +3048,7 @@ export async function deductAiCredits(
 
   if (result.rows.length === 0) {
     // Either user doesn't exist OR they didn't have enough credits. Check which.
-    const check = await db.execute(sql`
+    const check = await exec.execute(sql`
       SELECT ai_credits_user_balance FROM users WHERE id = ${userId} LIMIT 1
     `);
     if (check.rows.length === 0) return { ok: false, reason: "no_user" };
@@ -3047,7 +3056,7 @@ export async function deductAiCredits(
   }
 
   // Audit trail
-  await db.insert(auditLog).values({
+  await exec.insert(auditLog).values({
     entityType: "user",
     entityId: userId,
     action: "ai_credits.deducted",
