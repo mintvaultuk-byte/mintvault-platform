@@ -71,6 +71,7 @@ import { registerStolenRoutes } from "./routes/stolen";
 import { registerRedirectRoutes } from "./routes/redirects";
 import { registerEmbeddingRoutes } from "./routes/embedding";
 import { registerPromotionRoutes } from "./routes/admin/promotions";
+import { registerProjectControlRoutes } from "./routes/project-control";
 import { migratePromotionsSchema } from "./services/promotionService";
 import { migratePaymentIdempotencySchema } from "./webhookHandlers";
 import { registerGraderRoutes } from "./routes/grader";
@@ -1428,6 +1429,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerPreGradeRoutes(app);
   registerStolenRoutes(app);
   registerPromotionRoutes(app);
+  registerProjectControlRoutes(app);
   registerEmbeddingRoutes(app);
 
   // ── Vault Quest admin (isolated feature — server/routes/vault-quest-admin.ts) ──

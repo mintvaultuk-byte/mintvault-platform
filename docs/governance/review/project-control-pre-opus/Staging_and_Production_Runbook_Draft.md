@@ -1,0 +1,9 @@
+# Staging and production runbook draft
+
+This draft is intentionally non-executable. It authorizes no deployment, migration or feature-flag action.
+
+Before staging: obtain founder approval after independent Opus reviews; resolve `MRG-HIGH-001` by approving a lineage containing G6D `0019` before PCD `0020`; confirm the canonical staging schema includes legacy core tables required before numbered migration `0010`; re-run the candidate’s final verification from the approved committed tree; inspect migration backup/recovery and database permissions; and approve the exact immutable-record retention/writer policy.
+
+Staging sequence (operator-controlled): deploy the approved build with Project Control disabled; apply the reviewed ordered migration set through the standard locked migration runner; validate schema head, PCD indexes and append-only triggers; set the environment flag only through approved staging configuration; test direct denied and Super Admin permitted API access; verify no GET request writes PCD records; compare deployed version evidence with the running build; then collect an auditable staging result. Do not infer production readiness from deployment alone.
+
+Before production: repeat the independent approval, migration-order, backup/recovery, security, observability and rollback checks on the exact release artifact; obtain founder release approval; and confirm production data/permissions support the append-only trigger function. Enable only after a separately approved rollout plan. Post-release, verify deployed commit/version, authorization denial paths, feature state, scanner bounded failure behavior, audit trails, and production functionality. Any migration/flag failure requires stopping the rollout and using the approved recovery plan; do not run destructive rollback SQL against immutable governance records.

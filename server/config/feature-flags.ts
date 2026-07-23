@@ -35,6 +35,10 @@ export const FEATURE_FLAGS = {
   // ownerDisplayName regardless of column value. Default false.
   PUBLIC_NAME_TOGGLE_LIVE: process.env.PUBLIC_NAME_TOGGLE_LIVE === "true",
 
+  // MEGS-PCD-006 — Super Admin Project Control is fail-closed and default OFF.
+  // The route guard also checks runtime override storage; unreadable storage denies access.
+  SUPER_ADMIN_PROJECT_CONTROL_ENABLED: process.env.SUPER_ADMIN_PROJECT_CONTROL_ENABLED === "true",
+
   // ── AI feature toggles (per docs/ai-audit.md, 2026-05-07) ─────────────────
   // Per-feature kill-switches so we can disable individual AI calls without
   // unsetting ANTHROPIC_API_KEY (which would 503 every AI route at once).

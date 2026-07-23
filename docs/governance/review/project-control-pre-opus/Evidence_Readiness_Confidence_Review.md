@@ -1,0 +1,7 @@
+# Evidence, readiness and confidence review
+
+The engine keeps implementation, tests, review, deployment and production verification distinct. A requirement’s lifecycle is derived from the strongest current evidence, not documentation labels or file presence alone. Evidence is canonicalised and de-duplicated by source kind, locator, classification, lifecycle, summary and payload; duplicate evidence cannot increase a score.
+
+Mandatory, non-superseded requirements form the readiness denominator. Optional requirements are counted separately; superseded work is excluded. A failed mandatory test produces blocked / zero readiness and confidence. Missing or skipped mandatory test evidence cannot pass: without strong current direct evidence, readiness is capped at 25 and confidence at 15. Stale evidence caps readiness at 10. Self-reported or otherwise weak evidence cannot exceed in-progress readiness or 35 confidence. Contradictions reduce the result; unknown and blocked remain visibly distinct.
+
+The continuation prompt input is stable JSON over requirements, statuses and evidence IDs. The dynamic timestamp was removed, giving identical input the same snapshot ID and prompt text. Tests cover unknown, blocked, stale, missing, duplicate, failed/skipped test, deployment-pending, self-reported, optional and superseded scenarios. Future durable snapshot retention is intentionally outside this GET-only implementation.

@@ -117,6 +117,7 @@ const ShowroomPage = lazy(() => import("@/pages/showroom"));
 const ShowroomsListPage = lazy(() => import("@/pages/showrooms"));
 const CommunityPage = lazy(() => import("@/pages/community"));
 const AdminCommunityPage = lazy(() => import("@/pages/admin/community"));
+const AdminProjectControlPage = lazy(() => import("@/pages/admin/project-control"));
 const AdminPartnerNetworkPage = lazy(() => import("@/pages/admin/partner-network"));
 const AdminPartnerManagementPage = lazy(() => import("@/pages/admin/partner-management"));
 const AdminPartnerManagementDetailPage = lazy(() => import("@/pages/admin/partner-management-detail"));
@@ -340,6 +341,7 @@ function Router() {
           <Route path="/admin/vault-quest/card-factory" component={AdminVaultQuestCardFactoryPage} />
           <Route path="/admin/vault-quest" component={AdminVaultQuestPage} />
           <Route path="/admin/community" component={AdminCommunityPage} />
+          <Route path="/admin/project-control" component={AdminProjectControlPage} />
           <Route path="/admin/partner-network/partners/:partnerId" component={AdminPartnerManagementDetailPage} />
           <Route path="/admin/partner-network/partners" component={AdminPartnerManagementPage} />
           <Route path="/admin/partner-network" component={AdminPartnerNetworkPage} />

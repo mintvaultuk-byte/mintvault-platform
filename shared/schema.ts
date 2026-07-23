@@ -2185,3 +2185,72 @@ export const igSettings = pgTable("ig_settings", {
 });
 
 export type IgSettingsRow = typeof igSettings.$inferSelect;
+
+// ── Project Control Dashboard ────────────────────────────────────────────────
+// MEGS-PCD-001..010: append-only governance evidence and snapshot storage. These
+// tables are additive and read by the dashboard; operational mutation controls do
+// not live here.
+
+export const projectControlEvidence = pgTable(
+  "project_control_evidence",
+  {
+    id: serial("id").primaryKey(),
+    evidenceId: text("evidence_id").notNull().unique(),
+    requirementId: text("requirement_id").notNull(),
+    evidenceClassification: text("evidence_classification").notNull(),
+    lifecycleState: text("lifecycle_state").notNull().default("unknown"),
+    sourceKind: text("source_kind").notNull(),
+    sourceLocator: text("source_locator"),
+    sourceTimestamp: timestamp("source_timestamp", { withTimezone: true }),
+    summary: text("summary").notNull(),
+    payload: jsonb("payload"),
+    staleAfter: timestamp("stale_after", { withTimezone: true }),
+    confidenceImpact: integer("confidence_impact").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    requirementIdx: index("project_control_evidence_requirement_idx").on(t.requirementId),
+    sourceKindIdx: index("project_control_evidence_source_kind_idx").on(t.sourceKind),
+    createdIdx: index("project_control_evidence_created_idx").on(t.createdAt),
+  })
+);
+
+export type ProjectControlEvidence = typeof projectControlEvidence.$inferSelect;
+
+export const projectControlStatusHistory = pgTable(
+  "project_control_status_history",
+  {
+    id: serial("id").primaryKey(),
+    requirementId: text("requirement_id").notNull(),
+    lifecycleState: text("lifecycle_state").notNull(),
+    readinessPercent: integer("readiness_percent").notNull().default(0),
+    confidencePercent: integer("confidence_percent").notNull().default(0),
+    evidenceIds: jsonb("evidence_ids"),
+    reason: text("reason").notNull(),
+    snapshotId: text("snapshot_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    requirementCreatedIdx: index("project_control_status_requirement_created_idx").on(t.requirementId, t.createdAt),
+    snapshotIdx: index("project_control_status_snapshot_idx").on(t.snapshotId),
+  })
+);
+
+export type ProjectControlStatusHistory = typeof projectControlStatusHistory.$inferSelect;
+
+export const projectControlPromptSnapshots = pgTable(
+  "project_control_prompt_snapshots",
+  {
+    id: serial("id").primaryKey(),
+    snapshotId: text("snapshot_id").notNull().unique(),
+    promptText: text("prompt_text").notNull(),
+    sourceEvidence: jsonb("source_evidence"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    frozenUntil: timestamp("frozen_until", { withTimezone: true }),
+  },
+  (t) => ({
+    createdIdx: index("project_control_prompt_snapshots_created_idx").on(t.createdAt),
+  })
+);
+
+export type ProjectControlPromptSnapshot = typeof projectControlPromptSnapshots.$inferSelect;

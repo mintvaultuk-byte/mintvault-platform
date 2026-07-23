@@ -27,6 +27,7 @@ import {
   Library,
   PackageCheck,
   Share2,
+  ClipboardCheck,
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
 import InstallAppButton from "../install-app-button";
@@ -87,6 +88,7 @@ const NAV: NavSection[] = [
       { key: "printing", label: "Printing", icon: Printer },
       { href: "/admin/staff", label: "Staff", icon: Users },
       { href: "/admin/security", label: "Security", icon: ShieldCheck },
+      { href: "/admin/project-control", label: "Project Control", icon: ClipboardCheck },
       { href: "/admin/partner-network", label: "Partner Connectors", icon: PackageCheck },
       { href: "/admin/partner-network/partners", label: "Partners", icon: Users },
     ],
