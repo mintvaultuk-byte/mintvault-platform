@@ -301,7 +301,11 @@ export default function GradingPanel({
   // With AI identify OFF we pass ?aiIdentify=0 so the server SKIPS the identify
   // call and returns immediately (no block); `aiIdentify` is in the queryKey so
   // flipping the toggle refetches with the new behaviour.
-  const { data: gradingData, isPending: gradingPending } = useQuery<any>({
+  const {
+    data: gradingData,
+    isPending: gradingPending,
+    refetch: refetchGrading,
+  } = useQuery<any>({
     queryKey: [`${apiBase}/certificates/${certId}/grading`, aiIdentify],
     queryFn: async () => {
       const url = `${apiBase}/certificates/${certId}/grading${aiIdentify ? "" : "?aiIdentify=0"}`;
@@ -310,6 +314,85 @@ export default function GradingPanel({
       return res.json();
     },
   });
+
+  const gradingVersionRef = useRef<number | null>(null);
+  const [gradingConflict, setGradingConflict] = useState<{
+    expectedVersion: number;
+    currentVersion: number;
+  } | null>(null);
+  const gradingConflictRef = useRef(false);
+  const gradingConflictToastShownRef = useRef(false);
+  const gradingSaveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+
+  function rememberGradingVersion(value: unknown) {
+    const version = Number(value);
+    if (!Number.isSafeInteger(version) || version < 1) return;
+    // A delayed response must never lower this tab's token.
+    if (gradingVersionRef.current == null || version >= gradingVersionRef.current) gradingVersionRef.current = version;
+  }
+
+  function handleGradingConflict(status: number, data: any): boolean {
+    if (status !== 409 || data?.code !== "GRADING_VERSION_CONFLICT") return false;
+    const expectedVersion = Number(data.expectedVersion ?? gradingVersionRef.current);
+    const currentVersion = Number(data.currentVersion);
+    if (!Number.isSafeInteger(expectedVersion) || !Number.isSafeInteger(currentVersion)) return false;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    gradingConflictRef.current = true;
+    setGradingConflict({ expectedVersion, currentVersion });
+    if (!gradingConflictToastShownRef.current) {
+      gradingConflictToastShownRef.current = true;
+      toast({
+        title: "Newer grading draft detected",
+        description: "Your unsaved work is still on screen. Reload before saving again so you can reconcile it safely.",
+        variant: "destructive",
+      });
+    }
+    return true;
+  }
+
+  function versionedGradingPayload(extra: Record<string, unknown> = {}) {
+    const expectedVersion = gradingVersionRef.current;
+    if (expectedVersion == null || !Number.isSafeInteger(expectedVersion) || expectedVersion < 1) {
+      throw new Error("The grading version is not loaded yet. Reload this certificate before saving.");
+    }
+    return { ...buildPayload(), ...extra, expectedVersion };
+  }
+
+  async function queueGradingDraftSave(): Promise<any> {
+    const run = async () => {
+      if (gradingConflictRef.current) throw new Error("A newer grading draft exists. Reload before saving again.");
+      const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(versionedGradingPayload()),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (handleGradingConflict(res.status, data)) throw new Error("A newer grading draft exists.");
+        throw new Error(data.error || `HTTP ${res.status}`);
+      }
+      rememberGradingVersion(data.gradingVersion);
+      return data;
+    };
+    const queued = gradingSaveChainRef.current.catch(() => undefined).then(run);
+    gradingSaveChainRef.current = queued;
+    return queued;
+  }
+
+  async function reloadAfterGradingConflict() {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    gradingSaveChainRef.current = Promise.resolve();
+    gradingVersionRef.current = null;
+    gradingConflictRef.current = false;
+    const result = await refetchGrading();
+    if (result.data) {
+      rememberGradingVersion((result.data as any).gradingVersion);
+      setGradingConflict(null);
+      gradingConflictToastShownRef.current = false;
+      setAutoSaveStatus("idle");
+    }
+  }
 
   // Legacy "Manual Centering" two-rect picker REMOVED (owner directive
   // 2026-07-01): no longer used — the 8-dot Card Tool below is the only
@@ -667,9 +750,18 @@ export default function GradingPanel({
     // eslint-disable-next-line
   }, []);
 
+  useEffect(() => {
+    gradingVersionRef.current = null;
+    gradingConflictRef.current = false;
+    setGradingConflict(null);
+    gradingConflictToastShownRef.current = false;
+    gradingSaveChainRef.current = Promise.resolve();
+  }, [certId]);
+
   // Populate from saved grading data
   useEffect(() => {
     if (!gradingData) return;
+    rememberGradingVersion((gradingData as any).gradingVersion);
     if (gradingData.centeringFrontLr) setFrontLR(gradingData.centeringFrontLr);
     if (gradingData.centeringFrontTb) setFrontTB(gradingData.centeringFrontTb);
     if (gradingData.centeringBackLr) setBackLR(gradingData.centeringBackLr);
@@ -903,16 +995,7 @@ export default function GradingPanel({
   async function saveEditedGrade(): Promise<void> {
     setEditSaving(true);
     try {
-      const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload()),
-      });
-      const data = await res.json().catch(() => ({}) as any);
-      if (!res.ok) {
-        throw new Error(data?.error || `HTTP ${res.status}`);
-      }
+      await queueGradingDraftSave();
       // Cache invalidation — everything that reads from certificates.grade or
       // its subgrades. RQ will refetch on next access; not forcing immediate
       // refetch so we don't thrash. Keys mirror the existing approveGrade()
@@ -939,19 +1022,11 @@ export default function GradingPanel({
 
   async function autoSaveNow(): Promise<boolean> {
     const seq = ++autoSaveSeqRef.current;
+    if (gradingConflict) return false;
     setAutoSaveStatus("saving");
     try {
-      const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload()),
-      });
+      await queueGradingDraftSave();
       if (seq !== autoSaveSeqRef.current) return true;
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
       setAutoSaveStatus("saved");
       if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
       autoSavedClearTimerRef.current = setTimeout(() => {
@@ -961,7 +1036,9 @@ export default function GradingPanel({
     } catch (e: any) {
       if (seq !== autoSaveSeqRef.current) return false;
       setAutoSaveStatus("error");
-      toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
+      if (!gradingConflictToastShownRef.current) {
+        toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
+      }
       return false;
     }
   }
@@ -976,6 +1053,7 @@ export default function GradingPanel({
   useEffect(() => {
     if (!certId) return;
     if (gradeApprovedAt) return; // auto-save is pre-approval only
+    if (gradingConflict) return;
     if (!hydratedOnceRef.current) {
       hydratedOnceRef.current = true;
       return;
@@ -1621,14 +1699,7 @@ export default function GradingPanel({
   async function saveDraft() {
     setSaving(true);
     try {
-      const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload()),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Save failed");
+      await queueGradingDraftSave();
       toast({ title: "Draft saved" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
       queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/grading`] });
@@ -1656,23 +1727,23 @@ export default function GradingPanel({
     try {
       // Persist current state first so the server's read of the cert reflects
       // the admin's just-set subgrades + confirmed defects.
-      await fetch(`${apiBase}/certificates/${certId}/grade`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(buildPayload()),
-      });
+      await queueGradingDraftSave();
       const res = await fetch(`${apiBase}/certificates/${certId}/generate-description`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: gradingVersionRef.current }),
       });
       const data = await res.json();
       if (res.status === 422) {
         toast({ title: "Cannot generate yet", description: data.error || "Set all four subgrades first." });
         return;
       }
-      if (!res.ok) throw new Error(data.error || "Generation failed");
+      if (!res.ok) {
+        if (handleGradingConflict(res.status, data)) return;
+        throw new Error(data.error || "Generation failed");
+      }
+      rememberGradingVersion(data.gradingVersion);
       setGradeExplanation(data.description);
       toast({
         title: "Description generated",
@@ -1780,6 +1851,8 @@ export default function GradingPanel({
         clearTimeout(autoSaveTimerRef.current);
         autoSaveTimerRef.current = null;
       }
+      if (gradingConflict) throw new Error("A newer grading draft exists. Reload before submitting or approving.");
+      await queueGradingDraftSave();
       const elapsedSeconds = Math.round((Date.now() - gradingStartedAtRef.current) / 1000);
       // ADMIN-REVIEW MODE: explicit save-then-approve. Persist the (possibly
       //   corrected) draft via the non-publishing review endpoint, THEN publish
@@ -1789,19 +1862,11 @@ export default function GradingPanel({
       // ADMIN MODE: publish the grade live (PUT /approve).
       let res: Response;
       if (adminReview) {
-        const saveRes = await fetch(`${apiBase}/certificates/${certId}/grade`, {
-          method: "PUT",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildPayload()),
-        });
-        if (!saveRes.ok) {
-          const sd = await saveRes.json().catch(() => ({}));
-          throw new Error(sd.error || "Save failed");
-        }
         res = await fetch(`/api/admin/certificates/${certId}/approve-grader-grade`, {
           method: "POST",
           credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ expectedVersion: gradingVersionRef.current }),
         });
       } else if (graderMode && graderEdit) {
         // GRADER EDIT: re-grading an already-submitted card. Route through the
@@ -1813,25 +1878,29 @@ export default function GradingPanel({
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildPayload()),
+          body: JSON.stringify({ expectedVersion: gradingVersionRef.current }),
         });
       } else if (graderMode) {
         res = await fetch(`${apiBase}/certificates/${certId}/submit`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(buildPayload()),
+          body: JSON.stringify({ expectedVersion: gradingVersionRef.current }),
         });
       } else {
         res = await fetch(`${apiBase}/certificates/${certId}/approve`, {
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...buildPayload(), grading_time_seconds: elapsedSeconds }),
+          body: JSON.stringify(versionedGradingPayload({ grading_time_seconds: elapsedSeconds })),
         });
       }
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || (graderMode ? "Submit failed" : "Approve failed"));
+      if (!res.ok) {
+        if (handleGradingConflict(res.status, data)) return;
+        throw new Error(data.error || (graderMode ? "Submit failed" : "Approve failed"));
+      }
+      rememberGradingVersion(data.gradingVersion);
       setApproved(true);
       setShowConfirm(false);
       if (!graderMode) {
@@ -3161,6 +3230,25 @@ export default function GradingPanel({
               the cert is live and we want edits to flow through). The auto-
               save status pip sits to the left of the button. */}
             <div className="sticky bottom-0 pb-2 pt-1 bg-[var(--admin-panel)] space-y-2">
+              {gradingConflict && (
+                <div
+                  className="flex items-center justify-between gap-3 rounded border border-amber-500/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-100"
+                  data-testid="grading-version-conflict"
+                >
+                  <span>
+                    A newer grading draft (v{gradingConflict.currentVersion}) exists. Your unsaved edits have not been
+                    overwritten.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void reloadAfterGradingConflict()}
+                    className="shrink-0 rounded border border-amber-300/60 px-2 py-1 text-[10px] font-bold uppercase tracking-wide hover:bg-amber-400/10"
+                    data-testid="reload-grading-after-conflict"
+                  >
+                    Reload current draft
+                  </button>
+                </div>
+              )}
               <div className="flex items-center justify-between text-[10px] uppercase tracking-wider">
                 <span className="text-[var(--admin-ink-faint)]">
                   {autoSaveStatus === "saving" && (
@@ -3262,6 +3350,9 @@ export default function GradingPanel({
         <ManualCardTool
           apiBase={apiBase}
           certId={certId}
+          getExpectedGradingVersion={() => gradingVersionRef.current}
+          onGradingVersionSaved={rememberGradingVersion}
+          onGradingConflict={handleGradingConflict}
           side={manualCardToolSide}
           rawImageUrl={(manualCardToolSide === "front" ? urls.front_original : urls.back_original) as string}
           onCentering={(result) => {

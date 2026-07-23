@@ -179,6 +179,30 @@ export default function CertificateForm({
   const isEdit = !!certificate;
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  // The legacy AI controls below still mutate grading evidence. Keep their
+  // token separate from metadata's field-scoped stale-tab guard, but refresh it
+  // whenever the parent supplies a newer certificate row.
+  const legacyGradingVersionRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const version = Number((certificate as any)?.gradingVersion);
+    legacyGradingVersionRef.current = Number.isSafeInteger(version) && version > 0 ? version : null;
+  }, [certificate?.id, (certificate as any)?.gradingVersion]);
+
+  function expectedGradingVersion(): number {
+    const version = legacyGradingVersionRef.current;
+    if (!Number.isSafeInteger(version) || (version as number) < 1) {
+      throw new Error("The grading version is not loaded yet. Reload this certificate before saving.");
+    }
+    return version as number;
+  }
+
+  function gradingRequestError(data: any, fallback: string): Error {
+    if (data?.code === "GRADING_VERSION_CONFLICT") {
+      return new Error("A newer grading draft exists. Reload this certificate before trying again.");
+    }
+    return new Error(data?.error || fallback);
+  }
 
   const initRarity = certificate?.rarity || "";
   const initVariant = certificate?.variant || "";
@@ -930,9 +954,12 @@ export default function CertificateForm({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedVersion: expectedGradingVersion() }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Grade failed");
+      if (!res.ok) throw gradingRequestError(data, "Grade failed");
+      const version = Number(data.gradingVersion);
+      if (Number.isSafeInteger(version) && version > 0) legacyGradingVersionRef.current = version;
 
       toast({
         title: "Card graded",
@@ -1114,10 +1141,12 @@ export default function CertificateForm({
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...aiDraft, gradeType: form.gradeType }),
+        body: JSON.stringify({ ...aiDraft, gradeType: form.gradeType, expectedVersion: expectedGradingVersion() }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Approve failed");
+      if (!res.ok) throw gradingRequestError(data, "Approve failed");
+      const version = Number(data.gradingVersion);
+      if (Number.isSafeInteger(version) && version > 0) legacyGradingVersionRef.current = version;
       setApproved(true);
       // Update the form's grade fields to reflect the approved grade
       updateField("gradeOverall", aiDraft.overall);

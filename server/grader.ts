@@ -19,6 +19,12 @@ import { storage } from "./storage";
 import { getR2SignedUrl } from "./r2";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
 import { CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "./lib/correction-fields";
+import {
+  currentGradingVersion,
+  gradingVersionConflict,
+  parseExpectedGradingVersion,
+  type GradingVersionConflict,
+} from "./grading-concurrency";
 
 /**
  * AUTO-PUBLISH FLIP. When false (default) a grader's submit moves the card to
@@ -515,6 +521,7 @@ export async function buildCertGradingPayload(certId: number): Promise<any | nul
   if (!cert) return null;
   const c = cert as any;
   return {
+    gradingVersion: Number(c.gradingVersion ?? 1),
     // Resolved card identity — the grader panel re-syncs its editable idName/idSet
     // fields from these once the on-open identify has run (the panel mounts before
     // identify completes, so its props are stale). Without this the grader's
@@ -593,9 +600,16 @@ const keepStr = (a: any, b: any) =>
  * the incoming payload over the cert's current values so an omitted field is
  * never wiped.
  */
-export async function applyCertGradeDraft(certId: number, body: any): Promise<boolean> {
+export type GradeDraftSaveResult =
+  | { ok: true; gradingVersion: number }
+  | { ok: false; status: 404; error: string }
+  | ({ ok: false } & GradingVersionConflict)
+  | { ok: false; status: 409; error: string; code?: undefined };
+
+export async function applyCertGradeDraft(certId: number, body: any): Promise<GradeDraftSaveResult> {
   const cert = (await storage.getCertificate(certId)) as any;
-  if (!cert) throw new Error("Certificate not found");
+  if (!cert) return { ok: false, status: 404, error: "Certificate not found" };
+  const expectedVersion = parseExpectedGradingVersion(body?.expectedVersion, cert.gradingVersion);
 
   const overall = body.overall_grade;
   const gradeType = pick(body.grade_type, cert.gradeType) || "numeric";
@@ -639,26 +653,44 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<bo
       eye_appeal_modifier = ${num(body.eye_appeal_modifier, cert.eyeAppealModifier)},
       wrinkle_severity = ${pick(body.wrinkle_severity, cert.wrinkleSeverity)},
       tear_severity    = ${pick(body.tear_severity, cert.tearSeverity)},
+      grading_version  = grading_version + 1,
       updated_at = NOW()
-    WHERE id = ${certId} AND grade_approved_at IS NULL
-    RETURNING id
+    WHERE id = ${certId} AND grade_approved_at IS NULL AND grading_version = ${expectedVersion}
+    RETURNING grading_version
   `);
-  return r.rows.length > 0;
+  if (r.rows.length > 0) {
+    return { ok: true, gradingVersion: Number((r.rows[0] as any).grading_version) };
+  }
+
+  const currentVersion = await currentGradingVersion(certId);
+  if (currentVersion == null) return { ok: false, status: 404, error: "Certificate not found" };
+  if (currentVersion !== expectedVersion)
+    return { ok: false, ...gradingVersionConflict(expectedVersion, currentVersion) };
+  return { ok: false, status: 409, error: "Card status changed; refresh and try again" };
 }
 
 /** Publish a certificate's grade (admin approval): set approved_at + live status. */
-export async function approveCertGrade(certId: number, adminUser: string): Promise<boolean> {
+export async function approveCertGrade(
+  certId: number,
+  adminUser: string,
+  expectedVersion: number
+): Promise<GradeDraftSaveResult> {
   // Phase 2 — atomic CAS publish: only publishes while still pending_review (its
   // sole caller, approveGraderCert, requires that). 0 rows ⇒ state changed
   // concurrently (e.g. a racing reject) → caller returns 409 instead of double-publishing.
   const r = await db.execute(sql`
     UPDATE certificates
     SET grade_approved_at = NOW(), grade_approved_by = ${adminUser}, status = 'active',
-        grader_status = 'approved', graded_at = NOW(), updated_at = NOW()
-    WHERE id = ${certId} AND grader_status = 'pending_review'
-    RETURNING id
+        grader_status = 'approved', graded_at = NOW(), grading_version = grading_version + 1, updated_at = NOW()
+    WHERE id = ${certId} AND grader_status = 'pending_review' AND grading_version = ${expectedVersion}
+    RETURNING grading_version
   `);
-  return r.rows.length > 0;
+  if (r.rows.length > 0) return { ok: true, gradingVersion: Number((r.rows[0] as any).grading_version) };
+  const currentVersion = await currentGradingVersion(certId);
+  if (currentVersion == null) return { ok: false, status: 404, error: "Certificate not found" };
+  if (currentVersion !== expectedVersion)
+    return { ok: false, ...gradingVersionConflict(expectedVersion, currentVersion) };
+  return { ok: false, status: 409, error: "Card status changed; refresh and try again" };
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -857,7 +889,12 @@ export async function getCertsForSubmission(submissionId: number) {
 // ── Reject / approve (admin sanctioned actions on a pending_review cert) ───────
 
 /** Reject a grader-submitted cert: pending_review → assigned, store reason, +redo. */
-export async function rejectCertGrade(certId: number, reason: string | null, adminUser: string) {
+export async function rejectCertGrade(
+  certId: number,
+  reason: string | null,
+  adminUser: string,
+  expectedVersion: number
+) {
   const a = await getCertAssignment(certId);
   if (!a) return { ok: false as const, status: 404, error: "Certificate not found" };
   if (a.gradingStatus !== "pending_review") {
@@ -868,15 +905,19 @@ export async function rejectCertGrade(certId: number, reason: string | null, adm
   const r = await db.execute(sql`
     UPDATE certificates
     SET grader_status = 'assigned', rejection_reason = ${reason || null}, redo_count = redo_count + 1,
-        graded_at = NULL, updated_at = NOW()
-    WHERE id = ${certId} AND grader_status = 'pending_review'
-    RETURNING id
+        graded_at = NULL, grading_version = grading_version + 1, updated_at = NOW()
+    WHERE id = ${certId} AND grader_status = 'pending_review' AND grading_version = ${expectedVersion}
+    RETURNING grading_version
   `);
   if (r.rows.length === 0) {
+    const currentVersion = await currentGradingVersion(certId);
+    if (currentVersion == null) return { ok: false as const, status: 404, error: "Certificate not found" };
+    if (currentVersion !== expectedVersion)
+      return { ok: false as const, ...gradingVersionConflict(expectedVersion, currentVersion) };
     return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
   }
   await storage.writeAuditLog("certificate", String(certId), "grade_reject", adminUser, { reason: reason || null });
-  return { ok: true as const };
+  return { ok: true as const, gradingVersion: Number((r.rows[0] as any).grading_version) };
 }
 
 /**
@@ -885,7 +926,7 @@ export async function rejectCertGrade(certId: number, reason: string | null, adm
  * status='active') and marks it 'approved' + graded_at — never touches sibling
  * certs of the same submission.
  */
-export async function approveGraderCert(certId: number, adminUser: string) {
+export async function approveGraderCert(certId: number, adminUser: string, body: any) {
   const a = await getCertAssignment(certId);
   if (!a) return { ok: false as const, status: 404, error: "Certificate not found" };
   if (a.gradingStatus !== "pending_review") {
@@ -915,10 +956,11 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   // rather than flip grader_status on an unpublished grade.
   // The publish + grader_status flip is ONE atomic CAS UPDATE inside approveCertGrade
   // now, so there's no window for a racing reject to negate it. 0 rows ⇒ 409.
-  const published = await approveCertGrade(certId, adminUser);
-  if (!published) {
-    return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
-  }
+  const currentVersion = await currentGradingVersion(certId);
+  if (currentVersion == null) return { ok: false as const, status: 404, error: "Certificate not found" };
+  const expectedVersion = parseExpectedGradingVersion(body?.expectedVersion, currentVersion);
+  const published = await approveCertGrade(certId, adminUser, expectedVersion);
+  if (!published.ok) return published;
   // Snapshot the published grade into the approval audit row.
   const c = (await storage.getCertificate(certId)) as any;
   await storage.writeAuditLog("certificate", String(certId), "grade_approve", adminUser, {
@@ -931,7 +973,7 @@ export async function approveGraderCert(certId: number, adminUser: string) {
       surface: c?.gradeSurface ?? null,
     },
   });
-  return { ok: true as const };
+  return { ok: true as const, gradingVersion: published.gradingVersion };
 }
 
 /** {overall, subgrades} snapshot of a cert's current grade — for the admin-edit audit. */
@@ -962,12 +1004,10 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   const before = await gradeSnapshot(certId);
   const saved = await applyCertGradeDraft(certId, body);
-  if (!saved) {
-    return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
-  }
+  if (!saved.ok) return saved;
   const after = await gradeSnapshot(certId);
   await storage.writeAuditLog("certificate", String(certId), "admin_grade_edit", adminUser, { before, after });
-  return { ok: true as const };
+  return { ok: true as const, gradingVersion: saved.gradingVersion };
 }
 
 // ── Earnings (display-only; NO deduction logic) ───────────────────────────────

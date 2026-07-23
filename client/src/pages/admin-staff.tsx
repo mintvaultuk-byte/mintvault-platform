@@ -41,6 +41,7 @@ type QueueRow = {
   hasImages: boolean;
   submissionRef: string | null;
   submissionId: number | null;
+  gradingVersion: number;
 };
 
 const QUEUE_FILTERS = [
@@ -431,7 +432,7 @@ export default function AdminStaffPage() {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: rejectNote.trim() }),
+        body: JSON.stringify({ reason: rejectNote.trim(), expectedVersion: reviewCert.gradingVersion }),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) return setErr(adminBlockedMsg(res.status, d.error) || d.error || "Reject failed");

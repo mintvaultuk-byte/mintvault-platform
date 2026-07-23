@@ -150,10 +150,12 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
   const [correctionSaving, setCorrectionSaving] = useState(false);
   const correctionMetadataRef = useRef<() => FormData>(() => new FormData());
   const correctionGradingRef = useRef<() => Record<string, unknown>>(() => ({}));
-  const correctionVersionRef = useRef("");
+  const correctionVersionRef = useRef<number | null>(null);
 
-  const correctionVersionFor = (cert: CertificateRecord | Record<string, unknown> | null) =>
-    String((cert as any)?.correctionVersion || (cert as any)?.updatedAt || "");
+  const correctionVersionFor = (cert: CertificateRecord | Record<string, unknown> | null) => {
+    const version = Number((cert as any)?.gradingVersion);
+    return Number.isSafeInteger(version) && version > 0 ? version : null;
+  };
 
   const { data: certs = [], isLoading } = useQuery<CertificateRecord[]>({
     queryKey: ["/api/admin/certificates"],
@@ -200,7 +202,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
   const handleEdit = (cert: CertificateRecord) => {
     setEditingCert(cert);
     setCorrectionMode(false);
-    correctionVersionRef.current = "";
+    correctionVersionRef.current = null;
     setShowForm(true);
     setActiveTab("certs");
     const ids = certs.filter((c) => !(c as any).gradeApprovedAt).map((c) => c.id);
@@ -233,7 +235,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     const ids = queue.map((c) => c.id);
     setEditingCert(queue[0]);
     setCorrectionMode(false);
-    correctionVersionRef.current = "";
+    correctionVersionRef.current = null;
     setShowForm(true);
     // No setActiveTab("certs") here — the workstation renders via `showForm`
     // (an independent early return), and the caller (the activeTab==="grading"
@@ -262,7 +264,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     setGradeQueue({ ids: gradeQueue.ids, pos: gradeQueue.pos + 1 });
     setEditingCert(nextCert);
     setCorrectionMode(false);
-    correctionVersionRef.current = "";
+    correctionVersionRef.current = null;
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
     queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
@@ -273,7 +275,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
       // A new cert was just created — switch to edit mode so workstation mounts
       setEditingCert(newCert);
       setCorrectionMode(false);
-      correctionVersionRef.current = "";
+      correctionVersionRef.current = null;
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
       return; // stay in showForm=true with the new cert loaded
@@ -281,7 +283,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     setShowForm(false);
     setEditingCert(null);
     setCorrectionMode(false);
-    correctionVersionRef.current = "";
+    correctionVersionRef.current = null;
     queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
     queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
   };
@@ -300,7 +302,10 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     setCorrectionSaving(true);
     try {
       const formData = correctionMetadataRef.current();
-      formData.append("expectedVersion", correctionVersionRef.current || correctionVersionFor(editingCert));
+      const expectedVersion = correctionVersionRef.current ?? correctionVersionFor(editingCert);
+      if (expectedVersion == null)
+        throw new Error("The current grading version is unavailable. Reload before saving corrections.");
+      formData.append("expectedVersion", String(expectedVersion));
       formData.append("certId", editingCert.certId);
       formData.append("gradingPayload", JSON.stringify(correctionGradingRef.current()));
       const res = await fetch(`/api/admin/certificates/${editingCert.id}/correction`, {
@@ -321,7 +326,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
           : "Changes were saved atomically and audit logged.",
       });
       setCorrectionMode(false);
-      correctionVersionRef.current = "";
+      correctionVersionRef.current = null;
     } catch (e: any) {
       toast({ title: "Correction failed", description: e.message, variant: "destructive" });
     } finally {
@@ -333,7 +338,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     if (!editingCert?.id) return;
     if (correctionMode) {
       setCorrectionMode(false);
-      correctionVersionRef.current = "";
+      correctionVersionRef.current = null;
       return;
     }
     try {
@@ -350,7 +355,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
     // Open blank form — no DB row created until user saves with real data
     setEditingCert(null);
     setCorrectionMode(false);
-    correctionVersionRef.current = "";
+    correctionVersionRef.current = null;
     setShowForm(true);
     setActiveTab("certs");
   };

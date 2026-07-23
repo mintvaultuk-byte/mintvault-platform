@@ -8,6 +8,13 @@ import { normalizeCertId } from "./lib/cert-id";
 import { SUMMARIZED_AUDIT_FIELDS, CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "./lib/correction-fields";
 import { uploadToR2 } from "./r2";
 import { isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
+import {
+  GRADING_VERSION_CONFLICT,
+  gradingVersionConflict,
+  gradingVersionConflictResponse,
+  logGradingVersionConflict,
+  parseExpectedGradingVersion,
+} from "./grading-concurrency";
 
 const CORRECTION_ACTION = "cert_live_record_edit";
 const MAX_AUDIT_DETAILS_BYTES = 64 * 1024;
@@ -51,7 +58,7 @@ type CandidateValue = string | number | boolean | null | unknown[] | Record<stri
 type CorrectionInput = {
   certId: number;
   actor: string;
-  expectedVersion: string;
+  expectedVersion: number;
   metadata: Record<string, unknown>;
   grading: Record<string, unknown>;
   images: Partial<Record<UploadedSide, { key: string; originalName: string; mimeType: string; size: number }>>;
@@ -358,6 +365,7 @@ function publicRow(row: Record<string, unknown>) {
     id: Number(row.id),
     certId: normalizeCertId(String(row.certificate_number || "")),
     updatedAt: toVersion(row.updated_at),
+    gradingVersion: Number(row.grading_version),
     cardName: row.card_name ?? null,
     setName: row.set_name ?? null,
     gradeOverall: row.grade ?? null,
@@ -428,7 +436,7 @@ function safeAuditDetails(args: {
 export async function applySuperAdminCorrection(input: CorrectionInput) {
   return db.transaction(async (tx) => {
     const locked = await tx.execute(sql`
-      SELECT *, EXTRACT(EPOCH FROM updated_at)::text AS correction_version
+      SELECT *
       FROM certificates
       WHERE id = ${input.certId} AND deleted_at IS NULL
       FOR UPDATE
@@ -438,15 +446,11 @@ export async function applySuperAdminCorrection(input: CorrectionInput) {
     if (!before.grade_approved_at) {
       throw Object.assign(new Error("Correction Mode only applies to approved certificates"), { status: 409 });
     }
-    const currentVersion =
-      typeof before.correction_version === "string" ? before.correction_version : toVersion(before.updated_at);
-    if (!input.expectedVersion || !currentVersion || String(input.expectedVersion) !== currentVersion) {
-      throw Object.assign(new Error("Certificate changed; reload before saving corrections"), {
-        status: 409,
-        code: "version_conflict",
-        currentVersion,
-      });
+    const currentVersion = Number(before.grading_version);
+    if (!Number.isSafeInteger(currentVersion) || currentVersion < 1) {
+      throw Object.assign(new Error("Certificate grading version is invalid"), { status: 500 });
     }
+    if (input.expectedVersion !== currentVersion) throw gradingVersionConflict(input.expectedVersion, currentVersion);
 
     const metadata = buildMetadata(input.metadata, before);
     const grading = buildGrading(input.grading);
@@ -471,7 +475,7 @@ export async function applySuperAdminCorrection(input: CorrectionInput) {
         auditId: null,
         changedFields: [],
         certificate: publicRow(before),
-        version: currentVersion,
+        gradingVersion: currentVersion,
       };
     }
 
@@ -480,14 +484,24 @@ export async function applySuperAdminCorrection(input: CorrectionInput) {
       if (!column) throw Object.assign(new Error(`Unsupported correction field: ${field}`), { status: 400 });
       return sql`${sql.identifier(column)} = ${sqlValue(field, value as CandidateValue)}`;
     });
+    setParts.push(sql`grading_version = grading_version + 1`);
     setParts.push(sql`updated_at = NOW()`);
 
     const updated = await tx.execute(sql`
       UPDATE certificates
       SET ${sql.join(setParts, sql`, `)}
-      WHERE id = ${input.certId}
-      RETURNING *, EXTRACT(EPOCH FROM updated_at)::text AS correction_version
+      WHERE id = ${input.certId} AND grading_version = ${input.expectedVersion}
+      RETURNING *
     `);
+    if (updated.rows.length === 0) {
+      // SELECT ... FOR UPDATE above normally makes this unreachable, but retain
+      // the compare-and-set predicate so future refactors cannot turn this into
+      // a read-then-write lost update.
+      const current = await tx.execute(sql`SELECT grading_version FROM certificates WHERE id = ${input.certId}`);
+      const version = Number((current.rows[0] as any)?.grading_version);
+      if (Number.isSafeInteger(version) && version > 0) throw gradingVersionConflict(input.expectedVersion, version);
+      throw Object.assign(new Error("Certificate not found"), { status: 404 });
+    }
     const after = updated.rows[0] as Record<string, unknown>;
     const changes = diffFields(before, after, material as Record<string, CandidateValue>);
     const auditDetails = safeAuditDetails({
@@ -511,7 +525,7 @@ export async function applySuperAdminCorrection(input: CorrectionInput) {
       changedFields: changes.map((change) => change.field),
       changes,
       certificate: publicRow(after),
-      version: typeof after.correction_version === "string" ? after.correction_version : toVersion(after.updated_at),
+      gradingVersion: Number(after.grading_version),
     };
   });
 }
@@ -533,10 +547,11 @@ export async function applySuperAdminCorrection(input: CorrectionInput) {
  * authoritatively under SELECT ... FOR UPDATE inside the transaction, so a race between
  * this read and the write cannot produce an incorrect result — only a wasted upload.
  */
-async function loadCorrectionTarget(certId: number): Promise<{ certificateNumber: string; version: string | null }> {
+async function loadCorrectionTarget(
+  certId: number
+): Promise<{ certificateNumber: string; gradingVersion: number | null }> {
   const r = await db.execute(sql`
-    SELECT certificate_number, grade_approved_at,
-           EXTRACT(EPOCH FROM updated_at)::text AS correction_version
+    SELECT certificate_number, grade_approved_at, grading_version
     FROM certificates
     WHERE id = ${certId} AND deleted_at IS NULL
     LIMIT 1
@@ -548,7 +563,7 @@ async function loadCorrectionTarget(certId: number): Promise<{ certificateNumber
   }
   return {
     certificateNumber: String(row.certificate_number || ""),
-    version: typeof row.correction_version === "string" ? row.correction_version : null,
+    gradingVersion: Number.isSafeInteger(Number(row.grading_version)) ? Number(row.grading_version) : null,
   };
 }
 
@@ -620,17 +635,14 @@ export function registerCorrectionModeRoutes(app: ExpressApp): void {
             throw Object.assign(new Error("Invalid grading payload"), { status: 400 });
           }
         })();
-        const expectedVersion = String(body.expectedVersion || "");
         // Server-derived target. Also fails fast on missing / unapproved / stale-version so
         // we never upload bytes for a correction that is going to be rejected anyway.
         const target = await loadCorrectionTarget(certId);
-        if (!expectedVersion || !target.version || expectedVersion !== target.version) {
-          throw Object.assign(new Error("Certificate changed; reload before saving corrections"), {
-            status: 409,
-            code: "version_conflict",
-            currentVersion: target.version,
-          });
-        }
+        if (!target.gradingVersion)
+          throw Object.assign(new Error("Certificate grading version is invalid"), { status: 500 });
+        const expectedVersion = parseExpectedGradingVersion(body.expectedVersion, target.gradingVersion);
+        if (expectedVersion !== target.gradingVersion)
+          throw gradingVersionConflict(expectedVersion, target.gradingVersion);
         const images = await uploadCorrectionImages(
           target.certificateNumber,
           (req.files || {}) as Partial<Record<string, Express.Multer.File[]>>
@@ -647,11 +659,32 @@ export function registerCorrectionModeRoutes(app: ExpressApp): void {
       } catch (error: any) {
         const status = Number(error?.status || 500);
         if (status >= 500) console.error("[correction-mode] error:", error?.message || error);
-        return res.status(status).json({
-          error: error?.message || "Correction failed",
-          code: error?.code,
-          currentVersion: error?.currentVersion,
-        });
+        if (error?.code === GRADING_VERSION_CONFLICT) {
+          const expectedVersion = Number(error?.expectedVersion);
+          const currentVersion = Number(error?.currentVersion);
+          if (Number.isSafeInteger(expectedVersion) && Number.isSafeInteger(currentVersion)) {
+            await logGradingVersionConflict({
+              certId: Number.parseInt(String(req.params.id), 10),
+              actor: (req.session as any)?.adminEmail,
+              role: "super_admin",
+              route: "PUT /api/admin/certificates/:id/correction",
+              expectedVersion,
+              currentVersion,
+            });
+            return res.status(409).json(
+              gradingVersionConflictResponse({
+                status: 409,
+                code: GRADING_VERSION_CONFLICT,
+                message: error.message,
+                error: error.message,
+                expectedVersion,
+                currentVersion,
+                reload: true,
+              })
+            );
+          }
+        }
+        return res.status(status).json({ error: error?.message || "Correction failed", code: error?.code });
       }
     }
   );

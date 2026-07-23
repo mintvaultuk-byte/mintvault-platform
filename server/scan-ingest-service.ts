@@ -402,9 +402,7 @@ export async function processScanInBackground(
     // Two-scanner safety: the other scanner may have deleted this cert between
     // ingest and this background job. Skip the whole pipeline — the UPDATE
     // guards downstream would no-op anyway, this just avoids the wasted work.
-    const live = await db.execute(
-      sql`SELECT 1 FROM certificates WHERE id = ${certInfo.id} AND deleted_at IS NULL`
-    );
+    const live = await db.execute(sql`SELECT 1 FROM certificates WHERE id = ${certInfo.id} AND deleted_at IS NULL`);
     if (live.rows.length === 0) {
       console.log(`[process-scan] cert=${certInfo.certId} soft-deleted mid-ingest — skipping pipeline`);
       return;
@@ -413,9 +411,7 @@ export async function processScanInBackground(
     // staleness marker. Bumping it when the job actually STARTS means
     // "stale processing" measures started-but-died pipelines, not certs
     // that merely sat in a busy queue behind 3-4 scanners' worth of cards.
-    await db.execute(
-      sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${certInfo.id} AND deleted_at IS NULL`
-    );
+    await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${certInfo.id} AND deleted_at IS NULL`);
     const { frontVariants, backVariants, timing } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
     console.log(`[process-scan] images processed cert=${certInfo.certId}`);
 
@@ -935,9 +931,11 @@ export async function runAiOnCert(
   // (Detect Defects / Run All / Analyze with AI (Full)).
   //
   // Gated on `grade_approved_at IS NULL` — re-scanning an already-approved
-  // cert must NEVER overwrite the published grade. centering_score column
-  // is also CASE-guarded so we don't clobber a value the admin already
-  // chose during their first review pass.
+  // cert must NEVER overwrite the published grade. Every candidate column is
+  // null-fill-only, so the background job cannot overwrite human evidence. If
+  // it does add first-pass centering evidence, advance grading_version so an
+  // already-open grading tab must reload rather than save against a partial
+  // snapshot it never saw.
   let centeringWritten = false;
   if (aiGrading) {
     const result = await db.execute(sql`
@@ -947,8 +945,18 @@ export async function runAiOnCert(
         centering_front_tb = COALESCE(${aiGrading.centering.front_top_bottom}, centering_front_tb),
         centering_back_lr  = COALESCE(${aiGrading.centering.back_left_right},  centering_back_lr),
         centering_back_tb  = COALESCE(${aiGrading.centering.back_top_bottom},  centering_back_tb),
+        grading_version    = grading_version + 1,
         updated_at         = NOW()
-      WHERE id = ${certId} AND grade_approved_at IS NULL
+      WHERE id = ${certId}
+        AND grade_approved_at IS NULL
+        AND (
+          (centering_score IS NULL AND ${aiGrading.centering.subgrade} IS NOT NULL)
+          OR (centering_front_lr IS NULL AND ${aiGrading.centering.front_left_right} IS NOT NULL)
+          OR (centering_front_tb IS NULL AND ${aiGrading.centering.front_top_bottom} IS NOT NULL)
+          OR (centering_back_lr IS NULL AND ${aiGrading.centering.back_left_right} IS NOT NULL)
+          OR (centering_back_tb IS NULL AND ${aiGrading.centering.back_top_bottom} IS NOT NULL)
+        )
+      RETURNING grading_version
     `);
     centeringWritten = (result.rowCount ?? 0) > 0;
     if (!centeringWritten) {
@@ -1132,9 +1140,8 @@ export async function ensureAiDraft(certId: number, opts: { timeoutMs?: number }
  */
 export async function repairEmptyIdentityFromSnapshot(certId: number): Promise<boolean> {
   try {
-    const row = (
-      await db.execute(sql`SELECT card_name, set_name, ai_analysis FROM certificates WHERE id = ${certId}`)
-    ).rows[0] as any;
+    const row = (await db.execute(sql`SELECT card_name, set_name, ai_analysis FROM certificates WHERE id = ${certId}`))
+      .rows[0] as any;
     if (!row) return false;
     const nameEmpty = row.card_name == null || String(row.card_name).trim() === "";
     if (!nameEmpty) return false; // only repair a genuinely missing name

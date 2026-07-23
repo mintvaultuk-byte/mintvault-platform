@@ -394,6 +394,10 @@ export const certificates = pgTable("certificates", {
   backImagePath: text("back_image_path"),
   createdBy: text("created_by"),
   updatedAt: timestamp("updated_at").defaultNow(),
+  // Monotonic optimistic-concurrency token for mutable grading evidence. It is
+  // intentionally independent of updated_at because image/background metadata
+  // updates must not be mistaken for a draft compare-and-set token.
+  gradingVersion: integer("grading_version").notNull().default(1),
   currentOwnerUserId: varchar("current_owner_user_id"),
   ownershipStatus: varchar("ownership_status", { length: 20 }).notNull().default("unclaimed"),
   claimCodeHash: text("claim_code_hash"),
@@ -1263,7 +1267,7 @@ export const cardIdentificationCorrections = pgTable(
     idxField: index("idx_card_id_corrections_field").on(t.field),
     idxCreated: index("idx_card_id_corrections_created").on(t.createdAt),
     idxRequest: index("idx_card_id_corrections_request").on(t.requestId),
-  }),
+  })
 );
 
 export const cardIdentificationRequests = pgTable(
@@ -1282,7 +1286,7 @@ export const cardIdentificationRequests = pgTable(
   (t) => ({
     uqKey: uniqueIndex("uq_card_id_requests_key").on(t.idempotencyKey),
     idxCreated: index("idx_card_id_requests_created").on(t.createdAt),
-  }),
+  })
 );
 
 export type CardIdentificationCorrection = typeof cardIdentificationCorrections.$inferSelect;

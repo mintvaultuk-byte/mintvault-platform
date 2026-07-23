@@ -204,9 +204,9 @@ describe("correction route, audit, image, stats, and UI wiring", () => {
     expect(correctionService).toContain('"/api/admin/certificates/:id/correction"');
     expect(correctionService).toMatch(/requireSuperAdmin,\s*upload\.fields/s);
     expect(correctionService).toContain("FOR UPDATE");
-    expect(correctionService).toContain("EXTRACT(EPOCH FROM updated_at)::text AS correction_version");
-    expect(correctionService).toContain("String(input.expectedVersion) !== currentVersion");
-    expect(correctionService).toContain('code: "version_conflict"');
+    expect(correctionService).toContain("grading_version");
+    expect(correctionService).toContain("input.expectedVersion !== currentVersion");
+    expect(correctionService).toContain("GRADING_VERSION_CONFLICT");
     expect(correctionService).toContain("db.transaction(async (tx)");
     expect(correctionService).toContain("INSERT INTO audit_log");
     expect(correctionService).toContain("Correction audit insert failed");

@@ -140,7 +140,15 @@ import { generatePdfToken, verifyPdfToken } from "./lib/pdf-token";
 import { uploadToR2, getR2SignedUrl, deleteFromR2, headR2, r2KeyForImage, r2KeyForLabel } from "./r2";
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
-import { sql, inArray } from "drizzle-orm";
+import {
+  GRADING_VERSION_CONFLICT,
+  currentGradingVersion,
+  gradingVersionConflict,
+  gradingVersionConflictResponse,
+  logGradingVersionConflict,
+  parseExpectedGradingVersion,
+} from "./grading-concurrency";
+import { sql } from "drizzle-orm";
 import {
   sendSubmissionConfirmation,
   sendSubmissionConfirmationV2,
@@ -2401,6 +2409,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (await isGraderLocked(id)) return res.status(409).json({ error: "This card is assigned to a grader" });
 
       const { centering, corners, edges, surface, overall, gradeType, grading_time_seconds } = req.body;
+      const expectedVersion = parseExpectedGradingVersion(req.body?.expectedVersion, (cert as any).gradingVersion);
 
       const finalGradeType = gradeType || "numeric";
       const isNonNum = isNonNumericGrade(finalGradeType);
@@ -2501,7 +2510,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           ? "black"
           : "Standard";
 
-      await db.execute(sql`
+      const approved = await db.execute(sql`
         UPDATE certificates SET
           grade_type        = ${finalGradeType},
           grade             = ${isNonNum ? null : finalOverall},
@@ -2523,10 +2532,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                   ELSE verified_defects
                 END`
           },
+          grading_version     = grading_version + 1,
           grading_time_seconds = COALESCE(${clampedTime}::int, grading_time_seconds),
           updated_at        = NOW()
-        WHERE id = ${id}
+        WHERE id = ${id} AND grading_version = ${expectedVersion}
+        RETURNING grading_version
       `);
+      if (approved.rows.length === 0) {
+        const currentVersion = await currentGradingVersion(id);
+        if (currentVersion == null) return res.status(404).json({ error: "Certificate not found" });
+        const conflict = gradingVersionConflict(expectedVersion, currentVersion);
+        await logGradingVersionConflict({
+          certId: id,
+          actor: (req.session as any)?.adminEmail,
+          role: "admin",
+          route: "PUT /api/admin/certificates/:id/approve-grade",
+          expectedVersion,
+          currentVersion,
+        });
+        return res.status(409).json(gradingVersionConflictResponse(conflict));
+      }
 
       await storage.writeAuditLog("certificate", cert.certId, "approve_grade", req.session.adminEmail || "admin", {
         centering,
@@ -2540,10 +2565,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
 
       const updated = await storage.getCertificate(id);
-      res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : {});
+      res.json(
+        updated
+          ? {
+              ...updated,
+              certId: normalizeCertId(updated.certId),
+              gradingVersion: Number((approved.rows[0] as any).grading_version),
+            }
+          : { gradingVersion: Number((approved.rows[0] as any).grading_version) }
+      );
     } catch (error: any) {
       console.error("Approve grade error:", error.message);
-      res.status(500).json({ error: "Failed to approve grade" });
+      sendServerError(res, error);
     }
   });
 
@@ -3739,18 +3772,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         if (c.status === "draft" && !c.cardName && !c.frontImagePath && !c.gradeOverall) return false;
         return true;
       });
-      const certIds = certs.map((c: any) => Number(c.id)).filter((id) => Number.isInteger(id) && id > 0);
-      const correctionVersions = new Map<number, string>();
-      if (certIds.length > 0) {
-        const rows = await db
-          .select({
-            id: certificates.id,
-            correctionVersion: sql<string>`EXTRACT(EPOCH FROM ${certificates.updatedAt})::text`,
-          })
-          .from(certificates)
-          .where(inArray(certificates.id, certIds));
-        for (const row of rows) correctionVersions.set(Number(row.id), row.correctionVersion);
-      }
       const certsWithUrls = await Promise.all(
         certs.map(async (c: any) => {
           let frontImageUrl: string | null = null;
@@ -3769,8 +3790,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
               console.error("R2 sign failed (admin back):", c.backImagePath, e);
             }
           }
-          const correctionVersion = correctionVersions.get(Number(c.id)) ?? null;
-          return { ...c, certId: normalizeCertId(c.certId), correctionVersion, frontImageUrl, backImageUrl };
+          return { ...c, certId: normalizeCertId(c.certId), frontImageUrl, backImageUrl };
         })
       );
       res.json(certsWithUrls);
@@ -4071,38 +4091,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           if (uploadErr) return res.status(400).json({ error: uploadErr });
         }
 
-        const gradeTypeUpdate = req.body.gradeType || existing.gradeType || "numeric";
-        const isNonNumUpdate = isNonNumericGrade(gradeTypeUpdate);
-
-        if (!isNonNumUpdate && req.body.gradeOverall) {
-          const g = Number(req.body.gradeOverall);
-          if (!isValidNumericGrade(g)) {
-            return res.status(400).json({ error: "Grade must be a valid MVGS grade (1–10, including half grades)" });
-          }
-        }
-
-        // Grade to persist — the edit form always sends it, so it's preserved.
-        // Reused for the gate below and the data object so they can't diverge.
-        const finalGradeOverall = isNonNumUpdate
-          ? null
-          : typeof req.body.gradeOverall === "string" && req.body.gradeOverall.trim()
-            ? req.body.gradeOverall
-            : null;
-        // Pristine/black via the shared gate (certIsPristine) on the FINAL cert
-        // state. This is a metadata editor — it does NOT carry subgrades, so the
-        // gate reads the cert's EXISTING subgrades + measurements (preserved
-        // below — no longer wiped to null) with the final grade. A genuine
-        // Pristine cert keeps its black label through an unrelated metadata edit;
-        // a grade change to a non-Pristine value correctly flips it to Standard.
-        const computedLabelTypeUpdate =
-          !isNonNumUpdate &&
-          (await certIsPristine({ ...existing, gradeOverall: finalGradeOverall, gradeType: gradeTypeUpdate } as any))
-            ? "black"
-            : "Standard";
-
         const data: any = {
-          labelType: computedLabelTypeUpdate,
-          gradeType: gradeTypeUpdate,
           cardGame: req.body.cardGame,
           setName: req.body.setName,
           cardName: req.body.cardName,
@@ -4118,12 +4107,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           language: req.body.language || "English",
           year: req.body.year,
           notes: req.body.notes || null,
-          gradeOverall: finalGradeOverall,
-          // Subgrades are intentionally NOT written here: this metadata editor
-          // doesn't carry them, and writing null wiped real grading data on
-          // every edit (pre-existing data-loss bug) and demoted Pristine certs.
-          // Omitting them preserves the stored centering/corners/edges/surface
-          // scores so the gate above sees the cert's true subgrades.
+          // This metadata editor deliberately does not write any grading field
+          // (overall/type/label or subgrades). Grading must go through the
+          // versioned draft/approval routes below; carrying the form's display
+          // value here used to create an unnecessary stale-write bypass.
           status: req.body.status || existing.status,
         };
 
@@ -4191,7 +4178,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         await storage.writeAuditLog("certificate", existing.certId, "update", req.session.adminEmail || "admin", {
           cardName: data.cardName,
           setName: data.setName,
-          gradeOverall: data.gradeOverall,
+          gradeOverall: existing.gradeOverall,
         });
 
         res.json(cert ? { ...cert, certId: normalizeCertId(cert.certId) } : cert);
@@ -6343,6 +6330,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!cert) return res.status(404).json({ error: "Certificate not found" });
       const c = cert as any;
       if (c.deletedAt) return res.status(410).json({ error: "Certificate is deleted" });
+      const expectedVersion = parseExpectedGradingVersion(req.body?.expectedVersion, (cert as any).gradingVersion);
 
       // Validate all four subgrades present. Empty/0 means "not set" — the
       // calculator never produces 0 for a real grade (1 is the floor).
@@ -6433,12 +6421,28 @@ Defects (admin-confirmed): ${defectLines}`;
       const costGbp = costUsd * 0.79;
 
       // Persist + audit
-      await db.execute(sql`
+      const written = await db.execute(sql`
         UPDATE certificates SET
           grade_explanation = ${description},
+          grading_version = grading_version + 1,
           updated_at = NOW()
-        WHERE id = ${id}
+        WHERE id = ${id} AND grading_version = ${expectedVersion}
+        RETURNING grading_version
       `);
+      if (written.rows.length === 0) {
+        const currentVersion = await currentGradingVersion(id);
+        if (currentVersion == null) return res.status(404).json({ error: "Certificate not found" });
+        const conflict = gradingVersionConflict(expectedVersion, currentVersion);
+        await logGradingVersionConflict({
+          certId: id,
+          actor: (req.session as any)?.adminEmail,
+          role: "admin",
+          route: "POST /api/admin/certificates/:id/generate-description",
+          expectedVersion,
+          currentVersion,
+        });
+        return res.status(409).json(gradingVersionConflictResponse(conflict));
+      }
       await db.execute(sql`
         INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
         VALUES (
@@ -6459,7 +6463,11 @@ Defects (admin-confirmed): ${defectLines}`;
       `);
 
       console.log(`[generate-description] ${certIdStr}: wrote ${description.length} chars (£${costGbp.toFixed(4)})`);
-      res.json({ description, costEstimate: Number(costGbp.toFixed(4)) });
+      res.json({
+        description,
+        costEstimate: Number(costGbp.toFixed(4)),
+        gradingVersion: Number((written.rows[0] as any).grading_version),
+      });
     } catch (err: any) {
       console.error("[generate-description] error:", err.message);
       sendServerError(res, err);
@@ -6697,6 +6705,7 @@ Defects (admin-confirmed): ${defectLines}`;
       }
       const c = cert as any;
       res.json({
+        gradingVersion: Number(c.gradingVersion ?? 1),
         centeringFrontLr: c.centeringFrontLr || null,
         centeringFrontTb: c.centeringFrontTb || null,
         centeringBackLr: c.centeringBackLr || null,
@@ -6861,6 +6870,7 @@ Defects (admin-confirmed): ${defectLines}`;
       if (await isGraderLocked(id)) return res.status(409).json({ error: "This card is assigned to a grader" });
 
       const b = req.body;
+      const expectedVersion = parseExpectedGradingVersion(b?.expectedVersion, (cert as any).gradingVersion);
       const overallGrade = b.overall_grade;
       const isNonNum = overallGrade === "AA" || overallGrade === "NO";
       const parsedOverall = parseFloat(overallGrade);
@@ -6890,7 +6900,7 @@ Defects (admin-confirmed): ${defectLines}`;
       // certs got changed after publication.
       const wasApproved = (cert as any).gradeApprovedAt != null;
 
-      await db.execute(sql`
+      const saved = await db.execute(sql`
         UPDATE certificates SET
           centering_front_lr  = COALESCE(${txt(b.centering_front_lr)}, centering_front_lr),
           centering_front_tb  = COALESCE(${txt(b.centering_front_tb)}, centering_front_tb),
@@ -6991,9 +7001,28 @@ Defects (admin-confirmed): ${defectLines}`;
             if (v === "minor" || v === "significant" || v === "major") return sql`${v}`;
             return sql`tear_severity`;
           })()},
+          grading_version     = grading_version + 1,
           updated_at          = NOW()
-        WHERE id = ${id}
+        WHERE id = ${id} AND grading_version = ${expectedVersion}
+        RETURNING grading_version
       `);
+      if (saved.rows.length === 0) {
+        const currentVersion = await currentGradingVersion(id);
+        if (currentVersion == null) return res.status(404).json({ error: "Certificate not found" });
+        if (currentVersion !== expectedVersion) {
+          const conflict = gradingVersionConflict(expectedVersion, currentVersion);
+          await logGradingVersionConflict({
+            certId: id,
+            actor: (req.session as any)?.adminEmail,
+            role: "admin",
+            route: "PUT /api/admin/certificates/:id/grade",
+            expectedVersion,
+            currentVersion,
+          });
+          return res.status(409).json(gradingVersionConflictResponse(conflict));
+        }
+        return res.status(409).json({ error: "Certificate status changed; reload before saving again" });
+      }
 
       // Audit — distinguish draft saves from post-approve live-record edits.
       // Both fire the same SQL above, but the audit trail captures the
@@ -7055,7 +7084,7 @@ Defects (admin-confirmed): ${defectLines}`;
         console.warn("[grade] audit_log insert failed:", auditErr.message);
       }
 
-      res.json({ ok: true, wasApproved });
+      res.json({ ok: true, wasApproved, gradingVersion: Number((saved.rows[0] as any).grading_version) });
     } catch (error: any) {
       console.error("[grade] save error:", error.message);
       sendServerError(res, error);
@@ -7074,6 +7103,7 @@ Defects (admin-confirmed): ${defectLines}`;
       if (await isGraderLocked(id)) return res.status(409).json({ error: "This card is assigned to a grader" });
 
       const b = req.body;
+      const expectedVersion = parseExpectedGradingVersion(b?.expectedVersion, (cert as any).gradingVersion);
       const overallGrade = b.overall_grade;
       const isNonNum = overallGrade === "AA" || overallGrade === "NO";
 
@@ -7210,7 +7240,7 @@ Defects (admin-confirmed): ${defectLines}`;
           : "Standard";
       const gradeType = isNonNum ? (overallGrade === "AA" ? "AA" : "NO") : "numeric";
 
-      await db.execute(sql`
+      const published = await db.execute(sql`
         UPDATE certificates SET
           grade               = ${gradeNum},
           grade_type          = ${gradeType},
@@ -7270,9 +7300,28 @@ Defects (admin-confirmed): ${defectLines}`;
           grade_approved_at   = NOW(),
           status              = 'active',
           grading_time_seconds = COALESCE(${clampedTime}::int, grading_time_seconds),
+          grading_version     = grading_version + 1,
           updated_at          = NOW()
-        WHERE id = ${id}
+        WHERE id = ${id} AND grading_version = ${expectedVersion}
+        RETURNING grading_version
       `);
+      if (published.rows.length === 0) {
+        const currentVersion = await currentGradingVersion(id);
+        if (currentVersion == null) return res.status(404).json({ error: "Certificate not found" });
+        if (currentVersion !== expectedVersion) {
+          const conflict = gradingVersionConflict(expectedVersion, currentVersion);
+          await logGradingVersionConflict({
+            certId: id,
+            actor: (req.session as any)?.adminEmail,
+            role: "admin",
+            route: "PUT /api/admin/certificates/:id/approve",
+            expectedVersion,
+            currentVersion,
+          });
+          return res.status(409).json(gradingVersionConflictResponse(conflict));
+        }
+        return res.status(409).json({ error: "Certificate status changed; reload before publishing again" });
+      }
 
       // Log to grading_sessions. grading_duration_seconds also feeds the
       // existing /api/admin/learning/overview avg_seconds metric — finally
@@ -7363,7 +7412,15 @@ Defects (admin-confirmed): ${defectLines}`;
       }
 
       const updated = await storage.getCertificate(id);
-      res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : {});
+      res.json(
+        updated
+          ? {
+              ...updated,
+              certId: normalizeCertId(updated.certId),
+              gradingVersion: Number((published.rows[0] as any).grading_version),
+            }
+          : { gradingVersion: Number((published.rows[0] as any).grading_version) }
+      );
     } catch (error: any) {
       console.error("[approve] error:", error.message);
       sendServerError(res, error);
@@ -7490,7 +7547,7 @@ Defects (admin-confirmed): ${defectLines}`;
         const rows = await db.execute(sql`
           SELECT cert.id AS cert_id, cert.certificate_number AS cert_id_str, cert.card_name, cert.set_name,
                  cert.card_number_display AS card_number, cert.year_text AS year, cert.variant,
-                 cert.grader_status, cert.assigned_grader_id, cert.redo_count, cert.rejection_reason,
+                 cert.grader_status, cert.assigned_grader_id, cert.redo_count, cert.rejection_reason, cert.grading_version,
                  u.email AS grader_email, s.tracking_number AS submission_ref, s.id AS submission_id,
                  ${hasImages} AS has_images
           FROM certificates cert
@@ -7515,6 +7572,7 @@ Defects (admin-confirmed): ${defectLines}`;
           assignedGraderId: r.assigned_grader_id ?? null,
           assignedGraderEmail: r.grader_email ?? null,
           redoCount: Number(r.redo_count ?? 0),
+          gradingVersion: Number(r.grading_version ?? 1),
           rejectionReason: r.rejection_reason ?? null,
           hasImages: !!r.has_images,
           submissionRef: r.submission_ref ?? null,
@@ -7976,6 +8034,9 @@ Defects (admin-confirmed): ${defectLines}`;
     try {
       const id = parseInt(String(req.params.id), 10);
       const { side, outer, inner } = req.body;
+      const versionAtRequest = await currentGradingVersion(id);
+      if (versionAtRequest == null) return res.status(404).json({ error: "Certificate not found" });
+      const expectedVersion = parseExpectedGradingVersion(req.body?.expectedVersion, versionAtRequest);
       if (!side || !["front", "back"].includes(side))
         return res.status(400).json({ error: "side must be front or back" });
       if (!outer || !inner) return res.status(400).json({ error: "outer and inner rects required" });
@@ -8026,19 +8087,35 @@ Defects (admin-confirmed): ${defectLines}`;
       // into SQL text); column names come from the fixed front/back allowlist via
       // sql.identifier. Same columns, values, and WHERE as before — behaviour is
       // identical, injection-class breakout eliminated (cf. H2/H2b).
-      await db.execute(sql`
+      const saved = await db.execute(sql`
         UPDATE certificates SET
           ${sql.identifier(outerCol)} = ${JSON.stringify(outer)}::jsonb,
           ${sql.identifier(innerCol)} = ${JSON.stringify(inner)}::jsonb,
           ${sql.identifier(lrCol)} = ${lr},
           ${sql.identifier(tbCol)} = ${tb},
           centering_method = 'manual',
+          grading_version = grading_version + 1,
           updated_at = NOW()
-        WHERE id = ${id}
+        WHERE id = ${id} AND grading_version = ${expectedVersion}
+        RETURNING grading_version
       `);
+      if (saved.rows.length === 0) {
+        const currentVersion = await currentGradingVersion(id);
+        if (currentVersion == null) return res.status(404).json({ error: "Certificate not found" });
+        const conflict = gradingVersionConflict(expectedVersion, currentVersion);
+        await logGradingVersionConflict({
+          certId: id,
+          actor: (req.session as any)?.adminEmail,
+          role: "admin",
+          route: "POST /api/admin/certificates/:id/manual-centering",
+          expectedVersion,
+          currentVersion,
+        });
+        return res.status(409).json(gradingVersionConflictResponse(conflict));
+      }
 
       console.log(`[manual-centering] cert=${id} ${side}: L/R=${lr} T/B=${tb} subgrade=${subgrade}`);
-      res.json({ lr, tb, subgrade, outer, inner });
+      res.json({ lr, tb, subgrade, outer, inner, gradingVersion: Number((saved.rows[0] as any).grading_version) });
     } catch (err: any) {
       console.error("[manual-centering] error:", err.message);
       sendServerError(res, err);
@@ -8306,6 +8383,7 @@ Defects (admin-confirmed): ${defectLines}`;
       // Restricted-grader lock — an admin must not AI-grade a card that's in a
       // grader's workflow. Use the grader approval flow instead.
       if (await isGraderLocked(id)) return res.status(409).json({ error: "This card is assigned to a grader" });
+      const expectedVersion = parseExpectedGradingVersion(req.body?.expectedVersion, (cert as any).gradingVersion);
 
       const c = cert as any;
       const frontKey = c.gradingFrontOriginal || c.frontImagePath;
@@ -8346,7 +8424,7 @@ Defects (admin-confirmed): ${defectLines}`;
           ? Math.max(0, Math.min(100, Math.round((analysis as any).grade_strength_score)))
           : null;
 
-      await db.execute(sql`
+      const saved = await db.execute(sql`
         UPDATE certificates SET
           ai_analysis           = jsonb_set(COALESCE(ai_analysis, '{}'::jsonb), '{grading}', ${JSON.stringify(analysis)}::jsonb),
           ai_draft_grade        = ${overall},
@@ -8355,9 +8433,25 @@ Defects (admin-confirmed): ${defectLines}`;
           edges_score           = ${edges},
           surface_score         = ${surface},
           grade_strength_score  = ${strength},
+          grading_version       = grading_version + 1,
           updated_at            = NOW()
-        WHERE id = ${id}
+        WHERE id = ${id} AND grading_version = ${expectedVersion}
+        RETURNING grading_version
       `);
+      if (saved.rows.length === 0) {
+        const currentVersion = await currentGradingVersion(id);
+        if (currentVersion == null) return res.status(404).json({ error: "Certificate not found" });
+        const conflict = gradingVersionConflict(expectedVersion, currentVersion);
+        await logGradingVersionConflict({
+          certId: id,
+          actor: (req.session as any)?.adminEmail,
+          role: "admin",
+          route: "POST /api/admin/certificates/:id/grade",
+          expectedVersion,
+          currentVersion,
+        });
+        return res.status(409).json(gradingVersionConflictResponse(conflict));
+      }
 
       // Audit
       try {
@@ -8381,6 +8475,7 @@ Defects (admin-confirmed): ${defectLines}`;
         overall,
         grade_label: analysis.grade_label || null,
         grade_strength_score: strength,
+        gradingVersion: Number((saved.rows[0] as any).grading_version),
       });
     } catch (err: any) {
       const msg = String(err?.message || "");
@@ -8388,7 +8483,7 @@ Defects (admin-confirmed): ${defectLines}`;
         return res.status(403).json({ error: "AI Full Grade is disabled — enable it in /admin → AI Learning" });
       }
       console.error("[ai/grade] error:", msg);
-      res.status(500).json({ error: msg });
+      sendServerError(res, err);
     }
   });
 

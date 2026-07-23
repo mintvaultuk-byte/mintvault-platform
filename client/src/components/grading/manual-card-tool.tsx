@@ -98,6 +98,11 @@ interface Props {
   existingCroppedUrl?: string;
   /** API base for cert endpoints: '/api/admin' (default) or '/api/grader'. */
   apiBase?: string;
+  /** Current grading token, owned by the parent panel so card-tool saves join
+   *  the same optimistic-concurrency stream as draft autosaves. */
+  getExpectedGradingVersion?: () => number | null;
+  onGradingVersionSaved?: (version: unknown) => void;
+  onGradingConflict?: (status: number, data: any) => boolean;
 }
 
 /** Body of POST /api/admin/certificates/:id/recrop. */
@@ -302,6 +307,9 @@ export default function ManualCardTool({
   initialPhase = "capture",
   existingCroppedUrl,
   apiBase = "/api/admin",
+  getExpectedGradingVersion,
+  onGradingVersionSaved,
+  onGradingConflict,
 }: Props) {
   const [mode, setMode] = useState<CardToolMode>("full");
   const [outerPts, setOuterPts] = useState<Point[]>([]);
@@ -1072,14 +1080,22 @@ export default function ManualCardTool({
       // lands; in the legacy path it's awaited inline (below).
       const sendCentering = async () => {
         if (!(mode === "full" && centering)) return;
+        const expectedVersion = getExpectedGradingVersion?.();
+        if (!Number.isSafeInteger(expectedVersion) || (expectedVersion as number) < 1) {
+          throw new Error("The grading version is not loaded yet. Reload this certificate before saving.");
+        }
         const cenRes = await fetch(`${apiBase}/certificates/${certId}/manual-centering`, {
           method: "POST",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ side, outer: centering.outer, inner: centering.inner }),
+          body: JSON.stringify({ side, outer: centering.outer, inner: centering.inner, expectedVersion }),
         });
-        const cenJson = await cenRes.json();
-        if (!cenRes.ok) throw new Error(cenJson.error || "Centering save failed");
+        const cenJson = await cenRes.json().catch(() => ({}));
+        if (!cenRes.ok) {
+          if (onGradingConflict?.(cenRes.status, cenJson)) throw new Error("A newer grading draft exists.");
+          throw new Error(cenJson.error || "Centering save failed");
+        }
+        onGradingVersionSaved?.(cenJson.gradingVersion);
         onCentering?.({
           side,
           outer: centering.outer,

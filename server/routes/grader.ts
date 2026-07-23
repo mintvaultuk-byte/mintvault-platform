@@ -56,6 +56,14 @@ import {
 } from "../lib/rate-limiters";
 import { createDbCustomSetEditorStore, editCustomSetDetails, CustomSetEditError } from "../services/custom-set-editor";
 import {
+  GRADING_VERSION_CONFLICT,
+  currentGradingVersion,
+  gradingVersionConflict,
+  gradingVersionConflictResponse,
+  logGradingVersionConflict,
+  parseExpectedGradingVersion,
+} from "../grading-concurrency";
+import {
   STAFF_ABSOLUTE_SESSION_MS,
   clearSessionCookie,
   credentialVersionOf,
@@ -78,6 +86,40 @@ const staffCustomSetEditLimit = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many set edit attempts. Please wait a few minutes and try again." },
 });
+
+async function sendGradingSaveFailure(
+  res: Response,
+  result: {
+    ok: false;
+    status: number;
+    error: string;
+    code?: string;
+    expectedVersion?: number;
+    currentVersion?: number;
+    reload?: true;
+  },
+  audit: { certId: number; actor: string | null | undefined; role: string; route: string }
+) {
+  if (result.code === GRADING_VERSION_CONFLICT && result.expectedVersion && result.currentVersion) {
+    await logGradingVersionConflict({
+      ...audit,
+      expectedVersion: result.expectedVersion,
+      currentVersion: result.currentVersion,
+    });
+    return res.status(409).json(
+      gradingVersionConflictResponse({
+        status: 409,
+        code: GRADING_VERSION_CONFLICT,
+        message: result.error,
+        error: result.error,
+        expectedVersion: result.expectedVersion,
+        currentVersion: result.currentVersion,
+        reload: true,
+      })
+    );
+  }
+  return res.status(result.status).json({ error: result.error, code: result.code });
+}
 
 /** Panel actions the grader proxy may delegate to the admin handlers. */
 const GRADER_PROXY_ACTIONS = new Set([
@@ -412,10 +454,14 @@ export function registerGraderRoutes(app: Express): void {
         }
       }
       const saved = await applyCertGradeDraft(certId, req.body || {});
-      if (!saved) {
-        return res.status(409).json({ error: "Card status changed; refresh and try again" });
-      }
-      return res.json({ ok: true, gradingStatus: auth.gradingStatus });
+      if (!saved.ok)
+        return sendGradingSaveFailure(res, saved, {
+          certId,
+          actor: (req.session as any).graderEmail,
+          role: "restricted_grader",
+          route: "PUT /api/grader/certificates/:id/grade",
+        });
+      return res.json({ ok: true, gradingStatus: auth.gradingStatus, gradingVersion: saved.gradingVersion });
     } catch (e: any) {
       console.error("[grader] draft save error:", e.message);
       return sendServerError(res, e);
@@ -434,8 +480,24 @@ export function registerGraderRoutes(app: Express): void {
       }
       const graderEmail = (req.session as any).graderEmail as string;
       const graderId = (req.session as any).graderId || null;
-      // Persist any final edits in the same action, then transition.
-      if (req.body && Object.keys(req.body).length) await applyCertGradeDraft(certId, req.body);
+      const versionAtRequest = await currentGradingVersion(certId);
+      if (versionAtRequest == null) return res.status(404).json({ error: "Certificate not found" });
+      let expectedVersion = parseExpectedGradingVersion(req.body?.expectedVersion, versionAtRequest);
+      // Persist legacy final edits before the transition. Current clients flush
+      // their ordered draft queue first and submit only expectedVersion, avoiding
+      // a second full draft write in the common case.
+      const hasDraftFields = Object.keys(req.body || {}).some((key) => key !== "expectedVersion");
+      if (hasDraftFields) {
+        const saved = await applyCertGradeDraft(certId, req.body);
+        if (!saved.ok)
+          return sendGradingSaveFailure(res, saved, {
+            certId,
+            actor: graderEmail,
+            role: "restricted_grader",
+            route: "POST /api/grader/certificates/:id/submit",
+          });
+        expectedVersion = saved.gradingVersion;
+      }
 
       // PHASE 3 — capture the OPERATOR's own submission as an immutable snapshot.
       // applyCertGradeDraft (above) has just written the operator's overall grade
@@ -455,30 +517,61 @@ export function registerGraderRoutes(app: Express): void {
         // AUTO-PUBLISH FLIP: publish directly, skip admin review.
         const pub = await db.execute(sql`
           UPDATE certificates SET grade_approved_at = NOW(), grade_approved_by = ${graderEmail}, status = 'active',
-            grader_status = 'approved', graded_at = NOW(), ${captureOperatorSubmission}, updated_at = NOW()
-          WHERE id = ${certId} AND grader_status = 'assigned'
-          RETURNING id
+            grader_status = 'approved', graded_at = NOW(), ${captureOperatorSubmission}, grading_version = grading_version + 1, updated_at = NOW()
+          WHERE id = ${certId} AND grader_status = 'assigned' AND grading_version = ${expectedVersion}
+          RETURNING grading_version
         `);
         if (pub.rows.length === 0) {
+          const currentVersion = await currentGradingVersion(certId);
+          if (currentVersion != null && currentVersion !== expectedVersion) {
+            return sendGradingSaveFailure(
+              res,
+              { ok: false, ...gradingVersionConflict(expectedVersion, currentVersion) },
+              {
+                certId,
+                actor: graderEmail,
+                role: "restricted_grader",
+                route: "POST /api/grader/certificates/:id/submit",
+              }
+            );
+          }
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
         }
         await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
           auto_published: true,
         });
-        return res.json({ ok: true, gradingStatus: "approved" });
+        return res.json({
+          ok: true,
+          gradingStatus: "approved",
+          gradingVersion: Number((pub.rows[0] as any).grading_version),
+        });
       }
 
       // ── PHASE 4 — per-operator review gate (deterministic sampling) ──────────
       // Move to pending_review + snapshot the operator's submission (Phase 3).
       const toReview = await db.execute(sql`
         UPDATE certificates SET grader_status = 'pending_review', graded_at = NOW(),
-          ${captureOperatorSubmission}, updated_at = NOW()
-        WHERE id = ${certId} AND grader_status = 'assigned'
-        RETURNING id
+          ${captureOperatorSubmission}, grading_version = grading_version + 1, updated_at = NOW()
+        WHERE id = ${certId} AND grader_status = 'assigned' AND grading_version = ${expectedVersion}
+        RETURNING grading_version
       `);
       if (toReview.rows.length === 0) {
+        const currentVersion = await currentGradingVersion(certId);
+        if (currentVersion != null && currentVersion !== expectedVersion) {
+          return sendGradingSaveFailure(
+            res,
+            { ok: false, ...gradingVersionConflict(expectedVersion, currentVersion) },
+            {
+              certId,
+              actor: graderEmail,
+              role: "restricted_grader",
+              route: "POST /api/grader/certificates/:id/submit",
+            }
+          );
+        }
         return res.status(409).json({ error: "Card status changed; refresh and try again" });
       }
+      const transitionVersion = Number((toReview.rows[0] as any).grading_version);
 
       // Read back exactly what we just snapshotted + the gate inputs.
       const gateRow = (await db.execute(sql`SELECT operator_grade, card_name FROM certificates WHERE id = ${certId}`))
@@ -502,7 +595,9 @@ export function registerGraderRoutes(app: Express): void {
       const reviewRequired = forceReview || reviewRate >= 100 || (reviewRate > 0 && bucket < reviewRate);
 
       if (reviewRequired) {
-        await db.execute(sql`UPDATE certificates SET review_required = true, updated_at = NOW() WHERE id = ${certId}`);
+        await db.execute(
+          sql`UPDATE certificates SET review_required = true, updated_at = NOW() WHERE id = ${certId} AND grading_version = ${transitionVersion}`
+        );
         await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
           review_required: true,
           review_rate: reviewRate,
@@ -510,7 +605,12 @@ export function registerGraderRoutes(app: Express): void {
             ? { forced: gradeMissing ? "operator_grade_null" : "unidentified" }
             : { sampled_bucket: bucket }),
         });
-        return res.json({ ok: true, gradingStatus: "pending_review", reviewRequired: true });
+        return res.json({
+          ok: true,
+          gradingStatus: "pending_review",
+          reviewRequired: true,
+          gradingVersion: transitionVersion,
+        });
       }
 
       // AUTO-APPROVE — sampling cleared this card without manual review. Promote
@@ -527,9 +627,10 @@ export function registerGraderRoutes(app: Express): void {
           grade_approved_by = 'auto',
           grader_status = 'approved',
           status = 'active',
+          grading_version = grading_version + 1,
           updated_at = NOW()
-        WHERE id = ${certId} AND grader_status = 'pending_review'
-        RETURNING id
+        WHERE id = ${certId} AND grader_status = 'pending_review' AND grading_version = ${transitionVersion}
+        RETURNING grading_version
       `);
       if (autoApp.rows.length === 0) {
         return res.status(409).json({ error: "Card status changed; refresh and try again" });
@@ -540,7 +641,12 @@ export function registerGraderRoutes(app: Express): void {
         review_rate: reviewRate,
         sampled_bucket: bucket,
       });
-      return res.json({ ok: true, gradingStatus: "approved", autoApproved: true });
+      return res.json({
+        ok: true,
+        gradingStatus: "approved",
+        autoApproved: true,
+        gradingVersion: Number((autoApp.rows[0] as any).grading_version),
+      });
     } catch (e: any) {
       console.error("[grader] submit error:", e.message);
       return sendServerError(res, e);
@@ -582,7 +688,21 @@ export function registerGraderRoutes(app: Express): void {
         }
 
         // Persist identity + grade as a DRAFT (grade_approved_at stays NULL).
-        if (req.body && Object.keys(req.body).length) await applyCertGradeDraft(certId, req.body);
+        const versionAtRequest = await currentGradingVersion(certId);
+        if (versionAtRequest == null) return res.status(404).json({ error: "Certificate not found" });
+        let expectedVersion = parseExpectedGradingVersion(req.body?.expectedVersion, versionAtRequest);
+        const hasDraftFields = Object.keys(req.body || {}).some((key) => key !== "expectedVersion");
+        if (hasDraftFields) {
+          const saved = await applyCertGradeDraft(certId, req.body);
+          if (!saved.ok)
+            return sendGradingSaveFailure(res, saved, {
+              certId,
+              actor: graderEmail,
+              role: "restricted_grader",
+              route: "POST /api/grader/certificates/:id/edit-submission",
+            });
+          expectedVersion = saved.gradingVersion;
+        }
 
         // Re-assert the review gate + re-snapshot the operator's submission from the
         // freshly-written grade columns, so the reviewer sees the corrected grade.
@@ -595,9 +715,10 @@ export function registerGraderRoutes(app: Express): void {
           operator_subgrades = jsonb_build_object(
             'centering', centering_score, 'corners', corners_score,
             'edges', edges_score, 'surface', surface_score),
+          grading_version = grading_version + 1,
           updated_at = NOW()
-        WHERE id = ${certId} AND grader_status = 'pending_review' AND graded_by = ${graderId}
-        RETURNING id
+        WHERE id = ${certId} AND grader_status = 'pending_review' AND graded_by = ${graderId} AND grading_version = ${expectedVersion}
+        RETURNING grading_version
       `);
         if (reSnapshot.rows.length === 0) {
           return res.status(409).json({ error: "Card status changed; refresh and try again" });
@@ -632,7 +753,12 @@ export function registerGraderRoutes(app: Express): void {
           changed,
         });
 
-        return res.json({ ok: true, gradingStatus: "pending_review", changed: Object.keys(changed) });
+        return res.json({
+          ok: true,
+          gradingStatus: "pending_review",
+          changed: Object.keys(changed),
+          gradingVersion: Number((reSnapshot.rows[0] as any).grading_version),
+        });
       } catch (e: any) {
         console.error("[grader] edit-submission error:", e.message);
         return sendServerError(res, e);
@@ -1005,20 +1131,43 @@ export function registerGraderRoutes(app: Express): void {
 
   // ── Admin: approve / reject a grader-submitted (pending_review) cert ────────
   app.post("/api/admin/certificates/:id/approve-grader-grade", requireAdmin, async (req: Request, res: Response) => {
-    const certId = parseInt(String(req.params.id), 10);
-    const adminUser = (req.session as any).adminEmail || "admin";
-    const r = await approveGraderCert(certId, adminUser);
-    if (!r.ok) return res.status(r.status).json({ error: r.error });
-    return res.json({ ok: true, gradingStatus: "approved" });
+    try {
+      const certId = parseInt(String(req.params.id), 10);
+      const adminUser = (req.session as any).adminEmail || "admin";
+      const r = await approveGraderCert(certId, adminUser, req.body || {});
+      if (!r.ok)
+        return sendGradingSaveFailure(res, r, {
+          certId,
+          actor: adminUser,
+          role: "admin_reviewer",
+          route: "POST /api/admin/certificates/:id/approve-grader-grade",
+        });
+      return res.json({ ok: true, gradingStatus: "approved", gradingVersion: r.gradingVersion });
+    } catch (e: any) {
+      return sendServerError(res, e);
+    }
   });
 
   app.post("/api/admin/certificates/:id/reject-grade", requireAdmin, async (req: Request, res: Response) => {
     const certId = parseInt(String(req.params.id), 10);
     const adminUser = (req.session as any).adminEmail || "admin";
     const reason = typeof (req.body || {}).reason === "string" ? (req.body.reason as string).slice(0, 1000) : null;
-    const r = await rejectCertGrade(certId, reason, adminUser);
-    if (!r.ok) return res.status(r.status).json({ error: r.error });
-    return res.json({ ok: true, gradingStatus: "assigned" });
+    try {
+      const versionAtRequest = await currentGradingVersion(certId);
+      if (versionAtRequest == null) return res.status(404).json({ error: "Certificate not found" });
+      const expectedVersion = parseExpectedGradingVersion((req.body || {}).expectedVersion, versionAtRequest);
+      const r = await rejectCertGrade(certId, reason, adminUser, expectedVersion);
+      if (!r.ok)
+        return sendGradingSaveFailure(res, r, {
+          certId,
+          actor: adminUser,
+          role: "admin_reviewer",
+          route: "POST /api/admin/certificates/:id/reject-grade",
+        });
+      return res.json({ ok: true, gradingStatus: "assigned", gradingVersion: r.gradingVersion });
+    } catch (e: any) {
+      return sendServerError(res, e);
+    }
   });
 
   // ── Admin grade-review namespace ────────────────────────────────────────────
@@ -1058,8 +1207,14 @@ export function registerGraderRoutes(app: Express): void {
     try {
       const adminUser = (req.session as any).adminEmail || "admin";
       const r = await adminReviewSaveDraft(parseInt(String(req.params.id), 10), req.body || {}, adminUser);
-      if (!r.ok) return res.status(r.status).json({ error: r.error });
-      return res.json({ ok: true });
+      if (!r.ok)
+        return sendGradingSaveFailure(res, r, {
+          certId: parseInt(String(req.params.id), 10),
+          actor: adminUser,
+          role: "admin_reviewer",
+          route: "PUT /api/admin/grade-review/certificates/:id/grade",
+        });
+      return res.json({ ok: true, gradingVersion: r.gradingVersion });
     } catch (e: any) {
       console.error("[admin grade-review save] error:", e.message);
       return sendServerError(res, e);

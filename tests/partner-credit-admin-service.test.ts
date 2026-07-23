@@ -886,7 +886,7 @@ describe("Partner Network G6C Super Admin credit adjustments on PostgreSQL 17.10
     expect(await ledgerCount(tenantId)).toBe(1);
   });
 
-  it("keeps migration ordering extensible through 0018 and exposes no destructive ledger operation", () => {
+  it("keeps migration ordering extensible through 0019 and exposes no destructive ledger operation", () => {
     const migrations = listMigrationFiles().map((migration) => migration.filename);
     const numbered = migrations.filter((filename) => /^\d{4,}_/.test(filename));
     const numbers = numbered.map((filename) => Number(filename.match(/^(\d+)_/)![1]));
@@ -895,6 +895,7 @@ describe("Partner Network G6C Super Admin credit adjustments on PostgreSQL 17.10
         "0016_partner_wallet_ledger.sql",
         "0017_partner_credit_reservations.sql",
         "0018_correction_audit_index.sql",
+        "0019_grading_optimistic_concurrency.sql",
       ])
     );
     expect(new Set(numbers).size).toBe(numbers.length);

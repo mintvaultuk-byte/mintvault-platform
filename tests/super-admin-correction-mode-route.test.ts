@@ -55,7 +55,7 @@ let base: string;
 let errorSpy: ReturnType<typeof vi.spyOn>;
 let registerCorrectionModeRoutes: typeof import("../server/correction-mode").registerCorrectionModeRoutes;
 
-async function seedCertificate(options: { id?: number; approved?: boolean; deleted?: boolean } = {}): Promise<string> {
+async function seedCertificate(options: { id?: number; approved?: boolean; deleted?: boolean } = {}): Promise<number> {
   const id = options.id ?? CERT_ID;
   const approved = options.approved ?? true;
   const deleted = options.deleted ?? false;
@@ -64,34 +64,40 @@ async function seedCertificate(options: { id?: number; approved?: boolean; delet
   await pool.query(
     `INSERT INTO certificates (
       id, certificate_number, card_game, set_name, card_name, card_number_display, year_text,
-      grade_type, grade, graded_by, ai_defect_candidates, grade_approved_at, deleted_at, updated_at
+      grade_type, grade, graded_by, ai_defect_candidates, grade_approved_at, deleted_at, grading_version, updated_at
     ) VALUES ($1, 'MV-0000004242', 'Pokemon', 'Base Set', 'Charizard', '7', '1999',
       'numeric', 8.5, 'grader-1', '[]'::jsonb,
       CASE WHEN $2 THEN NOW() - INTERVAL '1 day' ELSE NULL END,
       CASE WHEN $3 THEN NOW() ELSE NULL END,
+      1,
       NOW() - INTERVAL '1 hour')`,
     [id, approved, deleted]
   );
-  const version = await pool.query<{ version: string }>(
-    "SELECT EXTRACT(EPOCH FROM updated_at)::text AS version FROM certificates WHERE id = $1",
+  const version = await pool.query<{ version: number }>(
+    "SELECT grading_version AS version FROM certificates WHERE id = $1",
     [id]
   );
   return version.rows[0].version;
 }
 
 function correctionForm(
-  version: string,
-  options: { malformedGrading?: boolean; image?: boolean; changes?: Record<string, string> } = {}
+  version: number,
+  options: {
+    malformedGrading?: boolean;
+    image?: boolean;
+    changes?: Record<string, string>;
+    grading?: Record<string, unknown>;
+  } = {}
 ) {
   const data = new FormData();
   const fields: Record<string, string> = {
-    expectedVersion: version,
+    expectedVersion: String(version),
     cardGame: "Pokemon",
     setName: "Base Set",
     cardName: "Charizard Corrected",
     cardNumber: "7",
     year: "1999",
-    gradingPayload: options.malformedGrading ? "{not-json" : JSON.stringify({}),
+    gradingPayload: options.malformedGrading ? "{not-json" : JSON.stringify(options.grading || {}),
     ...options.changes,
   };
   for (const [key, value] of Object.entries(fields)) data.append(key, value);
@@ -155,6 +161,7 @@ describe("PUT /api/admin/certificates/:id/correction", () => {
         crease_span_pct numeric, wrinkle_severity text, tear_severity text,
         front_image_path text, back_image_path text,
         graded_by text, grade_approved_at timestamp, deleted_at timestamp,
+        grading_version integer NOT NULL DEFAULT 1,
         updated_at timestamp NOT NULL DEFAULT now()
       )`);
     await pool.query(`
@@ -242,7 +249,7 @@ describe("PUT /api/admin/certificates/:id/correction", () => {
 
     let response = await correctionRequest(
       "/api/admin/certificates/999999/correction",
-      correctionForm("missing", { image: true }),
+      correctionForm(1, { image: true }),
       cookie
     );
     expect(response.status).toBe(404);
@@ -269,10 +276,16 @@ describe("PUT /api/admin/certificates/:id/correction", () => {
     version = await seedCertificate();
     response = await correctionRequest(
       `/api/admin/certificates/${CERT_ID}/correction`,
-      correctionForm(`${version}-stale`, { image: true }),
+      correctionForm(version + 1, { image: true }),
       cookie
     );
     expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: "GRADING_VERSION_CONFLICT",
+      expectedVersion: version + 1,
+      currentVersion: version,
+      reload: true,
+    });
     expect(runtime.uploads).toEqual([]);
   });
 
@@ -325,6 +338,31 @@ describe("PUT /api/admin/certificates/:id/correction", () => {
     });
     const audit = await pool.query("SELECT admin_user FROM audit_log");
     expect(audit.rows).toEqual([{ admin_user: SUPER_ADMIN_EMAIL }]);
+  });
+
+  it("keeps writer A's grade when stale writer B submits a later grade", async () => {
+    const cookie = await testSession("super");
+    const version = await seedCertificate();
+
+    const writerA = await correctionRequest(
+      `/api/admin/certificates/${CERT_ID}/correction`,
+      correctionForm(version, { grading: { overall_grade: "7" } }),
+      cookie
+    );
+    expect(writerA.status).toBe(200);
+    expect(await writerA.json()).toMatchObject({ gradingVersion: version + 1 });
+
+    const writerB = await correctionRequest(
+      `/api/admin/certificates/${CERT_ID}/correction`,
+      correctionForm(version, { grading: { overall_grade: "9" } }),
+      cookie
+    );
+    expect(writerB.status).toBe(409);
+    expect(await writerB.json()).toMatchObject({ code: "GRADING_VERSION_CONFLICT" });
+
+    const stored = await pool.query("SELECT grade, grading_version FROM certificates WHERE id = $1", [CERT_ID]);
+    expect(Number(stored.rows[0].grade)).toBe(7);
+    expect(Number(stored.rows[0].grading_version)).toBe(version + 1);
   });
 
   it("does not report success when the mandatory audit/database write fails", async () => {

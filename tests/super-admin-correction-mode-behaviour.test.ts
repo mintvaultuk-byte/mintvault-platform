@@ -78,6 +78,7 @@ describeDb("Super Admin Correction Mode — real PostgreSQL behaviour", () => {
         crease_span_pct numeric, wrinkle_severity text, tear_severity text,
         front_image_path text, back_image_path text,
         graded_by text, grade_approved_at timestamp, deleted_at timestamp,
+        grading_version integer NOT NULL DEFAULT 1,
         updated_at timestamp NOT NULL DEFAULT now()
       )`);
     await pool.query(`
@@ -93,8 +94,8 @@ describeDb("Super Admin Correction Mode — real PostgreSQL behaviour", () => {
     await pool.end();
   });
 
-  /** Reset to a known approved cert with an updated_at safely in the past. */
-  async function seed(): Promise<string> {
+  /** Reset to a known approved cert with a deterministic integer grading token. */
+  async function seed(): Promise<number> {
     await pool.query(`DELETE FROM audit_log`);
     await pool.query(`DELETE FROM certificates`);
     await pool.query(
@@ -105,10 +106,8 @@ describeDb("Super Admin Correction Mode — real PostgreSQL behaviour", () => {
          '[]'::jsonb, NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 hour')`,
       [CERT_ID]
     );
-    const r = await pool.query(`SELECT EXTRACT(EPOCH FROM updated_at)::text AS v FROM certificates WHERE id=$1`, [
-      CERT_ID,
-    ]);
-    return r.rows[0].v as string;
+    const r = await pool.query(`SELECT grading_version AS v FROM certificates WHERE id=$1`, [CERT_ID]);
+    return Number(r.rows[0].v);
   }
 
   const baseMetadata = {
@@ -119,7 +118,7 @@ describeDb("Super Admin Correction Mode — real PostgreSQL behaviour", () => {
     year: "1999",
   };
 
-  function input(version: string, metadata: Record<string, unknown> = {}, grading: Record<string, unknown> = {}) {
+  function input(version: number, metadata: Record<string, unknown> = {}, grading: Record<string, unknown> = {}) {
     return {
       certId: CERT_ID,
       actor: "mintvaultuk@gmail.com",
@@ -151,11 +150,12 @@ describeDb("Super Admin Correction Mode — real PostgreSQL behaviour", () => {
     expect(audit.rows[0].details.changes.cardName).toEqual({ before: "Charizard", after: "Charizard Corrected" });
   });
 
-  it("rejects a stale expectedVersion with 409 version_conflict and leaves the row untouched", async () => {
+  it("rejects a stale expectedVersion with GRADING_VERSION_CONFLICT and leaves the row untouched", async () => {
     await seed();
-    await expect(
-      applySuperAdminCorrection(input("1.000000", { cardName: "Should Not Persist" }))
-    ).rejects.toMatchObject({ status: 409, code: "version_conflict" });
+    await expect(applySuperAdminCorrection(input(999, { cardName: "Should Not Persist" }))).rejects.toMatchObject({
+      status: 409,
+      code: "GRADING_VERSION_CONFLICT",
+    });
 
     const cert = await pool.query(`SELECT card_name FROM certificates WHERE id=$1`, [CERT_ID]);
     expect(cert.rows[0].card_name).toBe("Charizard");
@@ -166,14 +166,25 @@ describeDb("Super Admin Correction Mode — real PostgreSQL behaviour", () => {
   it("changes the correction token after every successful correction", async () => {
     const v1 = await seed();
     const first = await applySuperAdminCorrection(input(v1, { cardName: "First" }));
-    expect(first.version).not.toBe(v1);
+    expect(first.gradingVersion).toBe(v1 + 1);
     // The now-stale original token must be rejected.
     await expect(applySuperAdminCorrection(input(v1, { cardName: "Second" }))).rejects.toMatchObject({
-      code: "version_conflict",
+      code: "GRADING_VERSION_CONFLICT",
     });
     // The fresh token is accepted.
-    const second = await applySuperAdminCorrection(input(String(first.version), { cardName: "Second" }));
+    const second = await applySuperAdminCorrection(input(first.gradingVersion, { cardName: "Second" }));
     expect(second.noChange).toBe(false);
+  });
+
+  it("preserves writer A's grade when writer B submits a stale token", async () => {
+    const version = await seed();
+    await applySuperAdminCorrection(input(version, {}, { overall_grade: "7" }));
+    await expect(applySuperAdminCorrection(input(version, {}, { overall_grade: "9" }))).rejects.toMatchObject({
+      status: 409,
+      code: "GRADING_VERSION_CONFLICT",
+    });
+    const cert = await pool.query(`SELECT grade FROM certificates WHERE id=$1`, [CERT_ID]);
+    expect(Number(cert.rows[0].grade)).toBe(7);
   });
 
   it("CONCURRENCY: two simultaneous corrections from the same version — exactly one wins", async () => {
@@ -189,7 +200,7 @@ describeDb("Super Admin Correction Mode — real PostgreSQL behaviour", () => {
 
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
-    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: "version_conflict" });
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ code: "GRADING_VERSION_CONFLICT" });
 
     // Exactly one write, exactly one audit row — no lost update, no double-apply.
     const cert = await pool.query(`SELECT card_name FROM certificates WHERE id=$1`, [CERT_ID]);
@@ -206,13 +217,13 @@ describeDb("Super Admin Correction Mode — real PostgreSQL behaviour", () => {
       await expect(applySuperAdminCorrection(input(version, { cardName: "Must Roll Back" }))).rejects.toBeTruthy();
 
       const cert = await pool.query(
-        `SELECT card_name, EXTRACT(EPOCH FROM updated_at)::text AS v
+        `SELECT card_name, grading_version AS v
                                      FROM certificates WHERE id=$1`,
         [CERT_ID]
       );
       // The live record must be untouched — no partial correction may survive.
       expect(cert.rows[0].card_name).toBe("Charizard");
-      expect(cert.rows[0].v).toBe(version);
+      expect(Number(cert.rows[0].v)).toBe(version);
     } finally {
       await pool.query(`ALTER TABLE audit_log DROP CONSTRAINT reject_all`);
     }
@@ -266,10 +277,8 @@ describeDb("Super Admin Correction Mode — real PostgreSQL behaviour", () => {
     expect(result.noChange).toBe(true);
     const audit = await pool.query(`SELECT id FROM audit_log`);
     expect(audit.rows).toHaveLength(0);
-    const cert = await pool.query(`SELECT EXTRACT(EPOCH FROM updated_at)::text AS v FROM certificates WHERE id=$1`, [
-      CERT_ID,
-    ]);
-    expect(cert.rows[0].v).toBe(version);
+    const cert = await pool.query(`SELECT grading_version AS v FROM certificates WHERE id=$1`, [CERT_ID]);
+    expect(Number(cert.rows[0].v)).toBe(version);
   });
 
   it("cannot reassign the certificate number or other immutable identifiers via the body", async () => {
