@@ -7,6 +7,9 @@
  * throwaway Postgres. These unit tests cover all pure logic.
  */
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { classifyDbHost } from "../scripts/db/db-host-policy";
 import { evaluatePreflight } from "../scripts/db/preflight-schema";
 import {
@@ -24,13 +27,35 @@ import {
 import { lintSql, hasBlocking, stripSqlNoise } from "../scripts/db/lint-destructive-sql";
 
 const PROD_UNMANAGED_TABLES_29 = [
-  "ai_accuracy_log", "ai_grade_corrections", "ai_override_audit", "audit_logs", "bot_logs",
-  "bot_seen", "bot_settings", "custom_sets", "custom_variants", "estimate_credits",
-  "estimate_free_uses", "grading_records", "grading_sessions", "member_credits",
-  "pending_switch_nonces", "pin_attempts", "pin_reset_tokens", "promo_codes", "promotions",
-  "session", "sessions", "set_review_decisions", "stripe_webhook_events",
-  "subscription_reminders", "tcgdex_sets", "value_protection_tiers", "vault_club_consents",
-  "vault_club_events", "vault_club_subscriptions",
+  "ai_accuracy_log",
+  "ai_grade_corrections",
+  "ai_override_audit",
+  "audit_logs",
+  "bot_logs",
+  "bot_seen",
+  "bot_settings",
+  "custom_sets",
+  "custom_variants",
+  "estimate_credits",
+  "estimate_free_uses",
+  "grading_records",
+  "grading_sessions",
+  "member_credits",
+  "pending_switch_nonces",
+  "pin_attempts",
+  "pin_reset_tokens",
+  "promo_codes",
+  "promotions",
+  "session",
+  "sessions",
+  "set_review_decisions",
+  "stripe_webhook_events",
+  "subscription_reminders",
+  "tcgdex_sets",
+  "value_protection_tiers",
+  "vault_club_consents",
+  "vault_club_events",
+  "vault_club_subscriptions",
 ];
 
 function objs(partial: Partial<LiveObjects>): LiveObjects {
@@ -88,7 +113,7 @@ describe("fail-closed preflight (all object types)", () => {
         schemas: KNOWN_SCHEMAS.map((s) => s.name),
         orphanSequences: ["ai_predictions_id_seq"],
         enums: [],
-      }),
+      })
     );
     expect(res.ok).toBe(true);
     expect(res.unknown).toEqual([]);
@@ -109,7 +134,9 @@ describe("fail-closed preflight (all object types)", () => {
   });
 
   it("knows the three prod schemas and does not flag them", () => {
-    expect(evaluatePreflight(objs({ tables: managedTables(), schemas: ["public", "drizzle", "stripe"] })).ok).toBe(true);
+    expect(evaluatePreflight(objs({ tables: managedTables(), schemas: ["public", "drizzle", "stripe"] })).ok).toBe(
+      true
+    );
   });
 
   it("classifies vq_* as vaultQuest, not unknown", () => {
@@ -129,15 +156,22 @@ describe("fail-closed preflight (all object types)", () => {
           { schema: "stripe", name: "charges", kind: "table" },
           { schema: "drizzle", name: "__drizzle_migrations", kind: "table" },
         ],
-      }),
+      })
     );
     expect(c.unknown).toEqual([]);
-    expect(c.integrationOwned.map((o) => `${o.schema}.${o.name}`)).toEqual(["stripe.charges", "drizzle.__drizzle_migrations"]);
+    expect(c.integrationOwned.map((o) => `${o.schema}.${o.name}`)).toEqual([
+      "stripe.charges",
+      "drizzle.__drizzle_migrations",
+    ]);
   });
 
   it("FAILS on an object in an UNKNOWN schema (F4 — never silent)", () => {
     const res = evaluatePreflight(
-      objs({ tables: managedTables(), schemas: ["public", "rogue"], nonPublicObjects: [{ schema: "rogue", name: "x", kind: "table" }] }),
+      objs({
+        tables: managedTables(),
+        schemas: ["public", "rogue"],
+        nonPublicObjects: [{ schema: "rogue", name: "x", kind: "table" }],
+      })
     );
     expect(res.ok).toBe(false);
     // both the unknown schema and the object in it are surfaced
@@ -183,7 +217,15 @@ describe("unmanaged inventory completeness & richness", () => {
 
   it("payment/session/credit/view/matview objects are all protected", () => {
     const inv = new Set(inventoriedUnmanaged());
-    for (const t of ["member_credits", "stripe_webhook_events", "promo_codes", "session", "vault_club_subscriptions", "reholder_credits", "population_report"]) {
+    for (const t of [
+      "member_credits",
+      "stripe_webhook_events",
+      "promo_codes",
+      "session",
+      "vault_club_subscriptions",
+      "reholder_credits",
+      "population_report",
+    ]) {
       expect(inv.has(t)).toBe(true);
     }
   });
@@ -197,9 +239,16 @@ describe("unmanaged inventory completeness & richness", () => {
 describe("partner network classification (Phase 1)", () => {
   it("classifies partner_* and field_welders as partnerNetwork, never unknown", () => {
     const c = classifyLiveObjects(
-      objs({ tables: ["partner_organisations", "partner_users", "partner_credit_ledger", "field_welders", "certificates"] }),
+      objs({
+        tables: ["partner_organisations", "partner_users", "partner_credit_ledger", "field_welders", "certificates"],
+      })
     );
-    expect(c.partnerNetwork.sort()).toEqual(["field_welders", "partner_credit_ledger", "partner_organisations", "partner_users"]);
+    expect(c.partnerNetwork.sort()).toEqual([
+      "field_welders",
+      "partner_credit_ledger",
+      "partner_organisations",
+      "partner_users",
+    ]);
     expect(c.managed).toContain("certificates");
     expect(c.unknown).toEqual([]);
   });
@@ -245,7 +294,8 @@ describe("destructive-SQL linter (expanded object coverage)", () => {
   });
 
   it("does NOT block a referential ON DELETE/UPDATE CASCADE in an additive FK (F3)", () => {
-    const sql = "CREATE TABLE IF NOT EXISTS child (id serial primary key, p int REFERENCES parent(id) ON DELETE CASCADE);";
+    const sql =
+      "CREATE TABLE IF NOT EXISTS child (id serial primary key, p int REFERENCES parent(id) ON DELETE CASCADE);";
     expect(lintSql(sql)).toEqual([]);
     // but a destructive DROP ... CASCADE is still blocked
     expect(hasBlocking(lintSql("DROP TABLE parent CASCADE;"))).toBe(true);
@@ -276,9 +326,39 @@ describe("destructive-SQL linter (expanded object coverage)", () => {
 });
 
 describe("migration runner planning (pure)", () => {
-  it("exports listMigrationFiles (duplicate-number rejection covered by disposable harness)", async () => {
+  it("exports listMigrationFiles", async () => {
     const { listMigrationFiles } = await import("../scripts/db/migrate");
     expect(typeof listMigrationFiles).toBe("function");
+  });
+
+  it("rejects duplicate migration numbers before execution", async () => {
+    const { listMigrationFiles } = await import("../scripts/db/migrate");
+    const dir = mkdtempSync(join(tmpdir(), "mintvault-duplicate-migrations-"));
+    try {
+      writeFileSync(join(dir, "0001_alpha.sql"), "CREATE TABLE alpha(id integer);");
+      writeFileSync(join(dir, "00001_beta.sql"), "CREATE TABLE beta(id integer);");
+      let message = "";
+      try {
+        listMigrationFiles(dir);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toContain("Duplicate migration number(s): 1 ->");
+      expect(message).toContain("0001_alpha.sql");
+      expect(message).toContain("00001_beta.sql");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("redacts postgres connection URLs from CLI error text", async () => {
+    const { redactMigrationErrorMessage } = await import("../scripts/db/migrate");
+    const message =
+      "connection failed for postgresql://user:supersecret@db.example.com:5432/mintvault and MINTVAULT_DATABASE_URL=postgres://u:p@host/db";
+    const redacted = redactMigrationErrorMessage(message);
+    expect(redacted).not.toContain("supersecret");
+    expect(redacted).not.toContain("postgres://u:p@host/db");
+    expect(redacted).toContain("[redacted-postgres-url]");
   });
 
   it("plan marks pending, detects checksum mismatch and journal inconsistency", async () => {
@@ -287,12 +367,22 @@ describe("migration runner planning (pure)", () => {
     const client = {
       async query(sql: string) {
         if (/to_regclass/i.test(sql)) return { rows: [{ reg: "schema_migrations" }] }; // journal exists
-        if (/CREATE TABLE IF NOT EXISTS schema_migrations|ALTER TABLE schema_migrations/i.test(sql)) return { rows: [] };
+        if (/CREATE TABLE IF NOT EXISTS schema_migrations|ALTER TABLE schema_migrations/i.test(sql))
+          return { rows: [] };
         if (/SELECT filename, checksum, status FROM schema_migrations/i.test(sql)) return { rows: journal.slice() };
         return { rows: [] };
       },
     };
-    const files = [{ number: "0001", filename: "0001_x.sql", path: "", sql: "CREATE TABLE x();", checksum: "aaa", noTransaction: false }];
+    const files = [
+      {
+        number: "0001",
+        filename: "0001_x.sql",
+        path: "",
+        sql: "CREATE TABLE x();",
+        checksum: "aaa",
+        noTransaction: false,
+      },
+    ];
     expect((await planMigrations(client, files)).pending).toEqual(["0001_x.sql"]);
     journal.push({ filename: "0001_x.sql", checksum: "aaa", status: "applied" });
     expect((await planMigrations(client, files)).alreadyApplied).toEqual(["0001_x.sql"]);
@@ -312,7 +402,16 @@ describe("migration runner planning (pure)", () => {
         return { rows: [] };
       },
     };
-    const files = [{ number: "0001", filename: "0001_x.sql", path: "", sql: "CREATE TABLE x();", checksum: "aaa", noTransaction: false }];
+    const files = [
+      {
+        number: "0001",
+        filename: "0001_x.sql",
+        path: "",
+        sql: "CREATE TABLE x();",
+        checksum: "aaa",
+        noTransaction: false,
+      },
+    ];
     const plan = await planMigrations(client, files);
     expect(plan.pending).toEqual(["0001_x.sql"]); // missing journal -> all pending
     expect(issued.some((s) => /CREATE TABLE|ALTER TABLE/i.test(s))).toBe(false); // no DDL issued

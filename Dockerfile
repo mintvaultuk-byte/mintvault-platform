@@ -43,10 +43,12 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy compiled node_modules (includes native canvas binary), built app, and brand assets
+# Copy compiled node_modules (includes native canvas binary), built app, brand assets,
+# and the numbered migration inventory needed by the one-off runner.
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
+COPY --from=builder /app/migrations/[0-9][0-9][0-9][0-9]*_*.sql ./migrations/
 
 ENV NODE_ENV=production
 ENV PORT=5000

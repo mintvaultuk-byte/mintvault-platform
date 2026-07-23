@@ -13,6 +13,7 @@
  * safety net that catches the common destructive statements, not a proof of safety. Treat a
  * clean result as "no obvious destructive statement", not "provably non-destructive".
  */
+import { readFileSync } from "node:fs";
 
 export type DestructiveKind =
   | "drop_database"
@@ -81,7 +82,11 @@ const RULES: Rule[] = [
   // Only DESTRUCTIVE cascades (DROP/TRUNCATE ... CASCADE). Referential actions like
   // "ON DELETE CASCADE" / "ON UPDATE CASCADE" in a FK definition are safe and NOT flagged.
   { kind: "cascade", severity: "block", re: /\b(DROP|TRUNCATE)\b[\s\S]{0,200}?\bCASCADE\b/i },
-  { kind: "enum_value_removed", severity: "block", re: /\bALTER\s+TYPE\b[\s\S]{0,120}?\b(RENAME\s+VALUE|DROP\s+VALUE)\b/i },
+  {
+    kind: "enum_value_removed",
+    severity: "block",
+    re: /\bALTER\s+TYPE\b[\s\S]{0,120}?\b(RENAME\s+VALUE|DROP\s+VALUE)\b/i,
+  },
   // Flags (review, not automatic block):
   { kind: "column_type_change", severity: "flag", re: /\bALTER\s+(?:COLUMN\s+)?[^\s;]+\s+(?:SET\s+DATA\s+)?TYPE\b/i },
   { kind: "add_not_null", severity: "flag", re: /\bALTER\s+COLUMN\b[\s\S]{0,60}?\bSET\s+NOT\s+NULL\b/i },
@@ -117,7 +122,12 @@ export function lintSql(sql: string): DestructiveFinding[] {
     let m: RegExpExecArray | null;
     while ((m = re.exec(cleaned)) !== null) {
       const line = cleaned.slice(0, m.index).split("\n").length;
-      findings.push({ kind: rule.kind, severity: rule.severity, match: m[0].replace(/\s+/g, " ").trim().slice(0, 80), line });
+      findings.push({
+        kind: rule.kind,
+        severity: rule.severity,
+        match: m[0].replace(/\s+/g, " ").trim().slice(0, 80),
+        line,
+      });
       if (m.index === re.lastIndex) re.lastIndex++;
     }
   }
@@ -145,7 +155,6 @@ function isMain(): boolean {
 }
 
 if (isMain()) {
-  const fs = await import("node:fs");
   const files = process.argv.slice(2);
   if (files.length === 0) {
     console.error("usage: lint-destructive-sql.ts <file.sql> [...]");
@@ -153,7 +162,7 @@ if (isMain()) {
   }
   let blocking = false;
   for (const f of files) {
-    const sql = fs.readFileSync(f, "utf8");
+    const sql = readFileSync(f, "utf8");
     const findings = lintSql(sql);
     if (findings.length === 0) {
       console.log(`✓ ${f}: no obvious destructive operations (regex heuristic — not a full parser)`);

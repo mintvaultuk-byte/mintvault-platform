@@ -109,6 +109,24 @@ async function buildAll() {
     external: externals,
     logLevel: "info",
   });
+
+  // Numbered migration runner for explicit one-off execution inside the Fly
+  // production image. Normal web startup remains dist/index.cjs; this artifact
+  // only runs when an operator deliberately invokes:
+  //   node /app/dist/migrate.cjs --apply
+  console.log("building numbered migration runner...");
+  await esbuild({
+    entryPoints: ["scripts/db/migrate.ts"],
+    platform: "node",
+    bundle: true,
+    format: "cjs",
+    outfile: "dist/migrate.cjs",
+    define: {
+      "process.env.NODE_ENV": '"production"',
+    },
+    external: externals,
+    logLevel: "info",
+  });
 }
 
 buildAll().catch((err) => {

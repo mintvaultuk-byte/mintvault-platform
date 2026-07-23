@@ -30,11 +30,18 @@
  * permits a deliberately destructive owner-approved migration.
  */
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { lintSql, hasBlocking } from "./lint-destructive-sql";
 
-const MIGRATIONS_DIR = join(process.cwd(), "migrations");
+function defaultMigrationsDir(): string {
+  const entry = process.argv[1] ?? "";
+  return basename(entry) === "migrate.cjs"
+    ? join(dirname(entry), "..", "migrations")
+    : join(process.cwd(), "migrations");
+}
+
+const MIGRATIONS_DIR = defaultMigrationsDir();
 const FILE_RE = /^(\d{4,})_.+\.sql$/;
 // Fixed advisory-lock key for the migration runner (arbitrary constant, namespaced).
 const ADVISORY_LOCK_KEY = 4_150_205; // "P0.5" mnemonic; any stable int works.
@@ -326,10 +333,17 @@ export async function applyMigrations(
 }
 
 function isMain(): boolean {
-  return !!process.argv[1] && process.argv[1].endsWith("migrate.ts");
+  const entry = process.argv[1] ? basename(process.argv[1]) : "";
+  return entry === "migrate.ts" || entry === "migrate.cjs";
 }
 
-if (isMain()) {
+export function redactMigrationErrorMessage(message: string): string {
+  return message
+    .replace(/postgres(?:ql)?:\/\/[^\s"'<>]+/gi, "[redacted-postgres-url]")
+    .replace(/MINTVAULT_DATABASE_URL=([^\s"'<>]+)/g, "MINTVAULT_DATABASE_URL=[redacted]");
+}
+
+async function main(): Promise<void> {
   const url = process.env.MINTVAULT_DATABASE_URL;
   if (!url) {
     console.error("MINTVAULT_DATABASE_URL is required");
@@ -371,4 +385,11 @@ if (isMain()) {
   } finally {
     await client.end();
   }
+}
+
+if (isMain()) {
+  main().catch((err) => {
+    console.error(redactMigrationErrorMessage((err as Error).message || String(err)));
+    process.exit(1);
+  });
 }

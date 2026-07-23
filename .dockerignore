@@ -25,9 +25,13 @@ coverage
 # scripts/scanner-app + scripts/scanner-watcher are macOS native scanner
 # integrations (LaunchAgents + Electron-style guide window). They talk
 # to the server over HTTPS with SCANNER_API_TOKEN — they are not imported
-# by the Vite/esbuild build. Excluding the whole scripts/ tree saves
+# by the Vite/esbuild build. Excluding almost all of scripts/ saves
 # ~513 MB of context per deploy (caught a Fly-builder timeout 2026-05-11).
-scripts
+scripts/*
+!scripts/db/
+scripts/db/*
+!scripts/db/migrate.ts
+!scripts/db/lint-destructive-sql.ts
 
 # ─── Project meta / documentation (not needed by build or runtime) ────
 docs

@@ -15,17 +15,91 @@ official workflows.
 
 ## The tools
 
-| Command | What it does |
-|---|---|
-| `npm run db:preflight` | Read-only. Lists every live object (tables, views, matviews, schemas, orphan sequences, enums) and **fails closed** if any is unknown (not managed and not in the classified inventory). |
-| `npm run db:lint-sql <file.sql>` | Scans a migration for destructive statements (DROP/TRUNCATE/rename/unqualified DELETE/…). Exits non-zero on a blocking finding. Regex heuristic, not a full parser. |
-| `npm run db:migrate` | Dry-run: shows the pending plan, lints, applies nothing. |
-| `npm run db:migrate -- --apply` | Applies pending migrations under an advisory lock, recording each in the `schema_migrations` journal. |
-| `npm run db:push` | Local-only schema prototyping. Guarded — blocked against non-local hosts. |
+| Command                          | What it does                                                                                                                                                                             |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run db:preflight`           | Read-only. Lists every live object (tables, views, matviews, schemas, orphan sequences, enums) and **fails closed** if any is unknown (not managed and not in the classified inventory). |
+| `npm run db:lint-sql <file.sql>` | Scans a migration for destructive statements (DROP/TRUNCATE/rename/unqualified DELETE/…). Exits non-zero on a blocking finding. Regex heuristic, not a full parser.                      |
+| `npm run db:migrate`             | Dry-run: shows the pending plan, lints, applies nothing.                                                                                                                                 |
+| `npm run db:migrate -- --apply`  | Applies pending migrations under an advisory lock, recording each in the `schema_migrations` journal.                                                                                    |
+| `npm run db:push`                | Local-only schema prototyping. Guarded — blocked against non-local hosts.                                                                                                                |
 
 Config: `drizzle.config.ts` scopes Drizzle to a **fail-closed allowlist** derived from
 `shared/schema.ts` (only managed tables are ever in scope). Vault Quest stays isolated via
 `drizzle-vq.config.ts`.
+
+## Production image one-off runner
+
+The production Docker image includes the numbered migration runner as:
+
+```sh
+node /app/dist/migrate.cjs
+```
+
+The image also includes the numbered SQL inventory at `/app/migrations`. Only
+`migrations/<four-or-more-digits>_*.sql` files are copied into that image path; rollback scripts and legacy
+unnumbered SQL files are intentionally excluded because the runner never executes them and rollback
+remains an explicit owner-approved operation.
+
+Normal application startup is unchanged:
+
+```sh
+node dist/index.cjs
+```
+
+There is no `release_command`, and migrations do not run when the web server starts.
+
+For production, run the migration command only as a deliberate one-off Fly Machine using an exact
+reviewed image ref. Do not paste `MINTVAULT_DATABASE_URL` into a local shell; Fly injects app
+secrets into Machines at boot.
+
+First production execution must be a dry-run, reviewed by the operator, and only then applied.
+
+Dry-run template, not to be run until independently reviewed:
+
+```sh
+fly machine run registry.fly.io/mintvault:<exact-reviewed-image-tag> \
+  --app mintvault \
+  --region lhr \
+  --name mintvault-migration-plan-<reviewed-short-sha> \
+  --restart no \
+  --rm \
+  --vm-size shared-cpu-1x \
+  "node /app/dist/migrate.cjs --plan"
+```
+
+After the dry-run output is reviewed and approved by the operator, run the apply command:
+
+```sh
+fly machine run registry.fly.io/mintvault:<exact-reviewed-image-tag> \
+  --app mintvault \
+  --region lhr \
+  --name mintvault-migration-apply-<reviewed-short-sha> \
+  --restart no \
+  --rm \
+  --vm-size shared-cpu-1x \
+  "node /app/dist/migrate.cjs --apply"
+```
+
+Pre-run evidence to capture:
+
+```sh
+git rev-parse HEAD
+fly image show --app mintvault --json
+fly secrets list --app mintvault
+fly machine list --app mintvault
+```
+
+Post-run evidence to capture:
+
+```sh
+fly logs --app mintvault
+fly machine status <one-off-machine-id> --app mintvault
+fly machine list --app mintvault
+```
+
+The one-off Machine must exit after the runner completes. `--restart no` prevents Fly from
+restarting a failed migration worker, and `--rm` removes the Machine after exit. It must not replace
+or scale the existing web Machines and must not be used as a deploy command.
 
 ## Creating and shipping a migration
 
