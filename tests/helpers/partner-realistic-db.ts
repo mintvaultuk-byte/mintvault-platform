@@ -4,7 +4,9 @@
  *
  * Role layout (mirrors managed Postgres, e.g. Neon):
  *   - cluster admin / superuser: creates DB + roles only (the `admin` client passed in).
- *   - pn_migrator:   NON-superuser, NON-BYPASSRLS, owns the schema + tables (applies migrations).
+ *   - pn_migrator:   NON-superuser, NON-BYPASSRLS, owns the schema + tables (applies ordinary migrations).
+ *   - deployment owner: the elevated `admin` connection passed to this helper. It applies only
+ *                       migrations that must create/revoke membership in a BYPASSRLS definer role.
  *   - partner_definer: NOLOGIN, NON-superuser, BYPASSRLS — provisioned by the elevated admin, owns
  *                      ONLY the three pre-auth SECURITY DEFINER functions (reassigned by 0006).
  *   - partner_runtime: NON-superuser, NOBYPASSRLS — created by migration 0001, execute-only.
@@ -85,6 +87,18 @@ export const PARTNER_MIGRATIONS_WITH_G6D = [
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 
+/**
+ * Migrations whose SECURITY DEFINER ownership transfer has to be performed by the governed
+ * deployment owner. PostgreSQL 16+ tracks membership grantors, so a restricted migration login
+ * cannot safely grant and revoke membership in a BYPASSRLS definer that it does not administer.
+ */
+export const DEPLOYMENT_OWNER_MIGRATIONS = new Set(["0019_partner_submission_credit_lifecycle"]);
+
+export interface RealisticMigrationExecution {
+  restrictedMigrator: string[];
+  deploymentOwner: string[];
+}
+
 function migrationSql(name: string): string {
   return readFileSync(join(process.cwd(), "migrations", `${name}.sql`), "utf8");
 }
@@ -126,14 +140,20 @@ export function migratorUrlFrom(adminUrl: string): string {
 }
 
 /**
- * Full realistic setup: provision roles (superuser), then apply ALL partner migrations as the
- * NON-superuser pn_migrator. `admin` must be connected to the target DB; `adminUrl` is its URL.
+ * Full realistic setup: provision roles, apply ordinary Partner migrations as the NON-superuser
+ * pn_migrator, then apply any owner-operated migration as the elevated deployment owner. `admin`
+ * must be connected to the target disposable DB; production uses the same role split through the
+ * governed numbered migration runner, not this test helper.
  */
 export async function applyMigrationsRealistic(
   admin: pg.Client,
   adminUrl: string,
   migrations: readonly string[] = PARTNER_MIGRATIONS
-): Promise<void> {
+): Promise<RealisticMigrationExecution> {
+  const execution: RealisticMigrationExecution = {
+    restrictedMigrator: [],
+    deploymentOwner: [],
+  };
   await provisionRealisticRoles(admin);
   if (migrations.includes("0019_partner_submission_credit_lifecycle")) {
     // Provision the dedicated G6D definer as an elevated one-time operation,
@@ -157,10 +177,17 @@ export async function applyMigrationsRealistic(
   await migrator.connect();
   try {
     for (const name of migrations) {
+      if (DEPLOYMENT_OWNER_MIGRATIONS.has(name)) continue;
       await migrator.query(migrationSql(name));
+      execution.restrictedMigrator.push(name);
     }
   } finally {
     await migrator.end();
+  }
+  for (const name of migrations) {
+    if (!DEPLOYMENT_OWNER_MIGRATIONS.has(name)) continue;
+    await admin.query(migrationSql(name));
+    execution.deploymentOwner.push(name);
   }
   if (migrations.includes("0019_partner_submission_credit_lifecycle")) {
     const membership = await admin.query<{ count: string }>(
@@ -181,4 +208,5 @@ export async function applyMigrationsRealistic(
       await admin.query(`ALTER TABLE public.${table} OWNER TO pn_credit_schema_owner`);
     }
   }
+  return execution;
 }

@@ -6,12 +6,14 @@ import {
   migratorUrlFrom,
   PARTNER_MIGRATIONS_WITH_G6B,
   provisionRealisticRoles,
+  type RealisticMigrationExecution,
 } from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 import { partnerCreditDefinerModelViolations } from "../server/partner/definer-guard";
 
 let cluster: DisposablePostgres17;
 let admin: Client;
+let g6dExecution: RealisticMigrationExecution;
 
 async function seedMintVaultTables(): Promise<void> {
   await admin.query("CREATE TABLE users (id varchar primary key default gen_random_uuid(), email varchar unique)");
@@ -37,7 +39,7 @@ describe("G6D migration 0019 upgrade path", () => {
     await provisionRealisticRoles(admin);
     await seedMintVaultTables();
     await applyMigrationsRealistic(admin, cluster.url, PARTNER_MIGRATIONS_WITH_G6B);
-    await applyMigrationsRealistic(admin, cluster.url, [
+    g6dExecution = await applyMigrationsRealistic(admin, cluster.url, [
       "0018_correction_audit_index",
       "0019_partner_submission_credit_lifecycle",
     ]);
@@ -69,6 +71,37 @@ describe("G6D migration 0019 upgrade path", () => {
         connector_update: false,
         connector_event_insert: false,
         connector_execute: true,
+      },
+    ]);
+  });
+
+  it("runs 0019 only in the governed deployment-owner phase", async () => {
+    expect(g6dExecution).toEqual({
+      restrictedMigrator: ["0018_correction_audit_index"],
+      deploymentOwner: ["0019_partner_submission_credit_lifecycle"],
+    });
+    const state = await admin.query<{
+      owner: string;
+      owner_bypasses_rls: boolean;
+      owner_can_login: boolean;
+      owner_is_superuser: boolean;
+    }>(
+      `SELECT owner_role.rolname AS owner,
+              owner_role.rolbypassrls AS owner_bypasses_rls,
+              owner_role.rolcanlogin AS owner_can_login,
+              owner_role.rolsuper AS owner_is_superuser
+         FROM pg_proc procedure
+         JOIN pg_namespace namespace ON namespace.oid = procedure.pronamespace
+         JOIN pg_roles owner_role ON owner_role.oid = procedure.proowner
+        WHERE namespace.nspname='public'
+          AND procedure.oid='partner_connector_release_submission_credit(uuid,uuid,uuid,text)'::regprocedure`
+    );
+    expect(state.rows).toEqual([
+      {
+        owner: "partner_credit_lifecycle_definer",
+        owner_bypasses_rls: true,
+        owner_can_login: false,
+        owner_is_superuser: false,
       },
     ]);
   });
@@ -109,6 +142,32 @@ describe("G6D migration 0019 upgrade path", () => {
       ).rejects.toMatchObject({ code: "42501" });
     } finally {
       await migrator.end();
+    }
+  });
+
+  it("denies migration-level DDL and direct accounting writes to a restricted connector runtime", async () => {
+    await admin.query("CREATE ROLE g6d_restricted_connector LOGIN PASSWORD 'synthetic' NOSUPERUSER NOBYPASSRLS");
+    await admin.query("GRANT partner_connector_runtime TO g6d_restricted_connector");
+    const runtimeUrl = new URL(cluster.url);
+    runtimeUrl.username = "g6d_restricted_connector";
+    runtimeUrl.password = "synthetic";
+    const runtime = new Client({ connectionString: runtimeUrl.toString() });
+    await runtime.connect();
+    try {
+      await expect(runtime.query("CREATE TABLE g6d_runtime_ddl_denied (id integer)")).rejects.toMatchObject({
+        code: "42501",
+      });
+      await expect(
+        runtime.query("ALTER TABLE partner_credit_reservations ADD COLUMN g6d_runtime_ddl_denied integer")
+      ).rejects.toMatchObject({ code: "42501" });
+      await expect(
+        runtime.query(
+          "INSERT INTO partner_credit_accounting_exceptions (tenant_id,event_type,reason_code,idempotency_key) VALUES (gen_random_uuid(),'settlement_exception','forged','g6d-runtime-forged')"
+        )
+      ).rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await runtime.end();
+      await admin.query("DROP ROLE g6d_restricted_connector");
     }
   });
 

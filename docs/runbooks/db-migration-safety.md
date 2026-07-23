@@ -15,13 +15,13 @@ official workflows.
 
 ## The tools
 
-| Command | What it does |
-|---|---|
-| `npm run db:preflight` | Read-only. Lists every live object (tables, views, matviews, schemas, orphan sequences, enums) and **fails closed** if any is unknown (not managed and not in the classified inventory). |
-| `npm run db:lint-sql <file.sql>` | Scans a migration for destructive statements (DROP/TRUNCATE/rename/unqualified DELETE/…). Exits non-zero on a blocking finding. Regex heuristic, not a full parser. |
-| `npm run db:migrate` | Dry-run: shows the pending plan, lints, applies nothing. |
-| `npm run db:migrate -- --apply` | Applies pending migrations under an advisory lock, recording each in the `schema_migrations` journal. |
-| `npm run db:push` | Local-only schema prototyping. Guarded — blocked against non-local hosts. |
+| Command                          | What it does                                                                                                                                                                             |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run db:preflight`           | Read-only. Lists every live object (tables, views, matviews, schemas, orphan sequences, enums) and **fails closed** if any is unknown (not managed and not in the classified inventory). |
+| `npm run db:lint-sql <file.sql>` | Scans a migration for destructive statements (DROP/TRUNCATE/rename/unqualified DELETE/…). Exits non-zero on a blocking finding. Regex heuristic, not a full parser.                      |
+| `npm run db:migrate`             | Dry-run: shows the pending plan, lints, applies nothing.                                                                                                                                 |
+| `npm run db:migrate -- --apply`  | Applies pending migrations under an advisory lock, recording each in the `schema_migrations` journal.                                                                                    |
+| `npm run db:push`                | Local-only schema prototyping. Guarded — blocked against non-local hosts.                                                                                                                |
 
 Config: `drizzle.config.ts` scopes Drizzle to a **fail-closed allowlist** derived from
 `shared/schema.ts` (only managed tables are ever in scope). Vault Quest stays isolated via
@@ -124,6 +124,41 @@ Migration `0006` then reconciles the role, transfers ownership of exactly the th
 Portal needs **no** elevated privilege — `partner_runtime` stays `NOSUPERUSER`/`NOBYPASSRLS` with
 EXECUTE-only. `npm run db:preflight` and the Partner Portal startup check both re-assert the model
 and refuse a broken configuration.
+
+## Partner Network — G6D deployment-owner migration (0019)
+
+`0019_partner_submission_credit_lifecycle.sql` has a stricter, intentional migration-time
+requirement than ordinary Partner migrations. It provisions and transfers ownership of five
+`SECURITY DEFINER` functions to the no-login `partner_credit_lifecycle_definer` role, which has
+`BYPASSRLS` only because the narrow connector release path must cross `FORCE ROW LEVEL SECURITY`
+after it validates its tenant and linkage inputs.
+
+The numbered migration runner uses the identity in `MINTVAULT_DATABASE_URL`; therefore the
+controlled deployment that applies 0019 must use the database/deployment owner (or an equivalently
+authorised owner identity) that can create and revoke the temporary membership in that definer role.
+An ordinary application connection, `partner_runtime`, `partner_connector_runtime`, or a restricted
+migration login must never be elevated to make this work. PostgreSQL 16+ records role-membership
+grantors, so a login that merely received the membership from another operator cannot necessarily
+revoke it atomically; 0019 fails closed rather than leaving a `SET ROLE` path behind.
+
+The required operational sequence is:
+
+1. An approved elevated operator pre-provisions `partner_credit_lifecycle_definer` as `NOLOGIN`,
+   `NOSUPERUSER`, `NOCREATEROLE`, `NOCREATEDB`, `NOREPLICATION`, `BYPASSRLS` if the managed service
+   prevents its creation by the deployment owner.
+2. The deployment owner runs the numbered migration runner in a controlled maintenance window.
+   Migration 0019 is transactional; its temporary membership and `CREATE` privilege are revoked
+   before commit.
+3. Verify the journal records 0019 as `applied`, the release function is owned by the no-login
+   definer, the deployment/migration login has no membership in that definer, and the connector
+   role has only the narrow function `EXECUTE` grant.
+4. Before a staging or production run, prove the actual configured runner identity can complete this
+   sequence in a disposable service-equivalent database. Do not discover a permission mismatch on a
+   shared or live database.
+
+The realistic test helper mirrors this split: ordinary migrations run as the non-superuser
+`pn_migrator`; 0019 runs only in its disposable deployment-owner phase; restricted runtime roles
+remain unable to create schema objects or directly mutate accounting tables.
 
 ## Partner Network — choosing the rollback script (DB-F2)
 
