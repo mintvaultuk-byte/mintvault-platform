@@ -62,6 +62,110 @@ async function claimStripeEvent(eventId: string, eventType: string): Promise<boo
   return res.rows.length > 0;
 }
 
+/** Transaction-capable executor. Production passes the real `db`; tests inject a
+ *  drizzle instance over a disposable PostgreSQL cluster so the atomic claim+grant
+ *  is exercised against real Postgres, not simulated. Changes NO runtime behaviour. */
+type TxRunner = Pick<typeof db, "transaction">;
+
+/** Minimal shape of the Stripe Checkout Session fields fulfilment reads. */
+interface EstimateCheckoutSession {
+  id?: string;
+  payment_status?: string | null;
+  metadata?: Record<string, string> | null;
+}
+
+/**
+ * PKG-2 — idempotent, atomic fulfilment of an estimate-credits Checkout purchase.
+ *
+ * The prior inline handler granted credits with NO event-idempotency guard, so a
+ * Stripe redelivery (at-least-once; also dual-endpoint during a DNS cutover)
+ * re-ran `credits_remaining + credits` and granted the SAME purchase repeatedly.
+ * It also swallowed errors and returned 200, so a transient DB failure silently
+ * lost a paying customer's credits (Stripe never retried).
+ *
+ * This performs the event-id CLAIM and the credit GRANT inside ONE transaction,
+ * reusing the SAME `stripe_webhook_events` ledger the grading flow uses:
+ *  - replayed / redelivered event  → the claim conflicts (0 rows) → grant skipped
+ *    (exactly-once credit, even under concurrent deliveries of the same event).
+ *  - transient failure mid-grant   → the whole transaction rolls back, releasing
+ *    the claim, so a later Stripe retry safely re-fulfils. No claim-then-crash
+ *    credit loss.
+ *
+ * Amount and owner are NOT taken from raw browser input: `credits` is fixed
+ * server-side at checkout from ESTIMATE_PACKAGES and carried in Stripe metadata
+ * (which only our server can set); the browser only ever chose a validated
+ * package key and its own email.
+ *
+ * Returns { granted, reason } and NEVER throws for a permanent condition
+ * (not-paid / malformed metadata / duplicate) — the caller returns 200 and Stripe
+ * stops. It DOES throw for a transient DB error so the caller returns non-2xx and
+ * Stripe retries onto the now-safe (rolled-back) state.
+ */
+export async function fulfilEstimateCreditsPurchase(
+  eventId: string,
+  eventType: string,
+  session: EstimateCheckoutSession,
+  deps: { exec?: TxRunner } = {}
+): Promise<{ granted: boolean; reason?: string }> {
+  const runner = deps.exec ?? db;
+  const meta = session.metadata || {};
+
+  // Only fulfil a genuinely paid session. checkout.session.completed can fire for
+  // delayed/async payment methods before funds settle — fail closed on anything
+  // that is not explicitly "paid".
+  if (session.payment_status && session.payment_status !== "paid") {
+    console.log(
+      `[webhook] estimate_credits session ${session.id} payment_status=${session.payment_status} — not fulfilling`
+    );
+    return { granted: false, reason: "not_paid" };
+  }
+
+  const email = (meta.email || "").trim().toLowerCase();
+  const userId = (meta.user_id || "").trim();
+  const credits = parseInt(meta.credits || "0", 10);
+
+  // Malformed / incomplete metadata → nothing safe to fulfil. Permanent condition,
+  // so do NOT throw (a retry can't help); surface loudly for reconciliation.
+  if ((!email && !userId) || !Number.isInteger(credits) || credits <= 0) {
+    console.error(
+      `[webhook] estimate_credits malformed metadata (email/user_id/credits) event=${eventId} session=${session.id} — skipping`
+    );
+    return { granted: false, reason: "malformed_metadata" };
+  }
+
+  return runner.transaction(async (tx) => {
+    const claim = await tx.execute(sql`
+      INSERT INTO stripe_webhook_events (stripe_event_id, event_type)
+      VALUES (${eventId}, ${eventType})
+      ON CONFLICT (stripe_event_id) DO NOTHING
+      RETURNING stripe_event_id
+    `);
+    if (claim.rows.length === 0) {
+      console.log(`[webhook] estimate_credits event ${eventId} already processed — skipping`);
+      return { granted: false, reason: "duplicate_event" };
+    }
+
+    if (userId) {
+      // Logged-in purchase — credit the account balance directly.
+      await tx.execute(sql`
+        UPDATE users SET ai_credits_user_balance = ai_credits_user_balance + ${credits} WHERE id = ${userId}
+      `);
+    } else {
+      // Anonymous / email purchase.
+      await tx.execute(sql`
+        INSERT INTO estimate_credits (email, credits_remaining, credits_purchased, credits_used)
+        VALUES (${email}, ${credits}, ${credits}, 0)
+        ON CONFLICT (email) DO UPDATE SET
+          credits_remaining = estimate_credits.credits_remaining + ${credits},
+          credits_purchased = estimate_credits.credits_purchased + ${credits},
+          updated_at = NOW()
+      `);
+    }
+    console.log(`[webhook] estimate_credits: +${credits} for ${userId || email} (event ${eventId})`);
+    return { granted: true };
+  });
+}
+
 export class WebhookHandlers {
   static async processWebhook(payload: Buffer, signature: string): Promise<void> {
     if (!Buffer.isBuffer(payload)) {
@@ -137,33 +241,12 @@ export class WebhookHandlers {
         return;
       }
 
-      // Legacy estimate credits checkout
+      // Estimate credits checkout — idempotent, atomic fulfilment (PKG-2).
+      // A thrown (transient DB) error propagates to the route, which returns a
+      // non-2xx so Stripe retries onto the safely rolled-back state; a permanent
+      // condition (duplicate / not-paid / malformed) returns without throwing.
       if (meta.type === "estimate_credits") {
-        const email = (meta.email || "").trim().toLowerCase();
-        const credits = parseInt(meta.credits || "0", 10);
-        if (!email || credits <= 0) return;
-
-        console.log(`[webhook] estimate_credits: +${credits} for ${email}`);
-        try {
-          // If a user_id is in the metadata, credit their account balance directly
-          if (meta.user_id) {
-            await db.execute(sql`
-              UPDATE users SET ai_credits_user_balance = ai_credits_user_balance + ${credits} WHERE id = ${meta.user_id}
-            `);
-          } else {
-            // Email-based fallback for anonymous purchases
-            await db.execute(sql`
-              INSERT INTO estimate_credits (email, credits_remaining, credits_purchased, credits_used)
-              VALUES (${email}, ${credits}, ${credits}, 0)
-              ON CONFLICT (email) DO UPDATE SET
-                credits_remaining = estimate_credits.credits_remaining + ${credits},
-                credits_purchased = estimate_credits.credits_purchased + ${credits},
-                updated_at = NOW()
-            `);
-          }
-        } catch (err: any) {
-          console.error("[webhook] estimate_credits upsert error:", err.message);
-        }
+        await fulfilEstimateCreditsPurchase(event.id, event.type, session);
       }
     }
 
