@@ -75,11 +75,7 @@ function norm(email: string | null | undefined): string {
   return (email || "").trim().toLowerCase();
 }
 
-async function bestEffortAudit(
-  exec: EstimateExec,
-  entityId: string,
-  details: Record<string, unknown>
-): Promise<void> {
+async function bestEffortAudit(exec: EstimateExec, entityId: string, details: Record<string, unknown>): Promise<void> {
   try {
     await exec.insert(auditLog).values({
       entityType: "estimate",
