@@ -125,15 +125,17 @@ const AdminPartnerManagementDetailPage = lazy(() => import("@/pages/admin/partne
 // backend (partner_portal_enabled flag + emergency stop) if the flag is off; not enabled in any
 // live environment yet. See INTEGRATION-ORDER.md.
 const PartnerLoginPage = lazy(() => import("@/pages/partner/login"));
+const PartnerInvitationPage = lazy(() => import("@/pages/partner/invite"));
 const PartnerDashboardPage = lazy(() => import("@/pages/partner/dashboard"));
-const PartnerSubmissionsPage = lazy(() => import("@/pages/partner/submissions"));
-const PartnerSubmissionWizardPage = lazy(() => import("@/pages/partner/submission-wizard"));
-const PartnerSubmissionDetailPage = lazy(() => import("@/pages/partner/submission-detail"));
-const PartnerUsersPage = lazy(() => import("@/pages/partner/coming-soon"));
-const PartnerLocationsPage = lazy(() => import("@/pages/partner/locations"));
-const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
-const PartnerHelpPage = lazy(() => import("@/pages/partner/help"));
 const PartnerSecurityPage = lazy(() => import("@/pages/partner/security"));
+const PartnerSubmissionWizardPage = lazy(() => import("@/pages/partner/submission-wizard"));
+const PartnerSubmissionsPage = lazy(() => import("@/pages/partner/submissions"));
+const PartnerSubmissionDetailPage = lazy(() => import("@/pages/partner/submission-detail"));
+const PartnerCreditsPage = lazy(() => import("@/pages/partner/billing"));
+const PartnerGradingPage = lazy(() => import("@/pages/partner/grading"));
+const PartnerCertificatesPage = lazy(() => import("@/pages/partner/certificates"));
+const PartnerCorrectionsPage = lazy(() => import("@/pages/partner/corrections"));
+const PartnerOnboardingPage = lazy(() => import("@/pages/partner/onboarding"));
 
 function GoldBurstEffect() {
   useEffect(() => {
@@ -239,6 +241,9 @@ function PartnerPortalRoutes() {
         <Route path="/partner/login">
           <PartnerLoginPage />
         </Route>
+        <Route path="/partner/invite">
+          <PartnerInvitationPage />
+        </Route>
         <Route path="/partner/dashboard">
           <PartnerRouteGuard>
             <PartnerDashboardPage />
@@ -259,24 +264,29 @@ function PartnerPortalRoutes() {
             <PartnerSubmissionsPage />
           </PartnerRouteGuard>
         </Route>
-        <Route path="/partner/users">
+        <Route path="/partner/credits">
           <PartnerRouteGuard>
-            <PartnerUsersPage />
+            <PartnerCreditsPage />
           </PartnerRouteGuard>
         </Route>
-        <Route path="/partner/locations">
+        <Route path="/partner/grading">
           <PartnerRouteGuard>
-            <PartnerLocationsPage />
+            <PartnerGradingPage />
           </PartnerRouteGuard>
         </Route>
-        <Route path="/partner/billing">
+        <Route path="/partner/certificates">
           <PartnerRouteGuard>
-            <PartnerBillingPage />
+            <PartnerCertificatesPage />
           </PartnerRouteGuard>
         </Route>
-        <Route path="/partner/help">
+        <Route path="/partner/corrections">
           <PartnerRouteGuard>
-            <PartnerHelpPage />
+            <PartnerCorrectionsPage />
+          </PartnerRouteGuard>
+        </Route>
+        <Route path="/partner/onboarding">
+          <PartnerRouteGuard>
+            <PartnerOnboardingPage />
           </PartnerRouteGuard>
         </Route>
         <Route path="/partner/security">

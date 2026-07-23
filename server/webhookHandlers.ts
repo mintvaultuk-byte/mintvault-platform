@@ -9,6 +9,7 @@ import { writeAuthAudit } from "./account-auth";
 import { auditLog } from "@shared/schema";
 import { fulfilPaidSubmission } from "./routes/submissions";
 import { sendVaultClubWelcomeEmail, sendVaultClubCancelledEmail, sendVaultClubPaymentFailedEmail } from "./email";
+import { handlePartnerStripeEvent } from "./partner/shop-launch-service";
 
 /**
  * Boot migration for payment idempotency. Idempotent + additive — safe to run
@@ -96,6 +97,8 @@ export class WebhookHandlers {
 
     // ── Existing grading payment flow ──────────────────────────────────────────
 
+    if (event.type === "payment_intent.succeeded" && (await handlePartnerStripeEvent(event))) return;
+
     if (event.type === "payment_intent.succeeded") {
       const pi = event.data.object as Stripe.PaymentIntent;
       console.log(`[webhook] payment_intent.succeeded for PI ${pi.id}`);
@@ -130,6 +133,8 @@ export class WebhookHandlers {
     if (event.type === "checkout.session.completed") {
       const session = event.data.object as Stripe.Checkout.Session;
       const meta = session.metadata || {};
+
+      if (await handlePartnerStripeEvent(event)) return;
 
       // Vault Club subscription checkout
       if (session.mode === "subscription" && meta.user_id) {
@@ -183,6 +188,15 @@ export class WebhookHandlers {
 
     if (event.type === "invoice.payment_failed") {
       await WebhookHandlers.handleInvoicePaymentFailed(event.id, event.data.object as Stripe.Invoice);
+    }
+
+    if (
+      event.type === "checkout.session.expired" ||
+      event.type === "payment_intent.payment_failed" ||
+      event.type === "charge.refunded" ||
+      event.type === "charge.dispute.created"
+    ) {
+      if (await handlePartnerStripeEvent(event)) return;
     }
 
     // ── Stripe Connect marketplace events ────────────────────────────────────
@@ -375,8 +389,8 @@ export class WebhookHandlers {
     if (userRow?.email) {
       // Same visibility fix as the welcome email above — a failed send must
       // not fail the webhook, but must not vanish silently either.
-      sendVaultClubCancelledEmail({ email: userRow.email, displayName: userRow.display_name || null }).catch(
-        (e: any) => writeAuthAudit("vault_club.cancelled_email_failed", userId, "webhook", { error: e?.message })
+      sendVaultClubCancelledEmail({ email: userRow.email, displayName: userRow.display_name || null }).catch((e: any) =>
+        writeAuthAudit("vault_club.cancelled_email_failed", userId, "webhook", { error: e?.message })
       );
     }
 

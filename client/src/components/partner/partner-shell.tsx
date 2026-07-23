@@ -10,20 +10,19 @@ import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { usePartnerSession } from "@/hooks/use-partner-session";
 import { partnerAuth, partnerLocations } from "@/lib/partner-api";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Menu,
   X,
   LayoutDashboard,
-  FileText,
-  Users,
-  MapPin,
-  CreditCard,
-  HelpCircle,
   ShieldCheck,
   LogOut,
-  PlusCircle,
+  CreditCard,
+  PackagePlus,
+  ClipboardCheck,
+  Award,
+  LifeBuoy,
+  GraduationCap,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -37,11 +36,13 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { href: "/partner/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/partner/submissions", label: "Submissions", icon: FileText, permission: "partner.orders.view" },
-  { href: "/partner/users", label: "Users", icon: Users, permission: "partner.users.view" },
-  { href: "/partner/locations", label: "Locations", icon: MapPin, permission: "partner.location.view" },
-  { href: "/partner/billing", label: "Billing", icon: CreditCard, permission: "partner.credits.view" },
-  { href: "/partner/help", label: "Help", icon: HelpCircle },
+  { href: "/partner/submissions/new", label: "New Submission", icon: PackagePlus, permission: "partner.orders.create" },
+  { href: "/partner/submissions", label: "Submissions", icon: ClipboardCheck, permission: "partner.orders.view" },
+  { href: "/partner/grading", label: "Grading", icon: GraduationCap, permission: "partner.grading.view" },
+  { href: "/partner/certificates", label: "Certificates", icon: Award, permission: "partner.certificates.view" },
+  { href: "/partner/corrections", label: "Corrections", icon: LifeBuoy, permission: "partner.corrections.view" },
+  { href: "/partner/credits", label: "Credits", icon: CreditCard, permission: "partner.credits.view" },
+  { href: "/partner/onboarding", label: "Onboarding", icon: ClipboardCheck, permission: "partner.onboarding.view" },
   { href: "/partner/security", label: "Security & Account", icon: ShieldCheck },
 ];
 
@@ -50,6 +51,11 @@ export function PartnerShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const qc = useQueryClient();
+  const { data: locations } = useQuery({
+    queryKey: ["/api/partner/locations"],
+    queryFn: () => partnerLocations.list(),
+    enabled: !!session?.mfaPassed,
+  });
 
   async function handleSignOut() {
     try {
@@ -58,6 +64,13 @@ export function PartnerShell({ children }: { children: ReactNode }) {
       await qc.invalidateQueries({ queryKey: ["/api/partner/session"] });
       window.location.href = "/partner/login";
     }
+  }
+
+  async function handleLocationChange(locationId: string) {
+    if (!locationId || locationId === session?.locationId) return;
+    await partnerAuth.switchLocation(locationId);
+    await qc.invalidateQueries({ queryKey: ["/api/partner/session"] });
+    await qc.invalidateQueries({ queryKey: ["/api/partner/dashboard/launch"] });
   }
 
   const visibleItems = NAV_ITEMS.filter((item) => !item.permission || hasPermission(item.permission));
@@ -77,17 +90,31 @@ export function PartnerShell({ children }: { children: ReactNode }) {
             <span className="font-bold text-lg tracking-tight" data-testid="text-partner-brand">
               MintVault Partner
             </span>
-            {session?.mfaPassed && <LocationSwitcher wrapperClassName="hidden md:flex" />}
+            {session?.mfaPassed && (
+              <span
+                className="hidden lg:inline text-xs text-muted-foreground truncate"
+                data-testid="text-active-location"
+              >
+                {locations?.find((location) => location.id === session.locationId)?.name ?? "No active location"}
+              </span>
+            )}
           </div>
 
           <div className="hidden md:flex items-center gap-2">
-            {session?.mfaPassed && (
-              <Link href="/partner/submissions/new">
-                <Button size="sm" data-testid="button-new-submission-header">
-                  <PlusCircle className="h-4 w-4 mr-1.5" aria-hidden="true" />
-                  New Submission
-                </Button>
-              </Link>
+            {session?.mfaPassed && locations && locations.length > 1 && (
+              <select
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+                value={session.locationId ?? ""}
+                aria-label="Select active location"
+                data-testid="select-active-location"
+                onChange={(event) => handleLocationChange(event.target.value)}
+              >
+                {locations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.name}
+                  </option>
+                ))}
+              </select>
             )}
             {session?.mfaPassed && (
               <Button variant="ghost" size="sm" onClick={handleSignOut} data-testid="button-sign-out">
@@ -115,16 +142,6 @@ export function PartnerShell({ children }: { children: ReactNode }) {
 
         {mobileOpen && (
           <nav aria-label="Partner navigation (mobile)" className="md:hidden border-t bg-card">
-            {session?.mfaPassed && (
-              <div className="px-3 pt-3">
-                <span className="text-xs font-medium text-muted-foreground" id="mobile-location-label">
-                  Location
-                </span>
-                <div aria-labelledby="mobile-location-label">
-                  <LocationSwitcher wrapperClassName="flex w-full mt-1" />
-                </div>
-              </div>
-            )}
             <ul className="flex flex-col p-2">
               {visibleItems.map((item) => (
                 <li key={item.href}>
@@ -187,79 +204,6 @@ export function PartnerShell({ children }: { children: ReactNode }) {
           {children}
         </main>
       </div>
-    </div>
-  );
-}
-
-/** Clear location switcher (shell requirement) — lists only locations this user may operate at
- *  (server-derived: org-wide roles see every active location, others see only their assigned
- *  ones) and switches via the existing Phase 1 POST /session/location, which itself re-verifies
- *  the assignment server-side — the client list is a convenience, never the authority. */
-/**
- * `wrapperClassName` lets the caller control visibility per breakpoint (header vs. mobile-menu
- * placements need opposite hidden/visible rules) without duplicating the fetch/switch logic —
- * this component is rendered TWICE (desktop header, mobile menu panel) so the switcher is always
- * reachable, never only on wide screens (a mobile user with no location selected still needs a
- * way to pick one; the wizard's own "select a location" state points here).
- */
-function LocationSwitcher({ wrapperClassName }: { wrapperClassName: string }) {
-  const { session, refresh } = usePartnerSession();
-  const qc = useQueryClient();
-  const [switchError, setSwitchError] = useState<string | null>(null);
-  const { data: locations } = useQuery({
-    queryKey: ["/api/partner/locations"],
-    queryFn: () => partnerLocations.list(),
-    enabled: !!session?.mfaPassed,
-  });
-
-  async function handleChange(locationId: string) {
-    setSwitchError(null);
-    try {
-      await partnerAuth.switchLocation(locationId);
-      await refresh();
-      await qc.invalidateQueries();
-    } catch {
-      // Session state (and therefore the Select's value) is untouched, so the control reverts to
-      // the still-current location on its own — we only need to surface why the switch was refused
-      // (e.g. an org-wide viewer picking a location they can see but aren't assigned to work from).
-      setSwitchError("Couldn't switch to that location. You may not be assigned there.");
-    }
-  }
-
-  if (!locations || locations.length === 0) return null;
-
-  // A single-location user never needs a picker — show the name plainly instead of an empty-feeling dropdown.
-  if (locations.length === 1) {
-    return (
-      <span className={`${wrapperClassName} text-sm text-muted-foreground`} data-testid="text-single-location">
-        {locations[0].name}
-      </span>
-    );
-  }
-
-  return (
-    <div className={`${wrapperClassName} flex-col gap-1`}>
-      <Select value={session?.locationId ?? undefined} onValueChange={handleChange}>
-        <SelectTrigger
-          className="h-8 w-full sm:w-[180px]"
-          data-testid="select-location-switcher"
-          aria-label="Current location"
-        >
-          <SelectValue placeholder="Select a location" />
-        </SelectTrigger>
-        <SelectContent>
-          {locations.map((loc) => (
-            <SelectItem key={loc.id} value={loc.id} data-testid={`option-location-${loc.id}`}>
-              {loc.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      {switchError && (
-        <span role="alert" className="text-xs text-destructive" data-testid="text-location-switch-error">
-          {switchError}
-        </span>
-      )}
     </div>
   );
 }

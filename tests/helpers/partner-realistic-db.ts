@@ -75,6 +75,25 @@ export const PARTNER_MIGRATIONS_WITH_G6B = [
   "0017_partner_credit_reservations",
 ] as const;
 
+/**
+ * 0020 deliberately follows the unmerged G6D 0019 migration in the eventual release chain. It
+ * remains independently testable from the current 0018/0017 Partner foundation because it has no
+ * dependency on G6D credit objects; final rebase verification must exercise 0018 → 0019 → 0020.
+ */
+export const PARTNER_MIGRATIONS_WITH_AUTH_INVITATIONS = [
+  ...PARTNER_MIGRATIONS_WITH_G6B,
+  "0020_partner_auth_invitations_rbac",
+] as const;
+
+/**
+ * 0021 is the additive Shop Launch layer. Current branch order is 0018/0017 → 0020 → 0021;
+ * final release must revalidate after G6D lands as 0018 → 0019 → 0020 → 0021.
+ */
+export const PARTNER_MIGRATIONS_WITH_SHOP_LAUNCH = [
+  ...PARTNER_MIGRATIONS_WITH_AUTH_INVITATIONS,
+  "0021_partner_shop_launch",
+] as const;
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 

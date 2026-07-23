@@ -82,24 +82,42 @@ let ADMIN_EMAIL: string;
     const authMod = await import("../server/auth");
     ADMIN_EMAIL = authMod.ADMIN_EMAIL;
     // seed the admin user requireAdmin validates against
-    await admin.query("INSERT INTO users (email, role, credential_version) VALUES ($1,'admin',1) ON CONFLICT (email) DO UPDATE SET role='admin', credential_version=1", [ADMIN_EMAIL.toLowerCase()]);
+    await admin.query(
+      "INSERT INTO users (email, role, credential_version) VALUES ($1,'admin',1) ON CONFLICT (email) DO UPDATE SET role='admin', credential_version=1",
+      [ADMIN_EMAIL.toLowerCase()]
+    );
 
     // seed partners, locations, users, roles, assignments, flags
     const { seedPartnerRbac } = await import("../server/partner/permissions");
     await seedPartnerRbac();
-    await admin.query("INSERT INTO partner_organisations (id, public_ref, legal_name, status) VALUES ($1,'rA','A Ltd','ACTIVE'),($2,'rB','B Ltd','ACTIVE')", [A, B]);
+    await admin.query(
+      "INSERT INTO partner_organisations (id, public_ref, legal_name, status) VALUES ($1,'rA','A Ltd','ACTIVE'),($2,'rB','B Ltd','ACTIVE')",
+      [A, B]
+    );
     const pw = await bcrypt.hash("correct-horse-battery", 12);
     await admin.query(
       `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status) VALUES
        ($1,'ua1',$4,$4,'owner@a.com',$6,'ACTIVE'),($2,'ua2',$4,$4,'tech@a.com',$6,'ACTIVE'),($3,'ub1',$5,$5,'owner@b.com',$6,'ACTIVE')`,
-      [UA_OWNER, UA_TECH, UB_OWNER, A, B, pw],
+      [UA_OWNER, UA_TECH, UB_OWNER, A, B, pw]
     );
-    const roleId = async (c: string) => (await admin.query<{ id: string }>("SELECT id FROM partner_roles WHERE code=$1", [c])).rows[0].id;
+    const roleId = async (c: string) =>
+      (await admin.query<{ id: string }>("SELECT id FROM partner_roles WHERE code=$1", [c])).rows[0].id;
     const owner = await roleId("PARTNER_OWNER");
-    await admin.query("INSERT INTO partner_user_roles (tenant_id, user_id, role_id) VALUES ($1,$2,$4),($1,$3,$4),($5,$6,$4)", [A, UA_OWNER, UA_TECH, owner, B, UB_OWNER]);
-    await admin.query("INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name, status) VALUES ($1,'la1',$3,$3,'LA1','ACTIVE'),($2,'la2',$3,$3,'LA2','ACTIVE')", [LA1, LA2, A]);
-    await admin.query("INSERT INTO partner_user_locations (tenant_id, user_id, location_id) VALUES ($1,$2,$3),($1,$2,$4)", [A, UA_OWNER, LA1, LA2]);
-    await admin.query("INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_portal_enabled',true)");
+    await admin.query(
+      "INSERT INTO partner_user_roles (tenant_id, user_id, role_id) VALUES ($1,$2,$4),($1,$3,$4),($5,$6,$4)",
+      [A, UA_OWNER, UA_TECH, owner, B, UB_OWNER]
+    );
+    await admin.query(
+      "INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name, status) VALUES ($1,'la1',$3,$3,'LA1','ACTIVE'),($2,'la2',$3,$3,'LA2','ACTIVE')",
+      [LA1, LA2, A]
+    );
+    await admin.query(
+      "INSERT INTO partner_user_locations (tenant_id, user_id, location_id) VALUES ($1,$2,$3),($1,$2,$4)",
+      [A, UA_OWNER, LA1, LA2]
+    );
+    await admin.query(
+      "INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_portal_enabled',true),(NULL,'partner_authentication_enabled',true)"
+    );
 
     // ── main-app composition: real requireAdmin + real super-admin router + TEST-ONLY admin login ──
     const express = (await import("express")).default;
@@ -107,12 +125,23 @@ let ADMIN_EMAIL: string;
     const { registerSuperAdminPartnerRoutes } = await import("../server/partner/admin-routes");
     const app = express();
     app.use(express.json());
-    app.use(session({ name: "mv.sid", secret: process.env.SESSION_SECRET!, resave: false, saveUninitialized: false, cookie: { httpOnly: true, sameSite: "lax" } }));
+    app.use(
+      session({
+        name: "mv.sid",
+        secret: process.env.SESSION_SECRET!,
+        resave: false,
+        saveUninitialized: false,
+        cookie: { httpOnly: true, sameSite: "lax" },
+      })
+    );
     // TEST-ONLY admin session fixture — stamps the SAME session the real login+PIN flow produces.
     // Lives only on this ephemeral test app; never a shipped runtime route. requireAdmin still fully runs.
     app.post("/__test/admin-login", (req, res) => {
       const s = req.session as unknown as Record<string, unknown>;
-      s.isAdmin = true; s.adminEmail = ADMIN_EMAIL; s.credentialVersion = 1; s.authenticatedAt = Date.now();
+      s.isAdmin = true;
+      s.adminEmail = ADMIN_EMAIL;
+      s.credentialVersion = 1;
+      s.authenticatedAt = Date.now();
       req.session.save(() => res.json({ ok: true }));
     });
     registerSuperAdminPartnerRoutes(app);
@@ -147,9 +176,18 @@ let ADMIN_EMAIL: string;
     return r.headers.get("set-cookie")!.split(";")[0];
   }
   const aget = (p: string, cookie = "") => fetch(`${adminBase}${p}`, { headers: cookie ? { cookie } : {} });
-  const apost = (p: string, body: unknown, cookie = "") => fetch(`${adminBase}${p}`, { method: "POST", headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) }, body: JSON.stringify(body) });
+  const apost = (p: string, body: unknown, cookie = "") =>
+    fetch(`${adminBase}${p}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(cookie ? { cookie } : {}) },
+      body: JSON.stringify(body),
+    });
   async function partnerLogin(email: string): Promise<string> {
-    const r = await fetch(`${partnerBase}/api/partner/auth/login`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password: "correct-horse-battery" }) });
+    const r = await fetch(`${partnerBase}/api/partner/auth/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email, password: "correct-horse-battery" }),
+    });
     return r.headers.get("set-cookie")?.split(";")[0] ?? "";
   }
   const psession = (cookie: string) => fetch(`${partnerBase}/api/partner/session`, { headers: { cookie } });
@@ -161,7 +199,9 @@ let ADMIN_EMAIL: string;
     const pc = await partnerLogin("owner@a.com");
     expect((await aget(SA, pc)).status).toBe(401); // partner cookie is mv.partner.sid — not an admin session
     // forged admin identity in body/headers does nothing (requireAdmin reads session only)
-    expect((await fetch(`${adminBase}${SA}`, { method: "GET", headers: { "x-admin": "true", "x-role": "admin" } })).status).toBe(401);
+    expect(
+      (await fetch(`${adminBase}${SA}`, { method: "GET", headers: { "x-admin": "true", "x-role": "admin" } })).status
+    ).toBe(401);
     const ac = await adminCookie();
     expect((await aget(SA, ac)).status).toBe(200); // real admin session accepted
   });
@@ -183,13 +223,21 @@ let ADMIN_EMAIL: string;
     // B unaffected
     expect((await partnerLogin("owner@b.com")) !== "").toBe(true);
     // audit + security recorded, with reason + no secrets
-    const au = await admin.query<{ action: string; reason: string }>("SELECT action, reason FROM partner_audit_events WHERE tenant_id=$1 AND action='partner_suspended'", [A]);
+    const au = await admin.query<{ action: string; reason: string }>(
+      "SELECT action, reason FROM partner_audit_events WHERE tenant_id=$1 AND action='partner_suspended'",
+      [A]
+    );
     expect(au.rows[0].reason).toBe("fraud check");
-    const sec = await admin.query("SELECT 1 FROM partner_security_events WHERE tenant_id=$1 AND kind='partner_suspended'", [A]);
+    const sec = await admin.query(
+      "SELECT 1 FROM partner_security_events WHERE tenant_id=$1 AND kind='partner_suspended'",
+      [A]
+    );
     expect(sec.rowCount).toBe(1);
     // partner user cannot call the suspend endpoint (no admin route on the partner app)
     const pc = await partnerLogin("owner@b.com");
-    expect((await fetch(`${partnerBase}${SA}/${A}/suspend`, { method: "POST", headers: { cookie: pc } })).status).toBe(404);
+    expect((await fetch(`${partnerBase}${SA}/${A}/suspend`, { method: "POST", headers: { cookie: pc } })).status).toBe(
+      404
+    );
     // reactivate A for later tests
     await admin.query("UPDATE partner_organisations SET status='ACTIVE' WHERE id=$1", [A]);
   });
@@ -198,17 +246,40 @@ let ADMIN_EMAIL: string;
   it("location suspend: reason required; bound sessions stop; other location + B unaffected; not selectable; audited", async () => {
     const ac = await adminCookie();
     const oc = await partnerLogin("owner@a.com");
-    await fetch(`${partnerBase}/api/partner/session/location`, { method: "POST", headers: { "content-type": "application/json", cookie: oc }, body: JSON.stringify({ locationId: LA1 }) });
+    await fetch(`${partnerBase}/api/partner/session/location`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: oc },
+      body: JSON.stringify({ locationId: LA1 }),
+    });
     expect((await psession(oc)).status).toBe(200);
     expect((await apost(`${SA}/${A}/locations/${LA1}/suspend`, {}, ac)).status).toBe(400);
     expect((await apost(`${SA}/${A}/locations/${LA1}/suspend`, { reason: "loc issue" }, ac)).status).toBe(200);
     expect((await psession(oc)).status).toBe(401); // session bound to LA1 stops
     // LA2 still selectable
     const oc2 = await partnerLogin("owner@a.com");
-    expect((await fetch(`${partnerBase}/api/partner/session/location`, { method: "POST", headers: { "content-type": "application/json", cookie: oc2 }, body: JSON.stringify({ locationId: LA2 }) })).status).toBe(200);
+    expect(
+      (
+        await fetch(`${partnerBase}/api/partner/session/location`, {
+          method: "POST",
+          headers: { "content-type": "application/json", cookie: oc2 },
+          body: JSON.stringify({ locationId: LA2 }),
+        })
+      ).status
+    ).toBe(200);
     // suspended LA1 cannot be selected
-    expect((await fetch(`${partnerBase}/api/partner/session/location`, { method: "POST", headers: { "content-type": "application/json", cookie: oc2 }, body: JSON.stringify({ locationId: LA1 }) })).status).toBe(404);
-    const au = await admin.query("SELECT 1 FROM partner_audit_events WHERE action='partner_location_suspended' AND record_id=$1", [LA1]);
+    expect(
+      (
+        await fetch(`${partnerBase}/api/partner/session/location`, {
+          method: "POST",
+          headers: { "content-type": "application/json", cookie: oc2 },
+          body: JSON.stringify({ locationId: LA1 }),
+        })
+      ).status
+    ).toBe(404);
+    const au = await admin.query(
+      "SELECT 1 FROM partner_audit_events WHERE action='partner_location_suspended' AND record_id=$1",
+      [LA1]
+    );
     expect(au.rowCount).toBe(1);
     await admin.query("UPDATE partner_locations SET status='ACTIVE' WHERE id=$1", [LA1]);
   });
@@ -224,9 +295,14 @@ let ADMIN_EMAIL: string;
     expect(await partnerLogin("tech@a.com")).toBe("");
     // owner@a unaffected
     expect((await partnerLogin("owner@a.com")) !== "").toBe(true);
-    const au = await admin.query("SELECT 1 FROM partner_audit_events WHERE action='partner_user_suspended' AND record_id=$1", [UA_TECH]);
+    const au = await admin.query(
+      "SELECT 1 FROM partner_audit_events WHERE action='partner_user_suspended' AND record_id=$1",
+      [UA_TECH]
+    );
     expect(au.rowCount).toBe(1);
-    await admin.query("UPDATE partner_users SET status='ACTIVE', credential_version=credential_version+1 WHERE id=$1", [UA_TECH]);
+    await admin.query("UPDATE partner_users SET status='ACTIVE', credential_version=credential_version+1 WHERE id=$1", [
+      UA_TECH,
+    ]);
   });
 
   // ── session revocation (revoke-all for partner) ──
@@ -252,14 +328,22 @@ let ADMIN_EMAIL: string;
     expect((await apost(`${SA}/${A}/flags`, { flag: "partner_grading_enabled", enabled: true }, ac)).status).toBe(200);
     expect((await apost(`${SA}/${A}/flags`, { flag: "partner_grading_enabled", enabled: false }, ac)).status).toBe(200);
     // deterministic: exactly one row for (A, null-loc, flag)
-    const rows = await admin.query<{ n: number }>("SELECT count(*)::int n FROM partner_feature_flags WHERE tenant_id=$1 AND location_id IS NULL AND flag='partner_grading_enabled'", [A]);
+    const rows = await admin.query<{ n: number }>(
+      "SELECT count(*)::int n FROM partner_feature_flags WHERE tenant_id=$1 AND location_id IS NULL AND flag='partner_grading_enabled'",
+      [A]
+    );
     expect(rows.rows[0].n).toBe(1);
     // unknown flag rejected; partner cannot write flags (no such partner route)
     expect((await apost(`${SA}/${A}/flags`, { flag: "not_a_flag", enabled: true }, ac)).status).toBe(400);
     const pc = await partnerLogin("owner@b.com");
-    expect((await fetch(`${partnerBase}${SA}/${A}/flags`, { method: "POST", headers: { cookie: pc } })).status).toBe(404);
+    expect((await fetch(`${partnerBase}${SA}/${A}/flags`, { method: "POST", headers: { cookie: pc } })).status).toBe(
+      404
+    );
     // audited
-    expect((await admin.query("SELECT 1 FROM partner_audit_events WHERE action='partner_flag_set' AND tenant_id=$1", [A])).rowCount).toBeGreaterThan(0);
+    expect(
+      (await admin.query("SELECT 1 FROM partner_audit_events WHERE action='partner_flag_set' AND tenant_id=$1", [A]))
+        .rowCount
+    ).toBeGreaterThan(0);
   });
 
   // ── global emergency stop ──
@@ -278,8 +362,21 @@ let ADMIN_EMAIL: string;
     await admin.query("DELETE FROM partner_emergency_controls WHERE tenant_id=$1", [A]);
     expect((await partnerLogin("owner@a.com")) !== "").toBe(true);
     // audited (audit + security)
-    expect((await admin.query("SELECT 1 FROM partner_audit_events WHERE action='partner_emergency_stop' AND tenant_id=$1", [A])).rowCount).toBe(1);
-    expect((await admin.query("SELECT 1 FROM partner_security_events WHERE kind='partner_emergency_stop' AND tenant_id=$1", [A])).rowCount).toBe(1);
+    expect(
+      (
+        await admin.query("SELECT 1 FROM partner_audit_events WHERE action='partner_emergency_stop' AND tenant_id=$1", [
+          A,
+        ])
+      ).rowCount
+    ).toBe(1);
+    expect(
+      (
+        await admin.query(
+          "SELECT 1 FROM partner_security_events WHERE kind='partner_emergency_stop' AND tenant_id=$1",
+          [A]
+        )
+      ).rowCount
+    ).toBe(1);
   });
 
   // ── super-admin MFA reset ──
@@ -287,25 +384,53 @@ let ADMIN_EMAIL: string;
     const ac = await adminCookie();
     // give owner@a an active MFA method + recovery codes + a live session
     const { encryptSecret, generateTotpSecret, recoveryHash } = await import("../server/partner/mfa");
-    await admin.query("INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status) VALUES ($1,$2,'totp',$3,'ACTIVE')", [A, UA_OWNER, encryptSecret(generateTotpSecret())]);
-    await admin.query("INSERT INTO partner_recovery_codes (tenant_id, user_id, code_hash) VALUES ($1,$2,$3)", [A, UA_OWNER, recoveryHash("rc-1")]);
+    await admin.query(
+      "INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status) VALUES ($1,$2,'totp',$3,'ACTIVE')",
+      [A, UA_OWNER, encryptSecret(generateTotpSecret())]
+    );
+    await admin.query("INSERT INTO partner_recovery_codes (tenant_id, user_id, code_hash) VALUES ($1,$2,$3)", [
+      A,
+      UA_OWNER,
+      recoveryHash("rc-1"),
+    ]);
     const oc = await partnerLogin("owner@a.com");
     expect((await apost(`${SA}/${A}/users/${UA_OWNER}/mfa-reset`, {}, ac)).status).toBe(400); // reason required
     const r = await apost(`${SA}/${A}/users/${UA_OWNER}/mfa-reset`, { reason: "lost device" }, ac);
     expect(r.status).toBe(200);
     expect(await r.text()).not.toMatch(/secret|recovery|[0-9a-f]{40}/i); // no secrets in response
     // method disabled, recovery cleared, sessions revoked
-    expect((await admin.query("SELECT count(*)::int n FROM partner_mfa_methods WHERE user_id=$1 AND status='ACTIVE'", [UA_OWNER])).rows[0].n).toBe(0);
-    expect((await admin.query("SELECT count(*)::int n FROM partner_recovery_codes WHERE user_id=$1", [UA_OWNER])).rows[0].n).toBe(0);
+    expect(
+      (
+        await admin.query("SELECT count(*)::int n FROM partner_mfa_methods WHERE user_id=$1 AND status='ACTIVE'", [
+          UA_OWNER,
+        ])
+      ).rows[0].n
+    ).toBe(0);
+    expect(
+      (await admin.query("SELECT count(*)::int n FROM partner_recovery_codes WHERE user_id=$1", [UA_OWNER])).rows[0].n
+    ).toBe(0);
     expect((await psession(oc)).status).toBe(401);
     // audit + security, no secrets in payload
-    const au = await admin.query<{ reason: string; after_value: unknown }>("SELECT reason, after_value FROM partner_audit_events WHERE action='partner_mfa_admin_reset' AND record_id=$1", [UA_OWNER]);
+    const au = await admin.query<{ reason: string; after_value: unknown }>(
+      "SELECT reason, after_value FROM partner_audit_events WHERE action='partner_mfa_admin_reset' AND record_id=$1",
+      [UA_OWNER]
+    );
     expect(au.rows[0].reason).toBe("lost device");
     expect(JSON.stringify(au.rows)).not.toMatch(/secret|recovery|[0-9a-f]{40}/i);
-    expect((await admin.query("SELECT 1 FROM partner_security_events WHERE kind='partner_mfa_admin_reset' AND tenant_id=$1", [A])).rowCount).toBe(1);
+    expect(
+      (
+        await admin.query(
+          "SELECT 1 FROM partner_security_events WHERE kind='partner_mfa_admin_reset' AND tenant_id=$1",
+          [A]
+        )
+      ).rowCount
+    ).toBe(1);
     // partner user cannot reset another user's MFA (no such partner route)
     const pc = await partnerLogin("owner@b.com");
-    expect((await fetch(`${partnerBase}${SA}/${A}/users/${UA_OWNER}/mfa-reset`, { method: "POST", headers: { cookie: pc } })).status).toBe(404);
+    expect(
+      (await fetch(`${partnerBase}${SA}/${A}/users/${UA_OWNER}/mfa-reset`, { method: "POST", headers: { cookie: pc } }))
+        .status
+    ).toBe(404);
     await admin.query("UPDATE partner_users SET credential_version=credential_version+1 WHERE id=$1", [UA_OWNER]);
   });
 
@@ -335,7 +460,10 @@ let ADMIN_EMAIL: string;
       apost(`${SA}/${A}/suspend`, { reason: "race b" }, ac),
     ]);
     expect([r1.status, r2.status].every((s) => s === 200)).toBe(true);
-    expect((await admin.query<{ status: string }>("SELECT status FROM partner_organisations WHERE id=$1", [A])).rows[0].status).toBe("SUSPENDED");
+    expect(
+      (await admin.query<{ status: string }>("SELECT status FROM partner_organisations WHERE id=$1", [A])).rows[0]
+        .status
+    ).toBe("SUSPENDED");
     await admin.query("UPDATE partner_organisations SET status='ACTIVE' WHERE id=$1", [A]);
   });
 });

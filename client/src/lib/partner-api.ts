@@ -50,6 +50,32 @@ export interface PartnerSessionInfo {
   permissions?: string[];
 }
 
+export interface PartnerLaunchDashboard {
+  partner: { id: string; legal_name: string; status: string; accreditation_level: string } | null;
+  location: { id: string; name: string; status: string } | null;
+  roleLabels: string[];
+  credit: {
+    postedLedgerBalance: number;
+    activeReservedCredits: number;
+    availableCredits: number;
+    consumedCredits: number;
+  } | null;
+  recentCreditActivity: Array<{
+    id: string;
+    amount: string | number;
+    entry_type: string;
+    source: string;
+    reason: string;
+    external_ref: string | null;
+    created_at: string;
+  }>;
+  submissions: Record<string, number>;
+  handoffs: Record<string, number>;
+  corrections: Record<string, number>;
+  readiness: Record<string, number>;
+  pilot: { status: string; reason: string | null; blockers: unknown };
+}
+
 export const partnerAuth = {
   login: (email: string, password: string) =>
     req<{ ok: boolean; mfaRequired?: boolean }>("POST", "/api/partner/auth/login", { email, password }),
@@ -60,6 +86,8 @@ export const partnerAuth = {
   switchLocation: (locationId: string) =>
     req<{ ok: boolean; locationId: string }>("POST", "/api/partner/session/location", { locationId }),
   revokeAll: () => req<{ ok: boolean; revoked: number }>("POST", "/api/partner/auth/revoke-all"),
+  acceptInvitation: (input: { token: string; email: string; password: string }) =>
+    req<{ ok: boolean; mfaRequired?: boolean }>("POST", "/api/partner/invitations/accept", input),
 };
 
 // ---- customers ----
@@ -86,6 +114,89 @@ export interface PartnerLocation {
 }
 export const partnerLocations = {
   list: () => req<PartnerLocation[]>("GET", "/api/partner/locations"),
+};
+
+export const partnerLaunch = {
+  dashboard: () => req<PartnerLaunchDashboard>("GET", "/api/partner/dashboard/launch"),
+  wallet: () =>
+    req<{
+      credit: {
+        wallet_id: string;
+        ledger_balance: string;
+        active_reserved: string;
+        available_balance: string;
+        consumed_reservations: string;
+      } | null;
+      ledger: Array<{
+        id: string;
+        amount: string | number;
+        entry_type: string;
+        source: string;
+        reason: string;
+        external_ref: string | null;
+        created_at: string;
+      }>;
+      purchases: Array<{
+        id: string;
+        status: string;
+        credits: number;
+        amount_pence: number;
+        currency: string;
+        package_name: string;
+        created_at: string;
+        fulfilled_at: string | null;
+      }>;
+    }>("GET", "/api/partner/wallet"),
+  packages: () =>
+    req<{
+      packages: Array<{
+        id: string;
+        name: string;
+        description: string | null;
+        credits: number;
+        price_pence: number;
+        currency: string;
+      }>;
+    }>("GET", "/api/partner/purchases/packages"),
+  createPurchase: (input: { packageId: string; idempotencyKey: string }) =>
+    req<{ purchase: { id: string; status: string } }>("POST", "/api/partner/purchases", input),
+  checkout: (purchaseId: string, idempotencyKey: string) =>
+    req<{ purchaseId: string; checkoutSessionId: string; url: string | null }>(
+      "POST",
+      `/api/partner/purchases/${purchaseId}/checkout`,
+      { idempotencyKey }
+    ),
+  certificates: () =>
+    req<{
+      certificates: Array<{
+        certificate_number: string;
+        origin_type: string;
+        partner_display_name: string | null;
+        location_display_name: string | null;
+        completed_at: string;
+      }>;
+    }>("GET", "/api/partner/certificates"),
+  corrections: () =>
+    req<{
+      corrections: Array<{
+        id: string;
+        certificate_number: string;
+        status: string;
+        request_reason: string;
+        partner_response: string | null;
+        created_at: string;
+      }>;
+    }>("GET", "/api/partner/corrections"),
+  readiness: () =>
+    req<{
+      checks: Array<{
+        check_key: string;
+        status: string;
+        evidence_type: string;
+        reason: string | null;
+        updated_at: string;
+      }>;
+    }>("GET", "/api/partner/onboarding/readiness"),
 };
 
 // ---- service tiers ----

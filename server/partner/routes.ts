@@ -10,6 +10,7 @@ import {
   markSessionMfaPassed,
   createPasswordResetToken,
   consumePasswordResetToken,
+  acceptPartnerInvitation,
 } from "./auth";
 import {
   requirePartnerAuth,
@@ -24,6 +25,7 @@ import {
   partnerLoginLimiter,
   partnerMfaLimiter,
   partnerResetLimiter,
+  partnerInvitationAcceptanceLimiter,
   partnerLocationSwitchLimiter,
 } from "./rate-limit";
 import { withTenant, partnerRuntimeQuery } from "./db";
@@ -31,6 +33,7 @@ import { recoveryHash, mfaEncryptionConfigured } from "./mfa";
 import { writePartnerAudit } from "./audit";
 import { resetDeliveryConfigured, deliverResetToken } from "./delivery";
 import { switchLocation } from "./location";
+import { assertInvitationDefinerModel } from "./definer-guard";
 import {
   mfaEnrolStart,
   mfaEnrolConfirm,
@@ -39,7 +42,7 @@ import {
   verifyActiveTotpNoReplay,
 } from "./mfa-service";
 
-export function partnerApiRouter(): Router {
+export function partnerApiRouter(opts: { includeFoundationManagementRoutes?: boolean } = {}): Router {
   const r = Router();
 
   // ---- auth ----
@@ -57,6 +60,43 @@ export function partnerApiRouter(): Router {
     }
     setPartnerCookie(res, result.sessionToken!);
     res.json({ ok: true, mfaRequired: !!result.mfaPending });
+  });
+
+  // The token arrives from the browser request body after the invitation page has removed it from
+  // the URL fragment. It is never accepted from a path/query value and never echoed in a response.
+  r.post("/invitations/accept", partnerInvitationAcceptanceLimiter, async (req, res) => {
+    const { token, email, password } = req.body ?? {};
+    if (typeof token !== "string" || typeof email !== "string" || typeof password !== "string") {
+      res.status(400).json({ error: "invalid invitation" });
+      return;
+    }
+    try {
+      await assertInvitationDefinerModel((sql, params) => partnerRuntimeQuery(sql, params));
+    } catch {
+      res.status(503).json({ error: "partner portal unavailable" });
+      return;
+    }
+    let outcome: Awaited<ReturnType<typeof acceptPartnerInvitation>>;
+    try {
+      outcome = await acceptPartnerInvitation(token, email, password, req.header("x-request-id")?.slice(0, 200));
+    } catch {
+      // The invitation capability is intentionally opaque; do not disclose database or password
+      // validation details when the guarded acceptance transition is unavailable.
+      res.status(503).json({ error: "partner portal unavailable" });
+      return;
+    }
+    if (outcome !== "accepted") {
+      // No invitation state, Partner, role, location or account detail is disclosed.
+      res.status(400).json({ error: "invitation unavailable" });
+      return;
+    }
+    const login = await partnerLogin(email, password, req.ip);
+    if (!login.ok) {
+      res.status(503).json({ error: "invitation accepted; sign in is temporarily unavailable" });
+      return;
+    }
+    setPartnerCookie(res, login.sessionToken!);
+    res.status(201).json({ ok: true, mfaRequired: !!login.mfaPending });
   });
 
   r.post("/auth/mfa", partnerMfaLimiter, async (req, res) => {
@@ -181,18 +221,6 @@ export function partnerApiRouter(): Router {
     res.json(data);
   });
 
-  r.get("/users", requirePartnerCapability("partner.users.view"), async (req, res) => {
-    const rows = await withTenant({ tenantId: req.partner!.tenantId }, async (c) => {
-      const u = await c.query("SELECT id, email, status FROM partner_users ORDER BY email");
-      return u.rows;
-    });
-    res.json(rows);
-  });
-
-  // Locations the current user may operate at — org-wide roles (owner/manager/finance-viewer) see
-  // every ACTIVE location; everyone else sees only their explicit partner_user_locations
-  // assignments. Powers the Portal's location switcher (Increment A) and the "select a location"
-  // step of the submission wizard (Increment B) — read-only, no client-supplied tenant/org filter.
   r.get("/locations", requirePartnerCapability("partner.location.view"), async (req, res) => {
     const rows = await withTenant({ tenantId: req.partner!.tenantId }, async (c) => {
       if (req.partner!.orgWide) {
@@ -210,9 +238,8 @@ export function partnerApiRouter(): Router {
     res.json(rows);
   });
 
-  // ---- location switching (Item 2) ----
   r.post("/session/location", partnerLocationSwitchLimiter, requirePartnerAuth, async (req, res) => {
-    const { locationId } = req.body ?? {}; // any submitted partner/tenant id is ignored
+    const { locationId } = req.body ?? {};
     if (typeof locationId !== "string") {
       res.status(400).json({ error: "invalid request" });
       return;
@@ -224,6 +251,50 @@ export function partnerApiRouter(): Router {
     }
     res.json({ ok: true, locationId });
   });
+
+  // These prior increment-A/B scope and staff-management endpoints are deliberately absent from
+  // the main-server mount. They remain available only to the isolated legacy integration harness
+  // until operational Partner Portal features receive a separate launch review.
+  if (opts.includeFoundationManagementRoutes) {
+    r.get("/users", requirePartnerCapability("partner.users.view"), async (req, res) => {
+      const rows = await withTenant({ tenantId: req.partner!.tenantId }, async (c) => {
+        const u = await c.query("SELECT id, email, status FROM partner_users ORDER BY email");
+        return u.rows;
+      });
+      res.json(rows);
+    });
+
+    r.get("/locations", requirePartnerCapability("partner.location.view"), async (req, res) => {
+      const rows = await withTenant({ tenantId: req.partner!.tenantId }, async (c) => {
+        if (req.partner!.orgWide) {
+          const l = await c.query("SELECT id, name, status FROM partner_locations WHERE status='ACTIVE' ORDER BY name");
+          return l.rows;
+        }
+        const l = await c.query(
+          `SELECT pl.id, pl.name, pl.status FROM partner_locations pl
+             JOIN partner_user_locations pul ON pul.location_id = pl.id
+            WHERE pul.user_id = $1 AND pl.status = 'ACTIVE' ORDER BY pl.name`,
+          [req.partner!.userId]
+        );
+        return l.rows;
+      });
+      res.json(rows);
+    });
+
+    r.post("/session/location", partnerLocationSwitchLimiter, requirePartnerAuth, async (req, res) => {
+      const { locationId } = req.body ?? {}; // any submitted partner/tenant id is ignored
+      if (typeof locationId !== "string") {
+        res.status(400).json({ error: "invalid request" });
+        return;
+      }
+      const result = await switchLocation(req.partner!, locationId);
+      if (!result.ok) {
+        res.status(result.reason === "not_assigned" ? 403 : 404).json({ error: result.reason });
+        return;
+      }
+      res.json({ ok: true, locationId });
+    });
+  }
 
   // ---- MFA enrolment (Item 3) ----
   // enrol/confirm are reachable by an mfa-pending session (a user with mfa_required but no method yet).
@@ -308,31 +379,33 @@ export function partnerApiRouter(): Router {
     res.json({ ok: true });
   });
 
-  r.post(
-    "/users/:id/revoke-sessions",
-    requirePartnerCapability("partner.sessions.revoke"),
-    requireNotViewOnly,
-    requireNotSensitiveFrozen,
-    async (req, res) => {
-      const targetId = String(req.params.id);
-      const n = await withTenant({ tenantId: req.partner!.tenantId }, async (c) => {
-        // RLS guarantees this only affects same-tenant users.
-        const r2 = await c.query(
-          "UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
-          [targetId]
-        );
-        await writePartnerAudit(c, {
-          tenantId: req.partner!.tenantId,
-          actorUserId: req.partner!.userId,
-          action: "partner_admin_revoke_sessions",
-          recordType: "partner_user",
-          recordId: targetId,
+  if (opts.includeFoundationManagementRoutes) {
+    r.post(
+      "/users/:id/revoke-sessions",
+      requirePartnerCapability("partner.sessions.revoke"),
+      requireNotViewOnly,
+      requireNotSensitiveFrozen,
+      async (req, res) => {
+        const targetId = String(req.params.id);
+        const n = await withTenant({ tenantId: req.partner!.tenantId }, async (c) => {
+          // RLS guarantees this only affects same-tenant users.
+          const r2 = await c.query(
+            "UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
+            [targetId]
+          );
+          await writePartnerAudit(c, {
+            tenantId: req.partner!.tenantId,
+            actorUserId: req.partner!.userId,
+            action: "partner_admin_revoke_sessions",
+            recordType: "partner_user",
+            recordId: targetId,
+          });
+          return r2.rowCount ?? 0;
         });
-        return r2.rowCount ?? 0;
-      });
-      res.json({ ok: true, revoked: n });
-    }
-  );
+        res.json({ ok: true, revoked: n });
+      }
+    );
+  }
 
   return r;
 }

@@ -220,7 +220,7 @@ describe("draft save-status and stale-conflict wording is plain English, not tec
   });
 });
 
-describe("deferred Users/Locations/Billing pages clearly state they are unavailable, never fabricate data", () => {
+describe("deferred pages clearly state they are unavailable, while launch-ready Credits uses real APIs", () => {
   it("shared coming-soon component says 'Not available yet' with no data-driven content", () => {
     expect(COMING_SOON).toContain("Not available yet.");
     expect(COMING_SOON).not.toMatch(/useQuery|fetch\(|apiRequest/);
@@ -229,11 +229,13 @@ describe("deferred Users/Locations/Billing pages clearly state they are unavaila
     expect(LOCATIONS_PAGE).toContain("PartnerComingSoon");
     expect(LOCATIONS_PAGE).not.toMatch(/useQuery|partnerLocations\.list/);
   });
-  it("Billing placeholder page renders the honest coming-soon component, not fabricated invoice/balance data", () => {
-    expect(BILLING_PAGE).toContain("PartnerComingSoon");
-    // "invoices" legitimately appears in the honest deferred-copy description — what must NEVER
-    // appear is a data fetch or a rendered monetary amount (which would imply real billing data).
-    expect(BILLING_PAGE).not.toMatch(/useQuery|apiRequest|fetch\(|£\d/);
+  it("Credits page renders API-backed wallet, package and purchase data without hard-coded monetary amounts", () => {
+    expect(BILLING_PAGE).not.toContain("PartnerComingSoon");
+    expect(BILLING_PAGE).toContain('queryKey: ["/api/partner/wallet"]');
+    expect(BILLING_PAGE).toContain('queryKey: ["/api/partner/purchases/packages"]');
+    expect(BILLING_PAGE).toContain("partnerLaunch.createPurchase");
+    expect(BILLING_PAGE).toContain("partnerLaunch.checkout");
+    expect(BILLING_PAGE).not.toMatch(/£\d/);
   });
 });
 
@@ -248,25 +250,13 @@ describe("no internal tenant/RLS terminology is shown anywhere in the shell", ()
   });
 });
 
-describe("rejected location switch is handled, not an unhandled crash", () => {
-  it("LocationSwitcher catches a failed switch and shows a plain-English message instead of throwing", () => {
-    const switcher = SHELL.slice(SHELL.indexOf("function LocationSwitcher"));
-    expect(switcher).toContain("try {");
-    expect(switcher).toContain("catch");
-    expect(switcher).toContain('data-testid="text-location-switch-error"');
-    expect(switcher).toContain("Couldn't switch to that location. You may not be assigned there.");
-  });
-  it("a single-location user sees a plain name, not a confusing one-item dropdown", () => {
-    const switcher = SHELL.slice(SHELL.indexOf("function LocationSwitcher"));
-    expect(switcher).toContain("locations.length === 1");
-    expect(switcher).toContain('data-testid="text-single-location"');
-  });
-  it("the location switcher is reachable on mobile too, not desktop-only (review finding: it was hidden below sm, but the wizard's own copy tells a locationless user to use it)", () => {
-    // Rendered twice: once desktop-only in the header, once inside the mobile menu panel.
-    const matches = SHELL.match(/<LocationSwitcher wrapperClassName=/g) ?? [];
-    expect(matches.length).toBe(2);
-    expect(SHELL).toContain('wrapperClassName="hidden md:flex"');
-    expect(SHELL).toMatch(/mobile[\s\S]{0,300}LocationSwitcher wrapperClassName="flex/i);
+describe("the main-server Partner shell exposes only the reviewed server-verified location selector", () => {
+  it("does not mount the legacy location switcher and calls the central Partner location/session APIs", () => {
+    expect(SHELL).not.toContain("function LocationSwitcher");
+    expect(SHELL).toContain("partnerLocations.list()");
+    expect(SHELL).toContain("partnerAuth.switchLocation");
+    expect(SHELL).toContain('queryKey: ["/api/partner/locations"]');
+    expect(API).toContain("/api/partner/session/location");
   });
 });
 

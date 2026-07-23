@@ -8,11 +8,12 @@
  *   the restricted partner_runtime role (server/partner/db.ts) — never the privileged MintVault
  *   connection. Feature flag `partner_portal_enabled` gates the whole surface (fail closed).
  */
-import express, { type Express, type Request, type Response, type NextFunction } from "express";
+import express, { type Express, type Request, type Response, type NextFunction, type Router } from "express";
 import { partnerSessionMiddleware } from "./session";
 import { partnerApiRouter } from "./routes";
 import { partnerSubmissionRouter } from "./submission-routes";
 import { partnerCustomerRouter } from "./customer-routes";
+import { partnerShopLaunchRouter } from "./shop-launch-routes";
 import { partnerDbConfigured, partnerRuntimeQuery } from "./db";
 import { resolveGlobalFlag } from "./flags";
 import { assertDefinerModel, definerModelViolations } from "./definer-guard";
@@ -55,13 +56,14 @@ export function __resetDefinerHealthForTests(): void {
   definerHealthy = false;
 }
 
-export function createPartnerApp(): Express {
-  const app = express();
-  app.disable("x-powered-by");
-  app.use(express.json({ limit: "1mb" }));
+export function createPartnerRouter(opts: { includeOperationalRoutes?: boolean } = {}): Router {
+  const router = express.Router();
+  // The main server already parses JSON; keeping the parser here makes the isolated disposable-DB
+  // app self-contained without widening middleware beyond the Partner namespace when mounted.
+  router.use("/api/partner", express.json({ limit: "1mb" }));
 
   // fail closed if the restricted runtime DB isn't configured (never fall back to privileged conn)
-  app.use((_req, res, next) => {
+  router.use("/api/partner", (_req, res, next) => {
     if (!partnerDbConfigured()) {
       res.status(503).json({ error: "partner portal unavailable" });
       return;
@@ -74,7 +76,7 @@ export function createPartnerApp(): Express {
   // on the /api/partner surface (the /partner shell is a static page, exempt).
   // DB-F1: fail the whole surface closed if the SECURITY DEFINER ownership model is broken, so a
   // misprovisioned DB returns an explicit 503 instead of silently rejecting every login. Memoized.
-  app.use("/api/partner", async (_req, res, next) => {
+  router.use("/api/partner", async (_req, res, next) => {
     try {
       if (!(await checkDefinerModelOnce())) {
         res.status(503).json({ error: "partner portal unavailable" });
@@ -86,13 +88,14 @@ export function createPartnerApp(): Express {
     }
   });
 
-  app.use("/api/partner", async (_req, res, next) => {
+  router.use("/api/partner", async (_req, res, next) => {
     try {
-      const [portalOn, emergencyStop] = await Promise.all([
+      const [portalOn, authenticationOn, emergencyStop] = await Promise.all([
         resolveGlobalFlag("partner_portal_enabled"),
+        resolveGlobalFlag("partner_authentication_enabled"),
         resolveGlobalFlag("partner_emergency_stop"),
       ]);
-      if (!portalOn || emergencyStop) {
+      if (!portalOn || !authenticationOn || emergencyStop) {
         res.status(503).json({ error: "partner portal unavailable" });
         return;
       }
@@ -102,10 +105,30 @@ export function createPartnerApp(): Express {
     }
   });
 
-  app.use(partnerSessionMiddleware);
-  app.use("/api/partner", partnerApiRouter());
-  app.use("/api/partner", partnerSubmissionRouter()); // Phase 2 submission workflow
-  app.use("/api/partner", partnerCustomerRouter()); // Phase 2 customer records
+  router.use("/api/partner", partnerSessionMiddleware);
+  router.use("/api/partner", partnerApiRouter({ includeFoundationManagementRoutes: opts.includeOperationalRoutes }));
+  // Shop-launch routes are now production-mounted, but still fail closed through the global portal
+  // and auth flags plus per-feature pilot/payment/grading/correction flags inside each route.
+  router.use("/api/partner", partnerSubmissionRouter());
+  router.use("/api/partner", partnerCustomerRouter());
+  router.use("/api/partner", partnerShopLaunchRouter());
+  if (opts.includeOperationalRoutes) {
+    // Legacy foundation staff/location management remains isolated to the disposable integration
+    // harness. The production mount uses only the reviewed launch router above.
+  }
+
+  return router;
+}
+
+/** Mount the minimal, fail-closed Partner authentication surface into the existing MintVault app. */
+export function registerPartnerPortalRoutes(app: Express): void {
+  app.use(createPartnerRouter());
+}
+
+export function createPartnerApp(): Express {
+  const app = express();
+  app.disable("x-powered-by");
+  app.use(createPartnerRouter({ includeOperationalRoutes: true }));
 
   // minimal UI shell route (SPA placeholder — no data, no secrets)
   app.get("/partner", (_req: Request, res: Response) => {

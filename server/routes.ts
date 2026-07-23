@@ -59,6 +59,10 @@ import { registerAdminConfigRoutes } from "./routes/admin-config";
 import { registerSuperAdminPartnerRoutes } from "./partner/admin-routes";
 import { registerConnectorOpsRoutes } from "./partner/connector-admin-routes";
 import { registerPartnerManagementRoutes } from "./partner/partner-management-routes";
+import { registerPartnerPortalRoutes } from "./partner/app";
+import { registerPartnerAccessAdminRoutes } from "./partner/partner-access-admin-routes";
+import { registerPartnerShopLaunchAdminRoutes } from "./partner/shop-launch-routes";
+import { createCustomerCorrectionRequest, publicCertificateOrigin } from "./partner/shop-launch-service";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
 import { registerCardIdentificationRoutes } from "./routes/card-identification";
@@ -1421,6 +1425,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerSuperAdminPartnerRoutes(app); // Phase 1 partner-network super-admin control shell (requireAdmin-gated)
   registerConnectorOpsRoutes(app); // G4 partner-connector operations (requireAdmin-gated, internal)
   registerPartnerManagementRoutes(app); // G5 partner management (requireAdmin-gated, internal)
+  registerPartnerAccessAdminRoutes(app); // Super Admin-only invitation and membership access controls
+  registerPartnerShopLaunchAdminRoutes(app); // Super Admin-only shop-launch operations/readiness/reconciliation
+  registerPartnerPortalRoutes(app); // Partner auth plus launch-gated operational portal APIs
+
+  app.get("/api/certificates/:certificateNumber/grading-origin", async (req, res) => {
+    try {
+      res.json(await publicCertificateOrigin(String(req.params.certificateNumber ?? "")));
+    } catch {
+      res.status(400).json({ error: "invalid certificate" });
+    }
+  });
+
+  app.post("/api/certificate-corrections", async (req, res) => {
+    try {
+      const created = await createCustomerCorrectionRequest({
+        certificateNumber: String(req.body?.certificateNumber ?? ""),
+        customerEmail: typeof req.body?.customerEmail === "string" ? req.body.customerEmail : null,
+        customerReference: typeof req.body?.customerReference === "string" ? req.body.customerReference : null,
+        reason: String(req.body?.reason ?? ""),
+      });
+      res.status(201).json({ ok: true, correctionId: created.id, status: created.status });
+    } catch {
+      res.status(400).json({ error: "correction request unavailable" });
+    }
+  });
   registerRarityMappingRoutes(app);
   registerPokemonKnowledgeRoutes(app);
   registerCardIdentificationRoutes(app);

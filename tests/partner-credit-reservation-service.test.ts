@@ -719,9 +719,12 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
   it("refuses the G6B rollback script when a later migration or reservation evidence exists", async () => {
     await expect(admin.query(rollbackSql)).rejects.toThrow(/later migration \(0018\+\) is applied/);
     await admin.query("ROLLBACK").catch(() => {});
-    // Reach the evidence guard exactly as a correct reverse-order rollback would: 0018 is
-    // no longer journalled, while G6B's immutable lifecycle evidence remains intact.
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0018_correction_audit_index.sql'");
+    // Reach the evidence guard exactly as a correct reverse-order rollback would: later migrations
+    // (including the intentionally independent 0020 authentication and 0021 shop-launch migrations) are no longer
+    // journalled, while G6B's immutable lifecycle evidence remains intact.
+    await admin.query(
+      "DELETE FROM schema_migrations WHERE filename IN ('0018_correction_audit_index.sql','0020_partner_auth_invitations_rbac.sql','0021_partner_shop_launch.sql')"
+    );
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );

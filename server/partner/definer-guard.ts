@@ -14,12 +14,15 @@
 
 export type DbQuery = (sql: string, params?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
 
-/** The three pre-auth SECURITY DEFINER functions that must be owned by partner_definer. */
+/** The established pre-auth SECURITY DEFINER functions required by the Phase 1 runtime. */
 export const DEFINER_FUNCTIONS = [
   "partner_auth_lookup",
   "partner_session_lookup",
   "partner_reset_token_tenant",
 ] as const;
+
+/** Added by 0020; checked explicitly by the invitation route before it can consume a token. */
+export const INVITATION_DEFINER_FUNCTIONS = ["partner_accept_invitation"] as const;
 
 export const DEFINER_ROLE = "partner_definer";
 export const RUNTIME_ROLE = "partner_runtime";
@@ -28,7 +31,7 @@ export const RUNTIME_ROLE = "partner_runtime";
  * Returns a list of human-readable violations of the definer ownership model. Empty array = healthy.
  * Each check maps 1:1 to a DB-F1 safety property so the caller/operator can see exactly what is wrong.
  */
-export async function definerModelViolations(query: DbQuery): Promise<string[]> {
+async function definerModelViolationsFor(query: DbQuery, functions: readonly string[]): Promise<string[]> {
   const v: string[] = [];
 
   // 1) Definer role exists with the exact least-privilege attribute set.
@@ -59,7 +62,7 @@ export async function definerModelViolations(query: DbQuery): Promise<string[]> 
 
   // 3) Each pre-auth function exists, is SECURITY DEFINER, owned by partner_definer, has a set
   //    search_path, is not executable by PUBLIC, and IS executable by partner_runtime.
-  for (const fn of DEFINER_FUNCTIONS) {
+  for (const fn of functions) {
     const f = await query(
       `SELECT p.prosecdef,
               pg_get_userbyid(p.proowner)                             AS owner,
@@ -89,6 +92,15 @@ export async function definerModelViolations(query: DbQuery): Promise<string[]> 
   return v;
 }
 
+export async function definerModelViolations(query: DbQuery): Promise<string[]> {
+  return definerModelViolationsFor(query, DEFINER_FUNCTIONS);
+}
+
+/** Extends the existing governance checks with the one atomic invitation-acceptance capability. */
+export async function invitationDefinerModelViolations(query: DbQuery): Promise<string[]> {
+  return definerModelViolationsFor(query, [...DEFINER_FUNCTIONS, ...INVITATION_DEFINER_FUNCTIONS]);
+}
+
 /** Throws a single, operator-facing error if the definer ownership model is not intact. */
 export async function assertDefinerModel(query: DbQuery): Promise<void> {
   const violations = await definerModelViolations(query);
@@ -96,6 +108,15 @@ export async function assertDefinerModel(query: DbQuery): Promise<void> {
     throw new Error(
       `Partner Network definer ownership model is broken (DB-F1). Partner authentication would fail closed. ` +
         `Apply migration 0006 with a role that can provision ${DEFINER_ROLE}. Violations: ${violations.join("; ")}`
+    );
+  }
+}
+
+export async function assertInvitationDefinerModel(query: DbQuery): Promise<void> {
+  const violations = await invitationDefinerModelViolations(query);
+  if (violations.length > 0) {
+    throw new Error(
+      `Partner invitation definer ownership model is broken. Apply migration 0020 before enabling Partner authentication. Violations: ${violations.join("; ")}`
     );
   }
 }

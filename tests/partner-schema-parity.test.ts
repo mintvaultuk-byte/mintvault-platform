@@ -44,7 +44,7 @@ describe("partner schema ↔ migration parity", () => {
     expect(drizzleTableNames().length).toBe(14);
   });
 
-  it("pins the full numbered migration inventory (0001–0018), so a new migration is noticed", () => {
+  it("pins the full numbered migration inventory, so a new migration is noticed", () => {
     const numbered = readdirSync(join(process.cwd(), "migrations"))
       .filter((f) => /^\d{4}_.+\.sql$/.test(f))
       .sort();
@@ -70,6 +70,10 @@ describe("partner schema ↔ migration parity", () => {
       // addition is consciously acknowledged. 0018 adds the partial index supporting the
       // Super Admin Correction Mode operator-statistics query (audit_log).
       "0018_correction_audit_index.sql",
+      // 0019 is reserved for G6D and intentionally absent from this independently-reviewable
+      // branch. Once G6D lands, this branch must rebase and verify the ordered chain.
+      "0020_partner_auth_invitations_rbac.sql",
+      "0021_partner_shop_launch.sql",
     ]);
   });
 

@@ -1422,6 +1422,101 @@ export async function sendPasswordResetEmail(email: string, resetUrl: string): P
   }
 }
 
+/**
+ * Partner invitations are deliberately sent through a dedicated caller rather than the password
+ * reset flow. The opaque token is present only in the outbound Resend payload; this function never
+ * logs it, persists it, or includes it in an error message.
+ */
+export async function sendPartnerInvitationEmail(input: {
+  email: string;
+  invitationUrl: string;
+  expiresAt: Date;
+  roleLabel: string;
+}): Promise<{ id: string }> {
+  const resend = getResend();
+  if (!resend) throw new Error("partner invitation delivery is unavailable");
+  const body = `
+<p style="margin:0 0 16px 0;">You have been invited to access the MintVault Partner Portal as <strong>${escapeHtmlForEmail(input.roleLabel)}</strong>.</p>
+<p style="margin:0 0 24px 0;">Use the secure invitation below to set your password. This invitation expires ${escapeHtmlForEmail(input.expiresAt.toUTCString())} and can only be used once.</p>
+<p style="margin:0 0 32px 0;text-align:center;">
+  <a href="${escapeHtmlForEmail(input.invitationUrl)}" style="display:inline-block;background:#D4AF37;color:#1A1400;font-weight:bold;padding:14px 32px;border-radius:6px;text-decoration:none;font-size:15px;letter-spacing:0.5px;">
+    Accept Partner Invitation
+  </a>
+</p>
+<p style="margin:0;color:#999;font-size:12px;">If you were not expecting this invitation, you can safely ignore this email.</p>`;
+  return sendViaResend(resend, {
+    from: getFromEmail(),
+    replyTo: REPLY_TO,
+    to: input.email,
+    subject: "Your MintVault Partner invitation",
+    html: baseHtml("Partner Portal Invitation", body),
+  });
+}
+
+export async function sendPartnerPurchaseNotification(input: {
+  to: string;
+  partnerName: string;
+  subjectKind: "confirmation" | "failure" | "fulfilled" | "reconciliation";
+  credits?: number;
+  purchaseReference?: string;
+}): Promise<{ sent: boolean; providerMessageId?: string | null }> {
+  const resend = getResend();
+  if (!resend) return { sent: false };
+  const subjects = {
+    confirmation: "MintVault Partner credit purchase received",
+    failure: "MintVault Partner payment needs attention",
+    fulfilled: "MintVault Partner credits fulfilled",
+    reconciliation: "MintVault Partner payment reconciliation required",
+  };
+  const body = `
+    <p style="margin:0 0 12px 0;">${input.partnerName} Partner account update.</p>
+    <p style="margin:0 0 12px 0;">${input.credits ? `${input.credits} grading credit(s).` : "Credit purchase status updated."}</p>
+    <p style="margin:0;color:#999;font-size:12px;">Reference: ${input.purchaseReference ?? "available in the Partner Portal"}</p>
+  `;
+  const sent = await sendViaResend(resend, {
+    from: getFromEmail(),
+    to: input.to,
+    replyTo: REPLY_TO,
+    subject: subjects[input.subjectKind],
+    html: baseHtml(subjects[input.subjectKind], body),
+  });
+  return { sent: true, providerMessageId: sent.id };
+}
+
+export async function sendPartnerWorkflowNotification(input: {
+  to: string;
+  subjectKind:
+    | "submission_received"
+    | "grading_complete"
+    | "correction_received"
+    | "correction_escalated"
+    | "partner_suspended";
+  partnerName: string;
+  safeReference?: string | null;
+}): Promise<{ sent: boolean; providerMessageId?: string | null }> {
+  const resend = getResend();
+  if (!resend) return { sent: false };
+  const subjects = {
+    submission_received: "MintVault Partner submission received",
+    grading_complete: "MintVault Partner grading complete",
+    correction_received: "MintVault correction request received",
+    correction_escalated: "MintVault correction request escalated",
+    partner_suspended: "MintVault Partner account status update",
+  };
+  const subject = subjects[input.subjectKind];
+  const sent = await sendViaResend(resend, {
+    from: getFromEmail(),
+    to: input.to,
+    replyTo: REPLY_TO,
+    subject,
+    html: baseHtml(
+      subject,
+      `<p style="margin:0 0 12px 0;">${input.partnerName}</p><p style="margin:0;color:#999;font-size:12px;">Reference: ${input.safeReference ?? "available in the Partner Portal"}</p>`
+    ),
+  });
+  return { sent: true, providerMessageId: sent.id };
+}
+
 export async function sendPasswordChangedEmail(email: string): Promise<void> {
   const resend = getResend();
   if (!resend) return;

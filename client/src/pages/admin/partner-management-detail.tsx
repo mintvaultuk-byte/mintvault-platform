@@ -23,15 +23,27 @@ import {
   CONTACT_TYPES,
   UNAVAILABLE_LABEL,
 } from "./partner-management-helpers";
+import { PartnerAccessPanel } from "./partner-access-panel";
 
 const BASE = "/api/super-admin/partner-management";
-const TABS = ["overview", "profile", "contacts", "branding", "activity", "notes", "audit", "connector"] as const;
+const TABS = [
+  "overview",
+  "profile",
+  "contacts",
+  "branding",
+  "access",
+  "activity",
+  "notes",
+  "audit",
+  "connector",
+] as const;
 type TabKey = (typeof TABS)[number];
 const TAB_LABELS: Record<TabKey, string> = {
   overview: "Overview",
   profile: "Company Profile",
   contacts: "Contacts",
   branding: "Branding",
+  access: "Partner Access",
   activity: "Activity",
   notes: "Internal Notes",
   audit: "Audit",
@@ -45,6 +57,7 @@ export default function PartnerManagementDetailPage() {
   const [, params] = useRoute("/admin/partner-network/partners/:partnerId");
   const partnerId = params?.partnerId ?? "";
   const [authed, setAuthed] = useState<boolean | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [tab, setTab] = useState<TabKey>("overview");
   const [banner, setBanner] = useState<string | null>(null);
   // generic reason modal state
@@ -64,8 +77,16 @@ export default function PartnerManagementDetailPage() {
     let live = true;
     fetch("/api/admin/session", { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => live && setAuthed(!!d?.authenticated))
-      .catch(() => live && setAuthed(false));
+      .then((d) => {
+        if (!live) return;
+        setAuthed(!!d?.authenticated);
+        setIsSuperAdmin(d?.isSuperAdmin === true);
+      })
+      .catch(() => {
+        if (!live) return;
+        setAuthed(false);
+        setIsSuperAdmin(false);
+      });
     return () => {
       live = false;
     };
@@ -158,6 +179,7 @@ export default function PartnerManagementDetailPage() {
   }, [modal, noteOpen]);
 
   const nextStatuses = useMemo(() => (org ? allowedNextStatuses(org.status) : []), [org]);
+  const visibleTabs = TABS.filter((candidate) => candidate !== "access" || isSuperAdmin);
 
   if (authed === null || detail.isLoading) {
     return (
@@ -250,7 +272,7 @@ export default function PartnerManagementDetailPage() {
         </div>
 
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }} data-testid="pm-tabs">
-          {TABS.map((k) => (
+          {visibleTabs.map((k) => (
             <Chip key={k} active={tab === k} onClick={() => setTab(k)} testId={`pm-tab-${k}`}>
               {TAB_LABELS[k]}
             </Chip>
@@ -393,6 +415,8 @@ export default function PartnerManagementDetailPage() {
             </div>
           </Panel>
         )}
+
+        {tab === "access" && isSuperAdmin && <PartnerAccessPanel partnerId={partnerId} />}
 
         {tab === "activity" && (
           <Panel title="Activity">

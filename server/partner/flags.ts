@@ -12,11 +12,16 @@ import { partnerRuntimeQuery } from "./db";
 /** Sensitive flags that gate live behaviour; all default OFF until explicitly enabled. */
 export const PARTNER_FLAGS = [
   "partner_portal_enabled",
+  // Authentication is a separate, fail-closed launch gate from the broader portal surface. Both
+  // this and partner_portal_enabled must be enabled before any Partner API can authenticate.
+  "partner_authentication_enabled",
   "partner_login_enabled",
   "partner_onboarding_enabled",
   "partner_evidence_capture_enabled",
   "partner_payments_enabled",
   "partner_grading_enabled",
+  "partner_corrections_enabled",
+  "partner_pilot_enabled",
   "partner_device_enforcement_enabled",
   "partner_emergency_stop",
   "partner_connector_enabled",

@@ -90,23 +90,39 @@ export async function partnerLogin(email: string, password: string, ip?: string 
   const mfaPending = u.mfa_required;
   const token = crypto.randomBytes(32).toString("base64url");
   await withTenant({ tenantId: u.tenant_id }, async (c) => {
-    await c.query(
-      "UPDATE partner_users SET failed_login_count=0, locked_until=NULL, last_login_at=now() WHERE id=$1",
-      [u.user_id],
-    );
+    await c.query("UPDATE partner_users SET failed_login_count=0, locked_until=NULL, last_login_at=now() WHERE id=$1", [
+      u.user_id,
+    ]);
     // rotation: any prior live session for this user is revoked before minting a new one.
     await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [u.user_id]);
     await c.query(
       `INSERT INTO partner_sessions (tenant_id, user_id, token_hash, credential_version, mfa_passed, ip, absolute_expires_at)
        VALUES ($1,$2,$3,$4,$5,$6, now() + ($7 || ' hours')::interval)`,
-      [u.tenant_id, u.user_id, sha256(token), u.credential_version, !mfaPending, ip ?? null, String(SESSION_ABSOLUTE_HOURS)],
+      [
+        u.tenant_id,
+        u.user_id,
+        sha256(token),
+        u.credential_version,
+        !mfaPending,
+        ip ?? null,
+        String(SESSION_ABSOLUTE_HOURS),
+      ]
     );
     await writePartnerAudit(c, {
-      tenantId: u.tenant_id, actorUserId: u.user_id, action: mfaPending ? "partner_login_mfa_pending" : "partner_login",
+      tenantId: u.tenant_id,
+      actorUserId: u.user_id,
+      action: mfaPending ? "partner_login_mfa_pending" : "partner_login",
       ip: ip ?? null,
     });
   });
-  return { ok: true, sessionToken: token, userId: u.user_id, tenantId: u.tenant_id, partnerId: u.partner_id, mfaPending };
+  return {
+    ok: true,
+    sessionToken: token,
+    userId: u.user_id,
+    tenantId: u.tenant_id,
+    partnerId: u.partner_id,
+    mfaPending,
+  };
 }
 
 async function recordFailure(u: AuthRow, ip: string | null | undefined, kind: string): Promise<void> {
@@ -120,18 +136,31 @@ async function recordFailure(u: AuthRow, ip: string | null | undefined, kind: st
                                   THEN now() + ($3 || ' minutes')::interval ELSE locked_until END
         WHERE id = $1
         RETURNING failed_login_count, (failed_login_count >= $2) AS locked`,
-      [u.user_id, LOCKOUT_THRESHOLD, String(LOCKOUT_MINUTES)],
+      [u.user_id, LOCKOUT_THRESHOLD, String(LOCKOUT_MINUTES)]
     );
     if (rows[0]?.locked) {
-      await writePartnerSecurity(c, { tenantId: u.tenant_id, severity: "medium", kind: "partner_account_locked", detail: { userId: u.user_id } });
+      await writePartnerSecurity(c, {
+        tenantId: u.tenant_id,
+        severity: "medium",
+        kind: "partner_account_locked",
+        detail: { userId: u.user_id },
+      });
     }
-    await writePartnerAudit(c, { tenantId: u.tenant_id, actorUserId: u.user_id, action: "partner_login_failure", ip: ip ?? null, reason: kind });
+    await writePartnerAudit(c, {
+      tenantId: u.tenant_id,
+      actorUserId: u.user_id,
+      action: "partner_login_failure",
+      ip: ip ?? null,
+      reason: kind,
+    });
   });
 }
 
 /** Mark the MFA challenge passed for the current session (after verifyTotp/recovery succeeds). */
 export async function markSessionMfaPassed(tenantId: string, sessionId: string): Promise<void> {
-  await withTenant({ tenantId }, (c) => c.query("UPDATE partner_sessions SET mfa_passed=true WHERE id=$1", [sessionId]));
+  await withTenant({ tenantId }, (c) =>
+    c.query("UPDATE partner_sessions SET mfa_passed=true WHERE id=$1", [sessionId])
+  );
 }
 
 export async function partnerLogout(tenantId: string, sessionId: string): Promise<void> {
@@ -143,7 +172,9 @@ export async function partnerLogout(tenantId: string, sessionId: string): Promis
 
 export async function revokeAllSessions(tenantId: string, userId: string, reason = "revoke_all"): Promise<number> {
   return withTenant({ tenantId }, async (c) => {
-    const r = await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [userId]);
+    const r = await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [
+      userId,
+    ]);
     await writePartnerAudit(c, { tenantId, actorUserId: userId, action: "partner_sessions_revoked", reason });
     return r.rowCount ?? 0;
   });
@@ -158,7 +189,7 @@ export async function createPasswordResetToken(tenantId: string, userId: string)
     await c.query(
       `INSERT INTO partner_password_reset_tokens (tenant_id, user_id, token_hash, expires_at)
        VALUES ($1,$2,$3, now() + ($4 || ' minutes')::interval)`,
-      [tenantId, userId, sha256(token), String(RESET_TOKEN_MINUTES)],
+      [tenantId, userId, sha256(token), String(RESET_TOKEN_MINUTES)]
     );
     await writePartnerAudit(c, { tenantId, actorUserId: userId, action: "partner_password_reset_requested" });
   });
@@ -176,14 +207,55 @@ export const MIN_PASSWORD_LEN = 10;
 // only an input-size limit. (Behaviour unchanged.)
 export const MAX_PASSWORD_LEN = 200;
 
+export type InvitationAcceptanceOutcome =
+  | "accepted"
+  | "used"
+  | "invalid"
+  | "expired"
+  | "revoked"
+  | "superseded"
+  | "member_inactive";
+
+/**
+ * Consume an invitation through the narrow database-owned acceptance transition. The raw token is
+ * hashed before it reaches PostgreSQL; the function obtains tenant, role and locations from the
+ * locked invitation rather than accepting any browser-supplied scope.
+ */
+export async function acceptPartnerInvitation(
+  token: string,
+  email: string,
+  newPassword: string,
+  correlationId?: string
+): Promise<InvitationAcceptanceOutcome> {
+  if (
+    typeof token !== "string" ||
+    typeof email !== "string" ||
+    typeof newPassword !== "string" ||
+    newPassword.length < MIN_PASSWORD_LEN ||
+    newPassword.length > MAX_PASSWORD_LEN
+  ) {
+    return "invalid";
+  }
+  const passwordHash = await hashPassword(newPassword);
+  const { rows } = await partnerRuntimeQuery<{ outcome: InvitationAcceptanceOutcome }>(
+    "SELECT outcome FROM partner_accept_invitation($1,$2,$3,$4)",
+    [sha256(token), email.trim().toLowerCase(), passwordHash, correlationId ?? null]
+  );
+  return rows[0]?.outcome ?? "invalid";
+}
+
 export async function consumePasswordResetToken(token: string, newPassword: string): Promise<boolean> {
   // F5: enforce the password policy in the SERVICE layer so every caller shares it, not just the route.
-  if (typeof newPassword !== "string" || newPassword.length < MIN_PASSWORD_LEN || newPassword.length > MAX_PASSWORD_LEN) {
+  if (
+    typeof newPassword !== "string" ||
+    newPassword.length < MIN_PASSWORD_LEN ||
+    newPassword.length > MAX_PASSWORD_LEN
+  ) {
     return false;
   }
   const { rows: tRows } = await partnerRuntimeQuery<{ tenant: string | null }>(
     "SELECT partner_reset_token_tenant($1) AS tenant",
-    [sha256(token)],
+    [sha256(token)]
   );
   const tenantId = tRows[0]?.tenant;
   if (!tenantId) return false; // unknown/expired/used token
@@ -192,12 +264,15 @@ export async function consumePasswordResetToken(token: string, newPassword: stri
     const { rows } = await c.query<{ id: string; user_id: string }>(
       `SELECT id, user_id FROM partner_password_reset_tokens
         WHERE token_hash=$1 AND used_at IS NULL AND expires_at > now() FOR UPDATE`,
-      [sha256(token)],
+      [sha256(token)]
     );
     if (rows.length !== 1) return false;
     const { id, user_id } = rows[0];
     await c.query("UPDATE partner_password_reset_tokens SET used_at=now() WHERE id=$1", [id]);
-    await c.query("UPDATE partner_users SET password_hash=$2, credential_version=credential_version+1 WHERE id=$1", [user_id, newHash]);
+    await c.query("UPDATE partner_users SET password_hash=$2, credential_version=credential_version+1 WHERE id=$1", [
+      user_id,
+      newHash,
+    ]);
     await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [user_id]);
     await writePartnerAudit(c, { tenantId, actorUserId: user_id, action: "partner_password_reset_completed" });
     return true;

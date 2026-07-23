@@ -91,16 +91,27 @@ describe("G5 list page source assertions", () => {
 
 describe("G5 detail page source assertions", () => {
   const src = readFileSync(join(process.cwd(), "client/src/pages/admin/partner-management-detail.tsx"), "utf8");
-  it("has the eight tabs (rendered from the TABS list) + admin session gate", () => {
+  it("has the nine tabs (rendered from the TABS list) + admin session gate", () => {
     expect(src).toContain("pm-tab-"); // tabs render via `pm-tab-${k}`
-    expect(src).toContain(
-      'const TABS = ["overview", "profile", "contacts", "branding", "activity", "notes", "audit", "connector"]'
-    );
+    for (const tab of [
+      "overview",
+      "profile",
+      "contacts",
+      "branding",
+      "access",
+      "activity",
+      "notes",
+      "audit",
+      "connector",
+    ]) {
+      expect(src).toContain(`"${tab}"`);
+    }
     for (const label of [
       "Overview",
       "Company Profile",
       "Contacts",
       "Branding",
+      "Partner Access",
       "Activity",
       "Internal Notes",
       "Audit",

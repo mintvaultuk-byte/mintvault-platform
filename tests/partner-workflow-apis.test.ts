@@ -96,7 +96,7 @@ let admin: Client;
 
       await admin.query("DELETE FROM partner_feature_flags");
       await admin.query(
-        "INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_portal_enabled',true)"
+        "INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_portal_enabled',true),(NULL,'partner_authentication_enabled',true)"
       );
       await admin.query(
         `INSERT INTO partner_service_tiers (tenant_id, tier_code, label, price_per_card_pence, turnaround_days, is_active) VALUES

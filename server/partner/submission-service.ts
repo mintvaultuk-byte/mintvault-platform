@@ -17,6 +17,13 @@ import type { PoolClient } from "pg";
 import { withTenant } from "./db";
 import { writePartnerAudit } from "./audit";
 import type { PartnerPrincipal } from "./session";
+import {
+  CreditReservationError,
+  getCreditPosition,
+  releaseReservedCredit,
+  reserveCredit,
+  type CreditReservation,
+} from "./partner-credit-reservation-service";
 
 export class SubmissionError extends Error {
   constructor(
@@ -39,6 +46,8 @@ const SERVICE_TIER_UNAVAILABLE = () =>
     "service_tier_unavailable",
     "This service is no longer available. Choose an available service before submitting."
   );
+const INSUFFICIENT_CREDITS = () =>
+  new SubmissionError("insufficient_credits", "Not enough available Partner grading credits for every card.");
 
 /** Location-scope predicate, appended to every submission query. Org-wide roles see everything;
  *  everyone else is restricted to their assigned locations via partner_user_locations.
@@ -245,6 +254,76 @@ async function writeEvent(
     `INSERT INTO partner_submission_events (tenant_id, submission_id, actor_user_id, event_type, from_status, to_status, reason)
      VALUES ($1,$2,$3,$4,$5,$6,$7)`,
     [principal.tenantId, submissionId, principal.userId, eventType, fromStatus, toStatus, reason]
+  );
+}
+
+async function reserveSubmissionCredits(
+  principal: PartnerPrincipal,
+  submissionId: string,
+  locationId: string,
+  cards: { id: string; sequence_number: number; quantity: number }[],
+  idempotencyKey: string
+): Promise<CreditReservation[]> {
+  const reserved: CreditReservation[] = [];
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+  try {
+    for (const card of cards) {
+      const quantity = Math.max(1, Number(card.quantity ?? 1));
+      for (let unit = 1; unit <= quantity; unit += 1) {
+        const result = await reserveCredit(
+          { actorUserId: principal.userId, actorEmail: null },
+          {
+            tenantId: principal.tenantId,
+            locationId,
+            cardReference: `partner-card:${card.id}:unit:${unit}`,
+            submissionReference: submissionId,
+            expiresAt,
+            idempotencyKey: `submission:${submissionId}:card:${card.id}:unit:${unit}:reserve`,
+            source: "portal",
+            reason: "Partner submission submitted",
+            actorType: "partner_user",
+            externalRef: submissionId,
+            metadata: { submitIdempotencyKey: idempotencyKey, sequenceNumber: card.sequence_number, unit },
+          }
+        );
+        reserved.push(result.reservation);
+      }
+    }
+    return reserved;
+  } catch (error) {
+    await releaseSubmissionCredits(principal, reserved, idempotencyKey, "reservation attempt failed");
+    if (error instanceof CreditReservationError) {
+      if (error.code === "INSUFFICIENT_CREDITS") throw INSUFFICIENT_CREDITS();
+      throw new SubmissionError(error.code.toLowerCase(), error.message);
+    }
+    throw error;
+  }
+}
+
+async function releaseSubmissionCredits(
+  principal: PartnerPrincipal,
+  reservations: CreditReservation[],
+  idempotencyKey: string,
+  reason: string
+): Promise<void> {
+  await Promise.all(
+    reservations
+      .filter((reservation) => reservation.status === "active")
+      .map((reservation) =>
+        releaseReservedCredit(
+          { actorUserId: principal.userId, actorEmail: null },
+          {
+            tenantId: principal.tenantId,
+            reservationId: reservation.id,
+            idempotencyKey: `submission:${reservation.submission_reference}:reservation:${reservation.id}:release:${idempotencyKey}`,
+            source: "portal",
+            reason,
+            actorType: "partner_user",
+            externalRef: reservation.submission_reference,
+            metadata: { submitIdempotencyKey: idempotencyKey },
+          }
+        ).catch(() => null)
+      )
   );
 }
 
@@ -596,11 +675,14 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
       throw NOT_DRAFT();
     }
 
-    const cards = await c.query(
-      `SELECT count(*)::int n FROM partner_submission_cards WHERE submission_id=$1 AND removed_at IS NULL`,
+    const cards = await c.query<{ id: string; sequence_number: number; quantity: number }>(
+      `SELECT id, sequence_number, quantity FROM partner_submission_cards WHERE submission_id=$1 AND removed_at IS NULL ORDER BY sequence_number`,
       [submissionId]
     );
-    if (cards.rows[0].n < 1) throw VALIDATION("Add at least one card before submitting.");
+    const totalCardCredits = cards.rows.reduce((sum, card) => sum + Number(card.quantity ?? 1), 0);
+    if (totalCardCredits < 1) throw VALIDATION("Add at least one card before submitting.");
+    const position = await getCreditPosition(principal.tenantId);
+    if (position.availableBalance < totalCardCredits) throw INSUFFICIENT_CREDITS();
 
     const full = await c.query(
       `SELECT s.*, (SELECT json_agg(row_to_json(sc)) FROM (
@@ -624,14 +706,31 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
       if (stillActive.rows[0].n < 1) throw SERVICE_TIER_UNAVAILABLE();
     }
 
+    const reserved = await reserveSubmissionCredits(
+      principal,
+      submissionId,
+      row.location_id,
+      cards.rows,
+      idempotencyKey
+    );
+
     // Locking the row (loadSubmissionForUpdate did FOR UPDATE) + the unique index on submission_id
     // in partner_submission_handoffs together make this INSERT impossible to duplicate under
     // concurrent retries: a second concurrent submit blocks on the row lock, then sees status is no
     // longer 'draft' and throws NOT_DRAFT() instead of inserting a second handoff.
-    await c.query(
-      `INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending',$3)`,
-      [principal.tenantId, submissionId, JSON.stringify(snapshot)]
-    );
+    try {
+      await c.query(
+        `INSERT INTO partner_submission_handoffs (tenant_id, submission_id, status, snapshot) VALUES ($1,$2,'pending',$3)`,
+        [
+          principal.tenantId,
+          submissionId,
+          JSON.stringify({ ...snapshot, creditReservations: reserved.map((r) => r.id) }),
+        ]
+      );
+    } catch (error) {
+      await releaseSubmissionCredits(principal, reserved, idempotencyKey, "handoff insert failed");
+      throw error;
+    }
     let updated;
     try {
       updated = await c.query(
@@ -640,6 +739,7 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
         [submissionId, idempotencyKey]
       );
     } catch (err) {
+      await releaseSubmissionCredits(principal, reserved, idempotencyKey, "submission submit failed");
       // RACE: the SAME idempotency key was concurrently attached to a DIFFERENT submission (the
       // pre-lock "already used?" check above can miss an in-flight sibling transaction, since
       // FOR UPDATE locks are per-submission-row, not per-key). uq_partner_submissions_idem
@@ -653,7 +753,10 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
       }
       throw err;
     }
-    if (updated.rowCount !== 1) throw STALE();
+    if (updated.rowCount !== 1) {
+      await releaseSubmissionCredits(principal, reserved, idempotencyKey, "submission stale after reservations");
+      throw STALE();
+    }
     await writeEvent(c, principal, submissionId, "submitted", "draft", "submitted_to_mintvault", null);
     await writePartnerAudit(c, {
       tenantId: principal.tenantId,
