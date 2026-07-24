@@ -726,6 +726,9 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     // Reverse-order rollback also clears the later print-workflow migration (≥0018),
     // otherwise its journal row keeps the later-migration guard tripping first.
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0022_print_workflow_lifecycle.sql'");
+    // Likewise the provisional Catalogue Manager migration (also ≥0018). Number is
+    // contested across parallel branches; the coordinated release review finalises it.
+    await admin.query("DELETE FROM schema_migrations WHERE filename = '0019_catalogue_manager.sql'");
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );

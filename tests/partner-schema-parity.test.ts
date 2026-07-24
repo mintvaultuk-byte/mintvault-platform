@@ -70,9 +70,15 @@ describe("partner schema ↔ migration parity", () => {
       // addition is consciously acknowledged. 0018 adds the partial index supporting the
       // Super Admin Correction Mode operator-statistics query (audit_log).
       "0018_correction_audit_index.sql",
+      // 0019 (PROVISIONAL — Catalogue Manager) creates the additive catalogue_items
+      // table. The number is contested across parallel branches (partner-credit and
+      // grading-concurrency also claim 0019); the coordinated release review assigns
+      // the final sequence. Its rollback is intentionally named
+      // rollback-0019-catalogue-manager.sql (non-numbered) so the runner never applies it.
+      "0019_catalogue_manager.sql",
       // Not a partner migration — the print workflow lifecycle (certificates.print_state,
-      // print_batches, print_events). 0019–0021 are intentionally skipped: claimed by other
-      // unmerged branches, so 0022 avoids the runner's duplicate-number hard-reject.
+      // print_batches, print_events). 0020–0021 are claimed by other unmerged branches,
+      // so 0022 avoids the runner's duplicate-number hard-reject.
       "0022_print_workflow_lifecycle.sql",
     ]);
   });

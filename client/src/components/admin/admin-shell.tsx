@@ -126,6 +126,10 @@ const NAV: NavSection[] = [
       { key: "submissions", label: "Submissions", icon: Package },
     ],
   },
+  {
+    heading: "System",
+    items: [{ href: "/admin/catalogue", label: "Catalogue Manager", icon: Library }],
+  },
 ];
 
 // Topbar crumb path label per section the active tab belongs to.

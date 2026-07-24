@@ -6,8 +6,11 @@ import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPic
 import { ReviewSummary } from "@/components/grading-workflow/ReviewSummary";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
+import { CertificatePreviewPanel } from "@/components/grading-workflow/CertificatePreviewPanel";
 import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
+import { VariantSummary } from "@/components/grading-workflow/VariantSummary";
 import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
+import { CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
@@ -384,6 +387,25 @@ export default function CertificateForm({
   // shared/edit-conflict.ts). Refreshed from the cert prop on refetch and
   // from each save's own posted values on success (self-healing).
   const loadedSnapshotRef = useRef<Record<string, string> | null>(null);
+  // Whether the SAVED cert already prints the consolidated variant line
+  // (structuredVariantVersion ≥ CONSOLIDATED_VARIANT_SCHEME). Refreshed from the
+  // cert prop and from every save's response row inside refreshSnapshotFromCert.
+  // A pre-consolidation cert that carries structured columns will change its
+  // printed variant line the next time it is saved, so the preview (which shows
+  // the post-save wording) legitimately differs from what is printed today.
+  const savedConsolidatedRef = useRef(false);
+
+  // Label-freshness signal for the Review certificate preview. Compares ONLY the
+  // fields that affect the printed label against the last SAVED snapshot (server
+  // truth, refreshed after every save/auto-save via refreshSnapshotFromCert) —
+  // DELIBERATELY excluding server-derived fields (labelType/status), whose casing
+  // the server rewrites ("standard" → "Standard"); comparing those would pin the
+  // preview to "Unsaved changes" forever after the first save. Create flow: always
+  // "unsaved" because nothing is printed yet. Both sides are trimmed so a stored
+  // value and the live form value normalise identically.
+  // (The former labelPreviewDirty() "unsaved changes" helper drove the removed
+  //  second LabelPreview panel; the canonical CertificatePreviewPanel renders
+  //  live from the current field values, so no dirty check is needed here.)
 
   /** Snapshot = SERVER truth for the guarded fields. Always refreshed from a
       cert row (prop refetch or a save's response) — never from what we posted,
@@ -398,6 +420,8 @@ export default function CertificateForm({
       snap[f] = v === null || v === undefined ? "" : String(v);
     }
     loadedSnapshotRef.current = snap;
+    const ver = Number((row as any).structuredVariantVersion ?? 0);
+    savedConsolidatedRef.current = ver >= CONSOLIDATED_VARIANT_SCHEME;
   }
 
   useEffect(() => {
@@ -1649,6 +1673,40 @@ export default function CertificateForm({
             certificateId={certificate?.id ?? null}
             frontFile={frontImage}
             backFile={backImage}
+            // Live front-certificate preview on Rarity + Review only (reuses the
+            // real print pipeline, read-only). Card stage passes no `below`, so
+            // its layout is byte-identical to before.
+            below={
+              wfStage === 1 || wfStage === 3 ? (
+                <CertificatePreviewPanel
+                  fields={{
+                    // Editing an existing cert → the server starts from the SAVED
+                    // grade/subgrade columns so the black-label (Pristine) preview
+                    // matches print; absent (create flow) it renders from fields.
+                    certificateId: certificate?.id ?? null,
+                    cardName: form.cardName,
+                    setName: form.setName,
+                    year: form.year,
+                    cardNumber: form.cardNumber,
+                    gradeType: form.gradeType,
+                    gradeOverall: form.gradeOverall,
+                    variant: form.variant,
+                    variantOther: form.variantOther,
+                    rarity: form.rarity,
+                    rarityOther: form.rarityOther,
+                    // Structured-variant codes → server derives the ONE consolidated
+                    // variant line (parity with print), same as the save routes.
+                    rarityCode: form.rarityCode,
+                    finishVariant: form.finishVariant,
+                    promoType: form.promoType,
+                    subsetName: form.subsetName,
+                    era: form.era,
+                    labelType: form.labelType,
+                    language: form.language,
+                  }}
+                />
+              ) : undefined
+            }
           />
         ) : null
       }
@@ -2708,6 +2766,23 @@ export default function CertificateForm({
                     onRecentChange={onRecentChange}
                     onCustomRarityNote={(note) => updateField("rarityOther", note ?? "")}
                   />
+
+                  {/* Permanent classification summary (item 2) — always visible below
+                the picker so the grader sees the exact language / rarity / finish /
+                promo they have selected, in the same wording used on Review. */}
+                  <VariantSummary
+                    values={{
+                      language: form.language,
+                      rarityCode: form.rarityCode,
+                      finishVariant: form.finishVariant,
+                      promoType: form.promoType,
+                      subsetName: form.subsetName,
+                      variant: form.variant,
+                      rarity: form.rarity,
+                      variantOther: form.variantOther,
+                      rarityOther: form.rarityOther,
+                    }}
+                  />
                 </div>
 
                 {/* Optional designations — collapsed by default so daily grading stays
@@ -2957,7 +3032,7 @@ export default function CertificateForm({
                   data-testid="button-review-card"
                   className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all"
                 >
-                  Review Card →
+                  Continue to Review →
                 </button>
               </div>
             </div>
@@ -3394,6 +3469,10 @@ export default function CertificateForm({
                   promoType: form.promoType,
                   subsetName: form.subsetName,
                   era: form.era,
+                  variant: form.variant,
+                  rarity: form.rarity,
+                  variantOther: form.variantOther,
+                  rarityOther: form.rarityOther,
                   designations,
                   gradeOverall: form.gradeOverall,
                   labelType: form.labelType,
@@ -3419,12 +3498,19 @@ export default function CertificateForm({
                   </span>
                 </div>
               )}
-              {/* Grader Notes with preset helper — moved from Card Details, unchanged. */}
+              {/* The Review-stage live FRONT-label preview is now the single
+                  canonical CertificatePreviewPanel (mounted once, above, for the
+                  Rarity + Review stages via WorkstationPreviewAside `below`). The
+                  former second LabelPreview here was a duplicate of the same
+                  renderer and endpoint and has been consolidated away. */}
+              {/* Public Notes with preset helper — moved from Card Details, unchanged. */}
               {notesOpen ? (
                 <div className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">
                   <div className="flex items-center gap-2">
                     <FileText size={13} className="text-[var(--admin-gold)]/60 shrink-0" />
-                    <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider">Grader Notes</label>
+                    <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider">
+                      Public Notes <span className="text-[var(--admin-ink-faint)] normal-case tracking-normal">· shown on the certificate</span>
+                    </label>
                   </div>
 
                   {/* Template buttons */}
@@ -3500,7 +3586,7 @@ export default function CertificateForm({
                   data-testid="button-add-grader-notes"
                   className="w-full px-4 py-2.5 rounded-lg border border-dashed border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/70 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/5 transition-colors"
                 >
-                  + Add Grader Notes
+                  + Add Public Notes
                 </button>
               )}
 
@@ -3518,23 +3604,50 @@ export default function CertificateForm({
                   Correction Mode uses the Save Correction button.
                 </div>
               ) : autoSaveEligible ? (
-                <div
-                  className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-6"
-                  data-testid="text-autosave-status"
-                >
-                  {autoSaveStatus === "saving" && (
-                    <span className="flex items-center gap-1.5">
-                      <Loader2 size={10} className="animate-spin" /> Saving…
-                    </span>
-                  )}
-                  {autoSaveStatus === "saved" && (
-                    <span className="flex items-center gap-1.5 text-[var(--admin-green)]">
-                      <CheckCircle2 size={10} /> Saved
-                    </span>
-                  )}
-                  {autoSaveStatus === "error" && (
-                    <span className="text-[var(--admin-red)]">Save failed — retrying on next change</span>
-                  )}
+                /* Item 7 — a large explicit Save button on Review. Auto-save is
+                   preserved (owner directive 2026-07-01): this button FORCES an
+                   immediate save via the same autoSaveNow() path rather than the
+                   navigating mutation, so it never leaves the workstation. The
+                   status line below still reflects auto-save + this save. */
+                <div className="space-y-1.5">
+                  <GradientButton
+                    as="button"
+                    type="button"
+                    onClick={() => {
+                      // Cancel any pending debounced auto-save so this explicit
+                      // save doesn't get followed by a redundant second PUT.
+                      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+                      autoSaveNow();
+                    }}
+                    disabled={autoSaveStatus === "saving"}
+                    height="48px"
+                    className="w-full"
+                    data-testid="button-save-now"
+                  >
+                    <Save size={16} />
+                    {autoSaveStatus === "saving" ? "Saving…" : "Save Now"}
+                  </GradientButton>
+                  <div
+                    className="flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] h-5"
+                    data-testid="text-autosave-status"
+                  >
+                    {autoSaveStatus === "saving" && (
+                      <span className="flex items-center gap-1.5">
+                        <Loader2 size={10} className="animate-spin" /> Saving…
+                      </span>
+                    )}
+                    {autoSaveStatus === "saved" && (
+                      <span className="flex items-center gap-1.5 text-[var(--admin-green)]">
+                        <CheckCircle2 size={10} /> Saved · auto-saves as you edit
+                      </span>
+                    )}
+                    {autoSaveStatus === "idle" && (
+                      <span className="text-[var(--admin-ink-faint)]">Auto-saves as you edit</span>
+                    )}
+                    {autoSaveStatus === "error" && (
+                      <span className="text-[var(--admin-red)]">Save failed — retrying on next change</span>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <GradientButton

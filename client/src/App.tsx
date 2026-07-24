@@ -43,6 +43,7 @@ const AdminSecurityPage = lazy(() => import("@/pages/admin-security"));
 const AdminSetsPage = lazy(() => import("@/pages/admin-sets"));
 const AdminLegacyReviewPage = lazy(() => import("@/pages/admin-legacy-review"));
 const AdminPokemonKnowledgePage = lazy(() => import("@/pages/admin-pokemon-knowledge"));
+const AdminCataloguePage = lazy(() => import("@/pages/admin-catalogue"));
 const AdminOperatorStatsPage = lazy(() => import("@/pages/admin-operator-stats"));
 const AdminInstagramPage = lazy(() => import("@/pages/admin-instagram"));
 const AdminWeeklyReelPage = lazy(() => import("@/pages/admin-weekly-reel"));
@@ -328,6 +329,7 @@ function Router() {
           <Route path="/admin/sets" component={AdminSetsPage} />
           <Route path="/admin/legacy-review" component={AdminLegacyReviewPage} />
           <Route path="/admin/pokemon-knowledge" component={AdminPokemonKnowledgePage} />
+          <Route path="/admin/catalogue" component={AdminCataloguePage} />
           <Route path="/admin/operator-stats" component={AdminOperatorStatsPage} />
           <Route path="/grader/login">
             <GraderLoginPage />

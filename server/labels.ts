@@ -4,6 +4,7 @@ import type { CertificateRecord, LabelOverride } from "@shared/schema";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
 import { computeMvgsScore, mvgsTierName } from "@shared/mvgs-scoring";
 import { isPristine } from "@shared/pristine";
+import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import path from "path";
 import { APP_BASE_URL } from "./app-url";
 
@@ -373,12 +374,43 @@ function buildRarityText(cert: CertificateRecord): string {
   return RARITY_DISPLAY[String(code).toUpperCase()] || String(code).replace(/_/g, " ");
 }
 
+/**
+ * The single public-facing variant/rarity line printed on the front label.
+ *
+ * Certs saved under the CONSOLIDATED variant scheme (structuredVariantVersion ≥
+ * CONSOLIDATED_VARIANT_SCHEME) print the ONE canonical consolidated line built
+ * by the shared formatVariantLine() — the exact same wording the Review preview
+ * and summary show, so preview and print always match. Every OLDER cert keeps
+ * its previous, byte-identical wording (variant OR rarity via the legacy maps),
+ * so no existing certificate's label changes until it is edited and re-saved.
+ *
+ * This affects ONLY the variant/rarity text line — no grade, subgrade, centering,
+ * Pristine/black-label, dimension, or MVGS logic is touched.
+ *
+ * Exported for regression tests (preview↔print parity, version gate, legacy
+ * fallback) — it is a pure string function, safe to call without canvas.
+ */
+export function consolidatedVariantForLabel(cert: CertificateRecord): string {
+  const version = Number((cert as unknown as { structuredVariantVersion?: number }).structuredVariantVersion ?? 0);
+  if (version >= CONSOLIDATED_VARIANT_SCHEME && hasStructuredVariant(cert as unknown as Parameters<typeof formatVariantLine>[0])) {
+    return formatVariantLine(cert as unknown as Parameters<typeof formatVariantLine>[0]).toUpperCase();
+  }
+  return buildVariantLine(cert) || (cert.rarity ? buildRarityText(cert).toUpperCase() : "");
+}
+
 // Real-world TCG sets in this recurring "<Era> Black Star Promos" family (e.g.
 // "Sword & Shield Black Star Promos", "XY Black Star Promos") name the whole
 // promo sub-line as part of the set name. Split that trailing qualifier off
 // so it can print on its own line instead of crushing onto the year line —
 // sets with no such suffix are returned untouched (base = full name).
-const PROMO_SUFFIX_RE = /\s+black star promos?$/i;
+// Bounded whitespace quantifier ({1,64} rather than +) so the match cost stays
+// linear — an unbounded \s+ before a literal is the polynomial-ReDoS shape CodeQL
+// flags (js/polynomial-redos), since a long run of whitespace makes the engine
+// retry from every start position. The VISIBLE OUTPUT is unchanged for every
+// possible input: splitPromoSuffix() .trim()s both the base and the suffix, so a
+// whitespace run longer than 64 yields byte-identical base/suffix either way —
+// only the internal match offset differs. Real set names have exactly one space.
+const PROMO_SUFFIX_RE = /\s{1,64}black star promos?$/i;
 
 function splitPromoSuffix(setName: string): { base: string; suffix: string } {
   const m = setName.match(PROMO_SUFFIX_RE);
@@ -929,7 +961,7 @@ async function drawFront(
     cardNameText,
     yearText && setBaseText ? yearText + " " + setBaseText : yearText || setBaseText,
     setSuffixText,
-    buildVariantLine(cert) || (cert.rarity ? buildRarityText(cert).toUpperCase() : ""),
+    consolidatedVariantForLabel(cert),
   ].filter((s) => s.trim().length > 0);
 
   // Horizontal fit: pick the smallest size that satisfies the widest line.
