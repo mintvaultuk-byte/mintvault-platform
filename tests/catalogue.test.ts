@@ -247,6 +247,13 @@ describe("buildPreviewFields — certificate preview builder", () => {
     const f = buildPreviewFields({ cardName: "x".repeat(500) });
     expect((f.cardName as string).length).toBe(200);
   });
+
+  it("collapses whitespace runs (neutralises the label-renderer polynomial ReDoS)", () => {
+    const f = buildPreviewFields({ setName: "Base" + " ".repeat(5000) + "Black Star Promo" });
+    // No long run of spaces survives to reach the protected renderer's regex.
+    expect(f.setName).not.toMatch(/ {2,}/);
+    expect((f.setName as string).length).toBeLessThanOrEqual(200);
+  });
 });
 
 describe("canReadCatalogue — role permission (read gate)", () => {

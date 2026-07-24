@@ -4,9 +4,15 @@
  * result to CertificateRecord and passes it to the UNMODIFIED generateLabelPNG.
  * Kept pure so it is unit-testable without importing the render pipeline.
  */
+// Collapse ALL whitespace runs to a single space and hard-cap the length before
+// any value reaches the (protected) label renderer. This neutralises a polynomial
+// ReDoS: the renderer matches set names with `/\s+black star promos?$/i`, which is
+// slow on long runs of spaces — collapsing runs to one space removes the repetition
+// the backtracker feeds on, and the length cap bounds it regardless. (Preview is
+// cosmetic, so normalising whitespace here is harmless.)
 const str = (v: unknown, max = 200): string | null => {
   if (typeof v !== "string") return null;
-  const s = v.trim();
+  const s = v.replace(/\s+/g, " ").trim();
   return s ? s.slice(0, max) : null;
 };
 const num = (v: unknown): number | null => {
