@@ -417,9 +417,13 @@ describe("Rarity clear: explicit 'No rarity' persists an empty selection (option
   it("C3. an INTENTIONAL clear persists (rarityTouched) while an untouched/unhydrated picker never wipes", () => {
     // Touch flag set on any picker interaction (incl. clear).
     expect(PANEL).toMatch(/function handleRarityChange\(v: StructuredCardVariant\) \{\s*setRarityTouched\(true\)/);
-    // Touched → send the exact value (empty string = persisted clear); untouched →
-    // non-empty guard only (preserve).
-    expect(PANEL).toMatch(/if \(rarityTouched\) \{\s*out\.rarity_code = rarityCode\.trim\(\);/);
+    // Touched → send the exact current selection, where a CLEARED field is sent
+    // as explicit NULL (applyCertGradeDraft's pick() persists an explicit null as
+    // SQL NULL, matching the admin certificate route; "" would have been stored
+    // verbatim as an empty string). Untouched → non-empty guard only (preserve).
+    expect(PANEL).toContain("out.rarity_code = rarityCode.trim() || null;");
+    expect(PANEL).toContain("out.finish_variant = finishVariant.trim() || null;");
+    expect(PANEL).toContain("out.promo_type = promoType.trim() || null;");
     expect(PANEL).toMatch(/\} else \{\s*if \(rarityCode\.trim\(\)\) out\.rarity_code = rarityCode\.trim\(\);/);
     // Touch flag is reset per card (no cross-record clear leakage).
     expect(PANEL).toContain("setRarityTouched(false)");
