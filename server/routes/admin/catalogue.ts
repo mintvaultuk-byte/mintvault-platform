@@ -39,6 +39,7 @@ import {
   CatalogueValidationError,
 } from "../../services/catalogueService";
 import { getCatalogueSnapshot, invalidateCatalogueCache } from "../../lib/catalogue-provider";
+import { canReadCatalogue } from "@shared/catalogue-access";
 
 const catalogueMutationLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -50,8 +51,7 @@ const catalogueMutationLimit = rateLimit({
 
 /** Read access for live pickers: admin OR any logged-in staff/grader. */
 function adminOrStaffRead(req: Request, res: Response, next: NextFunction): void {
-  const session = req.session as { isAdmin?: boolean; isGrader?: boolean } | undefined;
-  if (session?.isAdmin || session?.isGrader) return next();
+  if (canReadCatalogue(req.session as { isAdmin?: boolean; isGrader?: boolean } | undefined)) return next();
   res.status(401).json({ error: "Authentication required" });
 }
 

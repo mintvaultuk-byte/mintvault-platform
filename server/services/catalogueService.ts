@@ -23,6 +23,7 @@ import {
   type CatalogueItem,
   type InsertCatalogueItem,
 } from "@shared/schema";
+import { catalogueConflict, catalogueSearchMatch, parseImportItems } from "@shared/catalogue-validate";
 
 export class CatalogueValidationError extends Error {
   constructor(message: string) {
@@ -89,38 +90,8 @@ async function assertValid(
   excludeId?: number,
 ): Promise<void> {
   const all = await db.select().from(catalogueItems);
-  const v = norm(candidate.value);
-
-  if (all.some((r) => r.id !== excludeId && r.category === candidate.category && norm(r.value) === v)) {
-    throw new CatalogueValidationError(`"${candidate.value}" already exists in ${candidate.category}.`);
-  }
-
-  const abbr = norm(candidate.abbreviation);
-  if (
-    abbr &&
-    all.some(
-      (r) => r.id !== excludeId && r.category === candidate.category && norm(r.abbreviation) === abbr,
-    )
-  ) {
-    throw new CatalogueValidationError(
-      `Abbreviation "${candidate.abbreviation}" is already used in ${candidate.category}.`,
-    );
-  }
-
-  if (!candidate.allowCrossCategory) {
-    const clash = all.find(
-      (r) =>
-        r.id !== excludeId &&
-        r.category !== candidate.category &&
-        norm(r.value) === v &&
-        !r.allowCrossCategory,
-    );
-    if (clash) {
-      throw new CatalogueValidationError(
-        `"${candidate.value}" already exists as a ${clash.category}. A value belongs to one category only — enable "allow cross-category" on both entries to override.`,
-      );
-    }
-  }
+  const conflict = catalogueConflict(all, candidate, excludeId);
+  if (conflict) throw new CatalogueValidationError(conflict);
 }
 
 async function audit(
@@ -226,15 +197,8 @@ export async function reorderCatalogue(
 
 /** Search name / abbreviation / aliases / description (case-insensitive). */
 export async function searchCatalogueItems(query: string, category?: CatalogueCategory): Promise<CatalogueItem[]> {
-  const q = norm(query);
   const rows = await listCatalogueItems({ category, includeInactive: true, includeArchived: true });
-  if (!q) return rows;
-  return rows.filter((r) => {
-    const hay = [r.label, r.value, r.abbreviation ?? "", r.description, ...(r.aliases ?? [])]
-      .map(norm)
-      .join(" ");
-    return hay.includes(q);
-  });
+  return rows.filter((r) => catalogueSearchMatch(r, query));
 }
 
 export interface CatalogueExport {
@@ -267,12 +231,7 @@ export async function importCatalogue(
   actor: string,
 ): Promise<ImportResult> {
   const result: ImportResult = { created: 0, updated: 0, skipped: 0, errors: [] };
-  const items =
-    payload && typeof payload === "object" && Array.isArray((payload as CatalogueExport).items)
-      ? (payload as CatalogueExport).items
-      : Array.isArray(payload)
-        ? (payload as CatalogueExport["items"])
-        : null;
+  const items = parseImportItems(payload);
   if (!items) throw new CatalogueValidationError("Import payload must be a catalogue export ({ items: [...] }) or an array of items.");
 
   const existing = await listCatalogueItems({ includeInactive: true, includeArchived: true });
