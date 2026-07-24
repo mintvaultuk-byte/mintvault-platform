@@ -524,6 +524,12 @@ export async function buildCertGradingPayload(certId: number): Promise<any | nul
     cardNumber: c.cardNumber ?? null,
     year: c.year ?? null,
     variant: c.variant ?? null,
+    // Structured rarity/finish/promo — the SAME canonical fields the /admin
+    // CertificateForm rarity picker uses. Exposed additively so the shared
+    // four-stage workstation's Rarity stage works on the role routes too.
+    rarityCode: c.rarityCode ?? null,
+    finishVariant: c.finishVariant ?? null,
+    promoType: c.promoType ?? null,
     centeringFrontLr: c.centeringFrontLr || null,
     centeringFrontTb: c.centeringFrontTb || null,
     centeringBackLr: c.centeringBackLr || null,
@@ -616,6 +622,9 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<bo
       card_number_display = ${keepStr(body.card_number_display, cert.cardNumber)},
       year_text           = ${keepStr(body.year_text, cert.year)},
       variant             = ${pick(body.variant, cert.variant)},
+      rarity_code         = ${pick(body.rarity_code, cert.rarityCode)},
+      finish_variant      = ${pick(body.finish_variant, cert.finishVariant)},
+      promo_type          = ${pick(body.promo_type, cert.promoType)},
       centering_score = ${num(body.grade_centering, cert.gradeCentering)},
       corners_score   = ${num(body.grade_corners, cert.gradeCorners)},
       edges_score     = ${num(body.grade_edges, cert.gradeEdges)},

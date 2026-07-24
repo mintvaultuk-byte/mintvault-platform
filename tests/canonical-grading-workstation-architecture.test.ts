@@ -264,7 +264,7 @@ describe("Hotfix: stage bar gates content (Card / Rarity / Grade / Review)", () 
 
   it("SG5. no grading section is hidden on ALL four stages (submit + every section reachable somewhere)", () => {
     const sections = [
-      "workflow-banners", "identification", "identity-fields", "workstation-header", "preflight",
+      "workflow-banners", "identification", "identity-fields", "rarity", "workstation-header", "preflight",
       "ai-tools", "card-images", "defect-marking", "grading-controls", "mvgs-score", "grade-result",
       "d1-d2-d3", "centering", "surface", "authentication", "notes", "footer-actions",
     ];
@@ -302,5 +302,96 @@ describe("Hotfix: stage bar gates content (Card / Rarity / Grade / Review)", () 
     const PANEL = read("client/src/components/grading/grading-panel.tsx");
     expect(PANEL).not.toContain("grading-stage-gate");
     expect(PANEL).not.toContain("data-ws-stage");
+  });
+});
+
+describe("Four-stage workflow: canonical Rarity stage + one shared picker/catalogue", () => {
+  const ADMIN_TOKENS = read("client/src/styles/admin-tokens.css");
+  const PANEL = read("client/src/components/grading/grading-panel.tsx");
+  const GRADER_SERVER = read("server/grader.ts");
+  const CATALOGUE = "shared/pokemon-rarity-catalogue.ts";
+  const stageHides = (n: number, section: string) => {
+    const start = ADMIN_TOKENS.indexOf(`.grading-stage-gate[data-ws-stage="${n}"]`);
+    const block = ADMIN_TOKENS.slice(start, ADMIN_TOKENS.indexOf("display: none", start));
+    return block.includes(`[data-canonical-section="${section}"]`);
+  };
+
+  it("R1. Card and Rarity render DIFFERENT content (Card=identity, Rarity=picker)", () => {
+    // Card shows identity, hides rarity; Rarity shows rarity, hides identity.
+    expect(stageHides(0, "rarity")).toBe(true);
+    expect(stageHides(0, "identity-fields")).toBe(false);
+    expect(stageHides(1, "identity-fields")).toBe(true);
+    expect(stageHides(1, "rarity")).toBe(false);
+  });
+
+  it("R2-R4. Rarity mounts the canonical structured picker; /admin + role routes use the SAME component + catalogue", () => {
+    const IMPORT = 'import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker"';
+    const CERT = read("client/src/components/certificate-form.tsx");
+    expect(PANEL).toContain(IMPORT); // role workstation
+    expect(CERT).toContain(IMPORT); // /admin — SAME component
+    expect(PANEL).toContain("<RarityVariantPicker");
+    expect(PANEL).toContain('data-canonical-section="rarity"');
+    // one shared catalogue (single source of truth), imported by the picker.
+    const PICKER = read("client/src/components/rarity-picker/RarityVariantPicker.tsx");
+    expect(PICKER).toContain("@shared/pokemon-rarity-catalogue");
+  });
+
+  it("R5. the shared catalogue exposes the full rarity range (IR / SIR / Ultra / Hyper / ACE SPEC)", () => {
+    const cat = read(CATALOGUE);
+    for (const label of ["Illustration Rare", "Special Illustration Rare", "Ultra Rare", "Hyper Rare", "ACE SPEC"]) {
+      expect(cat, `catalogue exposes ${label}`).toContain(label);
+    }
+  });
+
+  it("R6-R7. finish + promo are independent structured fields (StructuredCardVariant), rarity single-select", () => {
+    // The picker emits {rarity, finish, promo, ...} — separate fields, and the
+    // role panel maps them to separate columns (rarity_code/finish_variant/promo_type).
+    expect(PANEL).toMatch(/setRarityCode\(v\.rarity/);
+    expect(PANEL).toMatch(/setFinishVariant\(v\.finish/);
+    expect(PANEL).toMatch(/setPromoType\(v\.promo/);
+  });
+
+  it("R8. role save/read persist rarity ADDITIVELY (existing columns; pick() preserves)", () => {
+    // Read path exposes the fields; write path persists them via applyCertGradeDraft.
+    expect(GRADER_SERVER).toContain("rarityCode: c.rarityCode");
+    expect(GRADER_SERVER).toContain("finishVariant: c.finishVariant");
+    expect(GRADER_SERVER).toContain("promoType: c.promoType");
+    expect(GRADER_SERVER).toMatch(/rarity_code\s*=\s*\$\{pick\(body\.rarity_code, cert\.rarityCode\)\}/);
+    expect(GRADER_SERVER).toMatch(/finish_variant\s*=\s*\$\{pick\(body\.finish_variant, cert\.finishVariant\)\}/);
+    expect(GRADER_SERVER).toMatch(/promo_type\s*=\s*\$\{pick\(body\.promo_type, cert\.promoType\)\}/);
+    // GradingPanel sends them in its save payload.
+    expect(PANEL).toContain("out.rarity_code = rarityCode.trim()");
+    // Rarity hydrates AND persists for BOTH graderMode and adminReview (so
+    // /admin/staff's Rarity stage is functional, not inert).
+    expect(PANEL).toMatch(/if \(!\(graderMode \|\| adminReview\) \|\| !gradingData\) return;[\s\S]*setRarityCode/);
+    expect(PANEL).toMatch(/if \(graderMode \|\| adminReview\) \{[\s\S]*out\.rarity_code/);
+    // Non-empty guard — an empty/unhydrated picker never wipes a stored value.
+    expect(PANEL).toContain("if (rarityCode.trim()) out.rarity_code = rarityCode.trim()");
+  });
+
+  it("R9. rarity stage is role-only — /admin is unaffected (no duplicate picker in the role GradingPanel path on /admin)", () => {
+    // GradingPanel renders the rarity section only for graderMode || adminReview,
+    // so admin-dashboard's plain GradingPanel mount shows no rarity section.
+    expect(PANEL).toMatch(/\{\(graderMode \|\| adminReview\) && \([\s\S]*data-canonical-section="rarity"/);
+  });
+
+  it("R10-R12. Grade has no submit; Review keeps submit reachable; Review shows the card+rarity summary", () => {
+    expect(stageHides(2, "footer-actions")).toBe(true); // no submit on Grade
+    expect(stageHides(3, "footer-actions")).toBe(false); // submit reachable on Review
+    expect(stageHides(3, "identity-fields")).toBe(false); // card summary on Review
+    expect(stageHides(3, "rarity")).toBe(false); // rarity summary on Review
+  });
+
+  it("R13-R15. one canonical picker only — no route-specific rarity component or role catalogue array", () => {
+    // No alternative/reduced rarity picker for staff.
+    const roots = ["client/src/pages/staff.tsx", "client/src/pages/grader.tsx", "client/src/pages/admin-staff.tsx"];
+    for (const p of roots) {
+      const src = read(p);
+      expect(src, `${p} must not build its own rarity picker`).not.toMatch(/RarityVariantPicker|RARITY_CATALOG|rarityCatalogue/);
+    }
+    // Density parity: role stages use the shared components; no role-specific
+    // density override class introduced for the rarity/identity surfaces.
+    expect(PANEL).not.toContain("staff-density");
+    expect(PANEL).not.toContain("grader-density");
   });
 });
