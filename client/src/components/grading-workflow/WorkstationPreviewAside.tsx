@@ -16,6 +16,7 @@
  * not an oversight — see the architecture note in certificate-form.tsx where
  * this component is used.
  */
+import type { ReactNode } from "react";
 import { CardPreviewPanel } from "./CardPreviewPanel";
 
 /** Single source of truth for the preview column's width + breakpoint. */
@@ -26,6 +27,7 @@ export function WorkstationPreviewAside({
   frontFile,
   backFile,
   apiBase = "/api/admin",
+  below,
 }: {
   certificateId: number | null;
   frontFile?: File | null;
@@ -33,10 +35,24 @@ export function WorkstationPreviewAside({
   /** Cert-scoped API base for the preview images. Defaults to /api/admin so the
       admin certificate editor is unchanged; role-safe shells pass their own. */
   apiBase?: string;
+  /** Optional panel stacked UNDER the card image (e.g. the live certificate
+      preview on Rarity/Review). When omitted the layout is unchanged. */
+  below?: ReactNode;
 }) {
+  // No `below` → render exactly as before (Card stage is untouched).
+  if (!below) {
+    return (
+      <aside className={`min-h-0 max-md:max-h-[55vh] ${WORKSTATION_PREVIEW_WIDTH_CLASS}`} data-testid="grading-preview-panel">
+        <CardPreviewPanel fill certificateId={certificateId} frontFile={frontFile} backFile={backFile} apiBase={apiBase} />
+      </aside>
+    );
+  }
   return (
-    <aside className={`min-h-0 max-md:max-h-[55vh] ${WORKSTATION_PREVIEW_WIDTH_CLASS}`} data-testid="grading-preview-panel">
-      <CardPreviewPanel fill certificateId={certificateId} frontFile={frontFile} backFile={backFile} apiBase={apiBase} />
+    <aside className={`flex min-h-0 flex-col gap-2 max-md:max-h-[55vh] ${WORKSTATION_PREVIEW_WIDTH_CLASS}`} data-testid="grading-preview-panel">
+      <div className="min-h-0 flex-1">
+        <CardPreviewPanel fill certificateId={certificateId} frontFile={frontFile} backFile={backFile} apiBase={apiBase} />
+      </div>
+      <div className="shrink-0">{below}</div>
     </aside>
   );
 }

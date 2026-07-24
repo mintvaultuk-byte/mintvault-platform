@@ -6,6 +6,7 @@ import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPic
 import { ReviewSummary } from "@/components/grading-workflow/ReviewSummary";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
+import { CertificatePreviewPanel } from "@/components/grading-workflow/CertificatePreviewPanel";
 import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
@@ -1649,6 +1650,29 @@ export default function CertificateForm({
             certificateId={certificate?.id ?? null}
             frontFile={frontImage}
             backFile={backImage}
+            // Live front-certificate preview on Rarity + Review only (reuses the
+            // real print pipeline, read-only). Card stage passes no `below`, so
+            // its layout is byte-identical to before.
+            below={
+              wfStage === 1 || wfStage === 3 ? (
+                <CertificatePreviewPanel
+                  fields={{
+                    cardName: form.cardName,
+                    setName: form.setName,
+                    year: form.year,
+                    cardNumber: form.cardNumber,
+                    gradeType: form.gradeType,
+                    gradeOverall: form.gradeOverall,
+                    variant: form.variant,
+                    variantOther: form.variantOther,
+                    rarity: form.rarity,
+                    rarityOther: form.rarityOther,
+                    labelType: form.labelType,
+                    language: form.language,
+                  }}
+                />
+              ) : undefined
+            }
           />
         ) : null
       }
