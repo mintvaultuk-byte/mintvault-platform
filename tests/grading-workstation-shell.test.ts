@@ -19,6 +19,10 @@ const SHELL = read("client/src/components/admin/admin-shell.tsx");
 // into their own shared components.
 const ASIDE_SRC = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
 const STRIP_SRC = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
+// canonical-consolidation pass: the fixed-height/two-panel outer geometry was
+// extracted verbatim into ONE shared shell. CertificateForm now MOUNTS it; the
+// geometry classes + grading-workspace/grading-control-panel testids live here.
+const SHELL_SRC = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
 
 /** Slice between two anchors (both must exist, in order). */
 function slice(src: string, start: string, end: string): string {
@@ -35,32 +39,41 @@ function changedFiles(): string[] {
   return gradingReleaseChangedFiles();
 }
 
-const WORKSPACE = slice(FORM, 'data-testid="grading-workspace"', "</form>");
-// Everything from the control panel start to the form open = the fixed header of
-// the right panel (workflow strip + identification tools live here).
-const CONTROL_HEADER = slice(FORM, `data-testid="grading-control-panel"`, "onSubmit={handleSubmit}");
+// CertificateForm now mounts the canonical shell; slice from the mount to the
+// form close to bound the /admin workstation body it composes.
+const WORKSPACE = slice(FORM, "<CanonicalGradingWorkstationShell", "</form>");
+// Everything from the header strip to the form open = the fixed header of the
+// right panel (workflow strip + identification tools live here), still composed
+// inside certificate-form.tsx as the shell's control-panel children.
+const CONTROL_HEADER = slice(FORM, "<WorkstationHeaderStrip", "onSubmit={handleSubmit}");
 
 describe("1-4. two-panel workspace: preview aside + control panel are grid siblings", () => {
   it("a viewport-bounded workspace wraps a two-column flex row (preview | controls)", () => {
-    expect(FORM).toMatch(/data-testid="grading-workspace"[^>]*/);
-    // Bounded, viewport-relative workstation height at desktop (decoupled from a
-    // fragile h-full chain); auto height below md so the page flows and scrolls.
-    expect(FORM).toContain("flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]");
+    // CertificateForm MOUNTS the one canonical shell — no inline geometry.
+    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
+    // The canonical shell OWNS the grading-workspace testid + the bounded,
+    // viewport-relative workstation height at desktop (auto below md so the page
+    // flows) — extracted verbatim from the old inline /admin layout.
+    expect(SHELL_SRC).toMatch(/data-testid="grading-workspace"[^>]*/);
+    expect(SHELL_SRC).toContain("flex min-h-0 flex-col");
+    expect(SHELL_SRC).toContain("md:h-[calc(100dvh-4.5rem)]");
     // The panels container is a flex row at md+ (column-stack below): 40% preview
-    // aside on the left, flex-1 control panel on the right. The column ratio
-    // now lives in the shared WorkstationPreviewAside component.
-    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
+    // aside on the left, flex-1 control panel on the right.
+    expect(SHELL_SRC).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
     expect(ASIDE_SRC).toContain("md:w-[40%] md:shrink-0");
   });
   it("CardPreviewPanel lives in the preview aside; controls in the control panel — siblings in one flex row", () => {
-    const row = slice(FORM, "flex min-h-0 flex-1 flex-col gap-3 md:flex-row", "onSubmit={handleSubmit}");
+    // CertificateForm passes the preview aside to the canonical shell; the
+    // shell composes it beside the control panel. Slice the mount → form.
+    const row = slice(FORM, "<CanonicalGradingWorkstationShell", "onSubmit={handleSubmit}");
     expect(row).toContain("<WorkstationPreviewAside");
     expect(ASIDE_SRC).toContain('data-testid="grading-preview-panel"');
     expect(ASIDE_SRC).toContain("<CardPreviewPanel");
-    expect(row).toContain('data-testid="grading-control-panel"');
+    // The control-panel column + its testid are owned by the canonical shell.
+    expect(SHELL_SRC).toContain('data-testid="grading-control-panel"');
     // preview aside renders for Card, Rarity AND Review (Grade keeps its own
     // dedicated protected card/defect tool and is intentionally excluded).
-    expect(row).toMatch(/\(wfStage <= 1 \|\| wfStage === 3\) &&[\s\S]*WorkstationPreviewAside/);
+    expect(row).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?[\s\S]*WorkstationPreviewAside/);
   });
   it("preview is NOT rendered above the fields as a full-width block", () => {
     // certificate-form.tsx no longer renders CardPreviewPanel directly at
@@ -69,7 +82,7 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
     // full-width row above the form.
     expect(FORM).not.toContain("<CardPreviewPanel");
     expect((ASIDE_SRC.match(/<CardPreviewPanel/g) ?? []).length).toBe(1);
-    const aside = slice(FORM, "<WorkstationPreviewAside", ")}");
+    const aside = slice(FORM, "<WorkstationPreviewAside", ") : null");
     expect(aside).toContain("WorkstationPreviewAside");
   });
 });
@@ -90,7 +103,7 @@ describe("2-3. workflow strip + Identification Tools are INSIDE the right contro
 
 describe("5-6. fixed-height shell + internal scroll", () => {
   it("the right control panel form scrolls internally (page itself does not grow unbounded)", () => {
-    const controlPanel = slice(FORM, 'data-testid="grading-control-panel"', "</form>");
+    const controlPanel = slice(FORM, "onSubmit={handleSubmit}", "</form>");
     expect(controlPanel).toContain("overflow-y-auto");
     expect(controlPanel).toContain("min-h-0 flex-1");
   });
@@ -127,13 +140,13 @@ describe("7-9. old tall chrome is gone", () => {
 
 describe("10-11. navigation + stage reuse", () => {
   it("Continue to Rarity stays inside the control panel form", () => {
-    const controlPanel = slice(FORM, 'data-testid="grading-control-panel"', "</form>");
+    const controlPanel = slice(FORM, "onSubmit={handleSubmit}", "</form>");
     expect(controlPanel).toContain('data-testid="button-continue-to-rarity"');
   });
   it("Rarity AND Review reuse the same side-by-side shell (aside shows for wfStage 0, 1, 3)", () => {
     // The preview aside gate covers Card (0), Rarity (1) and Review (3); Grade
     // (2) keeps its own dedicated protected card/defect tool instead.
-    expect(FORM).toMatch(/\{\(wfStage <= 1 \|\| wfStage === 3\) && \([\s\S]*WorkstationPreviewAside/);
+    expect(FORM).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?[\s\S]*WorkstationPreviewAside/);
   });
 });
 

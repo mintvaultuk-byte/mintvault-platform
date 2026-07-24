@@ -13,6 +13,7 @@ import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
+const CANON_SHELL = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
 const DASH = read("client/src/pages/admin-dashboard.tsx");
 const DRAWER = read("client/src/components/grading-workflow/CertificateToolsDrawer.tsx");
 const PICKER = read("client/src/components/rarity-picker/RarityVariantPicker.tsx");
@@ -75,7 +76,8 @@ describe("Ownership + NFC moved out of the grading scroll (spec 8-13, 15-17)", (
 
 describe("two-column shell + density (spec 1, 3, 19)", () => {
   it("Card/Rarity render the preview beside the controls (~40% left column)", () => {
-    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
+    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
+    expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
     // unified-shell pass: the column-ratio class now lives in ONE shared
     // constant inside WorkstationPreviewAside, not inline in certificate-form.
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");

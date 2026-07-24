@@ -95,7 +95,10 @@ describe("card preview is read-only (spec 3)", () => {
     // Fixed-height workstation shell: preview lives in a dedicated aside beside
     // the control panel, not a sticky column inside the form. unified-shell
     // pass: the aside is now the shared WorkstationPreviewAside component.
-    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
+    // The two-column row now lives in the canonical shell CertificateForm mounts.
+    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
+    const shellSrc = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
+    expect(shellSrc).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
     expect(FORM).toContain("<WorkstationPreviewAside");
     const asideSrc = read("client/src/components/grading-workflow/WorkstationPreviewAside.tsx");
     expect(asideSrc).toContain("md:w-[40%] md:shrink-0");

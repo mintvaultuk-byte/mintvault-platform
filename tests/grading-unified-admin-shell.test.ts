@@ -45,6 +45,9 @@ const ASIDE = read("client/src/components/grading-workflow/WorkstationPreviewAsi
 const CERT_TOOLS = read("client/src/components/grading-workflow/CertificateToolsDrawer.tsx");
 const GRADING_PANEL = read("client/src/components/grading/grading-panel.tsx");
 const REVIEW_SUMMARY = read("client/src/components/grading-workflow/ReviewSummary.tsx");
+// canonical-consolidation pass: the two-panel outer geometry + control-panel
+// column now live in the ONE shared shell (CertificateForm mounts it).
+const SHELL = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
 const BAR = read("client/src/components/grading-workflow/GradingWorkflowBar.tsx");
 
 describe("1. Staff and Super Admin share the AdminHeaderRow primitive", () => {
@@ -103,7 +106,9 @@ describe("3. all four grading stages use the SAME WorkstationHeaderStrip compone
 
 describe("4. all four stages use the same desktop breakpoint (md) for the two-column shell", () => {
   it("the outer workspace row and the preview aside share the SAME md: breakpoint", () => {
-    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
+    // CertificateForm mounts the shell; the two-column row lives in the shell.
+    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
+    expect(SHELL).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
     expect(ASIDE).toContain("md:w-[40%] md:shrink-0");
     // no competing/second breakpoint (e.g. lg:, 2xl:) governs the aside's own width.
     expect(ASIDE).not.toMatch(/lg:w-\[|2xl:w-\[|xl:w-\[/);
@@ -112,10 +117,10 @@ describe("4. all four stages use the same desktop breakpoint (md) for the two-co
 
 describe("5. the preview zone exists in Card, Rarity AND Review (Grade is a documented exception)", () => {
   it("the aside gate covers wfStage 0, 1 and 3", () => {
-    expect(FORM).toMatch(/\{\(wfStage <= 1 \|\| wfStage === 3\) && \(/);
+    expect(FORM).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?/);
   });
   it("Grade (wfStage 2) is excluded from the shared aside — documented, not accidental", () => {
-    const gateIdx = FORM.indexOf("{(wfStage <= 1 || wfStage === 3) && (");
+    const gateIdx = FORM.indexOf("wfStage <= 1 || wfStage === 3 ?");
     expect(gateIdx).toBeGreaterThan(-1);
     const gateLine = FORM.slice(gateIdx, gateIdx + 40);
     expect(gateLine).not.toContain("wfStage === 2");
@@ -183,7 +188,7 @@ describe("7. no duplicate preview in Grade or Review", () => {
     // The outer shell never mounts WorkstationPreviewAside for Grade (see
     // suite 5), so GradingPanel's own ImageViewer remains the only image
     // rendered for that stage.
-    const gateIdx = FORM.indexOf("{(wfStage <= 1 || wfStage === 3) && (");
+    const gateIdx = FORM.indexOf("wfStage <= 1 || wfStage === 3 ?");
     const gateLine = FORM.slice(gateIdx, gateIdx + 40);
     expect(gateLine).not.toContain("wfStage === 2");
   });
@@ -223,7 +228,8 @@ describe("10. session statistics use the slim shared row", () => {
 describe("11. no horizontal overflow risk at 1440x900 (structural check)", () => {
   it("the preview aside and control panel are both flex items with min-w-0/shrink control (no fixed oversized widths)", () => {
     expect(ASIDE).toContain("md:shrink-0"); // aside has an explicit, bounded share
-    expect(FORM).toContain('className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel"');
+    // The control-panel column (min-w-0 flex item) is owned by the canonical shell.
+    expect(SHELL).toContain('className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel"');
   });
   it("the workflow bar can shrink/scroll instead of forcing overflow", () => {
     expect(BAR).toContain("min-w-0");
@@ -233,7 +239,9 @@ describe("11. no horizontal overflow risk at 1440x900 (structural check)", () =>
 
 describe("12. right panel scrolls independently where required", () => {
   it("the control panel form has its own overflow-y-auto + min-h-0 flex-1", () => {
-    const i = FORM.indexOf('data-testid="grading-control-panel"');
+    // The control-panel column is the shell's; its scroll body (the <form>) is
+    // still composed inside certificate-form.tsx with the canonical scroll class.
+    const i = FORM.indexOf("onSubmit={handleSubmit}");
     const j = FORM.indexOf("</form>", i);
     const controlPanel = FORM.slice(i, j);
     expect(controlPanel).toContain("overflow-y-auto");
