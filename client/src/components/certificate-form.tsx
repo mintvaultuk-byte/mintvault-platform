@@ -1270,9 +1270,24 @@ export default function CertificateForm({
   // finishes — same debounce feel, strictly ordered writes.
   const autoSaveInFlightRef = useRef(false);
   const autoSavePendingRef = useRef(false);
+  // The queued replay MUST run the LATEST autoSaveNow, not the one that belongs
+  // to the in-flight save. `autoSaveNow` is re-created every render and reads
+  // `form` from its own closure (via buildCertFormData), so re-invoking the
+  // in-flight save's own binding replayed that render's STALE snapshot and
+  // silently re-persisted values the operator had since changed or cleared —
+  // e.g. clearing a rarity mid-flight was undone by the replay, making the
+  // pre-clear state the last write to the database. Assigning the newest
+  // closure to this ref every render (same deliberate pattern as the picker's
+  // onChangeRef) makes the replay build its payload from current state.
+  const autoSaveNowRef = useRef<(() => Promise<void>) | null>(null);
 
   async function autoSaveNow() {
     if (!certificate?.id) return;
+    // Mirror the debounce effect's guard. The queued replay now posts CURRENT
+    // state, so a field left transiently blank while a save was in flight must
+    // defer here exactly as the debounce defers it — never silently persist a
+    // blank required field. The next edit re-triggers the debounce and saves.
+    if (!hasRequiredFields) return;
     if (autoSaveInFlightRef.current) {
       autoSavePendingRef.current = true;
       return;
@@ -1321,10 +1336,20 @@ export default function CertificateForm({
       autoSaveInFlightRef.current = false;
       if (autoSavePendingRef.current) {
         autoSavePendingRef.current = false;
-        void autoSaveNow();
+        // Replay through the ref so the queued save serialises the CURRENT form
+        // state. `autoSaveNow()` here would re-run THIS closure and re-post the
+        // snapshot this save was built from, losing every edit made in flight.
+        // Falls back to this closure only if the ref was never assigned (it is
+        // assigned on every render below, so that is unreachable in practice).
+        void (autoSaveNowRef.current ?? autoSaveNow)();
       }
     }
   }
+
+  // Keep the replay target pointed at the newest closure (and therefore the
+  // newest `form`). Plain per-render assignment — not an effect — so it is
+  // already current when a save that started this render settles.
+  autoSaveNowRef.current = autoSaveNow;
 
   // Debounced auto-save whenever an identity field changes. Skips the first
   // render (hydratedOnceRef) so we don't immediately re-PUT what was just
