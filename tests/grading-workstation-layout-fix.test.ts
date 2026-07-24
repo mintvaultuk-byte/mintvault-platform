@@ -117,7 +117,9 @@ describe("6. desktop shell is a real two-column layout at desktop breakpoints", 
     expect(CANON_SHELL).not.toContain("gap-3 lg:flex-row");
   });
   it("the workstation is viewport-bounded at desktop (not an unbounded h-full chain)", () => {
-    expect(CANON_SHELL).toContain("md:h-[calc(100dvh-4.5rem)]");
+    // The shell FILLS its parent; the one bounded viewport-height wrapper is CertForm's.
+    expect(FORM).toContain("md:h-[calc(100dvh-4.5rem)]");
+    expect(CANON_SHELL).toContain("flex min-h-0 flex-col h-full");
   });
 });
 

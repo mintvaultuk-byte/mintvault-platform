@@ -86,12 +86,14 @@ export default function GraderPage() {
   if (active) {
     const c = active.card;
     return (
-      <div className="min-h-screen bg-[var(--admin-bg)] text-[var(--admin-ink)]">
+      // Focused full-viewport grading view — bounded flex column so the canonical
+      // workstation (flex-1) fills exactly the available height, no black band.
+      <div className="fixed inset-0 z-40 flex flex-col bg-[var(--admin-bg)] text-[var(--admin-ink)]" data-testid="grader-grading-focus">
         {/* Same shared AdminHeaderRow primitive as the Staff grading breadcrumb
             and Super Admin — the grader active-card view previously used a raw
             ad-hoc header (hardcoded brand hex, its own flex row), which read as
             a second, legacy standalone shell stacked beneath the app. */}
-        <header className="border-b border-[var(--admin-line)] px-3 py-2">
+        <header className="shrink-0 border-b border-[var(--admin-line)] px-3 py-2">
           <AdminHeaderRow
             testId="grader-grading-breadcrumb"
             left={

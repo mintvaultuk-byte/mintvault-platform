@@ -26,7 +26,14 @@ const ADMIN_STAFF = read("client/src/pages/admin-staff.tsx");
 // contain the canonical outer-geometry class strings.
 const ROUTE_MOUNTS = { STAFF, GRADER, ADMIN_STAFF, ADMIN_DASH, CERT_FORM, WORKSTATION };
 
-const GEOMETRY_HEIGHT = "md:h-[calc(100dvh-4.5rem)]";
+// HEIGHT CONTRACT: the shell FILLS its parent (h-full); it never sets a
+// viewport-relative height of its own. Exactly ONE bounded viewport-height
+// wrapper is sanctioned — CertificateForm's /admin wrapper. Role focused views
+// (staff/grader) and the admin-review overlay establish their bounded height via
+// a `fixed inset-0 flex flex-col` container. This is what removed the "black bar
+// below the shell" regression (a fixed-calc shell shorter than a taller parent).
+const SHELL_FILL = "flex min-h-0 flex-col h-full";
+const ADMIN_HEIGHT_WRAPPER = "md:h-[calc(100dvh-4.5rem)]";
 const GEOMETRY_ROW = "flex min-h-0 flex-1 flex-col gap-3 md:flex-row";
 const GEOMETRY_COL = 'className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel"';
 
@@ -49,16 +56,22 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     expect(WORKSTATION).toContain("<CanonicalGradingWorkstationShell");
   });
 
-  it("5+9. only ONE file owns the canonical outer geometry — every other surface just mounts it", () => {
+  it("5+9. only ONE file owns the canonical two-column geometry; the shell FILLS its parent (no fixed height)", () => {
     for (const [name, src] of Object.entries(ROUTE_MOUNTS)) {
-      expect(src, `${name} must NOT inline the fixed-height geometry`).not.toContain(GEOMETRY_HEIGHT);
+      // No route/adapter inlines the shell's two-column row or control-panel col.
       expect(src, `${name} must NOT inline the two-column row geometry`).not.toContain(GEOMETRY_ROW);
       expect(src, `${name} must NOT inline the control-panel column`).not.toContain(GEOMETRY_COL);
     }
-    // The shell is the single source of truth for all three.
-    expect(SHELL).toContain(GEOMETRY_HEIGHT);
+    // The shell is the single source of truth for the row + column, and it FILLS
+    // its parent rather than setting a viewport-relative height.
+    expect(SHELL).toContain(SHELL_FILL);
     expect(SHELL).toContain(GEOMETRY_ROW);
     expect(SHELL).toContain(GEOMETRY_COL);
+    // The shell must NEVER own a viewport-height calc (that was the black-bar bug).
+    expect(SHELL).not.toMatch(/h-\[calc\(100dvh/);
+    // Exactly ONE sanctioned bounded viewport-height wrapper exists: CertForm's.
+    expect(CERT_FORM).toContain(ADMIN_HEIGHT_WRAPPER);
+    expect((CERT_FORM.match(/md:h-\[calc\(100dvh/g) ?? []).length).toBe(1);
   });
 
   it("6. no max-w-6xl grading wrapper remains anywhere in the grading shell/adapter", () => {
@@ -66,11 +79,14 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     expect(WORKSTATION).not.toContain("max-w-6xl");
   });
 
-  it("7. canonical bounded-height / min-h-0 structure exists in the shell", () => {
-    expect(SHELL).toContain("flex min-h-0 flex-col");
-    expect(SHELL).toContain(GEOMETRY_HEIGHT);
+  it("7. canonical fill (h-full) / min-h-0 structure exists in the shell", () => {
+    expect(SHELL).toContain(SHELL_FILL);
     expect(SHELL).toContain('data-testid="grading-workspace"');
     expect(SHELL).toContain('data-canonical-shell="true"');
+    // Focused role views + the admin-review overlay provide the bounded height.
+    expect(STAFF).toMatch(/fixed inset-0 z-40 flex flex-col/);
+    expect(GRADER).toMatch(/fixed inset-0 z-40 flex flex-col/);
+    expect(ADMIN_STAFF).toMatch(/fixed inset-0 z-50 flex flex-col/);
   });
 
   it("8. GradingPanel is mounted inside the shell's bounded canonical scroll body", () => {
@@ -123,9 +139,80 @@ describe("Canonical grading workstation — one shell, capability-only role diff
     // competing shell/consumer appears, add it here deliberately — never silently.
     const mounts = ["client/src/components/grading-workflow/GradingWorkstation.tsx", "client/src/components/certificate-form.tsx"];
     for (const p of mounts) expect(read(p)).toContain("<CanonicalGradingWorkstationShell");
-    // No page defines its own workstation geometry class.
+    // Exactly ONE viewport-height wrapper is sanctioned across ALL grading
+    // surfaces — CertForm's /admin wrapper. No other file may introduce a
+    // competing `md:h-[calc(100dvh-…)]` (that reintroduces the black-bar class).
     for (const [name, src] of Object.entries(ROUTE_MOUNTS)) {
-      expect(src, `${name} owns no competing workstation height`).not.toMatch(/md:h-\[calc\(100dvh-\d/);
+      const count = (src.match(/md:h-\[calc\(100dvh/g) ?? []).length;
+      const allowed = name === "CERT_FORM" ? 1 : 0;
+      expect(count, `${name} owns ${count} viewport-height wrappers (allowed ${allowed})`).toBe(allowed);
     }
+  });
+});
+
+describe("Hotfix: bottom black bar + Admin Review identity-editor placement", () => {
+  it("BB1. the shell fills its parent and never sets a fixed/min viewport height (no obscuring bottom layer)", () => {
+    expect(SHELL).toContain(SHELL_FILL); // flex min-h-0 flex-col h-full
+    expect(SHELL).not.toMatch(/h-\[calc\(100dvh|min-h-\[100|min-h-screen/);
+  });
+
+  it("BB2. the role adapter cannot re-inflate/mask the shell — no admin-root min-height wrapper, no fixed height, no bg-black", () => {
+    // The adapter's own root fills its flex slot; it does NOT wrap the shell in
+    // admin-root (min-height:100vh) or a fixed viewport height or a black layer.
+    expect(WORKSTATION).toContain("flex min-h-0 min-w-0 flex-1 flex-col");
+    expect(WORKSTATION).not.toContain('className="admin-root"');
+    expect(WORKSTATION).not.toMatch(/h-\[calc\(100dvh|min-h-screen|bg-black/);
+  });
+
+  it("BB3. each active grading view provides ONE bounded flex-column height context (focused/overlay)", () => {
+    expect(STAFF).toMatch(/fixed inset-0 z-40 flex flex-col/);
+    expect(GRADER).toMatch(/fixed inset-0 z-40 flex flex-col/);
+    expect(ADMIN_STAFF).toMatch(/fixed inset-0 z-50 flex flex-col/);
+    // admin-review overlay no longer caps the workstation with max-w-6xl.
+    const overlay = ADMIN_STAFF.slice(ADMIN_STAFF.indexOf("grade-review-overlay"), ADMIN_STAFF.indexOf("</GradingWorkstation"));
+    expect(overlay).not.toContain("max-w-6xl");
+    expect(overlay).not.toContain("min-h-screen");
+  });
+
+  it("ID1. Admin Review passes its identity editor to the workstation identityEditor slot (rendered inside the body)", () => {
+    expect(ADMIN_STAFF).toContain("identityEditor={reviewIdentityEditor}");
+    // The adapter renders the slot INSIDE the scroll body (right column).
+    expect(WORKSTATION).toContain("identityEditor");
+    expect(WORKSTATION).toContain('data-testid="workstation-identity-editor"');
+    const slotIdx = WORKSTATION.indexOf('data-testid="workstation-identity-editor"');
+    const bodyIdx = WORKSTATION.indexOf("WORKSTATION_BODY_SCROLL_CLASS");
+    const panelIdx = WORKSTATION.indexOf("<GradingPanel");
+    expect(slotIdx).toBeGreaterThan(bodyIdx); // inside the body
+    expect(slotIdx).toBeLessThan(panelIdx); // above the grading panel
+  });
+
+  it("ID2. the identity editor is NOT a detached full-width section above the workstation", () => {
+    // The old inline section (border-b bg-gold, between the header and the
+    // workstation) is gone from admin-staff's overlay JSX.
+    const overlay = ADMIN_STAFF.slice(ADMIN_STAFF.indexOf("grade-review-overlay"));
+    expect(overlay).not.toContain('bg-[var(--admin-gold)]/[0.03] px-4 py-2.5');
+  });
+
+  it("ID3. the identity save / cancel / search / re-run handlers stay connected in the moved editor", () => {
+    // reviewIdentityEditor is defined in the component body and wires the same handlers.
+    expect(ADMIN_STAFF).toContain("const reviewIdentityEditor");
+    for (const t of [
+      "button-edit-identity",
+      "button-save-identity",
+      "button-override-rerun",
+      "input-override-card-search",
+      "input-override-name",
+      "input-override-set",
+      "input-override-variant",
+    ]) {
+      expect(ADMIN_STAFF, `identity control ${t} preserved`).toContain(t);
+    }
+    for (const h of ["saveIdentityOverride", "rerunIdentityOverride", "applyIdoCardPick", "setIdoOpen"]) {
+      expect(ADMIN_STAFF, `handler ${h} still wired`).toContain(h);
+    }
+  });
+
+  it("ID4. when the identity editor is open the preview aside is forced on (card left / editor right)", () => {
+    expect(WORKSTATION).toMatch(/mode === "admin-review" && !!identityEditor/);
   });
 });

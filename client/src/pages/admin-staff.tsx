@@ -600,6 +600,113 @@ export default function AdminStaffPage() {
   const visibleSelectable = queue.filter((q) => q.hasImages).map((q) => q.certId);
   const allVisibleSelected = visibleSelectable.length > 0 && visibleSelectable.every((id) => gSel.has(id));
 
+  // Manual card-identity override — rendered INSIDE the canonical grading
+  // workstation (GradingWorkstation identityEditor slot), beside the card
+  // preview in the right column, never as a detached full-width section above.
+  const reviewIdentityEditor = (
+    <div
+      className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-gold)]/[0.03] px-3 py-2.5"
+      data-testid="review-identity-editor"
+    >
+      {!idoOpen ? (
+        <button
+          type="button"
+          onClick={() => setIdoOpen(true)}
+          data-testid="button-edit-identity"
+          className="text-xs text-[var(--admin-gold)]/80 underline underline-offset-2 hover:text-[var(--admin-gold)]"
+        >
+          Edit card identity…
+        </button>
+      ) : (
+        <div className="space-y-2">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--admin-ink-faint)]">
+            Manual card identity override
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Identify tools</span>
+              <button
+                type="button"
+                onClick={rerunIdentityOverride}
+                disabled={idoRerunBusy}
+                title="Re-run TCGdex identification on this card (identify only — never grades)"
+                data-testid="button-override-rerun"
+                className="rounded border border-[var(--admin-gold)]/40 px-2 py-1 text-[10px] font-bold uppercase text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 disabled:opacity-40"
+              >
+                {idoRerunBusy ? "Re-running…" : "Re-run TCGdex"}
+              </button>
+            </div>
+            <TcgCardSearch onPick={applyIdoCardPick} initialQuery={idoName} testId="input-override-card-search" />
+          </div>
+          <PokemonSetPicker
+            value={idoSet}
+            onChange={(name, id) => {
+              setIdoSet(name);
+              setIdoSetCode(id || "");
+            }}
+            allowAddSet
+            allowEditSet
+            createEndpoint="/api/staff/custom-sets"
+            prefill={{ setName: idoSet, setCode: idoSetCode }}
+            testId="input-override-set"
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input
+              className="ss-input"
+              placeholder="Card name (required)"
+              value={idoName}
+              onChange={(e) => setIdoName(e.target.value)}
+              data-testid="input-override-name"
+            />
+            <input
+              className="ss-input"
+              placeholder="Card number (e.g. 037 or 037/091)"
+              value={idoNumber}
+              onChange={(e) => setIdoNumber(e.target.value)}
+              data-testid="input-override-number"
+            />
+            <input
+              className="ss-input"
+              placeholder="Year"
+              value={idoYear}
+              onChange={(e) => setIdoYear(e.target.value)}
+              data-testid="input-override-year"
+            />
+            <VariantPicker
+              value={idoVariant}
+              onChange={setIdoVariant}
+              testId="input-override-variant"
+              inputClassName="ss-input w-full"
+            />
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={saveIdentityOverride}
+              disabled={idoBusy}
+              data-testid="button-save-identity"
+              className="rounded bg-[var(--admin-gold)] px-4 py-1.5 text-xs font-bold text-[#1A1400] hover:bg-[var(--admin-gold-hi)] disabled:opacity-50"
+            >
+              {idoBusy ? "Saving…" : "Save identity"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIdoOpen(false)}
+              disabled={idoBusy}
+              className="rounded border border-[var(--admin-gold)]/40 px-4 py-1.5 text-xs hover:bg-[var(--admin-gold)]/10"
+            >
+              Cancel
+            </button>
+          </div>
+          <div className="text-[10px] text-[var(--admin-ink-faint)]">
+            Overwrites card name / set / number / year / variant. Flows to the operator queue, the public cert page, and
+            the slab/PDF. Logged.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-black text-[#E8E4DC] px-4 py-6">
       <div className="max-w-3xl mx-auto space-y-6">
@@ -1072,10 +1179,10 @@ export default function AdminStaffPage() {
         // Mounted inside the shared admin-root token scope (same design system as
         // Super Admin / corrected Staff shell) rather than raw hex — this overlay
         // previously ran its own standalone bg-black/#E8E4DC visual language.
-        <div className="admin-root fixed inset-0 z-50 overflow-auto bg-black/90" data-testid="grade-review-overlay">
-          <div className="min-h-screen p-3">
-            <div className="mx-auto max-w-6xl rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]">
-              <div className="sticky top-0 z-10 px-4 py-2.5 border-b border-[var(--admin-line)] bg-[var(--admin-panel)]">
+        <div className="admin-root fixed inset-0 z-50 flex flex-col bg-black/90" data-testid="grade-review-overlay">
+          <div className="flex min-h-0 flex-1 flex-col p-3">
+            <div className="mx-auto flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel)]">
+              <div className="shrink-0 px-4 py-2.5 border-b border-[var(--admin-line)] bg-[var(--admin-panel)]">
                 <AdminHeaderRow
                   testId="grade-review-header"
                   left={
@@ -1132,120 +1239,9 @@ export default function AdminStaffPage() {
                   </div>
                 )}
               </div>
-              {/* Manual card-identity override — admin sets the real name/set/year
-                  for cards that never auto-ID'd (or auto-ID'd empty/wrong). */}
-              <div className="border-b border-[var(--admin-line)] bg-[var(--admin-gold)]/[0.03] px-4 py-2.5">
-                {!idoOpen ? (
-                  <button
-                    type="button"
-                    onClick={() => setIdoOpen(true)}
-                    data-testid="button-edit-identity"
-                    className="text-xs text-[var(--admin-gold)]/80 underline underline-offset-2 hover:text-[var(--admin-gold)]"
-                  >
-                    Edit card identity…
-                  </button>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-[var(--admin-ink-faint)]">
-                      Manual card identity override
-                    </div>
-                    {/* TCGdex re-run + card-search by name — parity with the grader
-                        identity editor. Both call the shared /api/staff/* endpoints. */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
-                          Identify tools
-                        </span>
-                        <button
-                          type="button"
-                          onClick={rerunIdentityOverride}
-                          disabled={idoRerunBusy}
-                          title="Re-run TCGdex identification on this card (identify only — never grades)"
-                          data-testid="button-override-rerun"
-                          className="rounded border border-[var(--admin-gold)]/40 px-2 py-1 text-[10px] font-bold uppercase text-[var(--admin-gold)] hover:bg-[var(--admin-gold)]/10 disabled:opacity-40"
-                        >
-                          {idoRerunBusy ? "Re-running…" : "Re-run TCGdex"}
-                        </button>
-                      </div>
-                      <TcgCardSearch
-                        onPick={applyIdoCardPick}
-                        initialQuery={idoName}
-                        testId="input-override-card-search"
-                      />
-                    </div>
-
-                    {/* Set name — same searchable picker (with inline add) the grader uses. */}
-                    <PokemonSetPicker
-                      value={idoSet}
-                      onChange={(name, id) => {
-                        setIdoSet(name);
-                        setIdoSetCode(id || "");
-                      }}
-                      allowAddSet
-                      allowEditSet
-                      createEndpoint="/api/staff/custom-sets"
-                      prefill={{ setName: idoSet, setCode: idoSetCode }}
-                      testId="input-override-set"
-                    />
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                      <input
-                        className="ss-input"
-                        placeholder="Card name (required)"
-                        value={idoName}
-                        onChange={(e) => setIdoName(e.target.value)}
-                        data-testid="input-override-name"
-                      />
-                      <input
-                        className="ss-input"
-                        placeholder="Card number (e.g. 037 or 037/091)"
-                        value={idoNumber}
-                        onChange={(e) => setIdoNumber(e.target.value)}
-                        data-testid="input-override-number"
-                      />
-                      <input
-                        className="ss-input"
-                        placeholder="Year"
-                        value={idoYear}
-                        onChange={(e) => setIdoYear(e.target.value)}
-                        data-testid="input-override-year"
-                      />
-                      {/* Variant/finish — managed picker: full canonical list +
-                          custom_variants, inline add (dedup + audit server-side).
-                          Prints on the slab, so a proper picker not free-text. */}
-                      <VariantPicker
-                        value={idoVariant}
-                        onChange={setIdoVariant}
-                        testId="input-override-variant"
-                        inputClassName="ss-input w-full"
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={saveIdentityOverride}
-                        disabled={idoBusy}
-                        data-testid="button-save-identity"
-                        className="rounded bg-[var(--admin-gold)] px-4 py-1.5 text-xs font-bold text-[#1A1400] hover:bg-[var(--admin-gold-hi)] disabled:opacity-50"
-                      >
-                        {idoBusy ? "Saving…" : "Save identity"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setIdoOpen(false)}
-                        disabled={idoBusy}
-                        className="rounded border border-[var(--admin-gold)]/40 px-4 py-1.5 text-xs hover:bg-[var(--admin-gold)]/10"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                    <div className="text-[10px] text-[var(--admin-ink-faint)]">
-                      Overwrites card name / set / number / year / variant. Flows to the operator queue, the public cert
-                      page, and the slab/PDF. Logged.
-                    </div>
-                  </div>
-                )}
-              </div>
+              {/* Manual card-identity override moved INTO the workstation body
+                  (GradingWorkstation identityEditor slot) — beside the card
+                  preview, never a detached full-width section above the shell. */}
               {showReject && (
                 <div className="space-y-2 border-b border-red-900/40 bg-red-950/20 px-4 py-3">
                   <textarea
@@ -1275,13 +1271,15 @@ export default function AdminStaffPage() {
                   </div>
                 </div>
               )}
-              <div className="p-3">
+              <div className="flex min-h-0 flex-1 flex-col">
                 {/* The SAME grading panel the grader/admin use — adminReview mode is
                     charge-safe (no AI/recrop/delete) and its Approve does an explicit
-                    save-then-publish via approve-grader-grade. */}
+                    save-then-publish via approve-grader-grade. The identity editor is
+                    rendered inside the workstation (identityEditor slot). */}
                 <GradingWorkstation
                   mode="admin-review"
                   adminReview
+                  identityEditor={reviewIdentityEditor}
                   apiBase="/api/admin/grade-review"
                   certId={reviewCert.certId}
                   certIdStr={reviewCert.certIdStr}

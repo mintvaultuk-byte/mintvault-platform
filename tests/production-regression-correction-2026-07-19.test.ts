@@ -89,7 +89,8 @@ describe("Grade stage — containment lives on the outer shell, not the workstat
     // the <form> body still carries the single canonical scrollport class.
     expect(FORM).toContain("<CanonicalGradingWorkstationShell");
     const shellSrc = readFileSync(join(process.cwd(), "client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx"), "utf8");
-    expect(shellSrc).toContain("md:h-[calc(100dvh-4.5rem)]");
+    expect(shellSrc).toContain("flex min-h-0 flex-col h-full"); // shell fills its parent
+    expect(FORM).toContain("md:h-[calc(100dvh-4.5rem)]"); // the one bounded viewport wrapper
     expect(FORM).toContain("min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1");
   });
   it("no transform/scale/zoom was introduced (the protected card tool reads live getBoundingClientRect)", () => {

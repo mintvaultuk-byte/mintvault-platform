@@ -4,7 +4,6 @@ import {
   CanonicalGradingWorkstationShell,
   WORKSTATION_BODY_SCROLL_CLASS,
   WORKSTATION_HEADER_REGION_CLASS,
-  type WorkstationViewportOffset,
 } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
@@ -24,13 +23,13 @@ import { WorkstationPreviewAside } from "@/components/grading-workflow/Workstati
  */
 const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-type Mode = { key: string; label: string; offset: WorkstationViewportOffset; actions: string[]; readOnly?: boolean };
+type Mode = { key: string; label: string; actions: string[]; readOnly?: boolean };
 const MODES: Mode[] = [
-  { key: "super-admin", label: "Super Admin (/admin)", offset: "4.5rem", actions: ["Approve & Publish", "Certificate tools", "Correction mode"] },
-  { key: "admin-review", label: "Admin Review (/admin/staff)", offset: "4.5rem", actions: ["Approve", "Return", "Reject"] },
-  { key: "staff", label: "Staff (/staff)", offset: "8.5rem", actions: ["Save", "Submit for review"] },
-  { key: "grader", label: "Grader (/grader)", offset: "6.5rem", actions: ["Save", "Submit for review"] },
-  { key: "approved", label: "Approved / read-only", offset: "4.5rem", actions: [], readOnly: true },
+  { key: "super-admin", label: "Super Admin (/admin)", actions: ["Approve & Publish", "Certificate tools", "Correction mode"] },
+  { key: "admin-review", label: "Admin Review (/admin/staff)", actions: ["Approve", "Return", "Reject"] },
+  { key: "staff", label: "Staff (/staff)", actions: ["Save", "Submit for review"] },
+  { key: "grader", label: "Grader (/grader)", actions: ["Save", "Submit for review"] },
+  { key: "approved", label: "Approved / read-only", actions: [], readOnly: true },
 ];
 
 const gold = "bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400]";
@@ -108,12 +107,16 @@ export default function DevCanonicalWorkstationHarness() {
         <div className="space-y-6">
           {MODES.map((mode) => (
             <div key={mode.key}>
-              <div className="text-[11px] uppercase tracking-wider text-[var(--admin-ink-faint)] mb-1">{mode.label} · offset {mode.offset}</div>
-              <div className="mx-auto border border-[var(--admin-line)]" style={{ width: px, maxWidth: "100%" }} data-harness-mode={mode.key}>
-                <CanonicalGradingWorkstationShell
-                  viewportOffset={mode.offset}
-                  previewAside={<WorkstationPreviewAside certificateId={null} />}
-                >
+              <div className="text-[11px] uppercase tracking-wider text-[var(--admin-ink-faint)] mb-1">{mode.label}</div>
+              {/* Bounded flex-column parent (like each route's focused view). The
+                  shell FILLS this exactly — the workstation must reach the true
+                  bottom with NO black band below it. */}
+              <div
+                className="mx-auto flex flex-col border border-[var(--admin-line)]"
+                style={{ width: px, maxWidth: "100%", height: 640 }}
+                data-harness-mode={mode.key}
+              >
+                <CanonicalGradingWorkstationShell previewAside={<WorkstationPreviewAside certificateId={null} />}>
                   <div className={WORKSTATION_HEADER_REGION_CLASS}>
                     <WorkstationHeaderStrip workflowCurrent={2} workflowMax={3} onStageClick={() => {}} sessionCompleted={0} />
                   </div>
