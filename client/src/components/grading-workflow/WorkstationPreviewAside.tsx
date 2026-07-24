@@ -25,14 +25,18 @@ export function WorkstationPreviewAside({
   certificateId,
   frontFile,
   backFile,
+  apiBase = "/api/admin",
 }: {
   certificateId: number | null;
   frontFile?: File | null;
   backFile?: File | null;
+  /** Cert-scoped API base for the preview images. Defaults to /api/admin so the
+      admin certificate editor is unchanged; role-safe shells pass their own. */
+  apiBase?: string;
 }) {
   return (
     <aside className={`min-h-0 max-md:max-h-[55vh] ${WORKSTATION_PREVIEW_WIDTH_CLASS}`} data-testid="grading-preview-panel">
-      <CardPreviewPanel fill certificateId={certificateId} frontFile={frontFile} backFile={backFile} />
+      <CardPreviewPanel fill certificateId={certificateId} frontFile={frontFile} backFile={backFile} apiBase={apiBase} />
     </aside>
   );
 }

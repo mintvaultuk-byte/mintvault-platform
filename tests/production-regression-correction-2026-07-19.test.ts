@@ -34,7 +34,9 @@ describe("Staff shell — no duplicate legacy header in the active-card grading 
   it("both the outer Staff header and the grading breadcrumb use the same AdminHeaderRow component", () => {
     expect((STAFF.match(/<AdminHeaderRow/g) ?? []).length).toBeGreaterThanOrEqual(2);
   });
-  it("GradingPanel itself is untouched by this pass — mounted exactly as before", () => {
+  it("Staff active grading still uses the grader-scoped canonical workstation", () => {
+    expect(STAFF).toContain("<GradingWorkstation");
+    expect(STAFF).toContain('mode="staff"');
     expect(STAFF).toContain('apiBase="/api/grader"');
     expect(STAFF).toContain("graderMode");
   });

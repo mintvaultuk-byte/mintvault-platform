@@ -356,11 +356,12 @@ describe("admin-staff.tsx review overlay — the screenshot-proven regression st
   it("the review-failure/save-failure banners (msg/err) now render INSIDE the z-50 overlay, not only underneath it", () => {
     expect(overlay).toMatch(/\{msg && \(/);
   });
-  it("GradingPanel's adminReview props are untouched (protected-adjacent — visual fix only)", () => {
+  it("the canonical grading workstation preserves adminReview props (protected-adjacent — visual fix only)", () => {
     const panelBlock = ADMIN_STAFF.slice(
-      ADMIN_STAFF.indexOf("<GradingPanel"),
-      ADMIN_STAFF.indexOf("<GradingPanel") + 500
+      ADMIN_STAFF.indexOf("<GradingWorkstation"),
+      ADMIN_STAFF.indexOf("<GradingWorkstation") + 600
     );
+    expect(panelBlock).toContain('mode="admin-review"');
     expect(panelBlock).toContain("adminReview");
     expect(panelBlock).toContain('apiBase="/api/admin/grade-review"');
   });

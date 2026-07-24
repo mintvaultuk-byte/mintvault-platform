@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
-import GradingPanel from "../components/grading/grading-panel";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
+import { GradingWorkstation } from "@/components/grading-workflow/GradingWorkstation";
 
 /**
  * Restricted-grader dashboard (v2 — cert-level). Shows ONLY this grader's
@@ -112,7 +112,8 @@ export default function GraderPage() {
             </div>
           </div>
         )}
-        <GradingPanel
+        <GradingWorkstation
+          mode="grader"
           apiBase="/api/grader"
           graderMode
           certId={c.certId}
@@ -142,9 +143,7 @@ export default function GraderPage() {
       <header className="border-b border-[var(--admin-line)] px-3 py-2">
         <AdminHeaderRow
           testId="grader-header"
-          left={
-            <h1 className="text-[var(--admin-gold)] text-sm font-extrabold tracking-wide">MintVault — Grader</h1>
-          }
+          left={<h1 className="text-[var(--admin-gold)] text-sm font-extrabold tracking-wide">MintVault — Grader</h1>}
           right={
             <>
               <span className="text-[10px] text-[var(--admin-ink-faint)]">{email}</span>

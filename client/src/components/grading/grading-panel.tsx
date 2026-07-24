@@ -22,8 +22,8 @@ import ManualCardTool from "./manual-card-tool";
 // Reuse the EXACT admin set-name combobox + card autofill so the grader identity
 // editor feels identical to the admin CertificateForm. Both back-end endpoints
 // (/api/pokemon-sets, /api/cards/autofill) are public — no auth change needed.
-import { PokemonSetPicker } from "@/components/certificate-form";
-import { VariantPicker, TcgCardSearch, type TcgCardPick } from "@/components/identity-tools";
+import { type TcgCardPick } from "@/components/identity-tools";
+import { GradingIdentityVerification } from "@/components/grading/GradingIdentityVerification";
 import { autofillCard } from "@/lib/api";
 
 // Shared calculation imports (client-side re-implementations)
@@ -229,6 +229,26 @@ const SURFACE_ISSUES: { key: keyof SurfaceValues; label: string; warning?: strin
   },
 ];
 
+const CANONICAL_GRADING_SECTION_ORDER = [
+  "workflow-banners",
+  "identification",
+  "identity-fields",
+  "workstation-header",
+  "preflight",
+  "ai-tools",
+  "card-images",
+  "defect-marking",
+  "grading-controls",
+  "mvgs-score",
+  "grade-result",
+  "d1-d2-d3",
+  "centering",
+  "surface",
+  "authentication",
+  "notes",
+  "footer-actions",
+].join(",");
+
 function surfaceGradeColor(g: number): string {
   if (g >= 10) return "#D4AF37";
   if (g >= 8) return "#16A34A";
@@ -301,15 +321,27 @@ export default function GradingPanel({
   // With AI identify OFF we pass ?aiIdentify=0 so the server SKIPS the identify
   // call and returns immediately (no block); `aiIdentify` is in the queryKey so
   // flipping the toggle refetches with the new behaviour.
-  const { data: gradingData, isPending: gradingPending } = useQuery<any>({
+  const {
+    data: gradingData,
+    isPending: gradingPending,
+    isError: gradingError,
+    error: gradingLoadError,
+  } = useQuery<any>({
     queryKey: [`${apiBase}/certificates/${certId}/grading`, aiIdentify],
     queryFn: async () => {
       const url = `${apiBase}/certificates/${certId}/grading${aiIdentify ? "" : "?aiIdentify=0"}`;
       const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) return null;
+      if (!res.ok) throw new Error(`Grading workflow load failed (${res.status})`);
       return res.json();
     },
   });
+  const gradingWorkflowLocked = gradingPending || gradingError;
+  const gradingWorkflowLockedRef = useRef(gradingWorkflowLocked);
+  const gradingErrorRef = useRef(gradingError);
+  useEffect(() => {
+    gradingWorkflowLockedRef.current = gradingWorkflowLocked;
+    gradingErrorRef.current = gradingError;
+  }, [gradingWorkflowLocked, gradingError]);
 
   // Legacy "Manual Centering" two-rect picker REMOVED (owner directive
   // 2026-07-01): no longer used — the 8-dot Card Tool below is the only
@@ -645,9 +677,25 @@ export default function GradingPanel({
       if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
       if (e.ctrlKey && e.key === "s") {
         e.preventDefault();
+        if (gradingWorkflowLockedRef.current) {
+          toast({
+            title: gradingErrorRef.current ? "Grading workflow unavailable" : "Checking approval state",
+            description: "Wait for this card's workflow data before saving changes.",
+            variant: gradingErrorRef.current ? "destructive" : undefined,
+          });
+          return;
+        }
         saveDraft();
       } else if (e.ctrlKey && e.key === "Enter") {
         e.preventDefault();
+        if (gradingWorkflowLockedRef.current) {
+          toast({
+            title: gradingErrorRef.current ? "Grading workflow unavailable" : "Checking approval state",
+            description: "Wait for this card's workflow data before submitting changes.",
+            variant: gradingErrorRef.current ? "destructive" : undefined,
+          });
+          return;
+        }
         // Pre-grade checklist gate — Ctrl+Enter shortcut must respect the
         // deionization checkbox the same way the Approve button does.
         if (!deionizationComplete) {
@@ -723,13 +771,13 @@ export default function GradingPanel({
     if (gradingData.authNotes) setAuthNotes(gradingData.authNotes);
     if (gradingData.privateNotes) setPrivateNotes(gradingData.privateNotes);
     if (gradingData.gradeExplanation) setGradeExplanation(gradingData.gradeExplanation);
-    if (gradingData.gradeApprovedBy) {
-      setApproved(true);
-      setGradeApprovedBy(gradingData.gradeApprovedBy);
-    }
-    if ((gradingData as any).gradeApprovedAt) {
-      setGradeApprovedAt(String((gradingData as any).gradeApprovedAt));
-    }
+    const nextGradeApprovedAt = (gradingData as any).gradeApprovedAt
+      ? String((gradingData as any).gradeApprovedAt)
+      : null;
+    const nextGradeApprovedBy = gradingData.gradeApprovedBy ? String(gradingData.gradeApprovedBy) : null;
+    setGradeApprovedAt(nextGradeApprovedAt);
+    setGradeApprovedBy(nextGradeApprovedBy);
+    setApproved(!!(nextGradeApprovedAt || nextGradeApprovedBy));
     // Manual centering frame rects (persisted)
     if (gradingData.centeringOuterFront) setManualOuterFront(gradingData.centeringOuterFront);
     if (gradingData.centeringInnerFront) setManualInnerFront(gradingData.centeringInnerFront);
@@ -823,6 +871,33 @@ export default function GradingPanel({
   const autoSaveSeqRef = useRef(0);
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedOnceRef = useRef(false);
+
+  useEffect(() => {
+    setGradeApprovedAt(null);
+    setGradeApprovedBy(null);
+    setApproved(false);
+    setEditMode(false);
+    editSnapshotRef.current = null;
+    hydratedOnceRef.current = false;
+    setFrontLR("");
+    setFrontTB("");
+    setBackLR("");
+    setBackTB("");
+    setCorners(DEFAULT_CORNERS);
+    setEdges(DEFAULT_EDGES);
+    setSurface(DEFAULT_SURFACE);
+    setDefects([]);
+    setDefectCandidates([]);
+    setAuthStatus("genuine");
+    setAuthNotes("");
+    setPrivateNotes("");
+    setGradeExplanation("");
+    setCenteringOverride(null);
+    setCornersOverride(null);
+    setEdgesOverride(null);
+    setSurfaceOverride(null);
+    setOverallOverride(null);
+  }, [certId]);
 
   // ── Post-approval explicit-save flow ──────────────────────────────────
   function captureEditSnapshot(): EditSnapshot {
@@ -975,6 +1050,7 @@ export default function GradingPanel({
   // "edits save automatically to the live record" silent-write behaviour.
   useEffect(() => {
     if (!certId) return;
+    if (gradingWorkflowLocked) return;
     if (gradeApprovedAt) return; // auto-save is pre-approval only
     if (!hydratedOnceRef.current) {
       hydratedOnceRef.current = true;
@@ -1013,6 +1089,7 @@ export default function GradingPanel({
     idNumber,
     idYear,
     idVariant,
+    gradingWorkflowLocked,
   ]);
 
   function handleAiComplete(analysis: AiAnalysisResult, identification: AiIdentification | null) {
@@ -1266,6 +1343,14 @@ export default function GradingPanel({
    * on a cold reload without a fresh AI run, the button is disabled.
    */
   function handleRevertToAi() {
+    if (approvalInteractionLocked) {
+      toast({
+        title: "Workflow locked",
+        description: gradingWorkflowStatusCopy,
+        variant: gradingError ? "destructive" : undefined,
+      });
+      return;
+    }
     if (!aiAnalysis) {
       toast({
         title: "No AI draft in this session",
@@ -1474,6 +1559,34 @@ export default function GradingPanel({
     () => new Set((correctionFeedback?.changes || []).map((change) => change.field)),
     [correctionFeedback]
   );
+  const effectiveGradeApprovedAt = gradeApprovedAt ?? (gradingData as any)?.gradeApprovedAt ?? null;
+  const effectiveGradeApprovedBy = gradeApprovedBy ?? (gradingData as any)?.gradeApprovedBy ?? null;
+  const isApproved = approved || !!effectiveGradeApprovedAt || !!effectiveGradeApprovedBy;
+  const approvalInteractionLocked = gradingWorkflowLocked || (effectiveGradeApprovedAt != null && !editMode);
+  const gradingWorkflowStatusCopy = gradingError
+    ? (gradingLoadError as Error | null)?.message || "Grading workflow load failed."
+    : "Checking this card's approval and workflow state before enabling changes.";
+  const canonicalRole = adminReview
+    ? "admin-review"
+    : graderMode
+      ? "staff-or-grader"
+      : correctionMode
+        ? "super-admin"
+        : "admin";
+  const primaryActionCopy = graderMode
+    ? graderEdit
+      ? "Save edits (stays pending review)"
+      : "Submit for approval"
+    : adminReview
+      ? "Approve staff grade"
+      : "Approve & Publish";
+  const confirmTitle = graderMode
+    ? graderEdit
+      ? "Save edits — stays pending review"
+      : "Submit for approval"
+    : adminReview
+      ? "Approve staff grade"
+      : "Approve & Publish";
 
   function buildPayload() {
     // Companion to server-side COALESCE fix (PR #14): omit fields that don't
@@ -1619,6 +1732,14 @@ export default function GradingPanel({
   }
 
   async function saveDraft() {
+    if (gradingWorkflowLocked) {
+      toast({
+        title: "Workflow locked",
+        description: gradingWorkflowStatusCopy,
+        variant: gradingError ? "destructive" : undefined,
+      });
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
@@ -1764,6 +1885,14 @@ export default function GradingPanel({
   }
 
   async function approveGrade() {
+    if (gradingWorkflowLocked) {
+      toast({
+        title: "Workflow locked",
+        description: gradingWorkflowStatusCopy,
+        variant: gradingError ? "destructive" : undefined,
+      });
+      return;
+    }
     // HARD GATE: a backgrounded crop that's still uploading or has failed must
     // never finalise a cert (defects would point at an unpersisted/old image).
     const block = cropGateBlockToast();
@@ -1861,29 +1990,6 @@ export default function GradingPanel({
 
   const urls = imageData?.urls || {};
 
-  // On first open of a deferred cert, /grading BLOCKS ~10s while the server runs
-  // card IDENTIFICATION (no grading — humans grade everything). Show a clean
-  // computing state for that wait instead of the all-zero editable form (which
-  // looks like a real grade and whose fields would be clobbered when the data
-  // lands). adminReview hits a different, non-blocking endpoint so it's excluded,
-  // and AI-identify-OFF is excluded too (no block — it returns instantly and the
-  // light shows "Manual entry"). Fast loads flash only a brief spinner.
-  if (gradingPending && !adminReview && aiIdentify) {
-    return (
-      <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4">
-        <div className="flex items-center gap-3 px-2 py-8 text-sm text-amber-300">
-          <Loader2 size={18} className="animate-spin shrink-0" />
-          <div>
-            <div className="font-semibold">Identifying card…</div>
-            <div className="text-[var(--admin-ink-faint)]">
-              Looking up this card (~10s). The grading panel opens automatically when it&apos;s ready.
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // Card-identity status light (DISPLAY ONLY — reads existing ai_analysis flags +
   // the per-device AI-identify toggle; no AI calls, no writes). FOUR states so a
   // card still identifying — or one in manual mode — never looks like a failure:
@@ -1905,54 +2011,86 @@ export default function GradingPanel({
   const tcgGuess: string | null = tcgState === "red" ? (aiMeta?.suggested_name ?? null) : null;
 
   return (
-    <div className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4 space-y-5">
-      {/* Edit-mode banner — a grader re-opened their OWN submitted card. Make it
+    <div
+      className="bg-[var(--admin-panel)] border border-[var(--admin-line)] rounded-xl p-4 space-y-5"
+      data-testid="canonical-grading-panel"
+      data-canonical-role={canonicalRole}
+      data-section-order={CANONICAL_GRADING_SECTION_ORDER}
+      data-api-base={apiBase}
+      data-admin-review={String(adminReview)}
+      data-grader-mode={String(graderMode)}
+      data-grader-edit={String(graderEdit)}
+      data-correction-mode={String(correctionMode)}
+    >
+      <div data-canonical-section="workflow-banners" data-testid="section-workflow-banners">
+        {/* Edit-mode banner — a grader re-opened their OWN submitted card. Make it
           unmistakable that saving does NOT publish: the card stays pending review
           and still needs admin approval. */}
-      {graderMode && graderEdit && (
-        <div
-          className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-amber-300"
-          data-testid="grader-edit-banner"
-        >
-          <div className="text-[11px] font-bold uppercase tracking-wider">
-            Submitted · editing (stays pending review)
+        {graderMode && graderEdit && (
+          <div
+            className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-amber-300"
+            data-testid="grader-edit-banner"
+          >
+            <div className="text-[11px] font-bold uppercase tracking-wider">
+              Submitted · editing (stays pending review)
+            </div>
+            <div className="text-[11px] text-amber-200/80">
+              You&apos;re correcting an already-submitted card with the full tools. Saving keeps it pending review — it
+              never publishes; an admin still approves it.
+            </div>
           </div>
-          <div className="text-[11px] text-amber-200/80">
-            You&apos;re correcting an already-submitted card with the full tools. Saving keeps it pending review — it
-            never publishes; an admin still approves it.
+        )}
+        {correctionFeedback?.corrected && (
+          <div
+            className="bg-[var(--admin-amber)]/10 border border-[var(--admin-amber)]/45 rounded-xl p-3 space-y-2"
+            data-testid="staff-correction-feedback"
+            data-changed-count={correctedFields.size}
+          >
+            <p className="text-[var(--admin-amber)] text-xs font-bold uppercase tracking-widest">
+              This grading has been corrected by Admin.
+            </p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {correctionFeedback.changes.map((change) => (
+                <div
+                  key={change.field}
+                  className="rounded border border-[var(--admin-amber)]/25 bg-black/20 px-2.5 py-2 text-xs"
+                  data-testid={`correction-change-${change.field}`}
+                >
+                  <div className="font-bold text-[var(--admin-ink)]">{change.field}</div>
+                  <div className="text-[var(--admin-ink-dim)] break-words">{String(change.before ?? "blank")}</div>
+                  <div className="text-[var(--admin-amber)] text-[10px] uppercase tracking-widest">↓</div>
+                  <div className="text-[var(--admin-ink)] break-words">{String(change.after ?? "blank")}</div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
-      {correctionFeedback?.corrected && (
-        <div
-          className="bg-[var(--admin-amber)]/10 border border-[var(--admin-amber)]/45 rounded-xl p-3 space-y-2"
-          data-testid="staff-correction-feedback"
-          data-changed-count={correctedFields.size}
-        >
-          <p className="text-[var(--admin-amber)] text-xs font-bold uppercase tracking-widest">
-            This grading has been corrected by Admin.
-          </p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {correctionFeedback.changes.map((change) => (
-              <div
-                key={change.field}
-                className="rounded border border-[var(--admin-amber)]/25 bg-black/20 px-2.5 py-2 text-xs"
-                data-testid={`correction-change-${change.field}`}
-              >
-                <div className="font-bold text-[var(--admin-ink)]">{change.field}</div>
-                <div className="text-[var(--admin-ink-dim)] break-words">{String(change.before ?? "blank")}</div>
-                <div className="text-[var(--admin-amber)] text-[10px] uppercase tracking-widest">↓</div>
-                <div className="text-[var(--admin-ink)] break-words">{String(change.after ?? "blank")}</div>
-              </div>
-            ))}
+        )}
+        {gradingWorkflowLocked && (
+          <div
+            className={`rounded-lg border px-3 py-2 text-xs ${
+              gradingError
+                ? "border-[var(--admin-red)]/45 bg-[color-mix(in_srgb,var(--admin-red)_12%,transparent)] text-[var(--admin-red)]"
+                : "border-amber-500/45 bg-amber-500/10 text-amber-300"
+            }`}
+            data-testid="grading-workflow-safe-state"
+          >
+            <div className="flex items-center gap-2 font-bold uppercase tracking-wider">
+              {!gradingError && <Loader2 size={12} className="animate-spin" />}
+              {gradingError ? "Workflow unavailable" : "Checking approval state"}
+            </div>
+            <div className="mt-1 text-[11px] opacity-80">{gradingWorkflowStatusCopy}</div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
       {/* AI card-IDENTIFICATION toggle (per-device, localStorage). Identify step
           ONLY — the AI never grades. ON = auto-identify on open + TCGdex confirm;
           OFF = no AI call, enter identity manually. NOT graderMode-gated → the
           admin panel AND every staff grader sees + controls it. */}
-      <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--admin-line)] bg-[var(--admin-panel2)] px-3 py-2">
+      <div
+        className="flex items-center justify-between gap-3 rounded-md border border-[var(--admin-line)] bg-[var(--admin-panel2)] px-3 py-2"
+        data-canonical-section="identification"
+        data-testid="section-identification"
+      >
         <div className="min-w-0">
           <div className="text-xs font-semibold text-[var(--admin-ink)]">AI card identification</div>
           <div className="text-[10px] text-[var(--admin-ink-faint)]">
@@ -2031,130 +2169,55 @@ export default function GradingPanel({
           AI pre-grade errors before submitting). Edits ride the panel's debounced
           auto-save. graderMode-only: admins edit identity via the CertificateForm
           rendered above the panel. The cert number itself is not editable. */}
-      {graderMode &&
-        (() => {
-          const idLocked = gradeApprovedAt != null && !editMode;
-          const inputCls =
-            "w-full bg-[var(--admin-panel)] border border-[var(--admin-line)] text-[var(--admin-ink)] text-xs rounded px-2 py-1 outline-none focus:border-[var(--admin-gold)]/60 disabled:opacity-60 disabled:cursor-not-allowed";
-          const lbl = "text-[9px] uppercase tracking-wider text-[var(--admin-ink-dim)]";
-          return (
-            <div
-              className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel2)] px-3 py-2 space-y-2"
-              data-testid="grader-card-identity"
-            >
-              <div className="flex items-baseline justify-between gap-2 flex-wrap">
-                <span className="font-mono text-xs text-[var(--admin-gold)]">{certIdStr || ""}</span>
-                <span className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">
-                  Card identity{idLocked ? " (approved — read-only)" : " · editable"}
-                </span>
-              </div>
-
-              {/* Set name — identical combobox to the admin CertificateForm
-                  (free text + suggestions from /api/pokemon-sets). Graders CAN now
-                  add a set inline (via the staff endpoint with dedup) so a card
-                  whose set isn't in the list doesn't block grading. */}
-              <div className={idLocked ? "pointer-events-none opacity-60" : ""}>
-                <PokemonSetPicker
-                  value={idSet}
-                  onChange={(name, id) => {
-                    setIdSet(name);
-                    setIdSetCode(id || "");
-                  }}
-                  allowAddSet
-                  allowEditSet
-                  createEndpoint="/api/staff/custom-sets"
-                  prefill={{ setName: idSet, setCode: idSetCode }}
-                  testId="input-identity-set"
-                />
-              </div>
-
-              <div className="grid grid-cols-4 gap-2">
-                <label className="flex flex-col gap-0.5 col-span-2">
-                  <span className={lbl}>Card name</span>
-                  <input
-                    type="text"
-                    value={idName}
-                    placeholder="Charizard"
-                    disabled={idLocked}
-                    onChange={(e) => setIdName(e.target.value)}
-                    data-testid="input-identity-card-name"
-                    className={inputCls}
-                  />
-                </label>
-                <label className="flex flex-col gap-0.5 col-span-2">
-                  <span className={lbl}>Number</span>
-                  <div className="flex gap-1">
-                    <input
-                      type="text"
-                      value={idNumber}
-                      placeholder="4"
-                      disabled={idLocked}
-                      onChange={(e) => setIdNumber(e.target.value)}
-                      data-testid="input-identity-number"
-                      className={inputCls}
-                    />
-                    <button
-                      type="button"
-                      onClick={graderAutofill}
-                      disabled={idLocked || idAutofilling || !(idSetCode || idSet).trim() || !idNumber.trim()}
-                      title="Auto-fill name / year / variant from the card database (set + number)"
-                      data-testid="button-identity-autofill"
-                      className="shrink-0 border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] text-[10px] font-bold uppercase px-2 rounded hover:bg-[var(--admin-gold)]/10 disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      {idAutofilling ? "…" : "Auto-fill"}
-                    </button>
-                  </div>
-                </label>
-                <label className="flex flex-col gap-0.5 col-span-2">
-                  <span className={lbl}>Year</span>
-                  <input
-                    type="text"
-                    value={idYear}
-                    placeholder="1999"
-                    disabled={idLocked}
-                    onChange={(e) => setIdYear(e.target.value)}
-                    data-testid="input-identity-year"
-                    className={inputCls}
-                  />
-                </label>
-                <label className="flex flex-col gap-0.5 col-span-2">
-                  <span className={lbl}>Variant</span>
-                  {/* Managed picker: full canonical list + custom_variants, with
-                      inline "add new variant" (dedup + audit server-side). */}
-                  <VariantPicker
-                    value={idVariant}
-                    onChange={setIdVariant}
-                    disabled={idLocked}
-                    testId="input-identity-variant"
-                    inputClassName={inputCls}
-                  />
-                </label>
-              </div>
-
-              {/* TCGdex re-run + card search by name — parity with the admin
-                  review editor. Both call the shared /api/staff/* endpoints. */}
-              {!idLocked && (
-                <div className="space-y-2 pt-1 border-t border-[var(--admin-line)]">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={lbl}>Identify tools</span>
-                    <button
-                      type="button"
-                      onClick={rerunIdentify}
-                      disabled={idRerunBusy}
-                      title="Re-run TCGdex identification on this card (identify only — never grades)"
-                      data-testid="button-rerun-identify"
-                      className="border border-[var(--admin-gold)]/40 text-[var(--admin-gold)] text-[10px] font-bold uppercase px-2 py-1 rounded hover:bg-[var(--admin-gold)]/10 disabled:opacity-40"
-                    >
-                      {idRerunBusy ? "Re-running…" : "Re-run TCGdex"}
-                    </button>
-                  </div>
-                  <TcgCardSearch onPick={applyCardPick} initialQuery={idName} testId="input-card-search" />
-                </div>
-              )}
-            </div>
-          );
-        })()}
-      <div className="flex items-center justify-between">
+      {graderMode || adminReview ? (
+        <GradingIdentityVerification
+          certId={certId}
+          certIdStr={certIdStr}
+          mode={graderMode ? "edit" : "review"}
+          locked={approvalInteractionLocked}
+          game={cardGame}
+          name={idName}
+          set={idSet}
+          setCode={idSetCode}
+          number={idNumber}
+          year={idYear}
+          variant={idVariant}
+          onName={setIdName}
+          onSet={(name, id) => {
+            setIdSet(name);
+            setIdSetCode(id || "");
+          }}
+          onNumber={setIdNumber}
+          onYear={setIdYear}
+          onVariant={setIdVariant}
+          onAutofill={graderAutofill}
+          autofilling={idAutofilling}
+          autofillDisabled={
+            approvalInteractionLocked || idAutofilling || !(idSetCode || idSet).trim() || !idNumber.trim()
+          }
+          onSearchAgain={rerunIdentify}
+          searchBusy={idRerunBusy}
+          onCardPick={applyCardPick}
+          statusLabel={
+            tcgState === "green"
+              ? "TCGdex confirmed"
+              : tcgGuess
+                ? "AI suggested"
+                : tcgState === "manual"
+                  ? "Manual entry"
+                  : "Not identified"
+          }
+          statusTone={tcgState === "green" ? "confirmed" : tcgGuess ? "suggested" : "none"}
+          resetKey={certId}
+        />
+      ) : (
+        <div data-canonical-section="identity-fields" data-testid="section-card-identity" hidden />
+      )}
+      <div
+        className="flex items-center justify-between"
+        data-canonical-section="workstation-header"
+        data-testid="section-workstation-header"
+      >
         <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">
           Manual Grading Workstation
         </p>
@@ -2162,21 +2225,23 @@ export default function GradingPanel({
           <button
             type="button"
             onClick={handleRevertToAi}
-            disabled={!aiAnalysis}
+            disabled={!aiAnalysis || approvalInteractionLocked}
             title={
-              aiAnalysis
+              approvalInteractionLocked
+                ? gradingWorkflowStatusCopy
+                : aiAnalysis
                 ? "Clear all overrides and re-populate sub-grades from the last AI run this session"
                 : "Run AI Identify & Grade first to enable this"
             }
             className={`flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded transition-all ${
-              aiAnalysis
+              aiAnalysis && !approvalInteractionLocked
                 ? "text-[var(--admin-ink-dim)] border border-[var(--admin-line)] hover:text-[var(--admin-gold)] hover:border-[var(--admin-gold)]/40"
                 : "text-[var(--admin-ink-faint)] border border-[var(--admin-line)] opacity-60 cursor-not-allowed"
             }`}
           >
             Revert to AI
           </button>
-          {approved && (
+          {isApproved && (
             <span className="flex items-center gap-1.5 text-[var(--admin-green)] text-xs">
               <CheckCircle2 size={13} />
               Grade approved
@@ -2189,27 +2254,30 @@ export default function GradingPanel({
           deionized before imaging. Session-only state; gates the Approve
           & Publish button below. Hidden once the cert is approved since
           it's pre-grade-only and would clutter the post-approve view. */}
-      {!approved && (
-        <label
-          className={`flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2 transition-colors ${
-            deionizationComplete
-              ? "bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)]"
-              : "bg-[color-mix(in_srgb,var(--admin-amber)_12%,transparent)] border-[color-mix(in_srgb,var(--admin-amber)_50%,transparent)]"
-          }`}
-          data-testid="check-deionization-complete"
-        >
-          <input
-            type="checkbox"
-            checked={deionizationComplete}
-            onChange={() => setDeionizationComplete((v) => !v)}
-            className="accent-[var(--admin-gold)] h-4 w-4"
-          />
-          <span className="text-xs font-bold uppercase tracking-wider text-[var(--admin-ink)]">
-            Deionization complete
-          </span>
-          <span className="text-[10px] text-[var(--admin-ink-dim)] ml-auto">Required before approve</span>
-        </label>
-      )}
+      <div data-canonical-section="preflight" data-testid="section-preflight">
+        {!isApproved && (
+          <label
+            className={`flex items-center gap-2 cursor-pointer rounded-lg border px-3 py-2 transition-colors ${
+              deionizationComplete
+                ? "bg-[color-mix(in_srgb,var(--admin-green)_12%,transparent)] border-[color-mix(in_srgb,var(--admin-green)_40%,transparent)]"
+                : "bg-[color-mix(in_srgb,var(--admin-amber)_12%,transparent)] border-[color-mix(in_srgb,var(--admin-amber)_50%,transparent)]"
+            }`}
+            data-testid="check-deionization-complete"
+          >
+            <input
+              type="checkbox"
+              checked={deionizationComplete}
+              disabled={gradingWorkflowLocked}
+              onChange={() => setDeionizationComplete((v) => !v)}
+              className="accent-[var(--admin-gold)] h-4 w-4"
+            />
+            <span className="text-xs font-bold uppercase tracking-wider text-[var(--admin-ink)]">
+              Deionization complete
+            </span>
+            <span className="text-[10px] text-[var(--admin-ink-dim)] ml-auto">Required before approve</span>
+          </label>
+        )}
+      </div>
 
       {/* AI Panel + Reprocess — HIDDEN in admin-review (every AI/CV action hits
           /api/admin, would burn credits + overwrite the grader's work) AND HIDDEN
@@ -2219,33 +2287,35 @@ export default function GradingPanel({
           corrupting the per-operator drift stats. The identify banner + AI-identify
           toggle are SEPARATE (rendered above, ungated) so graders keep the
           identification help that fills the set — they just can't AI-grade. */}
-      {!adminReview && !graderMode && !correctionMode && (
-        <div className="flex items-start gap-3">
-          <div className="flex-1">
-            <AiPanel
-              certId={certId}
-              onAnalysisComplete={handleAiComplete}
-              referenceImageUrl={aiIdentification?.referenceImageUrl}
-              externalAnalysis={pendingAnalysis}
-              onExternalAnalysisConsumed={onPendingAnalysisConsumed}
-              onManualIdentification={onManualIdentification}
-              cardGame={cardGame}
-            />
+      <div data-canonical-section="ai-tools" data-testid="section-ai-tools">
+        {!adminReview && !graderMode && !correctionMode && (
+          <div className="flex items-start gap-3">
+            <div className="flex-1">
+              <AiPanel
+                certId={certId}
+                onAnalysisComplete={handleAiComplete}
+                referenceImageUrl={aiIdentification?.referenceImageUrl}
+                externalAnalysis={pendingAnalysis}
+                onExternalAnalysisConsumed={onPendingAnalysisConsumed}
+                onManualIdentification={onManualIdentification}
+                cardGame={cardGame}
+              />
+            </div>
+            {/* Admin-only image op (hits /api/admin) — hidden for graders. */}
+            {!graderMode && (
+              <ReprocessButton
+                certId={certId}
+                onDone={() => queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] })}
+              />
+            )}
           </div>
-          {/* Admin-only image op (hits /api/admin) — hidden for graders. */}
-          {!graderMode && (
-            <ReprocessButton
-              certId={certId}
-              onDone={() => queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] })}
-            />
-          )}
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Two-panel layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-[60%_40%] gap-5" data-testid="section-grading-workstation-grid">
         {/* LEFT — Image viewer + defect list */}
-        <div className="space-y-4">
+        <div className="space-y-4" data-canonical-section="card-images" data-testid="section-card-images">
           {/* FRONT/BACK chip row — own dedicated row above the absolute-anchor
               wrapper for TL/T/TR labels. Pulled out of ImageViewer so the
               wrapper's `top: 0` (anchor for TL/T/TR at top:-28) is the variant
@@ -2281,9 +2351,11 @@ export default function GradingPanel({
                     {hasImage && certId && !adminReview && (
                       <button
                         type="button"
-                        title={`Delete ${s} image`}
+                        title={approvalInteractionLocked ? gradingWorkflowStatusCopy : `Delete ${s} image`}
+                        disabled={approvalInteractionLocked}
                         onClick={async (e) => {
                           e.stopPropagation();
+                          if (approvalInteractionLocked) return;
                           if (!confirm(`Delete the ${s} image? You'll need to re-upload before grading.`)) return;
                           try {
                             const r = await fetch(`${apiBase}/certificates/${certId}/images/${s}`, {
@@ -2297,7 +2369,7 @@ export default function GradingPanel({
                             queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/images`] });
                           } catch {}
                         }}
-                        className="flex-shrink-0 rounded-r border border-l-0 border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-red)] hover:border-[var(--admin-red)]/40 px-1.5 py-1 transition-all"
+                        className="flex-shrink-0 rounded-r border border-l-0 border-[var(--admin-line)] text-[var(--admin-ink-dim)] hover:text-[var(--admin-red)] hover:border-[var(--admin-red)]/40 px-1.5 py-1 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <Trash2 size={10} />
                       </button>
@@ -2316,7 +2388,7 @@ export default function GradingPanel({
                 defects={defects}
                 onDefectAdded={(d) => setDefects((prev) => [...prev, d])}
                 onDefectsChange={setDefects}
-                readOnly={gradeApprovedAt != null && !editMode}
+                readOnly={approvalInteractionLocked}
                 highlightId={highlightDefect}
                 referenceImageUrl={aiIdentification?.referenceImageUrl}
                 side={viewerSide as "front" | "back"}
@@ -2390,15 +2462,21 @@ export default function GradingPanel({
             </div>
             {/* Bottom corner/edge selectors removed — MVGS-driven. */}
           </div>
-          <div className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 space-y-2">
+          <div
+            className="bg-[var(--admin-panel2)] border border-[var(--admin-line)] rounded-lg p-3 space-y-2"
+            data-canonical-section="defect-marking"
+            data-testid="section-defect-marking"
+          >
             <div className="flex items-center justify-between gap-2">
               <p className="text-[var(--admin-gold-deep)] text-[10px] uppercase tracking-widest font-bold">Defects</p>
               <div className="flex items-center gap-2">
                 {defects.length > 0 && defects.some((d) => !d.mvgsCode || !d.tier || !d.zone) && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDefects(
+	                  <button
+	                    type="button"
+	                    disabled={approvalInteractionLocked}
+	                    onClick={() => {
+	                      if (approvalInteractionLocked) return;
+	                      setDefects(
                         defects.map((d) => ({
                           ...d,
                           mvgsCode: d.mvgsCode ?? mapLegacyTypeToMvgsCode(d.type) ?? "WH",
@@ -2413,24 +2491,30 @@ export default function GradingPanel({
                         }))
                       );
                     }}
-                    className="flex items-center gap-1 text-[var(--admin-gold-deep)] hover:text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-wider transition-colors"
-                    data-testid="btn-recalc-zones"
-                    title="Backfill mvgsCode, tier, and zone on defects missing them — triggers MVGS subgrade scoring"
+	                    className="flex items-center gap-1 text-[var(--admin-gold-deep)] hover:text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+	                    data-testid="btn-recalc-zones"
+	                    title={
+	                      approvalInteractionLocked
+	                        ? gradingWorkflowStatusCopy
+	                        : "Backfill mvgsCode, tier, and zone on defects missing them — triggers MVGS subgrade scoring"
+	                    }
                   >
                     <Zap size={10} />
                     Recalculate
                   </button>
                 )}
                 {defects.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!window.confirm("Delete all defect pins? This cannot be undone.")) return;
-                      setDefects([]);
-                    }}
-                    className="flex items-center gap-1 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] text-[10px] font-bold uppercase tracking-wider transition-colors"
-                    data-testid="btn-clear-defects"
-                    title="Delete all defect pins"
+	                  <button
+	                    type="button"
+	                    disabled={approvalInteractionLocked}
+	                    onClick={() => {
+	                      if (approvalInteractionLocked) return;
+	                      if (!window.confirm("Delete all defect pins? This cannot be undone.")) return;
+	                      setDefects([]);
+	                    }}
+	                    className="flex items-center gap-1 text-[var(--admin-ink-faint)] hover:text-[var(--admin-red)] text-[10px] font-bold uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+	                    data-testid="btn-clear-defects"
+	                    title={approvalInteractionLocked ? gradingWorkflowStatusCopy : "Delete all defect pins"}
                   >
                     <Trash2 size={10} />
                     Clear Defects
@@ -2462,20 +2546,24 @@ export default function GradingPanel({
         </div>
 
         {/* RIGHT — Grading inputs */}
-        <div className="space-y-5 overflow-y-auto">
+        <div
+          className="space-y-5 overflow-y-auto"
+          data-canonical-section="grading-controls"
+          data-testid="section-grading-controls"
+        >
           {/* Post-approval banner — read-only by default, with an EDIT GRADE
               button that flips into explicit-save edit mode. Auto-save is
               disabled post-approval (see autoSave useEffect gate) so any
               edit-mode change requires the SAVE CHANGES button below. */}
-          {gradeApprovedAt && !editMode && !graderMode && !correctionMode && (
+          {effectiveGradeApprovedAt && !editMode && !graderMode && !correctionMode && (
             <div className="bg-[var(--admin-green)]/10 border border-[var(--admin-green)]/40 rounded-lg p-3 flex items-start justify-between gap-3">
               <div className="space-y-1 min-w-0">
                 <p className="text-[var(--admin-green)] text-xs font-bold uppercase tracking-widest">
                   ✓ Approved &amp; Live · {certIdStr || ""}
                 </p>
                 <p className="text-[var(--admin-green)]/80 text-[10px] leading-relaxed">
-                  Approved {gradeApprovedAt ? new Date(gradeApprovedAt).toLocaleString() : ""}
-                  {gradeApprovedBy ? ` by ${gradeApprovedBy}` : ""}.
+                  Approved {effectiveGradeApprovedAt ? new Date(effectiveGradeApprovedAt).toLocaleString() : ""}
+                  {effectiveGradeApprovedBy ? ` by ${effectiveGradeApprovedBy}` : ""}.
                 </p>
               </div>
               <button
@@ -2488,7 +2576,7 @@ export default function GradingPanel({
               </button>
             </div>
           )}
-          {gradeApprovedAt && editMode && (
+          {effectiveGradeApprovedAt && editMode && (
             <div className="bg-[color-mix(in_srgb,var(--admin-amber)_12%,transparent)] border border-[color-mix(in_srgb,var(--admin-amber)_50%,transparent)] rounded-lg p-3 space-y-2">
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1 min-w-0">
@@ -2531,7 +2619,7 @@ export default function GradingPanel({
               approval (gradeApprovedAt null) the fieldset is enabled and
               auto-save handles persistence as before. */}
           <fieldset
-            disabled={gradeApprovedAt != null && !editMode}
+            disabled={approvalInteractionLocked}
             className="min-w-0 border-none p-0 m-0 space-y-5 disabled:opacity-70"
           >
             {/* AI source badges */}
@@ -2613,6 +2701,7 @@ export default function GradingPanel({
                   <div
                     className="bg-[var(--admin-panel3)] border border-[var(--admin-gold)]/40 rounded-lg p-3 space-y-3"
                     data-testid="mvgs-controls"
+                    data-canonical-section="mvgs-score"
                   >
                     <div className="flex items-baseline justify-between">
                       <span className="text-[var(--admin-gold)] text-[10px] font-bold uppercase tracking-widest">
@@ -2691,26 +2780,28 @@ export default function GradingPanel({
 
             {/* Grade summary — always visible at top */}
             {!isNonNumeric && (
-              <GradeDisplay
-                overall={overall}
-                sub={sub}
-                hasCrease={surface.hasCrease}
-                hasTear={surface.hasTear}
-                manualOverride={null}
-                onOverride={() => {}}
-                lockedByMvgs={true}
-                gradeLabel={label}
-                isBlack={isBlack}
-                strengthScore={
-                  (aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null
-                }
-                cornersZonesSet={0}
-                edgesZonesSet={0}
-                cornersWorstKey=""
-                edgesWorstKey=""
-                aiSubgrades={aiSubgrades}
-                aiConfidence={aiConfidenceMap}
-              />
+              <div data-canonical-section="grade-result" data-testid="section-grade-result">
+                <GradeDisplay
+                  overall={overall}
+                  sub={sub}
+                  hasCrease={surface.hasCrease}
+                  hasTear={surface.hasTear}
+                  manualOverride={null}
+                  onOverride={() => {}}
+                  lockedByMvgs={true}
+                  gradeLabel={label}
+                  isBlack={isBlack}
+                  strengthScore={
+                    (aiAnalysis as any)?.grade_strength_score ?? (gradingData as any)?.gradeStrengthScore ?? null
+                  }
+                  cornersZonesSet={0}
+                  edgesZonesSet={0}
+                  cornersWorstKey=""
+                  edgesWorstKey=""
+                  aiSubgrades={aiSubgrades}
+                  aiConfidence={aiConfidenceMap}
+                />
+              </div>
             )}
 
             {/* Cross-grade estimate REMOVED (owner directive 2026-07-02):
@@ -2738,7 +2829,11 @@ export default function GradingPanel({
                 This is the ONE canonical home for these controls — the Surface
                 block below no longer carries duplicates. All identifiers are
                 component-scope, so the move keeps them in scope. */}
-            <div className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-2 mb-2 border border-[var(--admin-gold)]/30">
+            <div
+              className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-2 mb-2 border border-[var(--admin-gold)]/30"
+              data-canonical-section="d1-d2-d3"
+              data-testid="section-d1-d2-d3"
+            >
               <div className="flex items-center gap-2">
                 <span className="text-sm leading-none">📏</span>
                 <h3 className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">
@@ -2812,7 +2907,11 @@ export default function GradingPanel({
               )}
             </div>
 
-            <div className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-2">
+            <div
+              className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-2"
+              data-canonical-section="centering"
+              data-testid="section-centering"
+            >
               <CenteringInput
                 frontLR={frontLR}
                 frontTB={frontTB}
@@ -2988,7 +3087,11 @@ export default function GradingPanel({
                 from computeMvgsScore (mvgsSurfaceGrade) with the override
                 stepper layered on top. Condition checkboxes still drive
                 hasCrease / hasTear caps. */}
-            <div className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-3">
+            <div
+              className="bg-[var(--admin-panel2)] rounded-lg p-3 space-y-3"
+              data-canonical-section="surface"
+              data-testid="section-surface"
+            >
               <div className="flex items-center gap-2">
                 <Eye size={14} className="text-[var(--admin-gold)]" />
                 <h3 className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">Surface</h3>
@@ -3109,7 +3212,11 @@ export default function GradingPanel({
             </div>
 
             {/* Authentication */}
-            <div className="bg-[var(--admin-panel2)] rounded-lg p-3">
+            <div
+              className="bg-[var(--admin-panel2)] rounded-lg p-3"
+              data-canonical-section="authentication"
+              data-testid="section-authentication"
+            >
               <Authentication
                 status={authStatus}
                 notes={authNotes}
@@ -3128,9 +3235,11 @@ export default function GradingPanel({
                 <button
                   type="button"
                   onClick={generateDescription}
-                  disabled={generatingDescription || subgradesIncomplete}
+                  disabled={approvalInteractionLocked || generatingDescription || subgradesIncomplete}
                   title={
-                    subgradesIncomplete
+                    approvalInteractionLocked
+                      ? gradingWorkflowStatusCopy
+                      : subgradesIncomplete
                       ? "Set all four subgrades first"
                       : "Write a grade rationale paragraph using the current subgrades + confirmed defects"
                   }
@@ -3144,7 +3253,11 @@ export default function GradingPanel({
             )}
 
             {/* Notes */}
-            <div className="bg-[var(--admin-panel2)] rounded-lg p-3">
+            <div
+              className="bg-[var(--admin-panel2)] rounded-lg p-3"
+              data-canonical-section="notes"
+              data-testid="section-notes"
+            >
               <GradingNotes
                 privateNotes={privateNotes}
                 gradeExplanation={gradeExplanation}
@@ -3160,7 +3273,11 @@ export default function GradingPanel({
               present + overall > 0 + (post-approve, always enabled because
               the cert is live and we want edits to flow through). The auto-
               save status pip sits to the left of the button. */}
-            <div className="sticky bottom-0 pb-2 pt-1 bg-[var(--admin-panel)] space-y-2">
+            <div
+              className="sticky bottom-0 pb-2 pt-1 bg-[var(--admin-panel)] space-y-2"
+              data-canonical-section="footer-actions"
+              data-testid="section-footer-actions"
+            >
               <div className="flex items-center justify-between text-[10px] uppercase tracking-wider">
                 <span className="text-[var(--admin-ink-faint)]">
                   {autoSaveStatus === "saving" && (
@@ -3201,20 +3318,36 @@ export default function GradingPanel({
                       )}
                     </span>
                   ))}
-                {gradeApprovedAt && <span className="text-[var(--admin-green)]">✓ Live</span>}
+                {effectiveGradeApprovedAt && <span className="text-[var(--admin-green)]">✓ Live</span>}
               </div>
-              {!approved ? (
+              {gradingWorkflowLocked ? (
+                <div
+                  className="w-full flex items-center justify-center gap-2 border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-bold uppercase px-4 py-2.5 rounded"
+                  data-testid="btn-approve-publish-locked"
+                >
+                  {!gradingError && <Loader2 size={13} className="animate-spin" />}
+                  {gradingError ? "Workflow unavailable" : "Checking approval state"}
+                </div>
+              ) : !isApproved ? (
                 <button
                   type="button"
                   onClick={() => {
+                    if (gradingWorkflowLocked) return;
                     if (cropSyncBlocking) return; // belt-and-braces; button is disabled too
                     setShowConfirm(true);
                   }}
                   disabled={
-                    approving || overall <= 0 || subgradesIncomplete || !deionizationComplete || cropSyncBlocking
+                    gradingWorkflowLocked ||
+                    approving ||
+                    overall <= 0 ||
+                    subgradesIncomplete ||
+                    !deionizationComplete ||
+                    cropSyncBlocking
                   }
                   title={
-                    overall <= 0 || subgradesIncomplete
+                    gradingWorkflowLocked
+                      ? gradingWorkflowStatusCopy
+                      : overall <= 0 || subgradesIncomplete
                       ? "Set all four subgrades first"
                       : !deionizationComplete
                         ? "Tick 'Deionization complete' before approving"
@@ -3222,7 +3355,13 @@ export default function GradingPanel({
                           ? `${cropFailedSides.join(" + ")} crop failed to save — retry before approving`
                           : cropPendingSides.length > 0
                             ? `${cropPendingSides.join(" + ")} crop still saving to storage — wait for it to finish`
-                            : "Approve and publish — cert goes live and PDF becomes available at the public URL"
+                            : graderMode
+                              ? graderEdit
+                                ? "Save edits without publishing — this card stays pending review"
+                                : "Submit this grading for admin review"
+                              : adminReview
+                                ? "Approve the staff submission and publish the reviewed grade"
+                                : "Approve and publish — cert goes live and PDF becomes available at the public URL"
                   }
                   data-testid="btn-approve-publish"
                   className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase px-4 py-2.5 rounded transition-all hover:opacity-90 disabled:opacity-40"
@@ -3236,11 +3375,7 @@ export default function GradingPanel({
                         ? "Crop failed — retry"
                         : cropPendingSides.length > 0
                           ? "Crop syncing…"
-                          : graderMode && graderEdit
-                            ? "Save edits (stays pending review)"
-                            : graderMode
-                              ? "Submit for approval"
-                              : "Approve & Publish"}
+                          : primaryActionCopy}
                 </button>
               ) : (
                 <div className="w-full flex items-center justify-center gap-2 bg-[var(--admin-green)]/10 border border-[var(--admin-green)]/40 text-[var(--admin-green)] text-xs font-bold uppercase px-4 py-2.5 rounded">
@@ -3337,11 +3472,9 @@ export default function GradingPanel({
       {showConfirm && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
           <div className="bg-[var(--admin-panel)] border border-[var(--admin-line-hard)] rounded-xl p-6 max-w-sm w-full space-y-4">
-            <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">
-              {graderMode && graderEdit ? "Save edits — stays pending review" : "Approve & Publish"}
-            </p>
+            <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">{confirmTitle}</p>
             <p className="text-[var(--admin-ink-dim)] text-sm">
-              {graderMode && graderEdit ? "Save grade of " : "Publish grade of "}
+              {graderMode ? (graderEdit ? "Save grade edits for " : "Submit grade of ") : "Publish grade of "}
               <strong className="text-white">
                 {finalGradeOverall} —{" "}
                 {isNonNumeric ? (authStatus === "authentic_altered" ? "AUTHENTIC ALTERED" : "NOT ORIGINAL") : label}
@@ -3349,8 +3482,10 @@ export default function GradingPanel({
               for <strong className="text-white">{cardName}</strong> ({cardSet})?
             </p>
             <p className="text-[var(--admin-ink-dim)] text-xs">
-              {graderMode && graderEdit
-                ? "This card STAYS pending review — it does NOT publish. An admin still approves it. Your re-measured grade replaces the submitted one and is recorded in the audit log."
+              {graderMode
+                ? graderEdit
+                  ? "This card STAYS pending review — it does NOT publish. An admin still approves it. Your re-measured grade replaces the submitted one and is recorded in the audit log."
+                  : "This sends the card to admin review. It does NOT publish a live certificate."
                 : "The cert goes live, the Digital Grading Report becomes publicly accessible, and any future edits to subgrades or notes will be live immediately (recorded in the audit log)."}
             </p>
             {isBlack && (
@@ -3370,7 +3505,7 @@ export default function GradingPanel({
               <button
                 type="button"
                 onClick={() => approveGrade()}
-                disabled={approving}
+                disabled={approving || gradingWorkflowLocked}
                 className="flex-1 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-40"
               >
                 {approving

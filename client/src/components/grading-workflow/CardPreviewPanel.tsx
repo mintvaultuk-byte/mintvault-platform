@@ -31,6 +31,7 @@ export function CardPreviewPanel({
   frontFile,
   backFile,
   fill = false,
+  apiBase = "/api/admin",
 }: {
   certificateId: number | null;
   frontFile?: File | null;
@@ -39,6 +40,11 @@ export function CardPreviewPanel({
       that height (the Card/Rarity workstation aside). Default false keeps the
       capped thumbnail size used by the Review-stage summary. */
   fill?: boolean;
+  /** Cert-scoped API base for the images query. Defaults to /api/admin (the
+      admin certificate editor). Staff/grader/review shells pass their own base
+      (/api/grader, /api/admin/grade-review) so the preview loads role-scoped
+      signed URLs — and shares GradingPanel's images cache key. */
+  apiBase?: string;
 }) {
   const [side, setSide] = useState<"front" | "back">("front");
   const [zoom, setZoom] = useState(1);
@@ -49,7 +55,7 @@ export function CardPreviewPanel({
   const [fullscreen, setFullscreen] = useState(false);
 
   const { data } = useQuery<ImagesResponse>({
-    queryKey: [`/api/admin/certificates/${certificateId}/images`],
+    queryKey: [`${apiBase}/certificates/${certificateId}/images`],
     enabled: certificateId != null,
     staleTime: 5 * 60 * 1000,
   });

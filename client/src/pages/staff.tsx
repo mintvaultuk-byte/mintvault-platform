@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { Image as ImageIcon } from "lucide-react";
 import { useLocation } from "wouter";
-import GradingPanel from "../components/grading/grading-panel";
 import InstallAppButton from "../components/install-app-button";
 import { PrintingConsole } from "./admin-printing";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
+import { GradingWorkstation } from "@/components/grading-workflow/GradingWorkstation";
 
 /**
  * Unified staff dashboard. Renders ONLY the tabs the logged-in person's
@@ -449,7 +449,8 @@ function GradeTab() {
             </div>
           </div>
         )}
-        <GradingPanel
+        <GradingWorkstation
+          mode="staff"
           apiBase="/api/grader"
           graderMode
           // Reopening an already-submitted card = EDIT mode: the full workstation,
