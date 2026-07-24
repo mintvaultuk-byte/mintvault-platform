@@ -197,12 +197,17 @@ describe("Queue filters", () => {
   const AFTER = DAY_START + 3600_000;
   const BEFORE = DAY_START - 3600_000;
 
-  it("exposes exactly the six brief filters", () => {
-    expect([...PRINT_QUEUE_FILTERS]).toEqual(["needs_printing", "printed_today", "printed", "reprints", "completed", "all"]);
+  it("exposes exactly the brief filters incl. Printing/In Progress", () => {
+    expect([...PRINT_QUEUE_FILTERS]).toEqual(["needs_printing", "printing", "printed_today", "printed", "reprints", "completed", "all"]);
   });
   it("Needs Printing shows only needs_printing", () => {
     expect(matchesFilter({ state: "needs_printing", printedAtMs: null }, "needs_printing", DAY_START)).toBe(true);
     expect(matchesFilter({ state: "printed", printedAtMs: AFTER }, "needs_printing", DAY_START)).toBe(false);
+  });
+  it("Printing/In Progress shows only printing", () => {
+    expect(matchesFilter({ state: "printing", printedAtMs: null }, "printing", DAY_START)).toBe(true);
+    expect(matchesFilter({ state: "needs_printing", printedAtMs: null }, "printing", DAY_START)).toBe(false);
+    expect(matchesFilter({ state: "printed", printedAtMs: AFTER }, "printing", DAY_START)).toBe(false);
   });
   it("Printed shows printed and reprinted", () => {
     expect(matchesFilter({ state: "printed", printedAtMs: BEFORE }, "printed", DAY_START)).toBe(true);

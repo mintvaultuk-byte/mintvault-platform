@@ -3,11 +3,13 @@
  * lifecycle. Owns the durable STATE (certificates.print_state), the batch
  * records (print_batches), and the append-only audit ledger (print_events).
  *
- * It deliberately does NOT render PDFs — the existing, proven print-batch.ts
- * renderer (invoked via the existing /api/admin/print-batch route) produces the
- * bytes. This module reuses the same deterministic batchId so the two line up.
+ * Batch creation is SERVER-AUTHORITATIVE and atomic (createBatchAtomic):
+ * reserve → render/upload → finalise, with release-on-failure and idempotent
+ * retry keyed on the deterministic batchId. Cards never become `printed` on a
+ * click — only an explicit, positive mark-printed confirmation advances them.
+ * The proven print-batch.ts RENDERER is reused unchanged for the PDF bytes.
  *
- * Every state transition here is decided by the pure state machine in
+ * Every state transition is decided by the pure state machine in
  * shared/print-lifecycle.ts and persisted TRANSACTIONALLY and FAIL-LOUD — the
  * opposite of the legacy best-effort print writes (finding B-2). Actor identity
  * resolves admin OR staff correctly (fixes attribution finding B-3).
@@ -15,6 +17,7 @@
 import type { Request } from "express";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
+import { storage } from "./storage";
 import {
   effectivePrintState,
   nextState,
@@ -27,70 +30,10 @@ import {
 } from "@shared/print-lifecycle";
 import type { PrintQueueRow, PrintBatchSummary, PrintEvent } from "@shared/schema";
 
-// ── Boot-time idempotent schema migration ────────────────────────────────────
-// Mirrors the established certificates-column pattern (migratePerOperatorSchema):
-// ADD COLUMN IF NOT EXISTS + CREATE TABLE/INDEX IF NOT EXISTS + a one-time audit
-// row. Additive only; safe to run on every boot. Wired into the boot sequence in
-// server/routes.ts alongside the other migrate*Schema() calls.
-export async function migratePrintWorkflowSchema(): Promise<void> {
-  await db.execute(sql`
-    ALTER TABLE certificates
-      ADD COLUMN IF NOT EXISTS print_state VARCHAR(24) NOT NULL DEFAULT 'awaiting_approval'
-  `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_certificates_print_state ON certificates (print_state)`);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS print_batches (
-      id              SERIAL PRIMARY KEY,
-      batch_id        TEXT NOT NULL UNIQUE,
-      kind            VARCHAR(12) NOT NULL DEFAULT 'batch',
-      status          VARCHAR(12) NOT NULL DEFAULT 'open',
-      cert_ids        JSONB NOT NULL DEFAULT '[]'::jsonb,
-      cert_count      INTEGER NOT NULL DEFAULT 0,
-      success_count   INTEGER NOT NULL DEFAULT 0,
-      failure_count   INTEGER NOT NULL DEFAULT 0,
-      created_by      TEXT,
-      created_by_role VARCHAR(16),
-      created_at      TIMESTAMP NOT NULL DEFAULT NOW(),
-      printed_at      TIMESTAMP,
-      notes           TEXT,
-      reason          TEXT,
-      reason_category VARCHAR(24),
-      layout_version  TEXT
-    )
-  `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_print_batches_status ON print_batches (status)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_print_batches_created_at ON print_batches (created_at)`);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS print_events (
-      id              SERIAL PRIMARY KEY,
-      cert_id         TEXT NOT NULL,
-      batch_id        TEXT,
-      actor           TEXT NOT NULL,
-      actor_role      VARCHAR(16),
-      action          VARCHAR(24) NOT NULL,
-      from_state      VARCHAR(24),
-      to_state        VARCHAR(24),
-      reason          TEXT,
-      reason_category VARCHAR(24),
-      created_at      TIMESTAMP NOT NULL DEFAULT NOW()
-    )
-  `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_print_events_cert ON print_events (cert_id)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_print_events_batch ON print_events (batch_id)`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_print_events_created_at ON print_events (created_at)`);
-
-  await db.execute(sql`
-    INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
-    SELECT 'schema', 'print_workflow', 'print_workflow_schema_migrate', NULL,
-           ${{
-             certificates: ["print_state"],
-             tables: ["print_batches", "print_events"],
-           }}::jsonb
-    WHERE NOT EXISTS (SELECT 1 FROM audit_log WHERE action = 'print_workflow_schema_migrate')
-  `);
-}
+// The print-workflow schema (certificates.print_state, print_batches,
+// print_events) is created ONLY by migrations/0022_print_workflow_lifecycle.sql
+// through the numbered migration runner. There is deliberately NO boot-time ALTER
+// here — a single schema-mutation authority avoids the two-competing-paths problem.
 
 // ── Actor / role resolution ──────────────────────────────────────────────────
 
@@ -271,7 +214,7 @@ export async function getBatchDetail(
   return {
     batch: mapBatchSummary(row),
     certIds: row.cert_ids ?? [],
-    events: events.rows as unknown as PrintEvent[],
+    events: (events.rows as unknown as RawEventRow[]).map(mapEvent),
   };
 }
 
@@ -279,7 +222,39 @@ export async function listCertEvents(certId: string, limit = 200): Promise<Print
   const result = await db.execute(sql`
     SELECT * FROM print_events WHERE cert_id = ${certId} ORDER BY created_at DESC LIMIT ${limit}
   `);
-  return result.rows as unknown as PrintEvent[];
+  return (result.rows as unknown as RawEventRow[]).map(mapEvent);
+}
+
+// db.execute(SELECT *) returns raw snake_case column names, NOT the camelCase
+// $inferSelect shape — map explicitly so the client's camelCase reads work.
+interface RawEventRow {
+  id: number;
+  cert_id: string;
+  batch_id: string | null;
+  actor: string;
+  actor_role: string | null;
+  action: string;
+  from_state: string | null;
+  to_state: string | null;
+  reason: string | null;
+  reason_category: string | null;
+  created_at: string | Date;
+}
+
+function mapEvent(row: RawEventRow): PrintEvent {
+  return {
+    id: row.id,
+    certId: row.cert_id,
+    batchId: row.batch_id,
+    actor: row.actor,
+    actorRole: row.actor_role,
+    action: row.action,
+    fromState: row.from_state,
+    toState: row.to_state,
+    reason: row.reason,
+    reasonCategory: row.reason_category,
+    createdAt: (row.created_at instanceof Date ? row.created_at : new Date(row.created_at)) as PrintEvent["createdAt"],
+  };
 }
 
 function mapBatchSummary(row: RawBatchRow): PrintBatchSummary {
@@ -302,12 +277,21 @@ function mapBatchSummary(row: RawBatchRow): PrintBatchSummary {
 
 // ── Effective-state helper (read current stored + approval for a set of certs) ─
 
+/**
+ * Build a Postgres text[] array literal for a single bound param. drizzle's sql``
+ * does NOT bind a JS array as a pg array (it neither expands nor array-encodes it
+ * reliably for ANY/unnest), so we pass one properly-escaped literal + ::text[].
+ */
+function pgTextArray(ids: string[]): string {
+  return `{${ids.map((s) => `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")}}`;
+}
+
 async function loadEffectiveStates(certIds: string[]): Promise<Map<string, PrintState>> {
   if (certIds.length === 0) return new Map();
   const result = await db.execute(sql`
     SELECT certificate_number, print_state, (grade_approved_at IS NOT NULL) AS approved
     FROM certificates
-    WHERE certificate_number = ANY(${certIds})
+    WHERE certificate_number = ANY(${pgTextArray(certIds)}::text[])
   `);
   const map = new Map<string, PrintState>();
   for (const raw of result.rows as unknown as { certificate_number: string; print_state: string; approved: boolean }[]) {
@@ -326,28 +310,81 @@ export interface WorkflowResult {
   rejected: { certId: string; code?: string; message?: string }[];
 }
 
+export interface CreateBatchResult extends WorkflowResult {
+  batchId: string | null;
+  kind: BatchKind | null;
+  pdfUrl: string | null;
+  isDuplicate: boolean;
+  multiSheet: boolean;
+  pageCount: number;
+}
+
 /**
- * Persist a batch: mark each eligible cert `printing`, write/refresh the
- * print_batches record, and append print_events. Called AFTER the existing
- * renderer has produced the artefacts (client passes the same certIds; batchId
- * is derived identically). Idempotent on batchId (upsert). Transactional.
+ * Server-authoritative atomic batch creation. Reserve → render/upload → finalise.
+ *
+ *  1. RESERVE (transaction): claim eligible certs by moving needs_printing /
+ *     reprint_required → printing with a state-guarded UPDATE ... RETURNING, so two
+ *     concurrent requests can never both reserve the same cert (the loser sees 0
+ *     rows and reports it rejected). Writes the batch row as 'rendering' + events.
+ *  2. RENDER/UPLOAD: reuse the untouched print-batch.ts renderer to produce the PDF
+ *     and store it in R2 under the deterministic batchId key.
+ *  3a. On success: batch → 'printing'. Certs stay 'printing' — NOT 'printed'. Only
+ *      an explicit mark-printed advances them (positive physical confirmation).
+ *  3b. On ANY render/upload failure: RELEASE — roll the reserved certs back to their
+ *      prior state, batch → 'failed', write release events, then re-throw (500).
+ *      Cards never become printed because a render failed.
+ *
+ * Idempotent retry: batchId is deterministic (deriveBatchId). A repeat with an
+ * existing 'printing'/'printed' batch returns it without re-reserving or
+ * re-rendering. A previously 'failed' batch (certs already released) can retry.
  */
-export async function persistBatch(params: {
-  batchId: string;
+export async function createBatchAtomic(params: {
   certIds: string[];
-  kind: BatchKind;
   identity: ActorIdentity;
   reason?: string | null;
   reasonCategory?: string | null;
-  layoutVersion?: string | null;
   notes?: string | null;
-}): Promise<WorkflowResult> {
-  const { batchId, certIds, kind, identity } = params;
-  const states = await loadEffectiveStates(certIds);
-  const applied: string[] = [];
-  const rejected: WorkflowResult["rejected"] = [];
+}): Promise<CreateBatchResult> {
+  const { identity } = params;
+  const requested = [...new Set(params.certIds)];
+  const states = await loadEffectiveStates(requested);
 
-  for (const certId of certIds) {
+  const { deriveBatchId, CERTS_PER_PAGE, SHEET_LAYOUT_VERSION } = await import("./print-batch");
+
+  // ── Idempotency pre-check — a retry of an IN-FLIGHT batch (double-click /
+  // network retry). Fires ONLY when every requested cert is currently 'printing':
+  // that is precisely the duplicate-of-a-live-batch case. It deliberately does NOT
+  // fire for reprint_required (a genuine new reprint intent) or needs_printing (a
+  // fresh re-batch), so those proceed normally. Returns the existing live batch.
+  const allInFlight = requested.length > 0 && requested.every((id) => states.get(id) === "printing");
+  const sortedReq = JSON.stringify([...requested].sort());
+  const dup = allInFlight
+    ? await db.execute(sql`
+        SELECT batch_id, status, cert_ids, kind FROM print_batches
+        WHERE created_by = ${identity.actor} AND status IN ('printing', 'printed')
+          AND cert_ids @> ${sortedReq}::jsonb AND ${sortedReq}::jsonb @> cert_ids
+        ORDER BY created_at DESC LIMIT 1
+      `)
+    : { rows: [] as unknown[] };
+  if (dup.rows.length > 0) {
+    const row = dup.rows[0] as { batch_id: string; cert_ids?: string[]; kind: BatchKind };
+    const ids = row.cert_ids ?? [];
+    return {
+      applied: ids,
+      rejected: [],
+      batchId: row.batch_id,
+      kind: row.kind,
+      pdfUrl: `/api/admin/print-batch/${row.batch_id}/pdf`,
+      isDuplicate: true,
+      multiSheet: ids.length > CERTS_PER_PAGE,
+      pageCount: Math.max(1, Math.ceil(ids.length / CERTS_PER_PAGE)),
+    };
+  }
+
+  // ── Pre-flight eligibility (pure) ──────────────────────────────────────────
+  const rejected: WorkflowResult["rejected"] = [];
+  const eligible: { certId: string; from: PrintState }[] = [];
+  for (const certId of requested) {
     const from = states.get(certId);
     if (!from) {
       rejected.push({ certId, code: "not_found", message: "Certificate not found." });
@@ -355,46 +392,174 @@ export async function persistBatch(params: {
     }
     const t = nextState(from, "create_batch");
     if (!t.ok) rejected.push({ certId, code: t.code, message: t.message });
-    else applied.push(certId);
+    else eligible.push({ certId, from });
+  }
+  if (eligible.length === 0) {
+    return { applied: [], rejected, batchId: null, kind: null, pdfUrl: null, isDuplicate: false, multiSheet: false, pageCount: 0 };
   }
 
-  if (applied.length === 0) {
-    return { applied, rejected };
+  // A batch renders as one kind. Reprints (reprint_required, possibly claimed) use
+  // the reprint render path; fresh prints (needs_printing, unclaimed) use the
+  // standard path. Mixing is rejected so the render path is unambiguous.
+  const fromReprint = eligible.filter((e) => e.from === "reprint_required").length;
+  if (fromReprint > 0 && fromReprint !== eligible.length) {
+    const mixedRejected: WorkflowResult["rejected"] = eligible.map((e) => ({
+      certId: e.certId,
+      code: "mixed_batch",
+      message: "Select reprints and fresh prints in separate batches.",
+    }));
+    return {
+      applied: [],
+      rejected: [...mixedRejected, ...rejected],
+      batchId: null, kind: null, pdfUrl: null, isDuplicate: false, multiSheet: false, pageCount: 0,
+    };
+  }
+  const kind: BatchKind = fromReprint > 0 ? "reprint" : "batch";
+
+  const eligibleIds = eligible.map((e) => e.certId);
+  const batchId = deriveBatchId(eligibleIds, `${identity.actor}${kind === "reprint" ? "|reprint" : ""}`);
+  const pdfUrl = `/api/admin/print-batch/${batchId}/pdf`;
+
+  // ── Idempotent fast-path — existing live batch for this key ────────────────
+  const existing = await db.execute(sql`SELECT status, cert_ids FROM print_batches WHERE batch_id = ${batchId} LIMIT 1`);
+  if (existing.rows.length > 0) {
+    const st = (existing.rows[0] as { status: string }).status;
+    if (st === "printing" || st === "printed") {
+      const ids = (existing.rows[0] as { cert_ids?: string[] }).cert_ids ?? [];
+      return { applied: ids, rejected, batchId, kind, pdfUrl, isDuplicate: true, multiSheet: ids.length > CERTS_PER_PAGE, pageCount: Math.max(1, Math.ceil(ids.length / CERTS_PER_PAGE)) };
+    }
   }
 
+  // ── 1. RESERVE (transaction) — race-safe claim ─────────────────────────────
+  const reserved: string[] = [];
   await db.transaction(async (tx) => {
-    // Upsert the batch record.
     await tx.execute(sql`
-      INSERT INTO print_batches
-        (batch_id, kind, status, cert_ids, cert_count, created_by, created_by_role, reason, reason_category, layout_version, notes)
-      VALUES (
-        ${batchId}, ${kind}, 'printing', ${JSON.stringify(applied)}::jsonb, ${applied.length},
-        ${identity.actor}, ${identity.role}, ${params.reason ?? null}, ${params.reasonCategory ?? null},
-        ${params.layoutVersion ?? null}, ${params.notes ?? null}
-      )
-      ON CONFLICT (batch_id) DO UPDATE SET
-        status = 'printing',
-        cert_ids = ${JSON.stringify(applied)}::jsonb,
-        cert_count = ${applied.length},
-        kind = ${kind}
+      INSERT INTO print_batches (batch_id, kind, status, cert_ids, cert_count, created_by, created_by_role, reason, reason_category, layout_version, notes)
+      VALUES (${batchId}, ${kind}, 'rendering', '[]'::jsonb, 0, ${identity.actor}, ${identity.role},
+              ${params.reason ?? null}, ${params.reasonCategory ?? null}, ${SHEET_LAYOUT_VERSION}, ${params.notes ?? null})
+      ON CONFLICT (batch_id) DO UPDATE SET status = 'rendering', kind = ${kind}
     `);
-    // Advance each accepted cert to printing + write an event.
-    for (const certId of applied) {
-      const from = states.get(certId)!;
-      await tx.execute(sql`
+    for (const { certId, from } of eligible) {
+      // State-guarded claim: only succeeds if the cert is still in a batchable
+      // state. Concurrent reservation of the same cert loses here (0 rows).
+      const claim = await tx.execute(sql`
         UPDATE certificates SET print_state = 'printing', updated_at = NOW()
-        WHERE certificate_number = ${certId}
+        WHERE certificate_number = ${certId} AND print_state IN ('needs_printing', 'reprint_required')
+        RETURNING certificate_number
       `);
+      if (claim.rows.length === 0) {
+        rejected.push({ certId, code: "already_reserved", message: "Already being printed by another batch." });
+        continue;
+      }
+      reserved.push(certId);
       await tx.execute(sql`
         INSERT INTO print_events (cert_id, batch_id, actor, actor_role, action, from_state, to_state, reason, reason_category)
-        VALUES (${certId}, ${batchId}, ${identity.actor}, ${identity.role},
-                ${kind === "reprint" ? "create_batch" : "create_batch"}, ${from}, 'printing',
-                ${params.reason ?? null}, ${params.reasonCategory ?? null})
+        VALUES (${certId}, ${batchId}, ${identity.actor}, ${identity.role}, 'create_batch', ${from}, 'printing', ${params.reason ?? null}, ${params.reasonCategory ?? null})
       `);
     }
+    await tx.execute(sql`
+      UPDATE print_batches SET cert_ids = ${JSON.stringify(reserved)}::jsonb, cert_count = ${reserved.length}
+      WHERE batch_id = ${batchId}
+    `);
   });
 
-  return { applied, rejected };
+  if (reserved.length === 0) {
+    await db.execute(sql`UPDATE print_batches SET status = 'failed' WHERE batch_id = ${batchId}`);
+    return { applied: [], rejected, batchId, kind, pdfUrl: null, isDuplicate: false, multiSheet: false, pageCount: 0 };
+  }
+
+  // ── 2. RENDER / UPLOAD (slow I/O, outside the tx) ──────────────────────────
+  try {
+    await renderAndUploadBatch(batchId, reserved, kind);
+  } catch (err) {
+    // ── RELEASE — undo the reservation, fail loud ────────────────────────────
+    await db.transaction(async (tx) => {
+      for (const { certId, from } of eligible.filter((e) => reserved.includes(e.certId))) {
+        await tx.execute(sql`
+          UPDATE certificates SET print_state = ${from}, updated_at = NOW()
+          WHERE certificate_number = ${certId} AND print_state = 'printing'
+        `);
+        await tx.execute(sql`
+          INSERT INTO print_events (cert_id, batch_id, actor, actor_role, action, from_state, to_state, reason)
+          VALUES (${certId}, ${batchId}, ${identity.actor}, ${identity.role}, 'create_batch', 'printing', ${from}, 'render_failed_released')
+        `);
+      }
+      await tx.execute(sql`UPDATE print_batches SET status = 'failed', failure_count = ${reserved.length} WHERE batch_id = ${batchId}`);
+    });
+    throw err;
+  }
+
+  // ── 3. FINALISE — rendered, awaiting physical confirmation ─────────────────
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`UPDATE print_batches SET status = 'printing' WHERE batch_id = ${batchId}`);
+    // Keep the legacy label_prints sheet in sync (drives the existing sheet
+    // history UI + the queue's printedAt). printed_at stays NULL until an
+    // explicit mark-printed — a click never marks a card printed.
+    await tx.execute(sql`
+      INSERT INTO label_prints (cert_id, sheet_ref, printed_at)
+      SELECT unnest(${pgTextArray(reserved)}::text[]), ${`print_batch_${batchId}`}, NULL
+      ON CONFLICT (cert_id) DO UPDATE SET sheet_ref = EXCLUDED.sheet_ref, printed_at = NULL
+    `);
+  });
+
+  const multiSheet = reserved.length > CERTS_PER_PAGE;
+  return {
+    applied: reserved,
+    rejected,
+    batchId,
+    kind,
+    pdfUrl,
+    isDuplicate: false,
+    multiSheet,
+    pageCount: Math.max(1, Math.ceil(reserved.length / CERTS_PER_PAGE)),
+  };
+}
+
+/**
+ * Render + upload the batch artefacts using the UNTOUCHED print-batch.ts renderer,
+ * keyed by the deterministic batchId so the existing /print-batch/:id/pdf endpoint
+ * serves them. Throws on any resolution/render/upload failure so the caller can
+ * release the reservation. Fresh batches require unclaimed certs; reprint batches
+ * allow claimed certs (matching the existing /print-batch/reprint semantics).
+ */
+async function renderAndUploadBatch(batchId: string, certIds: string[], kind: BatchKind): Promise<void> {
+  const {
+    generatePrintBatchPDF,
+    generatePrintBatchPNG,
+    generatePrintBatchPrintPNG,
+    generateCricutSVG,
+    uploadPrintBatchArtifacts,
+    uploadPrintBatchPDF,
+    uploadCricutSvg,
+    CERTS_PER_PAGE,
+  } = await import("./print-batch");
+
+  const allCerts = await storage.listCertificates();
+  const items: { cert: unknown; claimCode: string }[] = [];
+  for (const certId of certIds) {
+    const cert = (allCerts as { certId: string; ownershipStatus?: string }[]).find((c) => c.certId === certId);
+    if (!cert) throw new Error(`Certificate not found while rendering: ${certId}`);
+    if (kind === "batch" && cert.ownershipStatus !== "unclaimed") {
+      throw new Error(`Cannot fresh-print a claimed cert (${certId}); use reprint.`);
+    }
+    const code = await storage.getOrGenerateClaimCode(certId);
+    items.push({ cert, claimCode: String(code) });
+  }
+
+  // The upload helpers derive the R2 object keys from batchId internally, so the
+  // existing /api/admin/print-batch/:batchId/pdf endpoint serves them unchanged.
+  if (items.length > CERTS_PER_PAGE) {
+    const pdf = await generatePrintBatchPDF(items as never);
+    await uploadPrintBatchPDF(batchId, pdf);
+  } else {
+    const [pdf, png, printPng] = await Promise.all([
+      generatePrintBatchPDF(items as never),
+      generatePrintBatchPNG(items as never),
+      generatePrintBatchPrintPNG(items as never),
+    ]);
+    await uploadPrintBatchArtifacts(batchId, pdf, png, printPng);
+    await uploadCricutSvg(batchId, generateCricutSVG(items as never)).catch(() => {});
+  }
 }
 
 /**

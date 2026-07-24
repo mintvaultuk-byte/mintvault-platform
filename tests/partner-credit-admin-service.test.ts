@@ -57,7 +57,8 @@ async function seedMintVaultTables(): Promise<void> {
       action text NOT NULL,
       created_at timestamptz NOT NULL DEFAULT now()
     )`);
-  for (const table of ["users", "submissions", "submission_items", "audit_log"]) {
+  await admin.query("CREATE TABLE certificates (id serial primary key, cert_id text)");
+  for (const table of ["users", "submissions", "submission_items", "audit_log", "certificates"]) {
     await admin.query(`ALTER TABLE ${table} OWNER TO pn_migrator`);
   }
 }

@@ -663,7 +663,8 @@ export async function approveCertGrade(certId: number, adminUser: string): Promi
   const r = await db.execute(sql`
     UPDATE certificates
     SET grade_approved_at = NOW(), grade_approved_by = ${adminUser}, status = 'active',
-        grader_status = 'approved', graded_at = NOW(), updated_at = NOW()
+        grader_status = 'approved', graded_at = NOW(), updated_at = NOW(),
+        print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END
     WHERE id = ${certId} AND grader_status = 'pending_review'
     RETURNING id
   `);

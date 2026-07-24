@@ -79,7 +79,6 @@ import { migrateGraderSchema, migrateGraderCertSchema, migratePerOperatorSchema,
 import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
 import { registerStaffRoutes } from "./routes/staff";
 import { registerPrintWorkflowRoutes } from "./routes/print-workflow";
-import { migratePrintWorkflowSchema } from "./print-workflow";
 import {
   BUILD_STAMP,
   pricingTiers,
@@ -1382,7 +1381,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   migratePerOperatorSchema().catch((e: any) => console.error("[per-operator-migrate] error:", e.message));
   migrateStaffCapabilitiesSchema().catch((e: any) => console.error("[staff-caps-migrate] error:", e.message));
   migrateScanSchema().catch((e: any) => console.error("[scan-migrate] error:", e.message));
-  migratePrintWorkflowSchema().catch((e: any) => console.error("[print-workflow-migrate] error:", e.message));
+  // NOTE: the print-workflow schema (print_state, print_batches, print_events) is
+  // applied ONLY by the numbered migration migrations/0022_print_workflow_lifecycle.sql
+  // via the migration runner — deliberately NOT a boot-time ALTER, to avoid two
+  // competing schema-mutation paths for the same objects.
   // Perf indexes run 20s after boot (CONCURRENTLY, no blocking lock) so the
   // schema ALTER migrations above have settled first — avoids the boot-time lock
   // contention that failed the earlier attempt. Fire-and-forget; non-fatal.
@@ -2522,6 +2524,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           grade_approved_by = ${(req.session as any)?.adminEmail || "admin"},
           grade_approved_at = NOW(),
           status            = 'active',
+          -- Print workflow: approval atomically enters Needs Printing. CASE guard
+          -- promotes only from the default, never regressing an in-flight print state.
+          print_state       = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END,
           grade_strength_score = ${isNonNum ? sql`grade_strength_score` : sql`${mvgsScore}::int`},
           verified_defects  = ${
             useMvgsClassifiedVerified
@@ -7278,6 +7283,8 @@ Defects (admin-confirmed): ${defectLines}`;
           grade_approved_by   = ${(req.session as any)?.adminEmail || "admin"},
           grade_approved_at   = NOW(),
           status              = 'active',
+          -- Print workflow: approval atomically enters Needs Printing (no regression).
+          print_state         = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END,
           grading_time_seconds = COALESCE(${clampedTime}::int, grading_time_seconds),
           updated_at          = NOW()
         WHERE id = ${id}

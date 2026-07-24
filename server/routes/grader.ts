@@ -455,7 +455,8 @@ export function registerGraderRoutes(app: Express): void {
         // AUTO-PUBLISH FLIP: publish directly, skip admin review.
         const pub = await db.execute(sql`
           UPDATE certificates SET grade_approved_at = NOW(), grade_approved_by = ${graderEmail}, status = 'active',
-            grader_status = 'approved', graded_at = NOW(), ${captureOperatorSubmission}, updated_at = NOW()
+            grader_status = 'approved', graded_at = NOW(), ${captureOperatorSubmission}, updated_at = NOW(),
+            print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END
           WHERE id = ${certId} AND grader_status = 'assigned'
           RETURNING id
         `);
@@ -527,6 +528,7 @@ export function registerGraderRoutes(app: Express): void {
           grade_approved_by = 'auto',
           grader_status = 'approved',
           status = 'active',
+          print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END,
           updated_at = NOW()
         WHERE id = ${certId} AND grader_status = 'pending_review'
         RETURNING id

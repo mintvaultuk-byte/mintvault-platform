@@ -44,7 +44,7 @@ describe("partner schema ↔ migration parity", () => {
     expect(drizzleTableNames().length).toBe(14);
   });
 
-  it("pins the full numbered migration inventory (0001–0018), so a new migration is noticed", () => {
+  it("pins the full numbered migration inventory, so a new migration is noticed", () => {
     const numbered = readdirSync(join(process.cwd(), "migrations"))
       .filter((f) => /^\d{4}_.+\.sql$/.test(f))
       .sort();
@@ -70,6 +70,10 @@ describe("partner schema ↔ migration parity", () => {
       // addition is consciously acknowledged. 0018 adds the partial index supporting the
       // Super Admin Correction Mode operator-statistics query (audit_log).
       "0018_correction_audit_index.sql",
+      // Not a partner migration — the print workflow lifecycle (certificates.print_state,
+      // print_batches, print_events). 0019–0021 are intentionally skipped: claimed by other
+      // unmerged branches, so 0022 avoids the runner's duplicate-number hard-reject.
+      "0022_print_workflow_lifecycle.sql",
     ]);
   });
 

@@ -272,6 +272,7 @@ export function findDuplicatePrints<T extends { certId: string; state: PrintStat
 
 export const PRINT_QUEUE_FILTERS = [
   "needs_printing",
+  "printing",
   "printed_today",
   "printed",
   "reprints",
@@ -283,6 +284,7 @@ export type PrintQueueFilter = (typeof PRINT_QUEUE_FILTERS)[number];
 
 export const PRINT_QUEUE_FILTER_LABEL: Record<PrintQueueFilter, string> = {
   needs_printing: "Needs Printing",
+  printing: "Printing / In Progress",
   printed_today: "Printed Today",
   printed: "Printed",
   reprints: "Reprints",
@@ -306,6 +308,8 @@ export function matchesFilter(row: QueueFilterInput, filter: PrintQueueFilter, d
       return true;
     case "needs_printing":
       return row.state === "needs_printing";
+    case "printing":
+      return row.state === "printing";
     case "printed":
       return row.state === "printed" || row.state === "reprinted";
     case "completed":

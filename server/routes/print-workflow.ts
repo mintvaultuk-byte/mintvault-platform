@@ -20,7 +20,7 @@ import {
   listBatches,
   getBatchDetail,
   listCertEvents,
-  persistBatch,
+  createBatchAtomic,
   markBatchPrinted,
   requestReprint,
   markCompleted,
@@ -35,10 +35,6 @@ const certIdsSchema = z.object({
 
 const batchSchema = z.object({
   certIds: z.array(z.string()).min(1).max(48),
-  batchId: z.string().regex(BATCH_ID_RE, "batchId must be the 16-hex id returned by /api/admin/print-batch"),
-  kind: z.enum(["batch", "reprint"]).default("batch"),
-  reason: z.string().trim().min(10).max(500).optional(),
-  reasonCategory: z.string().optional(),
   notes: z.string().max(1000).optional(),
 });
 
@@ -96,29 +92,22 @@ export function registerPrintWorkflowRoutes(app: Express): void {
     }
   });
 
-  // ── Batch persist (after the renderer produced the artefacts) ───────────────
+  // ── Create batch — server-authoritative reserve → render → finalise ─────────
+  // One call: the server reserves eligible certs (race-safe), renders via the
+  // existing print-batch renderer, and finalises — or releases on failure. Cards
+  // never become printed here; that needs an explicit mark-printed. Idempotent.
   app.post("/api/admin/printing/workflow/batch", requireAdmin, async (req: Request, res: Response) => {
     try {
       if (!ensurePermission(req, res, "create_batch")) return;
       const parsed = batchSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid body" });
-      const { certIds, batchId, kind, reason, reasonCategory, notes } = parsed.data;
-      const ids = certIds.map((c) => normalizeCertId(c));
-      const identity = resolveActor(req);
-      const result = await persistBatch({
-        batchId,
+      const ids = parsed.data.certIds.map((c) => normalizeCertId(c));
+      const result = await createBatchAtomic({
         certIds: ids,
-        kind,
-        identity,
-        reason: reason ?? null,
-        reasonCategory: reasonCategory ?? null,
-        notes: notes ?? null,
+        identity: resolveActor(req),
+        notes: parsed.data.notes ?? null,
       });
-      res.json({
-        ...result,
-        batchId,
-        pdfUrl: `/api/admin/print-batch/${batchId}/pdf`,
-      });
+      res.json(result);
     } catch (err) {
       sendServerError(res, err);
     }

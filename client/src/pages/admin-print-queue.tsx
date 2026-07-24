@@ -117,6 +117,7 @@ function PrintQueuePanel() {
   const counts = useMemo(() => {
     const c: Record<PrintQueueFilter, number> = {
       needs_printing: 0,
+      printing: 0,
       printed_today: 0,
       printed: 0,
       reprints: 0,
@@ -187,25 +188,31 @@ function PrintQueuePanel() {
       }
       setBusy(true);
       try {
-        const renderRes = await apiRequest("POST", `${base}/print-batch`, { certIds: ids });
-        const rendered = (await renderRes.json()) as { batchId: string; pdfUrl: string };
-        await apiRequest("POST", `${base}/printing/workflow/batch`, {
-          certIds: ids,
-          batchId: rendered.batchId,
-          kind: "batch",
+        // ONE server-authoritative call: reserve → render → finalise (atomic).
+        const res = await apiRequest("POST", `${base}/printing/workflow/batch`, { certIds: ids });
+        const result = (await res.json()) as {
+          batchId: string | null;
+          pdfUrl: string | null;
+          applied: string[];
+          rejected: { certId: string; message?: string }[];
+          isDuplicate: boolean;
+        };
+        if (result.batchId && result.pdfUrl && result.applied.length > 0) {
+          setLastBatchId(result.batchId);
+          window.open(rebaseUrl(result.pdfUrl, base), "_blank");
+        }
+        const skipped = result.rejected.length ? ` · ${result.rejected.length} skipped` : "";
+        toast({
+          title: result.applied.length ? (result.isDuplicate ? "Batch already generated" : "Batch created") : "Nothing batched",
+          description: result.applied.length
+            ? `${result.applied.length} label(s) ready — mark printed once on paper${skipped}.`
+            : result.rejected[0]?.message || "No eligible certificates in selection.",
+          variant: result.applied.length ? undefined : "destructive",
         });
-        setLastBatchId(rendered.batchId);
-        window.open(rebaseUrl(rendered.pdfUrl, base), "_blank");
-        toast({ title: "Batch created", description: `${ids.length} label(s) sent to print. Mark printed once on paper.` });
         clearSelection();
         invalidate();
       } catch (err: any) {
-        const code = err?.body?.code;
-        toast({
-          title: "Batch failed",
-          description: code === "CLAIMED_CERTS_PRESENT" ? "Selection contains claimed certs — use Reprint." : err?.message || "Could not create batch.",
-          variant: "destructive",
-        });
+        toast({ title: "Batch failed", description: err?.message || "Could not create batch.", variant: "destructive" });
       } finally {
         setBusy(false);
       }
@@ -265,30 +272,30 @@ function PrintQueuePanel() {
     [base, toast, invalidate]
   );
 
-  // Reprint: mark reprint_required (logged), render the reprint, persist printing.
+  // Reprint = flag the card Reprint Required (reason + who logged permanently).
+  // The physical reprint is then produced by selecting it under "Reprints" and
+  // hitting Print Selected — the same atomic batch endpoint (server sees the
+  // reprint_required state and renders a reprint batch).
   const submitReprint = useCallback(
     async (ids: string[], reason: string, category: ReprintReasonCategory) => {
       if (ids.length === 0) return;
       setBusy(true);
       try {
-        await apiRequest("POST", `${base}/printing/workflow/reprint`, { certIds: ids, reason, reasonCategory: category });
-        const renderRes = await apiRequest("POST", `${base}/print-batch/reprint`, { certIds: ids, reason });
-        const rendered = (await renderRes.json()) as { batchId: string; pdfUrl: string };
-        await apiRequest("POST", `${base}/printing/workflow/batch`, {
+        const res = await apiRequest("POST", `${base}/printing/workflow/reprint`, {
           certIds: ids,
-          batchId: rendered.batchId,
-          kind: "reprint",
           reason,
           reasonCategory: category,
         });
-        setLastBatchId(rendered.batchId);
-        window.open(rebaseUrl(rendered.pdfUrl, base), "_blank");
-        toast({ title: "Reprint created", description: `${ids.length} reprint label(s). Mark printed once on paper.` });
+        const result = (await res.json()) as WorkflowResult;
+        toast({
+          title: "Marked for reprint",
+          description: `${result.applied.length} card(s) flagged. Open the "Reprints" filter and Print Selected to produce the new label(s).`,
+        });
         setReprintOpen(false);
         clearSelection();
         invalidate();
       } catch (err: any) {
-        toast({ title: "Reprint failed", description: err?.message || "Could not reprint.", variant: "destructive" });
+        toast({ title: "Reprint failed", description: err?.message || "Could not flag reprint.", variant: "destructive" });
       } finally {
         setBusy(false);
       }
