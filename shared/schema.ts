@@ -1104,12 +1104,88 @@ export const insertRarityMappingReviewSchema = createInsertSchema(rarityMappingR
 export type RarityMappingReview = typeof rarityMappingReviews.$inferSelect;
 export type InsertRarityMappingReview = z.infer<typeof insertRarityMappingReviewSchema>;
 
+// ── Catalogue Manager (additive — migrations/0019_catalogue_manager.sql) ────────
+// The single source of truth for every grading classification list, made
+// admin-editable so no code deploy is needed to add a rarity/finish/promo/etc.
+// One table, discriminated by `category`; per-category structure (a rarity's
+// printed-symbol metadata, a promo's kind, a language's region…) lives in the
+// `metadata` JSONB so the table stays canonical for all eight sections. The
+// hard-coded arrays in shared/pokemon-rarity-catalogue.ts SEED this table and
+// remain the offline fallback — they are NOT a competing source. Audit uses the
+// existing `audit_log` table (entity_type="catalogue_item") — no new audit table.
+export const CATALOGUE_CATEGORIES = [
+  "rarity",
+  "finish",
+  "promo",
+  "designation",
+  "language",
+  "era",
+  "subset",
+  "attribute",
+] as const;
+export type CatalogueCategory = (typeof CATALOGUE_CATEGORIES)[number];
+
+export const catalogueItems = pgTable(
+  "catalogue_items",
+  {
+    id: serial("id").primaryKey(),
+    // One of CATALOGUE_CATEGORIES — the section this entry belongs to.
+    category: text("category").notNull(),
+    // Canonical machine value (stored on certificates + used by validation).
+    value: text("value").notNull(),
+    // Founder-facing display label.
+    label: text("label").notNull(),
+    // Printed abbreviation / code (e.g. "SAR"). Unique per category when set.
+    abbreviation: text("abbreviation"),
+    // Search aliases (label/abbrev/aliases/description are all searched).
+    aliases: jsonb("aliases").$type<string[]>().notNull().default([]),
+    // Plain-English description.
+    description: text("description").notNull().default(""),
+    // Per-category structured payload (rarity symbol {shape,colour,count,glyph},
+    // codes[], regions, eras[]; promo kind; language region; …). Shape is owned
+    // by the canonical types in shared/pokemon-rarity-catalogue.ts.
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    // Manual ordering within a category (picker + manager reorder).
+    sortOrder: integer("sort_order").notNull().default(0),
+    // Enable/disable (inactive = hidden from live pickers, kept in manager).
+    active: boolean("active").notNull().default(true),
+    // Archive/restore (archived = hidden everywhere unless restored).
+    archived: boolean("archived").notNull().default(false),
+    // Set true ONLY when a super admin deliberately allows this `value` to also
+    // exist in another category — otherwise a value belongs to ONE category.
+    allowCrossCategory: boolean("allow_cross_category").notNull().default(false),
+    notes: text("notes"),
+    createdBy: text("created_by"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: text("updated_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uqCategoryValue: uniqueIndex("uq_catalogue_items_category_value").on(t.category, t.value),
+    idxCategory: index("idx_catalogue_items_category").on(t.category),
+    idxActive: index("idx_catalogue_items_active").on(t.category, t.active, t.archived),
+  })
+);
+
+export const insertCatalogueItemSchema = createInsertSchema(catalogueItems, {
+  category: z.enum(CATALOGUE_CATEGORIES),
+  value: z.string().min(1).max(64),
+  label: z.string().min(1).max(96),
+  abbreviation: z.string().max(24).nullish(),
+  aliases: z.array(z.string().max(48)).max(32).optional(),
+  description: z.string().max(500).optional(),
+  notes: z.string().max(1000).nullish(),
+}).omit({ id: true, createdAt: true, updatedAt: true });
+export type CatalogueItem = typeof catalogueItems.$inferSelect;
+export type InsertCatalogueItem = z.infer<typeof insertCatalogueItemSchema>;
+
 // ── Pokémon Knowledge Engine (additive — migrations/add-pokemon-knowledge.sql) ──
 // Canonical SET knowledge lives here (companion to tcgdex_sets/custom_sets,
 // keyed by normalised set_key — the tcgdex re-import UPSERT clobbers its own
 // rows, so founder-verified knowledge must never live in importer-owned
-// columns). Rarities/finishes/promos/languages/eras stay in the ONE shared
-// catalogue (shared/pokemon-rarity-catalogue.ts) — no duplicate tables.
+// columns). Rarities/finishes/promos/languages/eras live in the ONE canonical
+// catalogue — now the `catalogue_items` table above (seeded from, and falling
+// back to, shared/pokemon-rarity-catalogue.ts) — no duplicate tables.
 
 export const pokemonSetKnowledge = pgTable(
   "pokemon_set_knowledge",

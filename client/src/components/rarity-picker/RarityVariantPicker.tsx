@@ -290,7 +290,7 @@ export function RarityVariantPicker({
   const quickRarities = useMemo(
     () =>
       quickList
-        .map(rarityByValue)
+        .map((v) => rarityByValue(v))
         .filter((r): r is PokemonRarity => Boolean(r) && base.some((b) => b.value === r!.value)),
     // quickList derives from `language`, so language stands in for it here.
     [base, language]
@@ -544,8 +544,8 @@ export function RarityVariantPicker({
     </button>
   );
 
-  const favouriteRarities = favourites.map(rarityByValue).filter(Boolean) as PokemonRarity[];
-  const recentRarities = recent.map(rarityByValue).filter(Boolean) as PokemonRarity[];
+  const favouriteRarities = favourites.map((v) => rarityByValue(v)).filter(Boolean) as PokemonRarity[];
+  const recentRarities = recent.map((v) => rarityByValue(v)).filter(Boolean) as PokemonRarity[];
 
   const quickFinishes = POKEMON_FINISHES.filter((f) => QUICK_FINISHES.includes(f.value));
   const moreFinishes = POKEMON_FINISHES.filter((f) => !QUICK_FINISHES.includes(f.value));
