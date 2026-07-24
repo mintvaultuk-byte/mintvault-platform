@@ -134,7 +134,7 @@ export default function AdminCataloguePage() {
 
   async function save() {
     if (!editor) return;
-    let metadata: Record<string, unknown> = {};
+    let metadata: Record<string, unknown>;
     try {
       metadata = editor.metadata.trim() ? JSON.parse(editor.metadata) : {};
     } catch {

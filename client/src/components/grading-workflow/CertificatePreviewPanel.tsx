@@ -62,7 +62,6 @@ export function CertificatePreviewPanel({ fields }: { fields: CertificatePreview
       cancelled = true;
       clearTimeout(timer);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
   // Revoke the last object URL on unmount.

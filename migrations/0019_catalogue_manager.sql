@@ -22,7 +22,8 @@
 -- rewrite or delete any data, and does not touch cert_counter or certificates.
 --
 -- Idempotent (IF NOT EXISTS throughout) and reversible
--- (see 0019_catalogue_manager.rollback.sql). Safe to run more than once.
+-- (see rollback-0019-catalogue-manager.sql — deliberately NOT numbered so the
+-- migration runner never applies the rollback as a migration). Safe to re-run.
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS catalogue_items (

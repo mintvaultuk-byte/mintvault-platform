@@ -39,19 +39,22 @@ export function WorkstationPreviewAside({
       preview on Rarity/Review). When omitted the layout is unchanged. */
   below?: ReactNode;
 }) {
-  // No `below` → render exactly as before (Card stage is untouched).
+  // ONE card-image render site (invariant enforced by the workstation-shell
+  // tests). When a `below` panel is present the aside stacks; otherwise the
+  // layout is byte-identical to before, so the Card stage is untouched.
+  const card = (
+    <CardPreviewPanel fill certificateId={certificateId} frontFile={frontFile} backFile={backFile} apiBase={apiBase} />
+  );
   if (!below) {
     return (
       <aside className={`min-h-0 max-md:max-h-[55vh] ${WORKSTATION_PREVIEW_WIDTH_CLASS}`} data-testid="grading-preview-panel">
-        <CardPreviewPanel fill certificateId={certificateId} frontFile={frontFile} backFile={backFile} apiBase={apiBase} />
+        {card}
       </aside>
     );
   }
   return (
     <aside className={`flex min-h-0 flex-col gap-2 max-md:max-h-[55vh] ${WORKSTATION_PREVIEW_WIDTH_CLASS}`} data-testid="grading-preview-panel">
-      <div className="min-h-0 flex-1">
-        <CardPreviewPanel fill certificateId={certificateId} frontFile={frontFile} backFile={backFile} apiBase={apiBase} />
-      </div>
+      <div className="min-h-0 flex-1">{card}</div>
       <div className="shrink-0">{below}</div>
     </aside>
   );

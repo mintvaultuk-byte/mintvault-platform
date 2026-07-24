@@ -27,7 +27,6 @@ import { db } from "../../db";
 import { auditLog, CATALOGUE_CATEGORIES, type CatalogueCategory } from "@shared/schema";
 import {
   listCatalogueItems,
-  getCatalogueItem,
   createCatalogueItem,
   updateCatalogueItem,
   setCatalogueActive,
