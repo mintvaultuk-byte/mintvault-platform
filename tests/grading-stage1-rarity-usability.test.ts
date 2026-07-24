@@ -258,7 +258,9 @@ describe("4. Stage 1 manual card-detail fields are visible by default", () => {
     // unified-shell pass: the preview aside is now the shared
     // WorkstationPreviewAside component.
     expect(FORM).toContain("<WorkstationPreviewAside");
-    expect(FORM).toContain('data-testid="grading-control-panel"');
+    // The control-panel column is owned by the canonical shell CertificateForm mounts.
+    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
+    expect(readFileSync(join(process.cwd(), "client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx"), "utf8")).toContain('data-testid="grading-control-panel"');
     const asideSrc = readFileSync(
       join(process.cwd(), "client/src/components/grading-workflow/WorkstationPreviewAside.tsx"),
       "utf8"

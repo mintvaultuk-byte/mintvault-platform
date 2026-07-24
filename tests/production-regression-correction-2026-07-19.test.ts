@@ -85,7 +85,11 @@ describe("Grade stage — containment lives on the outer shell, not the workstat
     expect(jsx).not.toMatch(/className="[^"]*overflow-y-auto/);
   });
   it("containment still lives on the outer shell (root fixed height + the form as the single scrollport)", () => {
-    expect(FORM).toContain("md:h-[calc(100dvh-4.5rem)]");
+    // The fixed-height root is now the ONE canonical shell CertificateForm mounts;
+    // the <form> body still carries the single canonical scrollport class.
+    expect(FORM).toContain("<CanonicalGradingWorkstationShell");
+    const shellSrc = readFileSync(join(process.cwd(), "client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx"), "utf8");
+    expect(shellSrc).toContain("md:h-[calc(100dvh-4.5rem)]");
     expect(FORM).toContain("min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1");
   });
   it("no transform/scale/zoom was introduced (the protected card tool reads live getBoundingClientRect)", () => {

@@ -1,0 +1,95 @@
+import React, { type ReactNode, type Ref } from "react";
+
+/**
+ * CanonicalGradingWorkstationShell — the ONE grading-workstation outer shell for
+ * the entire MintVault grading network (Super Admin /admin, Staff, Grader, Admin
+ * Review, and future Partner grading).
+ *
+ * This is the EXACT proven outer geometry previously inlined only in
+ * client/src/components/certificate-form.tsx (the founder-approved Super Admin
+ * workstation): a fixed viewport-height, full-width, two-panel pane with a
+ * shrink-0 header/stage region and an internally-scrolling grading body. It was
+ * extracted verbatim (same class strings, same testids, same nesting) so every
+ * role renders byte-identical geometry — only capabilities, data source, API
+ * base, read-only state and available actions differ by role, never the layout.
+ *
+ * Deliberately NOT configurable: width, max-width, desktop grid, gradient,
+ * preview sizing, scroll model, stage-bar layout, MVGS/Overall-Grade geometry,
+ * sticky-footer behaviour and responsive breakpoints are all owned here and
+ * cannot be overridden by a route. Routes may supply ONLY structural inputs:
+ * the surrounding-chrome viewport offset, the header content, the preview aside,
+ * and the grading body.
+ *
+ * The body (children) MUST be the canonical scroll element
+ * (`min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1`) — Super Admin passes its
+ * existing <form> with exactly those classes (unchanged); role routes pass a
+ * <div> with the same classes (see WORKSTATION_BODY_SCROLL_CLASS). An
+ * architecture test enforces this so no route can fork the scroll model.
+ */
+
+/**
+ * Literal per-route viewport-height classes. They MUST be written out in full
+ * (not interpolated) so Tailwind's JIT emits the CSS. "4.5rem" is byte-identical
+ * to the class the approved /admin workstation already used, so Super Admin
+ * rendering is unchanged. Role offsets account for each route's surrounding
+ * chrome (header rows / tabs / review overlay) and are tuned against real
+ * authenticated staging screenshots.
+ */
+export const WORKSTATION_VIEWPORT_HEIGHT_CLASS = {
+  "4.5rem": "md:h-[calc(100dvh-4.5rem)]", // Super Admin /admin (unchanged) + Admin Review overlay
+  "6.5rem": "md:h-[calc(100dvh-6.5rem)]", // Grader (single header row)
+  "8.5rem": "md:h-[calc(100dvh-8.5rem)]", // Staff (header row + tab bar)
+} as const;
+
+export type WorkstationViewportOffset = keyof typeof WORKSTATION_VIEWPORT_HEIGHT_CLASS;
+
+/** The one canonical fixed (shrink-0) header-region class. Both admin and role
+ *  routes compose their stage bar / ID tools inside a div with exactly this. */
+export const WORKSTATION_HEADER_REGION_CLASS = "shrink-0 space-y-1";
+
+/** The one canonical grading-body scroll class. Admin's <form> and every role
+ *  <div> use exactly this — enforced by the architecture test. */
+export const WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1";
+
+export interface CanonicalGradingWorkstationShellProps {
+  /** Surrounding-chrome offset subtracted from 100dvh. Defaults to the approved
+   *  Super Admin value so /admin is unchanged. */
+  viewportOffset?: WorkstationViewportOffset;
+  /** Left preview aside (Card / Rarity / Review stages). Falsy → hidden. */
+  previewAside?: ReactNode;
+  /** Ref to the outer root — used by routes for stage-scroll section queries. */
+  rootRef?: Ref<HTMLDivElement>;
+  /**
+   * The control-panel body: exactly two composed regions — a fixed header
+   * (`WORKSTATION_HEADER_REGION_CLASS`) and the canonical scroll body
+   * (`WORKSTATION_BODY_SCROLL_CLASS`). Admin passes its existing header div +
+   * <form> unchanged; role routes pass the header div + a <div> body. The shell
+   * owns the surrounding pane geometry; callers never own width/height/scroll.
+   */
+  children: ReactNode;
+}
+
+export function CanonicalGradingWorkstationShell({
+  viewportOffset = "4.5rem",
+  previewAside,
+  rootRef,
+  children,
+}: CanonicalGradingWorkstationShellProps) {
+  return (
+    <div
+      ref={rootRef}
+      className={`flex min-h-0 flex-col ${WORKSTATION_VIEWPORT_HEIGHT_CLASS[viewportOffset]}`}
+      data-testid="grading-workspace"
+      data-canonical-shell="true"
+    >
+      <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row">
+        {previewAside}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel">
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default CanonicalGradingWorkstationShell;

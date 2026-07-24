@@ -6,6 +6,7 @@ import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPic
 import { ReviewSummary } from "@/components/grading-workflow/ReviewSummary";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
+import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
@@ -1628,44 +1629,28 @@ export default function CertificateForm({
   const aiIdentifyAvailable = isEdit && !!certificate?.id && identifyEnabled;
 
   return (
-    <div className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]" data-testid="grading-workspace">
-      {/* Workstation shell — a fixed-height two-panel layout: a read-only card
-          preview aside (stages 0/1 only) beside the control panel that holds the
-          header strip + identification tools (fixed) and the scrollable form.
-          Workflow order (owner directive, Option A 2026-07-02): 1. AI Identify →
-          2. Card Details → 3. grading workstation (workstationSlot) → 4. Grade.
-          The AI-actions block sits OUTSIDE the <form>; the workstation renders
-          INSIDE the form after Card Details — safe because every workstation
-          button is type="button" and handleSubmit no-ops pre-approval, so it can
-          never trigger a form submit. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row">
-        {/* Preview aside — the SHARED WorkstationPreviewAside primitive (one
-            component, one width/breakpoint constant) — renders for Card,
-            Rarity AND Review (wfStage 0, 1, 3).
-            ARCHITECTURE NOTE (unified-shell pass): Grade (wfStage 2)
-            deliberately does NOT use this aside. The protected
-            client/src/components/grading/grading-panel.tsx workstation
-            already renders its own interactive card image + defect-marking
-            tool with its OWN internal two-column split
-            (`grid-cols-1 lg:grid-cols-[60%_40%]`, image left / controls
-            right). Mounting this aside alongside it would either duplicate
-            the card image (explicitly out of scope) or squeeze that
-            protected grid into a much narrower width, degrading defect/
-            centering placement precision — a real functional regression to
-            the grading task, not a cosmetic one. Grade's workstationSlot is
-            therefore rendered directly into the shared control-panel column
-            at full width, using GradingPanel's OWN protected internal
-            geometry as its "preview left / controls right" equivalent. This
-            is a deliberate, evidence-based exception (see the architecture
-            report), not an oversight — Stage 3 internals are never touched. */}
-        {(wfStage <= 1 || wfStage === 3) && (
+    // Canonical grading workstation shell — the ONE shared outer geometry (fixed
+    // viewport height, full width, two-panel columns, internal scroll), extracted
+    // verbatim from this component's previously-inline geometry so /admin renders
+    // identically; Staff / Grader / Admin Review use the exact same shell. Grade
+    // (wfStage 2) deliberately hides the preview aside because the protected
+    // grading-panel.tsx workstation already renders its own interactive card
+    // image + defect-marking tool (its own internal two-column split); mounting
+    // the aside there would duplicate the image or narrow that protected grid — a
+    // real functional regression, not cosmetic. The shrink-0 header div + <form>
+    // body below are the shell's control-panel children, unchanged.
+    <CanonicalGradingWorkstationShell
+      viewportOffset="4.5rem"
+      previewAside={
+        wfStage <= 1 || wfStage === 3 ? (
           <WorkstationPreviewAside
             certificateId={certificate?.id ?? null}
             frontFile={frontImage}
             backFile={backImage}
           />
-        )}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel">
+        ) : null
+      }
+    >
           <div className="shrink-0 space-y-1">
             {/* Shared workstation header strip (WorkstationHeaderStrip) — 4-stage
                 workflow navigation + queue/session stats. ONE render site for
@@ -3568,9 +3553,7 @@ export default function CertificateForm({
               )}
             </div>
           </form>
-        </div>
-      </div>
-    </div>
+        </CanonicalGradingWorkstationShell>
   );
 }
 

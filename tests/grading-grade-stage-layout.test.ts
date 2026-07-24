@@ -36,6 +36,8 @@ import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
+// canonical-consolidation: the ONE viewport-height cap now lives in the shared shell.
+const CANON_SHELL = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
 const PANEL = read("client/src/components/grading/grading-panel.tsx");
 
 /**
@@ -112,7 +114,9 @@ describe("A2. the desktop viewport does not obscure the grading workspace", () =
   it("exactly ONE viewport-height cap governs the workspace — the outer shell root", () => {
     // The defect was two competing caps. The root keeps its fixed height; the
     // inner one must never come back as live code.
-    expect(FORM_CODE).toContain("md:h-[calc(100dvh-4.5rem)]");
+    // The single fixed-height cap is owned by the canonical shell CertificateForm mounts.
+    expect(FORM_CODE).toContain("<CanonicalGradingWorkstationShell");
+    expect(CANON_SHELL).toContain("md:h-[calc(100dvh-4.5rem)]");
     expect(FORM_CODE).not.toContain("max-h-[calc(100dvh-12rem)]");
   });
 
@@ -183,7 +187,7 @@ describe("A5. blast radius — stages 0/1/3 and protected grading source are unt
   });
 
   it("the deliberate preview-aside gate (stages 0/1/3, Grade excluded) is unchanged", () => {
-    expect(FORM).toMatch(/\{\(wfStage <= 1 \|\| wfStage === 3\) && \(/);
+    expect(FORM).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?/);
   });
 
   it("the protected GradingPanel's own internal geometry is untouched", () => {

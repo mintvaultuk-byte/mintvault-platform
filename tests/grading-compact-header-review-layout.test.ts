@@ -23,6 +23,9 @@ import { join } from "path";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
+// canonical-consolidation: the two-column row geometry now lives in the ONE
+// shared shell CertificateForm mounts; the aside gate is a ternary prop value.
+const CANON_SHELL = read("client/src/components/grading-workflow/CanonicalGradingWorkstationShell.tsx");
 const BAR = read("client/src/components/grading-workflow/GradingWorkflowBar.tsx");
 const HUD = read("client/src/components/grading-workflow/SessionHud.tsx");
 const SUMMARY = read("client/src/components/grading-workflow/ReviewSummary.tsx");
@@ -112,10 +115,10 @@ describe("3. Certificate Tools is a compact utility control, not a large isolate
 
 describe("4. Stage 4 Review restores the two-column workstation (card left, details right)", () => {
   it("the preview aside now also renders for Review (wfStage === 3), not just Card/Rarity", () => {
-    expect(FORM).toMatch(/\{\(wfStage <= 1 \|\| wfStage === 3\) && \(/);
+    expect(FORM).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?/);
   });
   it("Grade (wfStage 2) is deliberately excluded — its own protected card/defect tool is untouched", () => {
-    const cond = FORM.slice(FORM.indexOf("{(wfStage <= 1 || wfStage === 3) && ("), FORM.indexOf("{(wfStage <= 1 || wfStage === 3) && (") + 60);
+    const cond = FORM.slice(FORM.indexOf("wfStage <= 1 || wfStage === 3 ?"), FORM.indexOf("wfStage <= 1 || wfStage === 3 ?") + 60);
     expect(cond).not.toContain("wfStage === 2");
   });
   it("preview and review-details are separate zones — no duplicated image", () => {
@@ -136,7 +139,7 @@ describe("4. Stage 4 Review restores the two-column workstation (card left, deta
     // exact same row (same aside gate, same flex row), so it inherits the
     // identical md breakpoint rather than requiring a new one. The column
     // ratio itself now lives in ONE shared constant (WorkstationPreviewAside).
-    expect(FORM).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
+    expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
     expect(ASIDE_SRC).toContain("md:w-[40%] md:shrink-0");
     expect(ASIDE_SRC).toContain("WORKSTATION_PREVIEW_WIDTH_CLASS");
   });
@@ -144,7 +147,7 @@ describe("4. Stage 4 Review restores the two-column workstation (card left, deta
     // Base (mobile-first) classes are flex-col; md:flex-row only applies at
     // the md breakpoint and above, so below it the aside and control panel
     // stack vertically like Card/Rarity already do.
-    expect(FORM).toMatch(/flex min-h-0 flex-1 flex-col gap-3 md:flex-row/);
+    expect(CANON_SHELL).toMatch(/flex min-h-0 flex-1 flex-col gap-3 md:flex-row/);
   });
 });
 

@@ -163,7 +163,7 @@ describe("8. shared primitives + all four grading stages still canonical (regres
     expect(staff).toContain("<AdminHeaderRow");
   });
   it("the preview aside gate still covers Card, Rarity and Review (wfStage 0, 1, 3) — Grade's protected exception is untouched", () => {
-    expect(FORM).toMatch(/\{\(wfStage <= 1 \|\| wfStage === 3\) && \(/);
+    expect(FORM).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?/);
   });
 });
 
