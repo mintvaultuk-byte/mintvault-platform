@@ -122,6 +122,32 @@ them for its own writes and flags them:
 | Customer/submission join misses certs with neither `submission_item_id` nor a card→submission link | Low | Those fields render "—"; the row still appears and is fully actionable. |
 | First boot applies the migration automatically | Medium (process) | It's owner-gated by not deploying; additive + idempotent. Documented so the first staging boot is a conscious step. |
 
+## Hardening pass (staging-prep) — what changed since the first draft
+
+- **Numbered migration.** The schema now ships as `migrations/0022_print_workflow_lifecycle.sql`
+  applied by the repo's numbered runner (`npm run db:migrate`). The boot-time ALTER was
+  removed — there is exactly **one** schema-mutation path. 0019–0021 are claimed by unmerged
+  branches, so 0022 is used to avoid the runner's duplicate-number hard-reject. Passes
+  `db:lint-sql` (additive only) and the migration-governance test.
+- **Approval → Needs Printing is automatic.** All five approval/publish paths now set
+  `print_state='needs_printing'` **in the same transaction** as `grade_approved_at`, via a
+  `CASE` that only promotes from the default (never regresses an in-flight print state). No
+  manual operator step. Failed approval prints nothing; re-approval is single-fire (approve-lock).
+- **Batch flow is now server-authoritative and atomic** — `createBatchAtomic`: reserve
+  (race-safe, state-guarded `UPDATE … RETURNING`) → render/upload → finalise, with
+  **release-on-failure** and **idempotent retry** (a re-fire of an in-flight batch returns the
+  existing one). The old client two-call flow is gone. A card only becomes `printed` on an
+  explicit mark-printed. Single source of truth documented in [AUTHORITY.md](./AUTHORITY.md).
+- **Real database tests (Postgres 17, Docker harness).** 25 DB-backed tests across migration/
+  backfill/approval-integration, service atomicity/idempotency/concurrency/release/reprint/audit,
+  and route-level permissions — plus 36 pure state-machine tests. **61 total, all passing.**
+  Full suite: **1876 passed, 0 failed**, 635 skipped (the 5 failing *files* are pre-existing
+  setup-throws for `TEST_DATABASE_URL`/`MINTVAULT_DATABASE_URL`, unrelated to printing; the two
+  `TEST_DATABASE_URL` migration tests pass once that DB is provided).
+- **Reconciled with main.** Rebased onto the current `origin/main` (twice — main moved during
+  the work). Canonical grading workstation untouched. Partner migration fixtures + the
+  migration-inventory parity test updated to acknowledge 0022.
+
 ## Proof level reached
 
 **Local Proof** — tsc clean, 35 unit tests green, full suite non-regressed,
