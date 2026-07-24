@@ -79,6 +79,7 @@ import { migrateGraderSchema, migrateGraderCertSchema, migratePerOperatorSchema,
 import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
 import { registerStaffRoutes } from "./routes/staff";
 import { registerPrintWorkflowRoutes } from "./routes/print-workflow";
+import { reconcileStuckPrintBatches } from "./print-workflow";
 import {
   BUILD_STAMP,
   pricingTiers,
@@ -1385,6 +1386,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // applied ONLY by the numbered migration migrations/0022_print_workflow_lifecycle.sql
   // via the migration runner — deliberately NOT a boot-time ALTER, to avoid two
   // competing schema-mutation paths for the same objects.
+  // Release any print batches stranded in 'rendering' by a crash/restart mid-render
+  // (age-guarded so it never races a live render on another machine). Best-effort;
+  // no-op until 0022 is applied.
+  reconcileStuckPrintBatches().catch((e: any) => console.error("[print-reconcile] error:", e?.message));
   // Perf indexes run 20s after boot (CONCURRENTLY, no blocking lock) so the
   // schema ALTER migrations above have settled first — avoids the boot-time lock
   // contention that failed the earlier attempt. Fire-and-forget; non-fatal.

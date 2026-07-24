@@ -232,6 +232,70 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
     expect(no.rejected[0].code).toBe("not_printed_yet");
   });
 
+  it("F1 regression: concurrent IDENTICAL submits never strand a cert or corrupt the batch", async () => {
+    await seedCert("MVDUP", "needs_printing");
+    const [a, b] = await Promise.all([
+      svc.createBatchAtomic({ certIds: ["MVDUP"], identity: ADMIN }),
+      svc.createBatchAtomic({ certIds: ["MVDUP"], identity: ADMIN }),
+    ]);
+    const winners = [a, b].filter((r) => r.applied.includes("MVDUP"));
+    // Either exactly one request reserved it, or (if the 2nd read after the 1st
+    // committed) the 2nd returned the 1st as a duplicate — never two live reserves.
+    expect(winners.length).toBeGreaterThanOrEqual(1);
+    expect(await stateOf("MVDUP")).toBe("printing");
+    const winnerBatch = winners.find((r) => !r.isDuplicate)?.batchId ?? winners[0].batchId!;
+    // The winning batch row is non-empty and the cert is still markable (not stranded).
+    const row = await adminClient.query(`SELECT cert_ids, status FROM print_batches WHERE batch_id=$1`, [winnerBatch]);
+    expect(row.rows[0].cert_ids).toEqual(["MVDUP"]);
+    const mp = await svc.markBatchPrinted(winnerBatch, ADMIN);
+    expect(mp.applied).toEqual(["MVDUP"]);
+    expect(await stateOf("MVDUP")).toBe("printed");
+  });
+
+  it("backend-F3 regression: mark-printed rejects a never-rendered ('rendering') batch", async () => {
+    await seedCert("MVREND", "needs_printing");
+    await adminClient.query(
+      `INSERT INTO print_batches (batch_id, kind, status, cert_ids, cert_count, created_by) VALUES ('aaaa000000000001','batch','rendering','["MVREND"]'::jsonb,1,'admin@mintvault')`
+    );
+    await adminClient.query(`UPDATE certificates SET print_state='printing' WHERE certificate_number='MVREND'`);
+    const r = await svc.markBatchPrinted("aaaa000000000001", ADMIN);
+    expect(r.applied).toEqual([]);
+    expect(r.rejected[0].code).toBe("not_printable");
+    expect(await stateOf("MVREND")).toBe("printing"); // NOT advanced to printed
+  });
+
+  it("DB-F2 regression: a second same-actor reprint of the same cert reserves a distinct batch", async () => {
+    await seedCert("MVRR", "printed");
+    await svc.requestReprint({ certIds: ["MVRR"], reason: "First damage on the corner", reasonCategory: "damaged_print", identity: ADMIN });
+    const b1 = await svc.createBatchAtomic({ certIds: ["MVRR"], identity: ADMIN });
+    await svc.markBatchPrinted(b1.batchId!, ADMIN);
+    expect(await stateOf("MVRR")).toBe("reprinted");
+    await svc.requestReprint({ certIds: ["MVRR"], reason: "Second, different damage later", reasonCategory: "damaged_print", identity: ADMIN });
+    const b2 = await svc.createBatchAtomic({ certIds: ["MVRR"], identity: ADMIN });
+    expect(b2.applied).toEqual(["MVRR"]); // NOT swallowed as a duplicate of b1
+    expect(b2.batchId).not.toBe(b1.batchId);
+    expect(await stateOf("MVRR")).toBe("printing");
+  });
+
+  it("reconciler releases a stale 'rendering' batch but leaves a fresh one alone", async () => {
+    await seedCert("MVSTUCK", "needs_printing");
+    await seedCert("MVFRESH", "needs_printing");
+    await adminClient.query(`UPDATE certificates SET print_state='printing' WHERE certificate_number IN ('MVSTUCK','MVFRESH')`);
+    await adminClient.query(
+      `INSERT INTO print_batches (batch_id, kind, status, cert_ids, cert_count, created_by, created_at)
+       VALUES ('bbbb000000000001','batch','rendering','["MVSTUCK"]'::jsonb,1,'admin@mintvault', NOW() - INTERVAL '20 minutes'),
+              ('bbbb000000000002','batch','rendering','["MVFRESH"]'::jsonb,1,'admin@mintvault', NOW())`
+    );
+    const released = await svc.reconcileStuckPrintBatches(15);
+    expect(released).toBe(1);
+    expect(await stateOf("MVSTUCK")).toBe("needs_printing"); // released
+    expect(await stateOf("MVFRESH")).toBe("printing"); // fresh render untouched (age guard)
+    const b = await adminClient.query(`SELECT status FROM print_batches WHERE batch_id='bbbb000000000001'`);
+    expect(b.rows[0].status).toBe("failed");
+    const ev = await adminClient.query(`SELECT to_state FROM print_events WHERE cert_id='MVSTUCK' AND reason='stuck_rendering_reconciled'`);
+    expect(ev.rows[0].to_state).toBe("needs_printing");
+  });
+
   it("keeps an append-only audit ledger per cert", async () => {
     await seedCert("MV70", "needs_printing");
     const batch = await svc.createBatchAtomic({ certIds: ["MV70"], identity: ADMIN });

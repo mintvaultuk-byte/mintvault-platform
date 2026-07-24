@@ -87,7 +87,7 @@ const ADVANCED_STATES: ReadonlySet<PrintState> = new Set<PrintState>([
 export const BATCH_KINDS = ["batch", "reprint"] as const;
 export type BatchKind = (typeof BATCH_KINDS)[number];
 
-export const BATCH_STATUSES = ["open", "printing", "printed", "partial", "failed", "cancelled"] as const;
+export const BATCH_STATUSES = ["open", "rendering", "printing", "printed", "partial", "failed", "cancelled"] as const;
 export type BatchStatus = (typeof BATCH_STATUSES)[number];
 
 // ── Reprint reasons ──────────────────────────────────────────────────────────

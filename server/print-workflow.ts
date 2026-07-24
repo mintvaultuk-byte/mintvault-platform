@@ -15,6 +15,7 @@
  * resolves admin OR staff correctly (fixes attribution finding B-3).
  */
 import type { Request } from "express";
+import { randomUUID } from "node:crypto";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
@@ -61,7 +62,10 @@ export function resolveActor(req: Request): ActorIdentity {
     // Staff without the print proxy — read-only surfaces only.
     return { actor: String(s.staffEmail), role: "staff_readonly" };
   }
-  return { actor: "admin", role: "admin" };
+  // Fail-closed: no admin/staff identity resolved. Reachable only if a future
+  // caller invokes this without the requireAdmin guard; default to the
+  // least-privileged role so it can never silently grant a mutation.
+  return { actor: "unknown", role: "staff_readonly" };
 }
 
 /**
@@ -361,7 +365,7 @@ export async function createBatchAtomic(params: {
   const dup = allInFlight
     ? await db.execute(sql`
         SELECT batch_id, status, cert_ids, kind FROM print_batches
-        WHERE created_by = ${identity.actor} AND status IN ('printing', 'printed')
+        WHERE created_by = ${identity.actor} AND status IN ('rendering', 'printing', 'printed')
           AND cert_ids @> ${sortedReq}::jsonb AND ${sortedReq}::jsonb @> cert_ids
         ORDER BY created_at DESC LIMIT 1
       `)
@@ -417,31 +421,24 @@ export async function createBatchAtomic(params: {
   const kind: BatchKind = fromReprint > 0 ? "reprint" : "batch";
 
   const eligibleIds = eligible.map((e) => e.certId);
-  const batchId = deriveBatchId(eligibleIds, `${identity.actor}${kind === "reprint" ? "|reprint" : ""}`);
+  // UNIQUE per-request batch id (random nonce). A deterministic id caused two
+  // hazards: concurrent identical submits shared one batch row (the loser
+  // clobbered the winner's cert_ids and stranded certs), and a second same-day
+  // reprint of the same certs collided with the first and was silently swallowed.
+  // Retry idempotency is instead provided by the in-flight membership pre-check
+  // above (keyed on the cert set + actor), not by id determinism.
+  const batchId = deriveBatchId(eligibleIds, `${identity.actor}|${kind}|${randomUUID()}`);
   const pdfUrl = `/api/admin/print-batch/${batchId}/pdf`;
+  const fromOf = new Map(eligible.map((e) => [e.certId, e.from]));
 
-  // ── Idempotent fast-path — existing live batch for this key ────────────────
-  const existing = await db.execute(sql`SELECT status, cert_ids FROM print_batches WHERE batch_id = ${batchId} LIMIT 1`);
-  if (existing.rows.length > 0) {
-    const st = (existing.rows[0] as { status: string }).status;
-    if (st === "printing" || st === "printed") {
-      const ids = (existing.rows[0] as { cert_ids?: string[] }).cert_ids ?? [];
-      return { applied: ids, rejected, batchId, kind, pdfUrl, isDuplicate: true, multiSheet: ids.length > CERTS_PER_PAGE, pageCount: Math.max(1, Math.ceil(ids.length / CERTS_PER_PAGE)) };
-    }
-  }
-
-  // ── 1. RESERVE (transaction) — race-safe claim ─────────────────────────────
+  // ── 1. RESERVE (transaction) — race-safe claim. The batch row is written ONLY
+  // if we actually won certs, so a losing concurrent request creates nothing to
+  // clobber and nothing to strand. ──
   const reserved: string[] = [];
   await db.transaction(async (tx) => {
-    await tx.execute(sql`
-      INSERT INTO print_batches (batch_id, kind, status, cert_ids, cert_count, created_by, created_by_role, reason, reason_category, layout_version, notes)
-      VALUES (${batchId}, ${kind}, 'rendering', '[]'::jsonb, 0, ${identity.actor}, ${identity.role},
-              ${params.reason ?? null}, ${params.reasonCategory ?? null}, ${SHEET_LAYOUT_VERSION}, ${params.notes ?? null})
-      ON CONFLICT (batch_id) DO UPDATE SET status = 'rendering', kind = ${kind}
-    `);
-    for (const { certId, from } of eligible) {
-      // State-guarded claim: only succeeds if the cert is still in a batchable
-      // state. Concurrent reservation of the same cert loses here (0 rows).
+    for (const { certId } of eligible) {
+      // State-guarded claim: succeeds only if the cert is still batchable. A
+      // concurrent request for the same cert loses here (row-locked, 0 rows).
       const claim = await tx.execute(sql`
         UPDATE certificates SET print_state = 'printing', updated_at = NOW()
         WHERE certificate_number = ${certId} AND print_state IN ('needs_printing', 'reprint_required')
@@ -452,55 +449,60 @@ export async function createBatchAtomic(params: {
         continue;
       }
       reserved.push(certId);
-      await tx.execute(sql`
-        INSERT INTO print_events (cert_id, batch_id, actor, actor_role, action, from_state, to_state, reason, reason_category)
-        VALUES (${certId}, ${batchId}, ${identity.actor}, ${identity.role}, 'create_batch', ${from}, 'printing', ${params.reason ?? null}, ${params.reasonCategory ?? null})
-      `);
     }
-    await tx.execute(sql`
-      UPDATE print_batches SET cert_ids = ${JSON.stringify(reserved)}::jsonb, cert_count = ${reserved.length}
-      WHERE batch_id = ${batchId}
-    `);
+    if (reserved.length > 0) {
+      await tx.execute(sql`
+        INSERT INTO print_batches (batch_id, kind, status, cert_ids, cert_count, created_by, created_by_role, reason, reason_category, layout_version, notes)
+        VALUES (${batchId}, ${kind}, 'rendering', ${JSON.stringify(reserved)}::jsonb, ${reserved.length}, ${identity.actor}, ${identity.role},
+                ${params.reason ?? null}, ${params.reasonCategory ?? null}, ${SHEET_LAYOUT_VERSION}, ${params.notes ?? null})
+      `);
+      for (const certId of reserved) {
+        await tx.execute(sql`
+          INSERT INTO print_events (cert_id, batch_id, actor, actor_role, action, from_state, to_state, reason, reason_category)
+          VALUES (${certId}, ${batchId}, ${identity.actor}, ${identity.role}, 'create_batch', ${fromOf.get(certId)}, 'printing', ${params.reason ?? null}, ${params.reasonCategory ?? null})
+        `);
+      }
+    }
   });
 
   if (reserved.length === 0) {
-    await db.execute(sql`UPDATE print_batches SET status = 'failed' WHERE batch_id = ${batchId}`);
-    return { applied: [], rejected, batchId, kind, pdfUrl: null, isDuplicate: false, multiSheet: false, pageCount: 0 };
+    // Nothing won (all already reserved/ineligible) — no batch row created.
+    return { applied: [], rejected, batchId: null, kind, pdfUrl: null, isDuplicate: false, multiSheet: false, pageCount: 0 };
   }
 
-  // ── 2. RENDER / UPLOAD (slow I/O, outside the tx) ──────────────────────────
+  // ── 2 + 3. RENDER + FINALISE (both inside the try; RELEASE on ANY failure) ──
   try {
     await renderAndUploadBatch(batchId, reserved, kind);
-  } catch (err) {
-    // ── RELEASE — undo the reservation, fail loud ────────────────────────────
     await db.transaction(async (tx) => {
-      for (const { certId, from } of eligible.filter((e) => reserved.includes(e.certId))) {
+      await tx.execute(sql`UPDATE print_batches SET status = 'printing' WHERE batch_id = ${batchId}`);
+      // Keep the legacy label_prints sheet in sync (drives the existing sheet
+      // history UI + the queue's printedAt). printed_at stays NULL until an
+      // explicit mark-printed — a click never marks a card printed.
+      await tx.execute(sql`
+        INSERT INTO label_prints (cert_id, sheet_ref, printed_at)
+        SELECT unnest(${pgTextArray(reserved)}::text[]), ${`print_batch_${batchId}`}, NULL
+        ON CONFLICT (cert_id) DO UPDATE SET sheet_ref = EXCLUDED.sheet_ref, printed_at = NULL
+      `);
+    });
+  } catch (err) {
+    // ── RELEASE — undo the reservation, fail loud. Covers render/upload AND
+    // finalise failure. (Process-crash mid-render is swept by the boot reconciler
+    // reconcileStuckPrintBatches — a live in-process failure is released here.) ──
+    await db.transaction(async (tx) => {
+      for (const certId of reserved) {
         await tx.execute(sql`
-          UPDATE certificates SET print_state = ${from}, updated_at = NOW()
+          UPDATE certificates SET print_state = ${fromOf.get(certId)}, updated_at = NOW()
           WHERE certificate_number = ${certId} AND print_state = 'printing'
         `);
         await tx.execute(sql`
           INSERT INTO print_events (cert_id, batch_id, actor, actor_role, action, from_state, to_state, reason)
-          VALUES (${certId}, ${batchId}, ${identity.actor}, ${identity.role}, 'create_batch', 'printing', ${from}, 'render_failed_released')
+          VALUES (${certId}, ${batchId}, ${identity.actor}, ${identity.role}, 'create_batch', 'printing', ${fromOf.get(certId)}, 'render_failed_released')
         `);
       }
       await tx.execute(sql`UPDATE print_batches SET status = 'failed', failure_count = ${reserved.length} WHERE batch_id = ${batchId}`);
     });
     throw err;
   }
-
-  // ── 3. FINALISE — rendered, awaiting physical confirmation ─────────────────
-  await db.transaction(async (tx) => {
-    await tx.execute(sql`UPDATE print_batches SET status = 'printing' WHERE batch_id = ${batchId}`);
-    // Keep the legacy label_prints sheet in sync (drives the existing sheet
-    // history UI + the queue's printedAt). printed_at stays NULL until an
-    // explicit mark-printed — a click never marks a card printed.
-    await tx.execute(sql`
-      INSERT INTO label_prints (cert_id, sheet_ref, printed_at)
-      SELECT unnest(${pgTextArray(reserved)}::text[]), ${`print_batch_${batchId}`}, NULL
-      ON CONFLICT (cert_id) DO UPDATE SET sheet_ref = EXCLUDED.sheet_ref, printed_at = NULL
-    `);
-  });
 
   const multiSheet = reserved.length > CERTS_PER_PAGE;
   return {
@@ -513,6 +515,45 @@ export async function createBatchAtomic(params: {
     multiSheet,
     pageCount: Math.max(1, Math.ceil(reserved.length / CERTS_PER_PAGE)),
   };
+}
+
+/**
+ * Reconciler for batches stranded in 'rendering' — a process crash/restart during
+ * the (out-of-transaction) render window leaves reserved certs in 'printing' with
+ * no way to advance. This releases them back to their pre-reserve state
+ * (needs_printing for a fresh batch, reprint_required for a reprint) and fails the
+ * batch. The age threshold avoids racing a genuinely in-flight render on another
+ * Fly machine (a render completes in seconds; default 15 min is well clear).
+ * Wire into the boot sequence and/or an interval. Returns certs released.
+ */
+export async function reconcileStuckPrintBatches(olderThanMinutes = 15): Promise<number> {
+  const stuck = await db.execute(sql`
+    SELECT batch_id, kind, cert_ids FROM print_batches
+    WHERE status = 'rendering' AND created_at < NOW() - make_interval(mins => ${olderThanMinutes})
+  `);
+  let released = 0;
+  for (const raw of stuck.rows as unknown as { batch_id: string; kind: BatchKind; cert_ids?: string[] }[]) {
+    const target: PrintState = raw.kind === "reprint" ? "reprint_required" : "needs_printing";
+    const certIds = raw.cert_ids ?? [];
+    await db.transaction(async (tx) => {
+      for (const certId of certIds) {
+        const r = await tx.execute(sql`
+          UPDATE certificates SET print_state = ${target}, updated_at = NOW()
+          WHERE certificate_number = ${certId} AND print_state = 'printing'
+          RETURNING certificate_number
+        `);
+        if (r.rows.length > 0) {
+          released++;
+          await tx.execute(sql`
+            INSERT INTO print_events (cert_id, batch_id, actor, actor_role, action, from_state, to_state, reason)
+            VALUES (${certId}, ${raw.batch_id}, 'system', 'admin', 'create_batch', 'printing', ${target}, 'stuck_rendering_reconciled')
+          `);
+        }
+      }
+      await tx.execute(sql`UPDATE print_batches SET status = 'failed' WHERE batch_id = ${raw.batch_id}`);
+    });
+  }
+  return released;
 }
 
 /**
@@ -568,11 +609,17 @@ async function renderAndUploadBatch(batchId: string, certIds: string[], kind: Ba
  * existing label_prints sheet as printed. Transactional.
  */
 export async function markBatchPrinted(batchId: string, identity: ActorIdentity): Promise<WorkflowResult> {
-  const b = await db.execute(sql`SELECT kind, cert_ids FROM print_batches WHERE batch_id = ${batchId} LIMIT 1`);
+  const b = await db.execute(sql`SELECT kind, cert_ids, status FROM print_batches WHERE batch_id = ${batchId} LIMIT 1`);
   if (b.rows.length === 0) {
     return { applied: [], rejected: [{ certId: batchId, code: "not_found", message: "Batch not found." }] };
   }
-  const batchRow = b.rows[0] as unknown as { kind: BatchKind; cert_ids?: string[] };
+  const batchRow = b.rows[0] as unknown as { kind: BatchKind; cert_ids?: string[]; status: string };
+  // Only a finalised batch (render + upload succeeded) may be confirmed printed.
+  // Blocks marking a 'rendering' (never-produced) or 'failed' batch as printed —
+  // a card must never read 'printed' with no PDF behind it.
+  if (batchRow.status !== "printing") {
+    return { applied: [], rejected: [{ certId: batchId, code: "not_printable", message: `Batch is "${batchRow.status}", not a finalised print.` }] };
+  }
   const kind = batchRow.kind;
   const certIds = batchRow.cert_ids ?? [];
   const states = await loadEffectiveStates(certIds);
@@ -590,7 +637,6 @@ export async function markBatchPrinted(batchId: string, identity: ActorIdentity)
     if (!t.ok || !t.to) rejected.push({ certId, code: t.code, message: t.message });
     else {
       targets.push({ certId, from, to: t.to });
-      applied.push(certId);
     }
   }
 
@@ -598,25 +644,35 @@ export async function markBatchPrinted(batchId: string, identity: ActorIdentity)
 
   await db.transaction(async (tx) => {
     for (const { certId, from, to } of targets) {
-      await tx.execute(sql`
+      // Compare-and-set: advance only if still in the expected state, and write
+      // the ledger event ONLY when the row actually changed. A concurrent double
+      // mark-printed therefore records exactly one event per cert.
+      const upd = await tx.execute(sql`
         UPDATE certificates SET print_state = ${to}, updated_at = NOW()
-        WHERE certificate_number = ${certId}
+        WHERE certificate_number = ${certId} AND print_state = ${from}
+        RETURNING certificate_number
       `);
+      if (upd.rows.length === 0) {
+        rejected.push({ certId, code: "state_changed", message: "Concurrently updated." });
+        continue;
+      }
+      applied.push(certId);
       await tx.execute(sql`
         INSERT INTO print_events (cert_id, batch_id, actor, actor_role, action, from_state, to_state)
         VALUES (${certId}, ${batchId}, ${identity.actor}, ${identity.role}, 'mark_printed', ${from}, ${to})
       `);
     }
-    await tx.execute(sql`
-      UPDATE print_batches
-      SET status = 'printed', printed_at = NOW(), success_count = ${applied.length},
-          failure_count = ${rejected.length}
-      WHERE batch_id = ${batchId}
-    `);
-    // Keep the legacy label_prints sheet in sync (reuses existing sheet history).
-    await tx.execute(sql`
-      UPDATE label_prints SET printed_at = NOW() WHERE sheet_ref = ${`print_batch_${batchId}`}
-    `);
+    // Only the winner of the CAS (at least one cert advanced) finalises the batch.
+    if (applied.length > 0) {
+      await tx.execute(sql`
+        UPDATE print_batches
+        SET status = 'printed', printed_at = NOW(), success_count = ${applied.length}, failure_count = ${rejected.length}
+        WHERE batch_id = ${batchId} AND status = 'printing'
+      `);
+      await tx.execute(sql`
+        UPDATE label_prints SET printed_at = NOW() WHERE sheet_ref = ${`print_batch_${batchId}`}
+      `);
+    }
   });
 
   return { applied, rejected };
@@ -650,25 +706,29 @@ export async function requestReprint(params: {
     }
     const t = nextState(from, "reprint", { hasReason: true });
     if (!t.ok) rejected.push({ certId, code: t.code, message: t.message });
-    else {
-      targets.push({ certId, from });
-      applied.push(certId);
-    }
+    else targets.push({ certId, from });
   }
 
   if (targets.length === 0) return { applied, rejected };
 
   await db.transaction(async (tx) => {
     for (const { certId, from } of targets) {
-      await tx.execute(sql`
+      // CAS: flag reprint only if still in the expected state; write the ledger +
+      // reprint_log row ONLY on a real change, so a double-submit records once.
+      const upd = await tx.execute(sql`
         UPDATE certificates SET print_state = 'reprint_required', updated_at = NOW()
-        WHERE certificate_number = ${certId}
+        WHERE certificate_number = ${certId} AND print_state = ${from}
+        RETURNING certificate_number
       `);
+      if (upd.rows.length === 0) {
+        rejected.push({ certId, code: "state_changed", message: "Concurrently updated." });
+        continue;
+      }
+      applied.push(certId);
       await tx.execute(sql`
         INSERT INTO print_events (cert_id, actor, actor_role, action, from_state, to_state, reason, reason_category)
         VALUES (${certId}, ${identity.actor}, ${identity.role}, 'reprint', ${from}, 'reprint_required', ${reason}, ${category})
       `);
-      // Populate reprint_log so the reprint-count badge is accurate.
       await tx.execute(sql`INSERT INTO reprint_log (cert_id) VALUES (${certId})`);
     }
   });
@@ -694,18 +754,22 @@ export async function markCompleted(params: { certIds: string[]; identity: Actor
     }
     const t = nextState(from, "complete");
     if (!t.ok) rejected.push({ certId, code: t.code, message: t.message });
-    else {
-      targets.push({ certId, from });
-      applied.push(certId);
-    }
+    else targets.push({ certId, from });
   }
   if (targets.length === 0) return { applied, rejected };
   await db.transaction(async (tx) => {
     for (const { certId, from } of targets) {
-      await tx.execute(sql`
+      // CAS: complete only if still printed/reprinted; event on real change only.
+      const upd = await tx.execute(sql`
         UPDATE certificates SET print_state = 'completed', updated_at = NOW()
-        WHERE certificate_number = ${certId}
+        WHERE certificate_number = ${certId} AND print_state = ${from}
+        RETURNING certificate_number
       `);
+      if (upd.rows.length === 0) {
+        rejected.push({ certId, code: "state_changed", message: "Concurrently updated." });
+        continue;
+      }
+      applied.push(certId);
       await tx.execute(sql`
         INSERT INTO print_events (cert_id, actor, actor_role, action, from_state, to_state)
         VALUES (${certId}, ${identity.actor}, ${identity.role}, 'complete', ${from}, 'completed')

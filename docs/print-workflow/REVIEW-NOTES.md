@@ -148,6 +148,30 @@ them for its own writes and flags them:
   the work). Canonical grading workstation untouched. Partner migration fixtures + the
   migration-inventory parity test updated to acknowledge 0022.
 
+## Independent hostile review (3-reviewer adversarial panel) — findings & fixes
+
+An adversarial panel (DB, backend, security) was run before staging. Two reviewers
+independently converged on the same critical concurrency flaw. All Critical/High
+findings are fixed; each has a regression test.
+
+| ID | Sev | Finding | Fix | Test |
+|---|---|---|---|---|
+| F1 | **Critical** | Concurrent identical batch submits shared one deterministic batch id; the loser clobbered the winner's `cert_ids` and stranded certs in `printing`. | Batch id is now a **unique per-request nonce**; the batch row is created **only when certs are actually reserved**, so a losing request writes nothing. Retry idempotency preserved by the in-flight membership pre-check. | `F1 regression: concurrent IDENTICAL submits…` |
+| F2 (reprint) | High | A second same-day reprint of the same certs collided with the first id and was silently swallowed. | Same unique-id fix removes the collision. | `DB-F2 regression: second same-actor reprint…` |
+| F3 (durability) | High | FINALISE failure / process-crash mid-render left certs stranded in `printing`, batch stuck `rendering`, unrecoverable. | FINALISE moved **inside the try** (release on any failure) + a **boot reconciler** `reconcileStuckPrintBatches` (age-guarded) releases stale `rendering` batches. | `reconciler releases a stale 'rendering' batch…` |
+| F3 (mark-printed) | High | `mark-printed` had no batch-status guard — a never-rendered `rendering` batch could be marked printed with no PDF. | `markBatchPrinted` now rejects unless `status='printing'` (finalised). | `backend-F3 regression: mark-printed rejects…` |
+| F5 (CAS) | Medium | Double-fire of mark-printed/reprint/complete duplicated ledger events. | Compare-and-set (`AND print_state = <from>` + `RETURNING`); event written only on a real change. | covered by mark-printed status-guard + idempotency tests |
+| PII | Medium | Queue's computed `customerName` wasn't in the staff PII-strip set → leaked to `can_print` staff. | Added `customerName` to `GRADER_PII_KEYS`. | (strip-set data; admin sees it, staff stripped) |
+| resolveActor | Low | Fallback returned role `admin`. | Fail-closed to `staff_readonly`. | — |
+| BATCH_STATUSES | Low | Type union omitted `rendering`. | Added. | — |
+
+### F4 (deploy-order) — a HARD rollout gate, not a code change
+The 5 approval sites reference `print_state` unconditionally. If the **code deploys
+before 0022 is applied** on a host, every grade approval 500s. **Mitigation is
+procedural and mandatory:** apply 0022 and verify `print_state` exists via
+`information_schema` on the target DB **before** the code deploy. This is enforced
+in the rollout below and is why staging migrates first, then deploys.
+
 ## Proof level reached
 
 **Local Proof** — tsc clean, 35 unit tests green, full suite non-regressed,

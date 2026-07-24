@@ -38,6 +38,9 @@ export type GradingStatus = "unassigned" | "assigned" | "pending_review" | "appr
  * camelCase + snake_case owner/claim/customer/return fields and private_notes.
  */
 const GRADER_PII_KEYS = new Set<string>([
+  // Print-workflow queue exposes a computed full customer name; strip it for
+  // proxied staff exactly like the other customer-identity fields below.
+  "customerName",
   "ownerName",
   "ownerEmail",
   "ownershipStatus",
