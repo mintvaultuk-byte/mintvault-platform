@@ -9,6 +9,7 @@ import {
   DollarSign,
   Database,
   Printer,
+  PrinterCheck,
   Film,
   BarChart3,
   Brain,
@@ -41,6 +42,7 @@ export type AdminTab =
   | "promotions"
   | "capacity"
   | "printing"
+  | "print-queue"
   | "grading"
   | "learning"
   | "capture-health"
@@ -85,6 +87,7 @@ const NAV: NavSection[] = [
       { key: "dashboard", label: "Overview", icon: LayoutDashboard },
       { key: "certs", label: "Certificates", icon: List },
       { key: "printing", label: "Printing", icon: Printer },
+      { key: "print-queue", label: "Print Queue", icon: PrinterCheck },
       { href: "/admin/staff", label: "Staff", icon: Users },
       { href: "/admin/security", label: "Security", icon: ShieldCheck },
       { href: "/admin/partner-network", label: "Partner Connectors", icon: PackageCheck },

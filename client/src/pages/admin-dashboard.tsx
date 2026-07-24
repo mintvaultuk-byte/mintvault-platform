@@ -84,6 +84,7 @@ import AdminSubmissions, { AdminIntake } from "@/pages/admin-submissions";
 import AdminPricing from "@/pages/admin-pricing";
 import AdminPromotions from "@/pages/admin-promotions";
 import AdminPrinting from "@/pages/admin-printing";
+import AdminPrintQueue from "@/pages/admin-print-queue";
 import AdminLearningPage from "@/pages/admin-learning";
 import AdminCaptureHealthPage from "@/pages/admin-capture-health";
 import AdminDivergencePage from "@/pages/admin-divergence";
@@ -578,6 +579,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
       {activeTab === "promotions" && <AdminPromotions />}
       {activeTab === "capacity" && <AdminCapacity />}
       {activeTab === "printing" && <AdminPrinting />}
+      {activeTab === "print-queue" && <AdminPrintQueue />}
       {activeTab === "learning" && <AdminLearningPage />}
       {activeTab === "capture-health" && <AdminCaptureHealthPage />}
       {activeTab === "divergence" && <AdminDivergencePage />}

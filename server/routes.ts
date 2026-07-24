@@ -78,6 +78,8 @@ import { registerCorrectionModeRoutes } from "./correction-mode";
 import { migrateGraderSchema, migrateGraderCertSchema, migratePerOperatorSchema, isGraderLocked } from "./grader";
 import { migrateStaffCapabilitiesSchema, migrateScanSchema } from "./staff";
 import { registerStaffRoutes } from "./routes/staff";
+import { registerPrintWorkflowRoutes } from "./routes/print-workflow";
+import { migratePrintWorkflowSchema } from "./print-workflow";
 import {
   BUILD_STAMP,
   pricingTiers,
@@ -1380,6 +1382,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   migratePerOperatorSchema().catch((e: any) => console.error("[per-operator-migrate] error:", e.message));
   migrateStaffCapabilitiesSchema().catch((e: any) => console.error("[staff-caps-migrate] error:", e.message));
   migrateScanSchema().catch((e: any) => console.error("[scan-migrate] error:", e.message));
+  migratePrintWorkflowSchema().catch((e: any) => console.error("[print-workflow-migrate] error:", e.message));
   // Perf indexes run 20s after boot (CONCURRENTLY, no blocking lock) so the
   // schema ALTER migrations above have settled first — avoids the boot-time lock
   // contention that failed the earlier attempt. Fire-and-forget; non-fatal.
@@ -1420,6 +1423,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerGraderRoutes(app);
   registerCorrectionModeRoutes(app);
   registerStaffRoutes(app);
+  registerPrintWorkflowRoutes(app); // Approval → Printing → Printed lifecycle (requireAdmin; staff via can_print proxy)
   registerSubmissionRoutes(app);
   registerAdminSubmissionRoutes(app);
   registerAdminConfigRoutes(app);

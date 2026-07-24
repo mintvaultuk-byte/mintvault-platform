@@ -3,6 +3,7 @@ import { Image as ImageIcon } from "lucide-react";
 import { useLocation } from "wouter";
 import InstallAppButton from "../components/install-app-button";
 import { PrintingConsole } from "./admin-printing";
+import { PrintQueueConsole } from "./admin-print-queue";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
 import { GradingWorkstation } from "@/components/grading-workflow/GradingWorkstation";
 
@@ -13,7 +14,7 @@ import { GradingWorkstation } from "@/components/grading-workflow/GradingWorksta
  * convenience, not the security boundary.
  */
 type Caps = { grade: boolean; scan: boolean; print: boolean };
-type Tab = "grade" | "scan" | "print";
+type Tab = "grade" | "scan" | "print" | "print-queue";
 
 export default function StaffPage() {
   const [, navigate] = useLocation();
@@ -63,6 +64,7 @@ export default function StaffPage() {
     { id: "grade", label: "Grading", on: caps.grade },
     { id: "scan", label: "Scanning", on: caps.scan },
     { id: "print", label: "Printing", on: caps.print },
+    { id: "print-queue", label: "Print Queue", on: caps.print },
   ];
   const tabs = allTabs.filter((t) => t.on);
 
@@ -108,6 +110,7 @@ export default function StaffPage() {
       {tab === "grade" && <GradeTab />}
       {tab === "scan" && <ScanTab />}
       {tab === "print" && <PrintTab />}
+      {tab === "print-queue" && <PrintQueueConsole apiBase="/api/staff/print" />}
       {!tab && <p className="text-center text-[#E8E4DC]/50 py-16 text-sm">No tools enabled for your account.</p>}
     </div>
   );
