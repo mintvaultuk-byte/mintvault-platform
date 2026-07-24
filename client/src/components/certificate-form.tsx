@@ -2761,6 +2761,8 @@ export default function CertificateForm({
                       subsetName: form.subsetName,
                       variant: form.variant,
                       rarity: form.rarity,
+                      variantOther: form.variantOther,
+                      rarityOther: form.rarityOther,
                     }}
                   />
                 </div>
@@ -3451,6 +3453,8 @@ export default function CertificateForm({
                   era: form.era,
                   variant: form.variant,
                   rarity: form.rarity,
+                  variantOther: form.variantOther,
+                  rarityOther: form.rarityOther,
                   designations,
                   gradeOverall: form.gradeOverall,
                   labelType: form.labelType,

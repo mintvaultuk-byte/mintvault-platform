@@ -65,6 +65,23 @@ describe("legacy variant/rarity is folded in, never silently erased (item 11)", 
   it("a structured finish takes precedence over a legacy one, without duplication", () => {
     expect(formatVariantLine({ rarityCode: "rare_holo", finishVariant: "cosmos_holo", variant: "HOLO" })).toBe("Holo Rare · Cosmos Holo");
   });
+  it("an ordinary legacy rarity is preserved, not dropped, on a mixed cert (backend hostile F1)", () => {
+    // legacy rarity RARE_HOLO has no clean structured code — must still print.
+    expect(formatVariantLine({ finishVariant: "cosmos_holo", rarity: "RARE_HOLO" })).toBe("Holo Rare · Cosmos Holo");
+    expect(formatVariantLine({ rarity: "COMMON" })).toBe("Common");
+    expect(formatVariantLine({ rarity: "UNCOMMON" })).toBe("Uncommon");
+  });
+  it("an ambiguous legacy code keeps its own wording instead of a silent remap (F2)", () => {
+    // SECRET_RARE must not become 'Super Rare' via the ambiguous jp_super_rare map.
+    expect(formatVariantLine({ variant: "SECRET_RARE" })).toBe("Secret Rare");
+  });
+  it("legacy OTHER free-text is preserved verbatim (frontend hostile F2)", () => {
+    expect(formatVariantLine({ variant: "OTHER", variantOther: "Prism Foil" })).toBe("Prism Foil");
+    expect(formatVariantLine({ rarity: "OTHER", rarityOther: "Staff Stamp" })).toBe("Staff Stamp");
+  });
+  it("a structured rarity always wins over a legacy rarity (no duplication)", () => {
+    expect(formatVariantLine({ rarityCode: "rare_holo", rarity: "ULTRA_RARE" })).toBe("Holo Rare");
+  });
 });
 
 describe("single rarity semantics (items 4, 5, 6)", () => {

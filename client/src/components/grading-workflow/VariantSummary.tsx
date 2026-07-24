@@ -22,6 +22,8 @@ export interface VariantSummaryValues {
   /** Legacy columns folded into the printed line only to fill an empty slot. */
   variant?: string;
   rarity?: string;
+  variantOther?: string;
+  rarityOther?: string;
 }
 
 function Line({ label, children }: { label: string; children: React.ReactNode }) {
@@ -51,6 +53,8 @@ export function VariantSummary({ values }: { values: VariantSummaryValues }) {
     subsetName: values.subsetName,
     variant: values.variant,
     rarity: values.rarity,
+    variantOther: values.variantOther,
+    rarityOther: values.rarityOther,
   });
 
   return (
@@ -62,8 +66,8 @@ export function VariantSummary({ values }: { values: VariantSummaryValues }) {
       {/* The exact wording that prints on the front label (matches the live preview). */}
       <div className="mb-1.5 flex items-baseline justify-between gap-2 border-b border-[var(--admin-gold)]/10 pb-1.5">
         <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Prints as</span>
-        <span className="min-w-0 text-right text-[12px] font-bold text-[var(--admin-gold)]" data-testid="variant-printed-line">
-          {printedLine || <span className="font-normal text-[var(--admin-ink-faint)]">—</span>}
+        <span className="min-w-0 text-right text-[12px] font-bold uppercase text-[var(--admin-gold)]" data-testid="variant-printed-line">
+          {printedLine || <span className="font-normal normal-case text-[var(--admin-ink-faint)]">—</span>}
         </span>
       </div>
       <Line label="Language">{lang?.label ?? values.language ?? <span className="text-[var(--admin-ink-faint)]">—</span>}</Line>

@@ -33,6 +33,8 @@ export interface ReviewSummaryValues {
   /** Legacy columns — folded into the printed line only to fill an empty slot. */
   variant?: string;
   rarity?: string;
+  variantOther?: string;
+  rarityOther?: string;
   designations: string[];
   gradeOverall: string;
   labelType: string;
@@ -100,6 +102,8 @@ export function ReviewSummary({
     subsetName: v.subsetName,
     variant: v.variant,
     rarity: v.rarity,
+    variantOther: v.variantOther,
+    rarityOther: v.rarityOther,
   });
 
   return (
@@ -126,8 +130,8 @@ export function ReviewSummary({
             {/* The exact single line the front label prints (matches the live preview). */}
             <div className="mb-1 flex items-baseline justify-between gap-2 border-b border-[var(--admin-gold)]/10 pb-1">
               <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Prints as</span>
-              <span className="min-w-0 truncate text-right text-[12px] font-bold text-[var(--admin-gold)]" data-testid="review-variant-printed-line">
-                {printedVariantLine || <span className="font-normal text-[var(--admin-ink-faint)]">—</span>}
+              <span className="min-w-0 truncate text-right text-[12px] font-bold uppercase text-[var(--admin-gold)]" data-testid="review-variant-printed-line">
+                {printedVariantLine || <span className="font-normal normal-case text-[var(--admin-ink-faint)]">—</span>}
               </span>
             </div>
             <div className="flex items-baseline justify-between gap-2 py-0.5">
