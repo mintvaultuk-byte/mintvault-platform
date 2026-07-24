@@ -42,13 +42,18 @@ export function catalogueConflict(
     return `Abbreviation "${candidate.abbreviation}" is already used in ${candidate.category}.`;
   }
 
-  if (!candidate.allowCrossCategory) {
-    const clash = existing.find(
-      (r) => r.id !== excludeId && r.category !== candidate.category && norm(r.value) === v && !r.allowCrossCategory,
-    );
-    if (clash) {
-      return `"${candidate.value}" already exists as a ${clash.category}. A value belongs to one category only — enable "allow cross-category" on both entries to override.`;
-    }
+  // One-classification-only: a value may live in two categories ONLY when BOTH
+  // the candidate and the existing entry opt into allowCrossCategory (symmetric —
+  // flagging just one side does not override the rule).
+  const clash = existing.find(
+    (r) =>
+      r.id !== excludeId &&
+      r.category !== candidate.category &&
+      norm(r.value) === v &&
+      !(candidate.allowCrossCategory && r.allowCrossCategory),
+  );
+  if (clash) {
+    return `"${candidate.value}" already exists as a ${clash.category}. A value belongs to one category only — enable "allow cross-category" on BOTH entries to override.`;
   }
 
   return null;

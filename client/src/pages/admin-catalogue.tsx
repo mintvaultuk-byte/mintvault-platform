@@ -306,9 +306,9 @@ export default function AdminCataloguePage() {
                 {items.map((item, i) => (
                   <tr key={item.id} className="border-t border-slate-800" data-testid={`row-${item.value}`}>
                     <td className="px-2 py-1.5">
-                      <div className="flex gap-1">
-                        <button className="text-slate-500 hover:text-amber-400 disabled:opacity-30" disabled={busy || i === 0} onClick={() => move(i, -1)} aria-label="Move up">▲</button>
-                        <button className="text-slate-500 hover:text-amber-400 disabled:opacity-30" disabled={busy || i === items.length - 1} onClick={() => move(i, 1)} aria-label="Move down">▼</button>
+                      <div className="flex gap-1" title={search.trim() ? "Clear the search to reorder" : undefined}>
+                        <button className="text-slate-500 hover:text-amber-400 disabled:opacity-30" disabled={busy || i === 0 || Boolean(search.trim())} onClick={() => move(i, -1)} aria-label="Move up">▲</button>
+                        <button className="text-slate-500 hover:text-amber-400 disabled:opacity-30" disabled={busy || i === items.length - 1 || Boolean(search.trim())} onClick={() => move(i, 1)} aria-label="Move down">▼</button>
                       </div>
                     </td>
                     <td className="px-2 py-1.5 font-medium text-slate-100">{item.label}</td>

@@ -7,7 +7,11 @@
  * clobbers founder edits (ON CONFLICT DO NOTHING). Pass --update to also refresh
  * label/aliases/description/metadata from the seed for existing rows.
  *
- *   npm run db:migrate -- --apply   # apply 0019 first (creates the table) — OWNER-GATED
+ *   npm run db:migrate               # DRY-RUN first: confirm `pending` lists ONLY
+ *                                    # 0019_catalogue_manager.sql (the runner applies
+ *                                    # ALL pending numbered migrations, not just 0019 —
+ *                                    # 0017/0018 may ride along; reconcile deliberately).
+ *   npm run db:migrate -- --apply    # apply pending (creates the table) — OWNER-GATED
  *   npx tsx scripts/db/seed-catalogue.ts           # insert-only seed  — OWNER-GATED (writes DB)
  *   npx tsx scripts/db/seed-catalogue.ts --update   # + refresh existing rows from seed
  *
@@ -52,6 +56,9 @@ function buildSeedRows(): SeedRow[] {
     }),
   );
 
+  // These finish values ALSO exist as designations (edition marks). Both sides
+  // must opt into allowCrossCategory for the one-classification-only rule.
+  const CROSS_FINISHES = new Set(["first_edition", "unlimited", "shadowless"]);
   POKEMON_FINISHES.forEach((f, i) =>
     rows.push({
       category: "finish",
@@ -61,6 +68,7 @@ function buildSeedRows(): SeedRow[] {
       description: f.description,
       metadata: {},
       sortOrder: i,
+      allowCrossCategory: CROSS_FINISHES.has(f.value),
     }),
   );
 

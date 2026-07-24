@@ -74,18 +74,36 @@ export function mapLanguageRow(row: CatalogueRowLike): PokemonLanguage {
   };
 }
 
-export function buildSnapshotFromRows(rows: CatalogueRowLike[]): CatalogueSnapshot {
+/**
+ * @param rows  ACTIVE, non-archived rows to map.
+ * @param seededCategories  Optional set of categories that exist in the table in
+ *   ANY state (active/inactive/archived). When provided, a category falls back to
+ *   the seed ONLY if it has NEVER been seeded (not in the set) — so deliberately
+ *   disabling/archiving every row in a category yields an EMPTY picker (the
+ *   founder's intent), instead of silently resurrecting the seed. When omitted
+ *   (e.g. unit tests), an empty category falls back to the seed slice.
+ */
+export function buildSnapshotFromRows(
+  rows: CatalogueRowLike[],
+  seededCategories?: Set<string>,
+): CatalogueSnapshot {
   const by = (c: string) => rows.filter((r) => r.category === c);
+  // A category uses its (possibly empty) DB rows when it has been seeded; else seed.
+  const useDb = (c: string, list: CatalogueRowLike[]) =>
+    seededCategories ? seededCategories.has(c) : list.length > 0;
   const rarities = by("rarity");
   const finishes = by("finish");
   const promos = [...by("promo"), ...by("subset")];
   const languages = by("language");
   const eras = by("era");
+  const promoSeeded = seededCategories
+    ? seededCategories.has("promo") || seededCategories.has("subset")
+    : promos.length > 0;
   return {
-    rarities: rarities.length ? rarities.map(mapRarityRow) : SEED_CATALOGUE.rarities,
-    finishes: finishes.length ? finishes.map(mapFinishRow) : SEED_CATALOGUE.finishes,
-    promos: promos.length ? promos.map(mapPromoRow) : SEED_CATALOGUE.promos,
-    languages: languages.length ? languages.map(mapLanguageRow) : SEED_CATALOGUE.languages,
-    eras: eras.length ? eras.map((r) => ({ value: r.value, label: r.label })) : SEED_CATALOGUE.eras,
+    rarities: useDb("rarity", rarities) ? rarities.map(mapRarityRow) : SEED_CATALOGUE.rarities,
+    finishes: useDb("finish", finishes) ? finishes.map(mapFinishRow) : SEED_CATALOGUE.finishes,
+    promos: promoSeeded ? promos.map(mapPromoRow) : SEED_CATALOGUE.promos,
+    languages: useDb("language", languages) ? languages.map(mapLanguageRow) : SEED_CATALOGUE.languages,
+    eras: useDb("era", eras) ? eras.map((r) => ({ value: r.value, label: r.label })) : SEED_CATALOGUE.eras,
   };
 }

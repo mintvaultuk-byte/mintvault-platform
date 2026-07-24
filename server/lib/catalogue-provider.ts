@@ -24,8 +24,16 @@ let cache: { snap: CatalogueSnapshot; at: number } | null = null;
 export async function getCatalogueSnapshot(force = false): Promise<CatalogueSnapshot> {
   if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.snap;
   try {
-    const rows = await listCatalogueItems(); // active + non-archived
-    const snap = rows.length ? buildSnapshotFromRows(rows) : SEED_CATALOGUE;
+    // Load ALL rows (any state) once, so we can tell a NEVER-seeded category
+    // (→ fall back to seed) from a deliberately-emptied one (→ empty picker).
+    const allRows = await listCatalogueItems({ includeInactive: true, includeArchived: true });
+    if (!allRows.length) {
+      cache = { snap: SEED_CATALOGUE, at: Date.now() };
+      return SEED_CATALOGUE;
+    }
+    const activeRows = allRows.filter((r) => r.active && !r.archived);
+    const seededCategories = new Set(allRows.map((r) => r.category));
+    const snap = buildSnapshotFromRows(activeRows, seededCategories);
     cache = { snap, at: Date.now() };
     return snap;
   } catch {

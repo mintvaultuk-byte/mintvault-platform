@@ -50,6 +50,8 @@ export function buildPreviewFields(body: Record<string, unknown>): Record<string
   for (const key of GRADE_PASSTHROUGH) {
     if (body[key] != null) cert[key] = num(body[key]);
   }
-  if (Array.isArray(body.defects)) cert.defects = body.defects;
+  // Cap the defect array — the preview render iterates it; an unbounded array
+  // from the client is a needless CPU sink (200 is well above any real card).
+  if (Array.isArray(body.defects)) cert.defects = body.defects.slice(0, 200);
   return cert;
 }

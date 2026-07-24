@@ -3961,7 +3961,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // Structured rarity/variant picker → new nullable columns (legacy
         // variant/rarity above are left untouched). Validated + symbol-derived
         // server-side; invalid catalogue values are rejected here, not at the DB.
-        const structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
+        let structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
+        if (!structuredCreate.ok) {
+          // A stale cross-machine catalogue cache can reject a just-added value —
+          // force-refresh the snapshot once and retry before failing (data is not
+          // mutated on a failed apply, so the retry is safe).
+          structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true));
+        }
         if (!structuredCreate.ok) {
           return res.status(400).json({ error: "Invalid rarity selection.", details: structuredCreate.errors });
         }
@@ -4170,7 +4176,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // Structured rarity/variant picker → new nullable columns. Opt-in by key
         // presence, so a partial PUT (e.g. grade-only) never erases them; the
         // legacy variant/rarity remain the untouched historical source of truth.
-        const structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
+        let structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
+        if (!structuredUpdate.ok) {
+          // Stale cross-machine cache guard — force-refresh once and retry.
+          structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true));
+        }
         if (!structuredUpdate.ok) {
           return res.status(400).json({ error: "Invalid rarity selection.", details: structuredUpdate.errors });
         }

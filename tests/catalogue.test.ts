@@ -46,21 +46,22 @@ describe("catalogueConflict — duplicate + one-category validation", () => {
     expect(catalogueConflict(rows, { category: "rarity", value: "holo" })).toMatch(/already exists as a finish/);
   });
 
-  it("permits a cross-category value only when BOTH sides allow it", () => {
+  it("permits a cross-category value ONLY when BOTH sides opt in (symmetric)", () => {
     const crossFinish: CatalogueEntryLike[] = [
       { id: 9, category: "finish", value: "first_edition", label: "First Edition", allowCrossCategory: true },
     ];
-    // candidate also opts in → allowed
+    // both opt in → allowed
     expect(
       catalogueConflict(crossFinish, { category: "designation", value: "first_edition", allowCrossCategory: true }),
     ).toBeNull();
-    // candidate does NOT opt in, but existing does → the guard only fires when it finds a NON-cross clash,
-    // so an existing cross-flagged row is excluded and this is allowed.
-    expect(
-      catalogueConflict(crossFinish, { category: "designation", value: "first_edition" }),
-    ).toBeNull();
-    // existing does NOT opt in, candidate does not → rejected
+    // existing opts in but candidate does NOT → still rejected (no single-sided bypass)
+    expect(catalogueConflict(crossFinish, { category: "designation", value: "first_edition" })).toMatch(/BOTH entries/);
+    // candidate opts in but existing does NOT → rejected
     const nonCross: CatalogueEntryLike[] = [{ id: 9, category: "finish", value: "first_edition", label: "FE" }];
+    expect(
+      catalogueConflict(nonCross, { category: "designation", value: "first_edition", allowCrossCategory: true }),
+    ).toMatch(/BOTH entries/);
+    // neither opts in → rejected
     expect(catalogueConflict(nonCross, { category: "designation", value: "first_edition" })).toMatch(/one category only/);
   });
 
@@ -137,6 +138,17 @@ describe("buildSnapshotFromRows — DB rows → canonical picker snapshot", () =
     expect(snap.finishes.some((f) => f.value === "reverse_holo")).toBe(true);
     const empty = buildSnapshotFromRows([]);
     expect(empty.rarities).toBe(SEED_CATALOGUE.rarities);
+  });
+
+  it("a deliberately-emptied category yields an EMPTY picker, not the resurrected seed", () => {
+    // Category was seeded (rows exist in ANY state) but all active rows are gone
+    // → empty, NOT seed. Contrast: a never-seeded category falls back to seed.
+    const activeRows: CatalogueRowLike[] = [{ category: "finish", value: "holo", label: "Holo", metadata: {} }];
+    const seeded = new Set(["rarity", "finish"]); // rarity seeded but has no active rows now
+    const snap2 = buildSnapshotFromRows(activeRows, seeded);
+    expect(snap2.rarities).toEqual([]); // deliberately emptied → empty
+    expect(snap2.finishes.map((f) => f.value)).toEqual(["holo"]);
+    expect(snap2.languages).toBe(SEED_CATALOGUE.languages); // never seeded → seed fallback
   });
 
   it("gives a founder-added rarity with no symbol a safe default", () => {

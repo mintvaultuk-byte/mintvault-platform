@@ -519,7 +519,10 @@ export function RarityVariantPicker({
     );
   };
 
-  const selectedRarity = rarity ? rarityByValue(rarity, cat) : undefined;
+  // Resolve against the live catalogue, falling back to the seed so a stored
+  // rarity that a founder has since disabled/archived still resolves for display
+  // (never a null-assertion crash — see the render blocks below).
+  const selectedRarity = rarity ? rarityByValue(rarity, cat) ?? rarityByValue(rarity) : undefined;
   const selectedCustom = selectedCustomId ? customRarities.find((c) => c.id === selectedCustomId) : undefined;
 
   const pill = <T extends { value: string; label: string; description?: string }>(
@@ -796,11 +799,12 @@ export function RarityVariantPicker({
         >
           <span>{languageByValueOrLabel(structured.language, cat)?.label ?? "—"}</span>
           {structured.era && <span>· {cat.eras.find((e) => e.value === structured.era)?.label}</span>}
-          {rarity && (
+          {rarity && selectedRarity && (
             <span className="inline-flex items-center gap-1">
-              · <RaritySymbol symbol={rarityByValue(rarity, cat)!.symbol} size={14} /> {rarityByValue(rarity, cat)!.label}
+              · <RaritySymbol symbol={selectedRarity.symbol} size={14} /> {selectedRarity.label}
             </span>
           )}
+          {rarity && !selectedRarity && <span>· {rarity}</span>}
           <span>· {structured.finish ? finishByValue(structured.finish, cat)?.label : "No finish"}</span>
           <span>
             ·{" "}
@@ -831,11 +835,13 @@ export function RarityVariantPicker({
             </div>
             <div className="flex items-center gap-1.5">
               Rarity:{" "}
-              {rarity ? (
+              {rarity && selectedRarity ? (
                 <>
-                  <RaritySymbol symbol={rarityByValue(rarity, cat)!.symbol} size={18} />
-                  <b className="text-slate-100">{rarityByValue(rarity, cat)!.label}</b>
+                  <RaritySymbol symbol={selectedRarity.symbol} size={18} />
+                  <b className="text-slate-100">{selectedRarity.label}</b>
                 </>
+              ) : rarity ? (
+                <b className="text-slate-100">{rarity}</b>
               ) : (
                 <span className="text-slate-500">—</span>
               )}

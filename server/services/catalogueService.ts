@@ -180,19 +180,43 @@ export async function setCatalogueArchived(id: number, archived: boolean, actor:
   return updateCatalogueItem(id, { archived, reason: archived ? "archived" : "restored" }, actor);
 }
 
-/** Reassign sort_order within a category to match the given id order. */
+/**
+ * Reassign sort_order within a category. `orderedIds` may be a PARTIAL/filtered
+ * subset (the manager view can hide archived rows or be searched); to avoid
+ * colliding sort orders we renumber the WHOLE category: the passed ids take their
+ * requested relative order first, then any remaining rows keep their current
+ * relative order after them, and every row gets a fresh 0..n-1 index.
+ */
 export async function reorderCatalogue(
   category: CatalogueCategory,
   orderedIds: number[],
   actor: string,
 ): Promise<void> {
-  for (let i = 0; i < orderedIds.length; i++) {
+  const all = await listCatalogueItems({ category, includeInactive: true, includeArchived: true });
+  const byId = new Map(all.map((r) => [r.id, r]));
+  const seen = new Set<number>();
+  const finalOrder: number[] = [];
+  // 1) requested ids (that actually belong to this category), in the given order
+  for (const id of orderedIds) {
+    if (byId.has(id) && !seen.has(id)) {
+      finalOrder.push(id);
+      seen.add(id);
+    }
+  }
+  // 2) any remaining category rows, in their current sort order
+  for (const r of all) {
+    if (!seen.has(r.id)) {
+      finalOrder.push(r.id);
+      seen.add(r.id);
+    }
+  }
+  for (let i = 0; i < finalOrder.length; i++) {
     await db
       .update(catalogueItems)
       .set({ sortOrder: i, updatedBy: actor, updatedAt: new Date() })
-      .where(and(eq(catalogueItems.id, orderedIds[i]), eq(catalogueItems.category, category)));
+      .where(and(eq(catalogueItems.id, finalOrder[i]), eq(catalogueItems.category, category)));
   }
-  await audit("catalogue_reorder", category, category, actor, { orderedIds });
+  await audit("catalogue_reorder", category, category, actor, { orderedIds, finalOrder });
 }
 
 /** Search name / abbreviation / aliases / description (case-insensitive). */
@@ -233,6 +257,8 @@ export async function importCatalogue(
   const result: ImportResult = { created: 0, updated: 0, skipped: 0, errors: [] };
   const items = parseImportItems(payload);
   if (!items) throw new CatalogueValidationError("Import payload must be a catalogue export ({ items: [...] }) or an array of items.");
+  // Bound the import — reference data is small; a huge array would be O(n) writes.
+  if (items.length > 5000) throw new CatalogueValidationError("Import too large (max 5000 items).");
 
   const existing = await listCatalogueItems({ includeInactive: true, includeArchived: true });
   for (const raw of items) {
