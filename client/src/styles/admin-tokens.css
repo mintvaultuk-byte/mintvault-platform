@@ -1283,3 +1283,80 @@
     font-size: 74px;
   }
 }
+
+/* ── Canonical grading workstation — stage-content gating ───────────────────
+   The stage bar (Card / Rarity / Grade / Review) controls WHICH grading content
+   is visible, not just the highlighted button. Applied only inside the role
+   workstation's `.grading-stage-gate[data-ws-stage=N]` wrapper (Staff / Grader /
+   Admin Review — /admin gates via CertificateForm's own wfStage, unchanged).
+
+   hidden-NOT-unmounted: sections are display:none'd so every GradingPanel section
+   stays mounted and its state / MVGS scoring is preserved. Display-only; changes
+   no grading logic and GradingPanel's markup is untouched.
+
+   NESTING-SAFE: grading-panel's right column IS data-canonical-section=
+   "grading-controls", and grade-result + the sub-grade sections + footer-actions
+   (the Approve/Submit button) are SIBLINGS *inside* it. So we only ever hide
+   `grading-controls` on stages that need NONE of its children (Card/Rarity); on
+   Grade/Review we keep `grading-controls` visible and hide the specific sibling
+   children — the submit button (footer-actions) is therefore always reachable on
+   the Review stage. GradingPanel has no dedicated rarity block (that picker is
+   CertForm-only), so Card AND Rarity show card identity (variant/rarity lives in
+   the identity block). */
+
+/* Stage 0 (Card) & Stage 1 (Rarity): card identity/setup only. Hiding
+   grading-controls cascades away all grade content + submit — intended here. */
+.grading-stage-gate[data-ws-stage="0"]
+  :where(
+    [data-canonical-section="workstation-header"],
+    [data-canonical-section="preflight"],
+    [data-canonical-section="ai-tools"],
+    [data-canonical-section="card-images"],
+    [data-canonical-section="defect-marking"],
+    [data-canonical-section="grading-controls"]
+  ),
+.grading-stage-gate[data-ws-stage="1"]
+  :where(
+    [data-canonical-section="workstation-header"],
+    [data-canonical-section="preflight"],
+    [data-canonical-section="ai-tools"],
+    [data-canonical-section="card-images"],
+    [data-canonical-section="defect-marking"],
+    [data-canonical-section="grading-controls"]
+  ) {
+  display: none !important;
+}
+
+/* Stage 2 (Grade): the grading workstation. Keep grading-controls (and its
+   grade-result / sub-grades) visible; hide identity + the submit button (submit
+   lives on Review). We hide footer-actions SPECIFICALLY, never its parent. */
+.grading-stage-gate[data-ws-stage="2"]
+  :where(
+    [data-canonical-section="identification"],
+    [data-canonical-section="identity-fields"],
+    [data-canonical-section="footer-actions"]
+  ) {
+  display: none !important;
+}
+
+/* Stage 3 (Review): final result + approval. Keep grading-controls VISIBLE so
+   its grade-result + footer-actions (Approve/Submit) show; hide only the
+   detailed sub-grade control siblings + the card-setup sections. */
+.grading-stage-gate[data-ws-stage="3"]
+  :where(
+    [data-canonical-section="identification"],
+    [data-canonical-section="identity-fields"],
+    [data-canonical-section="workstation-header"],
+    [data-canonical-section="preflight"],
+    [data-canonical-section="ai-tools"],
+    [data-canonical-section="card-images"],
+    [data-canonical-section="defect-marking"],
+    [data-canonical-section="mvgs-score"],
+    [data-canonical-section="d1-d2-d3"],
+    [data-canonical-section="centering"],
+    [data-canonical-section="surface"],
+    [data-canonical-section="authentication"],
+    [data-canonical-section="notes"]
+  ) {
+  display: none !important;
+}
