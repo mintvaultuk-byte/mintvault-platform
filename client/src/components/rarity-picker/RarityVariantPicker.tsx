@@ -312,12 +312,14 @@ export function RarityVariantPicker({
     () => buildStructuredVariant({ language, era: era || null, rarity, finish, promoOrSubset }, cat),
     [language, era, rarity, finish, promoOrSubset, cat]
   );
-  // Emit ONLY on a genuine change to the structured variant — never on mount, and
-  // never merely because the parent re-rendered (onChange is often an unstable
-  // inline function). Firing on mount/re-render made a consumer that seeds this
-  // picker asynchronously (the role grading workstation) mistake the mount echo
-  // for a user edit and wipe a stored rarity. `structured` only changes when the
-  // user actually picks/clears rarity/finish/promo/era/language.
+  // Emit ONLY on a genuine USER change to the selection — never on mount, never
+  // merely because the parent re-rendered (onChange is often an unstable inline
+  // function), and never merely because the live catalogue finished loading
+  // (which changes `structured`'s derived symbol but NOT the user's selection).
+  // Firing spuriously made a consumer that seeds this picker asynchronously (the
+  // role grading workstation) mistake the echo for a user edit and wipe a stored
+  // rarity. So we gate on the user-selection primitives, and emit the current
+  // catalogue-derived `structured` value when one of them actually changes.
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -329,7 +331,11 @@ export function RarityVariantPicker({
       return; // skip the mount echo — the value already reflects the seed
     }
     onChangeRef.current?.(structured);
-  }, [structured]);
+    // Deps are the user-selection primitives, NOT `structured`/`cat`: when a
+    // primitive changes, `structured` is recomputed this render and this effect's
+    // closure captures that fresh value; a catalogue load (cat-only change) does
+    // NOT re-run this effect, so it never looks like a user edit.
+  }, [rarity, finish, promoOrSubset, era, language]);
 
   const validation = useMemo(
     () =>
