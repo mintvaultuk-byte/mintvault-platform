@@ -37,7 +37,8 @@ async function seedMintVaultTables(): Promise<void> {
       action text NOT NULL,
       created_at timestamptz NOT NULL DEFAULT now()
     )`);
-  for (const table of ["users", "submissions", "submission_items", "audit_log"]) {
+  await admin.query("CREATE TABLE certificates (id serial primary key, cert_id text)");
+  for (const table of ["users", "submissions", "submission_items", "audit_log", "certificates"]) {
     await admin.query(`ALTER TABLE ${table} OWNER TO pn_migrator`);
   }
 }
@@ -722,6 +723,9 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     // Reach the evidence guard exactly as a correct reverse-order rollback would: 0018 is
     // no longer journalled, while G6B's immutable lifecycle evidence remains intact.
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0018_correction_audit_index.sql'");
+    // Reverse-order rollback also clears the later print-workflow migration (≥0018),
+    // otherwise its journal row keeps the later-migration guard tripping first.
+    await admin.query("DELETE FROM schema_migrations WHERE filename = '0022_print_workflow_lifecycle.sql'");
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );

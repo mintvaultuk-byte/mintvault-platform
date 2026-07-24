@@ -35,7 +35,9 @@ describe("Partner Network G6A wallet service on PostgreSQL 17.10", () => {
         action text NOT NULL,
         created_at timestamptz NOT NULL DEFAULT now()
       )`);
-    for (const table of ["users", "submissions", "submission_items", "audit_log"]) {
+    // Migration 0022 (print workflow) ALTERs certificates; provide its minimal shape.
+    await admin.query("CREATE TABLE certificates (id serial primary key, cert_id text)");
+    for (const table of ["users", "submissions", "submission_items", "audit_log", "certificates"]) {
       await admin.query(`ALTER TABLE ${table} OWNER TO pn_migrator`);
     }
     const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });

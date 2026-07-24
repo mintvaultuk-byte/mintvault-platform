@@ -38,6 +38,9 @@ export type GradingStatus = "unassigned" | "assigned" | "pending_review" | "appr
  * camelCase + snake_case owner/claim/customer/return fields and private_notes.
  */
 const GRADER_PII_KEYS = new Set<string>([
+  // Print-workflow queue exposes a computed full customer name; strip it for
+  // proxied staff exactly like the other customer-identity fields below.
+  "customerName",
   "ownerName",
   "ownerEmail",
   "ownershipStatus",
@@ -663,7 +666,8 @@ export async function approveCertGrade(certId: number, adminUser: string): Promi
   const r = await db.execute(sql`
     UPDATE certificates
     SET grade_approved_at = NOW(), grade_approved_by = ${adminUser}, status = 'active',
-        grader_status = 'approved', graded_at = NOW(), updated_at = NOW()
+        grader_status = 'approved', graded_at = NOW(), updated_at = NOW(),
+        print_state = CASE WHEN print_state = 'awaiting_approval' THEN 'needs_printing' ELSE print_state END
     WHERE id = ${certId} AND grader_status = 'pending_review'
     RETURNING id
   `);

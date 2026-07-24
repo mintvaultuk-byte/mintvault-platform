@@ -394,6 +394,13 @@ export const certificates = pgTable("certificates", {
   backImagePath: text("back_image_path"),
   createdBy: text("created_by"),
   updatedAt: timestamp("updated_at").defaultNow(),
+  // ── Print workflow lifecycle (server/print-workflow.ts) — additive ──────────
+  // Explicit print state, DISTINCT from `status` (validity: active/voided) and
+  // `grader_status` (grading workflow). Values are the PrintState union in
+  // shared/print-lifecycle.ts. Default 'awaiting_approval'; the queue derives
+  // 'needs_printing' from grade_approved_at on read, so approving a cert needs
+  // NO write here and the protected grading/approval code stays untouched.
+  printState: varchar("print_state", { length: 24 }).notNull().default("awaiting_approval"),
   currentOwnerUserId: varchar("current_owner_user_id"),
   ownershipStatus: varchar("ownership_status", { length: 20 }).notNull().default("unclaimed"),
   claimCodeHash: text("claim_code_hash"),
@@ -1325,6 +1332,120 @@ export const reprintLog = pgTable("reprint_log", {
 });
 
 export type ReprintLog = typeof reprintLog.$inferSelect;
+
+// ── Print batches — persisted batch records (server/print-workflow.ts) ────────
+// Historically a batch was ephemeral (an audit_log row + label_prints.sheet_ref +
+// R2 artifacts, all best-effort). This table is the durable, queryable batch
+// record the print workflow relies on. `batchId` matches the deterministic id
+// from print-batch.ts::deriveBatchId so batch artefacts (PDF/PNG) resolve by it.
+export const printBatches = pgTable(
+  "print_batches",
+  {
+    id: serial("id").primaryKey(),
+    batchId: text("batch_id").notNull().unique(),
+    // 'batch' (first-run) | 'reprint' — see BatchKind in shared/print-lifecycle.ts
+    kind: varchar("kind", { length: 12 }).notNull().default("batch"),
+    // open | printing | printed | partial | failed | cancelled — BatchStatus
+    status: varchar("status", { length: 12 }).notNull().default("open"),
+    certIds: jsonb("cert_ids").$type<string[]>().notNull().default([]),
+    certCount: integer("cert_count").notNull().default(0),
+    successCount: integer("success_count").notNull().default(0),
+    failureCount: integer("failure_count").notNull().default(0),
+    createdBy: text("created_by"),
+    // Role of the actor: 'admin' | 'staff_print' (attribution — fixes B-3 for new writes)
+    createdByRole: varchar("created_by_role", { length: 16 }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    printedAt: timestamp("printed_at"),
+    notes: text("notes"),
+    // Reprint-only: reason + category (ReprintReasonCategory)
+    reason: text("reason"),
+    reasonCategory: varchar("reason_category", { length: 24 }),
+    layoutVersion: text("layout_version"),
+  },
+  (t) => ({
+    idxStatus: index("idx_print_batches_status").on(t.status),
+    idxCreatedAt: index("idx_print_batches_created_at").on(t.createdAt),
+  })
+);
+
+export type PrintBatch = typeof printBatches.$inferSelect;
+export const insertPrintBatchSchema = createInsertSchema(printBatches).omit({ id: true, createdAt: true });
+export type InsertPrintBatch = z.infer<typeof insertPrintBatchSchema>;
+
+// ── Print events — APPEND-ONLY lifecycle audit ledger. Never deleted. ─────────
+// Every print-workflow state transition writes one row here: who, when, why,
+// which batch, old state → new state. This is the "never lose history" trail the
+// brief requires. Distinct from the generic `audit_log` (which stays as the
+// global compliance log); this table is the typed, queryable print history.
+export const printEvents = pgTable(
+  "print_events",
+  {
+    id: serial("id").primaryKey(),
+    certId: text("cert_id").notNull(),
+    batchId: text("batch_id"),
+    actor: text("actor").notNull(),
+    // 'admin' | 'staff_print' | 'staff_readonly' — PrintRole
+    actorRole: varchar("actor_role", { length: 16 }),
+    // PrintAction (create_batch, print_all_ready, mark_printed, reprint, complete)
+    action: varchar("action", { length: 24 }).notNull(),
+    fromState: varchar("from_state", { length: 24 }),
+    toState: varchar("to_state", { length: 24 }),
+    reason: text("reason"),
+    reasonCategory: varchar("reason_category", { length: 24 }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    idxCert: index("idx_print_events_cert").on(t.certId),
+    idxBatch: index("idx_print_events_batch").on(t.batchId),
+    idxCreatedAt: index("idx_print_events_created_at").on(t.createdAt),
+  })
+);
+
+export type PrintEvent = typeof printEvents.$inferSelect;
+export const insertPrintEventSchema = createInsertSchema(printEvents).omit({ id: true, createdAt: true });
+export type InsertPrintEvent = z.infer<typeof insertPrintEventSchema>;
+
+// ── Print workflow API response types (shared by client + server) ─────────────
+// Declared here (per CLAUDE.md "never redefine types locally") so the queue and
+// batch endpoints have a single typed contract; the client imports these instead
+// of re-declaring the envelope inline.
+export interface PrintQueueRow {
+  certId: string;
+  state: import("./print-lifecycle").PrintState;
+  cardName: string | null;
+  cardGame: string | null;
+  setName: string | null;
+  cardNumber: string | null;
+  gradeOverall: string | null;
+  customerName: string | null;
+  customerEmail: string | null;
+  submissionId: number | null;
+  trackingNumber: string | null;
+  approvedAt: string | null;
+  approvedBy: string | null;
+  printedAt: string | null;
+  batchId: string | null;
+  reprintCount: number;
+  certificateExists: boolean;
+  labelExists: boolean;
+  pdfExists: boolean;
+}
+
+export interface PrintBatchSummary {
+  batchId: string;
+  kind: string;
+  status: string;
+  certCount: number;
+  successCount: number;
+  failureCount: number;
+  createdBy: string | null;
+  createdByRole: string | null;
+  createdAt: string;
+  printedAt: string | null;
+  notes: string | null;
+  reason: string | null;
+  reasonCategory: string | null;
+}
 
 // ── Ownership history — tracks every claim and transfer event ─────────────────
 export const ownershipHistory = pgTable("ownership_history", {

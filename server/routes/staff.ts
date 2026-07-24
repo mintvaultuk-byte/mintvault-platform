@@ -316,16 +316,26 @@ export function registerStaffRoutes(app: Express): void {
     "/certificates/label/:certId/:filename",
     "/certificates/:certId/certificate-document",
     "/certificates/:certId/claim-insert",
+    // Print-workflow lifecycle reads (Approval → Printing → Printed).
+    "/printing/workflow/queue",
+    "/printing/workflow/batches",
+    "/printing/workflow/batches/:batchId",
+    "/printing/workflow/events",
   ]) {
     app.get(printConsole(sub), requireCapability("print"), printProxy(swapToAdmin));
   }
-  // POST routes
+  // POST routes. NOTE: /printing/workflow/complete is intentionally NOT here —
+  // marking a cert Completed is a terminal, admin-only action.
   for (const sub of [
     "/printing/override/:certId",
     "/printing/mark-printed",
     "/print-batch",
     "/print-batch/reprint",
     "/claim-insert-sheet",
+    // Print-workflow lifecycle writes permitted for can_print staff.
+    "/printing/workflow/batch",
+    "/printing/workflow/mark-printed",
+    "/printing/workflow/reprint",
   ]) {
     app.post(printConsole(sub), requireCapability("print"), printProxy(swapToAdmin));
   }
