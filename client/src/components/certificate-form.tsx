@@ -1290,6 +1290,8 @@ export default function CertificateForm({
   // per-certificate editable state and deliberately leave session/queue state
   // alone. The picker IS keyed (below), so its internal selection re-seeds.
   const currentCertIdRef = useRef<number | null>(certificate?.id ?? null);
+  // Certificate id whose next auto-save tick must be skipped (undefined = none).
+  const skipAutoSaveForCertRef = useRef<number | null | undefined>(undefined);
   useEffect(() => {
     const nextId = certificate?.id ?? null;
     if (currentCertIdRef.current === nextId) return; // same cert — nothing to do
@@ -1311,14 +1313,41 @@ export default function CertificateForm({
     setFrontImage(null);
     setBackImage(null);
 
+    // Everything else that describes THIS certificate. Most important:
+    // gradingImages holds picked File objects and uploadGradingImages() POSTs
+    // them to the CURRENT certificate id — without this reset, card A's photos
+    // would upload onto card B. The identify/AI/verification state likewise
+    // describes card A and would otherwise be shown as card B's.
+    setGradingImages({});
+    setGradingUrls({});
+    setGradingQuality({});
+    setGradingUploadDone(false);
+    setManuallyEdited(new Set());
+    setManuallyVerified(false);
+    setAutofillRan(false);
+    setIdentifyResult(null);
+    setIdentifyConfidence(null);
+    setIdentifyVerified(false);
+    setAiAnalysis(null);
+    setAiDraft({ centering: "", corners: "", edges: "", surface: "", overall: "" });
+    setAiDefects([]);
+    setApproved(false);
+    setSetId("");
+    setFlashFields(new Set());
+    setError("");
+    setWfStage(0);
+    setWfMaxStage(0);
+
     // Per-certificate refs: the conflict snapshot and the consolidated-scheme
     // flag describe the OLD cert; re-derive them for the new one.
     loadedSnapshotRef.current = null;
     savedConsolidatedRef.current = false;
     refreshSnapshotFromCert(certificate as unknown as Record<string, unknown> | null);
-    // Skip one auto-save tick so re-seeding the form does not immediately PUT
-    // back what we just loaded (same reason the initial hydration skips it).
-    hydratedOnceRef.current = false;
+    // Skip the auto-save tick for THIS certificate id, so re-seeding the form
+    // does not immediately PUT back what we just loaded. Keyed on the id (not a
+    // one-shot boolean) — see the debounce effect for why a boolean is consumed
+    // by the wrong commit on a real switch.
+    skipAutoSaveForCertRef.current = nextId;
     setAutoSaveStatus("idle");
     // eslint-disable-next-line
   }, [certificate?.id]);
@@ -1420,6 +1449,18 @@ export default function CertificateForm({
   const hasRequiredFields = !!form.cardGame && !!form.setName && !!form.cardName && !!form.cardNumber && !!form.year;
   useEffect(() => {
     if (!autoSaveEligible || !hasRequiredFields) return;
+    // Skip the tick that merely RE-SEEDS the form for a (new) certificate, so
+    // loading a card never immediately PUTs back what was just loaded. Gated on
+    // the certificate id, not a one-shot boolean: on a real switch the deps
+    // `autoSaveEligible`/`hasRequiredFields` can change on the SAME commit as
+    // the isolation effect — while `form` is still the previous card — and a
+    // boolean flag would be consumed by that commit, letting the NEXT commit
+    // (the freshly re-seeded form) schedule an un-edited full-state PUT.
+    if (skipAutoSaveForCertRef.current !== undefined && skipAutoSaveForCertRef.current === (certificate?.id ?? null)) {
+      skipAutoSaveForCertRef.current = undefined;
+      hydratedOnceRef.current = true;
+      return;
+    }
     if (!hydratedOnceRef.current) {
       hydratedOnceRef.current = true;
       return;
@@ -2841,14 +2882,23 @@ export default function CertificateForm({
                     // (its state is seeded once at mount) — the same protection
                     // grading-panel.tsx already applies to this component.
                     key={certificate?.id ?? "new"}
-                    legacyVariant={form.variant || null}
+                    legacyVariant={(certificate?.variant ?? form.variant) || null}
                     value={{
-                      language: languageByValueOrLabel(form.language)?.value ?? "en",
-                      era: (form.era || null) as StructuredCardVariant["era"],
-                      rarity: form.rarityCode || null,
-                      finish: form.finishVariant || null,
-                      promo: form.promoType || null,
-                      subset: form.subsetName || null,
+                      // Seed STRICTLY from the certificate (server truth), never from
+                      // `form`. `key` and `value` are both evaluated in the RENDER of
+                      // the commit where certificate.id changes, while `form` still
+                      // holds the PREVIOUS card — the re-seed happens in a passive
+                      // effect afterwards. Seeding from `form` would therefore mount
+                      // the new picker with card A's selection and, on the first
+                      // interaction, emit A's values into card B. Same rule (and same
+                      // reason) as grading-panel.tsx's picker.
+                      language:
+                        languageByValueOrLabel(certificate?.language ?? form.language)?.value ?? "en",
+                      era: ((certificate?.era ?? form.era) || null) as StructuredCardVariant["era"],
+                      rarity: (certificate?.rarityCode ?? form.rarityCode) || null,
+                      finish: (certificate?.finishVariant ?? form.finishVariant) || null,
+                      promo: (certificate?.promoType ?? form.promoType) || null,
+                      subset: (certificate?.subsetName ?? form.subsetName) || null,
                     }}
                     onChange={handleStructuredChange}
                     favourites={rarityFavourites}

@@ -31,6 +31,7 @@ import {
 } from "../shared/structured-variant-validate";
 import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "../shared/variant-line";
 import { buildFormStateFromCert } from "../client/src/components/certificate-form";
+import { consolidatedVariantForLabel } from "../server/labels";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 const FORM = read("client/src/components/certificate-form.tsx");
@@ -300,8 +301,12 @@ describe("cross-certificate isolation (items 17-18)", () => {
     for (const s of ["setSessionCompleted", "setShowSavedPanel", "setSavedToast", "setQueue"]) {
       expect(reset, `${s} must NOT be reset on a cert switch`).not.toContain(s);
     }
-    // it is a targeted reset, not a remount of the whole form
-    expect(FORM).not.toMatch(/<CertificateForm[^>]*\skey=/);
+    // It is a targeted reset, not a remount of the whole form — assert against
+    // the file that actually MOUNTS CertificateForm (asserting on the component's
+    // own source would be vacuous: it never renders itself).
+    const dashboard = read("client/src/pages/admin-dashboard.tsx");
+    expect(dashboard).toContain("<CertificateForm");
+    expect(dashboard).not.toMatch(/<CertificateForm[^>]*\skey=/);
   });
 
   it("19. save → reopen reproduces the exact explicit selections", () => {
@@ -325,12 +330,39 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     expect(read("server/labels.ts")).toContain("consolidatedVariantForLabel(cert)");
   });
 
-  it("21. legacy certificates keep byte-identical wording until edited (version gate intact)", () => {
+  it("21. legacy certificates keep byte-identical wording until edited (REAL renderer)", () => {
+    // Uses the shipped, exported consolidatedVariantForLabel — not a local model,
+    // so the legacy branch is genuinely exercised.
     // version < 2 → legacy branch, regardless of structured columns
-    expect(printed({ structuredVariantVersion: 1, rarityCode: "rare_holo" })).toBe("");
-    expect(printed({ rarityCode: "rare_holo" })).toBe("");
-    // the renderer's gate is unchanged
+    expect(consolidatedVariantForLabel({ structuredVariantVersion: 1, rarityCode: "rare_holo" })).toBe("");
+    expect(consolidatedVariantForLabel({ rarityCode: "rare_holo" })).toBe("");
+    // a legacy variant / rarity cert prints exactly as it always did
+    expect(consolidatedVariantForLabel({ variant: "COSMOS_HOLO" })).toBe("COSMOS HOLO");
+    expect(consolidatedVariantForLabel({ rarity: "RARE_HOLO" })).toBe("HOLO RARE");
     expect(read("server/labels.ts")).toContain("version >= CONSOLIDATED_VARIANT_SCHEME");
+  });
+
+  it("KNOWN GAP (F1): legacy variant/rarity still fold into CLEARED structured slots", () => {
+    // Documents the reviewer-confirmed Critical finding, using MV207's real
+    // legacy values. Clearing the structured rarity+finish does NOT yield a
+    // promo-only line while the legacy columns still hold values, because
+    // formatVariantLine deliberately folds legacy into empty slots (#242's
+    // "never drop a legacy value" contract). Resolving this changes PRINTED
+    // output, so it is held for an explicit founder decision — this test pins
+    // the CURRENT behaviour so the decision is made deliberately, not silently.
+    const clearedButLegacyPresent = {
+      structuredVariantVersion: 2,
+      rarityCode: null,
+      finishVariant: null,
+      promoType: "mcdonalds_promo",
+      rarity: "Basic Pokémon",
+      variant: "Holo",
+    };
+    expect(consolidatedVariantForLabel(clearedButLegacyPresent)).toBe("BASIC POKÉMON · MCDONALD’S PROMO · HOLO");
+    // …whereas with no legacy leftovers the required promo-only line is produced
+    expect(
+      consolidatedVariantForLabel({ structuredVariantVersion: 2, promoType: "mcdonalds_promo" })
+    ).toBe("MCDONALD’S PROMO");
   });
 
   it("22. no grading/MVGS/centering/Pristine/cert-number engine file is modified", () => {
