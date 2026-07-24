@@ -168,6 +168,67 @@ const NOTE_TEMPLATES: { label: string; text: string }[] = [
 type AutofillField = (typeof AUTOFILL_FIELDS)[number];
 type ProtectedField = AutofillField | "designations";
 
+/**
+ * The ONE mapping from a certificate row to editable form state.
+ *
+ * Used both for the initial seed and for the cross-certificate reset, so the two
+ * can never drift — a field added here is re-seeded on a cert switch for free.
+ * Every editable value is derived from `cert`; nothing is carried over from a
+ * previously edited certificate. Exported so the isolation contract is
+ * unit-testable without a DOM (this repo has no jsdom/RTL).
+ */
+export function buildFormStateFromCert(
+  certInput: (CertificateRecord & Record<string, any>) | null | undefined
+) {
+  const cert = certInput as (CertificateRecord & Record<string, any>) | null | undefined;
+  const initRarity = cert?.rarity || "";
+  const initVariant = cert?.variant || "";
+  const initCollCode = cert?.collectionCode || "";
+  const initRarityOther = cert?.rarityOther || "";
+  const initVariantOther = cert?.variantOther || "";
+  const initCollOther = cert?.collectionOther || "";
+  return {
+    gradeType: cert?.gradeType || "numeric",
+    serviceTier: "",
+    // Coerced to string: the field is a text input and the payload builder
+    // stringifies it anyway. (Previously reached this state via an `as any`.)
+    submissionItemId: cert?.submissionItemId ? String(cert.submissionItemId) : "",
+    cardGame: slugifyCardGame(cert?.cardGame),
+    setName: cert?.setName || "",
+    cardName: cert?.cardName === "(untitled)" || cert?.cardName === "(pending)" ? "" : cert?.cardName || "",
+    cardNumber: cert?.cardNumber || "",
+    rarity: initRarity,
+    rarityOther: initRarityOther,
+    collectionCode: initCollCode,
+    collectionOther: initCollOther,
+    variant: initVariant,
+    variantOther: initVariantOther,
+    unifiedSelect: buildUnifiedValue(
+      initRarity,
+      initVariant,
+      initCollCode,
+      initRarityOther,
+      initVariantOther,
+      initCollOther
+    ),
+    otherText: buildOtherText(initRarityOther, initVariantOther, initCollOther),
+    language: cert?.language || "English",
+    year: cert?.year || "",
+    notes: cert?.notes || "",
+    gradeOverall: cert?.gradeOverall || "",
+    labelType: cert?.labelType || "standard",
+    status: cert?.status || "active",
+    // Structured Pokémon rarity/variant (visual picker). Seeded from the cert's
+    // structured columns so an edit re-sends them unchanged (never erased). The
+    // legacy `variant`/`rarity` above stay as the historical source of truth.
+    rarityCode: cert?.rarityCode || "",
+    finishVariant: cert?.finishVariant || "",
+    promoType: cert?.promoType || "",
+    subsetName: cert?.subsetName || "",
+    era: cert?.era || "",
+  };
+}
+
 export default function CertificateForm({
   certificate,
   onSuccess,
@@ -184,54 +245,7 @@ export default function CertificateForm({
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const initRarity = certificate?.rarity || "";
-  const initVariant = certificate?.variant || "";
-  const initCollCode = (certificate as any)?.collectionCode || "";
-  const initRarityOther = (certificate as any)?.rarityOther || "";
-  const initVariantOther = (certificate as any)?.variantOther || "";
-  const initCollOther = (certificate as any)?.collectionOther || "";
-
-  const [form, setForm] = useState({
-    gradeType: (certificate as any)?.gradeType || "numeric",
-    serviceTier: "",
-    submissionItemId: (certificate as any)?.submissionItemId || "",
-    cardGame: slugifyCardGame(certificate?.cardGame),
-    setName: certificate?.setName || "",
-    cardName:
-      certificate?.cardName === "(untitled)" || certificate?.cardName === "(pending)"
-        ? ""
-        : certificate?.cardName || "",
-    cardNumber: certificate?.cardNumber || "",
-    rarity: initRarity,
-    rarityOther: initRarityOther,
-    collectionCode: initCollCode,
-    collectionOther: initCollOther,
-    variant: initVariant,
-    variantOther: initVariantOther,
-    unifiedSelect: buildUnifiedValue(
-      initRarity,
-      initVariant,
-      initCollCode,
-      initRarityOther,
-      initVariantOther,
-      initCollOther
-    ),
-    otherText: buildOtherText(initRarityOther, initVariantOther, initCollOther),
-    language: certificate?.language || "English",
-    year: certificate?.year || "",
-    notes: certificate?.notes || "",
-    gradeOverall: certificate?.gradeOverall || "",
-    labelType: (certificate as any)?.labelType || "standard",
-    status: certificate?.status || "active",
-    // Structured Pokémon rarity/variant (visual picker). Seeded from the cert's
-    // structured columns so an edit re-sends them unchanged (never erased). The
-    // legacy `variant`/`rarity` above stay as the historical source of truth.
-    rarityCode: certificate?.rarityCode || "",
-    finishVariant: certificate?.finishVariant || "",
-    promoType: certificate?.promoType || "",
-    subsetName: certificate?.subsetName || "",
-    era: certificate?.era || "",
-  });
+  const [form, setForm] = useState(() => buildFormStateFromCert(certificate));
 
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
   // Grader notes live in Stage 4 (Review), collapsed unless the cert already has notes.
@@ -1262,6 +1276,52 @@ export default function CertificateForm({
   const autoSaveSeqRef = useRef(0);
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedOnceRef = useRef(false);
+
+  // ── Cross-certificate isolation ────────────────────────────────────────────
+  // The workstation swaps `certificate` for the next queued card WITHOUT
+  // unmounting this form (admin-dashboard renders it with no `key`), and every
+  // editable value is `useState`-seeded once at mount. Without this reset, card
+  // A's rarity/finish/promo/subset/era and legacy variant/rarity stayed in
+  // `form` and the next auto-save wrote them onto card B.
+  //
+  // A remount (`key={cert.id}`) would fix it too, but would destroy state the
+  // operator needs ACROSS cards — sessionCompleted, the saved panel/toast and
+  // the auto-save status HUD all live in this component. So we reset only the
+  // per-certificate editable state and deliberately leave session/queue state
+  // alone. The picker IS keyed (below), so its internal selection re-seeds.
+  const currentCertIdRef = useRef<number | null>(certificate?.id ?? null);
+  useEffect(() => {
+    const nextId = certificate?.id ?? null;
+    if (currentCertIdRef.current === nextId) return; // same cert — nothing to do
+    currentCertIdRef.current = nextId;
+
+    // Drop any queued/in-flight auto-save so it can never land on the new cert.
+    // Bumping the sequence makes the in-flight response a no-op for UI state.
+    autoSavePendingRef.current = false;
+    autoSaveSeqRef.current += 1;
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+
+    // Re-seed every editable value from the NEW certificate (one shared mapping).
+    setForm(buildFormStateFromCert(certificate));
+    setDesignations((certificate?.designations as string[]) || []);
+    setNotesOpen(Boolean(certificate?.notes));
+    setFrontImage(null);
+    setBackImage(null);
+
+    // Per-certificate refs: the conflict snapshot and the consolidated-scheme
+    // flag describe the OLD cert; re-derive them for the new one.
+    loadedSnapshotRef.current = null;
+    savedConsolidatedRef.current = false;
+    refreshSnapshotFromCert(certificate as unknown as Record<string, unknown> | null);
+    // Skip one auto-save tick so re-seeding the form does not immediately PUT
+    // back what we just loaded (same reason the initial hydration skips it).
+    hydratedOnceRef.current = false;
+    setAutoSaveStatus("idle");
+    // eslint-disable-next-line
+  }, [certificate?.id]);
 
   // Serialize auto-saves: never two PUTs in flight at once. Overlapping saves
   // were the one way this tab could race ITSELF into a stale-snapshot 409
@@ -2775,6 +2835,12 @@ export default function CertificateForm({
                     </a>
                   </label>
                   <RarityVariantPicker
+                    // Keyed by certificate so switching cards REMOUNTS the picker
+                    // and re-seeds its internal rarity/finish/promo from the new
+                    // cert. Without this the picker keeps card A's selection
+                    // (its state is seeded once at mount) — the same protection
+                    // grading-panel.tsx already applies to this component.
+                    key={certificate?.id ?? "new"}
                     legacyVariant={form.variant || null}
                     value={{
                       language: languageByValueOrLabel(form.language)?.value ?? "en",
