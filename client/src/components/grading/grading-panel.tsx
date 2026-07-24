@@ -1666,9 +1666,15 @@ export default function GradingPanel({
     //    never wipe a stored value (applyCertGradeDraft's pick() preserves it).
     if (graderMode || adminReview) {
       if (rarityTouched) {
-        out.rarity_code = rarityCode.trim();
-        out.finish_variant = finishVariant.trim();
-        out.promo_type = promoType.trim();
+        // An explicit clear is sent as NULL, not "". applyCertGradeDraft's
+        // pick() preserves the stored value only for an OMITTED (undefined)
+        // key; an explicit null persists as SQL NULL, while "" would have been
+        // stored verbatim as an empty string — leaving this route writing ""
+        // where the admin certificate route writes NULL for the same columns.
+        // Same semantics, one emptiness representation, no server change.
+        out.rarity_code = rarityCode.trim() || null;
+        out.finish_variant = finishVariant.trim() || null;
+        out.promo_type = promoType.trim() || null;
       } else {
         if (rarityCode.trim()) out.rarity_code = rarityCode.trim();
         if (finishVariant.trim()) out.finish_variant = finishVariant.trim();
