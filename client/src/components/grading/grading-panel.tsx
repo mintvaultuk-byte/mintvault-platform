@@ -478,7 +478,18 @@ export default function GradingPanel({
   const [rarityCode, setRarityCode] = useState("");
   const [finishVariant, setFinishVariant] = useState("");
   const [promoType, setPromoType] = useState("");
+  // Tracks a deliberate operator interaction with the rarity picker (including an
+  // explicit "No rarity" clear). Only once touched do we persist an EMPTY rarity —
+  // so an unhydrated/untouched picker can never wipe a stored value, but an
+  // intentional clear IS saved. Reset per card.
+  const [rarityTouched, setRarityTouched] = useState(false);
+  // The picker seeds from `value` on mount and is uncontrolled after. It is mounted
+  // only once `gradingData` is present (so the seed reflects the STORED rarity) and
+  // is keyed by certId so switching certs remounts + re-seeds — both derived from the
+  // query, so no effect-ordering race can strand it. (The picker emits ONLY on real
+  // interaction now, so handleRarityChange = a genuine edit → touched.)
   function handleRarityChange(v: StructuredCardVariant) {
+    setRarityTouched(true);
     setRarityCode(v.rarity ?? "");
     setFinishVariant(v.finish ?? "");
     setPromoType(v.promo ?? "");
@@ -515,6 +526,9 @@ export default function GradingPanel({
     if (gd.rarityCode && !rarityCode) setRarityCode(String(gd.rarityCode));
     if (gd.finishVariant && !finishVariant) setFinishVariant(String(gd.finishVariant));
     if (gd.promoType && !promoType) setPromoType(String(gd.promoType));
+    // Keeps local rarity* state coherent for untouched saves. The picker itself seeds
+    // from `gradingData` directly at render (not this state), so its display never
+    // depends on this effect winning any ordering race against the per-card reset.
     // Fills only-when-empty on data arrival; the rarity* values are deliberately
     // not deps (same pattern as the identity hydration effect above).
   }, [gradingData, graderMode, adminReview]);
@@ -924,6 +938,7 @@ export default function GradingPanel({
     setRarityCode("");
     setFinishVariant("");
     setPromoType("");
+    setRarityTouched(false);
   }, [certId]);
 
   // ── Post-approval explicit-save flow ──────────────────────────────────
@@ -1643,13 +1658,22 @@ export default function GradingPanel({
 
     // Structured rarity/finish/promo — sent on BOTH graderMode and adminReview
     // (the Rarity stage is on all role routes; admins edit identity via a
-    // separate editor but rarity has no other role write-path). Only sent when
-    // non-empty so an unhydrated/empty picker can never wipe a stored value
-    // (applyCertGradeDraft's pick() preserves the existing value when omitted).
+    // separate editor but rarity has no other role write-path).
+    //  - TOUCHED (operator interacted, incl. an explicit "No rarity" clear): send
+    //    the exact current selection — an empty string here INTENTIONALLY persists
+    //    a cleared rarity.
+    //  - UNTOUCHED: only re-send non-empty, so an unhydrated/empty picker can
+    //    never wipe a stored value (applyCertGradeDraft's pick() preserves it).
     if (graderMode || adminReview) {
-      if (rarityCode.trim()) out.rarity_code = rarityCode.trim();
-      if (finishVariant.trim()) out.finish_variant = finishVariant.trim();
-      if (promoType.trim()) out.promo_type = promoType.trim();
+      if (rarityTouched) {
+        out.rarity_code = rarityCode.trim();
+        out.finish_variant = finishVariant.trim();
+        out.promo_type = promoType.trim();
+      } else {
+        if (rarityCode.trim()) out.rarity_code = rarityCode.trim();
+        if (finishVariant.trim()) out.finish_variant = finishVariant.trim();
+        if (promoType.trim()) out.promo_type = promoType.trim();
+      }
     }
 
     // Subgrade scalars — omit if 0/null (zone state at empty default).
@@ -2263,18 +2287,33 @@ export default function GradingPanel({
           data-testid="section-rarity"
         >
           <div className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Structured rarity &amp; variant</div>
-          <RarityVariantPicker
-            legacyVariant={idVariant || null}
-            value={{
-              language: "en",
-              era: null,
-              rarity: rarityCode || null,
-              finish: finishVariant || null,
-              promo: promoType || null,
-              subset: null,
-            }}
-            onChange={handleRarityChange}
-          />
+          {/* Mount only once gradingData is present so the picker (uncontrolled after
+              mount) seeds from the STORED rarity, and key it by certId so switching
+              certs remounts + re-seeds. Both derive straight from the query — no
+              effect-ordering latch that a per-card reset could strand. */}
+          {gradingData ? (
+            <RarityVariantPicker
+              key={certId ?? "none"}
+              legacyVariant={idVariant || null}
+              value={{
+                language: "en",
+                era: null,
+                // Seed STRICTLY from the per-cert query (the picker only mounts once
+                // gradingData is present, so it is authoritative). No local-state
+                // fallback: a null-rarity cert returning rarityCode:null must seed
+                // null, never the previous cert's still-unreset local rarityCode.
+                rarity: (gradingData as any).rarityCode || null,
+                finish: (gradingData as any).finishVariant || null,
+                promo: (gradingData as any).promoType || null,
+                subset: null,
+              }}
+              onChange={handleRarityChange}
+            />
+          ) : (
+            <div className="text-[11px] text-[var(--admin-ink-faint)]" data-testid="rarity-loading">
+              Loading rarity…
+            </div>
+          )}
         </div>
       )}
       <div

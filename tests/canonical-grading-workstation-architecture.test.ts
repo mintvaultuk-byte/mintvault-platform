@@ -395,3 +395,58 @@ describe("Four-stage workflow: canonical Rarity stage + one shared picker/catalo
     expect(PANEL).not.toContain("grader-density");
   });
 });
+
+describe("Rarity clear: explicit 'No rarity' persists an empty selection (optional, single-select)", () => {
+  const PANEL = read("client/src/components/grading/grading-panel.tsx");
+  const PICKER = read("client/src/components/rarity-picker/RarityVariantPicker.tsx");
+
+  it("C1. the canonical picker has an explicit 'No rarity — clear' action (deselects rarity)", () => {
+    expect(PICKER).toContain('data-testid="rarity-clear"');
+    expect(PICKER).toContain("No rarity — clear");
+    expect(PICKER).toMatch(/const clearRarity = \(\) => \{\s*setRarity\(null\)/);
+  });
+
+  it("C2. rarity is optional + single-select + toggle-off (clicking the selected rarity clears it)", () => {
+    // pickRarity: selecting the same catalogue rarity toggles it off (null).
+    expect(PICKER).toMatch(/if \(nextCatalogueRarity\(rarity, v, !!selectedCustomId\) === null\) \{\s*setRarity\(null\)/);
+    // finish + promo are independent controls (separate setters), not tied to rarity.
+    expect(PICKER).toContain("setFinish(");
+    expect(PICKER).toContain("setPromoOrSubset(");
+  });
+
+  it("C3. an INTENTIONAL clear persists (rarityTouched) while an untouched/unhydrated picker never wipes", () => {
+    // Touch flag set on any picker interaction (incl. clear).
+    expect(PANEL).toMatch(/function handleRarityChange\(v: StructuredCardVariant\) \{\s*setRarityTouched\(true\)/);
+    // Touched → send the exact value (empty string = persisted clear); untouched →
+    // non-empty guard only (preserve).
+    expect(PANEL).toMatch(/if \(rarityTouched\) \{\s*out\.rarity_code = rarityCode\.trim\(\);/);
+    expect(PANEL).toMatch(/\} else \{\s*if \(rarityCode\.trim\(\)\) out\.rarity_code = rarityCode\.trim\(\);/);
+    // Touch flag is reset per card (no cross-record clear leakage).
+    expect(PANEL).toContain("setRarityTouched(false)");
+  });
+
+  it("C4. one consolidated Variant value — the picker emits a single StructuredCardVariant (finish/promo independent fields within it)", () => {
+    // The picker builds ONE structured variant and emits it via onChange (through a
+    // stable ref so an unstable inline onChange prop cannot re-fire the effect).
+    expect(PICKER).toContain("buildStructuredVariant({");
+    expect(PICKER).toMatch(/onChangeRef\.current\?\.\(structured\)/);
+  });
+
+  it("C5. picker does NOT emit onChange on mount — only on genuine interaction (no spurious rarityTouched / stored-rarity wipe)", () => {
+    // The mount echo is suppressed via a ref guard so hydrating an existing cert's
+    // rarity into the (uncontrolled-after-mount) picker never looks like a user edit.
+    expect(PICKER).toMatch(/emitMountedRef\s*=\s*useRef\(false\)/);
+    expect(PICKER).toMatch(/if \(!emitMountedRef\.current\) \{\s*emitMountedRef\.current = true;\s*return;/);
+    // GradingPanel mounts the picker only once gradingData is present and keys it by
+    // certId, seeding from the stored value — both derived straight from the query, so
+    // no effect-ordering race (hydration vs per-card reset) can strand it on "Loading".
+    expect(PANEL).toMatch(/gradingData \? \(\s*<RarityVariantPicker/);
+    expect(PANEL).toMatch(/key=\{certId \?\? "none"\}/);
+    // Seed strictly from the per-cert query — no `?? localState` fallback (which would
+    // leak a previous cert's rarity onto a cached null-rarity cert).
+    expect(PANEL).toMatch(/rarity: \(gradingData as any\)\.rarityCode \|\| null/);
+    expect(PANEL).not.toMatch(/rarityCode\) \|\| null/);
+    // The stompable rarityHydrated latch is gone entirely.
+    expect(PANEL).not.toContain("rarityHydrated");
+  });
+});
