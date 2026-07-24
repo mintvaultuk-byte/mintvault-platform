@@ -11,6 +11,7 @@
  */
 import { RaritySymbol } from "@/components/rarity-picker/RaritySymbol";
 import { rarityByValue, finishByValue, promoByValue, languageByValueOrLabel } from "@shared/pokemon-rarity-catalogue";
+import { formatVariantLine } from "@shared/variant-line";
 
 export interface VariantSummaryValues {
   language?: string;
@@ -18,6 +19,9 @@ export interface VariantSummaryValues {
   finishVariant?: string;
   promoType?: string;
   subsetName?: string;
+  /** Legacy columns folded into the printed line only to fill an empty slot. */
+  variant?: string;
+  rarity?: string;
 }
 
 function Line({ label, children }: { label: string; children: React.ReactNode }) {
@@ -39,6 +43,15 @@ export function VariantSummary({ values }: { values: VariantSummaryValues }) {
   const lang = languageByValueOrLabel(values.language ?? "");
 
   const anySet = rarity || finish || promo || subset;
+  // The exact single line the front label will print — via the ONE shared formatter.
+  const printedLine = formatVariantLine({
+    rarityCode: values.rarityCode,
+    finishVariant: values.finishVariant,
+    promoType: values.promoType,
+    subsetName: values.subsetName,
+    variant: values.variant,
+    rarity: values.rarity,
+  });
 
   return (
     <div
@@ -46,6 +59,13 @@ export function VariantSummary({ values }: { values: VariantSummaryValues }) {
       data-testid="variant-summary"
     >
       <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">Selected classification</div>
+      {/* The exact wording that prints on the front label (matches the live preview). */}
+      <div className="mb-1.5 flex items-baseline justify-between gap-2 border-b border-[var(--admin-gold)]/10 pb-1.5">
+        <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Prints as</span>
+        <span className="min-w-0 text-right text-[12px] font-bold text-[var(--admin-gold)]" data-testid="variant-printed-line">
+          {printedLine || <span className="font-normal text-[var(--admin-ink-faint)]">—</span>}
+        </span>
+      </div>
       <Line label="Language">{lang?.label ?? values.language ?? <span className="text-[var(--admin-ink-faint)]">—</span>}</Line>
       <Line label="Rarity">
         {rarity ? (

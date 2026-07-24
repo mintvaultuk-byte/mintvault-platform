@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { applyStructuredVariantFromBody } from "../server/lib/structured-variant";
 import { CONFLICT_GUARDED_FIELDS } from "@shared/edit-conflict";
+import { STRUCTURED_VARIANT_VERSION } from "@shared/structured-variant-validate";
 
 describe("applyStructuredVariantFromBody — opt-in by key presence (test 28-30)", () => {
   it("does nothing when the request carries no structured keys (partial PUT can't erase)", () => {
@@ -29,7 +30,7 @@ describe("applyStructuredVariantFromBody — opt-in by key presence (test 28-30)
     expect(data.printedSymbolColour).toBe("gold");
     expect(data.printedSymbolCount).toBe(2);
     expect(data.region).toBe("western");
-    expect(data.structuredVariantVersion).toBe(1);
+    expect(data.structuredVariantVersion).toBe(STRUCTURED_VARIANT_VERSION);
     // Legacy columns are never touched by the structured apply.
     expect(data.variant).toBe("REVERSE_HOLO");
     expect(data.rarity).toBeNull();

@@ -64,8 +64,12 @@ export interface StructuredVariantResult {
   warnings: string[];
 }
 
-/** Current structured-schema version stamped when any structured field is set. */
-export const STRUCTURED_VARIANT_VERSION = 1;
+/** Current structured-schema version stamped when any structured field is set.
+ *  v2 marks the CONSOLIDATED variant-line scheme: certs saved at v2+ print the
+ *  single canonical variant line (shared/variant-line.ts). Kept in sync with
+ *  CONSOLIDATED_VARIANT_SCHEME there so the write-stamp and the renderer gate
+ *  can never drift. */
+export const STRUCTURED_VARIANT_VERSION = 2;
 
 const EMPTY_COLUMNS: StructuredVariantColumns = {
   rarityCode: null,

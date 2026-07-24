@@ -10,6 +10,7 @@ import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/
 import { LabelPreview } from "@/components/grading-workflow/LabelPreview";
 import { VariantSummary } from "@/components/grading-workflow/VariantSummary";
 import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
+import { CONSOLIDATED_VARIANT_SCHEME, hasStructuredVariant } from "@shared/variant-line";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
@@ -386,6 +387,13 @@ export default function CertificateForm({
   // shared/edit-conflict.ts). Refreshed from the cert prop on refetch and
   // from each save's own posted values on success (self-healing).
   const loadedSnapshotRef = useRef<Record<string, string> | null>(null);
+  // Whether the SAVED cert already prints the consolidated variant line
+  // (structuredVariantVersion ≥ CONSOLIDATED_VARIANT_SCHEME). Refreshed from the
+  // cert prop and from every save's response row inside refreshSnapshotFromCert.
+  // A pre-consolidation cert that carries structured columns will change its
+  // printed variant line the next time it is saved, so the preview (which shows
+  // the post-save wording) legitimately differs from what is printed today.
+  const savedConsolidatedRef = useRef(false);
 
   // Label-freshness signal for the Review certificate preview. Compares ONLY the
   // fields that affect the printed label against the last SAVED snapshot (server
@@ -400,6 +408,15 @@ export default function CertificateForm({
     if (!isEdit) return true;
     const snap = loadedSnapshotRef.current;
     if (!snap) return true;
+    // A structured cert not yet saved under the consolidated scheme will change
+    // its printed variant line on the next save — treat as unsaved until then.
+    const structuredNow = hasStructuredVariant({
+      rarityCode: form.rarityCode,
+      finishVariant: form.finishVariant,
+      promoType: form.promoType,
+      subsetName: form.subsetName,
+    });
+    if (structuredNow && !savedConsolidatedRef.current) return true;
     for (const key of CONFLICT_GUARDED_FIELDS) {
       if (labelNorm((form as unknown as Record<string, unknown>)[key]) !== labelNorm(snap[key])) return true;
     }
@@ -419,6 +436,8 @@ export default function CertificateForm({
       snap[f] = v === null || v === undefined ? "" : String(v);
     }
     loadedSnapshotRef.current = snap;
+    const ver = Number((row as any).structuredVariantVersion ?? 0);
+    savedConsolidatedRef.current = ver >= CONSOLIDATED_VARIANT_SCHEME;
   }
 
   useEffect(() => {
@@ -2740,6 +2759,8 @@ export default function CertificateForm({
                       finishVariant: form.finishVariant,
                       promoType: form.promoType,
                       subsetName: form.subsetName,
+                      variant: form.variant,
+                      rarity: form.rarity,
                     }}
                   />
                 </div>
@@ -3428,6 +3449,8 @@ export default function CertificateForm({
                   promoType: form.promoType,
                   subsetName: form.subsetName,
                   era: form.era,
+                  variant: form.variant,
+                  rarity: form.rarity,
                   designations,
                   gradeOverall: form.gradeOverall,
                   labelType: form.labelType,
