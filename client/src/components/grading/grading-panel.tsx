@@ -24,6 +24,8 @@ import ManualCardTool from "./manual-card-tool";
 // (/api/pokemon-sets, /api/cards/autofill) are public — no auth change needed.
 import { type TcgCardPick } from "@/components/identity-tools";
 import { GradingIdentityVerification } from "@/components/grading/GradingIdentityVerification";
+import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
+import type { StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import { autofillCard } from "@/lib/api";
 
 // Shared calculation imports (client-side re-implementations)
@@ -471,6 +473,16 @@ export default function GradingPanel({
   const [idNumber, setIdNumber] = useState(cardNumber || "");
   const [idYear, setIdYear] = useState(cardYear || "");
   const [idVariant, setIdVariant] = useState(cardVariant || "");
+  // Structured rarity/finish/promo (role routes only) — same canonical fields as
+  // the /admin CertificateForm rarity picker. Persisted via buildPayload.
+  const [rarityCode, setRarityCode] = useState("");
+  const [finishVariant, setFinishVariant] = useState("");
+  const [promoType, setPromoType] = useState("");
+  function handleRarityChange(v: StructuredCardVariant) {
+    setRarityCode(v.rarity ?? "");
+    setFinishVariant(v.finish ?? "");
+    setPromoType(v.promo ?? "");
+  }
   // Set CODE captured when a set is chosen from the picker (precise autofill key);
   // free-typed set names fall back to the name itself, same as the admin form.
   const [idSetCode, setIdSetCode] = useState("");
@@ -494,6 +506,18 @@ export default function GradingPanel({
     // Intentionally fills only empty fields once on data arrival — id* values are
     // deliberately not deps (they'd re-fire and could re-fill after a grader edit).
   }, [gradingData, graderMode]);
+  // Structured rarity hydration — runs for BOTH graderMode and adminReview (the
+  // Rarity stage renders on all role routes), so /admin/staff's picker loads the
+  // stored rarity/finish/promo too. Fills only-when-empty, same pattern as above.
+  useEffect(() => {
+    if (!(graderMode || adminReview) || !gradingData) return;
+    const gd: any = gradingData;
+    if (gd.rarityCode && !rarityCode) setRarityCode(String(gd.rarityCode));
+    if (gd.finishVariant && !finishVariant) setFinishVariant(String(gd.finishVariant));
+    if (gd.promoType && !promoType) setPromoType(String(gd.promoType));
+    // Fills only-when-empty on data arrival; the rarity* values are deliberately
+    // not deps (same pattern as the identity hydration effect above).
+  }, [gradingData, graderMode, adminReview]);
   // Card autofill — mirrors CertificateForm.handleAutofill: set(+number) → card
   // master → fill name/year/variant. Same /api/cards/autofill endpoint + pattern.
   async function graderAutofill() {
@@ -897,6 +921,9 @@ export default function GradingPanel({
     setEdgesOverride(null);
     setSurfaceOverride(null);
     setOverallOverride(null);
+    setRarityCode("");
+    setFinishVariant("");
+    setPromoType("");
   }, [certId]);
 
   // ── Post-approval explicit-save flow ──────────────────────────────────
@@ -1614,6 +1641,17 @@ export default function GradingPanel({
       out.variant = idVariant.trim();
     }
 
+    // Structured rarity/finish/promo — sent on BOTH graderMode and adminReview
+    // (the Rarity stage is on all role routes; admins edit identity via a
+    // separate editor but rarity has no other role write-path). Only sent when
+    // non-empty so an unhydrated/empty picker can never wipe a stored value
+    // (applyCertGradeDraft's pick() preserves the existing value when omitted).
+    if (graderMode || adminReview) {
+      if (rarityCode.trim()) out.rarity_code = rarityCode.trim();
+      if (finishVariant.trim()) out.finish_variant = finishVariant.trim();
+      if (promoType.trim()) out.promo_type = promoType.trim();
+    }
+
     // Subgrade scalars — omit if 0/null (zone state at empty default).
     // Reads from `sub` so the MVGS-derived subgrades ship to the server when
     // any defect is MVGS-classified; falls back to AI/manual subgrades
@@ -2212,6 +2250,32 @@ export default function GradingPanel({
         />
       ) : (
         <div data-canonical-section="identity-fields" data-testid="section-card-identity" hidden />
+      )}
+      {/* Rarity stage — the SAME canonical structured rarity/variant picker the
+          /admin CertificateForm uses (one component, one shared catalogue). Role
+          routes only (graderMode/adminReview); /admin renders its own via
+          CertificateForm. Persists via buildPayload → the role save (rarity_code /
+          finish_variant / promo_type). */}
+      {(graderMode || adminReview) && (
+        <div
+          className="rounded-lg border border-[var(--admin-line)] bg-[var(--admin-panel2)] px-3 py-2.5 space-y-2"
+          data-canonical-section="rarity"
+          data-testid="section-rarity"
+        >
+          <div className="text-[9px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Structured rarity &amp; variant</div>
+          <RarityVariantPicker
+            legacyVariant={idVariant || null}
+            value={{
+              language: "en",
+              era: null,
+              rarity: rarityCode || null,
+              finish: finishVariant || null,
+              promo: promoType || null,
+              subset: null,
+            }}
+            onChange={handleRarityChange}
+          />
+        </div>
       )}
       <div
         className="flex items-center justify-between"
