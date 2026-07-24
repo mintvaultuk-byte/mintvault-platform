@@ -403,7 +403,14 @@ export function consolidatedVariantForLabel(cert: CertificateRecord): string {
 // promo sub-line as part of the set name. Split that trailing qualifier off
 // so it can print on its own line instead of crushing onto the year line —
 // sets with no such suffix are returned untouched (base = full name).
-const PROMO_SUFFIX_RE = /\s+black star promos?$/i;
+// Bounded whitespace quantifier ({1,64} rather than +) so the match cost stays
+// linear — an unbounded \s+ before a literal is the polynomial-ReDoS shape CodeQL
+// flags (js/polynomial-redos), since a long run of whitespace makes the engine
+// retry from every start position. The VISIBLE OUTPUT is unchanged for every
+// possible input: splitPromoSuffix() .trim()s both the base and the suffix, so a
+// whitespace run longer than 64 yields byte-identical base/suffix either way —
+// only the internal match offset differs. Real set names have exactly one space.
+const PROMO_SUFFIX_RE = /\s{1,64}black star promos?$/i;
 
 function splitPromoSuffix(setName: string): { base: string; suffix: string } {
   const m = setName.match(PROMO_SUFFIX_RE);
