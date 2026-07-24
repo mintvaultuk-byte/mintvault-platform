@@ -342,27 +342,74 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     expect(read("server/labels.ts")).toContain("version >= CONSOLIDATED_VARIANT_SCHEME");
   });
 
-  it("KNOWN GAP (F1): legacy variant/rarity still fold into CLEARED structured slots", () => {
-    // Documents the reviewer-confirmed Critical finding, using MV207's real
-    // legacy values. Clearing the structured rarity+finish does NOT yield a
-    // promo-only line while the legacy columns still hold values, because
-    // formatVariantLine deliberately folds legacy into empty slots (#242's
-    // "never drop a legacy value" contract). Resolving this changes PRINTED
-    // output, so it is held for an explicit founder decision — this test pins
-    // the CURRENT behaviour so the decision is made deliberately, not silently.
-    const clearedButLegacyPresent = {
-      structuredVariantVersion: 2,
-      rarityCode: null,
-      finishVariant: null,
-      promoType: "mcdonalds_promo",
-      rarity: "Basic Pokémon",
-      variant: "Holo",
-    };
-    expect(consolidatedVariantForLabel(clearedButLegacyPresent)).toBe("BASIC POKÉMON · MCDONALD’S PROMO · HOLO");
-    // …whereas with no legacy leftovers the required promo-only line is produced
+  // ── Founder decision (Option 2): a consolidated cert is structured-ONLY ──
+  it("MV207 ACCEPTANCE: cleared rarity+finish with promo kept renders exactly MCDONALD'S PROMO", () => {
+    // MV207's REAL row values, including the legacy columns that previously
+    // folded back in and produced "BASIC POKÉMON · MCDONALD'S PROMO · HOLO".
     expect(
-      consolidatedVariantForLabel({ structuredVariantVersion: 2, promoType: "mcdonalds_promo" })
+      consolidatedVariantForLabel({
+        structuredVariantVersion: 2,
+        rarityCode: null,
+        finishVariant: null,
+        promoType: "mcdonalds_promo",
+        rarity: "Basic Pokémon",
+        variant: "Holo",
+      } as never)
     ).toBe("MCDONALD’S PROMO");
+  });
+
+  it("a version-2 cert does NOT fold legacy rarity into an empty structured rarity slot", () => {
+    expect(
+      consolidatedVariantForLabel({ structuredVariantVersion: 2, finishVariant: "cosmos_holo", rarity: "RARE_HOLO" } as never)
+    ).toBe("COSMOS HOLO");
+  });
+
+  it("a version-2 cert does NOT fold legacy variant into an empty structured finish slot", () => {
+    expect(
+      consolidatedVariantForLabel({ structuredVariantVersion: 2, rarityCode: "rare_holo", variant: "COSMOS_HOLO" } as never)
+    ).toBe("HOLO RARE");
+  });
+
+  it("empty structured rarity / finish / promo each display nothing on a v2 cert", () => {
+    const v2 = (o: Record<string, unknown>) => consolidatedVariantForLabel({ structuredVariantVersion: 2, ...o } as never);
+    expect(v2({ promoType: "mcdonalds_promo" })).toBe("MCDONALD’S PROMO"); // no rarity, no finish
+    expect(v2({ rarityCode: "rare_holo" })).toBe("HOLO RARE"); // no promo, no finish
+    expect(v2({ finishVariant: "cosmos_holo" })).toBe("COSMOS HOLO"); // no rarity, no promo
+  });
+
+  it("a PRE-consolidation certificate keeps its exact legacy wording (fold still applies)", () => {
+    // no version at all
+    expect(consolidatedVariantForLabel({ variant: "COSMOS_HOLO" } as never)).toBe("COSMOS HOLO");
+    expect(consolidatedVariantForLabel({ rarity: "RARE_HOLO" } as never)).toBe("HOLO RARE");
+    // version 1 → legacy branch, structured columns ignored
+    expect(consolidatedVariantForLabel({ structuredVariantVersion: 1, rarityCode: "rare_holo" } as never)).toBe("");
+    // legacy fold still fills an empty slot for a sub-v2 cert
+    expect(
+      formatVariantLine({ structuredVariantVersion: 1, promoType: "mcdonalds_promo", rarity: "RARE_HOLO" } as never).toUpperCase()
+    ).toBe("HOLO RARE · MCDONALD’S PROMO");
+  });
+
+  it("legacy COLUMNS are never modified by a structured clear (persistence unchanged)", () => {
+    // The structured writer only ever maps the structured columns — the legacy
+    // variant/rarity are not among the fields it returns, so a clear cannot
+    // erase them. (Requirement: legacy values remain stored.)
+    const cols = persist({ rarityCode: "", finishVariant: "", promoType: "mcdonalds_promo" });
+    expect(Object.keys(cols)).not.toContain("variant");
+    expect(Object.keys(cols)).not.toContain("rarity");
+    expect(read("server/lib/structured-variant.ts")).toContain("legacy");
+  });
+
+  it("preview and print share the ONE canonical rule (same helper, version-gated)", () => {
+    const labels = read("server/labels.ts");
+    expect(labels).toContain("version >= CONSOLIDATED_VARIANT_SCHEME");
+    expect(labels).toContain("formatVariantLine");
+    // the fold is gated inside the shared formatter, so every caller inherits it
+    expect(read("shared/variant-line.ts")).toContain(
+      "const consolidated = Number(input.structuredVariantVersion ?? 0) >= CONSOLIDATED_VARIANT_SCHEME;"
+    );
+    // the client summaries pass the version, so their line matches the label
+    expect(read("client/src/components/grading-workflow/VariantSummary.tsx")).toContain("structuredVariantVersion:");
+    expect(read("client/src/components/grading-workflow/ReviewSummary.tsx")).toContain("structuredVariantVersion:");
   });
 
   it("22. no grading/MVGS/centering/Pristine/cert-number engine file is modified", () => {

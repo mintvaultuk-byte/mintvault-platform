@@ -11,7 +11,7 @@
  */
 import { RaritySymbol } from "@/components/rarity-picker/RaritySymbol";
 import { rarityByValue, finishByValue, promoByValue, languageByValueOrLabel } from "@shared/pokemon-rarity-catalogue";
-import { formatVariantLine } from "@shared/variant-line";
+import { formatVariantLine, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 
 export interface VariantSummaryValues {
   language?: string;
@@ -55,6 +55,11 @@ export function VariantSummary({ values }: { values: VariantSummaryValues }) {
     rarity: values.rarity,
     variantOther: values.variantOther,
     rarityOther: values.rarityOther,
+    // Show the line the label will print AFTER this save: saving any structured
+    // value stamps the consolidated scheme, under which the line is derived ONLY
+    // from the structured fields (no legacy fold). With nothing structured set,
+    // the save leaves the cert pre-consolidation and the legacy wording stands.
+    structuredVariantVersion: anySet ? CONSOLIDATED_VARIANT_SCHEME : null,
   });
 
   return (

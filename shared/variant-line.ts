@@ -36,11 +36,24 @@ export interface VariantLineInput {
   finishVariant?: string | null;
   promoType?: string | null;
   subsetName?: string | null;
-  /** Legacy free-form columns, folded in only to fill an EMPTY structured slot. */
+  /**
+   * Legacy free-form columns. Folded in ONLY to fill an empty structured slot,
+   * and ONLY for a certificate that is not yet on the consolidated scheme — see
+   * `structuredVariantVersion` below.
+   */
   variant?: string | null;
   rarity?: string | null;
   variantOther?: string | null;
   rarityOther?: string | null;
+  /**
+   * The certificate's structured scheme version. At >= CONSOLIDATED_VARIANT_SCHEME
+   * the line is derived ONLY from the explicit structured fields: an empty
+   * rarity/finish/promo means that part is simply not displayed, and the legacy
+   * columns are NOT folded in. Below that (or absent) the legacy fold still
+   * applies, so an untouched pre-consolidation certificate keeps byte-identical
+   * wording. The legacy columns themselves are never modified either way.
+   */
+  structuredVariantVersion?: number | null;
 }
 
 /** Public-facing wording overrides where the catalogue's descriptive label is
@@ -127,8 +140,17 @@ export function formatVariantLine(input: VariantLineInput): string {
     if (nativeSlot === "rarity" && !rarityCode && !rarityLegacyFallback) rarityLegacyFallback = display;
     else if (nativeSlot === "finish" && !finishCode && !finishLegacyFallback) finishLegacyFallback = display;
   };
-  foldLegacy(input.variant, input.variantOther, "finish");
-  foldLegacy(input.rarity, input.rarityOther, "rarity");
+  // Consolidated-scheme certificates are structured-ONLY: a cleared rarity or
+  // finish must print as nothing, so a legacy leftover can never reappear on the
+  // label. (Before this, clearing the structured rarity/finish on a v2 cert
+  // still printed the legacy `rarity`/`variant` values — e.g. promo-only came
+  // out as "BASIC POKÉMON · MCDONALD'S PROMO · HOLO".) Pre-consolidation certs
+  // keep the legacy fold, so their wording is unchanged until they are edited.
+  const consolidated = Number(input.structuredVariantVersion ?? 0) >= CONSOLIDATED_VARIANT_SCHEME;
+  if (!consolidated) {
+    foldLegacy(input.variant, input.variantOther, "finish");
+    foldLegacy(input.rarity, input.rarityOther, "rarity");
+  }
 
   const rarity = rarityCode ? publicLabel(rarityCode, rarityByValue(rarityCode)?.label) : rarityLegacyFallback;
   const promo = promoCode ? publicLabel(promoCode, promoByValue(promoCode)?.label) : "";

@@ -11,7 +11,7 @@
  */
 import { RaritySymbol } from "@/components/rarity-picker/RaritySymbol";
 import { rarityByValue, finishByValue, promoByValue, POKEMON_ERAS, languageByValueOrLabel } from "@shared/pokemon-rarity-catalogue";
-import { formatVariantLine } from "@shared/variant-line";
+import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import { getDesignationLabel } from "@/lib/designationOptions";
 import { formatCollectorNumber } from "@shared/collector-number-format";
 
@@ -104,6 +104,16 @@ export function ReviewSummary({
     rarity: v.rarity,
     variantOther: v.variantOther,
     rarityOther: v.rarityOther,
+    // Same canonical rule as the printed label: once anything structured is set,
+    // the save stamps the consolidated scheme and the line is structured-ONLY.
+    structuredVariantVersion: hasStructuredVariant({
+      rarityCode: v.rarityCode,
+      finishVariant: v.finishVariant,
+      promoType: v.promoType,
+      subsetName: v.subsetName,
+    })
+      ? CONSOLIDATED_VARIANT_SCHEME
+      : null,
   });
 
   return (
