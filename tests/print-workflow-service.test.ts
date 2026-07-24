@@ -184,9 +184,36 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
     const appliedX = [a, b].filter((r) => r.applied.includes("MVX"));
     expect(appliedX.length).toBe(1); // exactly one batch got MVX
     expect(await stateOf("MVX")).toBe("printing");
-    // The loser reports MVX as already_reserved.
+
+    // Exactly ONE reservation exists for MVX — it is never double-reserved. The
+    // append-only create_batch event is the durable record of a reservation, and
+    // only the winning batch may carry MVX in its cert_ids.
+    const events = await adminClient.query(
+      `SELECT batch_id FROM print_events WHERE cert_id='MVX' AND action='create_batch'`
+    );
+    expect(events.rows.length).toBe(1);
+    const batches = await adminClient.query(
+      `SELECT batch_id FROM print_batches WHERE cert_ids @> '["MVX"]'::jsonb`
+    );
+    expect(batches.rows.length).toBe(1);
+    expect(batches.rows[0].batch_id).toBe(events.rows[0].batch_id);
+
+    // The loser must be rejected for MVX through one of the TWO legitimate
+    // concurrency paths. WHICH one is a pure read-timing detail with no
+    // behavioural difference, so asserting a single code makes this test flaky:
+    //   already_reserved → the loser's pre-flight read still saw MVX batchable,
+    //                      then the state-guarded UPDATE claimed 0 rows because
+    //                      the winner had committed first (server/print-workflow.ts).
+    //   invalid_from     → the winner's print_state='printing' was already committed
+    //                      when the loser's pre-flight read ran, so the pure state
+    //                      machine rejected MVX up front (shared/print-lifecycle.ts —
+    //                      "printing" is not a batchable from-state).
+    // Both prove the same invariant: the loser never got MVX.
     const loser = [a, b].find((r) => !r.applied.includes("MVX"))!;
-    expect(loser.rejected.some((x) => x.certId === "MVX" && x.code === "already_reserved")).toBe(true);
+    const loserX = loser.rejected.find((x) => x.certId === "MVX");
+    expect(loserX, "the losing batch must report MVX as rejected").toBeDefined();
+    expect(["already_reserved", "invalid_from"]).toContain(loserX!.code);
+    expect(loser.applied).not.toContain("MVX");
   });
 
   it("marks a batch printed → printed; a reprint batch → reprinted", async () => {
