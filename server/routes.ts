@@ -2,6 +2,7 @@ import { sendServerError } from "./lib/error-response";
 import { normalizeCertId, certNumberFromId } from "./lib/cert-id";
 import { ensurePerfIndexes } from "./lib/perf-indexes";
 import { applyStructuredVariantFromBody } from "./lib/structured-variant";
+import { getCatalogueSnapshot } from "./lib/catalogue-provider";
 import type {
   Express,
   Request as ExpressRequest,
@@ -61,6 +62,8 @@ import { registerConnectorOpsRoutes } from "./partner/connector-admin-routes";
 import { registerPartnerManagementRoutes } from "./partner/partner-management-routes";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
+import { registerCatalogueRoutes } from "./routes/admin/catalogue";
+import { registerLabelPreviewRoutes } from "./routes/admin/label-preview";
 import { registerCardIdentificationRoutes } from "./routes/card-identification";
 import { registerTransferRoutes } from "./routes/transfers";
 import { registerPreGradeRoutes } from "./routes/pre-grade";
@@ -1439,6 +1442,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerPartnerManagementRoutes(app); // G5 partner management (requireAdmin-gated, internal)
   registerRarityMappingRoutes(app);
   registerPokemonKnowledgeRoutes(app);
+  registerCatalogueRoutes(app);
+  registerLabelPreviewRoutes(app);
   registerCardIdentificationRoutes(app);
   registerTransferRoutes(app);
   registerPreGradeRoutes(app);
@@ -3956,7 +3961,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // Structured rarity/variant picker → new nullable columns (legacy
         // variant/rarity above are left untouched). Validated + symbol-derived
         // server-side; invalid catalogue values are rejected here, not at the DB.
-        const structuredCreate = applyStructuredVariantFromBody(req.body, data);
+        let structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
+        if (!structuredCreate.ok) {
+          // A stale cross-machine catalogue cache can reject a just-added value —
+          // force-refresh the snapshot once and retry before failing (data is not
+          // mutated on a failed apply, so the retry is safe).
+          structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true));
+        }
         if (!structuredCreate.ok) {
           return res.status(400).json({ error: "Invalid rarity selection.", details: structuredCreate.errors });
         }
@@ -4165,7 +4176,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // Structured rarity/variant picker → new nullable columns. Opt-in by key
         // presence, so a partial PUT (e.g. grade-only) never erases them; the
         // legacy variant/rarity remain the untouched historical source of truth.
-        const structuredUpdate = applyStructuredVariantFromBody(req.body, data);
+        let structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
+        if (!structuredUpdate.ok) {
+          // Stale cross-machine cache guard — force-refresh once and retry.
+          structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true));
+        }
         if (!structuredUpdate.ok) {
           return res.status(400).json({ error: "Invalid rarity selection.", details: structuredUpdate.errors });
         }
@@ -4310,108 +4325,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (error: any) {
       console.error("Label generation error:", error.message);
       res.status(500).json({ error: "Failed to generate label" });
-    }
-  });
-
-  // ── LIVE LABEL PREVIEW (Review-stage certificate preview) ─────────────────
-  // Renders the FRONT label from the grader's *draft* field values WITHOUT
-  // persisting anything, using the SAME generateLabelPNG() renderer that
-  // produces the printed label — so the preview always matches the printed
-  // output 1:1. There is deliberately NO second renderer.
-  //
-  // Fidelity model: for an existing certificate we start from the SAVED cert
-  // record (which carries the real subgrades / defects / measurement columns
-  // the black-label gate needs) and overlay ONLY the label-relevant metadata
-  // fields the workstation can edit — applying the EXACT same field→column
-  // mapping the create/update save routes use (legacy variant/rarity from the
-  // body + applyStructuredVariantFromBody). The result is byte-for-byte what
-  // generateLabelPNG would produce for the cert once the draft is saved.
-  //
-  // This route never writes to the DB and never touches grading logic — it
-  // only reads a cert and renders. Admin-only.
-  app.post("/api/admin/label-preview", requireAdmin, async (req, res) => {
-    try {
-      const body = (req.body || {}) as Record<string, any>;
-
-      // Base record: the saved cert supplies grade/subgrade/defect/measurement
-      // columns the pristine gate reads. Absent (create flow, no cert row yet),
-      // fall back to a null-measurement synthetic so the gate resolves to a
-      // Standard (white) label — matching the create route's own behaviour.
-      let base: Partial<CertificateRecord> & Record<string, any>;
-      const rawId = body.certificateId ?? body.id;
-      const numericId = rawId != null && rawId !== "" ? parseInt(String(rawId), 10) : NaN;
-      let hasBase = false;
-      if (Number.isFinite(numericId)) {
-        const saved = await storage.getCertificate(numericId);
-        if (saved) {
-          base = { ...saved };
-          hasBase = true;
-        } else {
-          base = {};
-        }
-      } else {
-        base = {};
-      }
-
-      // Coerce every text field to a string so a malformed (non-string) body
-      // value can never throw inside the renderer's .toUpperCase()/.trim()
-      // (which would surface as a generic 500). null/undefined pass through.
-      const str = (v: unknown): string | null | undefined =>
-        v === null || v === undefined ? (v as null | undefined) : String(v);
-
-      // Grade + gate fidelity: the overall grade is READ-ONLY in the workstation
-      // (owner directive) and is derived from the saved subgrades — which the
-      // black-label/Pristine gate also reads off the saved cert. So when a saved
-      // cert exists, grade columns come SOLELY from the base row (never the
-      // body), keeping the gate and the displayed grade one internally-consistent
-      // grading state. Only the create flow (no saved row, null subgrades →
-      // Standard) falls back to the body's grade.
-      const gradeType = hasBase ? base.gradeType || "numeric" : body.gradeType || "numeric";
-      const isNonNum = isNonNumericGrade(gradeType);
-
-      // Overlay — mirrors the label-relevant fields of the PUT/POST save routes
-      // (server/routes.ts create + update `data` blocks). Keep in sync with them.
-      const overlay: Record<string, any> = {
-        cardGame: str(body.cardGame ?? base.cardGame),
-        setName: str(body.setName ?? base.setName),
-        cardName: str(body.cardName ?? base.cardName),
-        cardNumber: str(body.cardNumber ?? base.cardNumber),
-        rarity: str(body.rarity) || null,
-        rarityOther: body.rarity === "OTHER" ? str(body.rarityOther) || null : null,
-        variant: str(body.variant) || null,
-        variantOther: body.variant === "OTHER" ? str(body.variantOther) || null : null,
-        collectionCode: str(body.collectionCode) || null,
-        collectionOther: body.collectionCode === "OTHER" ? str(body.collectionOther)?.trim() || null : null,
-        language: str(body.language) || str(base.language) || "English",
-        year: str(body.year ?? base.year),
-        gradeType,
-      };
-      // Grade only overridden in the create flow; edit flow keeps base's grade
-      // (spread from `base` below) so the gate stays internally consistent.
-      if (!hasBase) overlay.gradeOverall = isNonNum ? null : str(body.gradeOverall) ?? null;
-
-      // Structured rarity/variant columns (validated + catalogue-derived,
-      // never trusting the client) — same helper the save routes use. The label
-      // renderer reads legacy variant/rarity, but applying this keeps the
-      // preview cert shaped exactly like a saved one. Best-effort: on invalid
-      // structured input we simply skip it rather than failing the preview.
-      applyStructuredVariantFromBody(body, overlay);
-
-      const cert = { ...base, ...overlay } as CertificateRecord;
-
-      // certId is dereferenced by the renderer (String#replace) — never let it
-      // be null. Prefer the caller's human cert number, else the saved value,
-      // else a neutral placeholder for the create flow.
-      const certIdSource = body.certId || (base as any).certId || "MV-0000000000";
-      (cert as any).certId = normalizeCertId(String(certIdSource));
-
-      const png = await generateLabelPNG(cert, "front");
-      res.setHeader("Content-Type", "image/png");
-      res.setHeader("Cache-Control", "no-store");
-      return res.send(png);
-    } catch (error: any) {
-      console.error("Label preview error:", error.message);
-      res.status(500).json({ error: "Failed to render label preview" });
     }
   });
 

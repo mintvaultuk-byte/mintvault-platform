@@ -6,11 +6,11 @@ import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPic
 import { ReviewSummary } from "@/components/grading-workflow/ReviewSummary";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
+import { CertificatePreviewPanel } from "@/components/grading-workflow/CertificatePreviewPanel";
 import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
-import { LabelPreview } from "@/components/grading-workflow/LabelPreview";
 import { VariantSummary } from "@/components/grading-workflow/VariantSummary";
 import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
-import { CONSOLIDATED_VARIANT_SCHEME, hasStructuredVariant } from "@shared/variant-line";
+import { CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
@@ -403,25 +403,9 @@ export default function CertificateForm({
   // preview to "Unsaved changes" forever after the first save. Create flow: always
   // "unsaved" because nothing is printed yet. Both sides are trimmed so a stored
   // value and the live form value normalise identically.
-  const labelNorm = (v: unknown): string => (v === null || v === undefined ? "" : String(v).trim());
-  function labelPreviewDirty(): boolean {
-    if (!isEdit) return true;
-    const snap = loadedSnapshotRef.current;
-    if (!snap) return true;
-    // A structured cert not yet saved under the consolidated scheme will change
-    // its printed variant line on the next save — treat as unsaved until then.
-    const structuredNow = hasStructuredVariant({
-      rarityCode: form.rarityCode,
-      finishVariant: form.finishVariant,
-      promoType: form.promoType,
-      subsetName: form.subsetName,
-    });
-    if (structuredNow && !savedConsolidatedRef.current) return true;
-    for (const key of CONFLICT_GUARDED_FIELDS) {
-      if (labelNorm((form as unknown as Record<string, unknown>)[key]) !== labelNorm(snap[key])) return true;
-    }
-    return false;
-  }
+  // (The former labelPreviewDirty() "unsaved changes" helper drove the removed
+  //  second LabelPreview panel; the canonical CertificatePreviewPanel renders
+  //  live from the current field values, so no dirty check is needed here.)
 
   /** Snapshot = SERVER truth for the guarded fields. Always refreshed from a
       cert row (prop refetch or a save's response) — never from what we posted,
@@ -1689,6 +1673,40 @@ export default function CertificateForm({
             certificateId={certificate?.id ?? null}
             frontFile={frontImage}
             backFile={backImage}
+            // Live front-certificate preview on Rarity + Review only (reuses the
+            // real print pipeline, read-only). Card stage passes no `below`, so
+            // its layout is byte-identical to before.
+            below={
+              wfStage === 1 || wfStage === 3 ? (
+                <CertificatePreviewPanel
+                  fields={{
+                    // Editing an existing cert → the server starts from the SAVED
+                    // grade/subgrade columns so the black-label (Pristine) preview
+                    // matches print; absent (create flow) it renders from fields.
+                    certificateId: certificate?.id ?? null,
+                    cardName: form.cardName,
+                    setName: form.setName,
+                    year: form.year,
+                    cardNumber: form.cardNumber,
+                    gradeType: form.gradeType,
+                    gradeOverall: form.gradeOverall,
+                    variant: form.variant,
+                    variantOther: form.variantOther,
+                    rarity: form.rarity,
+                    rarityOther: form.rarityOther,
+                    // Structured-variant codes → server derives the ONE consolidated
+                    // variant line (parity with print), same as the save routes.
+                    rarityCode: form.rarityCode,
+                    finishVariant: form.finishVariant,
+                    promoType: form.promoType,
+                    subsetName: form.subsetName,
+                    era: form.era,
+                    labelType: form.labelType,
+                    language: form.language,
+                  }}
+                />
+              ) : undefined
+            }
           />
         ) : null
       }
@@ -3480,35 +3498,11 @@ export default function CertificateForm({
                   </span>
                 </div>
               )}
-              {/* Live FRONT-label certificate preview (item 1) — rendered by the
-            SAME server renderer that prints the physical label, from the current
-            DRAFT field values, so it always matches the printed output 1:1 and
-            updates live without saving. Click to enlarge. */}
-              <LabelPreview
-                active={wfStage === 3}
-                dirty={labelPreviewDirty()}
-                values={{
-                  certificateId: certificate?.id ?? null,
-                  certId: (certificate as any)?.certId ?? null,
-                  cardGame: form.cardGame,
-                  cardName: form.cardName,
-                  setName: form.setName,
-                  cardNumber: form.cardNumber,
-                  year: form.year,
-                  language: form.language,
-                  variant: form.variant,
-                  variantOther: form.variantOther,
-                  rarity: form.rarity,
-                  rarityOther: form.rarityOther,
-                  rarityCode: form.rarityCode,
-                  finishVariant: form.finishVariant,
-                  promoType: form.promoType,
-                  subsetName: form.subsetName,
-                  era: form.era,
-                  gradeType: form.gradeType,
-                  gradeOverall: form.gradeOverall,
-                }}
-              />
+              {/* The Review-stage live FRONT-label preview is now the single
+                  canonical CertificatePreviewPanel (mounted once, above, for the
+                  Rarity + Review stages via WorkstationPreviewAside `below`). The
+                  former second LabelPreview here was a duplicate of the same
+                  renderer and endpoint and has been consolidated away. */}
               {/* Public Notes with preset helper — moved from Card Details, unchanged. */}
               {notesOpen ? (
                 <div className="border border-[var(--admin-gold)]/20 rounded-lg p-3 space-y-3 bg-[var(--admin-gold)]/[0.02]">

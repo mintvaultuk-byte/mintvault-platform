@@ -148,11 +148,17 @@ describe("preview ↔ printed-label parity (items 8, 9, 10)", () => {
   });
 
   it("the live preview endpoint renders through the SAME generateLabelPNG as printing (no second renderer)", () => {
+    // After the four-build integration there is exactly ONE canonical preview
+    // endpoint — the modular server/routes/admin/label-preview.ts — which calls
+    // the exact same renderer the print/label routes use (generateLabelPNG). The
+    // former duplicate inline app.post("/api/admin/label-preview") in routes.ts
+    // was consolidated away.
+    const preview = read("server/routes/admin/label-preview.ts");
+    expect(preview).toContain('app.post("/api/admin/certificates/label/preview"');
+    expect(preview).toContain('generateLabelPNG(cert, "front")');
+    // The duplicate inline route must be gone (one canonical endpoint only).
     const routes = read("server/routes.ts");
-    // The label-preview route is registered and calls the exact same renderer
-    // used by the print/label routes (generateLabelPNG) — no second renderer.
-    expect(routes).toContain('app.post("/api/admin/label-preview"');
-    expect(routes).toContain('generateLabelPNG(cert, "front")');
+    expect(routes).not.toContain('app.post("/api/admin/label-preview"');
     // And the renderer composes the variant line through the single shared helper.
     const labels = read("server/labels.ts");
     expect(labels).toContain("consolidatedVariantForLabel(cert)");

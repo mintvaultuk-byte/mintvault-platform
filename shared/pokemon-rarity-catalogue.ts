@@ -203,6 +203,30 @@ export const POKEMON_PROMOS: readonly PokemonPromo[] = [
   p("other_promo", "Other", "promo", "Another promo/subset not listed.", ["other promo", "other subset"]),
 ];
 
+// ── Catalogue snapshot (DB-backed data uses the SAME helpers as the seed) ────────
+/**
+ * A snapshot of the four classification lists. The hard-coded arrays above are the
+ * SEED snapshot ({@link SEED_CATALOGUE}); the DB-backed Catalogue Manager produces a
+ * live snapshot of the same shape. Every helper below takes an optional snapshot and
+ * DEFAULTS to the seed — so existing callers are unchanged, and DB-driven callers pass
+ * the live snapshot. This keeps ONE implementation over both data sources.
+ */
+export interface CatalogueSnapshot {
+  languages: readonly PokemonLanguage[];
+  rarities: readonly PokemonRarity[];
+  finishes: readonly PokemonFinish[];
+  promos: readonly PokemonPromo[];
+  eras: readonly { value: PokemonEra | string; label: string }[];
+}
+
+export const SEED_CATALOGUE: CatalogueSnapshot = {
+  languages: POKEMON_LANGUAGES,
+  rarities: POKEMON_RARITIES,
+  finishes: POKEMON_FINISHES,
+  promos: POKEMON_PROMOS,
+  eras: POKEMON_ERAS,
+};
+
 // ── Helpers ──────────────────────────────────────────────────────────────────────
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
@@ -210,27 +234,36 @@ function scopeIncludesRegion(scope: RegionScope, region: PokemonLanguage["region
   return scope === "all" || scope.includes(region);
 }
 
-export function languageByValue(value: string | null | undefined): PokemonLanguage | undefined {
-  return POKEMON_LANGUAGES.find((l) => l.value === value);
+export function languageByValue(
+  value: string | null | undefined,
+  cat: CatalogueSnapshot = SEED_CATALOGUE,
+): PokemonLanguage | undefined {
+  return cat.languages.find((l) => l.value === value);
 }
 
 /** Resolve a language from its catalogue code ("en"), display label ("English"),
  *  or any alias — so the picker (codes) and the existing `language` column
  *  (display names) both map to the same entry. */
-export function languageByValueOrLabel(value: string | null | undefined): PokemonLanguage | undefined {
+export function languageByValueOrLabel(
+  value: string | null | undefined,
+  cat: CatalogueSnapshot = SEED_CATALOGUE,
+): PokemonLanguage | undefined {
   if (value == null) return undefined;
   const q = norm(String(value));
   if (!q) return undefined;
-  return POKEMON_LANGUAGES.find(
+  return cat.languages.find(
     (l) => l.value === value || norm(l.label) === q || l.aliases.some((a) => norm(a) === q),
   );
 }
 
 /** Rarities available for a given language + era + (optional) explicit region override. */
-export function filterRarities(opts: { language?: string | null; era?: PokemonEra | null }): PokemonRarity[] {
-  const lang = languageByValue(opts.language ?? "en");
+export function filterRarities(
+  opts: { language?: string | null; era?: PokemonEra | null },
+  cat: CatalogueSnapshot = SEED_CATALOGUE,
+): PokemonRarity[] {
+  const lang = languageByValue(opts.language ?? "en", cat);
   const region = lang?.region ?? "western";
-  return POKEMON_RARITIES.filter((rr) => {
+  return cat.rarities.filter((rr) => {
     if (!scopeIncludesRegion(rr.regions, region)) return false;
     if (opts.era && rr.eras !== "all" && !rr.eras.includes(opts.era)) return false;
     return true;
@@ -249,7 +282,10 @@ export interface CatalogueSearchResult {
 }
 
 /** Fuzzy alias/label/code search across ALL four classifications. */
-export function searchCatalogue(query: string): CatalogueSearchResult {
+export function searchCatalogue(
+  query: string,
+  cat: CatalogueSnapshot = SEED_CATALOGUE,
+): CatalogueSearchResult {
   const q = norm(query);
   if (!q) return { rarities: [], finishes: [], promos: [] };
   const hit = (label: string, aliases: string[], codes: string[] = []) =>
@@ -257,9 +293,9 @@ export function searchCatalogue(query: string): CatalogueSearchResult {
     codes.some((c) => norm(c) === q || norm(c).includes(q)) ||
     aliases.some((a) => norm(a).includes(q) || q.includes(norm(a)));
   return {
-    rarities: POKEMON_RARITIES.filter((x) => hit(x.label, x.aliases, x.codes)),
-    finishes: POKEMON_FINISHES.filter((x) => hit(x.label, x.aliases)),
-    promos: POKEMON_PROMOS.filter((x) => hit(x.label, x.aliases)),
+    rarities: cat.rarities.filter((x) => hit(x.label, x.aliases, x.codes)),
+    finishes: cat.finishes.filter((x) => hit(x.label, x.aliases)),
+    promos: cat.promos.filter((x) => hit(x.label, x.aliases)),
   };
 }
 
@@ -295,14 +331,23 @@ export function describeSymbol(symbol: RaritySymbol): string {
   }
 }
 
-export function rarityByValue(value: string | null | undefined): PokemonRarity | undefined {
-  return POKEMON_RARITIES.find((x) => x.value === value);
+export function rarityByValue(
+  value: string | null | undefined,
+  cat: CatalogueSnapshot = SEED_CATALOGUE,
+): PokemonRarity | undefined {
+  return cat.rarities.find((x) => x.value === value);
 }
-export function finishByValue(value: string | null | undefined): PokemonFinish | undefined {
-  return POKEMON_FINISHES.find((x) => x.value === value);
+export function finishByValue(
+  value: string | null | undefined,
+  cat: CatalogueSnapshot = SEED_CATALOGUE,
+): PokemonFinish | undefined {
+  return cat.finishes.find((x) => x.value === value);
 }
-export function promoByValue(value: string | null | undefined): PokemonPromo | undefined {
-  return POKEMON_PROMOS.find((x) => x.value === value);
+export function promoByValue(
+  value: string | null | undefined,
+  cat: CatalogueSnapshot = SEED_CATALOGUE,
+): PokemonPromo | undefined {
+  return cat.promos.find((x) => x.value === value);
 }
 
 // ── Legacy migration mapping (audit — never auto-applied) ─────────────────────────
@@ -390,16 +435,19 @@ export function toggleFavourite(list: readonly string[], value: string): string[
 }
 
 /** Build the SEPARATE-field selection (never a single combined display string). */
-export function buildStructuredVariant(sel: {
-  language?: string | null;
-  era?: PokemonEra | null;
-  rarity?: string | null;
-  finish?: string | null;
-  promoOrSubset?: string | null;
-}): StructuredCardVariant {
-  const lang = languageByValue(sel.language ?? "en") ?? POKEMON_LANGUAGES[0];
-  const rarity = rarityByValue(sel.rarity);
-  const promoSel = promoByValue(sel.promoOrSubset);
+export function buildStructuredVariant(
+  sel: {
+    language?: string | null;
+    era?: PokemonEra | null;
+    rarity?: string | null;
+    finish?: string | null;
+    promoOrSubset?: string | null;
+  },
+  cat: CatalogueSnapshot = SEED_CATALOGUE,
+): StructuredCardVariant {
+  const lang = languageByValue(sel.language ?? "en", cat) ?? cat.languages[0] ?? POKEMON_LANGUAGES[0];
+  const rarity = rarityByValue(sel.rarity, cat);
+  const promoSel = promoByValue(sel.promoOrSubset, cat);
   return {
     language: lang.value,
     region: lang.region,
@@ -407,7 +455,7 @@ export function buildStructuredVariant(sel: {
     rarity: rarity?.value ?? null,
     printedSymbol: rarity?.symbol.glyph ?? "",
     symbolColour: rarity?.symbol.colour ?? "none",
-    finish: finishByValue(sel.finish)?.value ?? null,
+    finish: finishByValue(sel.finish, cat)?.value ?? null,
     promo: promoSel?.kind === "promo" ? promoSel.value : null,
     subset: promoSel?.kind === "subset" ? promoSel.value : null,
   };
