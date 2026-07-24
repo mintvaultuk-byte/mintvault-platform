@@ -42,13 +42,6 @@ type Props = GradingPanelProps & {
   identityEditor?: ReactNode;
 };
 
-// Which canonical GradingPanel section each workflow stage scrolls to.
-const STAGE_SECTION: Record<number, string> = {
-  0: "identity-fields", // Card — identity
-  1: "identity-fields", // Rarity & variant live in the identity block
-  2: "grading-controls", // Grade
-  3: "footer-actions", // Review & submit
-};
 
 export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps }: Props) {
   const apiBase = panelProps.apiBase ?? "/api/admin";
@@ -57,11 +50,13 @@ export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps 
   // captured upstream. Start on Grade, keep every stage reachable.
   const [stage, setStage] = useState(2);
 
+  // The stage bar GATES content (hidden-not-unmounted via the .grading-stage-gate
+  // CSS on the body wrapper below): selecting a stage shows only that stage's
+  // GradingPanel sections. Scroll back to the top so the new stage starts at the
+  // top of the scroll body.
   const goToStage = useCallback((index: number) => {
     setStage(index);
-    const section = STAGE_SECTION[index];
-    const el = rootRef.current?.querySelector<HTMLElement>(`[data-canonical-section="${section}"]`);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    rootRef.current?.querySelector<HTMLElement>('[data-testid="grading-workstation-slot"]')?.scrollTo({ top: 0 });
   }, []);
 
   // Grade is stage 2; showing the preview aside beside GradingPanel would
@@ -95,8 +90,15 @@ export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps 
             sessionCompleted={0}
           />
         </div>
-        {/* Canonical scroll body — same class as the /admin <form> body. */}
-        <div className={WORKSTATION_BODY_SCROLL_CLASS} data-testid="grading-workstation-slot">
+        {/* Canonical scroll body — same class as the /admin <form> body. The
+            grading-stage-gate + data-ws-stage drive stage-content gating (CSS in
+            admin-tokens.css) so the stage bar controls which GradingPanel
+            sections are shown — hidden-not-unmounted, no grading-logic change. */}
+        <div
+          className={`${WORKSTATION_BODY_SCROLL_CLASS} grading-stage-gate`}
+          data-testid="grading-workstation-slot"
+          data-ws-stage={stage}
+        >
           {/* Admin Review identity editor — inside the workstation body (right
               column), above the grading panel; never a detached section. */}
           {identityEditor && <div data-testid="workstation-identity-editor">{identityEditor}</div>}

@@ -216,3 +216,91 @@ describe("Hotfix: bottom black bar + Admin Review identity-editor placement", ()
     expect(WORKSTATION).toMatch(/mode === "admin-review" && !!identityEditor/);
   });
 });
+
+describe("Hotfix: stage bar gates content (Card / Rarity / Grade / Review)", () => {
+  const ADMIN_TOKENS = read("client/src/styles/admin-tokens.css");
+
+  it("SG1. the role workstation body applies the stage-gate wrapper + current stage", () => {
+    expect(WORKSTATION).toContain("grading-stage-gate");
+    expect(WORKSTATION).toContain("data-ws-stage={stage}");
+    // The stage bar drives `stage`, and clicking a stage calls goToStage(setStage).
+    expect(WORKSTATION).toMatch(/onStageClick=\{\(i\) => goToStage\(i\)\}/);
+    expect(WORKSTATION).toMatch(/const goToStage = useCallback\(\(index: number\) => \{\s*setStage\(index\)/);
+  });
+
+  it("SG2. the stage-gate CSS exists for all four stages (hidden-not-unmounted)", () => {
+    for (const n of [0, 1, 2, 3]) {
+      expect(ADMIN_TOKENS, `stage ${n} gate rule`).toContain(`.grading-stage-gate[data-ws-stage="${n}"]`);
+    }
+    // display:none (hidden), never unmounts → GradingPanel state/scoring preserved.
+    expect(ADMIN_TOKENS).toMatch(/grading-stage-gate[\s\S]*display: none/);
+  });
+
+  it("SG3. NESTING-SAFE: grade-result + footer-actions (submit) are SIBLINGS inside grading-controls, so the gate never cascade-hides the submit button", () => {
+    // Slice each stage's rule block (each ends at its `display: none`).
+    const stage = (n: number) => {
+      const start = ADMIN_TOKENS.indexOf(`.grading-stage-gate[data-ws-stage="${n}"]`);
+      return ADMIN_TOKENS.slice(start, ADMIN_TOKENS.indexOf("display: none", start));
+    };
+    const sec = (name: string) => `[data-canonical-section="${name}"]`;
+    // Stage 0/1 (Card/Rarity): hide the whole grade column via grading-controls
+    // (nothing inside it is needed on these stages, so the cascade is intended).
+    expect(stage(0)).toContain(sec("grading-controls"));
+    // Stage 2 (Grade): hide identity + submit ONLY. It must NEVER hide
+    // grading-controls (that would cascade-hide grade-result + the submit button).
+    expect(stage(2)).toContain(sec("identity-fields"));
+    expect(stage(2)).toContain(sec("footer-actions"));
+    expect(stage(2)).not.toContain(sec("grading-controls"));
+    expect(stage(2)).not.toContain(sec("grade-result"));
+    // Stage 3 (Review): CRITICAL — never hide grading-controls, grade-result, or
+    // footer-actions, so the Approve/Submit button stays REACHABLE on Review.
+    expect(stage(3)).not.toContain(sec("grading-controls"));
+    expect(stage(3)).not.toContain(sec("grade-result"));
+    expect(stage(3)).not.toContain(sec("footer-actions"));
+    // Review hides the detailed sub-grade control siblings.
+    expect(stage(3)).toContain(sec("mvgs-score"));
+    expect(stage(3)).toContain(sec("notes"));
+  });
+
+  it("SG5. no grading section is hidden on ALL four stages (submit + every section reachable somewhere)", () => {
+    const sections = [
+      "workflow-banners", "identification", "identity-fields", "workstation-header", "preflight",
+      "ai-tools", "card-images", "defect-marking", "grading-controls", "mvgs-score", "grade-result",
+      "d1-d2-d3", "centering", "surface", "authentication", "notes", "footer-actions",
+    ];
+    // grade-result + footer-actions are children of grading-controls; a section is
+    // "effectively hidden" on a stage if it OR grading-controls is in that stage's
+    // hide-rule. Model that and assert every section is shown on ≥1 stage.
+    const childrenOfGradingControls = new Set([
+      "mvgs-score", "grade-result", "d1-d2-d3", "centering", "surface", "authentication", "notes", "footer-actions",
+    ]);
+    const stageRule = (n: number) => {
+      const start = ADMIN_TOKENS.indexOf(`.grading-stage-gate[data-ws-stage="${n}"]`);
+      // stage 0 and 1 share one comma-joined block; grab through its display:none.
+      return ADMIN_TOKENS.slice(start, ADMIN_TOKENS.indexOf("display: none", start));
+    };
+    const hiddenOn = (section: string, n: number) => {
+      const rule = n <= 1 ? stageRule(0) : stageRule(n); // 0/1 share the block
+      const nBlock = n === 1 ? rule.slice(rule.indexOf('[data-ws-stage="1"]')) : rule;
+      const direct = nBlock.includes(`[data-canonical-section="${section}"]`);
+      const viaParent = childrenOfGradingControls.has(section) && nBlock.includes('[data-canonical-section="grading-controls"]');
+      return direct || viaParent;
+    };
+    for (const s of sections) {
+      const shownSomewhere = [0, 1, 2, 3].some((n) => !hiddenOn(s, n));
+      expect(shownSomewhere, `section "${s}" is hidden on every stage (unreachable)`).toBe(true);
+    }
+    // Explicit: the Approve/Submit button is reachable on Review.
+    expect(hiddenOn("footer-actions", 3), "submit hidden on Review").toBe(false);
+  });
+
+  it("SG4. gating is canonical (adapter + CSS only) — /admin gates via its own wfStage, NOT the role gate", () => {
+    // The role gate class never appears in CertForm; /admin keeps CertForm wfStage.
+    expect(CERT_FORM).not.toContain("grading-stage-gate");
+    expect(CERT_FORM).toMatch(/const stageClass = \(i: number\) => \(wfStage === i \? "" : "hidden"\)/);
+    // GradingPanel itself is untouched (no stage prop / no gating logic added).
+    const PANEL = read("client/src/components/grading/grading-panel.tsx");
+    expect(PANEL).not.toContain("grading-stage-gate");
+    expect(PANEL).not.toContain("data-ws-stage");
+  });
+});
