@@ -22,6 +22,27 @@ import { applyStructuredVariantFromBody } from "../../lib/structured-variant";
 import { getCatalogueSnapshot } from "../../lib/catalogue-provider";
 import { storage } from "../../storage";
 
+// Every certificate column the Pristine / black-label gate reads. When the preview
+// is editing a SAVED cert these are restored from the saved row so a request body
+// can never flip the black↔white decision away from what the printed slab shows.
+// Keep in sync with buildPreviewFields' GRADE_PASSTHROUGH + the grade + defect fields.
+const PRISTINE_GATE_COLUMNS = [
+  "gradeType",
+  "gradeOverall",
+  "gradeCentering",
+  "gradeCorners",
+  "gradeEdges",
+  "gradeSurface",
+  "centeringFrontLr",
+  "centeringFrontTb",
+  "centeringBackLr",
+  "centeringBackTb",
+  "darkBorderFront",
+  "darkBorderBack",
+  "eyeAppealModifier",
+  "defects",
+] as const;
+
 const previewLimit = rateLimit({
   windowMs: 60 * 1000,
   max: 120,
@@ -56,12 +77,15 @@ export function registerLabelPreviewRoutes(app: Express): void {
         const saved = await storage.getCertificate(numericId);
         if (saved) {
           cert = { ...(saved as CertificateRecord), ...preview } as CertificateRecord;
-          // Grade is READ-ONLY in the workstation and the gate must stay internally
-          // consistent, so grade columns come SOLELY from the saved row (never the
-          // body). Subgrades / defects / measurements are already carried by `saved`
-          // and are NOT overwritten by buildPreviewFields.
-          (cert as Record<string, unknown>).gradeType = (saved as Record<string, unknown>).gradeType;
-          (cert as Record<string, unknown>).gradeOverall = (saved as Record<string, unknown>).gradeOverall;
+          // Grade is READ-ONLY in the workstation and the Pristine/black-label gate
+          // must stay internally consistent with the printed slab, so EVERY column
+          // the gate reads comes SOLELY from the saved row — never the request body.
+          // buildPreviewFields will copy grade/subgrade/defect fields through when a
+          // body supplies them, which would let a preview request flip the black↔white
+          // decision away from print; restoring them from `saved` here forecloses that.
+          const s = saved as Record<string, unknown>;
+          const c = cert as Record<string, unknown>;
+          for (const key of PRISTINE_GATE_COLUMNS) c[key] = s[key];
         }
       }
 
