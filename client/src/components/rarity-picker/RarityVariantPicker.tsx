@@ -18,7 +18,7 @@
  * Standalone + additive: it emits a StructuredCardVariant via onChange and does
  * NOT modify the protected grading card tool or the certificate renderer.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   POKEMON_LANGUAGES,
   POKEMON_ERAS,
@@ -312,9 +312,24 @@ export function RarityVariantPicker({
     () => buildStructuredVariant({ language, era: era || null, rarity, finish, promoOrSubset }),
     [language, era, rarity, finish, promoOrSubset]
   );
+  // Emit ONLY on a genuine change to the structured variant — never on mount, and
+  // never merely because the parent re-rendered (onChange is often an unstable
+  // inline function). Firing on mount/re-render made a consumer that seeds this
+  // picker asynchronously (the role grading workstation) mistake the mount echo
+  // for a user edit and wipe a stored rarity. `structured` only changes when the
+  // user actually picks/clears rarity/finish/promo/era/language.
+  const onChangeRef = useRef(onChange);
   useEffect(() => {
-    onChange?.(structured);
-  }, [structured, onChange]);
+    onChangeRef.current = onChange;
+  });
+  const emitMountedRef = useRef(false);
+  useEffect(() => {
+    if (!emitMountedRef.current) {
+      emitMountedRef.current = true;
+      return; // skip the mount echo — the value already reflects the seed
+    }
+    onChangeRef.current?.(structured);
+  }, [structured]);
 
   const validation = useMemo(
     () =>
@@ -362,6 +377,14 @@ export function RarityVariantPicker({
     setSelectedCustomId(entry.id);
     setRecent(addRecent(recent, CUSTOM_RARITY_VALUE));
     onCustomRarityNote?.(entry.composedNote);
+  };
+
+  // Explicit "No rarity" — deliberately deselects the rarity (rarity optional;
+  // zero selection is valid). Finish + promo are independent and left untouched.
+  const clearRarity = () => {
+    setRarity(null);
+    setSelectedCustomId(null);
+    onCustomRarityNote?.(null);
   };
 
   function resetAddForm() {
@@ -576,6 +599,23 @@ export function RarityVariantPicker({
             className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
           />
         </label>
+      </div>
+
+      {/* Rarity is optional — an explicit clear so an operator can deliberately
+          set "no rarity" (persisted), independent of finish/promo. Clicking the
+          selected rarity chip also toggles it off. */}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Rarity (optional)</span>
+        <button
+          type="button"
+          onClick={clearRarity}
+          disabled={!rarity}
+          data-testid="rarity-clear"
+          title="Clear the rarity selection (finish and promo are kept)"
+          className="rounded-md border border-dashed border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 transition hover:border-amber-400/60 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          No rarity — clear
+        </button>
       </div>
 
       {search && (

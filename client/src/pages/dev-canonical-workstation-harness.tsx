@@ -7,6 +7,25 @@ import {
 } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
+import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
+
+/** DEV emission probe — mounts the picker seeded with a rarity and counts
+ *  onChange calls on window.__rarityEmits so a browser check can prove the picker
+ *  does NOT emit on mount (no spurious "touched"/wipe) but DOES on interaction. */
+function RarityEmissionProbe() {
+  (window as unknown as { __rarityEmits: number }).__rarityEmits = 0;
+  return (
+    <div data-testid="rarity-emission-probe" style={{ maxWidth: 520 }}>
+      <RarityVariantPicker
+        legacyVariant={null}
+        value={{ language: "en", era: null, rarity: "rare_holo", finish: null, promo: null, subset: null }}
+        onChange={() => {
+          (window as unknown as { __rarityEmits: number }).__rarityEmits += 1;
+        }}
+      />
+    </div>
+  );
+}
 
 /**
  * DEV-ONLY preview harness for the canonical grading workstation shell.
@@ -103,6 +122,12 @@ export default function DevCanonicalWorkstationHarness() {
           <h1 className="text-[var(--admin-gold)] text-sm font-extrabold">Canonical Grading Workstation — dev harness</h1>
           <button onClick={() => setWidth("desktop")} className={`text-xs px-2 py-1 rounded border ${width === "desktop" ? gold : "border-[var(--admin-line)]"}`}>Desktop 1440</button>
           <button onClick={() => setWidth("macbook13")} className={`text-xs px-2 py-1 rounded border ${width === "macbook13" ? gold : "border-[var(--admin-line)]"}`}>13" 1280</button>
+        </div>
+        <div className="mb-4 rounded border border-[var(--admin-line)] p-2">
+          <div className="text-[11px] uppercase tracking-wider text-[var(--admin-ink-faint)] mb-1">
+            Rarity picker emission probe (seeded RARE_HOLO — window.__rarityEmits)
+          </div>
+          <RarityEmissionProbe />
         </div>
         <div className="space-y-6">
           {MODES.map((mode) => (
