@@ -42,6 +42,12 @@ describe("stage separation (spec 1-4)", () => {
     expect(STAGE_RARITY).toContain('data-testid="designations-details"');
     expect(STAGE_RARITY).not.toContain("Grader Notes");
   });
+  it("Rarity stage shows the permanent variant/classification summary below the picker (item 2)", () => {
+    expect(STAGE_RARITY).toContain("<VariantSummary");
+  });
+  it("Grade→Review advance button reads 'Continue to Review' (item 6)", () => {
+    expect(FORM).toContain("Continue to Review →");
+  });
   it("Grade stage renders the workstationSlot inside a plain visibility wrapper (no transform/scale)", () => {
     // Assert on the wrapper region only (up to the stage-3 nav), with comments
     // stripped — they deliberately describe what is NOT done.
@@ -49,10 +55,18 @@ describe("stage separation (spec 1-4)", () => {
     expect(wrapper).toContain("{workstationSlot}");
     expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
   });
-  it("Review stage holds the moved grader notes (collapsed) + the save action", () => {
-    expect(STAGE_REVIEW).toContain("Grader Notes");
+  it("Review stage holds the public notes (collapsed) + the save action", () => {
+    expect(STAGE_REVIEW).toContain("Public Notes");
     expect(STAGE_REVIEW).toContain('data-testid="button-add-grader-notes"');
     expect(STAGE_REVIEW).toContain("button-save-cert");
+  });
+  it("Review stage shows the live certificate preview + confidence (item 1/9)", () => {
+    expect(STAGE_REVIEW).toContain("<LabelPreview");
+    expect(STAGE_REVIEW).toContain("dirty={");
+  });
+  it("Review stage exposes an explicit large Save button alongside auto-save (item 7)", () => {
+    expect(STAGE_REVIEW).toContain('data-testid="button-save-now"');
+    expect(STAGE_REVIEW).toContain("Save Now");
   });
 });
 

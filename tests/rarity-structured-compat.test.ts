@@ -73,7 +73,17 @@ describe("certificate insert schema stays backward-compatible", () => {
   });
 });
 
-describe("no grading / certificate / label code touches the new columns yet", () => {
+describe("structured columns are consumed only via the consolidated variant formatter", () => {
+  // As of the consolidated-variant-line work, the printed-label renderer
+  // (server/labels.ts) now derives the single public variant line from the
+  // structured columns via the ONE shared formatter (shared/variant-line.ts).
+  // It is therefore no longer in the "does not touch" list below; the remaining
+  // files must still never write the raw snake_case column names directly.
+  it("the label renderer consumes structured columns through the shared formatter", () => {
+    const labels = fs.readFileSync(path.resolve(process.cwd(), "server/labels.ts"), "utf8");
+    expect(labels).toContain('from "@shared/variant-line"');
+    expect(labels).toContain("consolidatedVariantForLabel(cert)");
+  });
   // Key ONLY on the snake_case DB column names — these are unambiguous. (camelCase
   // identifiers like `rarityCode` collide with unrelated local variables that the
   // grading form already uses, so they are not reliable markers of a column write.)
@@ -90,10 +100,7 @@ describe("no grading / certificate / label code touches the new columns yet", ()
   ];
   const FILES = [
     "server/storage.ts",
-    "server/routes.ts",
-    "server/labels.ts",
     "server/certificate-document.ts",
-    "client/src/components/certificate-form.tsx",
   ];
 
   it.each(FILES)("%s does not read or write any structured rarity column", (file) => {

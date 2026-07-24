@@ -11,6 +11,7 @@
  */
 import { RaritySymbol } from "@/components/rarity-picker/RaritySymbol";
 import { rarityByValue, finishByValue, promoByValue, POKEMON_ERAS, languageByValueOrLabel } from "@shared/pokemon-rarity-catalogue";
+import { formatVariantLine } from "@shared/variant-line";
 import { getDesignationLabel } from "@/lib/designationOptions";
 import { formatCollectorNumber } from "@shared/collector-number-format";
 
@@ -29,6 +30,11 @@ export interface ReviewSummaryValues {
   promoType: string;
   subsetName: string;
   era: string;
+  /** Legacy columns — folded into the printed line only to fill an empty slot. */
+  variant?: string;
+  rarity?: string;
+  variantOther?: string;
+  rarityOther?: string;
   designations: string[];
   gradeOverall: string;
   labelType: string;
@@ -88,6 +94,17 @@ export function ReviewSummary({
   const era = POKEMON_ERAS.find((e) => e.value === v.era);
   const lang = languageByValueOrLabel(v.language);
   const isBlackTen = v.gradeOverall === "10" && v.labelType === "black";
+  // Exact single line the front label prints — via the ONE shared formatter.
+  const printedVariantLine = formatVariantLine({
+    rarityCode: v.rarityCode,
+    finishVariant: v.finishVariant,
+    promoType: v.promoType,
+    subsetName: v.subsetName,
+    variant: v.variant,
+    rarity: v.rarity,
+    variantOther: v.variantOther,
+    rarityOther: v.rarityOther,
+  });
 
   return (
     <div className="space-y-2" data-testid="review-summary">
@@ -110,6 +127,13 @@ export function ReviewSummary({
 
         <Card title="Classification" edit={<EditLink onClick={onEditRarity} testId="review-edit-rarity" />}>
           <div data-testid="review-classification">
+            {/* The exact single line the front label prints (matches the live preview). */}
+            <div className="mb-1 flex items-baseline justify-between gap-2 border-b border-[var(--admin-gold)]/10 pb-1">
+              <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Prints as</span>
+              <span className="min-w-0 truncate text-right text-[12px] font-bold uppercase text-[var(--admin-gold)]" data-testid="review-variant-printed-line">
+                {printedVariantLine || <span className="font-normal normal-case text-[var(--admin-ink-faint)]">—</span>}
+              </span>
+            </div>
             <div className="flex items-baseline justify-between gap-2 py-0.5">
               <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Rarity</span>
               <span className="flex min-w-0 items-center justify-end gap-1 text-right text-[12px] text-[var(--admin-ink)]">
