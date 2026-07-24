@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useState, useCallback } from "react";
 import { useLocation } from "wouter";
 import { Pencil, Trash2 } from "lucide-react";
-import GradingPanel from "../components/grading/grading-panel";
 import { PokemonSetPicker } from "@/components/certificate-form";
 import { VariantPicker, TcgCardSearch, type TcgCardPick } from "@/components/identity-tools";
 import { AdminHeaderRow } from "@/components/admin/AdminHeaderRow";
+import { GradingWorkstation } from "@/components/grading-workflow/GradingWorkstation";
 
 /**
  * Admin staff hub (evolves admin-graders). One staff account list with per-person
@@ -1279,7 +1279,8 @@ export default function AdminStaffPage() {
                 {/* The SAME grading panel the grader/admin use — adminReview mode is
                     charge-safe (no AI/recrop/delete) and its Approve does an explicit
                     save-then-publish via approve-grader-grade. */}
-                <GradingPanel
+                <GradingWorkstation
+                  mode="admin-review"
                   adminReview
                   apiBase="/api/admin/grade-review"
                   certId={reviewCert.certId}

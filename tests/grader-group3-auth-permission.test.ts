@@ -78,9 +78,9 @@ describe("Group 3 — grader data endpoints stay capability-gated (grade) and fa
     expect(SERVER_GRADER).toMatch(/app\.get\("\/api\/grader\/earnings", requireCapability\("grade"\)/);
   });
   it("requireCapability rejects non-staff with 401 and missing-capability with 403, and fails closed on error", () => {
-    expect(STAFF_MW).toContain('if (!(s && s.isStaff && s.staffId && !s.isAdmin)) return res.status(401)');
+    expect(STAFF_MW).toContain("if (!(s && s.isStaff && s.staffId && !s.isAdmin)) return res.status(401)");
     expect(STAFF_MW).toMatch(/missing '\$\{cap\}' capability/);
-    expect(STAFF_MW).toContain('res.status(403)');
+    expect(STAFF_MW).toContain("res.status(403)");
     expect(STAFF_MW).toContain('res.status(500).json({ error: "Internal server error" }); // fail-closed');
   });
 });
@@ -103,7 +103,9 @@ describe("Group 3 — grader UI exposes no elevated surface (grader ≠ staff-su
 });
 
 describe("Group 3 — the real MVGS panel is reused grader-scoped (protected engine untouched)", () => {
-  it("grader mounts GradingPanel with apiBase='/api/grader' + graderMode (never publishes)", () => {
+  it("grader mounts the canonical grading workstation with apiBase='/api/grader' + graderMode (never publishes)", () => {
+    expect(GRADER).toContain("<GradingWorkstation");
+    expect(GRADER).toContain('mode="grader"');
     expect(GRADER).toContain('apiBase="/api/grader"');
     expect(GRADER).toContain("graderMode");
     // it does NOT mount an admin-review / publishing surface
