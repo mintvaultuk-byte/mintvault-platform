@@ -399,17 +399,72 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     expect(read("server/lib/structured-variant.ts")).toContain("legacy");
   });
 
-  it("preview and print share the ONE canonical rule (same helper, version-gated)", () => {
-    const labels = read("server/labels.ts");
-    expect(labels).toContain("version >= CONSOLIDATED_VARIANT_SCHEME");
-    expect(labels).toContain("formatVariantLine");
-    // the fold is gated inside the shared formatter, so every caller inherits it
-    expect(read("shared/variant-line.ts")).toContain(
-      "const consolidated = Number(input.structuredVariantVersion ?? 0) >= CONSOLIDATED_VARIANT_SCHEME;"
-    );
-    // the client summaries pass the version, so their line matches the label
-    expect(read("client/src/components/grading-workflow/VariantSummary.tsx")).toContain("structuredVariantVersion:");
-    expect(read("client/src/components/grading-workflow/ReviewSummary.tsx")).toContain("structuredVariantVersion:");
+  it("preview and print produce the SAME line for a v2 cert and for a legacy cert (executable)", async () => {
+    // Exercises the REAL preview path (buildPreviewFields + the same structured
+    // derivation the save routes use) against the REAL renderer — not a grep.
+    const { buildPreviewFields } = await import("../shared/label-preview-fields");
+    const { applyStructuredVariantFromBody } = await import("../server/lib/structured-variant");
+
+    // v2 cert: MV207 after the clears
+    const saved: any = {
+      structuredVariantVersion: 2, rarityCode: null, finishVariant: null,
+      promoType: "mcdonalds_promo", rarity: "Basic Pokémon", variant: "Holo",
+      cardName: "Rayquaza", setName: "Base set",
+    };
+    const body: any = {
+      cardName: "Rayquaza", setName: "Base set", rarityCode: "", finishVariant: "",
+      promoType: "mcdonalds_promo", rarity: "Basic Pokémon", variant: "Holo",
+    };
+    const previewCert: any = { ...saved, ...buildPreviewFields(body) };
+    previewCert.rarity = saved.rarity;
+    previewCert.variant = saved.variant;
+    applyStructuredVariantFromBody(body, previewCert);
+    expect(consolidatedVariantForLabel(previewCert)).toBe(consolidatedVariantForLabel(saved));
+    expect(consolidatedVariantForLabel(previewCert)).toBe("MCDONALD’S PROMO");
+
+    // legacy cert: preview must match print too
+    const legacy: any = { variant: "COSMOS_HOLO", cardName: "X", setName: "Y" };
+    const legacyPreview: any = { ...legacy, ...buildPreviewFields({ cardName: "X", setName: "Y", variant: "COSMOS_HOLO" }) };
+    expect(consolidatedVariantForLabel(legacyPreview)).toBe(consolidatedVariantForLabel(legacy));
+  });
+
+  it("the version gate is robust to the shapes a DB/driver can produce", () => {
+    const withLegacy = (v: unknown) =>
+      formatVariantLine({
+        structuredVariantVersion: v, promoType: "mcdonalds_promo", rarity: "Basic Pokémon", variant: "Holo",
+      } as never).toUpperCase();
+    // >= 2 in any numeric shape → structured-only
+    for (const v of [2, "2", 3, " 2 "]) expect(withLegacy(v)).toBe("MCDONALD’S PROMO");
+    // below 2 / unusable → legacy fold preserved (byte-identical to before)
+    for (const v of [1, "1", 0, null, undefined, NaN, "two", ""])
+      expect(withLegacy(v)).toBe("BASIC POKÉMON · MCDONALD’S PROMO · HOLO");
+  });
+
+  it("a catalogue code this process cannot resolve still prints wording, never a blank line", () => {
+    // A rarity/finish added via Catalogue Manager exists in catalogue_items but
+    // NOT in the seed catalogue this pure formatter resolves against. Before the
+    // fallback it rendered "" — an empty variant line for a code the grader
+    // explicitly selected.
+    expect(formatVariantLine({ structuredVariantVersion: 2, rarityCode: "tera_hyper_rare_2026" } as never).toUpperCase())
+      .toBe("TERA HYPER RARE 2026");
+    expect(formatVariantLine({ structuredVariantVersion: 2, finishVariant: "prism_foil_2026" } as never).toUpperCase())
+      .toBe("PRISM FOIL 2026");
+    // known codes keep their curated public wording
+    expect(formatVariantLine({ structuredVariantVersion: 2, rarityCode: "rare_holo" } as never).toUpperCase())
+      .toBe("HOLO RARE");
+  });
+
+  it("both on-screen summaries use the SAME predicate as the server (trim-then-truthy)", () => {
+    const vs = read("client/src/components/grading-workflow/VariantSummary.tsx");
+    const rs = read("client/src/components/grading-workflow/ReviewSummary.tsx");
+    for (const src of [vs, rs]) {
+      expect(src).toContain("hasStructuredVariant({");
+      expect(src).toContain("?.trim() || null");
+      expect(src).toContain("CONSOLIDATED_VARIANT_SCHEME");
+    }
+    // a whitespace-only code is NOT structured data — matches the server's clean()
+    expect(hasStructuredVariant({ rarityCode: " ".trim() || null } as never)).toBe(false);
+    expect(persist({ rarityCode: " ", promoType: "mcdonalds_promo" }).rarityCode).toBeNull();
   });
 
   it("22. no grading/MVGS/centering/Pristine/cert-number engine file is modified", () => {

@@ -88,8 +88,15 @@ function legacyDisplayLabel(code: string): string {
 function publicLabel(code: string | null | undefined, catalogueLabel: string | undefined): string {
   if (!code) return "";
   if (PUBLIC_LABEL_OVERRIDES[code]) return PUBLIC_LABEL_OVERRIDES[code];
-  if (!catalogueLabel) return "";
-  return catalogueLabel.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  if (catalogueLabel) return catalogueLabel.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  // The code is SET but this process cannot resolve it. That happens for a code
+  // added through the Catalogue Manager (validated against the LIVE catalogue_items
+  // table) while this pure formatter only ever resolves against SEED_CATALOGUE.
+  // Returning "" would silently print an EMPTY variant line for a rarity/finish
+  // the grader explicitly selected — worse than imperfect wording. Humanise the
+  // code instead so the line is never blank and still reads correctly
+  // ("tera_hyper_rare" → "Tera Hyper Rare").
+  return legacyDisplayLabel(code);
 }
 
 /** True if any structured classification column is set (rarity/finish/promo/subset). */

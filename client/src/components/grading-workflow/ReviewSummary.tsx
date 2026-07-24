@@ -106,11 +106,13 @@ export function ReviewSummary({
     rarityOther: v.rarityOther,
     // Same canonical rule as the printed label: once anything structured is set,
     // the save stamps the consolidated scheme and the line is structured-ONLY.
+    // Same predicate as VariantSummary and the server's clean(): trim first, so
+    // a whitespace-only code is not treated as structured data.
     structuredVariantVersion: hasStructuredVariant({
-      rarityCode: v.rarityCode,
-      finishVariant: v.finishVariant,
-      promoType: v.promoType,
-      subsetName: v.subsetName,
+      rarityCode: v.rarityCode?.trim() || null,
+      finishVariant: v.finishVariant?.trim() || null,
+      promoType: v.promoType?.trim() || null,
+      subsetName: v.subsetName?.trim() || null,
     })
       ? CONSOLIDATED_VARIANT_SCHEME
       : null,

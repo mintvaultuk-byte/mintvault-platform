@@ -11,7 +11,7 @@
  */
 import { RaritySymbol } from "@/components/rarity-picker/RaritySymbol";
 import { rarityByValue, finishByValue, promoByValue, languageByValueOrLabel } from "@shared/pokemon-rarity-catalogue";
-import { formatVariantLine, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
+import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 
 export interface VariantSummaryValues {
   language?: string;
@@ -45,6 +45,14 @@ export function VariantSummary({ values }: { values: VariantSummaryValues }) {
   const lang = languageByValueOrLabel(values.language ?? "");
 
   const anySet = rarity || finish || promo || subset;
+  // Mirrors the server: validate/clean() trims, so a whitespace-only code is NOT
+  // structured data. This is the predicate that decides the printed line's rule.
+  const willBeConsolidated = hasStructuredVariant({
+    rarityCode: values.rarityCode?.trim() || null,
+    finishVariant: values.finishVariant?.trim() || null,
+    promoType: values.promoType?.trim() || null,
+    subsetName: values.subsetName?.trim() || null,
+  });
   // The exact single line the front label will print — via the ONE shared formatter.
   const printedLine = formatVariantLine({
     rarityCode: values.rarityCode,
@@ -59,7 +67,12 @@ export function VariantSummary({ values }: { values: VariantSummaryValues }) {
     // value stamps the consolidated scheme, under which the line is derived ONLY
     // from the structured fields (no legacy fold). With nothing structured set,
     // the save leaves the cert pre-consolidation and the legacy wording stands.
-    structuredVariantVersion: anySet ? CONSOLIDATED_VARIANT_SCHEME : null,
+    // Use the SERVER's post-clean() semantics (trim-then-truthy on the raw
+    // codes) — NOT catalogue resolution. `anySet` above resolves against the
+    // client's SEED catalogue, so a Catalogue-Manager-only code (or a
+    // whitespace-only value) would disagree with what the save actually stamps
+    // and this line would differ from the printed label.
+    structuredVariantVersion: willBeConsolidated ? CONSOLIDATED_VARIANT_SCHEME : null,
   });
 
   return (
