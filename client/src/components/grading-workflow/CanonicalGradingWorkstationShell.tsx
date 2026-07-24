@@ -28,20 +28,25 @@ import React, { type ReactNode, type Ref } from "react";
  */
 
 /**
- * Literal per-route viewport-height classes. They MUST be written out in full
- * (not interpolated) so Tailwind's JIT emits the CSS. "4.5rem" is byte-identical
- * to the class the approved /admin workstation already used, so Super Admin
- * rendering is unchanged. Role offsets account for each route's surrounding
- * chrome (header rows / tabs / review overlay) and are tuned against real
- * authenticated staging screenshots.
+ * The shell FILLS its parent's height (`h-full`) and never sets a viewport-
+ * relative height of its own. This is the canonical height contract:
+ *
+ *   caller provides a bounded flex-column parent  →  shell fills it exactly.
+ *
+ * This replaces the earlier per-route fixed viewport-calc height map, whose
+ * magic offsets could not match every route's real surrounding chrome and left a
+ * dark/black band below the shell whenever the offset was too large or an
+ * ancestor (admin-root min-height, a fixed black overlay) was taller than the
+ * shell. Deriving the height from the real parent removes the whole class of
+ * "black bar at the bottom" defects and needs no per-route tuning.
+ *
+ * Contract for callers (enforced by the architecture test):
+ *   - Super Admin /admin: CertificateForm wraps the shell in the ONE sanctioned
+ *     bounded viewport-height flex-column div → /admin height unchanged.
+ *   - Staff / Grader / Admin Review: the route wraps the shell in a focused
+ *     full-viewport flex-column container (or a flex-1 min-h-0 slot).
  */
-export const WORKSTATION_VIEWPORT_HEIGHT_CLASS = {
-  "4.5rem": "md:h-[calc(100dvh-4.5rem)]", // Super Admin /admin (unchanged) + Admin Review overlay
-  "6.5rem": "md:h-[calc(100dvh-6.5rem)]", // Grader (single header row)
-  "8.5rem": "md:h-[calc(100dvh-8.5rem)]", // Staff (header row + tab bar)
-} as const;
-
-export type WorkstationViewportOffset = keyof typeof WORKSTATION_VIEWPORT_HEIGHT_CLASS;
+export const WORKSTATION_FILL_CLASS = "flex min-h-0 flex-col h-full";
 
 /** The one canonical fixed (shrink-0) header-region class. Both admin and role
  *  routes compose their stage bar / ID tools inside a div with exactly this. */
@@ -52,9 +57,6 @@ export const WORKSTATION_HEADER_REGION_CLASS = "shrink-0 space-y-1";
 export const WORKSTATION_BODY_SCROLL_CLASS = "min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1";
 
 export interface CanonicalGradingWorkstationShellProps {
-  /** Surrounding-chrome offset subtracted from 100dvh. Defaults to the approved
-   *  Super Admin value so /admin is unchanged. */
-  viewportOffset?: WorkstationViewportOffset;
   /** Left preview aside (Card / Rarity / Review stages). Falsy → hidden. */
   previewAside?: ReactNode;
   /** Ref to the outer root — used by routes for stage-scroll section queries. */
@@ -69,19 +71,9 @@ export interface CanonicalGradingWorkstationShellProps {
   children: ReactNode;
 }
 
-export function CanonicalGradingWorkstationShell({
-  viewportOffset = "4.5rem",
-  previewAside,
-  rootRef,
-  children,
-}: CanonicalGradingWorkstationShellProps) {
+export function CanonicalGradingWorkstationShell({ previewAside, rootRef, children }: CanonicalGradingWorkstationShellProps) {
   return (
-    <div
-      ref={rootRef}
-      className={`flex min-h-0 flex-col ${WORKSTATION_VIEWPORT_HEIGHT_CLASS[viewportOffset]}`}
-      data-testid="grading-workspace"
-      data-canonical-shell="true"
-    >
+    <div ref={rootRef} className={WORKSTATION_FILL_CLASS} data-testid="grading-workspace" data-canonical-shell="true">
       <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row">
         {previewAside}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="grading-control-panel">

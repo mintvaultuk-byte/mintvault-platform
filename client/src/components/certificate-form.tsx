@@ -1639,8 +1639,10 @@ export default function CertificateForm({
     // the aside there would duplicate the image or narrow that protected grid — a
     // real functional regression, not cosmetic. The shrink-0 header div + <form>
     // body below are the shell's control-panel children, unchanged.
+    // Bounded viewport-height wrapper for /admin (unchanged 4.5rem admin-header
+    // offset). The canonical shell fills this exactly (h-full) — no black band.
+    <div className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]" data-testid="grading-workspace-bound">
     <CanonicalGradingWorkstationShell
-      viewportOffset="4.5rem"
       previewAside={
         wfStage <= 1 || wfStage === 3 ? (
           <WorkstationPreviewAside
@@ -3554,6 +3556,7 @@ export default function CertificateForm({
             </div>
           </form>
         </CanonicalGradingWorkstationShell>
+    </div>
   );
 }
 

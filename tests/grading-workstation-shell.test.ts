@@ -56,7 +56,8 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
     // flows) — extracted verbatim from the old inline /admin layout.
     expect(SHELL_SRC).toMatch(/data-testid="grading-workspace"[^>]*/);
     expect(SHELL_SRC).toContain("flex min-h-0 flex-col");
-    expect(SHELL_SRC).toContain("md:h-[calc(100dvh-4.5rem)]");
+    expect(SHELL_SRC).toContain("flex min-h-0 flex-col h-full"); // shell fills its parent
+    expect(FORM).toContain("md:h-[calc(100dvh-4.5rem)]"); // the one bounded viewport wrapper (CertForm)
     // The panels container is a flex row at md+ (column-stack below): 40% preview
     // aside on the left, flex-1 control panel on the right.
     expect(SHELL_SRC).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");

@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useRef, useState, type ReactNode } from "react";
 import GradingPanel from "@/components/grading/grading-panel";
 import { WorkstationHeaderStrip } from "@/components/grading-workflow/WorkstationHeaderStrip";
 import { WorkstationPreviewAside } from "@/components/grading-workflow/WorkstationPreviewAside";
@@ -6,24 +6,27 @@ import {
   CanonicalGradingWorkstationShell,
   WORKSTATION_BODY_SCROLL_CLASS,
   WORKSTATION_HEADER_REGION_CLASS,
-  type WorkstationViewportOffset,
 } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 
 /**
  * GradingWorkstation — a THIN role adapter for /staff, /grader and /admin/staff.
  *
- * It owns NO layout: all workstation geometry (fixed viewport height, full
- * width, two-panel columns, internal scroll, sticky actions, responsive
- * breakpoints) comes from the single CanonicalGradingWorkstationShell — the
- * exact same shell the /admin CertificateForm renders. This adapter only wires
- * role-specific inputs (apiBase, capability props, stage nav, preview) and the
- * shared building blocks (WorkstationHeaderStrip, WorkstationPreviewAside,
- * GradingPanel) into that canonical shell. Role differences are capabilities and
- * data source only — never a competing layout.
+ * It owns NO layout: all workstation geometry (full width, two-panel columns,
+ * internal scroll, sticky actions, responsive breakpoints) comes from the single
+ * CanonicalGradingWorkstationShell — the exact same shell /admin CertificateForm
+ * renders. Role differences are capabilities + data source only.
  *
- * The `admin-root` wrapper is the admin token scope + dark ground (same as this
- * adapter previously provided, and as /admin/staff's review overlay provides);
- * it sits OUTSIDE the shell so it never forces the fixed-height pane taller.
+ * HEIGHT CONTRACT: the shell fills its parent (h-full). This adapter's own root
+ * is `flex min-h-0 flex-1 flex-col`, so it fills whatever bounded flex slot the
+ * route gives it (each active grading view is a `h-[100dvh] flex flex-col`
+ * focused container). It does NOT set a viewport-relative height and does NOT
+ * wrap the shell in an `admin-root` (min-height:100vh) box — both of those made
+ * the shell shorter than its container and left a black band at the bottom. The
+ * `--admin-*` tokens are global (:root), so colours work without admin-root.
+ *
+ * `identityEditor` (Admin Review): rendered INSIDE the workstation — pinned at
+ * the top of the scroll body (right column), beside the card preview — never as
+ * a detached full-width section above the shell.
  */
 export type GradingWorkstationMode = "super-admin" | "admin" | "admin-review" | "staff" | "grader";
 
@@ -33,6 +36,10 @@ type Props = GradingPanelProps & {
   mode: GradingWorkstationMode;
   /** Optional queue position for the header strip (e.g. Staff "3 / 40"). */
   queue?: { position: number; total: number };
+  /** Admin Review identity editor, rendered inside the workstation body (top of
+   *  the right column, beside the preview). When present, the preview aside is
+   *  forced on so the card sits left / editor right. */
+  identityEditor?: ReactNode;
 };
 
 // Which canonical GradingPanel section each workflow stage scrolls to.
@@ -43,17 +50,7 @@ const STAGE_SECTION: Record<number, string> = {
   3: "footer-actions", // Review & submit
 };
 
-// Per-route surrounding-chrome offset (keys into the shell's literal class map).
-// Tuned against real authenticated staging screenshots.
-const MODE_VIEWPORT_OFFSET: Record<GradingWorkstationMode, WorkstationViewportOffset> = {
-  "super-admin": "4.5rem",
-  admin: "4.5rem",
-  "admin-review": "4.5rem", // review overlay is full-viewport
-  staff: "8.5rem", // header row + tab bar
-  grader: "6.5rem", // single header row
-};
-
-export function GradingWorkstation({ mode, queue, ...panelProps }: Props) {
+export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps }: Props) {
   const apiBase = panelProps.apiBase ?? "/api/admin";
   const rootRef = useRef<HTMLDivElement>(null);
   // Grade is the working stage for these role surfaces; Card/Rarity are already
@@ -68,16 +65,20 @@ export function GradingWorkstation({ mode, queue, ...panelProps }: Props) {
   }, []);
 
   // Grade is stage 2; showing the preview aside beside GradingPanel would
-  // duplicate its own image tool, so — exactly like the admin Grade stage — the
-  // aside is only shown when the operator navigates to the identity stages.
-  const showPreviewAside = stage <= 1;
+  // duplicate its own image tool. Show it on the identity stages, and ALWAYS when
+  // the Admin Review identity editor is open (so the card is left / editor right).
+  const showPreviewAside = stage <= 1 || (mode === "admin-review" && !!identityEditor);
   const certId = panelProps.certId;
 
   return (
-    <div className="admin-root" data-testid="grading-workstation" data-mode={mode} data-api-base={apiBase}>
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
+      data-testid="grading-workstation"
+      data-mode={mode}
+      data-api-base={apiBase}
+    >
       <CanonicalGradingWorkstationShell
         rootRef={rootRef}
-        viewportOffset={MODE_VIEWPORT_OFFSET[mode]}
         previewAside={
           showPreviewAside && certId != null ? (
             <WorkstationPreviewAside certificateId={certId} apiBase={apiBase} />
@@ -96,6 +97,9 @@ export function GradingWorkstation({ mode, queue, ...panelProps }: Props) {
         </div>
         {/* Canonical scroll body — same class as the /admin <form> body. */}
         <div className={WORKSTATION_BODY_SCROLL_CLASS} data-testid="grading-workstation-slot">
+          {/* Admin Review identity editor — inside the workstation body (right
+              column), above the grading panel; never a detached section. */}
+          {identityEditor && <div data-testid="workstation-identity-editor">{identityEditor}</div>}
           {/* Remount per card so no identity/grade/approval state leaks between
               records (GradingPanel seeds a lot of state from props at mount). */}
           <GradingPanel key={`${apiBase}:${certId}`} {...panelProps} />

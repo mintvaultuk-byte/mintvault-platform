@@ -116,7 +116,8 @@ describe("A2. the desktop viewport does not obscure the grading workspace", () =
     // inner one must never come back as live code.
     // The single fixed-height cap is owned by the canonical shell CertificateForm mounts.
     expect(FORM_CODE).toContain("<CanonicalGradingWorkstationShell");
-    expect(CANON_SHELL).toContain("md:h-[calc(100dvh-4.5rem)]");
+    expect(CANON_SHELL).toContain("flex min-h-0 flex-col h-full"); // shell fills its parent
+    expect(FORM_CODE).toContain("md:h-[calc(100dvh-4.5rem)]"); // the one bounded viewport wrapper
     expect(FORM_CODE).not.toContain("max-h-[calc(100dvh-12rem)]");
   });
 

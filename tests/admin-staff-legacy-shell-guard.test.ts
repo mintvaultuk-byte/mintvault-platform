@@ -326,7 +326,9 @@ describe("every admin/staff/grader route is either unified or an explicitly-logg
 const ADMIN_STAFF = read("client/src/pages/admin-staff.tsx");
 const overlay = ADMIN_STAFF.slice(
   ADMIN_STAFF.indexOf('data-testid="grade-review-overlay"') - 200,
-  ADMIN_STAFF.indexOf("Manual card identity override")
+  // identity editor moved into the workstation (identityEditor slot); bound the
+  // overlay slice at the workstation mount instead of the old inline section.
+  ADMIN_STAFF.indexOf("<GradingWorkstation")
 );
 
 describe("admin-staff.tsx review overlay — the screenshot-proven regression stays fixed", () => {
@@ -341,7 +343,7 @@ describe("admin-staff.tsx review overlay — the screenshot-proven regression st
   it("the overlay header + identity-override panel no longer hardcode raw admin-gold/ink hex", () => {
     const overlayToIdentityEnd = ADMIN_STAFF.slice(
       ADMIN_STAFF.indexOf('data-testid="grade-review-overlay"'),
-      ADMIN_STAFF.indexOf("Overwrites card name / set / number / year / variant")
+      ADMIN_STAFF.indexOf("<GradingWorkstation")
     );
     expect(overlayToIdentityEnd).not.toMatch(/#D4AF37|#E8E4DC/);
   });

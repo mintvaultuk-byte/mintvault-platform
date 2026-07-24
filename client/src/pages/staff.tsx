@@ -419,12 +419,17 @@ function GradeTab() {
   if (active) {
     const c = active.card;
     return (
-      <div>
+      // Focused full-viewport grading view: a bounded h-[100dvh] flex column so
+      // the canonical workstation (flex-1) fills exactly the available height —
+      // no fixed offset, no black band. Fixed inset-0 takes over the screen for
+      // rapid grading (breadcrumb has the ← back to exit).
+      <div className="fixed inset-0 z-40 flex flex-col bg-[var(--admin-bg)] text-[var(--admin-ink)]" data-testid="staff-grading-focus">
         {/* Same shared AdminHeaderRow primitive as the outer Staff header and
             Super Admin — this breadcrumb previously used raw ad-hoc markup
             (hardcoded #D4AF37 hex, no shared row rhythm), which is exactly
             what made the live grading workflow look like a second, legacy
             standalone shell stacked beneath the real header. */}
+        <div className="shrink-0">
         <AdminHeaderRow
           testId="staff-grading-breadcrumb"
           left={
@@ -449,6 +454,7 @@ function GradeTab() {
             </div>
           </div>
         )}
+        </div>
         <GradingWorkstation
           mode="staff"
           apiBase="/api/grader"
