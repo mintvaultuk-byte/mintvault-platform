@@ -10,6 +10,7 @@ import {
   type CustomSetRecord,
   editCustomSetDetails,
   normalizeCustomSetCode,
+  normalizeCustomSetName,
   validateCustomSetEdit,
 } from "../server/services/custom-set-editor";
 
@@ -30,7 +31,7 @@ function makeStore(overrides: Partial<CustomSetEditorStore> = {}) {
     findByCode: vi.fn(async () => null),
     findIdentical: vi.fn(async () => null),
     updateCustomSet: vi.fn(async () => {}),
-    updateCertificatesForSet: vi.fn(async () => 3),
+    countCertificatesForSet: vi.fn(async () => 3),
     writeAuditLog: vi.fn(async () => {}),
     ...overrides,
   } satisfies CustomSetEditorStore;
@@ -40,6 +41,12 @@ function makeStore(overrides: Partial<CustomSetEditorStore> = {}) {
 describe("custom set editor", () => {
   it("normalizes set codes without creating duplicate code shapes", () => {
     expect(normalizeCustomSetCode(" MV 10 EN ")).toBe("mv10en");
+  });
+
+  it("normalizes set names across punctuation and repeated whitespace for duplicate checks", () => {
+    expect(normalizeCustomSetName(" Pokémon  TCG: Classic - Charizard Deck ")).toBe(
+      "pokemon tcg classic charizard deck"
+    );
   });
 
   it("rejects blank names and blank codes", () => {
@@ -70,7 +77,8 @@ describe("custom set editor", () => {
       series: "Series A",
       releaseYear: 2025,
       totalCards: 12,
-      certificatesUpdated: 3,
+      certificatesUpdated: 0,
+      linkedCertificates: 3,
     });
     expect(store.updateCustomSet).toHaveBeenCalledWith("mv1", {
       setId: "mv2",
@@ -134,7 +142,7 @@ describe("custom set editor", () => {
     expect(store.writeAuditLog).not.toHaveBeenCalled();
   });
 
-  it("updates existing certificate display relationships and records an audit log", async () => {
+  it("preserves certificate display snapshots and records an audit log", async () => {
     const store = makeStore();
     await editCustomSetDetails(
       store,
@@ -143,13 +151,7 @@ describe("custom set editor", () => {
       { user: "grader@example.com", role: "staff" }
     );
 
-    expect(store.updateCertificatesForSet).toHaveBeenCalledWith(oldSet, {
-      setId: "mv1",
-      setName: "Corrected Set",
-      series: "Promo",
-      releaseYear: 2024,
-      totalCards: 10,
-    });
+    expect(store.countCertificatesForSet).toHaveBeenCalledWith(oldSet);
     expect(store.writeAuditLog).toHaveBeenCalledWith(
       oldSet,
       expect.objectContaining({ setName: "Corrected Set" }),
@@ -171,14 +173,17 @@ describe("custom set editor", () => {
     expect(store.transaction).toHaveBeenCalledTimes(1);
   });
 
-  it("requires edit-sets capability for staff set edits while preserving admin access", () => {
+  it("requires edit-sets capability for staff set edits and delegates to the canonical service", () => {
     const source = readFileSync("server/routes/grader.ts", "utf8");
-    const route =
-      source.match(/app\.patch\("\/api\/staff\/custom-sets\/:setId"[\s\S]*?editCustomSetDetails/)?.[0] || "";
+    const route = source.slice(
+      source.indexOf('app.patch("/api/staff/custom-sets/:setId"'),
+      source.indexOf("// ── Shared admin+grader")
+    );
     expect(route).toContain("s?.isAdmin");
     expect(route).toContain("s.capEditSets");
     expect(route).toContain("can_edit_sets");
     expect(route).not.toContain("capPrint");
     expect(route).not.toContain("capGrade");
+    expect(route).toContain('updateSetLibraryRecord("custom"');
   });
 });

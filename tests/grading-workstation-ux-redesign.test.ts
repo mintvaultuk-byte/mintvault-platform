@@ -103,6 +103,11 @@ describe("intelligent set search wired to the existing catalogue (spec 3)", () =
   it("PokemonSetPicker still reads the EXISTING /api/pokemon-sets source", () => {
     expect(FORM).toContain('fetch("/api/pokemon-sets")');
   });
+  it("catalogue edits from the shared picker use the set-library endpoint, not certificate save", () => {
+    expect(FORM).toContain('"/api/staff/sets"');
+    expect(FORM).toContain('"/api/admin/sets"');
+    expect(FORM).toContain("Existing certificate snapshots will not be changed automatically");
+  });
   it("ranks matches over collection code (ptcgo/id) AND name", () => {
     expect(FORM).toContain("const scoreSet = (s: PokemonSet): number =>");
     expect(FORM).toContain("s.ptcgoCode"); // collection code considered

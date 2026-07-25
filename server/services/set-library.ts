@@ -33,6 +33,7 @@ export interface SetLibraryRow {
   subset: string | null;
   archived: boolean;
   updatedAt: string | null;
+  version: string;
   publishedCardCount: number | null;
   linkedCards: number;
   linkedCertificates: number;
@@ -79,6 +80,8 @@ export interface SetLibraryEditInput {
   reason?: unknown;
   approvedSuggestionId?: unknown;
   confirmLinkedCardUpdate?: unknown;
+  updatedAt?: unknown;
+  version?: unknown;
 }
 
 export interface SetLibraryActor {
@@ -115,6 +118,16 @@ export function normalizeSetCode(value: unknown): string {
   return String(value ?? "")
     .replace(/\s+/g, "")
     .toLowerCase()
+    .trim();
+}
+
+export function normalizeSetNameKey(value: unknown): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -155,6 +168,33 @@ function parseBool(value: unknown): boolean {
   return value === true || value === "true" || value === 1 || value === "1";
 }
 
+function cleanOptionalTimestamp(value: unknown): string | null {
+  const text = cleanText(value);
+  if (!text) return null;
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) throw new SetLibraryError(400, "Invalid set version timestamp");
+  return date.toISOString();
+}
+
+function setLibraryVersion(row: BaseSetRow): string {
+  // `card_sets` predates updated_at. Version its editable fields so an open
+  // legacy record still gets optimistic-concurrency protection.
+  return Buffer.from(
+    JSON.stringify([
+      row.source,
+      normalizeSetCode(row.set_id),
+      row.set_name,
+      row.card_game ?? "pokemon",
+      row.series ?? null,
+      row.release_year ?? null,
+      row.total_cards ?? null,
+      row.subset ?? null,
+      !!row.archived,
+      row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    ])
+  ).toString("base64url");
+}
+
 function parseSource(value: unknown): SetLibrarySource {
   if ((SET_LIBRARY_SOURCES as readonly string[]).includes(String(value))) return value as SetLibrarySource;
   throw new SetLibraryError(400, "Unsupported set source");
@@ -172,9 +212,12 @@ export function validateSetLibraryEdit(input: SetLibraryEditInput) {
   const reason = cleanText(input.reason);
   const approvedSuggestionId = cleanText(input.approvedSuggestionId);
   const confirmLinkedCardUpdate = parseBool(input.confirmLinkedCardUpdate);
+  const updatedAt = cleanOptionalTimestamp(input.updatedAt);
+  const version = cleanText(input.version);
 
   if (!setId) throw new SetLibraryError(400, "Set code is required");
   if (!setName) throw new SetLibraryError(400, "Set name is required");
+  if (!reason) throw new SetLibraryError(400, "Correction reason is required");
   if (setId.length > 64 || setName.length > 200 || (series?.length ?? 0) > 120 || (subset?.length ?? 0) > 120) {
     throw new SetLibraryError(400, "Set values are too long");
   }
@@ -191,6 +234,8 @@ export function validateSetLibraryEdit(input: SetLibraryEditInput) {
     reason,
     approvedSuggestionId,
     confirmLinkedCardUpdate,
+    updatedAt,
+    version,
   };
 }
 
@@ -308,7 +353,7 @@ function toRow(
       suggested: {},
     });
   }
-  const nameKey = setName.toLowerCase().replace(/\s+/g, " ").trim();
+  const nameKey = normalizeSetNameKey(setName);
   if (duplicateNames.get(nameKey)! > 1) {
     const sources = duplicateNameSources.get(nameKey) ?? [];
     add({
@@ -372,6 +417,7 @@ function toRow(
     subset: row.subset ?? null,
     archived: !!row.archived,
     updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    version: setLibraryVersion(row),
     publishedCardCount: Number.isFinite(totalCards) ? totalCards : null,
     linkedCards,
     linkedCertificates,
@@ -442,10 +488,7 @@ export async function listSetLibrary(input: ListSetLibraryInput = {}): Promise<L
   const nameSources = new Map<string, Set<string>>();
   for (const row of rows) {
     const code = normalizeSetCode(row.set_id);
-    const name = String(row.set_name || "")
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .trim();
+    const name = normalizeSetNameKey(row.set_name);
     codeCounts.set(code, (codeCounts.get(code) || 0) + 1);
     nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
     codeSources.set(code, (codeSources.get(code) ?? new Set()).add(`${row.source}:${row.set_id}`));
@@ -528,7 +571,12 @@ export async function updateSetLibraryRecord(
     await ensureSetLibrarySchema(tx);
     const current = (
       await tx.execute(sql`
-      SELECT source, set_id, set_name, card_game, series, release_year, total_cards, subset, archived, updated_at
+      SELECT s.*,
+        (SELECT COUNT(*) FROM card_master cm WHERE LOWER(TRIM(cm.set_id)) = LOWER(TRIM(s.set_id)) AND cm.is_deleted = false)::int AS linked_cards,
+        (SELECT COUNT(*) FROM certificates c
+          WHERE c.deleted_at IS NULL
+            AND LOWER(TRIM(COALESCE(c.set_name, ''))) = LOWER(TRIM(s.set_name))
+            AND LOWER(TRIM(COALESCE(c.card_game, 'pokemon'))) = LOWER(TRIM(COALESCE(s.card_game, 'pokemon'))))::int AS linked_certificates
       FROM (
         SELECT 'custom'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards, subset, archived, updated_at
         FROM custom_sets
@@ -546,6 +594,25 @@ export async function updateSetLibraryRecord(
     ).rows[0] as unknown as BaseSetRow | undefined;
     if (!current) throw new SetLibraryError(404, "Set not found");
 
+    if (source === "card_sets") {
+      if (!next.version) throw new SetLibraryError(400, "Set version is required; refresh before saving.");
+      if (next.version !== setLibraryVersion(current)) {
+        throw new SetLibraryError(409, "This set was changed by another operator. Refresh before saving.");
+      }
+    } else {
+      if (!next.updatedAt) throw new SetLibraryError(400, "Set version is required; refresh before saving.");
+      if (!current.updated_at)
+        throw new SetLibraryError(409, "This set has no current version. Refresh before saving.");
+      const currentVersion = new Date(current.updated_at).toISOString();
+      if (currentVersion !== next.updatedAt) {
+        throw new SetLibraryError(409, "This set was changed by another operator. Refresh before saving.");
+      }
+    }
+
+    if (next.setId !== target) {
+      throw new SetLibraryError(400, "Set ID is stable and cannot be changed. Create a new set instead.");
+    }
+
     const unchanged =
       normalizeSetCode(current.set_id) === next.setId &&
       String(current.set_name) === next.setName &&
@@ -557,29 +624,15 @@ export async function updateSetLibraryRecord(
       !!current.archived === next.archived;
     if (unchanged) throw new SetLibraryError(400, "No changes to save");
 
-    const collision = (
-      await tx.execute(sql`
-      SELECT source, set_id FROM (
-        SELECT 'custom'::text AS source, set_id FROM custom_sets
-        UNION ALL SELECT 'tcgdex'::text AS source, set_id FROM tcgdex_sets
-        UNION ALL SELECT 'card_sets'::text AS source, set_id FROM card_sets
-      ) s
-      WHERE LOWER(TRIM(set_id)) = ${next.setId}
-        AND NOT (source = ${source} AND LOWER(TRIM(set_id)) = ${target})
-      LIMIT 1
-    `)
-    ).rows[0];
-    if (collision) throw new SetLibraryError(409, `Set code "${next.setId}" is already in use`);
-
     const identical = (
       await tx.execute(sql`
-      SELECT source, set_id FROM (
+      SELECT source, set_id, set_name FROM (
         SELECT 'custom'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards FROM custom_sets
         UNION ALL SELECT 'tcgdex'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards FROM tcgdex_sets
         UNION ALL SELECT 'card_sets'::text AS source, set_id, set_name, game AS card_game, series, NULLIF(SUBSTRING(COALESCE(release_date, '') FROM '\\d{4}'), '')::int AS release_year, total_cards FROM card_sets
       ) s
       WHERE NOT (source = ${source} AND LOWER(TRIM(set_id)) = ${target})
-        AND LOWER(TRIM(set_name)) = LOWER(TRIM(${next.setName}))
+        AND btrim(regexp_replace(LOWER(TRIM(translate(set_name, 'éÉ', 'eE'))), '[^[:alnum:]]+', ' ', 'g')) = ${normalizeSetNameKey(next.setName)}
         AND LOWER(TRIM(COALESCE(card_game, 'pokemon'))) = ${next.tcg}
         AND COALESCE(LOWER(TRIM(series)), '') = COALESCE(LOWER(TRIM(${next.series})), '')
         AND COALESCE(release_year, 0) = COALESCE(${next.releaseYear}, 0)
@@ -587,13 +640,19 @@ export async function updateSetLibraryRecord(
       LIMIT 1
     `)
     ).rows[0];
-    if (identical) throw new SetLibraryError(409, "An identical set record already exists");
+    if (identical) {
+      const match = identical as { source?: string; set_id?: string; set_name?: string };
+      throw new SetLibraryError(
+        409,
+        `A likely duplicate set already exists: "${match.set_name}" (${match.source}:${match.set_id})`
+      );
+    }
 
     const releaseDate = next.releaseYear ? `${next.releaseYear}-01-01` : null;
     if (source === "custom") {
       await tx.execute(sql`
         UPDATE custom_sets
-        SET set_id = ${next.setId}, set_name = ${next.setName}, card_game = ${next.tcg}, series = ${next.series},
+        SET set_name = ${next.setName}, card_game = ${next.tcg}, series = ${next.series},
             release_date = ${releaseDate}, total_cards = ${next.totalCards}, subset = ${next.subset},
             archived = ${next.archived}, updated_at = NOW()
         WHERE LOWER(TRIM(set_id)) = ${target}
@@ -601,7 +660,7 @@ export async function updateSetLibraryRecord(
     } else if (source === "tcgdex") {
       await tx.execute(sql`
         UPDATE tcgdex_sets
-        SET set_id = ${next.setId}, set_name = ${next.setName}, card_game = ${next.tcg}, series = ${next.series},
+        SET set_name = ${next.setName}, card_game = ${next.tcg}, series = ${next.series},
             release_date = ${releaseDate}, total_cards = ${next.totalCards}, subset = ${next.subset},
             archived = ${next.archived}, updated_at = NOW()
         WHERE LOWER(TRIM(set_id)) = ${target}
@@ -609,45 +668,14 @@ export async function updateSetLibraryRecord(
     } else {
       await tx.execute(sql`
         UPDATE card_sets
-        SET set_id = ${next.setId}, set_name = ${next.setName}, game = ${next.tcg}, series = ${next.series},
+        SET set_name = ${next.setName}, game = ${next.tcg}, series = ${next.series},
             release_date = ${next.releaseYear == null ? null : String(next.releaseYear)}, total_cards = ${next.totalCards},
             is_deleted = ${next.archived}, deleted_at = CASE WHEN ${next.archived} THEN COALESCE(deleted_at, NOW()) ELSE NULL END
         WHERE LOWER(TRIM(set_id)) = ${target}
       `);
     }
 
-    let linkedCardsUpdated = 0;
-    if (target !== next.setId) {
-      const linkedCardCount = Number(current.linked_cards ?? 0);
-      if (linkedCardCount > 0 && !next.confirmLinkedCardUpdate) {
-        throw new SetLibraryError(400, "Confirm linked card update before changing a set code");
-      }
-      const ambiguousCurrentCode = (
-        await tx.execute(sql`
-          SELECT source, set_id FROM (
-            SELECT 'custom'::text AS source, set_id FROM custom_sets
-            UNION ALL SELECT 'tcgdex'::text AS source, set_id FROM tcgdex_sets
-            UNION ALL SELECT 'card_sets'::text AS source, set_id FROM card_sets
-          ) s
-          WHERE LOWER(TRIM(set_id)) = ${target}
-            AND NOT (source = ${source} AND LOWER(TRIM(set_id)) = ${target})
-          LIMIT 1
-        `)
-      ).rows[0];
-      if (linkedCardCount > 0 && ambiguousCurrentCode) {
-        throw new SetLibraryError(
-          409,
-          "Cannot safely update linked cards because this set code exists in another source"
-        );
-      }
-      const linkedUpdate = await tx.execute(sql`
-        UPDATE card_master
-        SET set_id = ${next.setId}
-        WHERE LOWER(TRIM(set_id)) = ${target}
-          AND is_deleted = false
-      `);
-      linkedCardsUpdated = Number((linkedUpdate as { rowCount?: number }).rowCount ?? 0);
-    }
+    const linkedCardsUpdated = 0;
 
     if (next.approvedSuggestionId) {
       await tx.execute(sql`
@@ -682,6 +710,8 @@ export async function updateSetLibraryRecord(
             archived: !!current.archived,
           },
           new: next,
+          affectedGame: next.tcg,
+          linkedCertificates: Number(current.linked_certificates ?? 0),
           reason: next.reason,
           approvedSuggestionId: next.approvedSuggestionId,
           linkedCardsUpdated,

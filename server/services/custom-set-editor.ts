@@ -30,7 +30,8 @@ export interface CustomSetEditResult {
   series: string | null;
   releaseYear: number | null;
   totalCards: number | null;
-  certificatesUpdated: number;
+  certificatesUpdated: 0;
+  linkedCertificates: number;
 }
 
 export class CustomSetEditError extends Error {
@@ -49,12 +50,12 @@ export interface CustomSetEditorStore {
   findByCode(setId: string, excludeSetId: string): Promise<CustomSetRecord | null>;
   findIdentical(input: CustomSetRecord, excludeSetId: string): Promise<CustomSetRecord | null>;
   updateCustomSet(oldSetId: string, input: CustomSetRecord): Promise<void>;
-  updateCertificatesForSet(oldSet: CustomSetRecord, nextSet: CustomSetRecord): Promise<number>;
+  countCertificatesForSet(oldSet: CustomSetRecord): Promise<number>;
   writeAuditLog(
     oldSet: CustomSetRecord,
     nextSet: CustomSetRecord,
     actor: CustomSetEditActor,
-    certificatesUpdated: number
+    linkedCertificates: number
   ): Promise<void>;
 }
 
@@ -76,6 +77,16 @@ export function normalizeCustomSetCode(value: unknown): string {
   return String(value ?? "")
     .replace(/\s+/g, "")
     .toLowerCase()
+    .trim();
+}
+
+export function normalizeCustomSetName(value: unknown): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .replace(/\s+/g, " ")
     .trim();
 }
 
@@ -152,11 +163,11 @@ export async function editCustomSetDetails(
       throw new CustomSetEditError(409, `An identical set already exists: "${identical.setName}" (${identical.setId})`);
     }
 
+    const linkedCertificates = await txStore.countCertificatesForSet(oldSet);
     await txStore.updateCustomSet(oldSet.setId, nextSet);
-    const certificatesUpdated = await txStore.updateCertificatesForSet(oldSet, nextSet);
-    await txStore.writeAuditLog(oldSet, nextSet, actor, certificatesUpdated);
+    await txStore.writeAuditLog(oldSet, nextSet, actor, linkedCertificates);
 
-    return { ok: true, ...nextSet, certificatesUpdated };
+    return { ok: true, ...nextSet, certificatesUpdated: 0, linkedCertificates };
   });
 }
 
@@ -220,14 +231,14 @@ export function createDbCustomSetEditorStore(executor: SqlExecutor = db): Custom
           SELECT set_id, set_name, series, release_date, total_cards
           FROM custom_sets
           WHERE LOWER(TRIM(set_id)) <> ${normalizeCustomSetCode(excludeSetId)}
-            AND LOWER(TRIM(set_name)) = LOWER(TRIM(${input.setName}))
+            AND btrim(regexp_replace(LOWER(TRIM(translate(set_name, 'éÉ', 'eE'))), '[^[:alnum:]]+', ' ', 'g')) = ${normalizeCustomSetName(input.setName)}
             AND COALESCE(LOWER(TRIM(series)), '') = COALESCE(LOWER(TRIM(${input.series})), '')
             AND COALESCE(EXTRACT(YEAR FROM release_date)::int, 0) = COALESCE(${input.releaseYear}, 0)
             AND COALESCE(total_cards, 0) = COALESCE(${input.totalCards}, 0)
           UNION ALL
           SELECT set_id, set_name, series, release_date, total_cards
           FROM tcgdex_sets
-          WHERE LOWER(TRIM(set_name)) = LOWER(TRIM(${input.setName}))
+          WHERE btrim(regexp_replace(LOWER(TRIM(translate(set_name, 'éÉ', 'eE'))), '[^[:alnum:]]+', ' ', 'g')) = ${normalizeCustomSetName(input.setName)}
             AND COALESCE(LOWER(TRIM(series)), '') = COALESCE(LOWER(TRIM(${input.series})), '')
             AND COALESCE(EXTRACT(YEAR FROM release_date)::int, 0) = COALESCE(${input.releaseYear}, 0)
             AND COALESCE(total_cards, 0) = COALESCE(${input.totalCards}, 0)
@@ -251,21 +262,18 @@ export function createDbCustomSetEditorStore(executor: SqlExecutor = db): Custom
       `);
     },
 
-    async updateCertificatesForSet(oldSet, nextSet) {
+    async countCertificatesForSet(oldSet) {
       const result = await executor.execute(sql`
-        UPDATE certificates
-        SET
-          set_name = ${nextSet.setName},
-          year_text = COALESCE(${nextSet.releaseYear == null ? null : String(nextSet.releaseYear)}, year_text),
-          updated_at = NOW()
+        SELECT COUNT(*)::int AS count
+        FROM certificates
         WHERE LOWER(TRIM(COALESCE(set_name, ''))) = LOWER(TRIM(${oldSet.setName}))
           AND LOWER(TRIM(COALESCE(card_game, 'pokemon'))) = 'pokemon'
           AND deleted_at IS NULL
       `);
-      return Number(result.rowCount ?? 0);
+      return Number((result.rows[0] as { count?: number | string } | undefined)?.count ?? 0);
     },
 
-    async writeAuditLog(oldSet, nextSet, actor, certificatesUpdated) {
+    async writeAuditLog(oldSet, nextSet, actor, linkedCertificates) {
       await executor.execute(sql`
         INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details)
         VALUES (
@@ -279,7 +287,9 @@ export function createDbCustomSetEditorStore(executor: SqlExecutor = db): Custom
             user: actor.user,
             role: actor.role,
             timestamp: new Date().toISOString(),
-            certificatesUpdated,
+            linkedCertificates,
+            certificatesUpdated: 0,
+            certificateSnapshotPolicy: "catalogue edit only; certificate set_name snapshots are not rewritten",
           }}::jsonb
         )
       `);
