@@ -30,6 +30,7 @@
  * permits a deliberately destructive owner-approved migration.
  */
 import { readFileSync, readdirSync } from "node:fs";
+import { toDirectEndpoint } from "./read-only-session";
 import { basename, dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { lintSql, hasBlocking } from "./lint-destructive-sql";
@@ -45,6 +46,41 @@ const MIGRATIONS_DIR = defaultMigrationsDir();
 const FILE_RE = /^(\d{4,})_.+\.sql$/;
 // Fixed advisory-lock key for the migration runner (arbitrary constant, namespaced).
 const ADVISORY_LOCK_KEY = 4_150_205; // "P0.5" mnemonic; any stable int works.
+
+/**
+ * The migration runner MUST own a dedicated backend for the whole run.
+ *
+ * WHY (hostile review, 2026-07-25): `pg_try_advisory_lock` is SESSION-scoped, and session
+ * advisory locks are RE-ENTRANT for the same session. `MINTVAULT_DATABASE_URL` points at
+ * Neon's `-pooler` host — PgBouncer in transaction mode — where two runner processes can be
+ * multiplexed onto ONE server backend. The second runner's `pg_try_advisory_lock` would then
+ * see the lock as held by its *own* session and return true, so the "refusing to run
+ * concurrently" guard passes for BOTH and two runners apply migrations at once. A killed
+ * runner also leaks the lock onto a shared backend, blocking every later runner until the
+ * pooler recycles it.
+ *
+ * Fix: run the lock-owning session on the DIRECT (non-pooler) endpoint, and FAIL CLOSED if
+ * that cannot be derived — never silently fall back to a pooled session for a migration.
+ */
+export function resolveMigrationEndpoint(url: string): { url: string; pooled: boolean } {
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    // Unparseable: cannot prove it is safe, so treat as non-pooled only if it is clearly local.
+    return { url, pooled: false };
+  }
+  const looksPooled = /-pooler(?=\.)/i.test(host);
+  if (!looksPooled) return { url, pooled: false };
+  const direct = toDirectEndpoint(url);
+  if (!direct.changed) {
+    throw new Error(
+      "Refusing to run migrations through a connection pooler: the direct (non-pooler) endpoint " +
+        "could not be derived, so single-runner concurrency cannot be guaranteed."
+    );
+  }
+  return { url: direct.url, pooled: false };
+}
 
 interface MigrationFile {
   number: string;
@@ -259,10 +295,50 @@ export async function applyMigrations(
   opts: { allowDestructive?: boolean } = {}
 ): Promise<{ applied: string[] }> {
   // Serialise concurrent runners: a second runner fails fast instead of double-applying.
+  // Capture the backend identity FIRST, so lock ownership can be proven against a specific
+  // server process rather than assumed from a boolean.
+  const pidRow = await client.query("SELECT pg_backend_pid() AS pid, current_database() AS db");
+  const ownerPid = Number((pidRow.rows[0] as { pid: number | string } | undefined)?.pid);
+  const ownerDb = String((pidRow.rows[0] as { db?: string } | undefined)?.db ?? "");
+  if (!Number.isFinite(ownerPid)) {
+    throw new Error("Could not determine the migration runner's backend PID. Refusing to run.");
+  }
   const lockRes = await client.query("SELECT pg_try_advisory_lock($1) AS got", [ADVISORY_LOCK_KEY]);
   if (lockRes.rows[0]?.got !== true) {
     throw new Error("Another migration runner holds the advisory lock. Refusing to run concurrently.");
   }
+  /**
+   * Prove THIS backend holds the lock, on the CORRECT database. A session advisory lock is
+   * re-entrant, so `got === true` alone does not prove exclusivity when the connection could
+   * be shared by a pooler — this reads pg_locks and fails closed if the lock is not held by
+   * our own PID, or if our PID has changed (a replaced/recycled connection).
+   */
+  const assertLockOwned = async (stage: string): Promise<void> => {
+    const r = await client.query(
+      `SELECT l.pid, pg_backend_pid() AS current_pid, current_database() AS db
+         FROM pg_locks l
+        WHERE l.locktype = 'advisory' AND l.objid = $1 AND l.granted`,
+      [ADVISORY_LOCK_KEY]
+    );
+    const rows = r.rows as unknown as { pid: number; current_pid: number; db: string }[];
+    const currentPid = Number(rows[0]?.current_pid ?? NaN);
+    if (rows.length === 0) {
+      throw new Error(`Migration advisory lock is no longer held (${stage}). Refusing to continue.`);
+    }
+    if (Number.isFinite(currentPid) && currentPid !== ownerPid) {
+      throw new Error(
+        `Migration connection was replaced (${stage}): backend PID changed ${ownerPid} -> ${currentPid}. ` +
+          "The advisory lock can no longer be proven exclusive. Refusing to continue."
+      );
+    }
+    if (!rows.some((x) => Number(x.pid) === ownerPid)) {
+      throw new Error(`Migration advisory lock is not held by this runner (${stage}). Refusing to continue.`);
+    }
+    if (rows[0]?.db && ownerDb && rows[0].db !== ownerDb) {
+      throw new Error(`Migration advisory lock belongs to a different database (${stage}). Refusing to continue.`);
+    }
+  };
+  await assertLockOwned("after acquire");
   try {
     await ensureJournal(client); // create/upgrade the journal only on the apply path (never on dry-run)
     const plan = await planMigrations(client, files);
@@ -293,6 +369,10 @@ export async function applyMigrations(
     const applied: string[] = [];
     const byName = new Map(files.map((f) => [f.filename, f]));
     for (const filename of plan.pending) {
+      // Re-prove exclusivity before EVERY file. If the connection were ever replaced or
+      // recycled mid-run (the pooled-multiplexing hazard), the run stops between files
+      // rather than applying the remainder without a provable lock.
+      await assertLockOwned(`before ${filename}`);
       const f = byName.get(filename)!;
       if (f.noTransaction) {
         // Non-transactional migration (e.g. CREATE INDEX CONCURRENTLY): cannot run in a txn.
@@ -352,11 +432,43 @@ async function main(): Promise<void> {
   const apply = process.argv.includes("--apply");
   const allowDestructive = process.argv.includes("--allow-destructive");
   const { Client } = await import("pg");
+  // The lock-owning session must be a dedicated backend — see resolveMigrationEndpoint.
+  // Throws rather than falling back to a pooled connection.
+  let endpoint: { url: string; pooled: boolean };
+  try {
+    endpoint = resolveMigrationEndpoint(url);
+  } catch (e) {
+    console.error(`🚫 ${(e as Error).message}`);
+    process.exit(2);
+    return;
+  }
   const client = new Client({
-    connectionString: url,
-    ssl: url.includes("127.0.0.1") ? undefined : { rejectUnauthorized: false },
+    connectionString: endpoint.url,
+    ssl: endpoint.url.includes("127.0.0.1") ? undefined : { rejectUnauthorized: false },
+    connectionTimeoutMillis: 20_000,
   });
-  await client.connect();
+  try {
+    await client.connect();
+  } catch (e) {
+    // No silent pooled fallback: a migration that cannot prove single-runner exclusivity
+    // must not run at all.
+    console.error(
+      `🚫 Could not connect to the migration endpoint (${(e as Error).message}). ` +
+        "Refusing to fall back to a pooled connection."
+    );
+    process.exit(2);
+    return;
+  }
+  {
+    const h = (() => {
+      try {
+        return new URL(endpoint.url).hostname;
+      } catch {
+        return "unknown";
+      }
+    })();
+    console.log(`[migrate] lock-owning endpoint: ${h}`);
+  }
   try {
     const files = listMigrationFiles();
     const plan = await planMigrations(client as unknown as PgClientLike, files);
