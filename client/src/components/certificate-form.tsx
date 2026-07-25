@@ -408,12 +408,24 @@ export default function CertificateForm({
   // printed variant line the next time it is saved, so the preview (which shows
   // the post-save wording) legitimately differs from what is printed today.
   const savedConsolidatedRef = useRef(false);
+  // Render-visible mirror of the ref above. The ref is refreshed from EVERY save's
+  // response row, whereas the `certificate` PROP is not (auto-save never pushes the
+  // saved row up to the parent). Deriving the summaries' storedVersion from the prop
+  // therefore left them one save behind: after pick-rarity → clear, the label and the
+  // PNG preview correctly showed no variant line while "Prints as" still folded the
+  // legacy wording back in. State, so a change re-renders the summaries.
+  const [savedConsolidated, setSavedConsolidated] = useState(false);
   // Conversion warning: the wordings that will stop printing when this save
   // converts the cert to the consolidated scheme (null = nothing to warn about).
   // The ack ref is per-certificate and is reset by the isolation effect, so the
   // warning appears ONCE, at the boundary — never again on a v2 certificate.
   const [legacyLossWarning, setLegacyLossWarning] = useState<string[] | null>(null);
   const legacyLossAckRef = useRef(false);
+  // The save path that was in effect when the warning was raised. Dispatching on the
+  // CURRENT eligibility could take the published-cert branch (confirmPublishedEdit)
+  // if the cert became approved between raising and confirming — an override the
+  // operator never chose.
+  const legacyLossPathRef = useRef<"autosave" | "submit">("autosave");
   // Lets the warning's "Convert and save" button re-run the correct save path:
   // the auto-saving path for an unapproved cert, or the explicit form submit
   // (published cert / create flow) — which is the path that bypassed the warning.
@@ -446,6 +458,7 @@ export default function CertificateForm({
     loadedSnapshotRef.current = snap;
     const ver = Number((row as any).structuredVariantVersion ?? 0);
     savedConsolidatedRef.current = ver >= CONSOLIDATED_VARIANT_SCHEME;
+    setSavedConsolidated(savedConsolidatedRef.current);
   }
 
   useEffect(() => {
@@ -1352,6 +1365,7 @@ export default function CertificateForm({
     // flag describe the OLD cert; re-derive them for the new one.
     loadedSnapshotRef.current = null;
     savedConsolidatedRef.current = false;
+    setSavedConsolidated(false);
     legacyLossAckRef.current = false;
     setLegacyLossWarning(null);
     refreshSnapshotFromCert(certificate as unknown as Record<string, unknown> | null);
@@ -1403,6 +1417,7 @@ export default function CertificateForm({
         subsetName: form.subsetName,
       });
       if (lost.length > 0) {
+        legacyLossPathRef.current = "autosave";
         setLegacyLossWarning(lost);
         return; // deferred until the operator confirms or changes the selection
       }
@@ -1538,6 +1553,7 @@ export default function CertificateForm({
         subsetName: form.subsetName,
       });
       if (lost.length > 0) {
+        legacyLossPathRef.current = "submit";
         setLegacyLossWarning(lost);
         return; // held until the operator confirms or changes the selection
       }
@@ -1940,7 +1956,7 @@ export default function CertificateForm({
                       // Dispatch to whichever save path this certificate uses:
                       // auto-save for an unapproved cert, the explicit form submit
                       // for a published cert or the create flow.
-                      if (autoSaveEligible) autoSaveNow();
+                      if (legacyLossPathRef.current === "autosave") autoSaveNow();
                       else formElRef.current?.requestSubmit();
                     }}
                     className="rounded-md border border-amber-400/60 px-2 py-1 text-[11px] font-semibold text-amber-200 hover:bg-amber-500/15"
@@ -3031,8 +3047,9 @@ export default function CertificateForm({
                       // Stored scheme version — an already-consolidated cert prints
                       // structured-only even when everything is cleared, so this
                       // line must not fold legacy wording back in.
-                      storedVersion: (certificate as { structuredVariantVersion?: number | null } | null)
-                        ?.structuredVariantVersion ?? null,
+                      // Fresh saved-state (see savedConsolidated) — NOT the prop,
+                      // which auto-save never refreshes.
+                      storedVersion: savedConsolidated ? CONSOLIDATED_VARIANT_SCHEME : null,
                     }}
                   />
                 </div>
@@ -3725,9 +3742,7 @@ export default function CertificateForm({
                   rarity: form.rarity,
                   variantOther: form.variantOther,
                   rarityOther: form.rarityOther,
-                  storedVersion:
-                    (certificate as { structuredVariantVersion?: number | null } | null)?.structuredVariantVersion ??
-                    null,
+                  storedVersion: savedConsolidated ? CONSOLIDATED_VARIANT_SCHEME : null,
                   designations,
                   gradeOverall: form.gradeOverall,
                   labelType: form.labelType,

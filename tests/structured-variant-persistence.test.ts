@@ -539,8 +539,41 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     const handler = FORM.slice(confirmIdx, confirmIdx + 1600);
     expect(handler).toContain("if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);");
     // …and it dispatches to exactly ONE path
-    expect(handler).toContain("if (autoSaveEligible) autoSaveNow();");
+    expect(handler).toContain('if (legacyLossPathRef.current === "autosave") autoSaveNow();');
     expect(handler).toContain("else formElRef.current?.requestSubmit();");
+  });
+
+  it("an explicit label variant OVERRIDE still reaches the label on a v2 certificate", async () => {
+    // Regression for a HIGH: the version-alone gate made the label variant override
+    // (and the Manual Identity Override, which writes through the same legacy column)
+    // a silent no-op on every converted cert — removing the operator's escape hatch
+    // for a wrong printed line. An explicit override outranks the structured line.
+    const { applyLabelOverrides } = await import("../server/labels");
+    const ov = { variantOverride: "1ST EDITION SHADOWLESS" } as never;
+    const line = (cert: Record<string, unknown>, o: unknown) =>
+      consolidatedVariantForLabel(applyLabelOverrides(cert as never, o as never));
+
+    // legacy cert — unchanged behaviour
+    expect(line({ variant: "COSMOS_HOLO" }, ov)).toBe("1ST EDITION SHADOWLESS");
+    // v2 with a structured value, and v2 fully cleared — the override now wins
+    expect(line({ structuredVariantVersion: 2, rarityCode: "rare_holo", variant: "COSMOS_HOLO" }, ov))
+      .toBe("1ST EDITION SHADOWLESS");
+    expect(line({ structuredVariantVersion: 2, rarityCode: null, variant: "COSMOS_HOLO" }, ov))
+      .toBe("1ST EDITION SHADOWLESS");
+    // …and with NO override the structured-only rules are untouched
+    expect(line({ structuredVariantVersion: 2, rarityCode: "rare_holo", variant: "COSMOS_HOLO" }, null))
+      .toBe("HOLO RARE");
+    expect(line({ structuredVariantVersion: 2, rarityCode: null, variant: "COSMOS_HOLO" }, null)).toBe("");
+  });
+
+  it("the summaries read the FRESH saved state, not the stale certificate prop", () => {
+    // Auto-save never pushes the saved row up to the parent, so deriving the
+    // summaries' version from the prop left them a save behind (they folded legacy
+    // wording back in while the label and PNG preview correctly showed none).
+    expect(FORM).toContain("const [savedConsolidated, setSavedConsolidated] = useState(false);");
+    expect(FORM).toContain("setSavedConsolidated(savedConsolidatedRef.current);");
+    expect(FORM).toContain("storedVersion: savedConsolidated ? CONSOLIDATED_VARIANT_SCHEME : null,");
+    expect(FORM).not.toMatch(/storedVersion:\s*\(certificate as/);
   });
 
   it("ERA ALONE must never convert a certificate (it is a filter, not a printable field)", () => {
@@ -580,10 +613,17 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     // codebase hides rather than unmounts — so on the Card/Rarity/Grade stages the
     // save silently stopped with no visible reason.
     const warn = FORM.indexOf('data-testid="legacy-freetext-warning"');
-    const review = FORM.indexOf('data-workflow-stage="review"');
     expect(warn).toBeGreaterThan(-1);
-    expect(review).toBeGreaterThan(-1);
-    expect(warn).toBeLessThan(review);
+    // Source ORDER alone is too weak (an earlier stage container would pass it):
+    // assert the panel precedes the <form> AND every stage-gated container, i.e. it
+    // sits in the always-rendered header and is inside no stageClass()/wfStage gate.
+    expect(warn).toBeLessThan(FORM.indexOf("ref={formElRef}")); // the real <form> element
+    for (const m of FORM.matchAll(/data-workflow-stage="[a-z]+"/g)) {
+      expect(warn, `panel must precede ${m[0]}`).toBeLessThan(m.index as number);
+    }
+    for (const m of FORM.matchAll(/stageClass\(/g)) {
+      expect(warn, "panel must precede every stageClass() container").toBeLessThan(m.index as number);
+    }
   });
 
   it("the warning also guards the EXPLICIT save path (published cert / create flow)", () => {
@@ -595,7 +635,9 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     expect(submitBody).toContain("legacyFreeTextLostOnConversion({");
     expect(submitBody).toContain("setLegacyLossWarning(lost);");
     // and confirming dispatches to whichever path applies
-    expect(FORM).toContain("if (autoSaveEligible) autoSaveNow();");
+    // Dispatch uses the path captured when the warning was RAISED, not the current
+    // eligibility (which could have flipped to published in between).
+    expect(FORM).toContain('if (legacyLossPathRef.current === "autosave") autoSaveNow();');
     expect(FORM).toContain("else formElRef.current?.requestSubmit();");
   });
 
