@@ -4,6 +4,7 @@ import type { CertificateRecord, LabelOverride } from "@shared/schema";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
 import { computeMvgsScore, mvgsTierName } from "@shared/mvgs-scoring";
 import { isPristine } from "@shared/pristine";
+import { assertPrintableGrade, parseStoredGrade } from "@shared/printable-grade";
 import { formatVariantLine, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import path from "path";
 import { APP_BASE_URL } from "./app-url";
@@ -23,9 +24,7 @@ export function applyLabelOverrides(cert: CertificateRecord, override: LabelOver
     // line would otherwise ignore the legacy `variant` column this override writes
     // through. The marker lets consolidatedVariantForLabel tell "operator typed
     // this for the label" apart from "an incidental legacy column".
-    ...(override.variantOverride != null
-      ? { variant: override.variantOverride, __variantOverridden: true }
-      : {}),
+    ...(override.variantOverride != null ? { variant: override.variantOverride, __variantOverridden: true } : {}),
     ...(override.languageOverride != null ? { language: override.languageOverride } : {}),
     ...(override.yearOverride != null ? { year: override.yearOverride } : {}),
   };
@@ -413,7 +412,10 @@ export function consolidatedVariantForLabel(cert: CertificateRecord): string {
     // became a silent no-op on every converted certificate, removing the very
     // escape hatch used to correct a wrong printed line.
     const overridden = (cert as unknown as { __variantOverridden?: boolean }).__variantOverridden === true;
-    if (overridden) return String(cert.variant ?? "").trim().toUpperCase();
+    if (overridden)
+      return String(cert.variant ?? "")
+        .trim()
+        .toUpperCase();
     return formatVariantLine(cert as unknown as Parameters<typeof formatVariantLine>[0]).toUpperCase();
   }
   return buildVariantLine(cert) || (cert.rarity ? buildRarityText(cert).toUpperCase() : "");
@@ -470,6 +472,14 @@ function drawGoldFrame(ctx: any, frameColor: string = GOLD_LIGHT) {
 }
 
 export async function generateLabelPNG(cert: CertificateRecord, side: "front" | "back"): Promise<Buffer> {
+  // FAIL CLOSED before a single pixel is produced. Every label path funnels through this
+  // function — single label, print batch, print-workflow batch, reprint, slab showcase and
+  // the live workstation preview — so this one assertion makes "a numeric certificate can
+  // never produce a printable label without a valid MVGS ladder grade" true for present and
+  // future callers alike. See shared/printable-grade.ts for the 2026-07-25 incident
+  // (22 certificates rendered as 0 / POOR). Authentication-only certificates are
+  // unaffected: carrying no grade is their correct state.
+  assertPrintableGrade(cert as { gradeType?: string | null; gradeOverall?: string | number | null; certId?: string });
   const { createCanvas, loadImage } = await import("canvas");
 
   // Black Label / PRISTINE gate — uses the canonical isPristine() from
@@ -481,7 +491,10 @@ export async function generateLabelPNG(cert: CertificateRecord, side: "front" | 
   // reconstructed here exactly as the approve route does — from the same cert
   // columns fed to computeMvgsScore — changing nothing about how they're
   // computed.
-  const gradeNum = parseFloat(cert.gradeOverall || "0");
+  // No "|| 0" coercion: a missing grade must never become the digit 0, which
+  // mvgsTierName then labels "Poor". assertPrintableGrade above has already refused any
+  // numeric certificate without a valid grade.
+  const gradeNum = parseStoredGrade(cert.gradeOverall) ?? 0;
   const isNumericGrade = !isNonNumericGrade(cert.gradeType || "numeric");
   let mvgsDeductions: Record<string, number> | undefined;
   if (isNumericGrade) {
@@ -538,11 +551,11 @@ export async function generateLabelPNG(cert: CertificateRecord, side: "front" | 
     );
   // Backgrounds: holographic mode prints the standard label warm gold #c18e22
   // (was white) and keeps the Pristine label black; white-paper mode unchanged.
-  const labelBg = isBlack ? BLACK : (HOLOGRAPHIC_PAPER ? HOLO_GOLD : WHITE);
+  const labelBg = isBlack ? BLACK : HOLOGRAPHIC_PAPER ? HOLO_GOLD : WHITE;
   // Foreground: holographic mode draws ALL lettering WHITE (prints as nothing →
   // holographic paper shimmers through it). White-paper mode unchanged
   // (GOLD_LIGHT on the black label, black on the white label).
-  const labelFg = HOLOGRAPHIC_PAPER ? WHITE : (isBlack ? GOLD_LIGHT : "#000000");
+  const labelFg = HOLOGRAPHIC_PAPER ? WHITE : isBlack ? GOLD_LIGHT : "#000000";
   // Frame: WHITE (holographic border) in holo mode, else the gold frame.
   const frameColor = HOLOGRAPHIC_PAPER ? WHITE : GOLD_LIGHT;
 
@@ -662,7 +675,10 @@ async function drawFront(
   // must print "8.5" on the slab, matching the online cert — rounding to "9"
   // overstated the grade by half a tier. String(8.5)="8.5", String(9)="9",
   // String(10)="10" (no trailing .0).
-  const grade = isNonNum ? 0 : parseFloat(cert.gradeOverall || "0");
+  // Non-numeric certificates never reach the grade panel (guarded by `if (!isNonNum)`),
+  // and a numeric certificate without a valid grade was refused at the entry point — so
+  // this can no longer invent a 0 / POOR grade.
+  const grade = isNonNum ? 0 : (parseStoredGrade(cert.gradeOverall) ?? 0);
 
   // ── LAYOUT CONSTANTS ──────────────────────────────────────────────────────
   const PANEL_W = 148; // right grade panel (≈ 18%, -5.7%)

@@ -149,6 +149,7 @@ import {
   FAILED_LOGIN_DELAY_MS,
 } from "./auth";
 import { generateLabelPNG, generateLabelPDF, applyLabelOverrides } from "./labels";
+import { checkPrintableGrade, UnprintableGradeError } from "@shared/printable-grade";
 import { fileTypeFromBuffer } from "file-type";
 import path from "path";
 import fs from "fs";
@@ -2471,7 +2472,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             String((cert as { certId?: string }).certId ?? id),
             "approval_kind_change_rejected",
             (req.session as { adminEmail?: string })?.adminEmail || "admin",
-            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve-grade" },
+            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve-grade" }
           );
         } catch (auditErr) {
           console.warn("[approve-grade] kind-rejection audit failed:", (auditErr as Error).message);
@@ -4191,7 +4192,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                 stored_grade_type: storedGradeTypeUpdate,
                 requested_kind: requestedKindUpdate,
                 route: "certificate-update",
-              },
+              }
             );
           } catch (auditErr) {
             console.warn("[cert-update] kind-rejection audit failed:", (auditErr as Error).message);
@@ -4273,10 +4274,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // Structured rarity/variant picker → new nullable columns. Opt-in by key
         // presence, so a partial PUT (e.g. grade-only) never erases them; the
         // legacy variant/rarity remain the untouched historical source of truth.
-        let structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(), existing.structuredVariantVersion);
+        let structuredUpdate = applyStructuredVariantFromBody(
+          req.body,
+          data,
+          await getCatalogueSnapshot(),
+          existing.structuredVariantVersion
+        );
         if (!structuredUpdate.ok) {
           // Stale cross-machine cache guard — force-refresh once and retry.
-          structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true), existing.structuredVariantVersion);
+          structuredUpdate = applyStructuredVariantFromBody(
+            req.body,
+            data,
+            await getCatalogueSnapshot(true),
+            existing.structuredVariantVersion
+          );
         }
         if (!structuredUpdate.ok) {
           return res.status(400).json({ error: "Invalid rarity selection.", details: structuredUpdate.errors });
@@ -4421,6 +4432,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.send(pdf);
     } catch (error: any) {
       console.error("Label generation error:", error.message);
+      // A refused grade is an operator-fixable condition, not a server fault.
+      if (error instanceof UnprintableGradeError) {
+        return res
+          .status(422)
+          .json({ error: error.message, code: "UNPRINTABLE_GRADE", blockedCertIds: [error.certId] });
+      }
       res.status(500).json({ error: "Failed to generate label" });
     }
   });
@@ -4519,6 +4536,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // boundary kept intact — admins can still reprint claimed certs via
       // /api/admin/print-batch/reprint with a recorded reason).
       const allCerts = await storage.listCertificates();
+      // ── Grade printability PRE-PASS (fail closed) ────────────────────────────
+      // Runs BEFORE the loop below, because that loop MINTS claim codes as a side
+      // effect (getOrGenerateClaimCode) — so a rejected batch must never reach it.
+      // This is the exact endpoint that, on 2026-07-02, rendered 22 ungraded
+      // production certificates onto a real label sheet showing 0 / POOR: it had no
+      // grade or approval gate at all. All-or-nothing: no partial sheet.
+      const unprintable: { certId: string; code: string; message: string }[] = [];
+      for (const id of ids) {
+        const c = allCerts.find((x: any) => x.certId === id);
+        if (!c) continue; // handled as `missing` below
+        const verdict = checkPrintableGrade({ gradeType: (c as any).gradeType, gradeOverall: (c as any).gradeOverall });
+        if (!verdict.printable) {
+          unprintable.push({
+            certId: id,
+            code: verdict.reason ?? "unprintable_grade",
+            message: `${id}: ${verdict.message}`,
+          });
+        }
+      }
+      if (unprintable.length) {
+        return res.status(422).json({
+          error: `Cannot print — ${unprintable.length === 1 ? "this certificate is" : "these certificates are"} not ready: ${unprintable.map((u) => u.message).join(" ")}`,
+          code: "UNPRINTABLE_GRADE",
+          blockedCertIds: unprintable.map((u) => u.certId),
+          blocked: unprintable,
+        });
+      }
       const items: { cert: any; claimCode: string }[] = [];
       const missing: string[] = [];
       const claimed: string[] = [];
@@ -4822,6 +4866,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // point of this endpoint. Still reject not-found / soft-deleted /
       // missing-grade so the layout doesn't draw garbage.
       const allCerts = await storage.listCertificates();
+      // Reprint enforces the SAME grade printability rule as a fresh batch. There is no
+      // separate immutable-historical-artefact render path in this codebase, so none is
+      // invented here: a reprint re-renders from the CURRENT certificate row, which means
+      // an invalid grade would print an invented panel exactly as a fresh batch would.
+      // Pre-pass, before the claim-code minting below.
+      const unprintableRe: { certId: string; code: string; message: string }[] = [];
+      for (const id of ids) {
+        const c = allCerts.find((x: any) => x.certId === id);
+        if (!c) continue;
+        const verdict = checkPrintableGrade({ gradeType: (c as any).gradeType, gradeOverall: (c as any).gradeOverall });
+        if (!verdict.printable) {
+          unprintableRe.push({
+            certId: id,
+            code: verdict.reason ?? "unprintable_grade",
+            message: `${id}: ${verdict.message}`,
+          });
+        }
+      }
+      if (unprintableRe.length) {
+        return res.status(422).json({
+          error: `Cannot reprint — ${unprintableRe.length === 1 ? "this certificate is" : "these certificates are"} not ready: ${unprintableRe.map((u) => u.message).join(" ")}`,
+          code: "UNPRINTABLE_GRADE",
+          blockedCertIds: unprintableRe.map((u) => u.certId),
+          blocked: unprintableRe,
+        });
+      }
       const items: { cert: any; claimCode: string }[] = [];
       const missing: string[] = [];
       const mintedFor: string[] = [];
@@ -7036,7 +7106,7 @@ Defects (admin-confirmed): ${defectLines}`;
             String((cert as { certId?: string }).certId ?? id),
             "grade_kind_change_rejected",
             (req.session as { adminEmail?: string })?.adminEmail || "admin",
-            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "grade" },
+            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "grade" }
           );
         } catch (auditErr) {
           console.warn("[grade] kind-rejection audit failed:", (auditErr as Error).message);
@@ -7377,7 +7447,7 @@ Defects (admin-confirmed): ${defectLines}`;
             String((cert as { certId?: string }).certId ?? id),
             "approval_kind_change_rejected",
             (req.session as { adminEmail?: string })?.adminEmail || "admin",
-            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve" },
+            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve" }
           );
         } catch (auditErr) {
           console.warn("[approve] kind-rejection audit failed:", (auditErr as Error).message);

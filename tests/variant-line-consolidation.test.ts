@@ -13,7 +13,11 @@ import { readFileSync } from "fs";
 import { execFileSync } from "child_process";
 import { join } from "path";
 import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
-import { STRUCTURED_VARIANT_VERSION, validateStructuredVariant, structuredColumnsToCertFields } from "@shared/structured-variant-validate";
+import {
+  STRUCTURED_VARIANT_VERSION,
+  validateStructuredVariant,
+  structuredColumnsToCertFields,
+} from "@shared/structured-variant-validate";
 import { consolidatedVariantForLabel } from "../server/labels";
 import { nextCatalogueRarity } from "../client/src/components/rarity-picker/RarityVariantPicker";
 
@@ -51,7 +55,9 @@ describe("empty structured fields never create separators or placeholders (item 
     expect(formatVariantLine({ finishVariant: "cosmos_holo" })).not.toMatch(/^ ?· | ?· ?$/);
   });
   it("never emits a double separator", () => {
-    expect(formatVariantLine({ rarityCode: "rare_holo", promoType: "", finishVariant: "cosmos_holo" })).not.toContain("·  ·");
+    expect(formatVariantLine({ rarityCode: "rare_holo", promoType: "", finishVariant: "cosmos_holo" })).not.toContain(
+      "·  ·"
+    );
   });
 });
 
@@ -63,7 +69,9 @@ describe("legacy variant/rarity is folded in, never silently erased (item 11)", 
     expect(formatVariantLine({ rarityCode: "rare_holo", variant: "COSMOS_HOLO" })).toBe("Holo Rare · Cosmos Holo");
   });
   it("a structured finish takes precedence over a legacy one, without duplication", () => {
-    expect(formatVariantLine({ rarityCode: "rare_holo", finishVariant: "cosmos_holo", variant: "HOLO" })).toBe("Holo Rare · Cosmos Holo");
+    expect(formatVariantLine({ rarityCode: "rare_holo", finishVariant: "cosmos_holo", variant: "HOLO" })).toBe(
+      "Holo Rare · Cosmos Holo"
+    );
   });
   it("an ordinary legacy rarity is preserved, not dropped, on a mixed cert (backend hostile F1)", () => {
     // legacy rarity RARE_HOLO has no clean structured code — must still print.
@@ -130,7 +138,8 @@ describe("structured columns persist through the canonical mapper (items 1, 2, 3
 });
 
 describe("preview ↔ printed-label parity (items 8, 9, 10)", () => {
-  const v2 = (extra: Record<string, unknown>) => ({ structuredVariantVersion: CONSOLIDATED_VARIANT_SCHEME, ...extra }) as any;
+  const v2 = (extra: Record<string, unknown>) =>
+    ({ structuredVariantVersion: CONSOLIDATED_VARIANT_SCHEME, ...extra }) as any;
 
   it("the printed label wording equals the shared formatter output, upper-cased (summary shows the same words)", () => {
     const cert = v2({ rarityCode: "rare_holo", finishVariant: "cosmos_holo" });
@@ -141,7 +150,11 @@ describe("preview ↔ printed-label parity (items 8, 9, 10)", () => {
   it("saving then rendering produces the same wording the unsaved live preview shows", () => {
     // Preview and print both run the SAME renderer path (consolidatedVariantForLabel)
     // on a scheme-v2 cert, so the unsaved preview and the saved print are identical.
-    const draft = v2({ rarityCode: "special_illustration_rare", finishVariant: "cosmos_holo", promoType: "black_star_promo" });
+    const draft = v2({
+      rarityCode: "special_illustration_rare",
+      finishVariant: "cosmos_holo",
+      promoType: "black_star_promo",
+    });
     const rendered = consolidatedVariantForLabel(draft);
     expect(rendered).toBe(formatVariantLine(draft).toUpperCase());
     expect(rendered).toBe("SPECIAL ILLUSTRATION RARE · BLACK STAR PROMO · COSMOS HOLO");
@@ -209,14 +222,37 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     expect(importLines).not.toMatch(/mvgs|scoring|centering|pristine|grade|grader/i);
   });
   it("no MVGS/grading-CALCULATION engine file was modified on this branch", () => {
-    // The Review-polish + variant-line work may edit labels.ts (the label
-    // renderer, founder-authorised) but must NOT touch any grading-calculation
-    // engine: scoring, centering, pristine gate, input builder, or grader.
+    // labels.ts (the label renderer) and server/grader.ts (the grader WORKFLOW) are
+    // founder-authorised for narrowly scoped safety fixes — see the 2026-07-25 approval
+    // covering the print-batch grade gate, approveGraderCert and applyCertGradeDraft.
+    // The genuine CALCULATION engine is still hard-blocked: scoring tables, the centering
+    // maths, the Pristine gate, the MVGS input builder and the grading prompt.
     const changed = execFileSync("git", ["diff", "--name-only", "origin/main"], { encoding: "utf8" })
       .trim()
       .split("\n")
       .filter(Boolean);
-    const calcEngine = /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|shared\/mvgs-scoring/;
+    const calcEngine = /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|grading-prompt/;
     for (const f of changed) expect(f, `unexpected change to grading engine: ${f}`).not.toMatch(calcEngine);
+  });
+
+  it("if the grader workflow changed, it added NO scoring, weighting or formula logic", () => {
+    // The narrow-scope half of the founder authorisation: server/grader.ts may gain
+    // GUARDS, but must never gain or alter grade CALCULATION. Inspects the actual added
+    // lines, so a formula slipped in alongside a guard is caught.
+    const diff = execFileSync("git", ["diff", "--unified=0", "origin/main", "--", "server/grader.ts"], {
+      encoding: "utf8",
+    });
+    if (!diff.trim()) return; // grader.ts untouched on this branch — nothing to assert
+    const addedOrRemoved = diff
+      .split("\n")
+      .filter((l) => (l.startsWith("+") || l.startsWith("-")) && !l.startsWith("+++") && !l.startsWith("---"));
+    const formula =
+      /computeMvgsScore|scoreMvgsV2|mvgsTierName|gradeFromMvgsScore|loadMvgsCalibration|WEIGHT|weight\s*[:=]|deduction\s*[:=]|calibration/i;
+    for (const line of addedOrRemoved) {
+      // Comments are allowed to NAME these things; executable lines are not.
+      const code = line.slice(1).trim();
+      if (code.startsWith("//") || code.startsWith("*") || code.startsWith("/*")) continue;
+      expect(code, `grader workflow change must not touch grade calculation: ${code}`).not.toMatch(formula);
+    }
   });
 });

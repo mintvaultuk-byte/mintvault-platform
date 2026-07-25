@@ -15,6 +15,7 @@
  * resolves admin OR staff correctly (fixes attribution finding B-3).
  */
 import type { Request } from "express";
+import { checkPrintableGrade } from "@shared/printable-grade";
 import { randomUUID } from "node:crypto";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
@@ -145,9 +146,7 @@ export async function listPrintQueue(limit = 2000): Promise<PrintQueueRow[]> {
     const approved = r.grade_approved_at !== null;
     const state = effectivePrintState({ storedState: r.print_state as PrintState, approved });
     const customerName =
-      r.owner_name ||
-      [r.customer_first_name, r.customer_last_name].filter(Boolean).join(" ").trim() ||
-      null;
+      r.owner_name || [r.customer_first_name, r.customer_last_name].filter(Boolean).join(" ").trim() || null;
     return {
       certId: r.certificate_number,
       state,
@@ -298,7 +297,11 @@ async function loadEffectiveStates(certIds: string[]): Promise<Map<string, Print
     WHERE certificate_number = ANY(${pgTextArray(certIds)}::text[])
   `);
   const map = new Map<string, PrintState>();
-  for (const raw of result.rows as unknown as { certificate_number: string; print_state: string; approved: boolean }[]) {
+  for (const raw of result.rows as unknown as {
+    certificate_number: string;
+    print_state: string;
+    approved: boolean;
+  }[]) {
     map.set(
       raw.certificate_number,
       effectivePrintState({ storedState: raw.print_state as PrintState, approved: raw.approved === true })
@@ -399,7 +402,67 @@ export async function createBatchAtomic(params: {
     else eligible.push({ certId, from });
   }
   if (eligible.length === 0) {
-    return { applied: [], rejected, batchId: null, kind: null, pdfUrl: null, isDuplicate: false, multiSheet: false, pageCount: 0 };
+    return {
+      applied: [],
+      rejected,
+      batchId: null,
+      kind: null,
+      pdfUrl: null,
+      isDuplicate: false,
+      multiSheet: false,
+      pageCount: 0,
+    };
+  }
+
+  // ── Grade printability gate (fail closed) ──────────────────────────────────
+  // Runs INSIDE the pure pre-flight, BEFORE the reserve transaction — so a blocked
+  // certificate produces no batch row, no print_event, no print_state transition and no
+  // PDF. Applies identically to a fresh batch and a reprint: there is no separate
+  // historical-artefact render path in this codebase, so no exception is invented here.
+  // A numeric certificate with no/malformed/off-ladder grade would otherwise have been
+  // rendered with an invented 0 / POOR panel (production incident 2026-07-25).
+  const gradeRows = await db.execute(sql`
+    SELECT certificate_number, grade_type, grade::text AS grade
+    FROM certificates
+    WHERE certificate_number IN (${sql.join(
+      eligible.map((e) => sql`${e.certId}`),
+      sql`, `
+    )})
+  `);
+  const gradeOf = new Map(
+    (
+      gradeRows.rows as unknown as { certificate_number: string; grade_type: string | null; grade: string | null }[]
+    ).map((r) => [r.certificate_number, r])
+  );
+  const printable: { certId: string; from: PrintState }[] = [];
+  for (const e of eligible) {
+    const row = gradeOf.get(e.certId);
+    const verdict = checkPrintableGrade({ gradeType: row?.grade_type ?? null, gradeOverall: row?.grade ?? null });
+    if (!verdict.printable) {
+      rejected.push({
+        certId: e.certId,
+        code: verdict.reason ?? "unprintable_grade",
+        message: `${e.certId}: ${verdict.message ?? "grade is not printable."}`,
+      });
+    } else {
+      printable.push(e);
+    }
+  }
+  // All-or-nothing on grade validity: a sheet is a physical artefact, so we do not print
+  // the good half of a batch and silently drop the rest — the operator fixes the blocked
+  // card and re-submits. (State-based rejections above keep their existing partial
+  // behaviour; this only governs grade validity.)
+  if (printable.length !== eligible.length) {
+    return {
+      applied: [],
+      rejected,
+      batchId: null,
+      kind: null,
+      pdfUrl: null,
+      isDuplicate: false,
+      multiSheet: false,
+      pageCount: 0,
+    };
   }
 
   // A batch renders as one kind. Reprints (reprint_required, possibly claimed) use
@@ -415,7 +478,12 @@ export async function createBatchAtomic(params: {
     return {
       applied: [],
       rejected: [...mixedRejected, ...rejected],
-      batchId: null, kind: null, pdfUrl: null, isDuplicate: false, multiSheet: false, pageCount: 0,
+      batchId: null,
+      kind: null,
+      pdfUrl: null,
+      isDuplicate: false,
+      multiSheet: false,
+      pageCount: 0,
     };
   }
   const kind: BatchKind = fromReprint > 0 ? "reprint" : "batch";
@@ -467,7 +535,16 @@ export async function createBatchAtomic(params: {
 
   if (reserved.length === 0) {
     // Nothing won (all already reserved/ineligible) — no batch row created.
-    return { applied: [], rejected, batchId: null, kind, pdfUrl: null, isDuplicate: false, multiSheet: false, pageCount: 0 };
+    return {
+      applied: [],
+      rejected,
+      batchId: null,
+      kind,
+      pdfUrl: null,
+      isDuplicate: false,
+      multiSheet: false,
+      pageCount: 0,
+    };
   }
 
   // ── 2 + 3. RENDER + FINALISE (both inside the try; RELEASE on ANY failure) ──
@@ -499,7 +576,9 @@ export async function createBatchAtomic(params: {
           VALUES (${certId}, ${batchId}, ${identity.actor}, ${identity.role}, 'create_batch', 'printing', ${fromOf.get(certId)}, 'render_failed_released')
         `);
       }
-      await tx.execute(sql`UPDATE print_batches SET status = 'failed', failure_count = ${reserved.length} WHERE batch_id = ${batchId}`);
+      await tx.execute(
+        sql`UPDATE print_batches SET status = 'failed', failure_count = ${reserved.length} WHERE batch_id = ${batchId}`
+      );
     });
     throw err;
   }
@@ -618,7 +697,12 @@ export async function markBatchPrinted(batchId: string, identity: ActorIdentity)
   // Blocks marking a 'rendering' (never-produced) or 'failed' batch as printed —
   // a card must never read 'printed' with no PDF behind it.
   if (batchRow.status !== "printing") {
-    return { applied: [], rejected: [{ certId: batchId, code: "not_printable", message: `Batch is "${batchRow.status}", not a finalised print.` }] };
+    return {
+      applied: [],
+      rejected: [
+        { certId: batchId, code: "not_printable", message: `Batch is "${batchRow.status}", not a finalised print.` },
+      ],
+    };
   }
   const kind = batchRow.kind;
   const certIds = batchRow.cert_ids ?? [];
@@ -691,7 +775,14 @@ export async function requestReprint(params: {
 }): Promise<WorkflowResult> {
   const { certIds, reason, reasonCategory, identity } = params;
   if (!isValidReprintReason(reason)) {
-    return { applied: [], rejected: certIds.map((certId) => ({ certId, code: "reason_required", message: "A reprint reason (10–500 chars) is required." })) };
+    return {
+      applied: [],
+      rejected: certIds.map((certId) => ({
+        certId,
+        code: "reason_required",
+        message: "A reprint reason (10–500 chars) is required.",
+      })),
+    };
   }
   const category = isReprintReasonCategory(reasonCategory) ? reasonCategory : null;
   const states = await loadEffectiveStates(certIds);

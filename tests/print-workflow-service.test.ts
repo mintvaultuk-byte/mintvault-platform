@@ -66,6 +66,10 @@ const BASE_DDL = `
     id serial PRIMARY KEY, certificate_number text UNIQUE NOT NULL,
     grade_approved_at timestamptz, grade_approved_by text, deleted_at timestamptz,
     status varchar(10) NOT NULL DEFAULT 'active', ownership_status varchar(20) NOT NULL DEFAULT 'unclaimed',
+    -- The service now reads these to enforce the grade-printability gate (a numeric
+    -- certificate may never enter a printable batch without a valid MVGS ladder grade),
+    -- so the fixture must model them or the gate would be untestable here.
+    grade_type text NOT NULL DEFAULT 'numeric', grade numeric(4,1),
     updated_at timestamptz DEFAULT now(), issued_at timestamptz NOT NULL DEFAULT now()
   );
   CREATE TABLE label_prints ( id serial PRIMARY KEY, cert_id text UNIQUE NOT NULL, sheet_ref text, queued_at timestamptz DEFAULT now(), printed_at timestamptz );
@@ -80,11 +84,24 @@ let adminClient: InstanceType<typeof Client>;
 // Loaded after mocks are in place.
 let svc: typeof import("../server/print-workflow");
 
-async function seedCert(certId: string, printState: string, opts: { approved?: boolean; claimed?: boolean } = {}) {
+async function seedCert(
+  certId: string,
+  printState: string,
+  opts: { approved?: boolean; claimed?: boolean; gradeType?: string; grade?: number | null } = {}
+) {
   await adminClient.query(
-    `INSERT INTO certificates (certificate_number, print_state, grade_approved_at, ownership_status)
-     VALUES ($1, $2, $3, $4)`,
-    [certId, printState, opts.approved === false ? null : new Date(), opts.claimed ? "claimed" : "unclaimed"]
+    `INSERT INTO certificates (certificate_number, print_state, grade_approved_at, ownership_status, grade_type, grade)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      certId,
+      printState,
+      opts.approved === false ? null : new Date(),
+      opts.claimed ? "claimed" : "unclaimed",
+      opts.gradeType ?? "numeric",
+      // Default to a real ladder grade so existing tests describe a printable card;
+      // pass grade: null explicitly to exercise the gate.
+      opts.grade === undefined ? 8.5 : opts.grade,
+    ]
   );
   seededCerts.push({ certId, ownershipStatus: opts.claimed ? "claimed" : "unclaimed" });
 }
@@ -116,7 +133,9 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
   beforeEach(async () => {
     runtime.renderShouldFail = false;
     seededCerts.length = 0;
-    await adminClient.query(`TRUNCATE certificates, label_prints, reprint_log, print_batches, print_events RESTART IDENTITY`);
+    await adminClient.query(
+      `TRUNCATE certificates, label_prints, reprint_log, print_batches, print_events RESTART IDENTITY`
+    );
   });
 
   it("reserves needs_printing certs into a printing batch (happy path)", async () => {
@@ -127,10 +146,14 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
     expect(r.kind).toBe("batch");
     expect(r.batchId).toBeTruthy();
     expect(await stateOf("MV1")).toBe("printing");
-    const batch = await adminClient.query(`SELECT status, cert_count FROM print_batches WHERE batch_id=$1`, [r.batchId]);
+    const batch = await adminClient.query(`SELECT status, cert_count FROM print_batches WHERE batch_id=$1`, [
+      r.batchId,
+    ]);
     expect(batch.rows[0].status).toBe("printing");
     expect(Number(batch.rows[0].cert_count)).toBe(2);
-    const ev = await adminClient.query(`SELECT to_state FROM print_events WHERE cert_id='MV1' AND action='create_batch'`);
+    const ev = await adminClient.query(
+      `SELECT to_state FROM print_events WHERE cert_id='MV1' AND action='create_batch'`
+    );
     expect(ev.rows[0].to_state).toBe("printing");
     // label_prints row written (queued, not printed) so the queue printedAt works.
     const lp = await adminClient.query(`SELECT printed_at FROM label_prints WHERE cert_id='MV1'`);
@@ -143,7 +166,9 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
     const second = await svc.createBatchAtomic({ certIds: ["MV10"], identity: ADMIN });
     expect(second.batchId).toBe(first.batchId);
     expect(second.isDuplicate).toBe(true);
-    const events = await adminClient.query(`SELECT COUNT(*) FROM print_events WHERE cert_id='MV10' AND action='create_batch'`);
+    const events = await adminClient.query(
+      `SELECT COUNT(*) FROM print_events WHERE cert_id='MV10' AND action='create_batch'`
+    );
     expect(Number(events.rows[0].count)).toBe(1); // not doubled
   });
 
@@ -169,7 +194,9 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
     expect(await stateOf("MV30")).toBe("needs_printing");
     const batch = await adminClient.query(`SELECT status FROM print_batches ORDER BY id DESC LIMIT 1`);
     expect(batch.rows[0].status).toBe("failed");
-    const rel = await adminClient.query(`SELECT to_state FROM print_events WHERE cert_id='MV30' AND to_state='needs_printing'`);
+    const rel = await adminClient.query(
+      `SELECT to_state FROM print_events WHERE cert_id='MV30' AND to_state='needs_printing'`
+    );
     expect(rel.rows.length).toBeGreaterThan(0);
   });
 
@@ -192,9 +219,7 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
       `SELECT batch_id FROM print_events WHERE cert_id='MVX' AND action='create_batch'`
     );
     expect(events.rows.length).toBe(1);
-    const batches = await adminClient.query(
-      `SELECT batch_id FROM print_batches WHERE cert_ids @> '["MVX"]'::jsonb`
-    );
+    const batches = await adminClient.query(`SELECT batch_id FROM print_batches WHERE cert_ids @> '["MVX"]'::jsonb`);
     expect(batches.rows.length).toBe(1);
     expect(batches.rows[0].batch_id).toBe(events.rows[0].batch_id);
 
@@ -226,7 +251,12 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
     expect(lp.rows[0].printed_at).not.toBeNull();
 
     // Reprint loop → reprinted.
-    await svc.requestReprint({ certIds: ["MV40"], reason: "Damaged during slabbing test", reasonCategory: "damaged_print", identity: ADMIN });
+    await svc.requestReprint({
+      certIds: ["MV40"],
+      reason: "Damaged during slabbing test",
+      reasonCategory: "damaged_print",
+      identity: ADMIN,
+    });
     expect(await stateOf("MV40")).toBe("reprint_required");
     const rp = await svc.createBatchAtomic({ certIds: ["MV40"], identity: ADMIN });
     expect(rp.kind).toBe("reprint");
@@ -236,15 +266,27 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
 
   it("reprint requires a reason, logs reprint_log + an event with reason/category", async () => {
     await seedCert("MV50", "printed");
-    const bad = await svc.requestReprint({ certIds: ["MV50"], reason: "too short", reasonCategory: "lost_label", identity: ADMIN });
+    const bad = await svc.requestReprint({
+      certIds: ["MV50"],
+      reason: "too short",
+      reasonCategory: "lost_label",
+      identity: ADMIN,
+    });
     expect(bad.applied).toEqual([]);
     expect(await stateOf("MV50")).toBe("printed");
 
-    await svc.requestReprint({ certIds: ["MV50"], reason: "Lost in the post to the customer", reasonCategory: "lost_label", identity: ADMIN });
+    await svc.requestReprint({
+      certIds: ["MV50"],
+      reason: "Lost in the post to the customer",
+      reasonCategory: "lost_label",
+      identity: ADMIN,
+    });
     expect(await stateOf("MV50")).toBe("reprint_required");
     const log = await adminClient.query(`SELECT COUNT(*) FROM reprint_log WHERE cert_id='MV50'`);
     expect(Number(log.rows[0].count)).toBe(1);
-    const ev = await adminClient.query(`SELECT reason, reason_category, actor FROM print_events WHERE cert_id='MV50' AND action='reprint'`);
+    const ev = await adminClient.query(
+      `SELECT reason, reason_category, actor FROM print_events WHERE cert_id='MV50' AND action='reprint'`
+    );
     expect(ev.rows[0]).toMatchObject({ reason_category: "lost_label", actor: "admin@mintvault" });
   });
 
@@ -293,21 +335,91 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
 
   it("DB-F2 regression: a second same-actor reprint of the same cert reserves a distinct batch", async () => {
     await seedCert("MVRR", "printed");
-    await svc.requestReprint({ certIds: ["MVRR"], reason: "First damage on the corner", reasonCategory: "damaged_print", identity: ADMIN });
+    await svc.requestReprint({
+      certIds: ["MVRR"],
+      reason: "First damage on the corner",
+      reasonCategory: "damaged_print",
+      identity: ADMIN,
+    });
     const b1 = await svc.createBatchAtomic({ certIds: ["MVRR"], identity: ADMIN });
     await svc.markBatchPrinted(b1.batchId!, ADMIN);
     expect(await stateOf("MVRR")).toBe("reprinted");
-    await svc.requestReprint({ certIds: ["MVRR"], reason: "Second, different damage later", reasonCategory: "damaged_print", identity: ADMIN });
+    await svc.requestReprint({
+      certIds: ["MVRR"],
+      reason: "Second, different damage later",
+      reasonCategory: "damaged_print",
+      identity: ADMIN,
+    });
     const b2 = await svc.createBatchAtomic({ certIds: ["MVRR"], identity: ADMIN });
     expect(b2.applied).toEqual(["MVRR"]); // NOT swallowed as a duplicate of b1
     expect(b2.batchId).not.toBe(b1.batchId);
     expect(await stateOf("MVRR")).toBe("printing");
   });
 
+  // ── Grade-printability gate (production incident 2026-07-25: 22 ungraded certificates
+  // were rendered onto a real label sheet reading 0 / POOR) ─────────────────────────────
+  it("refuses to batch a numeric cert with NO grade, and creates NOTHING", async () => {
+    await seedCert("MVNOGRADE", "needs_printing", { grade: null });
+    const before = await adminClient.query(`SELECT count(*)::int n FROM print_batches`);
+    const r = await svc.createBatchAtomic({ certIds: ["MVNOGRADE"], identity: ADMIN });
+    expect(r.applied).toEqual([]);
+    expect(r.batchId).toBeNull();
+    expect(r.rejected[0]?.code).toBe("missing_numeric_grade");
+    expect(r.rejected[0]?.message).toContain("MVNOGRADE");
+    // Atomic: no batch row, no print event, no state change.
+    const after = await adminClient.query(`SELECT count(*)::int n FROM print_batches`);
+    expect(after.rows[0].n).toBe(before.rows[0].n);
+    const ev = await adminClient.query(`SELECT count(*)::int n FROM print_events WHERE cert_id='MVNOGRADE'`);
+    expect(ev.rows[0].n).toBe(0);
+    expect(await stateOf("MVNOGRADE")).toBe("needs_printing");
+  });
+
+  it("refuses an off-ladder grade and a contradictory kind/grade pair", async () => {
+    await seedCert("MVOFFLADDER", "needs_printing", { grade: 7.55 });
+    const a = await svc.createBatchAtomic({ certIds: ["MVOFFLADDER"], identity: ADMIN });
+    expect(a.batchId).toBeNull();
+    expect(a.rejected[0]?.code).toBe("off_ladder_numeric_grade");
+
+    await seedCert("MVCONTRA", "needs_printing", { gradeType: "NO", grade: 8.5 });
+    const b = await svc.createBatchAtomic({ certIds: ["MVCONTRA"], identity: ADMIN });
+    expect(b.batchId).toBeNull();
+    expect(b.rejected[0]?.code).toBe("kind_grade_contradiction");
+  });
+
+  it("an authentication-only cert with no grade batches fine — that is its correct state", async () => {
+    await seedCert("MVAUTHOK", "needs_printing", { gradeType: "NO", grade: null });
+    const r = await svc.createBatchAtomic({ certIds: ["MVAUTHOK"], identity: ADMIN });
+    expect(r.applied).toEqual(["MVAUTHOK"]);
+    expect(r.batchId).toBeTruthy();
+    expect(await stateOf("MVAUTHOK")).toBe("printing");
+  });
+
+  it("one bad card blocks the WHOLE sheet — a physical sheet is not printed half-good", async () => {
+    await seedCert("MVGOOD1", "needs_printing", { grade: 9 });
+    await seedCert("MVBAD1", "needs_printing", { grade: null });
+    const r = await svc.createBatchAtomic({ certIds: ["MVGOOD1", "MVBAD1"], identity: ADMIN });
+    expect(r.applied).toEqual([]);
+    expect(r.batchId).toBeNull();
+    // The good card must NOT have been reserved.
+    expect(await stateOf("MVGOOD1")).toBe("needs_printing");
+    expect(await stateOf("MVBAD1")).toBe("needs_printing");
+  });
+
+  it("a REPRINT is held to the same rule — no historical-artefact exemption", async () => {
+    await seedCert("MVREPNOGRADE", "reprint_required", { grade: null });
+    const r = await svc.createBatchAtomic({ certIds: ["MVREPNOGRADE"], identity: ADMIN });
+    expect(r.applied).toEqual([]);
+    expect(r.batchId).toBeNull();
+    expect(r.rejected[0]?.code).toBe("missing_numeric_grade");
+    expect(await stateOf("MVREPNOGRADE")).toBe("reprint_required");
+  });
+
   it("reconciler releases a stale 'rendering' batch but leaves a fresh one alone", async () => {
     await seedCert("MVSTUCK", "needs_printing");
     await seedCert("MVFRESH", "needs_printing");
-    await adminClient.query(`UPDATE certificates SET print_state='printing' WHERE certificate_number IN ('MVSTUCK','MVFRESH')`);
+    await adminClient.query(
+      `UPDATE certificates SET print_state='printing' WHERE certificate_number IN ('MVSTUCK','MVFRESH')`
+    );
     await adminClient.query(
       `INSERT INTO print_batches (batch_id, kind, status, cert_ids, cert_count, created_by, created_at)
        VALUES ('bbbb000000000001','batch','rendering','["MVSTUCK"]'::jsonb,1,'admin@mintvault', NOW() - INTERVAL '20 minutes'),
@@ -319,7 +431,9 @@ describe("print-workflow service (DB-backed, mocked renderer)", () => {
     expect(await stateOf("MVFRESH")).toBe("printing"); // fresh render untouched (age guard)
     const b = await adminClient.query(`SELECT status FROM print_batches WHERE batch_id='bbbb000000000001'`);
     expect(b.rows[0].status).toBe("failed");
-    const ev = await adminClient.query(`SELECT to_state FROM print_events WHERE cert_id='MVSTUCK' AND reason='stuck_rendering_reconciled'`);
+    const ev = await adminClient.query(
+      `SELECT to_state FROM print_events WHERE cert_id='MVSTUCK' AND reason='stuck_rendering_reconciled'`
+    );
     expect(ev.rows[0].to_state).toBe("needs_printing");
   });
 

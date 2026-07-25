@@ -118,7 +118,11 @@ describe("auto-save: an edit made while a save is in flight is not lost (items 1
   it("1-4. clearing rarity DURING a save is what the second PUT carries, and it stays cleared", async () => {
     const s = makeSerializer();
     // 1. a save is in flight, built from the pre-clear state
-    const saveA = s.render({ rarityCode: "silver_star_rare", finishVariant: "glitter_holo", promoType: "mcdonalds_promo" });
+    const saveA = s.render({
+      rarityCode: "silver_star_rare",
+      finishVariant: "glitter_holo",
+      promoType: "mcdonalds_promo",
+    });
     const flight = saveA();
     await new Promise((r) => setTimeout(r, 0));
     expect(s.puts).toHaveLength(1);
@@ -192,7 +196,11 @@ describe("structured combinations persist and print correctly (items 6-14)", () 
   });
 
   it("10. rarity + promo + finish (the observed MV207 state)", () => {
-    const cols = persist({ rarityCode: "silver_star_rare", promoType: "mcdonalds_promo", finishVariant: "glitter_holo" });
+    const cols = persist({
+      rarityCode: "silver_star_rare",
+      promoType: "mcdonalds_promo",
+      finishVariant: "glitter_holo",
+    });
     expect(printed(cols)).toBe("RARE · MCDONALD’S PROMO · GLITTER HOLO");
   });
 
@@ -248,7 +256,9 @@ describe("clear controls (items 15-16)", () => {
   });
 
   it("15. a finish/promo chosen from SEARCH can be cleared (toggle, not plain set)", () => {
-    expect(PICKER).toContain("search.finishes.map((x) => pill(x, finish === x.value, () => setFinish(finish === x.value ? null : x.value)))");
+    expect(PICKER).toContain(
+      "search.finishes.map((x) => pill(x, finish === x.value, () => setFinish(finish === x.value ? null : x.value)))"
+    );
     expect(PICKER).toMatch(/search\.promos\.map[\s\S]{0,160}promoOrSubset === x\.value \? null : x\.value/);
   });
 
@@ -271,12 +281,29 @@ describe("clear controls (items 15-16)", () => {
 
 describe("cross-certificate isolation (items 17-18)", () => {
   const CERT_A = {
-    id: 1, cardName: "Rayquaza", setName: "Base set", cardNumber: "014", year: "2022", cardGame: "pokemon",
-    rarity: "Basic Pokémon", variant: "Holo", language: "English",
-    rarityCode: "silver_star_rare", finishVariant: "glitter_holo", promoType: "mcdonalds_promo",
-    subsetName: "trainer_gallery", era: "sword_shield",
+    id: 1,
+    cardName: "Rayquaza",
+    setName: "Base set",
+    cardNumber: "014",
+    year: "2022",
+    cardGame: "pokemon",
+    rarity: "Basic Pokémon",
+    variant: "Holo",
+    language: "English",
+    rarityCode: "silver_star_rare",
+    finishVariant: "glitter_holo",
+    promoType: "mcdonalds_promo",
+    subsetName: "trainer_gallery",
+    era: "sword_shield",
   };
-  const CERT_B = { id: 2, cardName: "Mr. Mime", setName: "Jungle", cardNumber: "022", year: "1999", cardGame: "pokemon" };
+  const CERT_B = {
+    id: 2,
+    cardName: "Mr. Mime",
+    setName: "Jungle",
+    cardNumber: "022",
+    year: "1999",
+    cardGame: "pokemon",
+  };
 
   it("17. switching certificates carries NO structured or legacy value from the previous cert", () => {
     const b = buildFormStateFromCert(CERT_B as never);
@@ -365,18 +392,27 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
 
   it("a version-2 cert does NOT fold legacy rarity into an empty structured rarity slot", () => {
     expect(
-      consolidatedVariantForLabel({ structuredVariantVersion: 2, finishVariant: "cosmos_holo", rarity: "RARE_HOLO" } as never)
+      consolidatedVariantForLabel({
+        structuredVariantVersion: 2,
+        finishVariant: "cosmos_holo",
+        rarity: "RARE_HOLO",
+      } as never)
     ).toBe("COSMOS HOLO");
   });
 
   it("a version-2 cert does NOT fold legacy variant into an empty structured finish slot", () => {
     expect(
-      consolidatedVariantForLabel({ structuredVariantVersion: 2, rarityCode: "rare_holo", variant: "COSMOS_HOLO" } as never)
+      consolidatedVariantForLabel({
+        structuredVariantVersion: 2,
+        rarityCode: "rare_holo",
+        variant: "COSMOS_HOLO",
+      } as never)
     ).toBe("HOLO RARE");
   });
 
   it("empty structured rarity / finish / promo each display nothing on a v2 cert", () => {
-    const v2 = (o: Record<string, unknown>) => consolidatedVariantForLabel({ structuredVariantVersion: 2, ...o } as never);
+    const v2 = (o: Record<string, unknown>) =>
+      consolidatedVariantForLabel({ structuredVariantVersion: 2, ...o } as never);
     expect(v2({ promoType: "mcdonalds_promo" })).toBe("MCDONALD’S PROMO"); // no rarity, no finish
     expect(v2({ rarityCode: "rare_holo" })).toBe("HOLO RARE"); // no promo, no finish
     expect(v2({ finishVariant: "cosmos_holo" })).toBe("COSMOS HOLO"); // no rarity, no promo
@@ -390,7 +426,11 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     expect(consolidatedVariantForLabel({ structuredVariantVersion: 1, rarityCode: "rare_holo" } as never)).toBe("");
     // legacy fold still fills an empty slot for a sub-v2 cert
     expect(
-      formatVariantLine({ structuredVariantVersion: 1, promoType: "mcdonalds_promo", rarity: "RARE_HOLO" } as never).toUpperCase()
+      formatVariantLine({
+        structuredVariantVersion: 1,
+        promoType: "mcdonalds_promo",
+        rarity: "RARE_HOLO",
+      } as never).toUpperCase()
     ).toBe("HOLO RARE · MCDONALD’S PROMO");
   });
 
@@ -412,13 +452,23 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
 
     // v2 cert: MV207 after the clears
     const saved: any = {
-      structuredVariantVersion: 2, rarityCode: null, finishVariant: null,
-      promoType: "mcdonalds_promo", rarity: "Basic Pokémon", variant: "Holo",
-      cardName: "Rayquaza", setName: "Base set",
+      structuredVariantVersion: 2,
+      rarityCode: null,
+      finishVariant: null,
+      promoType: "mcdonalds_promo",
+      rarity: "Basic Pokémon",
+      variant: "Holo",
+      cardName: "Rayquaza",
+      setName: "Base set",
     };
     const body: any = {
-      cardName: "Rayquaza", setName: "Base set", rarityCode: "", finishVariant: "",
-      promoType: "mcdonalds_promo", rarity: "Basic Pokémon", variant: "Holo",
+      cardName: "Rayquaza",
+      setName: "Base set",
+      rarityCode: "",
+      finishVariant: "",
+      promoType: "mcdonalds_promo",
+      rarity: "Basic Pokémon",
+      variant: "Holo",
     };
     const previewCert: any = { ...saved, ...buildPreviewFields(body) };
     previewCert.rarity = saved.rarity;
@@ -429,14 +479,20 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
 
     // legacy cert: preview must match print too
     const legacy: any = { variant: "COSMOS_HOLO", cardName: "X", setName: "Y" };
-    const legacyPreview: any = { ...legacy, ...buildPreviewFields({ cardName: "X", setName: "Y", variant: "COSMOS_HOLO" }) };
+    const legacyPreview: any = {
+      ...legacy,
+      ...buildPreviewFields({ cardName: "X", setName: "Y", variant: "COSMOS_HOLO" }),
+    };
     expect(consolidatedVariantForLabel(legacyPreview)).toBe(consolidatedVariantForLabel(legacy));
   });
 
   it("the version gate is robust to the shapes a DB/driver can produce", () => {
     const withLegacy = (v: unknown) =>
       formatVariantLine({
-        structuredVariantVersion: v, promoType: "mcdonalds_promo", rarity: "Basic Pokémon", variant: "Holo",
+        structuredVariantVersion: v,
+        promoType: "mcdonalds_promo",
+        rarity: "Basic Pokémon",
+        variant: "Holo",
       } as never).toUpperCase();
     // >= 2 in any numeric shape → structured-only
     for (const v of [2, "2", 3, " 2 "]) expect(withLegacy(v)).toBe("MCDONALD’S PROMO");
@@ -450,7 +506,10 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     expect(
       consolidatedVariantForLabel({
         structuredVariantVersion: 2,
-        rarityCode: null, finishVariant: null, promoType: null, subsetName: null,
+        rarityCode: null,
+        finishVariant: null,
+        promoType: null,
+        subsetName: null,
       } as never)
     ).toBe("");
   });
@@ -459,8 +518,14 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     expect(
       consolidatedVariantForLabel({
         structuredVariantVersion: 2,
-        rarityCode: null, finishVariant: null, promoType: null, subsetName: null,
-        rarity: "Basic Pokémon", variant: "Holo", variantOther: "Prism Foil", rarityOther: "Gold Star",
+        rarityCode: null,
+        finishVariant: null,
+        promoType: null,
+        subsetName: null,
+        rarity: "Basic Pokémon",
+        variant: "Holo",
+        variantOther: "Prism Foil",
+        rarityOther: "Gold Star",
       } as never)
     ).toBe("");
     // the boundary is the VERSION alone, not "does it hold a structured value"
@@ -470,7 +535,9 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
   it("a pre-v2 certificate is byte-identical (full-clear rule does not touch it)", () => {
     expect(consolidatedVariantForLabel({ variant: "COSMOS_HOLO" } as never)).toBe("COSMOS HOLO");
     expect(consolidatedVariantForLabel({ rarity: "RARE_HOLO" } as never)).toBe("HOLO RARE");
-    expect(consolidatedVariantForLabel({ structuredVariantVersion: 1, rarity: "RARE_HOLO" } as never)).toBe("HOLO RARE");
+    expect(consolidatedVariantForLabel({ structuredVariantVersion: 1, rarity: "RARE_HOLO" } as never)).toBe(
+      "HOLO RARE"
+    );
     // an empty pre-v2 cert still prints nothing (unchanged)
     expect(consolidatedVariantForLabel({} as never)).toBe("");
   });
@@ -501,7 +568,12 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     };
 
     const cases: Array<[string, Record<string, any>, Record<string, any>, Record<string, any>]> = [
-      ["legacy", { variant: "COSMOS_HOLO" }, { storedVersion: null, variant: "COSMOS_HOLO" }, { variant: "COSMOS_HOLO" }],
+      [
+        "legacy",
+        { variant: "COSMOS_HOLO" },
+        { storedVersion: null, variant: "COSMOS_HOLO" },
+        { variant: "COSMOS_HOLO" },
+      ],
       [
         "v2 promo-only",
         { structuredVariantVersion: 2, promoType: "mcdonalds_promo", rarity: "Basic Pokémon", variant: "Holo" },
@@ -511,8 +583,13 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
       [
         "v2 fully cleared",
         {
-          structuredVariantVersion: 2, rarityCode: null, finishVariant: null, promoType: null,
-          rarity: "RARE_HOLO", variant: "COSMOS_HOLO", variantOther: "Prism Foil",
+          structuredVariantVersion: 2,
+          rarityCode: null,
+          finishVariant: null,
+          promoType: null,
+          rarity: "RARE_HOLO",
+          variant: "COSMOS_HOLO",
+          variantOther: "Prism Foil",
         },
         { storedVersion: 2, rarity: "RARE_HOLO", variant: "COSMOS_HOLO", variantOther: "Prism Foil" },
         { rarityCode: "", finishVariant: "", promoType: "" },
@@ -530,8 +607,14 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
       expect(previewLine(saved, body), `preview != label for ${name}`).toBe(label);
     }
     // and the specific values, so a silent shift in all three at once still fails
-    expect(consolidatedVariantForLabel({ structuredVariantVersion: 2, promoType: "mcdonalds_promo", rarity: "Basic Pokémon", variant: "Holo" } as never))
-      .toBe("MCDONALD’S PROMO");
+    expect(
+      consolidatedVariantForLabel({
+        structuredVariantVersion: 2,
+        promoType: "mcdonalds_promo",
+        rarity: "Basic Pokémon",
+        variant: "Holo",
+      } as never)
+    ).toBe("MCDONALD’S PROMO");
   });
 
   it("confirming the warning cancels the pending debounce (no redundant second PUT)", () => {
@@ -621,8 +704,9 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
       // otherwise the pause would be sticky and navigation stuck.
       expect(FORM).toMatch(/if \(legacyLossWarning\) \{\s*\n\s*setLegacyLossWarning\(null\);/);
       // behavioural: the helper returns [] once the wording is represented
-      expect(legacyFreeTextLostOnConversion({ currentVersion: 0, variantOther: "Cosmos Holo", finishVariant: "cosmos_holo" }))
-        .toEqual([]);
+      expect(
+        legacyFreeTextLostOnConversion({ currentVersion: 0, variantOther: "Cosmos Holo", finishVariant: "cosmos_holo" })
+      ).toEqual([]);
     });
 
     it("normal autosave is untouched when nothing is held", () => {
@@ -648,13 +732,16 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     // legacy cert — unchanged behaviour
     expect(line({ variant: "COSMOS_HOLO" }, ov)).toBe("1ST EDITION SHADOWLESS");
     // v2 with a structured value, and v2 fully cleared — the override now wins
-    expect(line({ structuredVariantVersion: 2, rarityCode: "rare_holo", variant: "COSMOS_HOLO" }, ov))
-      .toBe("1ST EDITION SHADOWLESS");
-    expect(line({ structuredVariantVersion: 2, rarityCode: null, variant: "COSMOS_HOLO" }, ov))
-      .toBe("1ST EDITION SHADOWLESS");
+    expect(line({ structuredVariantVersion: 2, rarityCode: "rare_holo", variant: "COSMOS_HOLO" }, ov)).toBe(
+      "1ST EDITION SHADOWLESS"
+    );
+    expect(line({ structuredVariantVersion: 2, rarityCode: null, variant: "COSMOS_HOLO" }, ov)).toBe(
+      "1ST EDITION SHADOWLESS"
+    );
     // …and with NO override the structured-only rules are untouched
-    expect(line({ structuredVariantVersion: 2, rarityCode: "rare_holo", variant: "COSMOS_HOLO" }, null))
-      .toBe("HOLO RARE");
+    expect(line({ structuredVariantVersion: 2, rarityCode: "rare_holo", variant: "COSMOS_HOLO" }, null)).toBe(
+      "HOLO RARE"
+    );
     expect(line({ structuredVariantVersion: 2, rarityCode: null, variant: "COSMOS_HOLO" }, null)).toBe("");
   });
 
@@ -682,8 +769,9 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     // so a legacy cert keeps printing its legacy wording after an era touch
     expect(consolidatedVariantForLabel({ ...r.columns, variant: "COSMOS_HOLO" } as never)).toBe("COSMOS HOLO");
     // a genuine structured selection still converts
-    expect(validateStructuredVariant({ promoType: "mcdonalds_promo" } as never).columns.structuredVariantVersion)
-      .toBe(STRUCTURED_VARIANT_VERSION);
+    expect(validateStructuredVariant({ promoType: "mcdonalds_promo" } as never).columns.structuredVariantVersion).toBe(
+      STRUCTURED_VARIANT_VERSION
+    );
   });
 
   it("the version-stamp predicate and the render predicate are the SAME four fields", () => {
@@ -751,8 +839,12 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     const { buildPreviewFields } = await import("../shared/label-preview-fields");
     const { applyStructuredVariantFromBody } = await import("../server/lib/structured-variant");
     const saved: any = {
-      structuredVariantVersion: 2, rarityCode: null, finishVariant: null, promoType: null,
-      rarity: "Basic Pokémon", variant: "Holo",
+      structuredVariantVersion: 2,
+      rarityCode: null,
+      finishVariant: null,
+      promoType: null,
+      rarity: "Basic Pokémon",
+      variant: "Holo",
     };
     const body: any = { rarityCode: "", finishVariant: "", promoType: "", rarity: "Basic Pokémon", variant: "Holo" };
     const preview: any = { ...saved, ...buildPreviewFields(body) };
@@ -771,10 +863,12 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
   });
 
   it("CONVERSION WARNING fires for legacy free text the new line will not print", () => {
-    expect(legacyFreeTextLostOnConversion({ currentVersion: 0, variantOther: "Prism Foil", finishVariant: "cosmos_holo" }))
-      .toEqual(["Prism Foil"]);
-    expect(legacyFreeTextLostOnConversion({ currentVersion: null, rarityOther: "Gold Star", promoType: "mcdonalds_promo" }))
-      .toEqual(["Gold Star"]);
+    expect(
+      legacyFreeTextLostOnConversion({ currentVersion: 0, variantOther: "Prism Foil", finishVariant: "cosmos_holo" })
+    ).toEqual(["Prism Foil"]);
+    expect(
+      legacyFreeTextLostOnConversion({ currentVersion: null, rarityOther: "Gold Star", promoType: "mcdonalds_promo" })
+    ).toEqual(["Gold Star"]);
   });
 
   it("CONVERSION WARNING stays silent when it should", () => {
@@ -791,7 +885,9 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
       legacyFreeTextLostOnConversion({ currentVersion: 0, variantOther: "Cosmos Holo", finishVariant: "cosmos_holo" })
     ).toEqual([]);
     // whitespace-only free text is not a warning
-    expect(legacyFreeTextLostOnConversion({ currentVersion: 0, variantOther: "   ", promoType: "mcdonalds_promo" })).toEqual([]);
+    expect(
+      legacyFreeTextLostOnConversion({ currentVersion: 0, variantOther: "   ", promoType: "mcdonalds_promo" })
+    ).toEqual([]);
   });
 
   it("CONVERSION WARNING is wired to HOLD the save, and cancelling does not save", () => {
@@ -813,13 +909,16 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     // NOT in the seed catalogue this pure formatter resolves against. Before the
     // fallback it rendered "" — an empty variant line for a code the grader
     // explicitly selected.
-    expect(formatVariantLine({ structuredVariantVersion: 2, rarityCode: "tera_hyper_rare_2026" } as never).toUpperCase())
-      .toBe("TERA HYPER RARE 2026");
-    expect(formatVariantLine({ structuredVariantVersion: 2, finishVariant: "prism_foil_2026" } as never).toUpperCase())
-      .toBe("PRISM FOIL 2026");
+    expect(
+      formatVariantLine({ structuredVariantVersion: 2, rarityCode: "tera_hyper_rare_2026" } as never).toUpperCase()
+    ).toBe("TERA HYPER RARE 2026");
+    expect(
+      formatVariantLine({ structuredVariantVersion: 2, finishVariant: "prism_foil_2026" } as never).toUpperCase()
+    ).toBe("PRISM FOIL 2026");
     // known codes keep their curated public wording
-    expect(formatVariantLine({ structuredVariantVersion: 2, rarityCode: "rare_holo" } as never).toUpperCase())
-      .toBe("HOLO RARE");
+    expect(formatVariantLine({ structuredVariantVersion: 2, rarityCode: "rare_holo" } as never).toUpperCase()).toBe(
+      "HOLO RARE"
+    );
   });
 
   it("both on-screen summaries use the SAME predicate as the server (trim-then-truthy)", () => {
@@ -838,8 +937,17 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
   it("22. no grading/MVGS/centering/Pristine/cert-number engine file is modified", () => {
     const { execFileSync } = require("child_process");
     const changed: string[] = execFileSync("git", ["diff", "--name-only", "origin/main"], { encoding: "utf8" })
-      .trim().split("\n").filter(Boolean);
-    const engine = /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|cert-pristine|certificate-document/;
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    // server/grader.ts (the grader WORKFLOW) is founder-authorised for narrowly scoped
+    // safety fixes — 2026-07-25 approval covering approveGraderCert and
+    // applyCertGradeDraft. The formula-level guarantee is enforced separately, by
+    // "the grader workflow changed, it added NO scoring/weighting/formula logic" in
+    // tests/variant-line-consolidation.test.ts, which inspects the actual added lines.
+    // The genuine CALCULATION engine stays hard-blocked here.
+    const engine =
+      /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|grading-prompt|cert-pristine|certificate-document/;
     for (const f of changed) expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);
   });
 
