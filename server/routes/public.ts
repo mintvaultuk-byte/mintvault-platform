@@ -15,6 +15,7 @@ import fs from "fs";
 import path from "path";
 import { normalizeCertId } from "../lib/cert-id";
 import { requireAdmin } from "../auth";
+import { ensureSetLibrarySchema } from "../services/set-library";
 
 export function registerPublicRoutes(app: Express): void {
   // ── Health check — no auth, no DB, no shared state ──────────────────────
@@ -488,8 +489,18 @@ export function registerPublicRoutes(app: Express): void {
         .toLowerCase()
         .trim();
     try {
+      await ensureSetLibrarySchema();
       // Hand-added custom sets (always included).
-      const customRows = await db.execute(sql`SELECT * FROM custom_sets ORDER BY created_at DESC`);
+      const customRows = await db.execute(sql`
+        SELECT cs.*,
+          (SELECT COUNT(*) FROM certificates c
+            WHERE c.deleted_at IS NULL
+              AND LOWER(TRIM(COALESCE(c.set_name, ''))) = LOWER(TRIM(cs.set_name))
+              AND LOWER(TRIM(COALESCE(c.card_game, 'pokemon'))) = LOWER(TRIM(COALESCE(cs.card_game, 'pokemon'))))::int AS linked_certificates
+        FROM custom_sets cs
+        WHERE COALESCE(cs.archived, false) = false
+        ORDER BY cs.created_at DESC
+      `);
       const customSets = (customRows.rows as any[]).map((s) => ({
         id: s.set_id,
         name: s.set_name,
@@ -498,11 +509,22 @@ export function registerPublicRoutes(app: Express): void {
         releaseDate: s.release_date ? new Date(s.release_date).toISOString().split("T")[0] : null,
         total: s.total_cards || 0,
         source: "custom",
+        updatedAt: s.updated_at ? new Date(s.updated_at).toISOString() : null,
+        linkedCertificates: Number(s.linked_certificates || 0),
       }));
 
       // Canonical TCGdex catalogue (DB-backed, imported). Preferred on collisions.
       const tcgdexRows = await db.execute(
-        sql`SELECT * FROM tcgdex_sets ORDER BY release_date DESC NULLS LAST, set_name ASC`
+        sql`
+          SELECT ts.*,
+            (SELECT COUNT(*) FROM certificates c
+              WHERE c.deleted_at IS NULL
+                AND LOWER(TRIM(COALESCE(c.set_name, ''))) = LOWER(TRIM(ts.set_name))
+                AND LOWER(TRIM(COALESCE(c.card_game, 'pokemon'))) = LOWER(TRIM(COALESCE(ts.card_game, 'pokemon'))))::int AS linked_certificates
+          FROM tcgdex_sets ts
+          WHERE COALESCE(ts.archived, false) = false
+          ORDER BY ts.release_date DESC NULLS LAST, ts.set_name ASC
+        `
       );
       const tcgdexSets = (tcgdexRows.rows as any[]).map((s) => ({
         id: s.set_id,
@@ -512,6 +534,8 @@ export function registerPublicRoutes(app: Express): void {
         releaseDate: s.release_date ? new Date(s.release_date).toISOString().split("T")[0] : null,
         total: s.total_cards || 0,
         source: "tcgdex",
+        updatedAt: s.updated_at ? new Date(s.updated_at).toISOString() : null,
+        linkedCertificates: Number(s.linked_certificates || 0),
       }));
 
       if (tcgdexSets.length > 0) {

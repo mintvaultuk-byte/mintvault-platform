@@ -16,6 +16,7 @@ vi.mock("../server/db", () => ({
 
 import {
   listSetLibrary,
+  normalizeSetNameKey,
   normalizeSetCode,
   recordSetReviewDecision,
   SetLibraryError,
@@ -69,6 +70,12 @@ function sqlText(query: unknown): string {
 describe("set library service", () => {
   it("normalizes set codes without creating duplicate code shapes", () => {
     expect(normalizeSetCode(" MV 10 EN ")).toBe("mv10en");
+  });
+
+  it("normalizes set names across punctuation variants for duplicate checks", () => {
+    expect(normalizeSetNameKey("Pokémon Trading Card Game Classic - Charizard Deck")).toBe(
+      "pokemon trading card game classic charizard deck"
+    );
   });
 
   it("validates editable fields without allowing blank names, blank codes or invalid counts", () => {
@@ -197,6 +204,28 @@ describe("set library service", () => {
     expect(linkedCardsSql).toContain("UPDATE card_master");
     expect(auditSql).toContain("INSERT INTO audit_log");
     expect(auditSql).toContain("set_library_update");
+  });
+
+  it("rejects stale catalogue edits when the caller posts an old updatedAt version", async () => {
+    mockEnsureSchema(mockDb.txExecute);
+    mockDb.txExecute.mockResolvedValueOnce({
+      rows: [{ ...baseSetRow, updated_at: "2026-01-02T00:00:00.000Z" }],
+    });
+
+    await expect(
+      updateSetLibraryRecord(
+        "custom",
+        "mv1",
+        {
+          setId: "mv1",
+          setName: "Corrected Set",
+          tcg: "pokemon",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        { id: "admin@example.com", role: "admin" }
+      )
+    ).rejects.toMatchObject({ status: 409 });
+    expect(mockDb.txExecute.mock.calls.some((call) => sqlText(call[0]).includes("UPDATE custom_sets"))).toBe(false);
   });
 
   it("rejects duplicate code collisions before writing a set update", async () => {

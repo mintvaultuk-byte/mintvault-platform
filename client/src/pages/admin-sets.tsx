@@ -226,6 +226,7 @@ export default function AdminSetsPage() {
     const cleanCode = draft.setId.replace(/\s+/g, "").toLowerCase();
     if (!cleanName) return setErr("Set name is required.");
     if (!cleanCode) return setErr("Set code is required.");
+    if (!draft.reason.trim()) return setErr("Correction reason is required.");
     const codeChanged = cleanCode !== row.setId;
     const nameChanged = cleanName !== row.setName;
     let confirmLinkedCardUpdate = false;
@@ -245,6 +246,8 @@ export default function AdminSetsPage() {
         setName: cleanName,
         releaseYear: draft.releaseYear.trim(),
         totalCards: draft.totalCards.trim(),
+        reason: draft.reason.trim(),
+        updatedAt: row.updatedAt,
         confirmLinkedCardUpdate,
       });
       setMsg("Set updated.");

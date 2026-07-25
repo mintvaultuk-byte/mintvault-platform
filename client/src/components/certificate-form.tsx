@@ -3668,7 +3668,7 @@ export default function CertificateForm({
                   {mutation.isPending
                     ? "Saving..."
                     : isEdit
-                      ? "Save Changes to Published Certificate"
+                      ? "Save changes to this certificate only"
                       : "Save Certificate"}
                 </GradientButton>
               )}
@@ -3894,7 +3894,9 @@ interface PokemonSet {
   ptcgoCode: string | null;
   releaseDate: string;
   total: number;
-  source?: string;
+  source?: "custom" | "tcgdex" | "card_sets" | string;
+  updatedAt?: string | null;
+  linkedCertificates?: number;
 }
 
 export function PokemonSetPicker({
@@ -3914,12 +3916,12 @@ export function PokemonSetPicker({
    *  graders pass allowAddSet + createEndpoint="/api/staff/custom-sets" so they can
    *  add a set whose name isn't in the picker rather than being blocked. */
   allowAddSet?: boolean;
-  /** Show set editing for authorised admin/staff surfaces. Only custom sets are editable. */
+  /** Show catalogue editing for authorised admin/staff surfaces. Server routes still enforce permissions. */
   allowEditSet?: boolean;
   /** Where the add-set form POSTs. Default admin; graders override to the
    *  staff endpoint (admin-or-grade auth + dedup). */
   createEndpoint?: string;
-  /** Where the edit-set form PATCHes. Defaults to the add-set endpoint base. */
+  /** Optional set-library edit endpoint base. Defaults to /api/admin/sets or /api/staff/sets from createEndpoint. */
   editEndpoint?: string;
   /** Seed the add-set form (e.g. from the AI identification) so the operator just
    *  confirms. setCode → Set Code, setName → Set Name. */
@@ -3933,7 +3935,17 @@ export function PokemonSetPicker({
   const [addForm, setAddForm] = useState({ setId: "", setName: "", series: "Promo", releaseYear: "", totalCards: "" });
   const [addSaving, setAddSaving] = useState(false);
   const [editingSet, setEditingSet] = useState<PokemonSet | null>(null);
-  const [editForm, setEditForm] = useState({ setId: "", setName: "", series: "", releaseYear: "", totalCards: "" });
+  const [editForm, setEditForm] = useState({
+    setId: "",
+    setName: "",
+    tcg: "pokemon",
+    series: "",
+    releaseYear: "",
+    totalCards: "",
+    subset: "",
+    archived: false,
+    reason: "",
+  });
   const [editSaving, setEditSaving] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -4021,19 +4033,22 @@ export function PokemonSetPicker({
         .map((x) => x.s)
     : sets.slice(0, 12);
 
-  const selectedSet = sets.find(
-    (s) => s.source === "custom" && (s.name === query || s.name === value || s.id === query)
-  );
+  const selectedSet = sets.find((s) => s.name === query || s.name === value || s.id === query);
   const canEditSelectedSet = allowEditSet && !!selectedSet;
+  const setLibraryBase = editEndpoint || (createEndpoint.startsWith("/api/staff") ? "/api/staff/sets" : "/api/admin/sets");
 
   function openEditSet(set: PokemonSet) {
     setEditingSet(set);
     setEditForm({
       setId: set.id,
       setName: set.name,
+      tcg: "pokemon",
       series: set.series || "",
       releaseYear: set.releaseDate ? set.releaseDate.split("-")[0] : "",
       totalCards: set.total ? String(set.total) : "",
+      subset: "",
+      archived: false,
+      reason: "",
     });
     setOpen(false);
     setShowAddForm(false);
@@ -4085,47 +4100,63 @@ export function PokemonSetPicker({
       toast({ title: "Set code and set name are required", variant: "destructive" });
       return;
     }
+    if (!editForm.reason.trim()) {
+      toast({ title: "Correction reason is required", variant: "destructive" });
+      return;
+    }
 
     const changedName = nextName !== editingSet.name;
     const changedCode = nextCode !== editingSet.id;
     if (
       (changedName || changedCode) &&
-      !window.confirm("Changing a set name or code updates the existing set record. Continue?")
+      !window.confirm(
+        "This edits the catalogue set used for future grading. Existing certificate snapshots will not be changed automatically. Continue?"
+      )
     ) {
       return;
     }
 
     setEditSaving(true);
     try {
-      const r = await fetch(`${editEndpoint || createEndpoint}/${encodeURIComponent(editingSet.id)}`, {
+      const source = editingSet.source || "custom";
+      const r = await fetch(`${setLibraryBase}/${encodeURIComponent(source)}/${encodeURIComponent(editingSet.id)}`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           setId: nextCode,
           setName: nextName,
+          tcg: editForm.tcg,
           series: editForm.series || null,
           releaseYear: editForm.releaseYear ? parseInt(editForm.releaseYear, 10) : null,
           totalCards: editForm.totalCards ? parseInt(editForm.totalCards, 10) : null,
+          subset: editForm.subset || null,
+          archived: editForm.archived,
+          reason: editForm.reason || null,
+          updatedAt: editingSet.updatedAt || null,
+          confirmLinkedCardUpdate: changedCode,
         }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Could not update set");
 
+      const saved = d.set || {};
       const updated: PokemonSet = {
-        id: d.setId || nextCode,
-        name: d.setName || nextName,
-        series: d.series || "Custom",
+        id: saved.setId || nextCode,
+        name: saved.setName || nextName,
+        series: saved.series || editForm.series || (source === "custom" ? "Custom" : ""),
         ptcgoCode: editingSet.ptcgoCode || null,
-        releaseDate: d.releaseYear ? `${d.releaseYear}-01-01` : "",
-        total: d.totalCards || 0,
-        source: "custom",
+        releaseDate: saved.releaseYear ? `${saved.releaseYear}-01-01` : "",
+        total: saved.totalCards || 0,
+        source,
+        updatedAt: new Date().toISOString(),
+        linkedCertificates: editingSet.linkedCertificates || 0,
       };
       setSets((current) => [updated, ...current.filter((s) => s.id !== editingSet.id && s.id !== updated.id)]);
       onChange(updated.name, updated.id);
       setQuery(updated.name);
       setEditingSet(null);
-      toast({ title: "Set updated", description: `${updated.name} (${updated.id})` });
+      toast({ title: "Catalogue set updated", description: `${updated.name} (${updated.id})` });
     } catch (e: unknown) {
       toast({ title: "Failed to update set", description: errorMessage(e), variant: "destructive" });
     } finally {
@@ -4150,13 +4181,16 @@ export function PokemonSetPicker({
         className="w-full bg-[var(--admin-panel)] border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-sm text-[var(--admin-ink)] placeholder:text-[var(--admin-ink-faint)] focus:outline-none focus:border-[var(--admin-gold)]"
       />
       {canEditSelectedSet && (
-        <button
-          type="button"
-          onClick={() => openEditSet(selectedSet)}
-          className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)] hover:text-[var(--admin-gold-bright)]"
-        >
-          <Pencil size={11} /> Edit Set
-        </button>
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
+          <span className="text-[var(--admin-ink-faint)]">Use this set for the certificate, or edit the catalogue record:</span>
+          <button
+            type="button"
+            onClick={() => openEditSet(selectedSet)}
+            className="inline-flex items-center gap-1 font-bold uppercase tracking-wider text-[var(--admin-gold)] hover:text-[var(--admin-gold-bright)]"
+          >
+            <Pencil size={11} /> Edit set
+          </button>
+        </div>
       )}
       {open && (
         // Width is allowed to exceed the (narrow) input column — real set
@@ -4204,6 +4238,7 @@ export function PokemonSetPicker({
                   recordRecentSet(s.id, s.name);
                   setOpen(false);
                 }}
+                title="Use this set"
                 className="w-full text-left px-3 py-2 hover:bg-[var(--admin-gold)]/5 border-b border-[var(--admin-line)] last:border-0"
               >
                 {/* Line 1: recognisable collection code chip + set name. Line 2:
@@ -4221,6 +4256,11 @@ export function PokemonSetPicker({
                   {s.source === "custom" && (
                     <span className="shrink-0 rounded bg-[color-mix(in_srgb,var(--admin-green)_18%,transparent)] px-1 py-0.5 text-[8px] font-bold uppercase text-[var(--admin-green)]">
                       Custom
+                    </span>
+                  )}
+                  {s.source === "tcgdex" && (
+                    <span className="shrink-0 rounded bg-sky-500/15 px-1 py-0.5 text-[8px] font-bold uppercase text-sky-200">
+                      TCGdex
                     </span>
                   )}
                 </div>
@@ -4339,8 +4379,21 @@ export function PokemonSetPicker({
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
           onClick={() => setEditingSet(null)}
         >
-          <div className="bg-[var(--admin-panel)] rounded-lg p-5 w-96 space-y-3" onClick={(e) => e.stopPropagation()}>
-            <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">Edit Set</p>
+          <div
+            className="bg-[var(--admin-panel)] rounded-lg p-5 w-[min(34rem,calc(100vw-2rem))] space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div>
+              <p className="text-[var(--admin-gold)] text-xs font-bold uppercase tracking-widest">Edit catalogue set</p>
+              <p className="mt-1 rounded border border-[color-mix(in_srgb,var(--admin-amber)_45%,transparent)] bg-[color-mix(in_srgb,var(--admin-amber)_10%,transparent)] px-3 py-2 text-[11px] leading-relaxed text-[var(--admin-amber)]">
+                This edits the catalogue set used for future grading. Existing certificate snapshots will not be changed automatically.
+              </p>
+              {(editingSet.linkedCertificates ?? 0) > 0 && (
+                <p className="mt-1 text-[10px] text-[var(--admin-ink-faint)]">
+                  {editingSet.linkedCertificates} certificate{editingSet.linkedCertificates === 1 ? "" : "s"} currently reference this set name.
+                </p>
+              )}
+            </div>
             <div>
               <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Set Code *</label>
               <input
@@ -4357,7 +4410,23 @@ export function PokemonSetPicker({
                 className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
               />
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Game / Category</label>
+                <select
+                  value={editForm.tcg}
+                  onChange={(e) => setEditForm((f) => ({ ...f, tcg: e.target.value }))}
+                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111]"
+                >
+                  <option value="pokemon">Pokemon</option>
+                  <option value="sports">Sports</option>
+                  <option value="one_piece">One Piece</option>
+                  <option value="yugioh">Yu-Gi-Oh!</option>
+                  <option value="magic">Magic</option>
+                  <option value="lorcana">Lorcana</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
               <div>
                 <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Series</label>
                 <input
@@ -4366,6 +4435,8 @@ export function PokemonSetPicker({
                   className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
                 />
               </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
               <div>
                 <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Year</label>
                 <input
@@ -4384,6 +4455,33 @@ export function PokemonSetPicker({
                   className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
                 />
               </div>
+              <div>
+                <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Deck / Subset</label>
+                <input
+                  value={editForm.subset}
+                  onChange={(e) => setEditForm((f) => ({ ...f, subset: e.target.value }))}
+                  className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-[11px] text-[var(--admin-ink-dim)]">
+              <input
+                type="checkbox"
+                checked={editForm.archived}
+                onChange={(e) => setEditForm((f) => ({ ...f, archived: e.target.checked }))}
+                className="accent-[var(--admin-gold)]"
+              />
+              Deactivate / archive this catalogue set
+            </label>
+            <div>
+              <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Reason *</label>
+              <textarea
+                value={editForm.reason}
+                onChange={(e) => setEditForm((f) => ({ ...f, reason: e.target.value }))}
+                rows={2}
+                placeholder="e.g. Correcting official source name"
+                className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
+              />
             </div>
             <div className="flex gap-2 pt-1">
               <button
@@ -4396,10 +4494,10 @@ export function PokemonSetPicker({
               <button
                 type="button"
                 onClick={saveEditedSet}
-                disabled={editSaving || !editForm.setId.trim() || !editForm.setName.trim()}
+                disabled={editSaving || !editForm.setId.trim() || !editForm.setName.trim() || !editForm.reason.trim()}
                 className="flex-1 bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold py-2 rounded disabled:opacity-50"
               >
-                {editSaving ? "Saving…" : "Save"}
+                {editSaving ? "Saving…" : "Save Changes"}
               </button>
             </div>
           </div>
