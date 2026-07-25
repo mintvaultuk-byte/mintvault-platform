@@ -1042,8 +1042,15 @@ export default function GradingPanel({
       // Ready To Print queue must not keep serving a pre-approval cache. The
       // global client sets staleTime: Infinity, so without this the queue would
       // show stale contents for the rest of the session on this machine.
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/printing/workflow/queue"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/printing/workflow/batches"] });
+      // Both base variants: the queue registers its key from its own apiBase, which
+      // is "/api/admin" for the admin surface and "/api/staff/print" for a
+      // print-capable staff surface. Invalidating a key nothing registered is a
+      // no-op, so covering both keeps this correct for an account that holds BOTH
+      // can_grade and can_print without guessing which surface is mounted.
+      for (const b of ["/api/admin", "/api/staff/print"]) {
+        queryClient.invalidateQueries({ queryKey: [`${b}/printing/workflow/queue`] });
+        queryClient.invalidateQueries({ queryKey: [`${b}/printing/workflow/batches`] });
+      }
       if (certIdStr) {
         queryClient.invalidateQueries({ queryKey: [`/api/cert/${certIdStr}`] });
         queryClient.invalidateQueries({ queryKey: [`/api/cert/${certIdStr}/report`] });

@@ -265,8 +265,12 @@ describe("queue refresh (21)", () => {
   });
 
   it("21. final approval also invalidates the Ready To Print queue", () => {
-    expect(PANEL).toContain('queryKey: ["/api/admin/printing/workflow/queue"]');
-    expect(PANEL).toContain('queryKey: ["/api/admin/printing/workflow/batches"]');
+    // Covers BOTH bases, because the queue registers its key from its own apiBase
+    // ("/api/admin" or "/api/staff/print") — an admin-only key would be a silent
+    // no-op for an account holding both can_grade and can_print.
+    expect(PANEL).toContain('for (const b of ["/api/admin", "/api/staff/print"])');
+    expect(PANEL).toContain("`${b}/printing/workflow/queue`");
+    expect(PANEL).toContain("`${b}/printing/workflow/batches`");
   });
 
   it("21. the queue re-checks on window focus (no polling, no sockets added)", () => {
