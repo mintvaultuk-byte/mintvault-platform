@@ -54,7 +54,7 @@ import {
   graderCorrectionHistoryReadRateLimit,
   graderEditSubmissionRateLimit,
 } from "../lib/rate-limiters";
-import { createDbCustomSetEditorStore, editCustomSetDetails, CustomSetEditError } from "../services/custom-set-editor";
+import { SetLibraryError, updateSetLibraryRecord } from "../services/set-library";
 import {
   STAFF_ABSOLUTE_SESSION_MS,
   clearSessionCookie,
@@ -800,13 +800,13 @@ export function registerGraderRoutes(app: Express): void {
 
     try {
       const actor = isAdmin ? s?.adminEmail || "admin" : s?.staffEmail || s?.graderEmail || "staff";
-      const result = await editCustomSetDetails(createDbCustomSetEditorStore(), String(req.params.setId), req.body, {
-        user: actor,
+      const result = await updateSetLibraryRecord("custom", String(req.params.setId), req.body || {}, {
+        id: actor,
         role: isAdmin ? "admin" : "staff",
       });
       return res.json(result);
     } catch (err: unknown) {
-      if (err instanceof CustomSetEditError) return res.status(err.status).json({ error: err.message });
+      if (err instanceof SetLibraryError) return res.status(err.status).json({ error: err.message });
       console.error("[staff custom-set] update failed:", err instanceof Error ? err.message : String(err));
       return res.status(500).json({ error: "Couldn't update set — please try again" });
     }

@@ -12,7 +12,6 @@ import { resolveEnglishSetByNameAndNumber } from "../services/tcgdex-set-resolve
 import { COLLECTOR_NUMBER_RE } from "../services/collector-number";
 import { getFeatureFlag } from "../config/feature-flags";
 import { normalizeCertId } from "../lib/cert-id";
-import { createDbCustomSetEditorStore, editCustomSetDetails, CustomSetEditError } from "../services/custom-set-editor";
 import {
   listSetLibrary,
   recordSetReviewDecision,
@@ -364,15 +363,13 @@ export function registerAdminConfigRoutes(app: Express): void {
   app.patch("/api/admin/custom-sets/:setId", requireAdmin, adminCustomSetEditLimit, async (req, res) => {
     try {
       const adminUser = (req.session as { adminEmail?: string })?.adminEmail || "admin";
-      const result = await editCustomSetDetails(createDbCustomSetEditorStore(), String(req.params.setId), req.body, {
-        user: adminUser,
+      const result = await updateSetLibraryRecord("custom", String(req.params.setId), req.body || {}, {
+        id: adminUser,
         role: "admin",
       });
       return res.json(result);
     } catch (err: unknown) {
-      if (err instanceof CustomSetEditError) return res.status(err.status).json({ error: err.message });
-      console.error("[custom-set] update failed:", err);
-      return res.status(500).json({ error: "Couldn't update set — check server logs" });
+      return sendSetLibraryError(res, err);
     }
   });
 
