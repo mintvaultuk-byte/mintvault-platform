@@ -1932,6 +1932,11 @@ export default function CertificateForm({
                     onClick={() => {
                       legacyLossAckRef.current = true;
                       setLegacyLossWarning(null);
+                      // Cancel any pending debounced auto-save first, exactly as the
+                      // "Save Now" button does — otherwise a timer armed by the edit
+                      // that triggered this warning fires after this save and costs a
+                      // redundant second PUT.
+                      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
                       // Dispatch to whichever save path this certificate uses:
                       // auto-save for an unapproved cert, the explicit form submit
                       // for a published cert or the create flow.

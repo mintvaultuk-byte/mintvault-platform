@@ -475,6 +475,74 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     expect(consolidatedVariantForLabel({} as never)).toBe("");
   });
 
+  it("SUMMARY == PREVIEW == LABEL for legacy / v2 promo-only / v2 fully-cleared / catalogue-only code", async () => {
+    const { buildPreviewFields } = await import("../shared/label-preview-fields");
+    const { applyStructuredVariantFromBody } = await import("../server/lib/structured-variant");
+
+    // The EXACT version expression both on-screen summaries compute.
+    const summaryLine = (v: Record<string, any>) => {
+      const willBe = hasStructuredVariant({
+        rarityCode: v.rarityCode?.trim?.() || null,
+        finishVariant: v.finishVariant?.trim?.() || null,
+        promoType: v.promoType?.trim?.() || null,
+        subsetName: v.subsetName?.trim?.() || null,
+      } as never);
+      const version =
+        Number(v.storedVersion ?? 0) >= CONSOLIDATED_VARIANT_SCHEME || willBe ? CONSOLIDATED_VARIANT_SCHEME : null;
+      return formatVariantLine({ ...v, structuredVariantVersion: version } as never).toUpperCase();
+    };
+    const previewLine = (saved: Record<string, any>, body: Record<string, any>) => {
+      const c: Record<string, any> = { ...saved, ...buildPreviewFields(body) };
+      c.rarity = saved.rarity;
+      c.variant = saved.variant;
+      c.variantOther = saved.variantOther;
+      applyStructuredVariantFromBody(body, c, undefined, saved.structuredVariantVersion);
+      return consolidatedVariantForLabel(c as never);
+    };
+
+    const cases: Array<[string, Record<string, any>, Record<string, any>, Record<string, any>]> = [
+      ["legacy", { variant: "COSMOS_HOLO" }, { storedVersion: null, variant: "COSMOS_HOLO" }, { variant: "COSMOS_HOLO" }],
+      [
+        "v2 promo-only",
+        { structuredVariantVersion: 2, promoType: "mcdonalds_promo", rarity: "Basic Pokémon", variant: "Holo" },
+        { storedVersion: 2, promoType: "mcdonalds_promo", rarity: "Basic Pokémon", variant: "Holo" },
+        { promoType: "mcdonalds_promo", rarity: "Basic Pokémon", variant: "Holo" },
+      ],
+      [
+        "v2 fully cleared",
+        {
+          structuredVariantVersion: 2, rarityCode: null, finishVariant: null, promoType: null,
+          rarity: "RARE_HOLO", variant: "COSMOS_HOLO", variantOther: "Prism Foil",
+        },
+        { storedVersion: 2, rarity: "RARE_HOLO", variant: "COSMOS_HOLO", variantOther: "Prism Foil" },
+        { rarityCode: "", finishVariant: "", promoType: "" },
+      ],
+      [
+        "v2 catalogue-only code",
+        { structuredVariantVersion: 2, rarityCode: "tera_hyper_rare_2026" },
+        { storedVersion: 2, rarityCode: "tera_hyper_rare_2026" },
+        { rarityCode: "tera_hyper_rare_2026" },
+      ],
+    ];
+    for (const [name, saved, sumIn, body] of cases) {
+      const label = consolidatedVariantForLabel(saved as never);
+      expect(summaryLine(sumIn), `summary != label for ${name}`).toBe(label);
+      expect(previewLine(saved, body), `preview != label for ${name}`).toBe(label);
+    }
+    // and the specific values, so a silent shift in all three at once still fails
+    expect(consolidatedVariantForLabel({ structuredVariantVersion: 2, promoType: "mcdonalds_promo", rarity: "Basic Pokémon", variant: "Holo" } as never))
+      .toBe("MCDONALD’S PROMO");
+  });
+
+  it("confirming the warning cancels the pending debounce (no redundant second PUT)", () => {
+    const confirmIdx = FORM.indexOf('data-testid="legacy-freetext-warning-confirm"');
+    const handler = FORM.slice(confirmIdx, confirmIdx + 1600);
+    expect(handler).toContain("if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);");
+    // …and it dispatches to exactly ONE path
+    expect(handler).toContain("if (autoSaveEligible) autoSaveNow();");
+    expect(handler).toContain("else formElRef.current?.requestSubmit();");
+  });
+
   it("ERA ALONE must never convert a certificate (it is a filter, not a printable field)", () => {
     // Regression for a CRITICAL: the picker's "Set era" control narrows the rarity
     // list, but its value is persisted. While hasStructuredData() counted `era`,
