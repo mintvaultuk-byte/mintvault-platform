@@ -129,11 +129,30 @@ describe("the preview cannot be rolled backwards (9-11)", () => {
     expect(refresh).not.toContain("setForm(");
   });
 
-  it("10. Card → Rarity keeps the latest in-memory values (stages hide, never unmount)", () => {
-    expect(FORM).toContain("Hidden-not-unmounted");
-    // the preview reads the same `form` object on every stage, so navigation
-    // cannot substitute older server values
-    expect(FORM).toContain("wfStage === 0 || wfStage === 1 || wfStage === 3");
+  it("10. Card → Rarity keeps the latest in-memory values (one form object, no per-stage copy)", () => {
+    // The preview is mounted ONCE, outside every stage container, and reads the single
+    // `form` object — so stage navigation cannot substitute older server values and
+    // there is no per-stage duplicate of the fields.
+    expect((FORM.match(/<CertificatePreviewPanel/g) ?? []).length).toBe(1);
+    const mountIdx = FORM.indexOf("<CertificatePreviewPanel");
+    const firstStageContainer = FORM.indexOf('data-workflow-stage=');
+    expect(mountIdx).toBeLessThan(firstStageContainer); // outside the stage containers
+    // goToStage only moves UI state — it must not write form values
+    const goTo = FORM.slice(FORM.indexOf("function goToStage"), FORM.indexOf("function goToStage") + 500);
+    expect(goTo).not.toContain("setForm(");
+  });
+
+  it("the preview remounts per certificate, so a stale rendered label cannot linger", () => {
+    const mount = FORM.slice(FORM.indexOf("<CertificatePreviewPanel"), FORM.indexOf("<CertificatePreviewPanel") + 900);
+    expect(mount).toContain('key={certificate?.id ?? "new"}');
+  });
+
+  it("the preview carries the REAL certificate number, not the MV-PREVIEW placeholder", () => {
+    expect(buildPreviewFields({ certId: "MV-0000012345", cardName: "X" }).certId).toBe("MV-0000012345");
+    // create flow still falls back to the placeholder
+    expect(buildPreviewFields({ cardName: "X" }).certId).toBe("MV-PREVIEW");
+    const mount = FORM.slice(FORM.indexOf("<CertificatePreviewPanel"), FORM.indexOf("<CertificatePreviewPanel") + 1800);
+    expect(mount).toContain("certId:");
   });
 
   it("11. certificate A values never appear under certificate B", () => {
@@ -265,12 +284,16 @@ describe("queue refresh (21)", () => {
   });
 
   it("21. final approval also invalidates the Ready To Print queue", () => {
-    // Covers BOTH bases, because the queue registers its key from its own apiBase
-    // ("/api/admin" or "/api/staff/print") — an admin-only key would be a silent
-    // no-op for an account holding both can_grade and can_print.
-    expect(PANEL).toContain('for (const b of ["/api/admin", "/api/staff/print"])');
-    expect(PANEL).toContain("`${b}/printing/workflow/queue`");
-    expect(PANEL).toContain("`${b}/printing/workflow/batches`");
+    // Anchored to the REAL approval function — asserting the loop exists anywhere in
+    // the file would pass even if it sat in an unrelated handler (it originally did).
+    const approveStart = PANEL.indexOf("async function approveGrade()");
+    expect(approveStart).toBeGreaterThan(-1);
+    const approveBody = PANEL.slice(approveStart, PANEL.indexOf("\n  }", approveStart));
+    expect(approveBody).toContain('for (const b of ["/api/admin", "/api/staff/print"])');
+    expect(approveBody).toContain("`${b}/printing/workflow/queue`");
+    expect(approveBody).toContain("`${b}/printing/workflow/batches`");
+    // covering BOTH bases matters: the queue keys off its own apiBase, so an
+    // admin-only key is a silent no-op for a can_grade+can_print account.
   });
 
   it("21. the queue re-checks on window focus (no polling, no sockets added)", () => {

@@ -1907,9 +1907,16 @@ export default function CertificateForm({
             // waits for autosave, an explicit save, a server round-trip or stage
             // navigation. Rollback protection comes from the surrounding machinery,
             // not from this mount: the auto-save replay posts the newest state, the
-            // cert→form resync only fills EMPTY fields so it cannot revert a typed
-            // value, and the per-certificate isolation effect re-seeds everything on
-            // a card switch so cert A's values can never appear under cert B.
+            // cert→form resync only fills EMPTY fields, and the per-certificate
+            // isolation effect re-seeds everything on a card switch so cert A's values
+            // can never appear under cert B.
+            //
+            // KNOWN LIMIT (pre-existing, not introduced here): that resync treats ""
+            // as fillable, so a DELIBERATELY CLEARED cardName/setName/cardNumber/year
+            // can be re-filled from the refetched row if the `certificate` prop is
+            // refreshed mid-edit (e.g. AI Identify) before the clear is persisted —
+            // the same class PR #245 fixed for rarity/finish. Tracked separately; do
+            // not read the line above as a guarantee for cleared fields.
             //
             // Which Card-stage fields visibly move the preview is decided by the
             // canonical renderer, NOT by this list: the front label prints card name,
@@ -1921,11 +1928,23 @@ export default function CertificateForm({
             below={
               wfStage === 0 || wfStage === 1 || wfStage === 3 ? (
                 <CertificatePreviewPanel
+                  // Keyed per certificate: the panel holds the rendered blob in
+                  // component state, so without a remount a "Next Card" switch left
+                  // card A's label visible under card B's image until the new render
+                  // arrived — on a surface captioned "exactly what will print".
+                  key={certificate?.id ?? "new"}
                   fields={{
                     // Editing an existing cert → the server starts from the SAVED
                     // grade/subgrade columns so the black-label (Pristine) preview
                     // matches print; absent (create flow) it renders from fields.
                     certificateId: certificate?.id ?? null,
+                    // Send the REAL certificate number. buildPreviewFields defaults
+                    // certId to "MV-PREVIEW" and the posted object wins over the saved
+                    // row, so omitting it made the preview's cert-number strip read
+                    // "-PREVIEW" while the printed label carries the real number —
+                    // contradicting this panel's own "exactly what will print" caption.
+                    // Absent (create flow) it still falls back to the placeholder.
+                    certId: (certificate as { certId?: string } | null)?.certId ?? undefined,
                     cardName: form.cardName,
                     setName: form.setName,
                     year: form.year,

@@ -36,7 +36,7 @@ export const DEFAULT_PRINT_STATE: PrintState = "awaiting_approval";
 /** Human labels for the admin UI. */
 export const PRINT_STATE_LABEL: Record<PrintState, string> = {
   awaiting_approval: "Awaiting Approval",
-  needs_printing: "Approved – Needs Printing",
+  needs_printing: "Approved – Ready To Print",
   printing: "Printing",
   printed: "Printed",
   reprint_required: "Reprint Required",

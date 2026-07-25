@@ -16,6 +16,9 @@ export interface CertificatePreviewFields {
   // When set, the server starts the preview from this saved cert's real grade /
   // subgrade / defect columns so the black-label (Pristine) preview matches print.
   certificateId?: number | null;
+  /** The real certificate number, so the preview's cert-number strip matches the
+   *  printed label instead of the "MV-PREVIEW" placeholder. */
+  certId?: string;
   cardName?: string;
   setName?: string;
   year?: string;

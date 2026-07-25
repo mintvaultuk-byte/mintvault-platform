@@ -1038,10 +1038,11 @@ export default function GradingPanel({
       queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/grading`] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/printing/browser"] });
-      // Final approval is what makes a certificate eligible for printing, so the
-      // Ready To Print queue must not keep serving a pre-approval cache. The
-      // global client sets staleTime: Infinity, so without this the queue would
-      // show stale contents for the rest of the session on this machine.
+      // Editing an ALREADY-APPROVED grade changes what the label will print, so the
+      // Ready To Print queue must not keep serving the pre-edit row. (The call that
+      // first makes a cert print-eligible is approveGrade() — it invalidates these
+      // same keys.) The global client sets staleTime: Infinity, so without this the
+      // queue could show stale contents for the rest of the session on this machine.
       // Both base variants: the queue registers its key from its own apiBase, which
       // is "/api/admin" for the admin surface and "/api/staff/print" for a
       // print-capable staff surface. Invalidating a key nothing registered is a
@@ -2062,6 +2063,17 @@ export default function GradingPanel({
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
       queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/grading`] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
+      // THIS is the call that makes a certificate print-eligible, so it is the one
+      // that must drop the Ready To Print cache. Both base variants: the queue
+      // registers its key from its own apiBase ("/api/admin" on the admin surface,
+      // "/api/staff/print" for print-capable staff); invalidating a key nothing
+      // registered is a no-op, so covering both is correct without guessing which
+      // surface is mounted. Without this the queue can serve pre-approval rows
+      // (the global client sets staleTime: Infinity).
+      for (const b of ["/api/admin", "/api/staff/print"]) {
+        queryClient.invalidateQueries({ queryKey: [`${b}/printing/workflow/queue`] });
+        queryClient.invalidateQueries({ queryKey: [`${b}/printing/workflow/batches`] });
+      }
     } catch (e: any) {
       toast({ title: "Approve failed", description: e.message, variant: "destructive" });
     } finally {
