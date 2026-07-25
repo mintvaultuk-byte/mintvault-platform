@@ -2443,6 +2443,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // NaN, so a payload without a readable `overall` would publish a corrupt grade
       // over a valid one. Reject instead. NO/AA are exempt — their grade is NULL by
       // design. Gate only: no scoring, weights, or formula logic is touched.
+      // LOCKED BUSINESS RULE (owner-approved 2026-07-25) — identical to the sibling
+      // /approve route: normal approval may NOT convert a certificate between numeric
+      // and authentication-only, and NEVER rewrites grade_type. Here the kind comes
+      // from the client's `gradeType` key rather than from `overall_grade`, but the
+      // hole is the same, so the same stored-vs-requested check applies. Comparison
+      // only — no scoring, weighting or formula logic is touched.
+      const storedGradeType = String((cert as { gradeType?: string | null }).gradeType ?? "numeric") || "numeric";
+      const storedIsNonNum = isNonNumericGrade(storedGradeType);
+      if (isNonNum !== storedIsNonNum) {
+        return res.status(400).json({
+          error: storedIsNonNum
+            ? "This certificate is authentication-only. Normal approval cannot give it a numeric grade — that would change its type."
+            : "This is a numeric certificate. Normal approval cannot convert it to authentication-only (NO/AA) — that requires the explicit Super Admin conversion action.",
+        });
+      }
+      if (isNonNum) {
+        const canonicalKind = (v: string): "NO" | "AA" => (v === "AA" || v === "authentic_altered" ? "AA" : "NO");
+        if (canonicalKind(finalGradeType) !== canonicalKind(storedGradeType)) {
+          return res.status(400).json({
+            error:
+              "Normal approval cannot change an authentication-only certificate between NO and AA — that requires the explicit Super Admin conversion action.",
+          });
+        }
+      }
+
       if (!isNonNum && (finalOverall == null || !isValidNumericGrade(finalOverall))) {
         return res.status(400).json({
           error:
@@ -2547,7 +2572,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       await db.execute(sql`
         UPDATE certificates SET
-          grade_type        = ${finalGradeType},
+          -- Invariant: normal approval NEVER changes grade_type. The gate above proved
+          -- the requested kind matches the stored record, so persisting the stored
+          -- value verbatim is equivalent for accepted payloads and structurally
+          -- incapable of rewriting the column (incl. legacy long-form aliases).
+          grade_type        = ${storedGradeType},
           -- Defence in depth behind the gate above: never let a null/NaN parameter
           -- erase a stored grade. NO/AA still clear it, by design.
           grade             = ${isNonNum ? sql`NULL` : sql`COALESCE(${finalOverall}::numeric, grade)`},
@@ -6925,6 +6954,26 @@ Defects (admin-confirmed): ${defectLines}`;
       const parsedOverall = parseFloat(overallGrade);
       const gradeNum = isNonNum ? null : isNaN(parsedOverall) ? null : parsedOverall;
 
+      // grade_type used to be derived SOLELY from this request's overall_grade, so ANY
+      // partial auto-save that omitted the field (the common case — this route fires on
+      // every autosave) rewrote grade_type to 'numeric'. On an authentication-only
+      // record that silently converted it to numeric. Proven on staging 2026-07-25:
+      // an autosave body of {"grade_explanation":"..."} flipped a stored 'NO' to
+      // 'numeric'. Per the locked business rule, a numeric <-> authentication-only
+      // conversion must be an explicit, separately-confirmed Super Admin action, never
+      // a side effect of a save. Fix: only honour a kind the caller actually stated;
+      // otherwise preserve the stored value. Preservation only — no scoring or formula
+      // logic, and an explicit NO/AA/numeric from the workstation still applies.
+      const storedGradeType = String((cert as { gradeType?: string | null }).gradeType ?? "numeric") || "numeric";
+      const overallStated = overallGrade != null && String(overallGrade).trim() !== "";
+      const nextGradeType = !overallStated
+        ? storedGradeType
+        : isNonNum
+          ? overallGrade === "AA"
+            ? "AA"
+            : "NO"
+          : "numeric";
+
       // P0 preservation helpers — return null when payload field is missing/empty/invalid,
       // so the SQL COALESCE below falls through to the existing column value.
       // (Prior `parseFloat(x) || null` idiom silently nulled rows on partial saves.)
@@ -6960,7 +7009,9 @@ Defects (admin-confirmed): ${defectLines}`;
           edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_edges)}::numeric,     edges_score)`},
           surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_surface)}::numeric,   surface_score)`},
           grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
-          grade_type          = ${isNonNum ? (overallGrade === "AA" ? "AA" : "NO") : "numeric"},
+          -- Preserves the stored kind when the caller did not state one (see nextGradeType
+          -- above): an autosave must never convert an authentication-only record to numeric.
+          grade_type          = ${nextGradeType},
           grade_strength_score = ${gradeChanged ? sql`NULL` : sql`grade_strength_score`},
           corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
           edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
@@ -7219,6 +7270,41 @@ Defects (admin-confirmed): ${defectLines}`;
         });
       }
 
+      // ── LOCKED BUSINESS RULE (owner-approved 2026-07-25): normal approval may NOT
+      // convert a certificate between numeric and authentication-only ────────────
+      // `isNonNum` above is derived SOLELY from the client-sent overall_grade, so a
+      // one-key payload (`{"overall_grade":"NO"}`) previously took the gate-exempt
+      // branch and cleared a published numeric grade plus all four sub-grades with a
+      // 200. The canonical STORED record — not the request — decides which kind of
+      // certificate this is. A numeric→authentication-only conversion must be an
+      // explicit, separately-confirmed, audited Super Admin action; this route is not
+      // that action.
+      //
+      // Fail closed in BOTH directions: the requested kind must match the stored
+      // kind, and for an already-authentication-only record the exact canonical token
+      // must match too (NO and AA print differently). Legacy long-form aliases are
+      // handled by isNonNumericGrade. Comparison only — no scoring, weighting or
+      // formula logic is touched, and grade_type is never changed by this route.
+      const storedGradeType = String((cert as { gradeType?: string | null }).gradeType ?? "numeric") || "numeric";
+      const storedIsNonNum = isNonNumericGrade(storedGradeType);
+      if (isNonNum !== storedIsNonNum) {
+        return res.status(400).json({
+          error: storedIsNonNum
+            ? "This certificate is authentication-only. Normal approval cannot give it a numeric grade — that would change its type."
+            : "This is a numeric certificate. Normal approval cannot convert it to authentication-only (NO/AA) — that requires the explicit Super Admin conversion action.",
+        });
+      }
+      if (isNonNum) {
+        // 'not_original' is the legacy long form of NO, 'authentic_altered' of AA.
+        const canonicalKind = (v: string): "NO" | "AA" => (v === "AA" || v === "authentic_altered" ? "AA" : "NO");
+        if (canonicalKind(String(overallGrade)) !== canonicalKind(storedGradeType)) {
+          return res.status(400).json({
+            error:
+              "Normal approval cannot change an authentication-only certificate between NO and AA — that requires the explicit Super Admin conversion action.",
+          });
+        }
+      }
+
       // Strength score is calibrated to the AI's overall grade. If the admin
       // changes the grade manually here, the AI-derived score is stale and
       // must be cleared. fmt() normalises 9 vs 9.0 vs null cleanly.
@@ -7308,7 +7394,6 @@ Defects (admin-confirmed): ${defectLines}`;
         )
           ? "black"
           : "Standard";
-      const gradeType = isNonNum ? (overallGrade === "AA" ? "AA" : "NO") : "numeric";
 
       await db.execute(sql`
         UPDATE certificates SET
@@ -7316,7 +7401,12 @@ Defects (admin-confirmed): ${defectLines}`;
           -- parameter erase a stored grade. Matches the guard already used by the
           -- draft-save route (PUT .../grade). NO/AA still clear it, by design.
           grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
-          grade_type          = ${gradeType},
+          -- Invariant: normal approval NEVER changes grade_type. The gate above proved
+          -- the requested kind and canonical token match the stored record, so writing
+          -- the stored value verbatim is equivalent for every accepted payload and is
+          -- structurally incapable of rewriting the column — including the legacy long
+          -- forms ('not_original'/'authentic_altered'), never normalised by an approval.
+          grade_type          = ${storedGradeType},
           centering_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentCentering}::numeric, centering_score)`},
           corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentCorners}::numeric,   corners_score)`},
           edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentEdges}::numeric,     edges_score)`},

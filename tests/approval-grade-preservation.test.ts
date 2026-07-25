@@ -232,6 +232,88 @@ describe("handler invariants: PUT /api/admin/certificates/:id/approve-grade", ()
   });
 });
 
+describe("LOCKED RULE: normal approval cannot convert numeric <-> authentication-only", () => {
+  // The canonical STORED record decides the kind, never the request. Verified over
+  // real HTTP against staging on a disposable numeric cert and a disposable
+  // authentication-only cert (evidence recorded on the PR and in the task ledger).
+  const handlers = [
+    { name: "/approve", marker: 'app.put("/api/admin/certificates/:id/approve"' },
+    { name: "/approve-grade", marker: 'app.put("/api/admin/certificates/:id/approve-grade"' },
+  ] as const;
+
+  const slice = (marker: string): string => {
+    const start = ROUTES.indexOf(marker);
+    expect(start).toBeGreaterThan(0);
+    const end = ROUTES.indexOf("\n  app.", start + 10);
+    return ROUTES.slice(start, end > start ? end : start + 20_000);
+  };
+
+  for (const h of handlers) {
+    it(`${h.name}: derives the certificate kind from the STORED record, not the request`, () => {
+      const s = slice(h.marker);
+      expect(s).toContain("const storedIsNonNum = isNonNumericGrade(storedGradeType)");
+      expect(s).toMatch(/if \(isNonNum !== storedIsNonNum\) \{[\s\S]{0,400}?res\.status\(400\)/);
+    });
+
+    it(`${h.name}: rejects a NO<->AA switch on an authentication-only record`, () => {
+      const s = slice(h.marker);
+      expect(s).toContain("canonicalKind");
+      expect(s).toMatch(/canonicalKind\([\s\S]{0,80}?\) !== canonicalKind\(storedGradeType\)[\s\S]{0,300}?res\.status\(400\)/);
+    });
+
+    it(`${h.name}: persists the STORED grade_type, so approval cannot rewrite the column`, () => {
+      const s = slice(h.marker);
+      expect(s).toMatch(/grade_type\s+= \$\{storedGradeType\}/);
+      // The old client-derived forms must be gone.
+      expect(s).not.toContain('const gradeType = isNonNum ? (overallGrade === "AA" ? "AA" : "NO") : "numeric";');
+      expect(s).not.toMatch(/grade_type\s+= \$\{finalGradeType\}/);
+    });
+
+    it(`${h.name}: the kind gate runs BEFORE the UPDATE`, () => {
+      const s = slice(h.marker);
+      expect(s.indexOf("storedIsNonNum")).toBeLessThan(s.indexOf("UPDATE certificates SET"));
+    });
+  }
+
+  it("legacy long-form aliases count as authentication-only on both sides of the check", async () => {
+    const { isNonNumericGrade } = await import("../shared/schema");
+    for (const t of ["NO", "AA", "not_original", "authentic_altered"]) expect(isNonNumericGrade(t)).toBe(true);
+    for (const t of ["numeric", "", "banana"]) expect(isNonNumericGrade(t)).toBe(false);
+  });
+
+  it("the canonical NO/AA mapping treats each legacy alias as its short form", () => {
+    // Mirrors the helper in both handlers.
+    const canonicalKind = (v: string): "NO" | "AA" => (v === "AA" || v === "authentic_altered" ? "AA" : "NO");
+    expect(canonicalKind("AA")).toBe("AA");
+    expect(canonicalKind("authentic_altered")).toBe("AA");
+    expect(canonicalKind("NO")).toBe("NO");
+    expect(canonicalKind("not_original")).toBe("NO");
+  });
+});
+
+describe("write semantics: grade_type is never rewritten by approval (real PostgreSQL)", () => {
+  it("persisting the stored value is a no-op for a numeric record", async () => {
+    await seed();
+    await pool.query("UPDATE certificates SET grade_type = (SELECT grade_type FROM certificates WHERE id = 1) WHERE id = 1");
+    const r = await pool.query<{ grade_type: string }>("SELECT grade_type FROM certificates WHERE id = 1");
+    expect(r.rows[0].grade_type).toBe("numeric");
+  });
+
+  it("a legacy long-form alias survives approval unchanged (not normalised to NO)", async () => {
+    await pool.query("DELETE FROM certificates");
+    await pool.query(
+      "INSERT INTO certificates (id, certificate_number, grade, grade_type, auth_status) VALUES (1,'MVAUTH',NULL,'not_original','not_original')"
+    );
+    // The shipped statement writes ${storedGradeType} — i.e. the value just read back.
+    await pool.query("UPDATE certificates SET grade_type = $1 WHERE id = 1", ["not_original"]);
+    const r = await pool.query<{ grade_type: string; grade: string | null }>(
+      "SELECT grade_type, grade::text AS grade FROM certificates WHERE id = 1"
+    );
+    expect(r.rows[0].grade_type).toBe("not_original");
+    expect(r.rows[0].grade).toBeNull();
+  });
+});
+
 describe("the published overall grade is parsed strictly, not with parseFloat", () => {
   // parseFloat is a PREFIX parser, so "7.5abc" -> 7.5 and [8] -> 8 would publish a
   // grade the operator never entered. Both approval routes now use a strict decimal
@@ -298,6 +380,48 @@ describe("handler invariants: PUT /api/admin/certificates/:id/grade (draft save)
 
   it("keeps its pre-existing COALESCE guard on the grade column", () => {
     expect(gradeHandler()).toMatch(/grade\s+= \$\{isNonNum \? sql`NULL` : sql`COALESCE\(/);
+  });
+
+  it("does NOT rewrite grade_type from a partial payload — an autosave cannot convert a record", () => {
+    // Proven on staging 2026-07-25: pre-fix, an autosave body of
+    // {"grade_explanation":"..."} flipped a stored grade_type of 'NO' to 'numeric',
+    // silently converting an authentication-only certificate to numeric. This route
+    // fires on EVERY autosave, so the exposure was continuous.
+    const h = gradeHandler();
+    expect(h).not.toContain('grade_type          = ${isNonNum ? (overallGrade === "AA" ? "AA" : "NO") : "numeric"}');
+    expect(h).toMatch(/grade_type\s+= \$\{nextGradeType\}/);
+    // The stored value must be the fallback when the caller states no kind.
+    expect(h).toContain("const overallStated = overallGrade != null && String(overallGrade).trim() !== \"\"");
+    expect(h).toMatch(/const nextGradeType = !overallStated\s*\?\s*storedGradeType/);
+  });
+
+  it("still honours an explicit kind stated by the workstation", () => {
+    // Preservation must not become "ignore the operator": a stated NO/AA/numeric applies.
+    const h = gradeHandler();
+    const decl = h.slice(h.indexOf("const nextGradeType"), h.indexOf("const nextGradeType") + 260);
+    expect(decl).toContain('"AA"');
+    expect(decl).toContain('"NO"');
+    expect(decl).toContain('"numeric"');
+  });
+});
+
+describe("write semantics: a partial autosave preserves the stored kind (real PostgreSQL)", () => {
+  it("omitted kind keeps 'NO'; stated kind applies", async () => {
+    await pool.query("DELETE FROM certificates");
+    await pool.query(
+      "INSERT INTO certificates (id, certificate_number, grade, grade_type, auth_status) VALUES (1,'MVAUTH',NULL,'NO','not_original')"
+    );
+    const stored = "NO";
+    // Omitted -> nextGradeType resolves to the stored value.
+    await pool.query("UPDATE certificates SET grade_type = $1 WHERE id = 1", [stored]);
+    expect((await pool.query<{ t: string }>("SELECT grade_type AS t FROM certificates WHERE id = 1")).rows[0].t).toBe(
+      "NO"
+    );
+    // Stated numeric -> applies.
+    await pool.query("UPDATE certificates SET grade_type = $1 WHERE id = 1", ["numeric"]);
+    expect((await pool.query<{ t: string }>("SELECT grade_type AS t FROM certificates WHERE id = 1")).rows[0].t).toBe(
+      "numeric"
+    );
   });
 });
 
