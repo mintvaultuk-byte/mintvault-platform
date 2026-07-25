@@ -2426,6 +2426,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const finalGradeType = gradeType || "numeric";
       const isNonNum = isNonNumericGrade(finalGradeType);
       const finalOverall = isNonNum ? null : parseFloat(overall);
+      // Malformed-payload gate (same class as the MV205 grade-erasure on the sibling
+      // /approve route). `parseFloat(undefined)` is NaN, and Postgres `numeric` accepts
+      // NaN, so a payload without a readable `overall` would publish a corrupt grade
+      // over a valid one. Reject instead. NO/AA are exempt — their grade is NULL by
+      // design. Gate only: no scoring, weights, or formula logic is touched.
+      if (!isNonNum && !Number.isFinite(finalOverall)) {
+        return res.status(400).json({
+          error:
+            "Cannot approve without a numeric overall grade. The approval payload is missing or has an unreadable overall grade — reopen the grading workstation and approve from there.",
+        });
+      }
       // label_type (Pristine/black) is computed below, AFTER the MVGS run, so
       // the shared isBlackLabel() gate can see the raw per-category deductions —
       // a card that buckets to a 10 chip but carries real defect deduction must
@@ -2525,7 +2536,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await db.execute(sql`
         UPDATE certificates SET
           grade_type        = ${finalGradeType},
-          grade             = ${isNonNum ? null : finalOverall},
+          -- Defence in depth behind the gate above: never let a null/NaN parameter
+          -- erase a stored grade. NO/AA still clear it, by design.
+          grade             = ${isNonNum ? sql`NULL` : sql`COALESCE(${finalOverall}::numeric, grade)`},
           centering_score   = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(centering)}::numeric, centering_score)`},
           corners_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(corners)}::numeric,   corners_score)`},
           edges_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(edges)}::numeric,     edges_score)`},
@@ -6948,7 +6961,11 @@ Defects (admin-confirmed): ${defectLines}`;
               ? sql`${JSON.stringify(b.ai_defect_candidates)}::jsonb`
               : sql`ai_defect_candidates`
           },
-          auth_status         = ${b.auth_status || "genuine"},
+          -- Preserve on omission rather than resetting to the most permissive value:
+          -- a payload without auth_status must not silently downgrade an
+          -- 'authentic_altered' record to 'genuine'. New rows default to 'genuine'
+          -- at the column level, so behaviour for a genuinely-new cert is unchanged.
+          auth_status         = COALESCE(${txt(b.auth_status)}, auth_status, 'genuine'),
           auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
           private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
@@ -7153,6 +7170,20 @@ Defects (admin-confirmed): ${defectLines}`;
         });
       }
 
+      // Overall-grade presence gate. The B3 gate above only inspects sub-grades, so a
+      // payload carrying sub-grades but no parseable `overall_grade` used to reach the
+      // UPDATE with gradeNum === null and silently NULL out a published grade (MV205,
+      // 2026-07-25: an empty `{}` body returned 200 and erased a stored 8.0). Reject the
+      // malformed payload instead of erasing the value. Non-numeric grades (NO/AA) are
+      // exempt by design — their `grade` column is NULL. Gate only: no scoring, weights,
+      // or formula logic is touched.
+      if (!isNonNum && gradeNum == null) {
+        return res.status(400).json({
+          error:
+            "Cannot approve without a numeric overall grade. The approval payload is missing or has an unreadable overall grade — reopen the grading workstation and approve from there.",
+        });
+      }
+
       // Strength score is calibrated to the AI's overall grade. If the admin
       // changes the grade manually here, the AI-derived score is stale and
       // must be cleared. fmt() normalises 9 vs 9.0 vs null cleanly.
@@ -7246,7 +7277,10 @@ Defects (admin-confirmed): ${defectLines}`;
 
       await db.execute(sql`
         UPDATE certificates SET
-          grade               = ${gradeNum},
+          -- Defence in depth behind the overall-grade gate above: never let a null
+          -- parameter erase a stored grade. Matches the guard already used by the
+          -- draft-save route (PUT .../grade). NO/AA still clear it, by design.
+          grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
           grade_type          = ${gradeType},
           centering_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentCentering}::numeric, centering_score)`},
           corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentCorners}::numeric,   corners_score)`},
@@ -7261,7 +7295,11 @@ Defects (admin-confirmed): ${defectLines}`;
           edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
           surface_values      = COALESCE(${jsn(b.surface)}::jsonb, surface_values),
           defects             = COALESCE(${jsn(b.defects)}::jsonb, defects),
-          auth_status         = ${b.auth_status || "genuine"},
+          -- Preserve on omission rather than resetting to the most permissive value:
+          -- a payload without auth_status must not silently downgrade an
+          -- 'authentic_altered' record to 'genuine'. New rows default to 'genuine'
+          -- at the column level, so behaviour for a genuinely-new cert is unchanged.
+          auth_status         = COALESCE(${txt(b.auth_status)}, auth_status, 'genuine'),
           auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
           private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
