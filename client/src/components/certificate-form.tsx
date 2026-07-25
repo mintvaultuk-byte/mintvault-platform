@@ -1896,17 +1896,55 @@ export default function CertificateForm({
             certificateId={certificate?.id ?? null}
             frontFile={frontImage}
             backFile={backImage}
-            // Live front-certificate preview on Rarity + Review only (reuses the
-            // real print pipeline, read-only). Card stage passes no `below`, so
-            // its layout is byte-identical to before.
+            // Live front-certificate preview on Card (0), Rarity (1) and Review (3)
+            // — the SAME component, the SAME canonical server renderer, in the SAME
+            // left-column position directly under the card image. Grade (2) is the
+            // only stage without it, because that stage renders the grading
+            // workstationSlot in this column instead.
+            //
+            // The panel is fed from CURRENT in-memory `form` state — never from the
+            // saved `certificate` prop — so it tracks typing immediately and never
+            // waits for autosave, an explicit save, a server round-trip or stage
+            // navigation. Rollback protection comes from the surrounding machinery,
+            // not from this mount: the auto-save replay posts the newest state, the
+            // cert→form resync only fills EMPTY fields, and the per-certificate
+            // isolation effect re-seeds everything on a card switch so cert A's values
+            // can never appear under cert B.
+            //
+            // KNOWN LIMIT (pre-existing, not introduced here): that resync treats ""
+            // as fillable, so a DELIBERATELY CLEARED cardName/setName/cardNumber/year
+            // can be re-filled from the refetched row if the `certificate` prop is
+            // refreshed mid-edit (e.g. AI Identify) before the clear is persisted —
+            // the same class PR #245 fixed for rarity/finish. Tracked separately; do
+            // not read the line above as a guarantee for cleared fields.
+            //
+            // Which Card-stage fields visibly move the preview is decided by the
+            // canonical renderer, NOT by this list: the front label prints card name,
+            // year + set name, the set suffix, the consolidated variant line, the
+            // grade panel and the card number. `language` and `collectionCode` are
+            // sent for cert-shape fidelity but are NOT printed on the front label
+            // today (buildCollectionLine is dead code), so they are deliberately not
+            // claimed as live-updating — and no dead label field is activated here.
             below={
-              wfStage === 1 || wfStage === 3 ? (
+              wfStage === 0 || wfStage === 1 || wfStage === 3 ? (
                 <CertificatePreviewPanel
+                  // Keyed per certificate: the panel holds the rendered blob in
+                  // component state, so without a remount a "Next Card" switch left
+                  // card A's label visible under card B's image until the new render
+                  // arrived — on a surface captioned "exactly what will print".
+                  key={certificate?.id ?? "new"}
                   fields={{
                     // Editing an existing cert → the server starts from the SAVED
                     // grade/subgrade columns so the black-label (Pristine) preview
                     // matches print; absent (create flow) it renders from fields.
                     certificateId: certificate?.id ?? null,
+                    // Send the REAL certificate number. buildPreviewFields defaults
+                    // certId to "MV-PREVIEW" and the posted object wins over the saved
+                    // row, so omitting it made the preview's cert-number strip read
+                    // "-PREVIEW" while the printed label carries the real number —
+                    // contradicting this panel's own "exactly what will print" caption.
+                    // Absent (create flow) it still falls back to the placeholder.
+                    certId: (certificate as { certId?: string } | null)?.certId ?? undefined,
                     cardName: form.cardName,
                     setName: form.setName,
                     year: form.year,
