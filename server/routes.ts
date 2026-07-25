@@ -1,4 +1,11 @@
 import { sendServerError } from "./lib/error-response";
+import {
+  kindOfGradeType,
+  kindOfOverallGrade,
+  rejectKindChange,
+  gradeTypeToPersist,
+  normaliseGradeType,
+} from "./lib/grade-kind";
 import { normalizeCertId, certNumberFromId } from "./lib/cert-id";
 import { ensurePerfIndexes } from "./lib/perf-indexes";
 import { applyStructuredVariantFromBody } from "./lib/structured-variant";
@@ -2425,7 +2432,59 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const finalGradeType = gradeType || "numeric";
       const isNonNum = isNonNumericGrade(finalGradeType);
-      const finalOverall = isNonNum ? null : parseFloat(overall);
+      // Strict parse (see the matching helper on the sibling /approve route): parseFloat
+      // is a prefix parser, so "7.5abc" would publish 7.5 and [8] would publish 8.
+      const strictGrade = (v: unknown): number | null => {
+        if (typeof v === "number") return Number.isFinite(v) ? v : null;
+        if (typeof v !== "string") return null;
+        const t = v.trim();
+        // Plain decimal only. Number() also accepts hex ("0x0A" -> 10), binary and
+        // exponent forms, none of which any client sends for a card grade.
+        if (!/^-?\d+(\.\d+)?$/.test(t)) return null;
+        const n = Number(t);
+        return Number.isFinite(n) ? n : null;
+      };
+      const finalOverall = isNonNum ? null : strictGrade(overall);
+      // Malformed-payload gate (same class as the MV205 grade-erasure on the sibling
+      // /approve route). `parseFloat(undefined)` is NaN, and Postgres `numeric` accepts
+      // NaN, so a payload without a readable `overall` would publish a corrupt grade
+      // over a valid one. Reject instead. NO/AA are exempt — their grade is NULL by
+      // design. Gate only: no scoring, weights, or formula logic is touched.
+      // LOCKED BUSINESS RULE (owner-approved 2026-07-25) — identical to the sibling
+      // /approve route: normal approval may NOT convert a certificate between numeric
+      // and authentication-only, and NEVER rewrites grade_type. Here the kind comes
+      // from the client's `gradeType` key rather than from `overall_grade`, but the
+      // hole is the same, so the same stored-vs-requested check applies. Comparison
+      // only — no scoring, weighting or formula logic is touched.
+      const storedGradeType = normaliseGradeType((cert as { gradeType?: string | null }).gradeType);
+      const requestedKind = kindOfGradeType(finalGradeType);
+      const kindRejection = rejectKindChange({
+        storedGradeType,
+        requestedKind,
+        isApproved: (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt != null,
+        allowChangeWhenUnapproved: false,
+      });
+      if (kindRejection) {
+        try {
+          await storage.writeAuditLog(
+            "certificate",
+            String((cert as { certId?: string }).certId ?? id),
+            "approval_kind_change_rejected",
+            (req.session as { adminEmail?: string })?.adminEmail || "admin",
+            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve-grade" },
+          );
+        } catch (auditErr) {
+          console.warn("[approve-grade] kind-rejection audit failed:", (auditErr as Error).message);
+        }
+        return res.status(400).json({ error: kindRejection });
+      }
+
+      if (!isNonNum && (finalOverall == null || !isValidNumericGrade(finalOverall))) {
+        return res.status(400).json({
+          error:
+            "Cannot approve without a valid numeric overall grade (1–10, half grades allowed). The approval payload is missing or has an unreadable overall grade — reopen the grading workstation and approve from there.",
+        });
+      }
       // label_type (Pristine/black) is computed below, AFTER the MVGS run, so
       // the shared isBlackLabel() gate can see the raw per-category deductions —
       // a card that buckets to a 10 chip but carries real defect deduction must
@@ -2524,8 +2583,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       await db.execute(sql`
         UPDATE certificates SET
-          grade_type        = ${finalGradeType},
-          grade             = ${isNonNum ? null : finalOverall},
+          -- Invariant: normal approval NEVER changes grade_type. The gate above proved
+          -- the requested kind matches the stored record, so persisting the stored
+          -- value verbatim is equivalent for accepted payloads and structurally
+          -- incapable of rewriting the column (incl. legacy long-form aliases).
+          grade_type        = ${storedGradeType},
+          -- Defence in depth behind the gate above: never let a null/NaN parameter
+          -- erase a stored grade. NO/AA still clear it, by design.
+          grade             = ${isNonNum ? sql`NULL` : sql`COALESCE(${finalOverall}::numeric, grade)`},
           centering_score   = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(centering)}::numeric, centering_score)`},
           corners_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(corners)}::numeric,   corners_score)`},
           edges_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(edges)}::numeric,     edges_score)`},
@@ -4101,8 +4166,40 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           if (uploadErr) return res.status(400).json({ error: uploadErr });
         }
 
-        const gradeTypeUpdate = req.body.gradeType || existing.gradeType || "numeric";
-        const isNonNumUpdate = isNonNumericGrade(gradeTypeUpdate);
+        // Locked NO rule on the metadata editor too: its Grade Type dropdown could
+        // convert a PUBLISHED numeric certificate to authentication-only and null its
+        // grade in the same write (finalGradeOverall below is forced to null for a
+        // non-numeric kind). Ordinary editing of an unapproved certificate is still
+        // allowed; changing a published certificate's kind is refused and routed to
+        // Super Admin Correction Mode. Comparison only — no scoring logic touched.
+        const storedGradeTypeUpdate = normaliseGradeType(existing.gradeType);
+        const requestedKindUpdate = kindOfGradeType(req.body.gradeType || storedGradeTypeUpdate);
+        const kindRejectionUpdate = rejectKindChange({
+          storedGradeType: storedGradeTypeUpdate,
+          requestedKind: requestedKindUpdate,
+          isApproved: existing.gradeApprovedAt != null,
+          allowChangeWhenUnapproved: true,
+        });
+        if (kindRejectionUpdate) {
+          try {
+            await storage.writeAuditLog(
+              "certificate",
+              String((existing as { certId?: string }).certId ?? id),
+              "edit_kind_change_rejected",
+              (req.session as { adminEmail?: string })?.adminEmail || "admin",
+              {
+                stored_grade_type: storedGradeTypeUpdate,
+                requested_kind: requestedKindUpdate,
+                route: "certificate-update",
+              },
+            );
+          } catch (auditErr) {
+            console.warn("[cert-update] kind-rejection audit failed:", (auditErr as Error).message);
+          }
+          return res.status(400).json({ error: kindRejectionUpdate });
+        }
+        const gradeTypeUpdate = gradeTypeToPersist(storedGradeTypeUpdate, requestedKindUpdate);
+        const isNonNumUpdate = requestedKindUpdate !== "numeric";
 
         if (!isNonNumUpdate && req.body.gradeOverall) {
           const g = Number(req.body.gradeOverall);
@@ -6896,9 +6993,61 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const b = req.body;
       const overallGrade = b.overall_grade;
-      const isNonNum = overallGrade === "AA" || overallGrade === "NO";
+      const isNonNumRequested = overallGrade === "AA" || overallGrade === "NO";
       const parsedOverall = parseFloat(overallGrade);
-      const gradeNum = isNonNum ? null : isNaN(parsedOverall) ? null : parsedOverall;
+      const gradeNum = isNonNumRequested ? null : isNaN(parsedOverall) ? null : parsedOverall;
+
+      // grade_type used to be derived SOLELY from this request's overall_grade, so ANY
+      // partial auto-save that omitted the field (the common case — this route fires on
+      // every autosave) rewrote grade_type to 'numeric'. On an authentication-only
+      // record that silently converted it to numeric. Proven on staging 2026-07-25:
+      // an autosave body of {"grade_explanation":"..."} flipped a stored 'NO' to
+      // 'numeric'. Per the locked business rule, a numeric <-> authentication-only
+      // conversion must be an explicit, separately-confirmed Super Admin action, never
+      // a side effect of a save. Fix: only honour a kind the caller actually stated;
+      // otherwise preserve the stored value. Preservation only — no scoring or formula
+      // logic, and an explicit NO/AA/numeric from the workstation still applies.
+      const storedGradeType = normaliseGradeType((cert as { gradeType?: string | null }).gradeType);
+      const overallStated = overallGrade != null && String(overallGrade).trim() !== "";
+      // CRITICAL (found by hostile review of the first version of this fix): giving this
+      // route only preserve-on-omission left a one-key body — {"overall_grade":"NO"} —
+      // able to convert a LIVE PUBLISHED numeric certificate to authentication-only and
+      // null its grade AND all four sub-grades, with a 200. This route's UPDATE has no
+      // grade_approved_at guard, so published rows are writable here.
+      //
+      // Locked rule, applied through the shared helper: setting the kind on a certificate
+      // that has never been approved is ordinary grading work and stays allowed (a card
+      // must be gradeable as authentication-only in the first place); changing the kind of
+      // an ALREADY-PUBLISHED certificate is refused and routed to Super Admin Correction
+      // Mode. An unstated kind always preserves the stored value.
+      const requestedKind = overallStated ? kindOfOverallGrade(overallGrade) : kindOfGradeType(storedGradeType);
+      const kindRejection = overallStated
+        ? rejectKindChange({
+            storedGradeType,
+            requestedKind,
+            isApproved: (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt != null,
+            allowChangeWhenUnapproved: true,
+          })
+        : null;
+      if (kindRejection) {
+        try {
+          await storage.writeAuditLog(
+            "certificate",
+            String((cert as { certId?: string }).certId ?? id),
+            "grade_kind_change_rejected",
+            (req.session as { adminEmail?: string })?.adminEmail || "admin",
+            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "grade" },
+          );
+        } catch (auditErr) {
+          console.warn("[grade] kind-rejection audit failed:", (auditErr as Error).message);
+        }
+        return res.status(400).json({ error: kindRejection });
+      }
+      const nextGradeType = gradeTypeToPersist(storedGradeType, requestedKind);
+      // The NULL-out branches below must follow the RESOLVED kind, never the raw request:
+      // otherwise a body whose kind change was refused (or simply omitted) could still
+      // null the grade and sub-grades while grade_type kept its stored value.
+      const isNonNum = requestedKind !== "numeric";
 
       // P0 preservation helpers — return null when payload field is missing/empty/invalid,
       // so the SQL COALESCE below falls through to the existing column value.
@@ -6935,7 +7084,9 @@ Defects (admin-confirmed): ${defectLines}`;
           edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_edges)}::numeric,     edges_score)`},
           surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_surface)}::numeric,   surface_score)`},
           grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
-          grade_type          = ${isNonNum ? (overallGrade === "AA" ? "AA" : "NO") : "numeric"},
+          -- Preserves the stored kind when the caller did not state one (see nextGradeType
+          -- above): an autosave must never convert an authentication-only record to numeric.
+          grade_type          = ${nextGradeType},
           grade_strength_score = ${gradeChanged ? sql`NULL` : sql`grade_strength_score`},
           corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
           edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
@@ -6948,7 +7099,11 @@ Defects (admin-confirmed): ${defectLines}`;
               ? sql`${JSON.stringify(b.ai_defect_candidates)}::jsonb`
               : sql`ai_defect_candidates`
           },
-          auth_status         = ${b.auth_status || "genuine"},
+          -- Preserve on omission rather than resetting to the most permissive value:
+          -- a payload without auth_status must not silently downgrade an
+          -- 'authentic_altered' record to 'genuine'. New rows default to 'genuine'
+          -- at the column level, so behaviour for a genuinely-new cert is unchanged.
+          auth_status         = COALESCE(${txt(b.auth_status)}, auth_status, 'genuine'),
           auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
           private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
@@ -7120,7 +7275,23 @@ Defects (admin-confirmed): ${defectLines}`;
       const txt = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
       const jsn = (v: unknown): string | null => (v != null ? JSON.stringify(v) : null);
 
-      const gradeNum = isNonNum ? null : num(overallGrade);
+      // STRICT parse for the published overall grade only (sub-grades keep num(), and
+      // are COALESCE-protected anyway). num() is parseFloat-based, i.e. a *prefix*
+      // parser: "7.5abc" -> 7.5 and [8] -> 8, so a malformed payload could publish a
+      // grade the operator never entered. Number() on a string plus an explicit type
+      // check rejects both. Every legitimate value (a JS number, or a numeric string
+      // such as "8", "8.0", " 8.5 ") still parses identically.
+      const strictGrade = (v: unknown): number | null => {
+        if (typeof v === "number") return Number.isFinite(v) ? v : null;
+        if (typeof v !== "string") return null;
+        const t = v.trim();
+        // Plain decimal only. Number() also accepts hex ("0x0A" -> 10), binary and
+        // exponent forms, none of which any client sends for a card grade.
+        if (!/^-?\d+(\.\d+)?$/.test(t)) return null;
+        const n = Number(t);
+        return Number.isFinite(n) ? n : null;
+      };
+      const gradeNum = isNonNum ? null : strictGrade(overallGrade);
       const sentCentering = isNonNum ? null : num(b.grade_centering);
       const sentCorners = isNonNum ? null : num(b.grade_corners);
       const sentEdges = isNonNum ? null : num(b.grade_edges);
@@ -7151,6 +7322,67 @@ Defects (admin-confirmed): ${defectLines}`;
           error:
             "Cannot publish a numeric grade without all four sub-grades (centering, corners, edges, surface). Re-run the MVGS workstation so the sub-grades populate, then approve.",
         });
+      }
+
+      // Overall-grade presence gate. The B3 gate above only inspects sub-grades, so a
+      // payload carrying sub-grades but no parseable `overall_grade` used to reach the
+      // UPDATE with gradeNum === null and silently NULL out a published grade (MV205,
+      // 2026-07-25: an empty `{}` body returned 200 and erased a stored 8.0). Reject the
+      // malformed payload instead of erasing the value. Non-numeric grades (NO/AA) are
+      // exempt by design — their `grade` column is NULL. Gate only: no scoring, weights,
+      // or formula logic is touched.
+      // isValidNumericGrade (the repo's existing predicate, already used by the other
+      // grade write paths at ~L3884/L4122) rather than a bare null check: num() is a
+      // prefix parser, so "7.5abc" -> 7.5, "1e2" -> 100, [8] -> 8, and 0/-5/Infinity
+      // all pass a presence-only test. Verified before adopting: every grade the MVGS
+      // engine can emit is a member of NUMERIC_GRADE_VALUES, and neither staging nor
+      // production holds a single off-ladder grade, so no legitimate re-approval is
+      // newly rejected. Membership check only — no scoring or formula logic.
+      if (!isNonNum && (gradeNum == null || !isValidNumericGrade(gradeNum))) {
+        return res.status(400).json({
+          error:
+            "Cannot approve without a valid numeric overall grade (1–10, half grades allowed). The approval payload is missing or has an unreadable overall grade — reopen the grading workstation and approve from there.",
+        });
+      }
+
+      // ── LOCKED BUSINESS RULE (owner-approved 2026-07-25): normal approval may NOT
+      // convert a certificate between numeric and authentication-only ────────────
+      // `isNonNum` above is derived SOLELY from the client-sent overall_grade, so a
+      // one-key payload (`{"overall_grade":"NO"}`) previously took the gate-exempt
+      // branch and cleared a published numeric grade plus all four sub-grades with a
+      // 200. The canonical STORED record — not the request — decides which kind of
+      // certificate this is. A numeric→authentication-only conversion must be an
+      // explicit, separately-confirmed, audited Super Admin action; this route is not
+      // that action.
+      //
+      // Fail closed in BOTH directions: the requested kind must match the stored
+      // kind, and for an already-authentication-only record the exact canonical token
+      // must match too (NO and AA print differently). Legacy long-form aliases are
+      // handled by isNonNumericGrade. Comparison only — no scoring, weighting or
+      // formula logic is touched, and grade_type is never changed by this route.
+      const storedGradeType = normaliseGradeType((cert as { gradeType?: string | null }).gradeType);
+      const requestedKind = kindOfOverallGrade(overallGrade);
+      // Approval may NEVER change the kind (allowChangeWhenUnapproved: false).
+      const kindRejection = rejectKindChange({
+        storedGradeType,
+        requestedKind,
+        isApproved: (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt != null,
+        allowChangeWhenUnapproved: false,
+      });
+      if (kindRejection) {
+        // Audited: an attempted violation of the locked rule must not be silent.
+        try {
+          await storage.writeAuditLog(
+            "certificate",
+            String((cert as { certId?: string }).certId ?? id),
+            "approval_kind_change_rejected",
+            (req.session as { adminEmail?: string })?.adminEmail || "admin",
+            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve" },
+          );
+        } catch (auditErr) {
+          console.warn("[approve] kind-rejection audit failed:", (auditErr as Error).message);
+        }
+        return res.status(400).json({ error: kindRejection });
       }
 
       // Strength score is calibrated to the AI's overall grade. If the admin
@@ -7242,12 +7474,19 @@ Defects (admin-confirmed): ${defectLines}`;
         )
           ? "black"
           : "Standard";
-      const gradeType = isNonNum ? (overallGrade === "AA" ? "AA" : "NO") : "numeric";
 
       await db.execute(sql`
         UPDATE certificates SET
-          grade               = ${gradeNum},
-          grade_type          = ${gradeType},
+          -- Defence in depth behind the overall-grade gate above: never let a null
+          -- parameter erase a stored grade. Matches the guard already used by the
+          -- draft-save route (PUT .../grade). NO/AA still clear it, by design.
+          grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
+          -- Invariant: normal approval NEVER changes grade_type. The gate above proved
+          -- the requested kind and canonical token match the stored record, so writing
+          -- the stored value verbatim is equivalent for every accepted payload and is
+          -- structurally incapable of rewriting the column — including the legacy long
+          -- forms ('not_original'/'authentic_altered'), never normalised by an approval.
+          grade_type          = ${storedGradeType},
           centering_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentCentering}::numeric, centering_score)`},
           corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentCorners}::numeric,   corners_score)`},
           edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${sentEdges}::numeric,     edges_score)`},
@@ -7261,7 +7500,11 @@ Defects (admin-confirmed): ${defectLines}`;
           edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
           surface_values      = COALESCE(${jsn(b.surface)}::jsonb, surface_values),
           defects             = COALESCE(${jsn(b.defects)}::jsonb, defects),
-          auth_status         = ${b.auth_status || "genuine"},
+          -- Preserve on omission rather than resetting to the most permissive value:
+          -- a payload without auth_status must not silently downgrade an
+          -- 'authentic_altered' record to 'genuine'. New rows default to 'genuine'
+          -- at the column level, so behaviour for a genuinely-new cert is unchanged.
+          auth_status         = COALESCE(${txt(b.auth_status)}, auth_status, 'genuine'),
           auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
           private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
