@@ -24,6 +24,10 @@ export interface VariantSummaryValues {
   rarity?: string;
   variantOther?: string;
   rarityOther?: string;
+  /** The certificate's STORED scheme version. Once >= 2 the cert is consolidated
+   *  and prints structured-only even with everything cleared, so the stored value
+   *  must win over "is anything selected right now". */
+  storedVersion?: number | null;
 }
 
 function Line({ label, children }: { label: string; children: React.ReactNode }) {
@@ -72,7 +76,13 @@ export function VariantSummary({ values }: { values: VariantSummaryValues }) {
     // client's SEED catalogue, so a Catalogue-Manager-only code (or a
     // whitespace-only value) would disagree with what the save actually stamps
     // and this line would differ from the printed label.
-    structuredVariantVersion: willBeConsolidated ? CONSOLIDATED_VARIANT_SCHEME : null,
+    // Sticky: an already-consolidated cert stays consolidated even when every
+    // field is cleared — otherwise this line would fold legacy wording back in
+    // while the printed label (correctly) shows nothing.
+    structuredVariantVersion:
+      Number(values.storedVersion ?? 0) >= CONSOLIDATED_VARIANT_SCHEME || willBeConsolidated
+        ? CONSOLIDATED_VARIANT_SCHEME
+        : null,
   });
 
   return (

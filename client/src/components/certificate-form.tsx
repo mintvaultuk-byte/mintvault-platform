@@ -414,6 +414,10 @@ export default function CertificateForm({
   // warning appears ONCE, at the boundary — never again on a v2 certificate.
   const [legacyLossWarning, setLegacyLossWarning] = useState<string[] | null>(null);
   const legacyLossAckRef = useRef(false);
+  // Lets the warning's "Convert and save" button re-run the correct save path:
+  // the auto-saving path for an unapproved cert, or the explicit form submit
+  // (published cert / create flow) — which is the path that bypassed the warning.
+  const formElRef = useRef<HTMLFormElement | null>(null);
 
   // Label-freshness signal for the Review certificate preview. Compares ONLY the
   // fields that affect the printed label against the last SAVED snapshot (server
@@ -1519,6 +1523,26 @@ export default function CertificateForm({
       return;
     }
 
+    // Same one-time conversion warning as the auto-save path. This is the branch an
+    // ALREADY-APPROVED (published) certificate uses — the population where losing a
+    // printed wording matters most — plus the create flow, so the operator is warned
+    // on every save that can convert, not only on the auto-saving path.
+    if (!legacyLossAckRef.current) {
+      const lost = legacyFreeTextLostOnConversion({
+        currentVersion: savedConsolidatedRef.current ? CONSOLIDATED_VARIANT_SCHEME : 0,
+        variantOther: form.variantOther,
+        rarityOther: form.rarityOther,
+        rarityCode: form.rarityCode,
+        finishVariant: form.finishVariant,
+        promoType: form.promoType,
+        subsetName: form.subsetName,
+      });
+      if (lost.length > 0) {
+        setLegacyLossWarning(lost);
+        return; // held until the operator confirms or changes the selection
+      }
+    }
+
     // Grade is optional on initial save — can be set later via the workstation
     if (!isNonNum && form.gradeOverall) {
       const grade = parseFloat(form.gradeOverall);
@@ -1879,6 +1903,56 @@ export default function CertificateForm({
               queue={queue}
               sessionCompleted={sessionCompleted}
             />
+
+                  {/* One-time conversion warning — shown ONLY at the boundary where
+                this certificate first moves onto the consolidated scheme while
+                it still carries legacy free text the new line will not print.
+                The wording stays in the database either way. */}
+            {legacyLossWarning && legacyLossWarning.length > 0 && (
+              <div
+                className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5"
+                data-testid="legacy-freetext-warning"
+              >
+                <p className="text-[11px] font-bold uppercase tracking-wide text-amber-300">
+                  Legacy wording will stop printing
+                </p>
+                <p className="mt-1 text-[11px] text-[var(--admin-ink)]">
+                  This save converts the certificate to the structured classification. The typed wording{" "}
+                  <span className="font-semibold">{legacyLossWarning.join(" · ")}</span> stays stored on the record but
+                  will <span className="font-semibold">no longer appear on the printed label</span>, because a
+                  converted certificate prints only its explicit structured selections.
+                </p>
+                <p className="mt-1 text-[11px] text-[var(--admin-ink-faint)]">
+                  If that wording is still required, cancel and select the matching structured values instead.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    data-testid="legacy-freetext-warning-confirm"
+                    onClick={() => {
+                      legacyLossAckRef.current = true;
+                      setLegacyLossWarning(null);
+                      // Dispatch to whichever save path this certificate uses:
+                      // auto-save for an unapproved cert, the explicit form submit
+                      // for a published cert or the create flow.
+                      if (autoSaveEligible) autoSaveNow();
+                      else formElRef.current?.requestSubmit();
+                    }}
+                    className="rounded-md border border-amber-400/60 px-2 py-1 text-[11px] font-semibold text-amber-200 hover:bg-amber-500/15"
+                  >
+                    Convert and save
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="legacy-freetext-warning-cancel"
+                    onClick={() => setLegacyLossWarning(null)}
+                    className="rounded-md border border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 hover:border-slate-400"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
             {isEdit && certificate?.id && (
               <details
                 className="border border-[var(--admin-gold)]/15 rounded-lg bg-[var(--admin-gold)]/[0.02] mb-1"
@@ -1966,6 +2040,7 @@ export default function CertificateForm({
             )}
           </div>
           <form
+            ref={formElRef}
             onSubmit={handleSubmit}
             onKeyDown={(e) => {
               // Enter advances the stage (Continue) when the grader isn't in a
@@ -2948,6 +3023,11 @@ export default function CertificateForm({
                       rarity: form.rarity,
                       variantOther: form.variantOther,
                       rarityOther: form.rarityOther,
+                      // Stored scheme version — an already-consolidated cert prints
+                      // structured-only even when everything is cleared, so this
+                      // line must not fold legacy wording back in.
+                      storedVersion: (certificate as { structuredVariantVersion?: number | null } | null)
+                        ?.structuredVariantVersion ?? null,
                     }}
                   />
                 </div>
@@ -3640,6 +3720,9 @@ export default function CertificateForm({
                   rarity: form.rarity,
                   variantOther: form.variantOther,
                   rarityOther: form.rarityOther,
+                  storedVersion:
+                    (certificate as { structuredVariantVersion?: number | null } | null)?.structuredVariantVersion ??
+                    null,
                   designations,
                   gradeOverall: form.gradeOverall,
                   labelType: form.labelType,
@@ -3777,51 +3860,6 @@ export default function CertificateForm({
                    navigating mutation, so it never leaves the workstation. The
                    status line below still reflects auto-save + this save. */
                 <div className="space-y-1.5">
-                  {/* One-time conversion warning — shown ONLY at the boundary where
-                      this certificate first moves onto the consolidated scheme while
-                      it still carries legacy free text the new line will not print.
-                      The wording stays in the database either way. */}
-                  {legacyLossWarning && legacyLossWarning.length > 0 && (
-                    <div
-                      className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5"
-                      data-testid="legacy-freetext-warning"
-                    >
-                      <p className="text-[11px] font-bold uppercase tracking-wide text-amber-300">
-                        Legacy wording will stop printing
-                      </p>
-                      <p className="mt-1 text-[11px] text-[var(--admin-ink)]">
-                        This save converts the certificate to the structured classification. The typed wording{" "}
-                        <span className="font-semibold">{legacyLossWarning.join(" · ")}</span> stays stored on the record but
-                        will <span className="font-semibold">no longer appear on the printed label</span>, because a
-                        converted certificate prints only its explicit structured selections.
-                      </p>
-                      <p className="mt-1 text-[11px] text-[var(--admin-ink-faint)]">
-                        If that wording is still required, cancel and select the matching structured values instead.
-                      </p>
-                      <div className="mt-2 flex gap-2">
-                        <button
-                          type="button"
-                          data-testid="legacy-freetext-warning-confirm"
-                          onClick={() => {
-                            legacyLossAckRef.current = true;
-                            setLegacyLossWarning(null);
-                            autoSaveNow();
-                          }}
-                          className="rounded-md border border-amber-400/60 px-2 py-1 text-[11px] font-semibold text-amber-200 hover:bg-amber-500/15"
-                        >
-                          Convert and save
-                        </button>
-                        <button
-                          type="button"
-                          data-testid="legacy-freetext-warning-cancel"
-                          onClick={() => setLegacyLossWarning(null)}
-                          className="rounded-md border border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 hover:border-slate-400"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  )}
                   <GradientButton
                     as="button"
                     type="button"

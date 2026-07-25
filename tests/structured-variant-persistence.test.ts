@@ -475,6 +475,62 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     expect(consolidatedVariantForLabel({} as never)).toBe("");
   });
 
+  it("ERA ALONE must never convert a certificate (it is a filter, not a printable field)", () => {
+    // Regression for a CRITICAL: the picker's "Set era" control narrows the rarity
+    // list, but its value is persisted. While hasStructuredData() counted `era`,
+    // merely touching that filter stamped version 2 — and because the renderer
+    // gates on the version alone and era is NOT printable, the label's variant
+    // line went BLANK. Sticky conversion made it unrecoverable and the free-text
+    // warning (which keys off hasStructuredVariant) never fired.
+    const r = validateStructuredVariant({ era: "vintage", rarityCode: "", finishVariant: "", promoType: "" } as never);
+    expect(r.ok).toBe(true);
+    expect(r.columns.structuredVariantVersion).toBeNull(); // NOT converted
+    expect(r.columns.era).toBe("vintage"); // …but the era is still stored
+    // so a legacy cert keeps printing its legacy wording after an era touch
+    expect(consolidatedVariantForLabel({ ...r.columns, variant: "COSMOS_HOLO" } as never)).toBe("COSMOS HOLO");
+    // a genuine structured selection still converts
+    expect(validateStructuredVariant({ promoType: "mcdonalds_promo" } as never).columns.structuredVariantVersion)
+      .toBe(STRUCTURED_VARIANT_VERSION);
+  });
+
+  it("the version-stamp predicate and the render predicate are the SAME four fields", () => {
+    // Any divergence silently changes what prints (that is exactly how the era bug
+    // arose). Neither may count `region` or `era`.
+    for (const f of ["rarityCode", "finishVariant", "promoType", "subsetName"] as const) {
+      expect(hasStructuredData({ [f]: "x" } as never)).toBe(true);
+      expect(hasStructuredVariant({ [f]: "x" } as never)).toBe(true);
+    }
+    for (const f of ["era", "region"] as const) {
+      expect(hasStructuredData({ [f]: "x" } as never)).toBe(false);
+      expect(hasStructuredVariant({ [f]: "x" } as never)).toBe(false);
+    }
+  });
+
+  it("the conversion warning is rendered OUTSIDE the review-stage container (visible on every stage)", () => {
+    // Regression for a CRITICAL: the guard defers the save on ALL stages, but the
+    // panel that clears it was nested in the review-only container, which this
+    // codebase hides rather than unmounts — so on the Card/Rarity/Grade stages the
+    // save silently stopped with no visible reason.
+    const warn = FORM.indexOf('data-testid="legacy-freetext-warning"');
+    const review = FORM.indexOf('data-workflow-stage="review"');
+    expect(warn).toBeGreaterThan(-1);
+    expect(review).toBeGreaterThan(-1);
+    expect(warn).toBeLessThan(review);
+  });
+
+  it("the warning also guards the EXPLICIT save path (published cert / create flow)", () => {
+    // autoSaveNow is not used for an approved cert or the create flow, so the
+    // guard must exist in handleSubmit too — that population's labels are already
+    // printed and in customers' hands.
+    const submitIdx = FORM.indexOf("const handleSubmit");
+    const submitBody = FORM.slice(submitIdx, submitIdx + 2600);
+    expect(submitBody).toContain("legacyFreeTextLostOnConversion({");
+    expect(submitBody).toContain("setLegacyLossWarning(lost);");
+    // and confirming dispatches to whichever path applies
+    expect(FORM).toContain("if (autoSaveEligible) autoSaveNow();");
+    expect(FORM).toContain("else formElRef.current?.requestSubmit();");
+  });
+
   it("the scheme version is STICKY: clearing everything does not revert a v2 cert to legacy", async () => {
     const { applyStructuredVariantFromBody } = await import("../server/lib/structured-variant");
     // already converted → stays converted → full clear prints nothing

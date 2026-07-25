@@ -97,21 +97,24 @@ function isEra(v: string | null, cat: CatalogueSnapshot): v is PokemonEra {
 
 /** True when a normalised column set carries any structured data. */
 export function hasStructuredData(cols: StructuredVariantColumns): boolean {
-  // `region` is DERIVED from the language, which every certificate always has
-  // (it defaults to English). Counting it meant carriesData was ALWAYS true, so
-  // structuredVariantVersion was stamped 2 even when the operator had cleared
-  // every actual variant field — "no structured variant" was unrepresentable.
+  // The version marks the presence of a PRINTABLE structured variant, and it must
+  // use EXACTLY the same predicate the renderer gates on — hasStructuredVariant()
+  // in shared/variant-line.ts. Any divergence silently changes what prints:
   //
-  // The invariant is now: the version marks the presence of a structured
-  // VARIANT (rarity / finish / promo / subset / era), not the presence of a
-  // language. This matches hasStructuredVariant() in shared/variant-line.ts,
-  // which the label renderer already gates on.
+  //  - `region` is DERIVED from the language, which every certificate always has
+  //    (it defaults to English). Counting it made "no structured variant"
+  //    unrepresentable, so the version was stamped even with everything cleared.
+  //  - `era` is a CONTEXT/filter value (the picker's "Set era" narrows the rarity
+  //    list) and never appears in the printed line. Counting it meant simply
+  //    touching that filter converted the certificate to the consolidated scheme,
+  //    after which the label printed NOTHING — the legacy wording was suppressed
+  //    while the era itself is not printable. Because conversion is sticky, that
+  //    was unrecoverable, and the free-text warning (which gates on
+  //    hasStructuredVariant) never fired. Era is still stored; it just no longer
+  //    decides the rendering scheme.
   //
-  // Rendering is unaffected: consolidatedVariantForLabel requires BOTH
-  // version >= 2 AND hasStructuredVariant(), and that helper never counted
-  // region — so no certificate's printed label changes. Existing rows are not
-  // rewritten (no migration/backfill); only newly-written versions differ.
-  return Boolean(cols.rarityCode || cols.finishVariant || cols.promoType || cols.subsetName || cols.era);
+  // Keep this list identical to hasStructuredVariant(): rarity / finish / promo / subset.
+  return Boolean(cols.rarityCode || cols.finishVariant || cols.promoType || cols.subsetName);
 }
 
 /**
