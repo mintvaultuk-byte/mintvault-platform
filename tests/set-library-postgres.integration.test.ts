@@ -76,6 +76,14 @@ describe("set-library reconciliation against disposable PostgreSQL", () => {
     await client.query("ALTER TABLE custom_sets DROP COLUMN archived");
     const failed = await fetch(`http://127.0.0.1:${port}/api/pokemon-sets`);
     expect(failed.status).toBe(503);
+    await expect(
+      client.query(
+        "SELECT 1 FROM information_schema.columns WHERE table_name = 'custom_sets' AND column_name = 'archived'"
+      )
+    ).resolves.toMatchObject({ rowCount: 0 });
+    // Restore only through the canonical migration fixture, never through an
+    // application request.
+    await client.query(await readFile("migrations/0023_set_library_schema.sql", "utf8"));
   });
 
   it("uses raw card_sets dates in the real service compare-and-swap", async () => {
@@ -281,5 +289,38 @@ describe("set-library reconciliation against disposable PostgreSQL", () => {
       rows: [{ set_name: "Custom race", series: "Base" }],
     });
     closePool = () => pool.end();
+  });
+
+  it("fails closed for missing TCGdex and review-decision schema without repairing or partially writing", async () => {
+    await client.query("ALTER TABLE tcgdex_sets DROP COLUMN subset");
+    vi.resetModules();
+    const { listSetLibrary, recordSetReviewDecision, SetLibraryError } = await import("../server/services/set-library");
+
+    await expect(listSetLibrary()).rejects.toMatchObject({
+      status: 503,
+      message: "Set library schema is unavailable. Apply database migrations.",
+    });
+    await expect(
+      client.query(
+        "SELECT 1 FROM information_schema.columns WHERE table_name = 'tcgdex_sets' AND column_name = 'subset'"
+      )
+    ).resolves.toMatchObject({ rowCount: 0 });
+
+    await client.query(await readFile("migrations/0023_set_library_schema.sql", "utf8"));
+    await client.query("DROP TABLE set_review_decisions");
+    const auditBefore = await client.query("SELECT COUNT(*)::int AS count FROM audit_log");
+    await expect(
+      recordSetReviewDecision("custom", "custom-live", "missing_year", "ignore", "Not applicable", {
+        id: "admin@example.com",
+        role: "admin",
+      })
+    ).rejects.toBeInstanceOf(SetLibraryError);
+    await expect(
+      client.query("SELECT to_regclass('public.set_review_decisions') AS table_name")
+    ).resolves.toMatchObject({ rows: [{ table_name: null }] });
+    await expect(client.query("SELECT COUNT(*)::int AS count FROM audit_log")).resolves.toMatchObject({
+      rows: auditBefore.rows,
+    });
+    await client.query(await readFile("migrations/0023_set_library_schema.sql", "utf8"));
   });
 });

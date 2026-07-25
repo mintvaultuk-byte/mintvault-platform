@@ -9,6 +9,7 @@ import { getStripePublishableKey } from "../stripeClient";
 import { getR2SignedUrl } from "../r2";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { assertSetLibrarySchemaReady } from "../services/set-library";
 import { APP_BASE_URL } from "../app-url";
 import { FEATURE_FLAGS } from "../config/feature-flags";
 import fs from "fs";
@@ -488,6 +489,7 @@ export function registerPublicRoutes(app: Express): void {
         .toLowerCase()
         .trim();
     try {
+      await assertSetLibrarySchemaReady();
       // Public catalogue reads must remain safe on read-only database sessions.
       // Editing metadata and certificate linkage belong to authorised endpoints.
       const customRows = await db.execute(sql`

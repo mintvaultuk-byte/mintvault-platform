@@ -253,34 +253,47 @@ export function validateSetLibraryEdit(input: SetLibraryEditInput) {
   };
 }
 
-export async function ensureSetLibrarySchema(executor: Pick<typeof db, "execute"> = db): Promise<void> {
-  await executor.execute(sql`
-    ALTER TABLE custom_sets
-      ADD COLUMN IF NOT EXISTS subset TEXT,
-      ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
+const SET_LIBRARY_REQUIRED_COLUMNS = [
+  ["custom_sets", "subset"],
+  ["custom_sets", "archived"],
+  ["custom_sets", "updated_at"],
+  ["tcgdex_sets", "card_game"],
+  ["tcgdex_sets", "subset"],
+  ["tcgdex_sets", "archived"],
+  ["tcgdex_sets", "updated_at"],
+] as const;
+
+/**
+ * Migration 0023 is the sole owner of these objects. This bounded metadata
+ * read detects drift without attempting to repair it on an application path.
+ */
+export async function assertSetLibrarySchemaReady(executor: Pick<typeof db, "execute"> = db): Promise<void> {
+  const result = await executor.execute(sql`
+    SELECT table_name, column_name
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND (
+        (table_name = 'custom_sets' AND column_name IN ('subset', 'archived', 'updated_at'))
+        OR (table_name = 'tcgdex_sets' AND column_name IN ('card_game', 'subset', 'archived', 'updated_at'))
+      )
+    UNION ALL
+    SELECT table_name, NULL::text AS column_name
+    FROM information_schema.tables
+    WHERE table_schema = current_schema()
+      AND table_name = 'set_review_decisions'
   `);
-  await executor.execute(sql`
-    ALTER TABLE tcgdex_sets
-      ADD COLUMN IF NOT EXISTS card_game TEXT NOT NULL DEFAULT 'pokemon',
-      ADD COLUMN IF NOT EXISTS subset TEXT,
-      ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
-  `);
-  await executor.execute(sql`
-    CREATE TABLE IF NOT EXISTS set_review_decisions (
-      id SERIAL PRIMARY KEY,
-      source TEXT NOT NULL,
-      set_id TEXT NOT NULL,
-      suggestion_key TEXT NOT NULL,
-      decision TEXT NOT NULL,
-      reason TEXT,
-      actor_id TEXT,
-      actor_role TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE (source, set_id, suggestion_key)
+  const available = new Set(
+    (result.rows as Array<{ table_name: string; column_name: string | null }>).map((row) =>
+      row.column_name ? `${row.table_name}.${row.column_name}` : row.table_name
     )
-  `);
+  );
+  const ready =
+    SET_LIBRARY_REQUIRED_COLUMNS.every(([table, column]) => available.has(`${table}.${column}`)) &&
+    available.has("set_review_decisions");
+  if (!ready) {
+    console.error("[set-library] schema is incomplete; apply database migrations");
+    throw new SetLibraryError(503, "Set library schema is unavailable. Apply database migrations.");
+  }
 }
 
 function toRow(
@@ -453,7 +466,7 @@ function parseFilters(input: unknown): Set<string> {
 }
 
 export async function listSetLibrary(input: ListSetLibraryInput = {}): Promise<ListSetLibraryResult> {
-  await ensureSetLibrarySchema();
+  await assertSetLibrarySchemaReady();
   const page = Math.max(1, Number.parseInt(String(input.page ?? "1"), 10) || 1);
   const pageSize = Math.min(100, Math.max(10, Number.parseInt(String(input.pageSize ?? "50"), 10) || 50));
   const q = cleanText(input.q)?.toLowerCase() ?? "";
@@ -580,9 +593,9 @@ export async function updateSetLibraryRecord(
   const target = normalizeSetCode(targetSetId);
   if (!target) throw new SetLibraryError(400, "Set code is required");
   const next = validateSetLibraryEdit(input);
+  await assertSetLibrarySchemaReady();
 
   return db.transaction(async (tx) => {
-    await ensureSetLibrarySchema(tx);
     const current = (
       await tx.execute(sql`
       SELECT s.*,
@@ -781,7 +794,7 @@ export async function recordSetReviewDecision(
   if (!setId || !suggestionKey) throw new SetLibraryError(400, "Set and suggestion are required");
   if (!decision || !["approve", "reject", "ignore"].includes(decision))
     throw new SetLibraryError(400, "Invalid decision");
-  await ensureSetLibrarySchema();
+  await assertSetLibrarySchemaReady();
   await db.transaction(async (tx) => {
     await tx.execute(sql`
       INSERT INTO set_review_decisions (source, set_id, suggestion_key, decision, reason, actor_id, actor_role)
