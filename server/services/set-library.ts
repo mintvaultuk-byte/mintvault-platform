@@ -451,11 +451,11 @@ export async function listSetLibrary(input: ListSetLibraryInput = {}): Promise<L
     await db.execute(sql`
     WITH all_sets AS (
       SELECT 'custom'::text AS source, set_id, set_name, card_game, series,
-             EXTRACT(YEAR FROM release_date)::int AS release_year, release_date AS release_date_raw, total_cards, subset, archived, updated_at
+             EXTRACT(YEAR FROM release_date)::int AS release_year, release_date::text AS release_date_raw, total_cards, subset, archived, updated_at
       FROM custom_sets
       UNION ALL
       SELECT 'tcgdex'::text AS source, set_id, set_name, card_game, series,
-             EXTRACT(YEAR FROM release_date)::int AS release_year, release_date AS release_date_raw, total_cards, subset, archived, updated_at
+             EXTRACT(YEAR FROM release_date)::int AS release_year, release_date::text AS release_date_raw, total_cards, subset, archived, updated_at
       FROM tcgdex_sets
       UNION ALL
       SELECT 'card_sets'::text AS source, set_id, set_name, game AS card_game, series,
@@ -578,10 +578,10 @@ export async function updateSetLibraryRecord(
             AND LOWER(TRIM(COALESCE(c.set_name, ''))) = LOWER(TRIM(s.set_name))
             AND LOWER(TRIM(COALESCE(c.card_game, 'pokemon'))) = LOWER(TRIM(COALESCE(s.card_game, 'pokemon'))))::int AS linked_certificates
       FROM (
-        SELECT 'custom'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, release_date AS release_date_raw, total_cards, subset, archived, updated_at
+        SELECT 'custom'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, release_date::text AS release_date_raw, total_cards, subset, archived, updated_at
         FROM custom_sets
         UNION ALL
-        SELECT 'tcgdex'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, release_date AS release_date_raw, total_cards, subset, archived, updated_at
+        SELECT 'tcgdex'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, release_date::text AS release_date_raw, total_cards, subset, archived, updated_at
         FROM tcgdex_sets
         UNION ALL
         SELECT 'card_sets'::text AS source, set_id, set_name, game AS card_game, series, NULLIF(SUBSTRING(COALESCE(release_date, '') FROM '\\d{4}'), '')::int AS release_year,
@@ -663,6 +663,8 @@ export async function updateSetLibraryRecord(
     }
 
     const releaseDate = merged.releaseYear ? `${merged.releaseYear}-01-01` : null;
+    const legacyReleaseDate =
+      next.releaseYear === undefined ? (current.release_date_raw ?? null) : merged.releaseYear == null ? null : String(merged.releaseYear);
     let writeResult: { rowCount?: number } | undefined;
     if (source === "custom") {
       writeResult = (await tx.execute(sql`
@@ -686,7 +688,7 @@ export async function updateSetLibraryRecord(
       writeResult = (await tx.execute(sql`
         UPDATE card_sets
         SET set_name = ${merged.setName}, game = ${merged.tcg}, series = ${merged.series},
-            release_date = ${merged.releaseYear == null ? null : String(merged.releaseYear)}, total_cards = ${merged.totalCards},
+            release_date = ${legacyReleaseDate}, total_cards = ${merged.totalCards},
             is_deleted = ${merged.archived}, deleted_at = CASE WHEN ${merged.archived} THEN COALESCE(deleted_at, NOW()) ELSE NULL END
         WHERE LOWER(TRIM(set_id)) = ${target}
           AND set_name IS NOT DISTINCT FROM ${current.set_name}
