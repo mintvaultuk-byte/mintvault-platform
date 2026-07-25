@@ -105,6 +105,56 @@ export function hasStructuredVariant(input: VariantLineInput): boolean {
 }
 
 /**
+ * Legacy free-text wording that will STOP being printed when this save converts a
+ * certificate to the consolidated scheme.
+ *
+ * Converting is a one-way boundary for the LABEL (never for the data — the legacy
+ * columns are always kept): from version 2 on, only the explicit structured
+ * selections print. An operator-typed value such as "Prism Foil" cannot be
+ * reproduced by any catalogue code, so the UI must warn once, at the conversion
+ * itself, before that wording disappears from the label.
+ *
+ * Returns the wordings that will no longer print — empty when there is nothing to
+ * warn about. Deliberately empty when:
+ *   - the certificate is ALREADY consolidated (warn once, at the boundary only);
+ *   - this save will not consolidate it (nothing changes);
+ *   - there is no legacy free text;
+ *   - the wording is still represented in the resulting structured line.
+ */
+export function legacyFreeTextLostOnConversion(input: {
+  /** The certificate's CURRENT (pre-save) scheme version. */
+  currentVersion?: number | null;
+  /** Legacy free-text columns as they will be saved. */
+  variantOther?: string | null;
+  rarityOther?: string | null;
+  /** The structured selection this save will persist. */
+  rarityCode?: string | null;
+  finishVariant?: string | null;
+  promoType?: string | null;
+  subsetName?: string | null;
+}): string[] {
+  const alreadyConsolidated = Number(input.currentVersion ?? 0) >= CONSOLIDATED_VARIANT_SCHEME;
+  if (alreadyConsolidated) return [];
+  const willConsolidate = hasStructuredVariant(input);
+  if (!willConsolidate) return [];
+
+  const resultingLine = formatVariantLine({
+    rarityCode: input.rarityCode,
+    finishVariant: input.finishVariant,
+    promoType: input.promoType,
+    subsetName: input.subsetName,
+    structuredVariantVersion: CONSOLIDATED_VARIANT_SCHEME,
+  }).toLowerCase();
+
+  const candidates = [input.variantOther, input.rarityOther]
+    .map((v) => (typeof v === "string" ? v.trim() : ""))
+    .filter((v) => v.length > 0);
+
+  // "Represented" = the wording already appears in the line the label will print.
+  return candidates.filter((v) => !resultingLine.includes(v.toLowerCase()));
+}
+
+/**
  * Build the consolidated public Variant line. Returns "" when nothing is set.
  * Structured columns win; a legacy `variant`/`rarity` value is folded into any
  * still-empty slot — and is NEVER dropped: a legacy code that has no clean,

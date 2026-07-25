@@ -97,7 +97,12 @@ export function registerLabelPreviewRoutes(app: Express): void {
       // preview must never fail on unsaved, half-typed values. getCatalogueSnapshot
       // falls back to the seed catalogue if catalogue_items is absent (pre-migration).
       try {
-        applyStructuredVariantFromBody(body, cert as unknown as Record<string, unknown>, await getCatalogueSnapshot());
+        applyStructuredVariantFromBody(
+          body,
+          cert as unknown as Record<string, unknown>,
+          await getCatalogueSnapshot(),
+          (cert as unknown as { structuredVariantVersion?: number | null }).structuredVariantVersion,
+        );
       } catch {
         /* preview stays on the legacy variant line if structured derivation throws */
       }

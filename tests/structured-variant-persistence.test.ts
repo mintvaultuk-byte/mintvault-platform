@@ -29,7 +29,12 @@ import {
   hasStructuredData,
   STRUCTURED_VARIANT_VERSION,
 } from "../shared/structured-variant-validate";
-import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "../shared/variant-line";
+import {
+  formatVariantLine,
+  hasStructuredVariant,
+  legacyFreeTextLostOnConversion,
+  CONSOLIDATED_VARIANT_SCHEME,
+} from "../shared/variant-line";
 import { buildFormStateFromCert } from "../client/src/components/certificate-form";
 import { consolidatedVariantForLabel } from "../server/labels";
 
@@ -438,6 +443,111 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     // below 2 / unusable → legacy fold preserved (byte-identical to before)
     for (const v of [1, "1", 0, null, undefined, NaN, "two", ""])
       expect(withLegacy(v)).toBe("BASIC POKÉMON · MCDONALD’S PROMO · HOLO");
+  });
+
+  // ── Founder decisions: full-clear rule + legacy free-text conversion warning ──
+  it("FULL-CLEAR: a v2 cert with every structured field empty renders NO variant line", () => {
+    expect(
+      consolidatedVariantForLabel({
+        structuredVariantVersion: 2,
+        rarityCode: null, finishVariant: null, promoType: null, subsetName: null,
+      } as never)
+    ).toBe("");
+  });
+
+  it("FULL-CLEAR does not fold legacy rarity, legacy variant OR variantOther back in", () => {
+    expect(
+      consolidatedVariantForLabel({
+        structuredVariantVersion: 2,
+        rarityCode: null, finishVariant: null, promoType: null, subsetName: null,
+        rarity: "Basic Pokémon", variant: "Holo", variantOther: "Prism Foil", rarityOther: "Gold Star",
+      } as never)
+    ).toBe("");
+    // the boundary is the VERSION alone, not "does it hold a structured value"
+    expect(read("server/labels.ts")).toContain("if (version >= CONSOLIDATED_VARIANT_SCHEME) {");
+  });
+
+  it("a pre-v2 certificate is byte-identical (full-clear rule does not touch it)", () => {
+    expect(consolidatedVariantForLabel({ variant: "COSMOS_HOLO" } as never)).toBe("COSMOS HOLO");
+    expect(consolidatedVariantForLabel({ rarity: "RARE_HOLO" } as never)).toBe("HOLO RARE");
+    expect(consolidatedVariantForLabel({ structuredVariantVersion: 1, rarity: "RARE_HOLO" } as never)).toBe("HOLO RARE");
+    // an empty pre-v2 cert still prints nothing (unchanged)
+    expect(consolidatedVariantForLabel({} as never)).toBe("");
+  });
+
+  it("the scheme version is STICKY: clearing everything does not revert a v2 cert to legacy", async () => {
+    const { applyStructuredVariantFromBody } = await import("../server/lib/structured-variant");
+    // already converted → stays converted → full clear prints nothing
+    const converted: Record<string, unknown> = {};
+    applyStructuredVariantFromBody({ rarityCode: "", finishVariant: "", promoType: "" }, converted, undefined, 2);
+    expect(converted.structuredVariantVersion).toBe(2);
+    expect(consolidatedVariantForLabel({ ...converted, rarity: "Basic Pokémon", variant: "Holo" } as never)).toBe("");
+    // never converted → stays legacy (a clear must not silently convert it)
+    const legacy: Record<string, unknown> = {};
+    applyStructuredVariantFromBody({ rarityCode: "", finishVariant: "", promoType: "" }, legacy, undefined, null);
+    expect(legacy.structuredVariantVersion).toBeNull();
+    expect(consolidatedVariantForLabel({ ...legacy, variant: "COSMOS_HOLO" } as never)).toBe("COSMOS HOLO");
+  });
+
+  it("preview and print agree on the FULL-CLEAR case (executable, real preview path)", async () => {
+    const { buildPreviewFields } = await import("../shared/label-preview-fields");
+    const { applyStructuredVariantFromBody } = await import("../server/lib/structured-variant");
+    const saved: any = {
+      structuredVariantVersion: 2, rarityCode: null, finishVariant: null, promoType: null,
+      rarity: "Basic Pokémon", variant: "Holo",
+    };
+    const body: any = { rarityCode: "", finishVariant: "", promoType: "", rarity: "Basic Pokémon", variant: "Holo" };
+    const preview: any = { ...saved, ...buildPreviewFields(body) };
+    preview.rarity = saved.rarity;
+    preview.variant = saved.variant;
+    applyStructuredVariantFromBody(body, preview, undefined, saved.structuredVariantVersion);
+    expect(consolidatedVariantForLabel(preview)).toBe(consolidatedVariantForLabel(saved));
+    expect(consolidatedVariantForLabel(preview)).toBe("");
+  });
+
+  it("legacy values remain STORED after conversion and clearing (no write path erases them)", () => {
+    const cols = persist({ rarityCode: "", finishVariant: "", promoType: "mcdonalds_promo" });
+    for (const k of ["variant", "rarity", "variantOther", "rarityOther"]) {
+      expect(Object.keys(cols)).not.toContain(k);
+    }
+  });
+
+  it("CONVERSION WARNING fires for legacy free text the new line will not print", () => {
+    expect(legacyFreeTextLostOnConversion({ currentVersion: 0, variantOther: "Prism Foil", finishVariant: "cosmos_holo" }))
+      .toEqual(["Prism Foil"]);
+    expect(legacyFreeTextLostOnConversion({ currentVersion: null, rarityOther: "Gold Star", promoType: "mcdonalds_promo" }))
+      .toEqual(["Gold Star"]);
+  });
+
+  it("CONVERSION WARNING stays silent when it should", () => {
+    // no legacy free text
+    expect(legacyFreeTextLostOnConversion({ currentVersion: 0, finishVariant: "cosmos_holo" })).toEqual([]);
+    // already version 2 — warn ONCE, at the boundary only
+    expect(
+      legacyFreeTextLostOnConversion({ currentVersion: 2, variantOther: "Prism Foil", finishVariant: "cosmos_holo" })
+    ).toEqual([]);
+    // this save does not convert (nothing structured selected)
+    expect(legacyFreeTextLostOnConversion({ currentVersion: 0, variantOther: "Prism Foil" })).toEqual([]);
+    // the wording is still represented in the resulting line
+    expect(
+      legacyFreeTextLostOnConversion({ currentVersion: 0, variantOther: "Cosmos Holo", finishVariant: "cosmos_holo" })
+    ).toEqual([]);
+    // whitespace-only free text is not a warning
+    expect(legacyFreeTextLostOnConversion({ currentVersion: 0, variantOther: "   ", promoType: "mcdonalds_promo" })).toEqual([]);
+  });
+
+  it("CONVERSION WARNING is wired to HOLD the save, and cancelling does not save", () => {
+    // the save path defers while the warning is unacknowledged…
+    expect(FORM).toContain("if (!legacyLossAckRef.current) {");
+    expect(FORM).toContain("setLegacyLossWarning(lost);");
+    expect(FORM).toMatch(/setLegacyLossWarning\(lost\);\s*\n\s*return;/);
+    // …confirming acknowledges and saves; cancelling only dismisses (no save)
+    expect(FORM).toContain('data-testid="legacy-freetext-warning-confirm"');
+    expect(FORM).toContain('data-testid="legacy-freetext-warning-cancel"');
+    const cancel = FORM.slice(FORM.indexOf('data-testid="legacy-freetext-warning-cancel"'));
+    expect(cancel.slice(0, 200)).not.toContain("autoSaveNow()");
+    // the ack is per-certificate: reset by the isolation effect
+    expect(FORM).toContain("legacyLossAckRef.current = false;");
   });
 
   it("a catalogue code this process cannot resolve still prints wording, never a blank line", () => {

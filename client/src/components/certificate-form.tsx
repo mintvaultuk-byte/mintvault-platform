@@ -10,7 +10,7 @@ import { CertificatePreviewPanel } from "@/components/grading-workflow/Certifica
 import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 import { VariantSummary } from "@/components/grading-workflow/VariantSummary";
 import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
-import { CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
+import { CONSOLIDATED_VARIANT_SCHEME, legacyFreeTextLostOnConversion } from "@shared/variant-line";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
@@ -408,6 +408,12 @@ export default function CertificateForm({
   // printed variant line the next time it is saved, so the preview (which shows
   // the post-save wording) legitimately differs from what is printed today.
   const savedConsolidatedRef = useRef(false);
+  // Conversion warning: the wordings that will stop printing when this save
+  // converts the cert to the consolidated scheme (null = nothing to warn about).
+  // The ack ref is per-certificate and is reset by the isolation effect, so the
+  // warning appears ONCE, at the boundary — never again on a v2 certificate.
+  const [legacyLossWarning, setLegacyLossWarning] = useState<string[] | null>(null);
+  const legacyLossAckRef = useRef(false);
 
   // Label-freshness signal for the Review certificate preview. Compares ONLY the
   // fields that affect the printed label against the last SAVED snapshot (server
@@ -1342,6 +1348,8 @@ export default function CertificateForm({
     // flag describe the OLD cert; re-derive them for the new one.
     loadedSnapshotRef.current = null;
     savedConsolidatedRef.current = false;
+    legacyLossAckRef.current = false;
+    setLegacyLossWarning(null);
     refreshSnapshotFromCert(certificate as unknown as Record<string, unknown> | null);
     // Skip the auto-save tick for THIS certificate id, so re-seeding the form
     // does not immediately PUT back what we just loaded. Keyed on the id (not a
@@ -1377,6 +1385,24 @@ export default function CertificateForm({
     // defer here exactly as the debounce defers it — never silently persist a
     // blank required field. The next edit re-triggers the debounce and saves.
     if (!hasRequiredFields) return;
+    // One-time conversion warning: this save would move the certificate onto the
+    // consolidated scheme while it still carries legacy free text that the new
+    // structured line will not print. Hold the save and ask first.
+    if (!legacyLossAckRef.current) {
+      const lost = legacyFreeTextLostOnConversion({
+        currentVersion: savedConsolidatedRef.current ? CONSOLIDATED_VARIANT_SCHEME : 0,
+        variantOther: form.variantOther,
+        rarityOther: form.rarityOther,
+        rarityCode: form.rarityCode,
+        finishVariant: form.finishVariant,
+        promoType: form.promoType,
+        subsetName: form.subsetName,
+      });
+      if (lost.length > 0) {
+        setLegacyLossWarning(lost);
+        return; // deferred until the operator confirms or changes the selection
+      }
+    }
     if (autoSaveInFlightRef.current) {
       autoSavePendingRef.current = true;
       return;
@@ -3751,6 +3777,51 @@ export default function CertificateForm({
                    navigating mutation, so it never leaves the workstation. The
                    status line below still reflects auto-save + this save. */
                 <div className="space-y-1.5">
+                  {/* One-time conversion warning — shown ONLY at the boundary where
+                      this certificate first moves onto the consolidated scheme while
+                      it still carries legacy free text the new line will not print.
+                      The wording stays in the database either way. */}
+                  {legacyLossWarning && legacyLossWarning.length > 0 && (
+                    <div
+                      className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5"
+                      data-testid="legacy-freetext-warning"
+                    >
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-amber-300">
+                        Legacy wording will stop printing
+                      </p>
+                      <p className="mt-1 text-[11px] text-[var(--admin-ink)]">
+                        This save converts the certificate to the structured classification. The typed wording{" "}
+                        <span className="font-semibold">{legacyLossWarning.join(" · ")}</span> stays stored on the record but
+                        will <span className="font-semibold">no longer appear on the printed label</span>, because a
+                        converted certificate prints only its explicit structured selections.
+                      </p>
+                      <p className="mt-1 text-[11px] text-[var(--admin-ink-faint)]">
+                        If that wording is still required, cancel and select the matching structured values instead.
+                      </p>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          data-testid="legacy-freetext-warning-confirm"
+                          onClick={() => {
+                            legacyLossAckRef.current = true;
+                            setLegacyLossWarning(null);
+                            autoSaveNow();
+                          }}
+                          className="rounded-md border border-amber-400/60 px-2 py-1 text-[11px] font-semibold text-amber-200 hover:bg-amber-500/15"
+                        >
+                          Convert and save
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="legacy-freetext-warning-cancel"
+                          onClick={() => setLegacyLossWarning(null)}
+                          className="rounded-md border border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 hover:border-slate-400"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <GradientButton
                     as="button"
                     type="button"
