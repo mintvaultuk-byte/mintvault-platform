@@ -488,8 +488,14 @@ export function registerPublicRoutes(app: Express): void {
         .toLowerCase()
         .trim();
     try {
-      // Hand-added custom sets (always included).
-      const customRows = await db.execute(sql`SELECT * FROM custom_sets ORDER BY created_at DESC`);
+      // Public catalogue reads must remain safe on read-only database sessions.
+      // Editing metadata and certificate linkage belong to authorised endpoints.
+      const customRows = await db.execute(sql`
+        SELECT cs.set_id, cs.set_name, cs.series, cs.ptcgo_code, cs.release_date, cs.total_cards
+        FROM custom_sets cs
+        WHERE COALESCE(cs.archived, false) = false
+        ORDER BY cs.created_at DESC
+      `);
       const customSets = (customRows.rows as any[]).map((s) => ({
         id: s.set_id,
         name: s.set_name,
@@ -502,7 +508,12 @@ export function registerPublicRoutes(app: Express): void {
 
       // Canonical TCGdex catalogue (DB-backed, imported). Preferred on collisions.
       const tcgdexRows = await db.execute(
-        sql`SELECT * FROM tcgdex_sets ORDER BY release_date DESC NULLS LAST, set_name ASC`
+        sql`
+          SELECT ts.set_id, ts.set_name, ts.series, ts.ptcgo_code, ts.release_date, ts.total_cards
+          FROM tcgdex_sets ts
+          WHERE COALESCE(ts.archived, false) = false
+          ORDER BY ts.release_date DESC NULLS LAST, ts.set_name ASC
+        `
       );
       const tcgdexSets = (tcgdexRows.rows as any[]).map((s) => ({
         id: s.set_id,
@@ -549,7 +560,7 @@ export function registerPublicRoutes(app: Express): void {
       return res.json(merged);
     } catch (err: any) {
       console.error("[pokemon-sets] error:", err.message);
-      res.json(cachedTcgSets || []);
+      res.status(503).json({ error: "Set catalogue is temporarily unavailable" });
     }
   });
 
