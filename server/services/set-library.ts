@@ -253,45 +253,168 @@ export function validateSetLibraryEdit(input: SetLibraryEditInput) {
   };
 }
 
-const SET_LIBRARY_REQUIRED_COLUMNS = [
-  ["custom_sets", "subset"],
-  ["custom_sets", "archived"],
-  ["custom_sets", "updated_at"],
-  ["tcgdex_sets", "card_game"],
-  ["tcgdex_sets", "subset"],
-  ["tcgdex_sets", "archived"],
-  ["tcgdex_sets", "updated_at"],
-] as const;
+type SchemaColumnContract = {
+  type: string;
+  notNull: boolean;
+  default?: RegExp;
+};
+
+const SET_LIBRARY_SCHEMA_CONTRACT: Record<string, Record<string, SchemaColumnContract>> = {
+  custom_sets: {
+    id: { type: "integer", notNull: true, default: /nextval\(/i },
+    set_id: { type: "text", notNull: true },
+    set_name: { type: "text", notNull: true },
+    series: { type: "text", notNull: false },
+    ptcgo_code: { type: "text", notNull: false },
+    release_date: { type: "date", notNull: false },
+    total_cards: { type: "integer", notNull: false },
+    card_game: { type: "text", notNull: true, default: /'pokemon'::text/i },
+    notes: { type: "text", notNull: false },
+    created_at: { type: "timestamp with time zone", notNull: true, default: /now\(\)/i },
+    created_by: { type: "text", notNull: false },
+    subset: { type: "text", notNull: false },
+    archived: { type: "boolean", notNull: true, default: /false/i },
+    updated_at: { type: "timestamp with time zone", notNull: false, default: /now\(\)/i },
+  },
+  tcgdex_sets: {
+    id: { type: "integer", notNull: true, default: /nextval\(/i },
+    set_id: { type: "text", notNull: true },
+    set_name: { type: "text", notNull: true },
+    series: { type: "text", notNull: false },
+    ptcgo_code: { type: "text", notNull: false },
+    release_date: { type: "date", notNull: false },
+    total_cards: { type: "integer", notNull: false },
+    source: { type: "text", notNull: true, default: /'tcgdex'::text/i },
+    synced_at: { type: "timestamp with time zone", notNull: true, default: /now\(\)/i },
+    card_game: { type: "text", notNull: true, default: /'pokemon'::text/i },
+    subset: { type: "text", notNull: false },
+    archived: { type: "boolean", notNull: true, default: /false/i },
+    updated_at: { type: "timestamp with time zone", notNull: false, default: /now\(\)/i },
+  },
+  set_review_decisions: {
+    id: { type: "integer", notNull: true, default: /nextval\(/i },
+    source: { type: "text", notNull: true },
+    set_id: { type: "text", notNull: true },
+    suggestion_key: { type: "text", notNull: true },
+    decision: { type: "text", notNull: true },
+    reason: { type: "text", notNull: false },
+    actor_id: { type: "text", notNull: false },
+    actor_role: { type: "text", notNull: false },
+    created_at: { type: "timestamp with time zone", notNull: true, default: /now\(\)/i },
+  },
+};
+
+const SET_LIBRARY_REQUIRED_CONSTRAINTS: Record<string, Array<{ type: "p" | "u"; columns: string[] }>> = {
+  custom_sets: [
+    { type: "p", columns: ["id"] },
+    { type: "u", columns: ["set_id"] },
+  ],
+  tcgdex_sets: [
+    { type: "p", columns: ["id"] },
+    { type: "u", columns: ["set_id"] },
+  ],
+  set_review_decisions: [
+    { type: "p", columns: ["id"] },
+    { type: "u", columns: ["source", "set_id", "suggestion_key"] },
+  ],
+};
+
+type SchemaInspectionRow = {
+  kind: "column" | "constraint";
+  relation_name: string;
+  relation_oid: string | null;
+  relation_schema: string | null;
+  relation_kind: string | null;
+  column_name: string | null;
+  column_type: string | null;
+  column_not_null: boolean | null;
+  column_default: string | null;
+  constraint_type: "p" | "u" | null;
+  constraint_columns: string[] | null;
+};
+
+// Cache only a successful check and only for the exact executor instance. A
+// failure is intentionally retried, so applying a migration can recover a live
+// process without a stale negative cache.
+let readyExecutors = new WeakSet<object>();
+
+export function resetSetLibrarySchemaReadinessCache(): void {
+  readyExecutors = new WeakSet<object>();
+}
 
 /**
  * Migration 0023 is the sole owner of these objects. This bounded metadata
  * read detects drift without attempting to repair it on an application path.
  */
 export async function assertSetLibrarySchemaReady(executor: Pick<typeof db, "execute"> = db): Promise<void> {
-  const result = await executor.execute(sql`
-    SELECT table_name, column_name
-    FROM information_schema.columns
-    WHERE table_schema = current_schema()
-      AND (
-        (table_name = 'custom_sets' AND column_name IN ('subset', 'archived', 'updated_at'))
-        OR (table_name = 'tcgdex_sets' AND column_name IN ('card_game', 'subset', 'archived', 'updated_at'))
+  const cacheKey = executor as object;
+  if (readyExecutors.has(cacheKey)) return;
+  try {
+    const result = await executor.execute(sql`
+      WITH expected(relation_name) AS (
+        VALUES ('custom_sets'::text), ('tcgdex_sets'::text), ('set_review_decisions'::text)
+      ), resolved AS (
+        SELECT relation_name, to_regclass(relation_name)::oid AS relation_oid FROM expected
+      ), relations AS (
+        SELECT r.relation_name, c.oid AS relation_oid, n.nspname AS relation_schema, c.relkind AS relation_kind
+        FROM resolved r
+        LEFT JOIN pg_class c ON c.oid = r.relation_oid
+        LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
       )
-    UNION ALL
-    SELECT table_name, NULL::text AS column_name
-    FROM information_schema.tables
-    WHERE table_schema = current_schema()
-      AND table_name = 'set_review_decisions'
-  `);
-  const available = new Set(
-    (result.rows as Array<{ table_name: string; column_name: string | null }>).map((row) =>
-      row.column_name ? `${row.table_name}.${row.column_name}` : row.table_name
-    )
-  );
-  const ready =
-    SET_LIBRARY_REQUIRED_COLUMNS.every(([table, column]) => available.has(`${table}.${column}`)) &&
-    available.has("set_review_decisions");
-  if (!ready) {
-    console.error("[set-library] schema is incomplete; apply database migrations");
+      SELECT 'column'::text AS kind, r.relation_name, r.relation_oid::text, r.relation_schema, r.relation_kind,
+             a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS column_type,
+             a.attnotnull AS column_not_null, pg_get_expr(d.adbin, d.adrelid) AS column_default,
+             NULL::text AS constraint_type, NULL::text[] AS constraint_columns
+      FROM relations r
+      LEFT JOIN pg_attribute a ON a.attrelid = r.relation_oid AND a.attnum > 0 AND NOT a.attisdropped
+      LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+      UNION ALL
+      SELECT 'constraint'::text AS kind, r.relation_name, r.relation_oid::text, r.relation_schema, r.relation_kind,
+             NULL::text, NULL::text, NULL::boolean, NULL::text,
+             c.contype::text AS constraint_type,
+             ARRAY(SELECT a.attname FROM unnest(c.conkey) WITH ORDINALITY k(attnum, ord)
+                   JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+                   ORDER BY k.ord) AS constraint_columns
+      FROM relations r
+      LEFT JOIN pg_constraint c ON c.conrelid = r.relation_oid AND c.contype IN ('p', 'u')
+    `);
+    const rows = result.rows as unknown as SchemaInspectionRow[];
+    const failures: string[] = [];
+    for (const [relationName, columns] of Object.entries(SET_LIBRARY_SCHEMA_CONTRACT)) {
+      const relationRows = rows.filter((row) => row.relation_name === relationName);
+      const relation = relationRows[0];
+      if (!relation || !relation.relation_oid || relation.relation_kind !== "r") {
+        failures.push(`${relationName} relation`);
+        continue;
+      }
+      for (const [columnName, contract] of Object.entries(columns)) {
+        const column = relationRows.find((row) => row.kind === "column" && row.column_name === columnName);
+        if (!column || column.column_type !== contract.type || column.column_not_null !== contract.notNull) {
+          failures.push(`${relationName}.${columnName}`);
+          continue;
+        }
+        if (contract.default && !contract.default.test(column.column_default ?? "")) {
+          failures.push(`${relationName}.${columnName} default`);
+        }
+      }
+      for (const constraint of SET_LIBRARY_REQUIRED_CONSTRAINTS[relationName]) {
+        const found = relationRows.some(
+          (row) =>
+            row.kind === "constraint" &&
+            row.constraint_type === constraint.type &&
+            JSON.stringify(row.constraint_columns) === JSON.stringify(constraint.columns)
+        );
+        if (!found) failures.push(`${relationName} ${constraint.type}(${constraint.columns.join(",")})`);
+      }
+    }
+    if (failures.length > 0) {
+      console.error(`[set-library] schema is incomplete (${failures.join(", ")}); apply database migrations`);
+      throw new SetLibraryError(503, "Set library schema is unavailable. Apply database migrations.");
+    }
+    readyExecutors.add(cacheKey);
+  } catch (error) {
+    if (error instanceof SetLibraryError) throw error;
+    console.error("[set-library] schema verification failed; apply database migrations");
     throw new SetLibraryError(503, "Set library schema is unavailable. Apply database migrations.");
   }
 }

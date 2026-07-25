@@ -234,6 +234,18 @@ describe("unmanaged inventory completeness & richness", () => {
     expect(inventoriedUnmanaged()).toContain("schema_migrations");
     expect(classifyLiveTables(["schema_migrations", ...managedTables()]).unknown).toEqual([]);
   });
+
+  it("records all Set Library tables as numbered-migration-owned, never runtime-managed", () => {
+    const setLibrary = UNMANAGED_INVENTORY.filter((entry) =>
+      ["custom_sets", "tcgdex_sets", "set_review_decisions"].includes(entry.name)
+    );
+    expect(setLibrary).toHaveLength(3);
+    for (const entry of setLibrary) {
+      expect(entry.class).toBe("numbered_migration");
+      expect(entry.reason).toMatch(/migrations\/002[34]_set_library/i);
+      expect(entry.futureDisposition).not.toMatch(/runtime-managed/i);
+    }
+  });
 });
 
 describe("partner network classification (Phase 1)", () => {

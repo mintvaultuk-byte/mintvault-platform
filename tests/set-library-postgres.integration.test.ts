@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client } from "pg";
 import express from "express";
+import { PgDialect } from "drizzle-orm/pg-core";
 import type { Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
@@ -20,6 +21,7 @@ async function applyFixtureSchema(): Promise<void> {
     CREATE TABLE audit_log (entity_type text, entity_id text, action text, admin_user text, details jsonb);
   `);
   await client.query(await readFile("migrations/0023_set_library_schema.sql", "utf8"));
+  await client.query(await readFile("migrations/0024_set_library_base_tables.sql", "utf8"));
 }
 
 beforeAll(async () => {
@@ -38,6 +40,65 @@ afterAll(async () => {
 });
 
 describe("set-library reconciliation against disposable PostgreSQL", () => {
+  it("creates the complete Set Library contract from an empty schema using numbered migrations", async () => {
+    await client.query("CREATE SCHEMA set_library_fresh");
+    try {
+      await client.query("SET search_path TO set_library_fresh, public");
+      await client.query(await readFile("migrations/0023_set_library_schema.sql", "utf8"));
+      await client.query(await readFile("migrations/0024_set_library_base_tables.sql", "utf8"));
+      await expect(
+        client.query(`
+          SELECT table_name FROM information_schema.tables
+          WHERE table_schema = 'set_library_fresh'
+            AND table_name IN ('custom_sets', 'tcgdex_sets', 'set_review_decisions')
+          ORDER BY table_name
+        `)
+      ).resolves.toMatchObject({
+        rows: [{ table_name: "custom_sets" }, { table_name: "set_review_decisions" }, { table_name: "tcgdex_sets" }],
+      });
+      await expect(
+        client.query(`
+          SELECT count(*)::int AS count FROM pg_constraint
+          WHERE conrelid IN ('custom_sets'::regclass, 'tcgdex_sets'::regclass, 'set_review_decisions'::regclass)
+            AND contype IN ('p', 'u')
+        `)
+      ).resolves.toMatchObject({ rows: [{ count: 6 }] });
+    } finally {
+      await client.query("RESET search_path");
+      await client.query("DROP SCHEMA set_library_fresh CASCADE");
+    }
+  });
+
+  it("resolves the runtime search_path and rejects an incompatible shadow relation without DDL", async () => {
+    const schema = "set_library_search_path_probe";
+    const inspectedStatements: string[] = [];
+    const dialect = new PgDialect();
+    const executor = {
+      execute: async (query: Parameters<PgDialect["sqlToQuery"]>[0]) => {
+        const built = dialect.sqlToQuery(query);
+        inspectedStatements.push(built.sql);
+        return client.query(built.sql, built.params);
+      },
+    };
+    await client.query(`CREATE SCHEMA ${schema}`);
+    try {
+      await client.query(`SET search_path TO ${schema}, public`);
+      vi.resetModules();
+      const { assertSetLibrarySchemaReady, resetSetLibrarySchemaReadinessCache, SetLibraryError } =
+        await import("../server/services/set-library");
+      resetSetLibrarySchemaReadinessCache();
+      await expect(assertSetLibrarySchemaReady(executor as never)).resolves.toBeUndefined();
+      expect(inspectedStatements.every((statement) => /^\s*WITH|^\s*SELECT/i.test(statement))).toBe(true);
+
+      await client.query(`CREATE TABLE ${schema}.custom_sets (id text)`);
+      resetSetLibrarySchemaReadinessCache();
+      await expect(assertSetLibrarySchemaReady(executor as never)).rejects.toBeInstanceOf(SetLibraryError);
+    } finally {
+      await client.query("RESET search_path");
+      await client.query(`DROP SCHEMA ${schema} CASCADE`);
+    }
+  });
+
   it("serves only active public rows after 0023 and returns 503 on a query failure", async () => {
     await client.query(`
       INSERT INTO custom_sets (set_id, set_name, series, release_date, total_cards, archived)

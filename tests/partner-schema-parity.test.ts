@@ -81,6 +81,9 @@ describe("partner schema ↔ migration parity", () => {
       // so 0022 avoids the runner's duplicate-number hard-reject.
       "0022_print_workflow_lifecycle.sql",
       "0023_set_library_schema.sql",
+      // Set Library base-table ownership is completed by 0024; it is additive
+      // and follows the already-applied 0023 schema additions.
+      "0024_set_library_base_tables.sql",
     ]);
   });
 
