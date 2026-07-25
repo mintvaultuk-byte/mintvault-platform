@@ -155,6 +155,20 @@ function parseYear(value: unknown): number | null {
   return year;
 }
 
+function rawReleaseDate(value: BaseSetRow["release_date_raw"]): string | null {
+  if (value == null) return null;
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value);
+}
+
+function releaseDateForPatch(current: BaseSetRow, requestedYear: number | null | undefined): string | null {
+  const raw = rawReleaseDate(current.release_date_raw);
+  if (requestedYear === undefined) return raw;
+  if (requestedYear === null) return null;
+
+  const currentYear = raw?.match(/^(\d{4})/)?.[1];
+  return currentYear === String(requestedYear) ? raw : `${requestedYear}-01-01`;
+}
+
 function parseCardCount(value: unknown): number | null {
   if (value === "" || value === null || value === undefined) return null;
   const count = Number(value);
@@ -662,9 +676,8 @@ export async function updateSetLibraryRecord(
       );
     }
 
-    const releaseDate = merged.releaseYear ? `${merged.releaseYear}-01-01` : null;
-    const legacyReleaseDate =
-      next.releaseYear === undefined ? (current.release_date_raw ?? null) : merged.releaseYear == null ? null : String(merged.releaseYear);
+    const releaseDate = releaseDateForPatch(current, next.releaseYear);
+    const legacyReleaseDate = releaseDateForPatch(current, next.releaseYear);
     let writeResult: { rowCount?: number } | undefined;
     if (source === "custom") {
       writeResult = (await tx.execute(sql`

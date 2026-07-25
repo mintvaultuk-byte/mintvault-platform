@@ -62,7 +62,15 @@ describe("set-library reconciliation against disposable PostgreSQL", () => {
     expect(response.status).toBe(200);
     expect(body.map((row: { id: string }) => row.id)).toEqual(expect.arrayContaining(["custom-live", "tcgdex-live"]));
     expect(body.map((row: { id: string }) => row.id)).not.toEqual(expect.arrayContaining(["custom-old", "tcgdex-old"]));
-    expect(Object.keys(body[0]).sort()).toEqual(["id", "name", "ptcgoCode", "releaseDate", "series", "source", "total"]);
+    expect(Object.keys(body[0]).sort()).toEqual([
+      "id",
+      "name",
+      "ptcgoCode",
+      "releaseDate",
+      "series",
+      "source",
+      "total",
+    ]);
     expect(JSON.stringify(body)).not.toContain("linkedCertificates");
     expect(JSON.stringify(body)).not.toContain("updatedAt");
     await client.query("ALTER TABLE custom_sets DROP COLUMN archived");
@@ -77,15 +85,201 @@ describe("set-library reconciliation against disposable PostgreSQL", () => {
     `);
     vi.resetModules();
     const { listSetLibrary, updateSetLibraryRecord, SetLibraryError } = await import("../server/services/set-library");
-    const read = async (id: string) => (await listSetLibrary({ pageSize: 100 })).sets.find((row) => row.source === "card_sets" && row.setId === id)!;
+    const read = async (id: string) =>
+      (await listSetLibrary({ pageSize: 100 })).sets.find((row) => row.source === "card_sets" && row.setId === id)!;
     const full = await read("full-date");
     expect((await read("full-date")).version).toBe(full.version);
-    await expect(updateSetLibraryRecord("card_sets", "full-date", { setName: "Full date corrected", reason: "Fix", version: full.version }, { id: "a", role: "admin" })).resolves.toMatchObject({ ok: true });
-    expect((await client.query("SELECT release_date, set_id, series FROM card_sets WHERE set_id = 'full-date'")).rows[0]).toMatchObject({ release_date: "2023-09-22", set_id: "full-date", series: "Base" });
-    await expect(updateSetLibraryRecord("card_sets", "full-date", { setName: "Stale", reason: "Fix", version: full.version }, { id: "b", role: "admin" })).rejects.toBeInstanceOf(SetLibraryError);
+    await expect(
+      updateSetLibraryRecord(
+        "card_sets",
+        "full-date",
+        { setName: "Full date corrected", reason: "Fix", version: full.version },
+        { id: "a", role: "admin" }
+      )
+    ).resolves.toMatchObject({ ok: true });
+    expect(
+      (await client.query("SELECT release_date, set_id, series FROM card_sets WHERE set_id = 'full-date'")).rows[0]
+    ).toMatchObject({ release_date: "2023-09-22", set_id: "full-date", series: "Base" });
+    await expect(
+      updateSetLibraryRecord(
+        "card_sets",
+        "full-date",
+        { setName: "Stale", reason: "Fix", version: full.version },
+        { id: "b", role: "admin" }
+      )
+    ).rejects.toBeInstanceOf(SetLibraryError);
     for (const id of ["year-only", "no-date"]) {
       const row = await read(id);
-      await expect(updateSetLibraryRecord("card_sets", id, { setName: `${row.setName} corrected`, reason: "Fix", version: row.version }, { id: "a", role: "admin" })).resolves.toMatchObject({ ok: true });
+      await expect(
+        updateSetLibraryRecord(
+          "card_sets",
+          id,
+          { setName: `${row.setName} corrected`, reason: "Fix", version: row.version },
+          { id: "a", role: "admin" }
+        )
+      ).resolves.toMatchObject({ ok: true });
     }
+  });
+
+  it("preserves precise custom and TCGdex dates unless the release year genuinely changes", async () => {
+    await client.query(`
+      INSERT INTO custom_sets (set_id, set_name, card_game, series, release_date, total_cards, archived)
+      VALUES ('custom-precise', 'Custom precise', 'pokemon', 'Base', '2023-09-22', 1, false);
+      INSERT INTO custom_sets (set_id, set_name, card_game, series, release_date, total_cards, archived)
+      VALUES ('custom-no-date', 'Custom no date', 'pokemon', 'Base', NULL, 1, false);
+      INSERT INTO tcgdex_sets (set_id, set_name, card_game, series, release_date, total_cards, archived)
+      VALUES ('tcgdex-precise', 'TCGdex precise', 'pokemon', 'Base', '2023-09-22', 1, false);
+    `);
+    vi.resetModules();
+    const { listSetLibrary, SetLibraryError, updateSetLibraryRecord } = await import("../server/services/set-library");
+    const read = async (source: "custom" | "tcgdex", id: string) =>
+      (await listSetLibrary({ pageSize: 100 })).sets.find((row) => row.source === source && row.setId === id)!;
+
+    const custom = await read("custom", "custom-precise");
+    await expect(
+      updateSetLibraryRecord(
+        "custom",
+        "custom-precise",
+        { setName: "Custom renamed", releaseYear: 2023, reason: "Correct name", version: custom.version },
+        { id: "a", role: "admin" }
+      )
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      client.query("SELECT release_date::text AS release_date FROM custom_sets WHERE set_id = 'custom-precise'")
+    ).resolves.toMatchObject({
+      rows: [{ release_date: "2023-09-22" }],
+    });
+
+    const tcgdex = await read("tcgdex", "tcgdex-precise");
+    await expect(
+      updateSetLibraryRecord(
+        "tcgdex",
+        "tcgdex-precise",
+        { setName: "TCGdex renamed", releaseYear: 2023, reason: "Correct name", version: tcgdex.version },
+        { id: "a", role: "admin" }
+      )
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      client.query("SELECT release_date::text AS release_date FROM tcgdex_sets WHERE set_id = 'tcgdex-precise'")
+    ).resolves.toMatchObject({
+      rows: [{ release_date: "2023-09-22" }],
+    });
+
+    const changedYear = await read("tcgdex", "tcgdex-precise");
+    await expect(
+      updateSetLibraryRecord(
+        "tcgdex",
+        "tcgdex-precise",
+        { series: "Revised", releaseYear: 2024, reason: "Correct year", version: changedYear.version },
+        { id: "a", role: "admin" }
+      )
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      client.query("SELECT release_date::text AS release_date FROM tcgdex_sets WHERE set_id = 'tcgdex-precise'")
+    ).resolves.toMatchObject({
+      rows: [{ release_date: "2024-01-01" }],
+    });
+    await expect(
+      updateSetLibraryRecord(
+        "tcgdex",
+        "tcgdex-precise",
+        { setName: "Stale update", reason: "Stale version test", version: tcgdex.version },
+        { id: "b", role: "admin" }
+      )
+    ).rejects.toBeInstanceOf(SetLibraryError);
+
+    const omitted = await read("custom", "custom-precise");
+    await expect(
+      updateSetLibraryRecord(
+        "custom",
+        "custom-precise",
+        { series: "Revised", reason: "Metadata correction", version: omitted.version },
+        { id: "a", role: "admin" }
+      )
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      client.query("SELECT release_date::text AS release_date FROM custom_sets WHERE set_id = 'custom-precise'")
+    ).resolves.toMatchObject({
+      rows: [{ release_date: "2023-09-22" }],
+    });
+
+    const clear = await read("custom", "custom-precise");
+    await expect(
+      updateSetLibraryRecord(
+        "custom",
+        "custom-precise",
+        { releaseYear: null, reason: "Remove unknown date", version: clear.version },
+        { id: "a", role: "admin" }
+      )
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      client.query("SELECT release_date::text AS release_date FROM custom_sets WHERE set_id = 'custom-precise'")
+    ).resolves.toMatchObject({
+      rows: [{ release_date: null }],
+    });
+
+    const noDate = await read("custom", "custom-no-date");
+    await expect(
+      updateSetLibraryRecord(
+        "custom",
+        "custom-no-date",
+        { setName: "Custom no date renamed", reason: "Correct name", version: noDate.version },
+        { id: "a", role: "admin" }
+      )
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      client.query("SELECT release_date::text AS release_date FROM custom_sets WHERE set_id = 'custom-no-date'")
+    ).resolves.toMatchObject({
+      rows: [{ release_date: null }],
+    });
+  });
+
+  it("rejects a custom-set write when the row changes between its version check and SQL compare-and-swap", async () => {
+    await client.query(`
+      INSERT INTO custom_sets (set_id, set_name, card_game, series, release_date, total_cards, archived)
+      VALUES ('custom-race', 'Custom race', 'pokemon', 'Base', '2023-09-22', 1, false);
+    `);
+    vi.resetModules();
+    const { pool } = await import("../server/db");
+    const { listSetLibrary, SetLibraryError, updateSetLibraryRecord } = await import("../server/services/set-library");
+    let raced = false;
+    const statements: string[] = [];
+    pool.once("connect", (connection) => {
+      const query = connection.query.bind(connection);
+      vi.spyOn(connection, "query").mockImplementation(async (...args) => {
+        const result = await query(...args);
+        const statement = typeof args[0] === "string" ? args[0] : args[0]?.text || "";
+        statements.push(statement);
+        if (!raced && statement.includes("LIMIT 5001")) {
+          raced = true;
+          await query(
+            "UPDATE custom_sets SET series = 'Concurrent change', updated_at = NOW() WHERE set_id = 'custom-race'"
+          );
+        }
+        return result;
+      });
+    });
+
+    const row = (await listSetLibrary({ pageSize: 100 })).sets.find(
+      (candidate) => candidate.source === "custom" && candidate.setId === "custom-race"
+    )!;
+    await expect(
+      updateSetLibraryRecord(
+        "custom",
+        "custom-race",
+        { setName: "Should not save", reason: "Race test", version: row.version },
+        { id: "a", role: "admin" }
+      )
+    ).rejects.toBeInstanceOf(SetLibraryError);
+    expect(raced).toBe(true);
+    expect(statements.find((statement) => statement.includes("UPDATE custom_sets"))).toContain(
+      "updated_at IS NOT DISTINCT FROM"
+    );
+    await expect(
+      client.query("SELECT set_name, series FROM custom_sets WHERE set_id = 'custom-race'")
+    ).resolves.toMatchObject({
+      rows: [{ set_name: "Custom race", series: "Base" }],
+    });
+    closePool = () => pool.end();
   });
 });
