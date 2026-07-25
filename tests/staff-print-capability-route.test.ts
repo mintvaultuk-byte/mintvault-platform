@@ -74,7 +74,7 @@ beforeAll(async () => {
       resave: false,
       saveUninitialized: false,
       cookie: { httpOnly: true, sameSite: "lax", secure: false },
-    }),
+    })
   );
 
   // Test-only session issuer — stamps the same fields the real staff login stamps.
@@ -106,10 +106,7 @@ beforeAll(async () => {
 
   // Stub admin targets behind the REAL requireAdmin, so the proxy chain (capability
   // check -> __graderProxy -> requireAdmin) is exercised exactly as in production.
-  for (const p of [
-    "/api/admin/printing/workflow/queue",
-    "/api/admin/printing/workflow/complete",
-  ]) {
+  for (const p of ["/api/admin/printing/workflow/queue", "/api/admin/printing/workflow/complete"]) {
     app.get(p, requireAdmin, (req, res) => {
       proxied.push({ path: p, graderProxy: !!(req as unknown as { __graderProxy?: boolean }).__graderProxy });
       res.json({ rows: [{ certId: "MV999", state: "needs_printing", customerEmail: "leak@example.test" }] });
@@ -138,7 +135,7 @@ beforeEach(async () => {
     `INSERT INTO users (id, email, role, can_grade, can_print, credential_version) VALUES
        ($1, 'printer@example.test', 'staff', true, true,  1),
        ($2, 'grader@example.test',  'staff', true, false, 1)`,
-    [PRINT_STAFF, GRADE_ONLY_STAFF],
+    [PRINT_STAFF, GRADE_ONLY_STAFF]
   );
   const { invalidateStaffSessionCache } = await import("../server/staff");
   invalidateStaffSessionCache(PRINT_STAFF);
@@ -245,16 +242,14 @@ describe("no privilege escalation through the print proxy", () => {
 
 describe("changing can_print does not disturb other capabilities or the role", () => {
   it("toggling print leaves can_grade, can_scan, can_edit_sets and role untouched", async () => {
-    const before = await pool.query(
-      "SELECT role, can_grade, can_scan, can_edit_sets FROM users WHERE id = $1",
-      [PRINT_STAFF],
-    );
+    const before = await pool.query("SELECT role, can_grade, can_scan, can_edit_sets FROM users WHERE id = $1", [
+      PRINT_STAFF,
+    ]);
     await pool.query("UPDATE users SET can_print = false WHERE id = $1", [PRINT_STAFF]);
     await pool.query("UPDATE users SET can_print = true WHERE id = $1", [PRINT_STAFF]);
-    const after = await pool.query(
-      "SELECT role, can_grade, can_scan, can_edit_sets FROM users WHERE id = $1",
-      [PRINT_STAFF],
-    );
+    const after = await pool.query("SELECT role, can_grade, can_scan, can_edit_sets FROM users WHERE id = $1", [
+      PRINT_STAFF,
+    ]);
     expect(after.rows[0]).toEqual(before.rows[0]);
   });
 });

@@ -1,4 +1,11 @@
 import { sendServerError } from "./lib/error-response";
+import {
+  kindOfGradeType,
+  kindOfOverallGrade,
+  rejectKindChange,
+  gradeTypeToPersist,
+  normaliseGradeType,
+} from "./lib/grade-kind";
 import { normalizeCertId, certNumberFromId } from "./lib/cert-id";
 import { ensurePerfIndexes } from "./lib/perf-indexes";
 import { applyStructuredVariantFromBody } from "./lib/structured-variant";
@@ -2449,23 +2456,27 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // from the client's `gradeType` key rather than from `overall_grade`, but the
       // hole is the same, so the same stored-vs-requested check applies. Comparison
       // only — no scoring, weighting or formula logic is touched.
-      const storedGradeType = String((cert as { gradeType?: string | null }).gradeType ?? "numeric") || "numeric";
-      const storedIsNonNum = isNonNumericGrade(storedGradeType);
-      if (isNonNum !== storedIsNonNum) {
-        return res.status(400).json({
-          error: storedIsNonNum
-            ? "This certificate is authentication-only. Normal approval cannot give it a numeric grade — that would change its type."
-            : "This is a numeric certificate. Normal approval cannot convert it to authentication-only (NO/AA) — that requires the explicit Super Admin conversion action.",
-        });
-      }
-      if (isNonNum) {
-        const canonicalKind = (v: string): "NO" | "AA" => (v === "AA" || v === "authentic_altered" ? "AA" : "NO");
-        if (canonicalKind(finalGradeType) !== canonicalKind(storedGradeType)) {
-          return res.status(400).json({
-            error:
-              "Normal approval cannot change an authentication-only certificate between NO and AA — that requires the explicit Super Admin conversion action.",
-          });
+      const storedGradeType = normaliseGradeType((cert as { gradeType?: string | null }).gradeType);
+      const requestedKind = kindOfGradeType(finalGradeType);
+      const kindRejection = rejectKindChange({
+        storedGradeType,
+        requestedKind,
+        isApproved: (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt != null,
+        allowChangeWhenUnapproved: false,
+      });
+      if (kindRejection) {
+        try {
+          await storage.writeAuditLog(
+            "certificate",
+            String((cert as { certId?: string }).certId ?? id),
+            "approval_kind_change_rejected",
+            (req.session as { adminEmail?: string })?.adminEmail || "admin",
+            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve-grade" },
+          );
+        } catch (auditErr) {
+          console.warn("[approve-grade] kind-rejection audit failed:", (auditErr as Error).message);
         }
+        return res.status(400).json({ error: kindRejection });
       }
 
       if (!isNonNum && (finalOverall == null || !isValidNumericGrade(finalOverall))) {
@@ -4155,8 +4166,40 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           if (uploadErr) return res.status(400).json({ error: uploadErr });
         }
 
-        const gradeTypeUpdate = req.body.gradeType || existing.gradeType || "numeric";
-        const isNonNumUpdate = isNonNumericGrade(gradeTypeUpdate);
+        // Locked NO rule on the metadata editor too: its Grade Type dropdown could
+        // convert a PUBLISHED numeric certificate to authentication-only and null its
+        // grade in the same write (finalGradeOverall below is forced to null for a
+        // non-numeric kind). Ordinary editing of an unapproved certificate is still
+        // allowed; changing a published certificate's kind is refused and routed to
+        // Super Admin Correction Mode. Comparison only — no scoring logic touched.
+        const storedGradeTypeUpdate = normaliseGradeType(existing.gradeType);
+        const requestedKindUpdate = kindOfGradeType(req.body.gradeType || storedGradeTypeUpdate);
+        const kindRejectionUpdate = rejectKindChange({
+          storedGradeType: storedGradeTypeUpdate,
+          requestedKind: requestedKindUpdate,
+          isApproved: existing.gradeApprovedAt != null,
+          allowChangeWhenUnapproved: true,
+        });
+        if (kindRejectionUpdate) {
+          try {
+            await storage.writeAuditLog(
+              "certificate",
+              String((existing as { certId?: string }).certId ?? id),
+              "edit_kind_change_rejected",
+              (req.session as { adminEmail?: string })?.adminEmail || "admin",
+              {
+                stored_grade_type: storedGradeTypeUpdate,
+                requested_kind: requestedKindUpdate,
+                route: "certificate-update",
+              },
+            );
+          } catch (auditErr) {
+            console.warn("[cert-update] kind-rejection audit failed:", (auditErr as Error).message);
+          }
+          return res.status(400).json({ error: kindRejectionUpdate });
+        }
+        const gradeTypeUpdate = gradeTypeToPersist(storedGradeTypeUpdate, requestedKindUpdate);
+        const isNonNumUpdate = requestedKindUpdate !== "numeric";
 
         if (!isNonNumUpdate && req.body.gradeOverall) {
           const g = Number(req.body.gradeOverall);
@@ -6950,9 +6993,9 @@ Defects (admin-confirmed): ${defectLines}`;
 
       const b = req.body;
       const overallGrade = b.overall_grade;
-      const isNonNum = overallGrade === "AA" || overallGrade === "NO";
+      const isNonNumRequested = overallGrade === "AA" || overallGrade === "NO";
       const parsedOverall = parseFloat(overallGrade);
-      const gradeNum = isNonNum ? null : isNaN(parsedOverall) ? null : parsedOverall;
+      const gradeNum = isNonNumRequested ? null : isNaN(parsedOverall) ? null : parsedOverall;
 
       // grade_type used to be derived SOLELY from this request's overall_grade, so ANY
       // partial auto-save that omitted the field (the common case — this route fires on
@@ -6964,15 +7007,47 @@ Defects (admin-confirmed): ${defectLines}`;
       // a side effect of a save. Fix: only honour a kind the caller actually stated;
       // otherwise preserve the stored value. Preservation only — no scoring or formula
       // logic, and an explicit NO/AA/numeric from the workstation still applies.
-      const storedGradeType = String((cert as { gradeType?: string | null }).gradeType ?? "numeric") || "numeric";
+      const storedGradeType = normaliseGradeType((cert as { gradeType?: string | null }).gradeType);
       const overallStated = overallGrade != null && String(overallGrade).trim() !== "";
-      const nextGradeType = !overallStated
-        ? storedGradeType
-        : isNonNum
-          ? overallGrade === "AA"
-            ? "AA"
-            : "NO"
-          : "numeric";
+      // CRITICAL (found by hostile review of the first version of this fix): giving this
+      // route only preserve-on-omission left a one-key body — {"overall_grade":"NO"} —
+      // able to convert a LIVE PUBLISHED numeric certificate to authentication-only and
+      // null its grade AND all four sub-grades, with a 200. This route's UPDATE has no
+      // grade_approved_at guard, so published rows are writable here.
+      //
+      // Locked rule, applied through the shared helper: setting the kind on a certificate
+      // that has never been approved is ordinary grading work and stays allowed (a card
+      // must be gradeable as authentication-only in the first place); changing the kind of
+      // an ALREADY-PUBLISHED certificate is refused and routed to Super Admin Correction
+      // Mode. An unstated kind always preserves the stored value.
+      const requestedKind = overallStated ? kindOfOverallGrade(overallGrade) : kindOfGradeType(storedGradeType);
+      const kindRejection = overallStated
+        ? rejectKindChange({
+            storedGradeType,
+            requestedKind,
+            isApproved: (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt != null,
+            allowChangeWhenUnapproved: true,
+          })
+        : null;
+      if (kindRejection) {
+        try {
+          await storage.writeAuditLog(
+            "certificate",
+            String((cert as { certId?: string }).certId ?? id),
+            "grade_kind_change_rejected",
+            (req.session as { adminEmail?: string })?.adminEmail || "admin",
+            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "grade" },
+          );
+        } catch (auditErr) {
+          console.warn("[grade] kind-rejection audit failed:", (auditErr as Error).message);
+        }
+        return res.status(400).json({ error: kindRejection });
+      }
+      const nextGradeType = gradeTypeToPersist(storedGradeType, requestedKind);
+      // The NULL-out branches below must follow the RESOLVED kind, never the raw request:
+      // otherwise a body whose kind change was refused (or simply omitted) could still
+      // null the grade and sub-grades while grade_type kept its stored value.
+      const isNonNum = requestedKind !== "numeric";
 
       // P0 preservation helpers — return null when payload field is missing/empty/invalid,
       // so the SQL COALESCE below falls through to the existing column value.
@@ -7285,24 +7360,29 @@ Defects (admin-confirmed): ${defectLines}`;
       // must match too (NO and AA print differently). Legacy long-form aliases are
       // handled by isNonNumericGrade. Comparison only — no scoring, weighting or
       // formula logic is touched, and grade_type is never changed by this route.
-      const storedGradeType = String((cert as { gradeType?: string | null }).gradeType ?? "numeric") || "numeric";
-      const storedIsNonNum = isNonNumericGrade(storedGradeType);
-      if (isNonNum !== storedIsNonNum) {
-        return res.status(400).json({
-          error: storedIsNonNum
-            ? "This certificate is authentication-only. Normal approval cannot give it a numeric grade — that would change its type."
-            : "This is a numeric certificate. Normal approval cannot convert it to authentication-only (NO/AA) — that requires the explicit Super Admin conversion action.",
-        });
-      }
-      if (isNonNum) {
-        // 'not_original' is the legacy long form of NO, 'authentic_altered' of AA.
-        const canonicalKind = (v: string): "NO" | "AA" => (v === "AA" || v === "authentic_altered" ? "AA" : "NO");
-        if (canonicalKind(String(overallGrade)) !== canonicalKind(storedGradeType)) {
-          return res.status(400).json({
-            error:
-              "Normal approval cannot change an authentication-only certificate between NO and AA — that requires the explicit Super Admin conversion action.",
-          });
+      const storedGradeType = normaliseGradeType((cert as { gradeType?: string | null }).gradeType);
+      const requestedKind = kindOfOverallGrade(overallGrade);
+      // Approval may NEVER change the kind (allowChangeWhenUnapproved: false).
+      const kindRejection = rejectKindChange({
+        storedGradeType,
+        requestedKind,
+        isApproved: (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt != null,
+        allowChangeWhenUnapproved: false,
+      });
+      if (kindRejection) {
+        // Audited: an attempted violation of the locked rule must not be silent.
+        try {
+          await storage.writeAuditLog(
+            "certificate",
+            String((cert as { certId?: string }).certId ?? id),
+            "approval_kind_change_rejected",
+            (req.session as { adminEmail?: string })?.adminEmail || "admin",
+            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve" },
+          );
+        } catch (auditErr) {
+          console.warn("[approve] kind-rejection audit failed:", (auditErr as Error).message);
         }
+        return res.status(400).json({ error: kindRejection });
       }
 
       // Strength score is calibrated to the AI's overall grade. If the admin

@@ -218,7 +218,11 @@ describe("handler invariants: PUT /api/admin/certificates/:id/approve-grade", ()
 
   it("places the gate BEFORE the UPDATE", () => {
     const h = approveGradeHandler();
-    expect(h.indexOf("isValidNumericGrade(finalOverall)")).toBeLessThan(h.indexOf("UPDATE certificates SET"));
+    const gateAt = h.indexOf("isValidNumericGrade(finalOverall)");
+    const updateAt = h.indexOf("UPDATE certificates SET");
+    expect(gateAt).toBeGreaterThan(0);
+    expect(updateAt).toBeGreaterThan(0);
+    expect(gateAt).toBeLessThan(updateAt);
   });
 
   it("no longer writes `grade` from a bare parameter", () => {
@@ -251,14 +255,18 @@ describe("LOCKED RULE: normal approval cannot convert numeric <-> authentication
   for (const h of handlers) {
     it(`${h.name}: derives the certificate kind from the STORED record, not the request`, () => {
       const s = slice(h.marker);
-      expect(s).toContain("const storedIsNonNum = isNonNumericGrade(storedGradeType)");
-      expect(s).toMatch(/if \(isNonNum !== storedIsNonNum\) \{[\s\S]{0,400}?res\.status\(400\)/);
+      // The kind comes from the stored record and the decision goes through the single
+      // shared helper, so the paths cannot drift apart again.
+      expect(s).toContain("normaliseGradeType((cert as { gradeType?: string | null }).gradeType)");
+      expect(s).toContain("rejectKindChange({");
+      expect(s).toContain("storedGradeType,");
+      expect(s).toMatch(/if \(kindRejection\) \{[\s\S]{0,900}?res\.status\(400\)/);
     });
 
     it(`${h.name}: rejects a NO<->AA switch on an authentication-only record`, () => {
       const s = slice(h.marker);
-      expect(s).toContain("canonicalKind");
-      expect(s).toMatch(/canonicalKind\([\s\S]{0,80}?\) !== canonicalKind\(storedGradeType\)[\s\S]{0,300}?res\.status\(400\)/);
+      // Approval routes forbid ANY kind change, so NO<->AA is covered by the same call.
+      expect(s).toContain("allowChangeWhenUnapproved: false");
     });
 
     it(`${h.name}: persists the STORED grade_type, so approval cannot rewrite the column`, () => {
@@ -271,7 +279,13 @@ describe("LOCKED RULE: normal approval cannot convert numeric <-> authentication
 
     it(`${h.name}: the kind gate runs BEFORE the UPDATE`, () => {
       const s = slice(h.marker);
-      expect(s.indexOf("storedIsNonNum")).toBeLessThan(s.indexOf("UPDATE certificates SET"));
+      const gateAt = s.indexOf("rejectKindChange");
+      const updateAt = s.indexOf("UPDATE certificates SET");
+      // indexOf returns -1 when absent and -1 < anything, so BOTH must be proven present
+      // or this assertion is vacuously true on a tree with no gate at all.
+      expect(gateAt).toBeGreaterThan(0);
+      expect(updateAt).toBeGreaterThan(0);
+      expect(gateAt).toBeLessThan(updateAt);
     });
   }
 
@@ -294,7 +308,9 @@ describe("LOCKED RULE: normal approval cannot convert numeric <-> authentication
 describe("write semantics: grade_type is never rewritten by approval (real PostgreSQL)", () => {
   it("persisting the stored value is a no-op for a numeric record", async () => {
     await seed();
-    await pool.query("UPDATE certificates SET grade_type = (SELECT grade_type FROM certificates WHERE id = 1) WHERE id = 1");
+    await pool.query(
+      "UPDATE certificates SET grade_type = (SELECT grade_type FROM certificates WHERE id = 1) WHERE id = 1"
+    );
     const r = await pool.query<{ grade_type: string }>("SELECT grade_type FROM certificates WHERE id = 1");
     expect(r.rows[0].grade_type).toBe("numeric");
   });
@@ -391,17 +407,29 @@ describe("handler invariants: PUT /api/admin/certificates/:id/grade (draft save)
     expect(h).not.toContain('grade_type          = ${isNonNum ? (overallGrade === "AA" ? "AA" : "NO") : "numeric"}');
     expect(h).toMatch(/grade_type\s+= \$\{nextGradeType\}/);
     // The stored value must be the fallback when the caller states no kind.
-    expect(h).toContain("const overallStated = overallGrade != null && String(overallGrade).trim() !== \"\"");
-    expect(h).toMatch(/const nextGradeType = !overallStated\s*\?\s*storedGradeType/);
+    expect(h).toContain('const overallStated = overallGrade != null && String(overallGrade).trim() !== ""');
+    expect(h).toContain("const nextGradeType = gradeTypeToPersist(storedGradeType, requestedKind)");
+    expect(h).toMatch(
+      /requestedKind = overallStated \? kindOfOverallGrade\(overallGrade\) : kindOfGradeType\(storedGradeType\)/
+    );
   });
 
-  it("still honours an explicit kind stated by the workstation", () => {
-    // Preservation must not become "ignore the operator": a stated NO/AA/numeric applies.
+  it("REFUSES a kind change on a PUBLISHED certificate (this route had no gate at all)", () => {
+    // Hostile review proved a one-key body {"overall_grade":"NO"} converted a LIVE
+    // published numeric cert here and nulled its grade and all four sub-grades, 200.
+    // An earlier version of this file asserted the opposite and blessed that behaviour.
     const h = gradeHandler();
-    const decl = h.slice(h.indexOf("const nextGradeType"), h.indexOf("const nextGradeType") + 260);
-    expect(decl).toContain('"AA"');
-    expect(decl).toContain('"NO"');
-    expect(decl).toContain('"numeric"');
+    expect(h).toContain("rejectKindChange");
+    expect(h).toContain("allowChangeWhenUnapproved: true");
+    expect(h).toMatch(/isApproved:.*gradeApprovedAt/);
+    expect(h).toContain("res.status(400)");
+  });
+
+  it("binds the NULL-out branches to the RESOLVED kind, not the raw request", () => {
+    const h = gradeHandler();
+    expect(h).toContain('const isNonNum = requestedKind !== "numeric"');
+    // The raw-request flag must no longer drive the SQL.
+    expect(h).toMatch(/const isNonNumRequested = overallGrade === "AA"/);
   });
 });
 
