@@ -5,12 +5,12 @@
 -- makes the catalogue-read schema explicit so public read-only endpoints never
 -- need runtime DDL.
 
-ALTER TABLE custom_sets
+ALTER TABLE IF EXISTS custom_sets
   ADD COLUMN IF NOT EXISTS subset TEXT,
   ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
-ALTER TABLE tcgdex_sets
+ALTER TABLE IF EXISTS tcgdex_sets
   ADD COLUMN IF NOT EXISTS card_game TEXT NOT NULL DEFAULT 'pokemon',
   ADD COLUMN IF NOT EXISTS subset TEXT,
   ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false,

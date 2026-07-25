@@ -80,6 +80,7 @@ describe("partner schema ↔ migration parity", () => {
       // print_batches, print_events). 0020–0021 are claimed by other unmerged branches,
       // so 0022 avoids the runner's duplicate-number hard-reject.
       "0022_print_workflow_lifecycle.sql",
+      "0023_set_library_schema.sql",
     ]);
   });
 
