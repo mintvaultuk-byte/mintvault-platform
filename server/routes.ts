@@ -2425,16 +2425,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const finalGradeType = gradeType || "numeric";
       const isNonNum = isNonNumericGrade(finalGradeType);
-      const finalOverall = isNonNum ? null : parseFloat(overall);
+      // Strict parse (see the matching helper on the sibling /approve route): parseFloat
+      // is a prefix parser, so "7.5abc" would publish 7.5 and [8] would publish 8.
+      const strictGrade = (v: unknown): number | null => {
+        if (typeof v === "number") return Number.isFinite(v) ? v : null;
+        if (typeof v !== "string") return null;
+        const t = v.trim();
+        // Plain decimal only. Number() also accepts hex ("0x0A" -> 10), binary and
+        // exponent forms, none of which any client sends for a card grade.
+        if (!/^-?\d+(\.\d+)?$/.test(t)) return null;
+        const n = Number(t);
+        return Number.isFinite(n) ? n : null;
+      };
+      const finalOverall = isNonNum ? null : strictGrade(overall);
       // Malformed-payload gate (same class as the MV205 grade-erasure on the sibling
       // /approve route). `parseFloat(undefined)` is NaN, and Postgres `numeric` accepts
       // NaN, so a payload without a readable `overall` would publish a corrupt grade
       // over a valid one. Reject instead. NO/AA are exempt — their grade is NULL by
       // design. Gate only: no scoring, weights, or formula logic is touched.
-      if (!isNonNum && !Number.isFinite(finalOverall)) {
+      if (!isNonNum && (finalOverall == null || !isValidNumericGrade(finalOverall))) {
         return res.status(400).json({
           error:
-            "Cannot approve without a numeric overall grade. The approval payload is missing or has an unreadable overall grade — reopen the grading workstation and approve from there.",
+            "Cannot approve without a valid numeric overall grade (1–10, half grades allowed). The approval payload is missing or has an unreadable overall grade — reopen the grading workstation and approve from there.",
         });
       }
       // label_type (Pristine/black) is computed below, AFTER the MVGS run, so
@@ -7137,7 +7149,23 @@ Defects (admin-confirmed): ${defectLines}`;
       const txt = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
       const jsn = (v: unknown): string | null => (v != null ? JSON.stringify(v) : null);
 
-      const gradeNum = isNonNum ? null : num(overallGrade);
+      // STRICT parse for the published overall grade only (sub-grades keep num(), and
+      // are COALESCE-protected anyway). num() is parseFloat-based, i.e. a *prefix*
+      // parser: "7.5abc" -> 7.5 and [8] -> 8, so a malformed payload could publish a
+      // grade the operator never entered. Number() on a string plus an explicit type
+      // check rejects both. Every legitimate value (a JS number, or a numeric string
+      // such as "8", "8.0", " 8.5 ") still parses identically.
+      const strictGrade = (v: unknown): number | null => {
+        if (typeof v === "number") return Number.isFinite(v) ? v : null;
+        if (typeof v !== "string") return null;
+        const t = v.trim();
+        // Plain decimal only. Number() also accepts hex ("0x0A" -> 10), binary and
+        // exponent forms, none of which any client sends for a card grade.
+        if (!/^-?\d+(\.\d+)?$/.test(t)) return null;
+        const n = Number(t);
+        return Number.isFinite(n) ? n : null;
+      };
+      const gradeNum = isNonNum ? null : strictGrade(overallGrade);
       const sentCentering = isNonNum ? null : num(b.grade_centering);
       const sentCorners = isNonNum ? null : num(b.grade_corners);
       const sentEdges = isNonNum ? null : num(b.grade_edges);
@@ -7177,10 +7205,17 @@ Defects (admin-confirmed): ${defectLines}`;
       // malformed payload instead of erasing the value. Non-numeric grades (NO/AA) are
       // exempt by design — their `grade` column is NULL. Gate only: no scoring, weights,
       // or formula logic is touched.
-      if (!isNonNum && gradeNum == null) {
+      // isValidNumericGrade (the repo's existing predicate, already used by the other
+      // grade write paths at ~L3884/L4122) rather than a bare null check: num() is a
+      // prefix parser, so "7.5abc" -> 7.5, "1e2" -> 100, [8] -> 8, and 0/-5/Infinity
+      // all pass a presence-only test. Verified before adopting: every grade the MVGS
+      // engine can emit is a member of NUMERIC_GRADE_VALUES, and neither staging nor
+      // production holds a single off-ladder grade, so no legitimate re-approval is
+      // newly rejected. Membership check only — no scoring or formula logic.
+      if (!isNonNum && (gradeNum == null || !isValidNumericGrade(gradeNum))) {
         return res.status(400).json({
           error:
-            "Cannot approve without a numeric overall grade. The approval payload is missing or has an unreadable overall grade — reopen the grading workstation and approve from there.",
+            "Cannot approve without a valid numeric overall grade (1–10, half grades allowed). The approval payload is missing or has an unreadable overall grade — reopen the grading workstation and approve from there.",
         });
       }
 

@@ -39,7 +39,11 @@ beforeAll(async () => {
     CREATE TABLE certificates (
       id integer PRIMARY KEY,
       certificate_number text,
-      grade numeric,
+      -- MUST match the shipped column (shared/schema.ts: decimal precision 4, scale 1),
+      -- confirmed as numeric(4,1) on BOTH staging and production. An unconstrained
+      -- numeric here would silently store Infinity and hide the overflow behaviour
+      -- the NaN/Infinity tests below reason about.
+      grade numeric(4,1),
       grade_type text,
       auth_status text DEFAULT 'genuine',
       centering_score numeric, corners_score numeric, edges_score numeric, surface_score numeric
@@ -147,8 +151,29 @@ describe("handler invariants: PUT /api/admin/certificates/:id/approve", () => {
     return ROUTES.slice(start, end > start ? end : start + 20_000);
   };
 
-  it("rejects a numeric approval whose overall grade is missing or unreadable", () => {
-    expect(approveHandler()).toMatch(/if \(!isNonNum && gradeNum == null\) \{\s*return res\.status\(400\)/);
+  it("rejects a numeric approval whose overall grade is missing, unreadable or off-ladder", () => {
+    // Behaviour-shaped rather than spelling-shaped: the gate must consult BOTH the
+    // presence of the value and the shared grade validator, and must 400.
+    const h = approveHandler();
+    // Anchor on the overall-grade gate specifically — the B3 sub-grade gate also
+    // begins "if (!isNonNum &&" and appears earlier in the handler.
+    const at = h.indexOf("if (!isNonNum && (gradeNum == null");
+    expect(at).toBeGreaterThan(0);
+    const gate = h.slice(at, at + 400);
+    expect(gate).toContain("gradeNum == null");
+    expect(gate).toContain("isValidNumericGrade(gradeNum)");
+    expect(gate).toContain("res.status(400)");
+  });
+
+  it("places the gate BEFORE the UPDATE, so a rejected payload never reaches the write", () => {
+    // Without this, a gate accidentally placed after the UPDATE would satisfy every
+    // other assertion in this file while being completely useless.
+    const h = approveHandler();
+    const gateAt = h.indexOf("isValidNumericGrade(gradeNum)");
+    const updateAt = h.indexOf("UPDATE certificates SET");
+    expect(gateAt).toBeGreaterThan(0);
+    expect(updateAt).toBeGreaterThan(0);
+    expect(gateAt).toBeLessThan(updateAt);
   });
 
   it("no longer writes `grade` from a bare parameter", () => {
@@ -184,10 +209,16 @@ describe("handler invariants: PUT /api/admin/certificates/:id/approve-grade", ()
     return ROUTES.slice(start, end > start ? end : start + 20_000);
   };
 
-  it("rejects a numeric approval whose overall grade is not a finite number (NaN hazard)", () => {
-    expect(approveGradeHandler()).toMatch(
-      /if \(!isNonNum && !Number\.isFinite\(finalOverall\)\) \{\s*return res\.status\(400\)/
-    );
+  it("rejects a numeric approval whose overall grade is NaN or off-ladder", () => {
+    const h = approveGradeHandler();
+    const gate = h.slice(h.indexOf("if (!isNonNum &&"), h.indexOf("if (!isNonNum &&") + 400);
+    expect(gate).toContain("isValidNumericGrade(finalOverall)");
+    expect(gate).toContain("res.status(400)");
+  });
+
+  it("places the gate BEFORE the UPDATE", () => {
+    const h = approveGradeHandler();
+    expect(h.indexOf("isValidNumericGrade(finalOverall)")).toBeLessThan(h.indexOf("UPDATE certificates SET"));
   });
 
   it("no longer writes `grade` from a bare parameter", () => {
@@ -201,11 +232,96 @@ describe("handler invariants: PUT /api/admin/certificates/:id/approve-grade", ()
   });
 });
 
+describe("the published overall grade is parsed strictly, not with parseFloat", () => {
+  // parseFloat is a PREFIX parser, so "7.5abc" -> 7.5 and [8] -> 8 would publish a
+  // grade the operator never entered. Both approval routes now use a strict decimal
+  // parse. Verified over real HTTP against staging: "7.5abc", [8], {v:8}, true,
+  // "0x0A", "1e2" and "Infinity" all 400; 8.5, "8.5" and " 8.5 " all 200.
+  const STRICT_DECIMAL = /^-?\d+(\.\d+)?$/;
+  const strictGrade = (v: unknown): number | null => {
+    if (typeof v === "number") return Number.isFinite(v) ? v : null;
+    if (typeof v !== "string") return null;
+    const t = v.trim();
+    if (!STRICT_DECIMAL.test(t)) return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  it("mirrors the shipped helper: the regex in this test matches the one in routes.ts", () => {
+    // Guards against the test's copy drifting from the implementation.
+    expect(ROUTES).toContain("/^-?\\d+(\\.\\d+)?$/.test(t)");
+    expect((ROUTES.match(/const strictGrade = \(v: unknown\): number \| null => \{/g) ?? []).length).toBe(2);
+  });
+
+  it("rejects prefix-parseable junk that parseFloat would have accepted", () => {
+    for (const junk of ["7.5abc", "0x0A", "1e2", "Infinity", "8,5", "", " ", "--8"]) {
+      expect(strictGrade(junk)).toBeNull();
+    }
+    for (const nonPrimitive of [[8], { v: 8 }, true, false, null, undefined]) {
+      expect(strictGrade(nonPrimitive)).toBeNull();
+    }
+    expect(strictGrade(Number.NaN)).toBeNull();
+    expect(strictGrade(Number.POSITIVE_INFINITY)).toBeNull();
+  });
+
+  it("still accepts every legitimate form a client sends", () => {
+    expect(strictGrade(8.5)).toBe(8.5);
+    expect(strictGrade("8.5")).toBe(8.5);
+    expect(strictGrade(" 8.5 ")).toBe(8.5);
+    expect(strictGrade("10")).toBe(10);
+    expect(strictGrade("8.0")).toBe(8);
+    expect(strictGrade(1)).toBe(1);
+  });
+
+  it("no longer derives the overall grade with parseFloat on either approval route", () => {
+    expect(ROUTES).not.toContain("const finalOverall = isNonNum ? null : parseFloat(overall);");
+    expect(ROUTES).not.toContain("const gradeNum = isNonNum ? null : num(overallGrade);");
+  });
+});
+
+describe("handler invariants: PUT /api/admin/certificates/:id/grade (draft save)", () => {
+  // This third handler was also changed (auth_status) and must be pinned too, or the
+  // change is unguarded — the draft-save route runs on EVERY auto-save, so an
+  // auth_status reset here is far higher-frequency than on approval.
+  const gradeHandler = (): string => {
+    const start = ROUTES.indexOf('app.put("/api/admin/certificates/:id/grade"');
+    expect(start).toBeGreaterThan(0);
+    const end = ROUTES.indexOf("\n  app.", start + 10);
+    return ROUTES.slice(start, end > start ? end : start + 20_000);
+  };
+
+  it("preserves auth_status on omission instead of resetting it to 'genuine'", () => {
+    const h = gradeHandler();
+    expect(h).not.toContain('auth_status         = ${b.auth_status || "genuine"}');
+    expect(h).toContain("auth_status         = COALESCE(${txt(b.auth_status)}, auth_status, 'genuine')");
+  });
+
+  it("keeps its pre-existing COALESCE guard on the grade column", () => {
+    expect(gradeHandler()).toMatch(/grade\s+= \$\{isNonNum \? sql`NULL` : sql`COALESCE\(/);
+  });
+});
+
+describe("the adopted grade validator accepts every grade MVGS can emit", () => {
+  // Load-bearing for the gate: if the validator rejected any MVGS output, the fix
+  // would 400 on legitimate approvals. Proven exhaustively over the score domain.
+  it("accepts all gradeFromMvgsScore outputs and rejects junk", async () => {
+    const { isValidNumericGrade } = await import("../shared/schema");
+    const { gradeFromMvgsScore } = await import("../shared/mvgs-scoring");
+    for (let s = -20; s <= 120; s += 0.25) {
+      expect(isValidNumericGrade(gradeFromMvgsScore(s))).toBe(true);
+    }
+    for (const junk of [0, -5, 100, 7.55, 1e2, Number.NaN, Number.POSITIVE_INFINITY, 10.5, 0.5]) {
+      expect(isValidNumericGrade(junk)).toBe(false);
+    }
+    for (const ok of [1, 1.5, 7.5, 8, 9.5, 10]) expect(isValidNumericGrade(ok)).toBe(true);
+  });
+});
+
 describe("grading engine and MVGS remain untouched by this fix", () => {
   it("the fix adds no scoring, weighting or formula logic", () => {
     // Slice ONLY the gate block that this fix introduced (not the surrounding handler,
     // which legitimately runs MVGS to derive label_type).
-    const at = ROUTES.indexOf("if (!isNonNum && gradeNum == null)");
+    const at = ROUTES.indexOf("if (!isNonNum && (gradeNum == null");
     expect(at).toBeGreaterThan(0);
     const gate = ROUTES.slice(at, ROUTES.indexOf("}", ROUTES.indexOf("});", at)) + 1);
     // The gate is a presence check only — it must not compute or adjust a grade.
