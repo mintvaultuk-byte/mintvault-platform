@@ -4106,9 +4106,8 @@ export function PokemonSetPicker({
     }
 
     const changedName = nextName !== editingSet.name;
-    const changedCode = nextCode !== editingSet.id;
     if (
-      (changedName || changedCode) &&
+      changedName &&
       !window.confirm(
         "This edits the catalogue set used for future grading. Existing certificate snapshots will not be changed automatically. Continue?"
       )
@@ -4134,7 +4133,6 @@ export function PokemonSetPicker({
           archived: editForm.archived,
           reason: editForm.reason || null,
           updatedAt: editingSet.updatedAt || null,
-          confirmLinkedCardUpdate: changedCode,
         }),
       });
       const d = await r.json();
@@ -4152,7 +4150,7 @@ export function PokemonSetPicker({
         updatedAt: new Date().toISOString(),
         linkedCertificates: editingSet.linkedCertificates || 0,
       };
-      setSets((current) => [updated, ...current.filter((s) => s.id !== editingSet.id && s.id !== updated.id)]);
+      fetchSets();
       onChange(updated.name, updated.id);
       setQuery(updated.name);
       setEditingSet(null);
@@ -4395,11 +4393,12 @@ export function PokemonSetPicker({
               )}
             </div>
             <div>
-              <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Set Code *</label>
+              <label className="text-[var(--admin-ink-dim)] text-[10px] block mb-0.5">Stable Set ID</label>
               <input
                 value={editForm.setId}
-                onChange={(e) => setEditForm((f) => ({ ...f, setId: e.target.value }))}
-                className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-white text-[#111] placeholder:text-gray-400"
+                readOnly
+                aria-readonly="true"
+                className="w-full border border-[var(--admin-line)] rounded px-2 py-1.5 text-xs bg-slate-100 text-[#444]"
               />
             </div>
             <div>

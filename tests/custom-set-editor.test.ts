@@ -173,14 +173,17 @@ describe("custom set editor", () => {
     expect(store.transaction).toHaveBeenCalledTimes(1);
   });
 
-  it("requires edit-sets capability for staff set edits while preserving admin access", () => {
+  it("requires edit-sets capability for staff set edits and delegates to the canonical service", () => {
     const source = readFileSync("server/routes/grader.ts", "utf8");
-    const route =
-      source.match(/app\.patch\("\/api\/staff\/custom-sets\/:setId"[\s\S]*?editCustomSetDetails/)?.[0] || "";
+    const route = source.slice(
+      source.indexOf('app.patch("/api/staff/custom-sets/:setId"'),
+      source.indexOf("// ── Shared admin+grader")
+    );
     expect(route).toContain("s?.isAdmin");
     expect(route).toContain("s.capEditSets");
     expect(route).toContain("can_edit_sets");
     expect(route).not.toContain("capPrint");
     expect(route).not.toContain("capGrade");
+    expect(route).toContain('updateSetLibraryRecord("custom"');
   });
 });

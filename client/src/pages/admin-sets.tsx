@@ -29,6 +29,7 @@ type SetRow = {
   subset: string | null;
   archived: boolean;
   updatedAt: string | null;
+  version: string;
   publishedCardCount: number | null;
   linkedCards: number;
   linkedCertificates: number;
@@ -227,15 +228,9 @@ export default function AdminSetsPage() {
     if (!cleanName) return setErr("Set name is required.");
     if (!cleanCode) return setErr("Set code is required.");
     if (!draft.reason.trim()) return setErr("Correction reason is required.");
-    const codeChanged = cleanCode !== row.setId;
     const nameChanged = cleanName !== row.setName;
-    let confirmLinkedCardUpdate = false;
-    if (nameChanged || codeChanged) {
-      const prompt = codeChanged
-        ? `Save this set code change for the ${sourceLabel(row.source)} record?\n\nLinked draft/card-master records using ${row.setId} will be updated to ${cleanCode}. Issued certificate text will not be rewritten.`
-        : "Save this set name change? Issued certificate text will not be rewritten.";
-      if (!window.confirm(prompt)) return;
-      confirmLinkedCardUpdate = codeChanged;
+    if (nameChanged) {
+      if (!window.confirm("Save this set name change? Issued certificate text will not be rewritten.")) return;
     }
     savingRef.current = true;
     setSaving(true);
@@ -248,7 +243,7 @@ export default function AdminSetsPage() {
         totalCards: draft.totalCards.trim(),
         reason: draft.reason.trim(),
         updatedAt: row.updatedAt,
-        confirmLinkedCardUpdate,
+        version: row.version,
       });
       setMsg("Set updated.");
       setEditing(null);
@@ -476,7 +471,9 @@ export default function AdminSetsPage() {
                     <tr key={row.uid} className="align-top text-[var(--admin-ink)]">
                       <td className="max-w-[280px] px-3 py-3">
                         <div className="font-semibold">{row.setName}</div>
-                        {row.subset && <div className="mt-1 text-xs text-[var(--admin-gold)]">Subset: {row.subset}</div>}
+                        {row.subset && (
+                          <div className="mt-1 text-xs text-[var(--admin-gold)]">Subset: {row.subset}</div>
+                        )}
                       </td>
                       <td className="px-3 py-3 font-mono text-xs">{row.setId}</td>
                       <td className="px-3 py-3">{TCG_OPTIONS.find((o) => o.value === row.tcg)?.label || row.tcg}</td>
@@ -650,12 +647,8 @@ export default function AdminSetsPage() {
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">Set code</span>
-                <input
-                  className={`${inputCls} w-full`}
-                  value={editing.draft.setId}
-                  onChange={(e) => setEditing({ ...editing, draft: { ...editing.draft, setId: e.target.value } })}
-                />
+                <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">Stable set ID</span>
+                <input className={`${inputCls} w-full`} value={editing.draft.setId} readOnly aria-readonly="true" />
               </label>
               <label className="space-y-1">
                 <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">Year</span>
@@ -700,7 +693,9 @@ export default function AdminSetsPage() {
                 />
               </label>
               <label className="space-y-1 sm:col-span-2">
-                <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">Subset / review classification</span>
+                <span className="text-xs font-semibold uppercase text-[var(--admin-gold)]">
+                  Subset / review classification
+                </span>
                 <input
                   className={`${inputCls} w-full`}
                   value={editing.draft.subset}

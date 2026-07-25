@@ -85,7 +85,9 @@ describe("set library service", () => {
     expect(() => validateSetLibraryEdit({ setId: "mv2", setName: "Set", releaseYear: 2024.5 })).toThrow(
       SetLibraryError
     );
-    expect(validateSetLibraryEdit({ setId: " MV2 ", setName: " Corrected ", totalCards: 0 })).toMatchObject({
+    expect(
+      validateSetLibraryEdit({ setId: " MV2 ", setName: " Corrected ", totalCards: 0, reason: "Correction" })
+    ).toMatchObject({
       setId: "mv2",
       setName: "Corrected",
       totalCards: 0,
@@ -160,21 +162,17 @@ describe("set library service", () => {
     expect(duplicateName?.current.duplicateSources).toEqual(["custom:mv1", "tcgdex: MV1 "]);
   });
 
-  it("updates an existing source row, prevents duplicate creation, and records old/new audit details", async () => {
+  it("updates an existing source row without changing its stable ID and records old/new audit details", async () => {
     mockEnsureSchema(mockDb.txExecute);
     mockDb.txExecute.mockResolvedValueOnce({ rows: [baseSetRow] });
     mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [], rowCount: 2 });
     mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
 
     const result = await updateSetLibraryRecord(
       "custom",
       "mv1",
       {
-        setId: "mv2",
+        setId: "mv1",
         setName: "Corrected Set",
         tcg: "pokemon",
         series: "Promo",
@@ -183,7 +181,7 @@ describe("set library service", () => {
         subset: "Trainer Gallery",
         archived: false,
         reason: "Correct source data",
-        confirmLinkedCardUpdate: true,
+        updatedAt: "2026-01-01T00:00:00.000Z",
       },
       { id: "admin@example.com", role: "admin" }
     );
@@ -192,16 +190,20 @@ describe("set library service", () => {
       ok: true,
       source: "custom",
       oldSetId: "mv1",
-      linkedCardsUpdated: 2,
+      linkedCardsUpdated: 0,
       certificatesUpdated: 0,
     });
     expect(mockDb.transaction).toHaveBeenCalledTimes(1);
-    expect(mockDb.txExecute).toHaveBeenCalledTimes(10);
-    const updateSql = sqlText(mockDb.txExecute.mock.calls[6][0]);
-    const linkedCardsSql = sqlText(mockDb.txExecute.mock.calls[8][0]);
-    const auditSql = sqlText(mockDb.txExecute.mock.calls[9][0]);
+    const updateSql =
+      mockDb.txExecute.mock.calls.map((call) => sqlText(call[0])).find((text) => text.includes("UPDATE custom_sets")) ||
+      "";
+    const auditSql =
+      mockDb.txExecute.mock.calls
+        .map((call) => sqlText(call[0]))
+        .find((text) => text.includes("INSERT INTO audit_log")) || "";
     expect(updateSql).toContain("UPDATE custom_sets");
-    expect(linkedCardsSql).toContain("UPDATE card_master");
+    expect(updateSql).not.toContain("set_id =");
+    expect(mockDb.txExecute.mock.calls.some((call) => sqlText(call[0]).includes("UPDATE card_master"))).toBe(false);
     expect(auditSql).toContain("INSERT INTO audit_log");
     expect(auditSql).toContain("set_library_update");
   });
@@ -221,6 +223,7 @@ describe("set library service", () => {
           setName: "Corrected Set",
           tcg: "pokemon",
           updatedAt: "2026-01-01T00:00:00.000Z",
+          reason: "Correction",
         },
         { id: "admin@example.com", role: "admin" }
       )
@@ -228,99 +231,55 @@ describe("set library service", () => {
     expect(mockDb.txExecute.mock.calls.some((call) => sqlText(call[0]).includes("UPDATE custom_sets"))).toBe(false);
   });
 
-  it("rejects duplicate code collisions before writing a set update", async () => {
+  it("requires a reason and a current version before accepting a catalogue update", async () => {
     mockEnsureSchema(mockDb.txExecute);
     mockDb.txExecute.mockResolvedValueOnce({ rows: [baseSetRow] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [{ source: "tcgdex", set_id: "mv2" }] });
 
     await expect(
       updateSetLibraryRecord(
         "custom",
         "mv1",
-        { setId: "mv2", setName: "Corrected Set", tcg: "pokemon" },
+        { setId: "mv1", setName: "Corrected Set", tcg: "pokemon", reason: "Correction" },
         { id: "admin@example.com", role: "admin" }
       )
-    ).rejects.toMatchObject({ status: 409 });
+    ).rejects.toMatchObject({ status: 400 });
     expect(mockDb.txExecute.mock.calls.some((call) => sqlText(call[0]).includes("UPDATE custom_sets"))).toBe(false);
   });
 
-  it("blocks code collisions across every set source", async () => {
-    for (const [source, collision] of [
-      ["custom", "tcgdex"],
-      ["custom", "card_sets"],
-      ["tcgdex", "card_sets"],
-    ] as const) {
-      mockDb.txExecute.mockReset();
-      mockEnsureSchema(mockDb.txExecute);
-      mockDb.txExecute.mockResolvedValueOnce({ rows: [{ ...baseSetRow, source }] });
-      mockDb.txExecute.mockResolvedValueOnce({ rows: [{ source: collision, set_id: " MV2 " }] });
-
-      await expect(
-        updateSetLibraryRecord(
-          source,
-          "mv1",
-          { setId: " mv2 ", setName: "Corrected Set", tcg: "pokemon" },
-          { id: "admin@example.com", role: "admin" }
-        )
-      ).rejects.toMatchObject({ status: 409 });
-      expect(mockDb.txExecute.mock.calls.some((call) => sqlText(call[0]).includes("UPDATE card_master"))).toBe(false);
-    }
-  });
-
-  it("allows retaining the current code while editing another field", async () => {
+  it("rejects attempts to change a stable set ID without touching linked cards", async () => {
     mockEnsureSchema(mockDb.txExecute);
     mockDb.txExecute.mockResolvedValueOnce({ rows: [baseSetRow] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-
-    await expect(
-      updateSetLibraryRecord(
-        "custom",
-        " MV1 ",
-        { setId: "mv1", setName: "Renamed Set", tcg: "pokemon", series: "Promo", releaseYear: 2024, totalCards: 10 },
-        { id: "admin@example.com", role: "admin" }
-      )
-    ).resolves.toMatchObject({ ok: true, linkedCardsUpdated: 0 });
-    expect(mockDb.txExecute.mock.calls.some((call) => sqlText(call[0]).includes("UPDATE card_master"))).toBe(false);
-  });
-
-  it("requires explicit linked-card confirmation before changing a code with cards", async () => {
-    mockEnsureSchema(mockDb.txExecute);
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [baseSetRow] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
 
     await expect(
       updateSetLibraryRecord(
         "custom",
         "mv1",
-        { setId: "mv2", setName: "Corrected Set", tcg: "pokemon" },
+        {
+          setId: "mv2",
+          setName: "Renamed Set",
+          tcg: "pokemon",
+          reason: "Correction",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
         { id: "admin@example.com", role: "admin" }
       )
     ).rejects.toMatchObject({ status: 400 });
     expect(mockDb.txExecute.mock.calls.some((call) => sqlText(call[0]).includes("UPDATE card_master"))).toBe(false);
   });
 
-  it("blocks ambiguous card-master rewrites when the old code exists in another source", async () => {
+  it("uses a content version for active legacy card-set records", async () => {
     mockEnsureSchema(mockDb.txExecute);
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [baseSetRow] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
-    mockDb.txExecute.mockResolvedValueOnce({ rows: [{ source: "tcgdex", set_id: "mv1" }] });
+    const legacy = { ...baseSetRow, source: "card_sets", updated_at: null };
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [legacy] });
 
     await expect(
       updateSetLibraryRecord(
-        "custom",
+        "card_sets",
         "mv1",
-        { setId: "mv2", setName: "Corrected Set", tcg: "pokemon", confirmLinkedCardUpdate: true },
+        { setId: "mv1", setName: "Corrected Set", tcg: "pokemon", reason: "Correction", version: "stale" },
         { id: "admin@example.com", role: "admin" }
       )
     ).rejects.toMatchObject({ status: 409 });
-    expect(mockDb.txExecute.mock.calls.some((call) => sqlText(call[0]).includes("UPDATE card_master"))).toBe(false);
   });
 
   it("records approve/reject/ignore review decisions with audit trail", async () => {
