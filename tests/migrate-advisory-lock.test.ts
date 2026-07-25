@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
-import { resolveMigrationEndpoint } from "../scripts/db/migrate";
+import { assertDedicatedBackend, assertNotSharedBackend, resolveMigrationEndpoint } from "../scripts/db/migrate";
 
 const LOCK_KEY = 4_150_205; // must match ADVISORY_LOCK_KEY in migrate.ts
 
@@ -206,17 +206,109 @@ describe("endpoint selection fails closed — a pooled session can never own the
   });
 
   it("leaves an already-direct or local URL untouched", () => {
-    for (const u of [
-      "postgresql://u:p@ep-a-1.eu.aws.neon.tech/neondb",
-      "postgresql://u:p@127.0.0.1:5432/db",
-      "postgresql://u:p@localhost/db",
-    ]) {
-      expect(resolveMigrationEndpoint(u)).toEqual({ url: u, pooled: false });
+    for (const [u, host] of [
+      ["postgresql://u:p@ep-a-1.eu.aws.neon.tech/neondb", "ep-a-1.eu.aws.neon.tech"],
+      ["postgresql://u:p@127.0.0.1:5432/db", "127.0.0.1"],
+      ["postgresql://u:p@localhost/db", "localhost"],
+    ] as const) {
+      expect(resolveMigrationEndpoint(u)).toEqual({ url: u, pooled: false, host });
     }
   });
 
   it("the disposable local cluster is accepted unchanged (so tests exercise the real path)", () => {
     expect(resolveMigrationEndpoint(url).url).toBe(url);
+  });
+});
+
+describe("routing parameters cannot bypass the endpoint guard (hostile-review CRITICAL)", () => {
+  // pg-connection-string copies host/port/options query params onto the connection config
+  // AFTER parsing the URL, so they OVERRIDE the URL's hostname. The first version of this
+  // guard inspected the hostname while the runner connected somewhere else — and then
+  // printed the safe-looking host, which is worse than silence. Proven end to end by the
+  // reviewer: a Neon hostname with ?host=127.0.0.1 read the journal off localhost while
+  // reporting the Neon endpoint.
+  it("REFUSES a URL carrying ?host=", () => {
+    expect(() =>
+      resolveMigrationEndpoint("postgresql://u:p@ep-x.eu.aws.neon.tech/db?host=ep-x-pooler.eu.aws.neon.tech")
+    ).toThrow(/host.*parameter|overrides/i);
+  });
+
+  it("REFUSES ?port=, ?options= and ?servername=", () => {
+    for (const q of ["port=6432", "options=endpoint%3Dfoo", "servername=other.host"]) {
+      expect(() => resolveMigrationEndpoint(`postgresql://u:p@ep-x.eu.aws.neon.tech/db?${q}`), q).toThrow(
+        /parameter|overrides/i
+      );
+    }
+  });
+
+  it("still accepts the legitimate parameters a Neon URL actually carries", () => {
+    const r = resolveMigrationEndpoint(
+      "postgresql://u:p@ep-x-pooler.eu.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+    );
+    expect(r.url).not.toContain("-pooler");
+    expect(r.url).toContain("sslmode=require");
+  });
+
+  it("FAILS CLOSED on an unparseable URL instead of proceeding", () => {
+    // Previously returned { pooled: false } and connected anyway.
+    for (const bad of ["not a url", "", "postgres://u:p@[bad host]/db"]) {
+      expect(() => resolveMigrationEndpoint(bad), JSON.stringify(bad)).toThrow(/did not parse|parameter/i);
+    }
+  });
+
+  it("catches a non-Neon pooled hostname form too", () => {
+    // `.pooler.` (dot-separated) as well as `-pooler.` — e.g. other providers.
+    expect(() => resolveMigrationEndpoint("postgresql://u:p@aws-0-eu.pooler.example.com:6543/db")).toThrow(/pooler/i);
+  });
+
+  it("reports the host it will actually dial", () => {
+    const r = resolveMigrationEndpoint("postgresql://u:p@EP-A-1-POOLER.EU.AWS.NEON.TECH/db");
+    expect(r.host).toBe("ep-a-1.eu.aws.neon.tech");
+    expect(r.host).not.toContain("-pooler");
+  });
+
+  it("tolerates a trailing-dot FQDN rather than blocking all migrations", () => {
+    const r = resolveMigrationEndpoint("postgresql://u:p@ep-a-1.eu.aws.neon.tech./db");
+    expect(r.pooled).toBe(false);
+    expect(r.host).toBe("ep-a-1.eu.aws.neon.tech");
+  });
+});
+
+describe("dedicated-backend proof (hostile-review HIGH: pg_locks cannot see backend SHARING)", () => {
+  // Two runners multiplexed onto ONE pooled backend share pg_backend_pid(), so every
+  // advisory-lock ownership branch passes for both — which is the double-apply vector.
+  // This measures the property that matters instead of pattern-matching hostnames.
+  it("passes on a direct connection (a second connection gets a different backend)", async () => {
+    const c = await runner();
+    try {
+      const pid = await backendPid(c);
+      await expect(assertDedicatedBackend(url, pid, undefined)).resolves.toBeUndefined();
+    } finally {
+      await c.end();
+    }
+  });
+
+  it("THROWS when two connections report the SAME backend — the shared-pooled signature", () => {
+    // Deterministic, and this is the whole point of the check: under PgBouncer transaction
+    // mode two runners can share one server backend, in which case both see the same pid and
+    // every advisory-lock ownership branch passes for both. A real PgBouncer is not available
+    // here, so the comparison itself is pinned exhaustively.
+    expect(() => assertNotSharedBackend(4242, 4242)).toThrow(/shares its server backend/i);
+    expect(() => assertNotSharedBackend(1, 1)).toThrow(/shares its server backend/i);
+  });
+
+  it("passes only when the two pids genuinely differ", () => {
+    expect(() => assertNotSharedBackend(4242, 4243)).not.toThrow();
+  });
+
+  it("fails closed when either pid is unreadable", () => {
+    for (const [a, b] of [
+      [Number.NaN, 1],
+      [1, Number.NaN],
+      [Number.POSITIVE_INFINITY, 1],
+    ] as const) {
+      expect(() => assertNotSharedBackend(a, b)).toThrow(/could not verify/i);
+    }
   });
 });
 

@@ -59,19 +59,46 @@ const ADVISORY_LOCK_KEY = 4_150_205; // "P0.5" mnemonic; any stable int works.
  * runner also leaks the lock onto a shared backend, blocking every later runner until the
  * pooler recycles it.
  *
- * Fix: run the lock-owning session on the DIRECT (non-pooler) endpoint, and FAIL CLOSED if
- * that cannot be derived — never silently fall back to a pooled session for a migration.
+ * A SECOND hostile review proved the first version of this guard was bypassable and that a
+ * hostname test can never be sufficient:
+ *
+ *  • `pg-connection-string` copies `host`, `port` and `options` QUERY PARAMETERS onto the
+ *    connection config AFTER parsing the URL, so they override the URL's own hostname. The
+ *    guard inspected one endpoint while the runner connected to another — and the log line
+ *    then printed the safe-looking host, which is worse than silence. Those parameters are
+ *    now REFUSED outright: a migration URL has no legitimate need for them.
+ *  • Two runners sharing ONE pooled backend share `pg_backend_pid()`, so every pg_locks
+ *    ownership branch passes for both. Pattern-matching hostnames cannot detect that.
+ *    `assertDedicatedBackend` therefore MEASURES the property that actually matters.
+ *
+ * Fail closed everywhere: an unparseable URL, a pooler that cannot be rewritten, or a
+ * routing parameter all refuse to run rather than proceed unproven.
  */
-export function resolveMigrationEndpoint(url: string): { url: string; pooled: boolean } {
-  let host = "";
+export function resolveMigrationEndpoint(url: string): { url: string; pooled: boolean; host: string } {
+  // The EFFECTIVE target, as node-postgres will actually dial it — not merely the URL host.
+  let effectiveHost: string;
   try {
-    host = new URL(url).hostname.toLowerCase();
-  } catch {
-    // Unparseable: cannot prove it is safe, so treat as non-pooled only if it is clearly local.
-    return { url, pooled: false };
+    const u = new URL(url);
+    // Routing overrides are refused rather than interpreted. `host`/`port` change the target
+    // outright; Neon's `options=endpoint=...` re-routes at the SNI layer. Any of them would
+    // make this guard inspect something the runner does not connect to.
+    for (const param of ["host", "port", "options", "servername"]) {
+      if (u.searchParams.has(param)) {
+        throw new Error(
+          `Refusing to run migrations: the database URL carries a '${param}' parameter, which overrides the ` +
+            "endpoint this guard validates. Remove it so the connection target is unambiguous."
+        );
+      }
+    }
+    effectiveHost = u.hostname.toLowerCase().replace(/\.$/, "");
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("Refusing to run migrations")) throw e;
+    // Fail CLOSED on an unparseable URL — the same policy as classifyDbHost in
+    // scripts/db/db-host-policy.ts. Previously this returned pooled:false and proceeded.
+    throw new Error("Refusing to run migrations: the database URL did not parse, so its endpoint cannot be verified.");
   }
-  const looksPooled = /-pooler(?=\.)/i.test(host);
-  if (!looksPooled) return { url, pooled: false };
+  const looksPooled = /-pooler(?=\.)/i.test(effectiveHost) || /\.pooler(?=\.)/i.test(effectiveHost);
+  if (!looksPooled) return { url, pooled: false, host: effectiveHost };
   const direct = toDirectEndpoint(url);
   if (!direct.changed) {
     throw new Error(
@@ -79,7 +106,71 @@ export function resolveMigrationEndpoint(url: string): { url: string; pooled: bo
         "could not be derived, so single-runner concurrency cannot be guaranteed."
     );
   }
-  return { url: direct.url, pooled: false };
+  let rewrittenHost = effectiveHost;
+  try {
+    rewrittenHost = new URL(direct.url).hostname.toLowerCase();
+  } catch {
+    throw new Error("Refusing to run migrations: the rewritten direct endpoint did not parse.");
+  }
+  return { url: direct.url, pooled: false, host: rewrittenHost };
+}
+
+/**
+ * POSITIVE proof that this connection owns a dedicated backend.
+ *
+ * A hostname heuristic cannot see backend SHARING, which is the actual double-apply vector:
+ * two runners multiplexed onto one PgBouncer server connection share `pg_backend_pid()`, so
+ * every advisory-lock ownership check passes for both. This measures it instead — a second
+ * independent connection on the same URL MUST land on a different backend. The incident
+ * evidence is exactly this shape: 8 pooler clients shared 1 backend PID, while 4
+ * direct-endpoint clients got 4 distinct PIDs.
+ *
+ * Works regardless of how the endpoint was specified, so it also covers poolers this code
+ * cannot recognise by name (a PgBouncer sidecar, a CNAME, a non-Neon provider).
+ */
+/**
+ * The comparison at the heart of the dedicated-backend proof, exported so it can be pinned
+ * exhaustively without needing a real PgBouncer in the test environment.
+ * Two independent connections MUST land on different server backends.
+ */
+export function assertNotSharedBackend(ownPid: number, probePid: number): void {
+  if (!Number.isFinite(ownPid) || !Number.isFinite(probePid)) {
+    throw new Error("Refusing to run migrations: could not verify that this connection owns a dedicated backend.");
+  }
+  if (ownPid === probePid) {
+    throw new Error(
+      `Refusing to run migrations: this connection shares its server backend (pid ${ownPid}) with another ` +
+        "session, which means a connection pooler is multiplexing it. A session advisory lock cannot " +
+        "guarantee a single runner in that configuration."
+    );
+  }
+}
+
+export async function assertDedicatedBackend(
+  connectionString: string,
+  ownPid: number,
+  ssl: { rejectUnauthorized: boolean } | undefined
+): Promise<void> {
+  const { Client } = await import("pg");
+  const probe = new Client({ connectionString, ssl, connectionTimeoutMillis: 20_000 });
+  probe.on("error", () => {
+    /* a probe failure is reported by the awaited query below */
+  });
+  await probe.connect();
+  try {
+    const r = await probe.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+    const probePid = Number(r.rows[0]?.pid);
+    if (!Number.isFinite(probePid)) {
+      throw new Error("Refusing to run migrations: could not verify that this connection owns a dedicated backend.");
+    }
+    assertNotSharedBackend(ownPid, probePid);
+  } finally {
+    try {
+      await probe.end();
+    } catch {
+      /* nothing can leak through a closed connection */
+    }
+  }
 }
 
 interface MigrationFile {
@@ -297,9 +388,8 @@ export async function applyMigrations(
   // Serialise concurrent runners: a second runner fails fast instead of double-applying.
   // Capture the backend identity FIRST, so lock ownership can be proven against a specific
   // server process rather than assumed from a boolean.
-  const pidRow = await client.query("SELECT pg_backend_pid() AS pid, current_database() AS db");
+  const pidRow = await client.query("SELECT pg_backend_pid() AS pid");
   const ownerPid = Number((pidRow.rows[0] as { pid: number | string } | undefined)?.pid);
-  const ownerDb = String((pidRow.rows[0] as { db?: string } | undefined)?.db ?? "");
   if (!Number.isFinite(ownerPid)) {
     throw new Error("Could not determine the migration runner's backend PID. Refusing to run.");
   }
@@ -315,12 +405,20 @@ export async function applyMigrations(
    */
   const assertLockOwned = async (stage: string): Promise<void> => {
     const r = await client.query(
-      `SELECT l.pid, pg_backend_pid() AS current_pid, current_database() AS db
+      // Precise encoding: PostgreSQL stores a SINGLE-bigint advisory key as
+      // classid = high32, objid = low32, objsubid = 1 (the two-int form uses objsubid = 2).
+      // Without classid/objsubid an UNRELATED two-int lock sharing the low word matches;
+      // without the database filter a lock held in ANOTHER database of the same cluster
+      // matches. Either corrupts the "is my lock still held" signal.
+      `SELECT l.pid, pg_backend_pid() AS current_pid
          FROM pg_locks l
-        WHERE l.locktype = 'advisory' AND l.objid = $1 AND l.granted`,
+        WHERE l.locktype = 'advisory'
+          AND l.classid = 0 AND l.objid = $1 AND l.objsubid = 1
+          AND l.database = (SELECT oid FROM pg_database WHERE datname = current_database())
+          AND l.granted`,
       [ADVISORY_LOCK_KEY]
     );
-    const rows = r.rows as unknown as { pid: number; current_pid: number; db: string }[];
+    const rows = r.rows as unknown as { pid: number; current_pid: number }[];
     const currentPid = Number(rows[0]?.current_pid ?? NaN);
     if (rows.length === 0) {
       throw new Error(`Migration advisory lock is no longer held (${stage}). Refusing to continue.`);
@@ -333,9 +431,6 @@ export async function applyMigrations(
     }
     if (!rows.some((x) => Number(x.pid) === ownerPid)) {
       throw new Error(`Migration advisory lock is not held by this runner (${stage}). Refusing to continue.`);
-    }
-    if (rows[0]?.db && ownerDb && rows[0].db !== ownerDb) {
-      throw new Error(`Migration advisory lock belongs to a different database (${stage}). Refusing to continue.`);
     }
   };
   await assertLockOwned("after acquire");
