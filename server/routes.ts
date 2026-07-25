@@ -3929,7 +3929,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           if (uploadErr) return res.status(400).json({ error: uploadErr });
         }
 
-        const gradeType = req.body.gradeType || "numeric";
+        // Normalise on the way IN: this column is plain text with no CHECK constraint, and a
+        // padded or junk value ("  NO ", "banana") is treated as numeric by the renderer,
+        // which is how a certificate could be created with a non-numeric-looking kind and no
+        // grade. The PUT path already normalises; this create path did not.
+        const gradeType = normaliseGradeType(req.body.gradeType);
         const isNonNum = isNonNumericGrade(gradeType);
 
         if (!isNonNum && req.body.gradeOverall) {
@@ -5030,8 +5034,85 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // PDF: inline by default (so the print-window flow can navigate to it and
   // trigger window.print()), attachment when ?download=1 is set.
   // PNG: always attachment (Cricut Design Space needs the file on disk).
+
+  /**
+   * Cached print artefacts (PDF/PNG/cut-SVG) are streamed straight out of R2 with no
+   * re-render, so a sheet produced BEFORE the grade gate existed — including the
+   * 2026-07-02 sheet whose panels read 0 / POOR — remained downloadable and printable by
+   * batch id. Re-validate the batch's certificates against the same rule before serving.
+   *
+   * Cert membership is resolved from `print_batches.cert_ids` when the row exists, and
+   * otherwise from `label_prints.sheet_ref` (which is how pre-0022 legacy sheets are
+   * recorded). If membership cannot be resolved at all we FAIL CLOSED rather than serve an
+   * artefact we cannot vouch for.
+   */
+  async function assertBatchArtefactPrintable(
+    batchId: string
+  ): Promise<{ ok: true } | { ok: false; blocked: string[]; message: string }> {
+    let certIds: string[] = [];
+    try {
+      const b = await db.execute(sql`SELECT cert_ids FROM print_batches WHERE batch_id = ${batchId}`);
+      const row = b.rows[0] as { cert_ids?: string[] } | undefined;
+      if (row?.cert_ids?.length) certIds = row.cert_ids;
+    } catch {
+      /* print_batches may not exist yet (pre-0022) — fall through to label_prints */
+    }
+    if (certIds.length === 0) {
+      const lp = await db.execute(
+        sql`SELECT cert_id FROM label_prints WHERE sheet_ref = ${`print_batch_${batchId}`} OR sheet_ref = ${batchId}`
+      );
+      certIds = (lp.rows as unknown as { cert_id: string }[]).map((r) => r.cert_id).filter(Boolean);
+    }
+    if (certIds.length === 0) {
+      return {
+        ok: false,
+        blocked: [],
+        message:
+          "This print sheet's certificates cannot be identified, so it cannot be verified as safe to print. " +
+          "Create a fresh batch instead.",
+      };
+    }
+    const rows = await db.execute(
+      sql`SELECT certificate_number, grade_type, grade::text AS grade FROM certificates
+           WHERE certificate_number IN (${sql.join(
+             certIds.map((c) => sql`${c}`),
+             sql`, `
+           )})`
+    );
+    const byId = new Map(
+      (rows.rows as unknown as { certificate_number: string; grade_type: string | null; grade: string | null }[]).map(
+        (r) => [r.certificate_number, r]
+      )
+    );
+    const blocked: string[] = [];
+    for (const id of certIds) {
+      const r = byId.get(id);
+      // A cert missing from the result fails CLOSED.
+      const v = checkPrintableGrade({ gradeType: r?.grade_type ?? null, gradeOverall: r?.grade ?? null });
+      if (!v.printable) blocked.push(id);
+    }
+    if (blocked.length) {
+      return {
+        ok: false,
+        blocked,
+        message:
+          `This print sheet contains ${blocked.length === 1 ? "a certificate" : "certificates"} without a valid grade ` +
+          `(${blocked.join(", ")}), so it cannot be downloaded or printed. Grade ${blocked.length === 1 ? "it" : "them"} and create a fresh batch.`,
+      };
+    }
+    return { ok: true };
+  }
+
   app.get("/api/admin/print-batch/:batchId/pdf", requireAdmin, async (req, res) => {
     try {
+      {
+        const guard = await assertBatchArtefactPrintable(String(req.params.batchId));
+        if (!guard.ok) {
+          return res
+            .status(422)
+            .json({ error: guard.message, code: "UNPRINTABLE_GRADE", blockedCertIds: guard.blocked });
+        }
+      }
       const batchId = String(req.params.batchId);
       const download = req.query.download === "1";
       const { r2KeyForPrintBatch } = await import("./print-batch");
@@ -5059,6 +5140,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/admin/print-batch/:batchId/png", requireAdmin, async (req, res) => {
     try {
+      {
+        const guard = await assertBatchArtefactPrintable(String(req.params.batchId));
+        if (!guard.ok) {
+          return res
+            .status(422)
+            .json({ error: guard.message, code: "UNPRINTABLE_GRADE", blockedCertIds: guard.blocked });
+        }
+      }
       const batchId = String(req.params.batchId);
       const { r2KeyForPrintBatch } = await import("./print-batch");
       const key = r2KeyForPrintBatch(batchId, "png");
@@ -5086,6 +5175,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // 400-DPI print PNG — same R2-stream pattern as /png, distinct -print.png key.
   app.get("/api/admin/print-batch/:batchId/print-png", requireAdmin, async (req, res) => {
     try {
+      {
+        const guard = await assertBatchArtefactPrintable(String(req.params.batchId));
+        if (!guard.ok) {
+          return res
+            .status(422)
+            .json({ error: guard.message, code: "UNPRINTABLE_GRADE", blockedCertIds: guard.blocked });
+        }
+      }
       const batchId = String(req.params.batchId);
       const { r2KeyForPrintBatch } = await import("./print-batch");
       const key = r2KeyForPrintBatch(batchId, "print-png");
@@ -5113,6 +5210,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Cricut cut-guide SVG (matches the PNG layout) — same R2-stream pattern as /png.
   app.get("/api/admin/print-batch/:batchId/cricut-cut.svg", requireAdmin, async (req, res) => {
     try {
+      {
+        const guard = await assertBatchArtefactPrintable(String(req.params.batchId));
+        if (!guard.ok) {
+          return res
+            .status(422)
+            .json({ error: guard.message, code: "UNPRINTABLE_GRADE", blockedCertIds: guard.blocked });
+        }
+      }
       const batchId = String(req.params.batchId);
       const { r2KeyForCricutSvg } = await import("./print-batch");
       const key = r2KeyForCricutSvg(batchId);
@@ -5165,6 +5270,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.setHeader("Content-Disposition", `attachment; filename="${cert.certId}-${side}.pdf"`);
       res.send(pdf);
     } catch (err: any) {
+      // A refused grade is operator-fixable, not a server fault. This route feeds the
+      // Printing-console thumbnails, so every ungraded row previously produced an opaque
+      // 500 plus a server-error log line with no actionable message.
+      if (err instanceof UnprintableGradeError) {
+        return res.status(422).json({ error: err.message, code: "UNPRINTABLE_GRADE", blockedCertIds: [err.certId] });
+      }
       sendServerError(res, err);
     }
   });

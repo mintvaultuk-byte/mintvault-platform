@@ -171,6 +171,66 @@ describe("THE RENDERER cannot turn a missing grade into 0 / POOR", () => {
   });
 });
 
+describe("the kind predicate matches the renderer EXACTLY (hostile-review Critical)", () => {
+  // The first version of the rule TRIMMED grade_type while the renderer used exact string
+  // membership. Consequence, proven by rendering the PNG: grade_type " NO " with a NULL
+  // grade passed the gate as "authentication-only, no grade needed", the renderer saw " NO "
+  // as numeric, and printed 0 / POOR — the incident artefact, reproduced. Every one of the
+  // other 32 tests passed while that hole was open, which is why these exist.
+  const padded = [" NO ", "NO ", " NO", "AA ", "\nNO", "\tAA", "not_original ", " authentic_altered"];
+
+  it("a padded non-numeric grade_type with NO grade is NOT printable", () => {
+    for (const gt of padded) {
+      const v = checkPrintableGrade({ gradeType: gt, gradeOverall: null });
+      expect(v.printable, `gradeType ${JSON.stringify(gt)} must fail closed`).toBe(false);
+      expect(v.reason).toBe("missing_numeric_grade");
+    }
+  });
+
+  it("the RENDERER refuses every padded form — no 0 / POOR panel can be produced", async () => {
+    for (const gt of padded) {
+      await expect(
+        generateLabelPNG(numericCert({ gradeType: gt, gradeOverall: null }), "front"),
+        `gradeType ${JSON.stringify(gt)}`
+      ).rejects.toThrow(UnprintableGradeError);
+    }
+  });
+
+  it("junk grade_type with no grade is NOT printable either", () => {
+    for (const gt of ["banana", "NUMERIC", "no", "aa", "", "   ", "0"]) {
+      expect(checkPrintableGrade({ gradeType: gt, gradeOverall: null }).printable, gt).toBe(false);
+    }
+  });
+
+  it("the gate and the renderer agree on EVERY grade_type / grade combination", async () => {
+    // The real invariant: the rule's verdict must predict the renderer's behaviour exactly.
+    const types = ["numeric", "NO", "AA", "not_original", "authentic_altered", " NO ", "banana", "", null];
+    const grades = [null, "", "8.5", "0", "7.55", "abc"];
+    for (const gt of types) {
+      for (const g of grades) {
+        const predicted = checkPrintableGrade({ gradeType: gt, gradeOverall: g }).printable;
+        let rendered = true;
+        try {
+          await generateLabelPNG(numericCert({ gradeType: gt, gradeOverall: g }), "front");
+        } catch {
+          rendered = false;
+        }
+        expect(rendered, `gradeType=${JSON.stringify(gt)} grade=${JSON.stringify(g)}`).toBe(predicted);
+      }
+    }
+  });
+
+  it("uses the shared isNonNumericGrade predicate rather than its own trimmed set", async () => {
+    const { isNonNumericGrade } = await import("../shared/schema");
+    const src = readFileSync(new URL("../shared/printable-grade.ts", import.meta.url), "utf8");
+    expect(src).toContain("isNonNumericGrade(gradeType)");
+    expect(src).not.toContain("NON_NUMERIC_TYPES");
+    // And the predicate itself is exact, not trimming.
+    expect(isNonNumericGrade(" NO ")).toBe(false);
+    expect(isNonNumericGrade("NO")).toBe(true);
+  });
+});
+
 describe("legitimate labels are UNCHANGED (protected label design)", () => {
   it("a valid numeric label still renders, and identical input is byte-identical", async () => {
     const a = await generateLabelPNG(numericCert(), "front");

@@ -236,23 +236,80 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
   });
 
   it("if the grader workflow changed, it added NO scoring, weighting or formula logic", () => {
-    // The narrow-scope half of the founder authorisation: server/grader.ts may gain
-    // GUARDS, but must never gain or alter grade CALCULATION. Inspects the actual added
-    // lines, so a formula slipped in alongside a guard is caught.
+    // The narrow-scope half of the founder authorisation: server/grader.ts may gain GUARDS,
+    // but must never gain or alter grade CALCULATION. Hostile review broke the first version
+    // of this check twice — real weighted arithmetic containing none of the blocked
+    // identifiers passed, and prefixing an EXECUTABLE line with a block comment made the
+    // comment-skip swallow it. Both are closed below.
     const diff = execFileSync("git", ["diff", "--unified=0", "origin/main", "--", "server/grader.ts"], {
       encoding: "utf8",
     });
-    if (!diff.trim()) return; // grader.ts untouched on this branch — nothing to assert
-    const addedOrRemoved = diff
-      .split("\n")
-      .filter((l) => (l.startsWith("+") || l.startsWith("-")) && !l.startsWith("+++") && !l.startsWith("---"));
-    const formula =
-      /computeMvgsScore|scoreMvgsV2|mvgsTierName|gradeFromMvgsScore|loadMvgsCalibration|WEIGHT|weight\s*[:=]|deduction\s*[:=]|calibration/i;
-    for (const line of addedOrRemoved) {
-      // Comments are allowed to NAME these things; executable lines are not.
-      const code = line.slice(1).trim();
-      if (code.startsWith("//") || code.startsWith("*") || code.startsWith("/*")) continue;
-      expect(code, `grader workflow change must not touch grade calculation: ${code}`).not.toMatch(formula);
+    if (!diff.trim()) return; // grader.ts untouched on this branch
+
+    const identifiers =
+      /computeMvgsScore|scoreMvgsV2|mvgsTierName|gradeFromMvgsScore|loadMvgsCalibration|isPristine|mvgs|calibration|WEIGHT|weight\s*[:=]|deduction\s*[:=]|penalt/i;
+    // Arithmetic on any grade-ish quantity: a formula does not have to name a helper.
+    const gradeIdent = /(grade|overall|centering|corners|edges|surface|subgrade|score)/i;
+    const arithmetic = /[+\-*/]\s*-?\d|\d\s*[+\-*/]|Math\.(min|max|round|floor|ceil|abs|pow)/;
+
+    for (const raw of diff.split("\n")) {
+      if (!/^[+-]/.test(raw) || raw.startsWith("+++") || raw.startsWith("---")) continue;
+      let code = raw.slice(1);
+      // Strip comments FIRST, then judge what remains — so a leading /* … */ can no longer
+      // be used to hide an executable statement from this check.
+      code = code.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/, "");
+      // Then strip STRING LITERALS: an operator-facing message may legitimately mention the
+      // MVGS workstation, and a message containing digits must not read as arithmetic. A
+      // dynamic import is still caught, because the member access sits outside the quotes.
+      code = code
+        .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+        .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+        .replace(/`(?:[^`\\]|\\.)*`/g, "``");
+      code = code.trim();
+      if (!code || code === "*" || code.startsWith("*")) continue; // JSDoc continuation line
+
+      expect(code, `grader workflow change must not name grade-calculation machinery: ${code}`).not.toMatch(
+        identifiers
+      );
+      if (gradeIdent.test(code)) {
+        expect(code, `grader workflow change must not do arithmetic on a grade value: ${code}`).not.toMatch(arithmetic);
+      }
     }
+  });
+
+  it("that guard actually catches a disguised formula (self-test)", () => {
+    // Pins the two bypasses hostile review demonstrated, so the guard cannot silently rot.
+    const identifiers =
+      /computeMvgsScore|scoreMvgsV2|mvgsTierName|gradeFromMvgsScore|loadMvgsCalibration|isPristine|mvgs|calibration|WEIGHT|weight\s*[:=]|deduction\s*[:=]|penalt/i;
+    const gradeIdent = /(grade|overall|centering|corners|edges|surface|subgrade|score)/i;
+    const arithmetic = /[+\-*/]\s*-?\d|\d\s*[+\-*/]|Math\.(min|max|round|floor|ceil|abs|pow)/;
+    const judge = (line: string): boolean => {
+      const code = line
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|\s)\/\/.*$/, "")
+        .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+        .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+        .replace(/`(?:[^`\\]|\\.)*`/g, "``")
+        .trim();
+      if (!code) return true; // a pure comment is allowed
+      if (identifiers.test(code)) return false;
+      if (gradeIdent.test(code) && arithmetic.test(code)) return false;
+      return true;
+    };
+    // These MUST be caught:
+    expect(judge("const overall = Math.min(10, c * 0.35 + co * 0.25 + e * 0.2 + s * 0.2);")).toBe(false);
+    expect(judge("const penalty = defects.length * 0.5; grade -= penalty;")).toBe(false);
+    expect(judge("/* guard */ const s = computeMvgsScore(inputs);")).toBe(false);
+    expect(judge("gradeOverall = gradeOverall - 1;")).toBe(false);
+    // These MUST be allowed (guards and plain comparisons are the whole point):
+    expect(judge("if (!verdict.printable) return { ok: false as const, status: 409, error: verdict.message };")).toBe(
+      true
+    );
+    expect(judge("// grade is recomputed by MVGS elsewhere")).toBe(true);
+    expect(judge("const storedGradeType = normaliseGradeType(cert.gradeType);")).toBe(true);
+    // An operator message may name the MVGS workstation, and may contain digits.
+    expect(judge('error: "Re-run the MVGS workstation so the grade and 4 sub-grades populate.",')).toBe(true);
+    // …but a dynamic import is still caught, because the member access is outside the quotes.
+    expect(judge('const sc = (await import("@shared/mvgs-scoring")).computeMvgsScore;')).toBe(false);
   });
 });

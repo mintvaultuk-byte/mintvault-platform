@@ -18,7 +18,7 @@
  * Pure: no I/O, no database, no scoring. It decides nothing about WHAT grade a card
  * deserves — only whether what is stored may be printed. MVGS calculation is untouched.
  */
-import { isValidNumericGrade } from "./schema";
+import { isNonNumericGrade, isValidNumericGrade } from "./schema";
 
 export type PrintableGradeFailure =
   | "missing_numeric_grade"
@@ -40,8 +40,6 @@ export interface PrintableGradeInput {
   gradeOverall?: string | number | null;
 }
 
-const NON_NUMERIC_TYPES = new Set(["NO", "AA", "not_original", "authentic_altered"]);
-
 /**
  * Strict parse of a stored grade. Deliberately NOT parseFloat: that is a prefix parser, so
  * "7.5abc" would yield 7.5 and "" would yield NaN which then coerced to 0. Returns null for
@@ -58,8 +56,16 @@ export function parseStoredGrade(value: unknown): number | null {
 
 /** Decide whether this certificate's grade may be printed. */
 export function checkPrintableGrade(cert: PrintableGradeInput): PrintableGradeVerdict {
-  const gradeType = String(cert.gradeType ?? "numeric").trim() || "numeric";
-  const isNonNumeric = NON_NUMERIC_TYPES.has(gradeType);
+  // The kind MUST be decided by the SAME predicate the renderer uses — isNonNumericGrade,
+  // which is EXACT string membership. An earlier version of this file trimmed first, and a
+  // hostile review proved the consequence: grade_type " NO " with a NULL grade passed this
+  // gate as "authentication-only, no grade needed" while the renderer saw " NO " as NOT
+  // non-numeric, fell through to the numeric branch and printed 0 / POOR — the incident
+  // artefact, reproduced. Anything that is not an exact non-numeric token is therefore
+  // treated as numeric here, which makes a padded or junk grade_type with no grade fail
+  // CLOSED instead of opening a hole.
+  const gradeType = String(cert.gradeType ?? "numeric") || "numeric";
+  const isNonNumeric = isNonNumericGrade(gradeType);
   const raw = cert.gradeOverall;
   const absent = raw == null || (typeof raw === "string" && raw.trim() === "");
 

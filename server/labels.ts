@@ -4,7 +4,7 @@ import type { CertificateRecord, LabelOverride } from "@shared/schema";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
 import { computeMvgsScore, mvgsTierName } from "@shared/mvgs-scoring";
 import { isPristine } from "@shared/pristine";
-import { assertPrintableGrade, parseStoredGrade } from "@shared/printable-grade";
+import { assertPrintableGrade, parseStoredGrade, UnprintableGradeError } from "@shared/printable-grade";
 import { formatVariantLine, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import path from "path";
 import { APP_BASE_URL } from "./app-url";
@@ -678,7 +678,18 @@ async function drawFront(
   // Non-numeric certificates never reach the grade panel (guarded by `if (!isNonNum)`),
   // and a numeric certificate without a valid grade was refused at the entry point — so
   // this can no longer invent a 0 / POOR grade.
-  const grade = isNonNum ? 0 : (parseStoredGrade(cert.gradeOverall) ?? 0);
+  // For a numeric certificate the grade is guaranteed parseable by assertPrintableGrade at
+  // the entry point; if that ever ceases to hold, refuse rather than invent 0 (which
+  // mvgsTierName labels "Poor"). Non-numeric certificates never reach the grade panel.
+  const parsedGrade = parseStoredGrade(cert.gradeOverall);
+  if (!isNonNum && parsedGrade === null) {
+    throw new UnprintableGradeError(String((cert as { certId?: string }).certId ?? "certificate"), {
+      printable: false,
+      reason: "missing_numeric_grade",
+      message: "This certificate has no readable numeric grade, so no label can be produced for it.",
+    });
+  }
+  const grade = isNonNum ? 0 : (parsedGrade as number);
 
   // ── LAYOUT CONSTANTS ──────────────────────────────────────────────────────
   const PANEL_W = 148; // right grade panel (≈ 18%, -5.7%)

@@ -376,6 +376,42 @@ export async function createBatchAtomic(params: {
   if (dup.rows.length > 0) {
     const row = dup.rows[0] as { batch_id: string; cert_ids?: string[]; kind: BatchKind };
     const ids = row.cert_ids ?? [];
+    // A retry must not hand back the URL of a batch created BEFORE the grade gate existed
+    // (or one whose certs have since lost a valid grade). Re-validate before returning it.
+    if (ids.length > 0) {
+      const dupRows = await db.execute(sql`
+        SELECT certificate_number, grade_type, grade::text AS grade FROM certificates
+         WHERE certificate_number IN (${sql.join(
+           ids.map((c) => sql`${c}`),
+           sql`, `
+         )})
+      `);
+      const dupById = new Map(
+        (
+          dupRows.rows as unknown as { certificate_number: string; grade_type: string | null; grade: string | null }[]
+        ).map((r) => [r.certificate_number, r])
+      );
+      const dupBlocked = ids.filter((id) => {
+        const r = dupById.get(id);
+        return !checkPrintableGrade({ gradeType: r?.grade_type ?? null, gradeOverall: r?.grade ?? null }).printable;
+      });
+      if (dupBlocked.length > 0) {
+        return {
+          applied: [],
+          rejected: dupBlocked.map((certId) => ({
+            certId,
+            code: "unprintable_grade",
+            message: `${certId}: this certificate has no valid grade, so the existing batch cannot be reused.`,
+          })),
+          batchId: null,
+          kind: null,
+          pdfUrl: null,
+          isDuplicate: false,
+          multiSheet: false,
+          pageCount: 0,
+        };
+      }
+    }
     return {
       applied: ids,
       rejected: [],
@@ -439,7 +475,9 @@ export async function createBatchAtomic(params: {
     const row = gradeOf.get(e.certId);
     const verdict = checkPrintableGrade({ gradeType: row?.grade_type ?? null, gradeOverall: row?.grade ?? null });
     if (!verdict.printable) {
-      rejected.push({
+      // Unshifted, not pushed: the print-queue toast surfaces rejected[0] only, so a mixed
+      // selection (one state-ineligible + one ungraded) must not hide the ungraded card.
+      rejected.unshift({
         certId: e.certId,
         code: verdict.reason ?? "unprintable_grade",
         message: `${e.certId}: ${verdict.message ?? "grade is not printable."}`,
