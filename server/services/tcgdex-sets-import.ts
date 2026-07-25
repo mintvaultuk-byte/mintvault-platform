@@ -14,6 +14,7 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { listAllSets, fetchSet } from "./tcgdex";
+import { assertSetLibrarySchemaReady } from "./set-library";
 
 export interface TcgdexImportSummary {
   fetched: number;
@@ -31,24 +32,6 @@ const normalizeSetId = (id: string): string =>
     .toLowerCase()
     .trim();
 
-/** Idempotent DDL — the single source of the tcgdex_sets schema. Called at
- *  startup (migrateMarketplaceSchema) and defensively before any import. */
-export async function ensureTcgdexSetsTable(): Promise<void> {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS tcgdex_sets (
-      id SERIAL PRIMARY KEY,
-      set_id TEXT NOT NULL UNIQUE,
-      set_name TEXT NOT NULL,
-      series TEXT,
-      release_date DATE,
-      total_cards INTEGER,
-      ptcgo_code TEXT,
-      source TEXT NOT NULL DEFAULT 'tcgdex',
-      synced_at TIMESTAMPTZ DEFAULT NOW()
-    )
-  `);
-}
-
 // One run at a time (the admin endpoint is fire-and-forget; block concurrent runs).
 let importRunning = false;
 export function isTcgdexImportRunning(): boolean {
@@ -65,7 +48,7 @@ export async function importTcgdexSets(opts: { lang?: string } = {}): Promise<Tc
   const lang = opts.lang || "en";
   const summary: TcgdexImportSummary = { fetched: 0, inserted: 0, updated: 0, skipped: 0, errors: 0 };
   try {
-    await ensureTcgdexSetsTable();
+    await assertSetLibrarySchemaReady();
 
     const list = await listAllSets(lang); // brief: { id, name, cardCount }
     summary.fetched = list.length;
