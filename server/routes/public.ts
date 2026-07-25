@@ -560,7 +560,7 @@ export function registerPublicRoutes(app: Express): void {
       return res.json(merged);
     } catch (err: any) {
       console.error("[pokemon-sets] error:", err.message);
-      res.json(cachedTcgSets || []);
+      res.status(503).json({ error: "Set catalogue is temporarily unavailable" });
     }
   });
 

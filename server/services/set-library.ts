@@ -109,6 +109,7 @@ export interface BaseSetRow {
   subset: string | null;
   archived: boolean | null;
   updated_at: Date | string | null;
+  release_date_raw?: Date | string | null;
   linked_cards: number | string | null;
   linked_certificates: number | string | null;
 }
@@ -183,6 +184,7 @@ export function setLibraryVersion(row: BaseSetRow): string {
       row.card_game ?? "pokemon",
       row.series ?? null,
       row.release_year ?? null,
+      row.release_date_raw instanceof Date ? row.release_date_raw.toISOString() : (row.release_date_raw ?? null),
       row.total_cards ?? null,
       row.subset ?? null,
       !!row.archived,
@@ -449,16 +451,16 @@ export async function listSetLibrary(input: ListSetLibraryInput = {}): Promise<L
     await db.execute(sql`
     WITH all_sets AS (
       SELECT 'custom'::text AS source, set_id, set_name, card_game, series,
-             EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards, subset, archived, updated_at
+             EXTRACT(YEAR FROM release_date)::int AS release_year, release_date AS release_date_raw, total_cards, subset, archived, updated_at
       FROM custom_sets
       UNION ALL
       SELECT 'tcgdex'::text AS source, set_id, set_name, card_game, series,
-             EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards, subset, archived, updated_at
+             EXTRACT(YEAR FROM release_date)::int AS release_year, release_date AS release_date_raw, total_cards, subset, archived, updated_at
       FROM tcgdex_sets
       UNION ALL
       SELECT 'card_sets'::text AS source, set_id, set_name, game AS card_game, series,
              NULLIF(SUBSTRING(COALESCE(release_date, '') FROM '\\d{4}'), '')::int AS release_year,
-             total_cards, NULL::text AS subset, is_deleted AS archived, deleted_at AS updated_at
+             release_date AS release_date_raw, total_cards, NULL::text AS subset, is_deleted AS archived, deleted_at AS updated_at
       FROM card_sets
     )
     SELECT s.*,
@@ -576,14 +578,14 @@ export async function updateSetLibraryRecord(
             AND LOWER(TRIM(COALESCE(c.set_name, ''))) = LOWER(TRIM(s.set_name))
             AND LOWER(TRIM(COALESCE(c.card_game, 'pokemon'))) = LOWER(TRIM(COALESCE(s.card_game, 'pokemon'))))::int AS linked_certificates
       FROM (
-        SELECT 'custom'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards, subset, archived, updated_at
+        SELECT 'custom'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, release_date AS release_date_raw, total_cards, subset, archived, updated_at
         FROM custom_sets
         UNION ALL
-        SELECT 'tcgdex'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards, subset, archived, updated_at
+        SELECT 'tcgdex'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, release_date AS release_date_raw, total_cards, subset, archived, updated_at
         FROM tcgdex_sets
         UNION ALL
         SELECT 'card_sets'::text AS source, set_id, set_name, game AS card_game, series, NULLIF(SUBSTRING(COALESCE(release_date, '') FROM '\\d{4}'), '')::int AS release_year,
-             total_cards, NULL::text AS subset, is_deleted AS archived, deleted_at AS updated_at
+             release_date AS release_date_raw, total_cards, NULL::text AS subset, is_deleted AS archived, deleted_at AS updated_at
         FROM card_sets
       ) s
       WHERE source = ${source} AND LOWER(TRIM(set_id)) = ${target}
@@ -690,7 +692,7 @@ export async function updateSetLibraryRecord(
           AND set_name IS NOT DISTINCT FROM ${current.set_name}
           AND game IS NOT DISTINCT FROM ${current.card_game}
           AND series IS NOT DISTINCT FROM ${current.series}
-          AND release_date IS NOT DISTINCT FROM ${current.release_year == null ? null : String(current.release_year)}
+          AND release_date IS NOT DISTINCT FROM ${current.release_date_raw ?? null}
           AND total_cards IS NOT DISTINCT FROM ${current.total_cards}
           AND is_deleted IS NOT DISTINCT FROM ${current.archived}
           AND deleted_at IS NOT DISTINCT FROM ${current.updated_at}

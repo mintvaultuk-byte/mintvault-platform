@@ -4383,10 +4383,15 @@ export function PokemonSetPicker({
 
   useEffect(() => {
     if (!allowEditSet) return;
-    fetch(`${setLibraryBase}?pageSize=10`, { credentials: "include" })
-      .then((response) => setCanEditCatalogue(response.ok))
+    const sessionEndpoint = createEndpoint.startsWith("/api/staff") ? "/api/staff/session" : "/api/admin/session";
+    fetch(sessionEndpoint, { credentials: "include" })
+      .then(async (response) => {
+        const session = await response.json();
+        return createEndpoint.startsWith("/api/staff") ? response.ok && session.caps?.editSets === true : response.ok && session.authenticated === true;
+      })
+      .then(setCanEditCatalogue)
       .catch(() => setCanEditCatalogue(false));
-  }, [allowEditSet, setLibraryBase]);
+  }, [allowEditSet, createEndpoint]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {

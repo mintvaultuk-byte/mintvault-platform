@@ -36,6 +36,7 @@ const baseSetRow = {
   subset: null,
   archived: false,
   updated_at: "2026-01-01T00:00:00.000Z",
+  release_date_raw: "2024-01-01",
   linked_cards: 2,
   linked_certificates: 3,
 };
@@ -77,6 +78,7 @@ function versionFor(row: typeof baseSetRow): string {
       row.card_game || "pokemon",
       row.series || null,
       row.release_year || null,
+      row.release_date_raw || null,
       row.total_cards || null,
       row.subset || null,
       !!row.archived,
@@ -340,6 +342,35 @@ describe("set library service", () => {
         { id: "admin@example.com", role: "admin" }
       )
     ).rejects.toMatchObject({ status: 409 });
+  });
+
+  it("uses the exact legacy release-date text in a successful card_sets compare-and-swap", async () => {
+    mockEnsureSchema(mockDb.txExecute);
+    const legacy = {
+      ...baseSetRow,
+      source: "card_sets" as const,
+      release_year: 2023,
+      release_date_raw: "2023-09-22",
+      updated_at: null,
+    };
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [legacy] });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
+
+    await expect(
+      updateSetLibraryRecord(
+        "card_sets",
+        "mv1",
+        { setName: "Corrected Set", reason: "Correct source", version: versionFor(legacy) },
+        { id: "admin@example.com", role: "admin" }
+      )
+    ).resolves.toMatchObject({ ok: true, source: "card_sets" });
+    const update = mockDb.txExecute.mock.calls
+      .map((call) => sqlText(call[0]))
+      .find((text) => text.includes("UPDATE card_sets"));
+    expect(update).toContain("release_date IS NOT DISTINCT FROM");
+    expect(update).not.toContain("String(current.release_year)");
   });
 
   it("keeps active and archived legacy card-set versions deterministic across repeated reads", () => {
