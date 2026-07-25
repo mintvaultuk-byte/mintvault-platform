@@ -8,17 +8,27 @@
  * a newly-appeared object is never silently treated as disposable.
  *
  * Fail-closed on connection errors, query errors, or incomplete metadata. Never writes
- * (runs under SET default_transaction_read_only = on). Never prints credentials. Emits both
+ * (runs inside an explicit READ ONLY TRANSACTION, and the session is verified clean
+ * before the connection is released — see read-only-session.ts). Never prints credentials. Emits both
  * human-readable and machine-readable (JSON) output. The core (classifyLiveObjects) is pure
  * and unit-tested without a database.
  */
 import { classifyLiveObjects, type LiveObjects, type Classification } from "./schema-registry";
+import { withReadOnlySession } from "./read-only-session";
 import { definerModelViolations } from "../../server/partner/definer-guard";
 
 export interface PreflightResult extends Classification {
   ok: boolean;
   definerViolations: string[];
-  counts: { tables: number; views: number; matviews: number; schemas: number; orphanSequences: number; enums: number; nonPublicObjects: number };
+  counts: {
+    tables: number;
+    views: number;
+    matviews: number;
+    schemas: number;
+    orphanSequences: number;
+    enums: number;
+    nonPublicObjects: number;
+  };
 }
 
 /** Pure evaluation over a provided object set (used by tests and by the DB path). */
@@ -42,34 +52,30 @@ export function evaluatePreflight(objs: LiveObjects, definerViolations: string[]
 
 /** Read-only: fetch the full live object set. Fails closed (throws) on any query error. */
 async function fetchLiveObjects(databaseUrl: string): Promise<LiveObjects> {
-  const { Client } = await import("pg");
-  const client = new Client({
-    connectionString: databaseUrl,
-    ssl: databaseUrl.includes("127.0.0.1") || databaseUrl.includes("localhost") ? undefined : { rejectUnauthorized: false },
-  });
-  await client.connect();
-  try {
-    await client.query("SET default_transaction_read_only = on");
+  // Read-only enforcement is TRANSACTION-scoped and the connection is verified clean
+  // before release — see read-only-session.ts for the 2026-07-25 pooler-leak incident.
+  return withReadOnlySession(databaseUrl, async (client_query) => {
+    const client = { query: client_query };
     const one = async (sql: string): Promise<string[]> => {
       const { rows } = await client.query<{ name: string }>(sql);
       return rows.map((r) => r.name);
     };
     const tables = await one(
-      "select table_name as name from information_schema.tables where table_schema='public' and table_type='BASE TABLE'",
+      "select table_name as name from information_schema.tables where table_schema='public' and table_type='BASE TABLE'"
     );
     const views = await one("select table_name as name from information_schema.views where table_schema='public'");
     const matviews = await one("select matviewname as name from pg_matviews where schemaname='public'");
     const schemas = await one(
-      "select schema_name as name from information_schema.schemata where schema_name not in ('pg_catalog','information_schema','pg_toast') and schema_name not like 'pg_temp%' and schema_name not like 'pg_toast_temp%'",
+      "select schema_name as name from information_schema.schemata where schema_name not in ('pg_catalog','information_schema','pg_toast') and schema_name not like 'pg_temp%' and schema_name not like 'pg_toast_temp%'"
     );
     // Orphan = a sequence NOT owned by a column. Column-owned sequences have a pg_depend row
     // with deptype 'a' (serial/OWNED BY) or 'i' (GENERATED ... AS IDENTITY). Both are owned and
     // must NOT be flagged as orphans.
     const orphanSequences = await one(
-      "select s.relname as name from pg_class s join pg_namespace n on n.oid=s.relnamespace where s.relkind='S' and n.nspname='public' and not exists (select 1 from pg_depend d where d.objid=s.oid and d.deptype in ('a','i'))",
+      "select s.relname as name from pg_class s join pg_namespace n on n.oid=s.relnamespace where s.relkind='S' and n.nspname='public' and not exists (select 1 from pg_depend d where d.objid=s.oid and d.deptype in ('a','i'))"
     );
     const enums = await one(
-      "select t.typname as name from pg_type t join pg_namespace n on n.oid=t.typnamespace where n.nspname='public' and t.typtype='e'",
+      "select t.typname as name from pg_type t join pg_namespace n on n.oid=t.typnamespace where n.nspname='public' and t.typtype='e'"
     );
     // Objects in NON-public, non-system schemas (schema-qualified) so they are never invisible.
     const npRows = (
@@ -81,7 +87,7 @@ async function fetchLiveObjects(databaseUrl: string): Promise<LiveObjects> {
             and table_schema not like 'pg_temp%' and table_schema not like 'pg_toast_temp%'
          union all
          select schemaname as schema, matviewname as name, 'materialized_view' as kind
-           from pg_matviews where schemaname not in ('public') and schemaname not like 'pg_%'`,
+           from pg_matviews where schemaname not in ('public') and schemaname not like 'pg_%'`
       )
     ).rows;
     const nonPublicObjects = npRows.map((r) => ({ schema: r.schema, name: r.name, kind: r.kind }));
@@ -91,9 +97,7 @@ async function fetchLiveObjects(databaseUrl: string): Promise<LiveObjects> {
       throw new Error("Preflight received empty metadata (no tables, no schemas) — failing closed.");
     }
     return { tables, views, matviews, schemas, orphanSequences, enums, nonPublicObjects };
-  } finally {
-    await client.end();
-  }
+  });
 }
 
 /**
@@ -101,22 +105,14 @@ async function fetchLiveObjects(databaseUrl: string): Promise<LiveObjects> {
  * present; a database with no Partner Network is unaffected. Fails closed on query error.
  */
 async function fetchDefinerViolations(databaseUrl: string): Promise<string[]> {
-  const { Client } = await import("pg");
-  const client = new Client({
-    connectionString: databaseUrl,
-    ssl: databaseUrl.includes("127.0.0.1") || databaseUrl.includes("localhost") ? undefined : { rejectUnauthorized: false },
-  });
-  await client.connect();
-  try {
-    await client.query("SET default_transaction_read_only = on");
-    const present = await client.query(
-      "select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.proname='partner_auth_lookup' and n.nspname='public'",
+  return withReadOnlySession(databaseUrl, async (query) => {
+    const present = await query(
+      "select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.proname='partner_auth_lookup' and n.nspname='public'"
     );
+    // Early return: cleanup still runs, because it is not inside this callback.
     if (present.rows.length === 0) return []; // no Partner Network here — nothing to assert
-    return await definerModelViolations((sql, params) => client.query(sql, params as unknown[]));
-  } finally {
-    await client.end();
-  }
+    return await definerModelViolations((sql, params) => query(sql, params as unknown[]));
+  });
 }
 
 export async function runPreflight(databaseUrl: string): Promise<PreflightResult> {
@@ -151,22 +147,28 @@ if (isMain()) {
       `Preflight: tables=${res.counts.tables} views=${res.counts.views} matviews=${res.counts.matviews} ` +
         `schemas=${res.counts.schemas} orphanSeq=${res.counts.orphanSequences} enums=${res.counts.enums} ` +
         `nonPublicObj=${res.counts.nonPublicObjects} | managed=${res.managed.length} unmanaged=${res.unmanaged.length} ` +
-        `vaultQuest=${res.vaultQuest.length} partnerNetwork=${res.partnerNetwork.length} integrationOwned=${res.integrationOwned.length} unknown=${res.unknown.length}`,
+        `vaultQuest=${res.vaultQuest.length} partnerNetwork=${res.partnerNetwork.length} integrationOwned=${res.integrationOwned.length} unknown=${res.unknown.length}`
     );
   }
   if (res.definerViolations.length > 0) {
-    console.error(`\n🚫 Preflight FAILED — Partner definer ownership model broken (DB-F1). Partner auth would fail closed:`);
+    console.error(
+      `\n🚫 Preflight FAILED — Partner definer ownership model broken (DB-F1). Partner auth would fail closed:`
+    );
     for (const dv of res.definerViolations) console.error(`   - ${dv}`);
-    console.error(`\n   Apply migration 0006 with a role able to provision partner_definer (see db-migration-safety runbook).`);
+    console.error(
+      `\n   Apply migration 0006 with a role able to provision partner_definer (see db-migration-safety runbook).`
+    );
     process.exit(1);
   }
   if (!res.ok) {
-    console.error(`\n🚫 Preflight FAILED — ${res.unknown.length} UNKNOWN object(s) not managed and not in the classified inventory:`);
+    console.error(
+      `\n🚫 Preflight FAILED — ${res.unknown.length} UNKNOWN object(s) not managed and not in the classified inventory:`
+    );
     for (const u of res.unknown) console.error(`   - [${u.objectType}] ${u.name}`);
     console.error(
       `\n   Add each to shared/schema.ts (managed table) or to UNMANAGED_INVENTORY / KNOWN_SCHEMAS /\n` +
         `   KNOWN_ORPHAN_SEQUENCES in scripts/db/schema-registry.ts with a classification.\n` +
-        `   Do NOT run any schema sync until this is resolved.`,
+        `   Do NOT run any schema sync until this is resolved.`
     );
     process.exit(1);
   }
