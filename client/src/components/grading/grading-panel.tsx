@@ -1038,6 +1038,12 @@ export default function GradingPanel({
       queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/grading`] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/stats"] });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/printing/browser"] });
+      // Final approval is what makes a certificate eligible for printing, so the
+      // Ready To Print queue must not keep serving a pre-approval cache. The
+      // global client sets staleTime: Infinity, so without this the queue would
+      // show stale contents for the rest of the session on this machine.
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/printing/workflow/queue"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/printing/workflow/batches"] });
       if (certIdStr) {
         queryClient.invalidateQueries({ queryKey: [`/api/cert/${certIdStr}`] });
         queryClient.invalidateQueries({ queryKey: [`/api/cert/${certIdStr}/report`] });

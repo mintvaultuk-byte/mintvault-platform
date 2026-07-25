@@ -84,6 +84,8 @@ function PrintQueuePanel() {
   const queueKey = useMemo(() => [`${base}/printing/workflow/queue`], [base]);
   const { data, isLoading, refetch } = useQuery<{ rows: PrintQueueRow[] }>({
     queryKey: queueKey,
+    refetchOnWindowFocus: true,
+    staleTime: 15_000,
     queryFn: async () => {
       const res = await apiRequest("GET", `${base}/printing/workflow/queue`);
       return res.json();
@@ -94,6 +96,8 @@ function PrintQueuePanel() {
   const batchesKey = useMemo(() => [`${base}/printing/workflow/batches`], [base]);
   const { data: batchData } = useQuery<{ batches: PrintBatchSummary[] }>({
     queryKey: batchesKey,
+    refetchOnWindowFocus: true,
+    staleTime: 15_000,
     queryFn: async () => {
       const res = await apiRequest("GET", `${base}/printing/workflow/batches`);
       return res.json();
@@ -308,7 +312,7 @@ function PrintQueuePanel() {
   return (
     <div className="admin-records" data-testid="print-queue">
       <div className="admin-list-head">
-        <h1 className="admin-list-head__t">Print Queue</h1>
+        <h1 className="admin-list-head__t">Ready To Print</h1>
         <AdminButton size="sm" onClick={() => refetch()} title="Refresh">
           <RefreshCw size={13} /> Refresh
         </AdminButton>

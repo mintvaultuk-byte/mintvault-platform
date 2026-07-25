@@ -1896,11 +1896,30 @@ export default function CertificateForm({
             certificateId={certificate?.id ?? null}
             frontFile={frontImage}
             backFile={backImage}
-            // Live front-certificate preview on Rarity + Review only (reuses the
-            // real print pipeline, read-only). Card stage passes no `below`, so
-            // its layout is byte-identical to before.
+            // Live front-certificate preview on Card (0), Rarity (1) and Review (3)
+            // — the SAME component, the SAME canonical server renderer, in the SAME
+            // left-column position directly under the card image. Grade (2) is the
+            // only stage without it, because that stage renders the grading
+            // workstationSlot in this column instead.
+            //
+            // The panel is fed from CURRENT in-memory `form` state — never from the
+            // saved `certificate` prop — so it tracks typing immediately and never
+            // waits for autosave, an explicit save, a server round-trip or stage
+            // navigation. Rollback protection comes from the surrounding machinery,
+            // not from this mount: the auto-save replay posts the newest state, the
+            // cert→form resync only fills EMPTY fields so it cannot revert a typed
+            // value, and the per-certificate isolation effect re-seeds everything on
+            // a card switch so cert A's values can never appear under cert B.
+            //
+            // Which Card-stage fields visibly move the preview is decided by the
+            // canonical renderer, NOT by this list: the front label prints card name,
+            // year + set name, the set suffix, the consolidated variant line, the
+            // grade panel and the card number. `language` and `collectionCode` are
+            // sent for cert-shape fidelity but are NOT printed on the front label
+            // today (buildCollectionLine is dead code), so they are deliberately not
+            // claimed as live-updating — and no dead label field is activated here.
             below={
-              wfStage === 1 || wfStage === 3 ? (
+              wfStage === 0 || wfStage === 1 || wfStage === 3 ? (
                 <CertificatePreviewPanel
                   fields={{
                     // Editing an existing cert → the server starts from the SAVED

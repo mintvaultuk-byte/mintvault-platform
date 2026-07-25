@@ -283,7 +283,7 @@ export const PRINT_QUEUE_FILTERS = [
 export type PrintQueueFilter = (typeof PRINT_QUEUE_FILTERS)[number];
 
 export const PRINT_QUEUE_FILTER_LABEL: Record<PrintQueueFilter, string> = {
-  needs_printing: "Needs Printing",
+  needs_printing: "Ready To Print",
   printing: "Printing / In Progress",
   printed_today: "Printed Today",
   printed: "Printed",
