@@ -4176,10 +4176,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // Structured rarity/variant picker → new nullable columns. Opt-in by key
         // presence, so a partial PUT (e.g. grade-only) never erases them; the
         // legacy variant/rarity remain the untouched historical source of truth.
-        let structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
+        let structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(), existing.structuredVariantVersion);
         if (!structuredUpdate.ok) {
           // Stale cross-machine cache guard — force-refresh once and retry.
-          structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true));
+          structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true), existing.structuredVariantVersion);
         }
         if (!structuredUpdate.ok) {
           return res.status(400).json({ error: "Invalid rarity selection.", details: structuredUpdate.errors });

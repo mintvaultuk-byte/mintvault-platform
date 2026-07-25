@@ -10,7 +10,7 @@ import { CertificatePreviewPanel } from "@/components/grading-workflow/Certifica
 import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 import { VariantSummary } from "@/components/grading-workflow/VariantSummary";
 import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
-import { CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
+import { CONSOLIDATED_VARIANT_SCHEME, legacyFreeTextLostOnConversion } from "@shared/variant-line";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
@@ -168,6 +168,67 @@ const NOTE_TEMPLATES: { label: string; text: string }[] = [
 type AutofillField = (typeof AUTOFILL_FIELDS)[number];
 type ProtectedField = AutofillField | "designations";
 
+/**
+ * The ONE mapping from a certificate row to editable form state.
+ *
+ * Used both for the initial seed and for the cross-certificate reset, so the two
+ * can never drift — a field added here is re-seeded on a cert switch for free.
+ * Every editable value is derived from `cert`; nothing is carried over from a
+ * previously edited certificate. Exported so the isolation contract is
+ * unit-testable without a DOM (this repo has no jsdom/RTL).
+ */
+export function buildFormStateFromCert(
+  certInput: (CertificateRecord & Record<string, any>) | null | undefined
+) {
+  const cert = certInput as (CertificateRecord & Record<string, any>) | null | undefined;
+  const initRarity = cert?.rarity || "";
+  const initVariant = cert?.variant || "";
+  const initCollCode = cert?.collectionCode || "";
+  const initRarityOther = cert?.rarityOther || "";
+  const initVariantOther = cert?.variantOther || "";
+  const initCollOther = cert?.collectionOther || "";
+  return {
+    gradeType: cert?.gradeType || "numeric",
+    serviceTier: "",
+    // Coerced to string: the field is a text input and the payload builder
+    // stringifies it anyway. (Previously reached this state via an `as any`.)
+    submissionItemId: cert?.submissionItemId ? String(cert.submissionItemId) : "",
+    cardGame: slugifyCardGame(cert?.cardGame),
+    setName: cert?.setName || "",
+    cardName: cert?.cardName === "(untitled)" || cert?.cardName === "(pending)" ? "" : cert?.cardName || "",
+    cardNumber: cert?.cardNumber || "",
+    rarity: initRarity,
+    rarityOther: initRarityOther,
+    collectionCode: initCollCode,
+    collectionOther: initCollOther,
+    variant: initVariant,
+    variantOther: initVariantOther,
+    unifiedSelect: buildUnifiedValue(
+      initRarity,
+      initVariant,
+      initCollCode,
+      initRarityOther,
+      initVariantOther,
+      initCollOther
+    ),
+    otherText: buildOtherText(initRarityOther, initVariantOther, initCollOther),
+    language: cert?.language || "English",
+    year: cert?.year || "",
+    notes: cert?.notes || "",
+    gradeOverall: cert?.gradeOverall || "",
+    labelType: cert?.labelType || "standard",
+    status: cert?.status || "active",
+    // Structured Pokémon rarity/variant (visual picker). Seeded from the cert's
+    // structured columns so an edit re-sends them unchanged (never erased). The
+    // legacy `variant`/`rarity` above stay as the historical source of truth.
+    rarityCode: cert?.rarityCode || "",
+    finishVariant: cert?.finishVariant || "",
+    promoType: cert?.promoType || "",
+    subsetName: cert?.subsetName || "",
+    era: cert?.era || "",
+  };
+}
+
 export default function CertificateForm({
   certificate,
   onSuccess,
@@ -184,54 +245,7 @@ export default function CertificateForm({
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const initRarity = certificate?.rarity || "";
-  const initVariant = certificate?.variant || "";
-  const initCollCode = (certificate as any)?.collectionCode || "";
-  const initRarityOther = (certificate as any)?.rarityOther || "";
-  const initVariantOther = (certificate as any)?.variantOther || "";
-  const initCollOther = (certificate as any)?.collectionOther || "";
-
-  const [form, setForm] = useState({
-    gradeType: (certificate as any)?.gradeType || "numeric",
-    serviceTier: "",
-    submissionItemId: (certificate as any)?.submissionItemId || "",
-    cardGame: slugifyCardGame(certificate?.cardGame),
-    setName: certificate?.setName || "",
-    cardName:
-      certificate?.cardName === "(untitled)" || certificate?.cardName === "(pending)"
-        ? ""
-        : certificate?.cardName || "",
-    cardNumber: certificate?.cardNumber || "",
-    rarity: initRarity,
-    rarityOther: initRarityOther,
-    collectionCode: initCollCode,
-    collectionOther: initCollOther,
-    variant: initVariant,
-    variantOther: initVariantOther,
-    unifiedSelect: buildUnifiedValue(
-      initRarity,
-      initVariant,
-      initCollCode,
-      initRarityOther,
-      initVariantOther,
-      initCollOther
-    ),
-    otherText: buildOtherText(initRarityOther, initVariantOther, initCollOther),
-    language: certificate?.language || "English",
-    year: certificate?.year || "",
-    notes: certificate?.notes || "",
-    gradeOverall: certificate?.gradeOverall || "",
-    labelType: (certificate as any)?.labelType || "standard",
-    status: certificate?.status || "active",
-    // Structured Pokémon rarity/variant (visual picker). Seeded from the cert's
-    // structured columns so an edit re-sends them unchanged (never erased). The
-    // legacy `variant`/`rarity` above stay as the historical source of truth.
-    rarityCode: certificate?.rarityCode || "",
-    finishVariant: certificate?.finishVariant || "",
-    promoType: certificate?.promoType || "",
-    subsetName: certificate?.subsetName || "",
-    era: certificate?.era || "",
-  });
+  const [form, setForm] = useState(() => buildFormStateFromCert(certificate));
 
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
   // Grader notes live in Stage 4 (Review), collapsed unless the cert already has notes.
@@ -394,6 +408,49 @@ export default function CertificateForm({
   // printed variant line the next time it is saved, so the preview (which shows
   // the post-save wording) legitimately differs from what is printed today.
   const savedConsolidatedRef = useRef(false);
+  // Render-visible mirror of the ref above. The ref is refreshed from EVERY save's
+  // response row, whereas the `certificate` PROP is not (auto-save never pushes the
+  // saved row up to the parent). Deriving the summaries' storedVersion from the prop
+  // therefore left them one save behind: after pick-rarity → clear, the label and the
+  // PNG preview correctly showed no variant line while "Prints as" still folded the
+  // legacy wording back in. State, so a change re-renders the summaries.
+  const [savedConsolidated, setSavedConsolidated] = useState(false);
+  // Conversion warning: the wordings that will stop printing when this save
+  // converts the cert to the consolidated scheme (null = nothing to warn about).
+  // The ack ref is per-certificate and is reset by the isolation effect, so the
+  // warning appears ONCE, at the boundary — never again on a v2 certificate.
+  const [legacyLossWarning, setLegacyLossWarning] = useState<string[] | null>(null);
+  // Panel visibility is SEPARATE from the held state: Cancel hides the panel but the
+  // save is still deferred, so the status line must keep saying so and navigation
+  // must keep being guarded. Without this split, Cancel looked like "resolved" while
+  // the edit sat unsaved and Next Card threw it away.
+  const [legacyLossPanelOpen, setLegacyLossPanelOpen] = useState(false);
+  // A cert-replacing navigation the operator asked for while a save is held. Held
+  // until they explicitly discard or stay.
+  const [pendingNav, setPendingNav] = useState<{ run: () => void } | null>(null);
+  /**
+   * Guard any action that would REPLACE the current certificate. While a save is
+   * held behind the conversion warning the edit is not yet persisted, so leaving
+   * would discard it. Ask for a deliberate discard instead of losing it silently.
+   */
+  const guardedNav = (run: () => void) => {
+    if (legacyLossWarning) {
+      setPendingNav({ run });
+      setLegacyLossPanelOpen(true);
+      return;
+    }
+    run();
+  };
+  const legacyLossAckRef = useRef(false);
+  // The save path that was in effect when the warning was raised. Dispatching on the
+  // CURRENT eligibility could take the published-cert branch (confirmPublishedEdit)
+  // if the cert became approved between raising and confirming — an override the
+  // operator never chose.
+  const legacyLossPathRef = useRef<"autosave" | "submit">("autosave");
+  // Lets the warning's "Convert and save" button re-run the correct save path:
+  // the auto-saving path for an unapproved cert, or the explicit form submit
+  // (published cert / create flow) — which is the path that bypassed the warning.
+  const formElRef = useRef<HTMLFormElement | null>(null);
 
   // Label-freshness signal for the Review certificate preview. Compares ONLY the
   // fields that affect the printed label against the last SAVED snapshot (server
@@ -422,6 +479,7 @@ export default function CertificateForm({
     loadedSnapshotRef.current = snap;
     const ver = Number((row as any).structuredVariantVersion ?? 0);
     savedConsolidatedRef.current = ver >= CONSOLIDATED_VARIANT_SCHEME;
+    setSavedConsolidated(savedConsolidatedRef.current);
   }
 
   useEffect(() => {
@@ -1263,6 +1321,86 @@ export default function CertificateForm({
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedOnceRef = useRef(false);
 
+  // ── Cross-certificate isolation ────────────────────────────────────────────
+  // The workstation swaps `certificate` for the next queued card WITHOUT
+  // unmounting this form (admin-dashboard renders it with no `key`), and every
+  // editable value is `useState`-seeded once at mount. Without this reset, card
+  // A's rarity/finish/promo/subset/era and legacy variant/rarity stayed in
+  // `form` and the next auto-save wrote them onto card B.
+  //
+  // A remount (`key={cert.id}`) would fix it too, but would destroy state the
+  // operator needs ACROSS cards — sessionCompleted, the saved panel/toast and
+  // the auto-save status HUD all live in this component. So we reset only the
+  // per-certificate editable state and deliberately leave session/queue state
+  // alone. The picker IS keyed (below), so its internal selection re-seeds.
+  const currentCertIdRef = useRef<number | null>(certificate?.id ?? null);
+  // Certificate id whose next auto-save tick must be skipped (undefined = none).
+  const skipAutoSaveForCertRef = useRef<number | null | undefined>(undefined);
+  useEffect(() => {
+    const nextId = certificate?.id ?? null;
+    if (currentCertIdRef.current === nextId) return; // same cert — nothing to do
+    currentCertIdRef.current = nextId;
+
+    // Drop any queued/in-flight auto-save so it can never land on the new cert.
+    // Bumping the sequence makes the in-flight response a no-op for UI state.
+    autoSavePendingRef.current = false;
+    autoSaveSeqRef.current += 1;
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
+    }
+
+    // Re-seed every editable value from the NEW certificate (one shared mapping).
+    setForm(buildFormStateFromCert(certificate));
+    setDesignations((certificate?.designations as string[]) || []);
+    setNotesOpen(Boolean(certificate?.notes));
+    setFrontImage(null);
+    setBackImage(null);
+
+    // Everything else that describes THIS certificate. Most important:
+    // gradingImages holds picked File objects and uploadGradingImages() POSTs
+    // them to the CURRENT certificate id — without this reset, card A's photos
+    // would upload onto card B. The identify/AI/verification state likewise
+    // describes card A and would otherwise be shown as card B's.
+    setGradingImages({});
+    setGradingUrls({});
+    setGradingQuality({});
+    setGradingUploadDone(false);
+    setManuallyEdited(new Set());
+    setManuallyVerified(false);
+    setAutofillRan(false);
+    setIdentifyResult(null);
+    setIdentifyConfidence(null);
+    setIdentifyVerified(false);
+    setAiAnalysis(null);
+    setAiDraft({ centering: "", corners: "", edges: "", surface: "", overall: "" });
+    setAiDefects([]);
+    setApproved(false);
+    setSetId("");
+    setFlashFields(new Set());
+    setError("");
+    setWfStage(0);
+    setWfMaxStage(0);
+
+    // Per-certificate refs: the conflict snapshot and the consolidated-scheme
+    // flag describe the OLD cert; re-derive them for the new one.
+    loadedSnapshotRef.current = null;
+    savedConsolidatedRef.current = false;
+    setSavedConsolidated(false);
+    legacyLossAckRef.current = false;
+    setLegacyLossWarning(null);
+    setLegacyLossPanelOpen(false);
+    setPendingNav(null);
+    refreshSnapshotFromCert(certificate as unknown as Record<string, unknown> | null);
+    // Skip the auto-save tick for THIS certificate id, so re-seeding the form
+    // does not immediately PUT back what we just loaded. Keyed on the id (not a
+    // one-shot boolean) — see the debounce effect for why a boolean is consumed
+    // by the wrong commit on a real switch.
+    skipAutoSaveForCertRef.current = nextId;
+    setAutoSaveStatus("idle");
+    // eslint-disable-next-line
+  }, [certificate?.id]);
+
   // Serialize auto-saves: never two PUTs in flight at once. Overlapping saves
   // were the one way this tab could race ITSELF into a stale-snapshot 409
   // (save B built before save A's success refreshed the snapshot). A save
@@ -1270,9 +1408,50 @@ export default function CertificateForm({
   // finishes — same debounce feel, strictly ordered writes.
   const autoSaveInFlightRef = useRef(false);
   const autoSavePendingRef = useRef(false);
+  // The queued replay MUST run the LATEST autoSaveNow, not the one that belongs
+  // to the in-flight save. `autoSaveNow` is re-created every render and reads
+  // `form` from its own closure (via buildCertFormData), so re-invoking the
+  // in-flight save's own binding replayed that render's STALE snapshot and
+  // silently re-persisted values the operator had since changed or cleared —
+  // e.g. clearing a rarity mid-flight was undone by the replay, making the
+  // pre-clear state the last write to the database. Assigning the newest
+  // closure to this ref every render (same deliberate pattern as the picker's
+  // onChangeRef) makes the replay build its payload from current state.
+  const autoSaveNowRef = useRef<(() => Promise<void>) | null>(null);
 
   async function autoSaveNow() {
     if (!certificate?.id) return;
+    // Mirror the debounce effect's guard. The queued replay now posts CURRENT
+    // state, so a field left transiently blank while a save was in flight must
+    // defer here exactly as the debounce defers it — never silently persist a
+    // blank required field. The next edit re-triggers the debounce and saves.
+    if (!hasRequiredFields) return;
+    // One-time conversion warning: this save would move the certificate onto the
+    // consolidated scheme while it still carries legacy free text that the new
+    // structured line will not print. Hold the save and ask first.
+    if (!legacyLossAckRef.current) {
+      const lost = legacyFreeTextLostOnConversion({
+        currentVersion: savedConsolidatedRef.current ? CONSOLIDATED_VARIANT_SCHEME : 0,
+        variantOther: form.variantOther,
+        rarityOther: form.rarityOther,
+        rarityCode: form.rarityCode,
+        finishVariant: form.finishVariant,
+        promoType: form.promoType,
+        subsetName: form.subsetName,
+      });
+      if (lost.length > 0) {
+        legacyLossPathRef.current = "autosave";
+        setLegacyLossWarning(lost);
+        setLegacyLossPanelOpen(true);
+        return; // deferred until the operator confirms or changes the selection
+      }
+      // Nothing would be lost any more (the operator changed the selection) — release
+      // the hold so the status line and the navigation guard stop reporting a pause.
+      if (legacyLossWarning) {
+        setLegacyLossWarning(null);
+        setLegacyLossPanelOpen(false);
+      }
+    }
     if (autoSaveInFlightRef.current) {
       autoSavePendingRef.current = true;
       return;
@@ -1321,10 +1500,20 @@ export default function CertificateForm({
       autoSaveInFlightRef.current = false;
       if (autoSavePendingRef.current) {
         autoSavePendingRef.current = false;
-        void autoSaveNow();
+        // Replay through the ref so the queued save serialises the CURRENT form
+        // state. `autoSaveNow()` here would re-run THIS closure and re-post the
+        // snapshot this save was built from, losing every edit made in flight.
+        // Falls back to this closure only if the ref was never assigned (it is
+        // assigned on every render below, so that is unreachable in practice).
+        void (autoSaveNowRef.current ?? autoSaveNow)();
       }
     }
   }
+
+  // Keep the replay target pointed at the newest closure (and therefore the
+  // newest `form`). Plain per-render assignment — not an effect — so it is
+  // already current when a save that started this render settles.
+  autoSaveNowRef.current = autoSaveNow;
 
   // Debounced auto-save whenever an identity field changes. Skips the first
   // render (hydratedOnceRef) so we don't immediately re-PUT what was just
@@ -1335,6 +1524,18 @@ export default function CertificateForm({
   const hasRequiredFields = !!form.cardGame && !!form.setName && !!form.cardName && !!form.cardNumber && !!form.year;
   useEffect(() => {
     if (!autoSaveEligible || !hasRequiredFields) return;
+    // Skip the tick that merely RE-SEEDS the form for a (new) certificate, so
+    // loading a card never immediately PUTs back what was just loaded. Gated on
+    // the certificate id, not a one-shot boolean: on a real switch the deps
+    // `autoSaveEligible`/`hasRequiredFields` can change on the SAME commit as
+    // the isolation effect — while `form` is still the previous card — and a
+    // boolean flag would be consumed by that commit, letting the NEXT commit
+    // (the freshly re-seeded form) schedule an un-edited full-state PUT.
+    if (skipAutoSaveForCertRef.current !== undefined && skipAutoSaveForCertRef.current === (certificate?.id ?? null)) {
+      skipAutoSaveForCertRef.current = undefined;
+      hydratedOnceRef.current = true;
+      return;
+    }
     if (!hydratedOnceRef.current) {
       hydratedOnceRef.current = true;
       return;
@@ -1365,6 +1566,28 @@ export default function CertificateForm({
     if (!form.cardGame || !form.setName || !form.cardName || !form.cardNumber || !form.year) {
       setError("Please fill in all required fields: Game, Set, Card Name, Card Number, Year");
       return;
+    }
+
+    // Same one-time conversion warning as the auto-save path. This is the branch an
+    // ALREADY-APPROVED (published) certificate uses — the population where losing a
+    // printed wording matters most — plus the create flow, so the operator is warned
+    // on every save that can convert, not only on the auto-saving path.
+    if (!legacyLossAckRef.current) {
+      const lost = legacyFreeTextLostOnConversion({
+        currentVersion: savedConsolidatedRef.current ? CONSOLIDATED_VARIANT_SCHEME : 0,
+        variantOther: form.variantOther,
+        rarityOther: form.rarityOther,
+        rarityCode: form.rarityCode,
+        finishVariant: form.finishVariant,
+        promoType: form.promoType,
+        subsetName: form.subsetName,
+      });
+      if (lost.length > 0) {
+        legacyLossPathRef.current = "submit";
+        setLegacyLossWarning(lost);
+        setLegacyLossPanelOpen(true);
+        return; // held until the operator confirms or changes the selection
+      }
     }
 
     // Grade is optional on initial save — can be set later via the workstation
@@ -1727,6 +1950,104 @@ export default function CertificateForm({
               queue={queue}
               sessionCompleted={sessionCompleted}
             />
+
+                  {/* One-time conversion warning — shown ONLY at the boundary where
+                this certificate first moves onto the consolidated scheme while
+                it still carries legacy free text the new line will not print.
+                The wording stays in the database either way. */}
+            {legacyLossWarning && legacyLossWarning.length > 0 && legacyLossPanelOpen && (
+              <div
+                className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5"
+                data-testid="legacy-freetext-warning"
+              >
+                <p className="text-[11px] font-bold uppercase tracking-wide text-amber-300">
+                  Legacy wording will stop printing
+                </p>
+                <p className="mt-1 text-[11px] text-[var(--admin-ink)]">
+                  This save converts the certificate to the structured classification. The typed wording{" "}
+                  <span className="font-semibold">{legacyLossWarning.join(" · ")}</span> stays stored on the record but
+                  will <span className="font-semibold">no longer appear on the printed label</span>, because a
+                  converted certificate prints only its explicit structured selections.
+                </p>
+                <p className="mt-1 text-[11px] text-[var(--admin-ink-faint)]">
+                  If that wording is still required, cancel and select the matching structured values instead.
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    data-testid="legacy-freetext-warning-confirm"
+                    onClick={() => {
+                      legacyLossAckRef.current = true;
+                      setLegacyLossWarning(null);
+                      setLegacyLossPanelOpen(false);
+                      // Cancel any pending debounced auto-save first, exactly as the
+                      // "Save Now" button does — otherwise a timer armed by the edit
+                      // that triggered this warning fires after this save and costs a
+                      // redundant second PUT.
+                      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+                      // Dispatch to whichever save path this certificate uses:
+                      // auto-save for an unapproved cert, the explicit form submit
+                      // for a published cert or the create flow.
+                      if (legacyLossPathRef.current === "autosave") autoSaveNow();
+                      else formElRef.current?.requestSubmit();
+                    }}
+                    className="rounded-md border border-amber-400/60 px-2 py-1 text-[11px] font-semibold text-amber-200 hover:bg-amber-500/15"
+                  >
+                    Convert and save
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="legacy-freetext-warning-cancel"
+                    onClick={() => {
+                      // Hide the panel but KEEP the save held: the edits stay in the
+                      // form, the status line keeps showing "Save paused", and
+                      // certificate navigation stays guarded. Nothing is discarded.
+                      setLegacyLossPanelOpen(false);
+                      setPendingNav(null);
+                    }}
+                    className="rounded-md border border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 hover:border-slate-400"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {pendingNav && (
+                  <div
+                    className="mt-2 rounded-md border border-red-500/40 bg-red-500/10 p-2"
+                    data-testid="legacy-freetext-discard-gate"
+                  >
+                    <p className="text-[11px] font-semibold text-red-200">
+                      Leaving this certificate now would discard the unsaved change.
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        data-testid="legacy-freetext-discard-confirm"
+                        onClick={() => {
+                          // Deliberate, certificate-scoped discard: release the hold and
+                          // run the navigation the operator asked for, WITHOUT saving.
+                          const go = pendingNav.run;
+                          setPendingNav(null);
+                          setLegacyLossWarning(null);
+                          setLegacyLossPanelOpen(false);
+                          go();
+                        }}
+                        className="rounded-md border border-red-400/60 px-2 py-1 text-[11px] font-semibold text-red-200 hover:bg-red-500/15"
+                      >
+                        Discard change and continue
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="legacy-freetext-discard-cancel"
+                        onClick={() => setPendingNav(null)}
+                        className="rounded-md border border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 hover:border-slate-400"
+                      >
+                        Stay on this card
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
             {isEdit && certificate?.id && (
               <details
                 className="border border-[var(--admin-gold)]/15 rounded-lg bg-[var(--admin-gold)]/[0.02] mb-1"
@@ -1814,6 +2135,7 @@ export default function CertificateForm({
             )}
           </div>
           <form
+            ref={formElRef}
             onSubmit={handleSubmit}
             onKeyDown={(e) => {
               // Enter advances the stage (Continue) when the grader isn't in a
@@ -1870,7 +2192,7 @@ export default function CertificateForm({
                       title={queue.hasNext ? "Open the next queued draft" : "No more cards in the queue"}
                       onClick={() => {
                         setShowSavedPanel(false);
-                        queue.onNext();
+                        guardedNav(queue.onNext);
                       }}
                       className="w-full rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] px-4 py-2.5 text-xs font-bold uppercase text-[#1A1400] hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
@@ -1881,7 +2203,7 @@ export default function CertificateForm({
                       data-testid="button-back-to-queue"
                       onClick={() => {
                         setShowSavedPanel(false);
-                        (queue.onBackToQueue ?? (() => onSuccess(undefined)))();
+                        guardedNav(queue.onBackToQueue ?? (() => onSuccess(undefined)));
                       }}
                       className="w-full rounded-lg border border-[var(--admin-gold)]/30 px-4 py-2 text-xs font-bold uppercase text-[var(--admin-gold)]/80 hover:bg-[var(--admin-gold)]/10"
                     >
@@ -1899,13 +2221,15 @@ export default function CertificateForm({
                 className="-mt-3 text-right text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]"
                 data-testid="text-autosave-status-mini"
               >
-                {autoSaveStatus === "saving"
-                  ? "Saving…"
-                  : autoSaveStatus === "error"
-                    ? "Save failed — retrying on next change"
-                    : autoSaveStatus === "saved"
-                      ? "Saved"
-                      : "Unsaved changes save automatically"}
+                {legacyLossWarning
+                  ? "Save paused — confirm the conversion"
+                  : autoSaveStatus === "saving"
+                    ? "Saving…"
+                    : autoSaveStatus === "error"
+                      ? "Save failed — retrying on next change"
+                      : autoSaveStatus === "saved"
+                        ? "Saved"
+                        : "Unsaved changes save automatically"}
               </div>
             )}
             {!isEdit && (
@@ -2750,14 +3074,29 @@ export default function CertificateForm({
                     </a>
                   </label>
                   <RarityVariantPicker
-                    legacyVariant={form.variant || null}
+                    // Keyed by certificate so switching cards REMOUNTS the picker
+                    // and re-seeds its internal rarity/finish/promo from the new
+                    // cert. Without this the picker keeps card A's selection
+                    // (its state is seeded once at mount) — the same protection
+                    // grading-panel.tsx already applies to this component.
+                    key={certificate?.id ?? "new"}
+                    legacyVariant={(certificate?.variant ?? form.variant) || null}
                     value={{
-                      language: languageByValueOrLabel(form.language)?.value ?? "en",
-                      era: (form.era || null) as StructuredCardVariant["era"],
-                      rarity: form.rarityCode || null,
-                      finish: form.finishVariant || null,
-                      promo: form.promoType || null,
-                      subset: form.subsetName || null,
+                      // Seed STRICTLY from the certificate (server truth), never from
+                      // `form`. `key` and `value` are both evaluated in the RENDER of
+                      // the commit where certificate.id changes, while `form` still
+                      // holds the PREVIOUS card — the re-seed happens in a passive
+                      // effect afterwards. Seeding from `form` would therefore mount
+                      // the new picker with card A's selection and, on the first
+                      // interaction, emit A's values into card B. Same rule (and same
+                      // reason) as grading-panel.tsx's picker.
+                      language:
+                        languageByValueOrLabel(certificate?.language ?? form.language)?.value ?? "en",
+                      era: ((certificate?.era ?? form.era) || null) as StructuredCardVariant["era"],
+                      rarity: (certificate?.rarityCode ?? form.rarityCode) || null,
+                      finish: (certificate?.finishVariant ?? form.finishVariant) || null,
+                      promo: (certificate?.promoType ?? form.promoType) || null,
+                      subset: (certificate?.subsetName ?? form.subsetName) || null,
                     }}
                     onChange={handleStructuredChange}
                     favourites={rarityFavourites}
@@ -2781,6 +3120,12 @@ export default function CertificateForm({
                       rarity: form.rarity,
                       variantOther: form.variantOther,
                       rarityOther: form.rarityOther,
+                      // Stored scheme version — an already-consolidated cert prints
+                      // structured-only even when everything is cleared, so this
+                      // line must not fold legacy wording back in.
+                      // Fresh saved-state (see savedConsolidated) — NOT the prop,
+                      // which auto-save never refreshes.
+                      storedVersion: savedConsolidated ? CONSOLIDATED_VARIANT_SCHEME : null,
                     }}
                   />
                 </div>
@@ -3473,6 +3818,7 @@ export default function CertificateForm({
                   rarity: form.rarity,
                   variantOther: form.variantOther,
                   rarityOther: form.rarityOther,
+                  storedVersion: savedConsolidated ? CONSOLIDATED_VARIANT_SCHEME : null,
                   designations,
                   gradeOverall: form.gradeOverall,
                   labelType: form.labelType,
@@ -3641,8 +3987,14 @@ export default function CertificateForm({
                         <CheckCircle2 size={10} /> Saved · auto-saves as you edit
                       </span>
                     )}
-                    {autoSaveStatus === "idle" && (
-                      <span className="text-[var(--admin-ink-faint)]">Auto-saves as you edit</span>
+                    {legacyLossWarning ? (
+                      <span className="text-amber-300" data-testid="text-save-paused">
+                        Save paused — confirm the conversion
+                      </span>
+                    ) : (
+                      autoSaveStatus === "idle" && (
+                        <span className="text-[var(--admin-ink-faint)]">Auto-saves as you edit</span>
+                      )
                     )}
                     {autoSaveStatus === "error" && (
                       <span className="text-[var(--admin-red)]">Save failed — retrying on next change</span>

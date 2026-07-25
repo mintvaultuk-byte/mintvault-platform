@@ -4,7 +4,7 @@ import type { CertificateRecord, LabelOverride } from "@shared/schema";
 import { gradeLabelFull, isNonNumericGrade } from "@shared/schema";
 import { computeMvgsScore, mvgsTierName } from "@shared/mvgs-scoring";
 import { isPristine } from "@shared/pristine";
-import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
+import { formatVariantLine, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import path from "path";
 import { APP_BASE_URL } from "./app-url";
 
@@ -18,7 +18,14 @@ export function applyLabelOverrides(cert: CertificateRecord, override: LabelOver
     ...cert,
     ...(override.cardNameOverride != null ? { cardName: override.cardNameOverride } : {}),
     ...(override.setOverride != null ? { setName: override.setOverride } : {}),
-    ...(override.variantOverride != null ? { variant: override.variantOverride } : {}),
+    // The variant override is an EXPLICIT operator instruction for this label, so
+    // it must win even on a consolidated (v2) certificate — where the structured
+    // line would otherwise ignore the legacy `variant` column this override writes
+    // through. The marker lets consolidatedVariantForLabel tell "operator typed
+    // this for the label" apart from "an incidental legacy column".
+    ...(override.variantOverride != null
+      ? { variant: override.variantOverride, __variantOverridden: true }
+      : {}),
     ...(override.languageOverride != null ? { language: override.languageOverride } : {}),
     ...(override.yearOverride != null ? { year: override.yearOverride } : {}),
   };
@@ -392,7 +399,21 @@ function buildRarityText(cert: CertificateRecord): string {
  */
 export function consolidatedVariantForLabel(cert: CertificateRecord): string {
   const version = Number((cert as unknown as { structuredVariantVersion?: number }).structuredVariantVersion ?? 0);
-  if (version >= CONSOLIDATED_VARIANT_SCHEME && hasStructuredVariant(cert as unknown as Parameters<typeof formatVariantLine>[0])) {
+  // The boundary is the SCHEME VERSION ALONE — deliberately NOT "does it currently
+  // hold a structured value". A consolidated certificate prints exactly its
+  // explicit structured selections, so clearing every field yields NO variant
+  // line rather than resurrecting the legacy wording (previously, a full clear
+  // fell through to the legacy branch and "HOLO" reappeared). The legacy columns
+  // are still stored and untouched — they simply stop being printed once the
+  // operator has converted the certificate to the consolidated scheme.
+  if (version >= CONSOLIDATED_VARIANT_SCHEME) {
+    // An explicit label variant OVERRIDE is an operator instruction for this
+    // label and outranks the structured line — otherwise the override (and the
+    // Manual Identity Override, which writes through the same legacy column)
+    // became a silent no-op on every converted certificate, removing the very
+    // escape hatch used to correct a wrong printed line.
+    const overridden = (cert as unknown as { __variantOverridden?: boolean }).__variantOverridden === true;
+    if (overridden) return String(cert.variant ?? "").trim().toUpperCase();
     return formatVariantLine(cert as unknown as Parameters<typeof formatVariantLine>[0]).toUpperCase();
   }
   return buildVariantLine(cert) || (cert.rarity ? buildRarityText(cert).toUpperCase() : "");

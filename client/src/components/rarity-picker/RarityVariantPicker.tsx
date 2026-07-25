@@ -393,6 +393,17 @@ export function RarityVariantPicker({
     onCustomRarityNote?.(null);
   };
 
+  // Explicit "No finish" / "No promo" — the same deliberate, always-visible
+  // affordance rarity already had. Toggling the selected pill still works, but
+  // a selection living inside the collapsed "More finishes"/"More promos" list
+  // was invisible AND unreachable, and a finish picked from search had no
+  // toggle at all — so an operator could see "· Glitter Holo" in the summary
+  // with no way to remove it. Each clear touches ONLY its own field: rarity,
+  // finish and promo/subset are independent, and zero selection is valid for
+  // all three (promo-only is a legitimate saved state).
+  const clearFinish = () => setFinish(null);
+  const clearPromo = () => setPromoOrSubset(null);
+
   function resetAddForm() {
     setAddForm({
       displayName: "",
@@ -632,8 +643,13 @@ export function RarityVariantPicker({
           <div className="mb-1 text-[11px] font-semibold text-slate-400">Search results</div>
           <div className={RARITY_TILE_GRID}>{search.rarities.map(chip)}</div>
           <div className="mt-2 flex flex-wrap gap-2">
-            {search.finishes.map((x) => pill(x, finish === x.value, () => setFinish(x.value)))}
-            {search.promos.map((x) => pill(x, promoOrSubset === x.value, () => setPromoOrSubset(x.value)))}
+            {/* Toggle-to-clear here too — a finish/promo picked FROM SEARCH was
+                previously unclearable from the search results (plain set, no
+                toggle), which is how a selection could get stuck. */}
+            {search.finishes.map((x) => pill(x, finish === x.value, () => setFinish(finish === x.value ? null : x.value)))}
+            {search.promos.map((x) =>
+              pill(x, promoOrSubset === x.value, () => setPromoOrSubset(promoOrSubset === x.value ? null : x.value))
+            )}
           </div>
         </div>
       )}
@@ -741,10 +757,32 @@ export function RarityVariantPicker({
 
       {/* 2 · Finish / Variant */}
       <div>
-        <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Choose the finish</div>
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Choose the finish (optional)</span>
+          <button
+            type="button"
+            onClick={clearFinish}
+            disabled={!finish}
+            data-testid="finish-clear"
+            title="Clear the finish selection (rarity and promo are kept)"
+            className="rounded-md border border-dashed border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 transition hover:border-amber-400/60 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            No finish — clear
+          </button>
+        </div>
         <div className="flex flex-wrap gap-1.5">
           {quickFinishes.map((x) => pill(x, finish === x.value, () => setFinish(finish === x.value ? null : x.value)))}
         </div>
+        {/* A finish chosen from search or the collapsed "more" list must never be
+            invisible — surface it inline so the operator can always see (and
+            toggle off) what is actually selected. */}
+        {finish && !quickFinishes.some((f) => f.value === finish) && !showMoreFinish && (
+          <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="finish-selected-outside-quick">
+            {moreFinishes
+              .filter((f) => f.value === finish)
+              .map((x) => pill(x, true, () => setFinish(null)))}
+          </div>
+        )}
         <button
           type="button"
           onClick={() => setShowMoreFinish((s) => !s)}
@@ -761,14 +799,35 @@ export function RarityVariantPicker({
 
       {/* 3 · Promo / Subset */}
       <div>
-        <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-          Does the card have a promo or gallery mark?
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Does the card have a promo or gallery mark? (optional)
+          </span>
+          <button
+            type="button"
+            onClick={clearPromo}
+            disabled={!promoOrSubset}
+            data-testid="promo-clear"
+            title="Clear the promo/subset selection (rarity and finish are kept)"
+            className="rounded-md border border-dashed border-slate-600 px-2 py-1 text-[11px] font-semibold text-slate-300 transition hover:border-amber-400/60 hover:text-amber-200 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            No promo — clear
+          </button>
         </div>
         <div className="flex flex-wrap gap-1.5">
           {quickPromos.map((x) =>
             pill(x, promoOrSubset === x.value, () => setPromoOrSubset(promoOrSubset === x.value ? null : x.value))
           )}
         </div>
+        {/* Same visibility guarantee as finish: a promo/subset selected from the
+            collapsed list stays visible and toggleable. */}
+        {promoOrSubset && !quickPromos.some((p) => p.value === promoOrSubset) && !showMorePromo && (
+          <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="promo-selected-outside-quick">
+            {morePromos
+              .filter((p) => p.value === promoOrSubset)
+              .map((x) => pill(x, true, () => setPromoOrSubset(null)))}
+          </div>
+        )}
         <button
           type="button"
           onClick={() => setShowMorePromo((s) => !s)}
