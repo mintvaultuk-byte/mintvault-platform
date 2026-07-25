@@ -8,11 +8,13 @@
  * a newly-appeared object is never silently treated as disposable.
  *
  * Fail-closed on connection errors, query errors, or incomplete metadata. Never writes
- * (runs under SET default_transaction_read_only = on). Never prints credentials. Emits both
+ * (runs inside an explicit READ ONLY TRANSACTION, and the session is verified clean
+ * before the connection is released — see read-only-session.ts). Never prints credentials. Emits both
  * human-readable and machine-readable (JSON) output. The core (classifyLiveObjects) is pure
  * and unit-tested without a database.
  */
 import { classifyLiveObjects, type LiveObjects, type Classification } from "./schema-registry";
+import { withReadOnlySession } from "./read-only-session";
 import { definerModelViolations } from "../../server/partner/definer-guard";
 
 export interface PreflightResult extends Classification {
@@ -42,14 +44,10 @@ export function evaluatePreflight(objs: LiveObjects, definerViolations: string[]
 
 /** Read-only: fetch the full live object set. Fails closed (throws) on any query error. */
 async function fetchLiveObjects(databaseUrl: string): Promise<LiveObjects> {
-  const { Client } = await import("pg");
-  const client = new Client({
-    connectionString: databaseUrl,
-    ssl: databaseUrl.includes("127.0.0.1") || databaseUrl.includes("localhost") ? undefined : { rejectUnauthorized: false },
-  });
-  await client.connect();
-  try {
-    await client.query("SET default_transaction_read_only = on");
+  // Read-only enforcement is TRANSACTION-scoped and the connection is verified clean
+  // before release — see read-only-session.ts for the 2026-07-25 pooler-leak incident.
+  return withReadOnlySession(databaseUrl, async (client_query) => {
+    const client = { query: client_query };
     const one = async (sql: string): Promise<string[]> => {
       const { rows } = await client.query<{ name: string }>(sql);
       return rows.map((r) => r.name);
@@ -91,9 +89,7 @@ async function fetchLiveObjects(databaseUrl: string): Promise<LiveObjects> {
       throw new Error("Preflight received empty metadata (no tables, no schemas) — failing closed.");
     }
     return { tables, views, matviews, schemas, orphanSequences, enums, nonPublicObjects };
-  } finally {
-    await client.end();
-  }
+  });
 }
 
 /**
@@ -101,22 +97,14 @@ async function fetchLiveObjects(databaseUrl: string): Promise<LiveObjects> {
  * present; a database with no Partner Network is unaffected. Fails closed on query error.
  */
 async function fetchDefinerViolations(databaseUrl: string): Promise<string[]> {
-  const { Client } = await import("pg");
-  const client = new Client({
-    connectionString: databaseUrl,
-    ssl: databaseUrl.includes("127.0.0.1") || databaseUrl.includes("localhost") ? undefined : { rejectUnauthorized: false },
-  });
-  await client.connect();
-  try {
-    await client.query("SET default_transaction_read_only = on");
-    const present = await client.query(
+  return withReadOnlySession(databaseUrl, async (query) => {
+    const present = await query(
       "select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where p.proname='partner_auth_lookup' and n.nspname='public'",
     );
+    // Early return: cleanup still runs, because it is not inside this callback.
     if (present.rows.length === 0) return []; // no Partner Network here — nothing to assert
-    return await definerModelViolations((sql, params) => client.query(sql, params as unknown[]));
-  } finally {
-    await client.end();
-  }
+    return await definerModelViolations((sql, params) => query(sql, params as unknown[]));
+  });
 }
 
 export async function runPreflight(databaseUrl: string): Promise<PreflightResult> {
