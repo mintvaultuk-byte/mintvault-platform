@@ -543,6 +543,98 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     expect(handler).toContain("else formElRef.current?.requestSubmit();");
   });
 
+  // ── F3: a held save must never be silently discarded ──────────────────────
+  describe("deferred-save safety (F3)", () => {
+    it("a deferred autosave shows a PAUSED state, not 'saves automatically'", () => {
+      // Both status renderers must report the pause; the held state (not the panel
+      // visibility) drives it, so Cancel cannot make the UI look resolved.
+      expect(FORM).toContain('"Save paused — confirm the conversion"');
+      expect(FORM).toContain('data-testid="text-save-paused"');
+      // the mini status checks the hold FIRST, before the autoSaveStatus ladder
+      const mini = FORM.slice(FORM.indexOf('data-testid="text-autosave-status-mini"'));
+      expect(mini.slice(0, 700)).toMatch(/legacyLossWarning\s*\n?\s*\?\s*"Save paused/);
+    });
+
+    it("Cancel preserves the edits and leaves the save HELD (no save, no discard)", () => {
+      const cancel = FORM.slice(FORM.indexOf('data-testid="legacy-freetext-warning-cancel"'));
+      const handler = cancel.slice(0, 700);
+      // hides the panel only…
+      expect(handler).toContain("setLegacyLossPanelOpen(false);");
+      // …and must NOT save, NOT clear the hold, NOT touch the form state
+      expect(handler).not.toContain("autoSaveNow()");
+      expect(handler).not.toContain("requestSubmit()");
+      expect(handler).not.toContain("setLegacyLossWarning(null)");
+      expect(handler).not.toContain("setForm(");
+      // the panel's visibility is separate from the hold, so the hold survives Cancel
+      expect(FORM).toContain("legacyLossWarning && legacyLossWarning.length > 0 && legacyLossPanelOpen");
+    });
+
+    it("Next Card / back-to-queue cannot silently discard a held edit", () => {
+      // every certificate-REPLACING navigation goes through the guard
+      expect(FORM).toContain("guardedNav(queue.onNext)");
+      expect(FORM).toContain("guardedNav(queue.onBackToQueue ?? (() => onSuccess(undefined)))");
+      const guard = FORM.slice(FORM.indexOf("const guardedNav ="), FORM.indexOf("const guardedNav =") + 500);
+      expect(guard).toContain("if (legacyLossWarning) {");
+      expect(guard).toContain("setPendingNav({ run });"); // blocked, not executed
+      expect(guard).toContain("run();"); // …and passes straight through when nothing is held
+    });
+
+    it("an explicit, certificate-scoped discard allows navigation WITHOUT saving", () => {
+      expect(FORM).toContain('data-testid="legacy-freetext-discard-gate"');
+      const discard = FORM.slice(FORM.indexOf('data-testid="legacy-freetext-discard-confirm"'));
+      const handler = discard.slice(0, 800);
+      expect(handler).toContain("const go = pendingNav.run;");
+      expect(handler).toContain("go();");
+      // it must not save on the way out
+      expect(handler).not.toContain("autoSaveNow()");
+      expect(handler).not.toContain("requestSubmit()");
+      // and "Stay on this card" simply cancels the navigation
+      expect(FORM).toContain('data-testid="legacy-freetext-discard-cancel"');
+      expect(FORM).toContain("onClick={() => setPendingNav(null)}");
+    });
+
+    it("confirming performs exactly ONE save on the captured path (no duplicate PUT)", () => {
+      const confirm = FORM.slice(FORM.indexOf('data-testid="legacy-freetext-warning-confirm"'));
+      const handler = confirm.slice(0, 1600);
+      expect(handler).toContain("if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);");
+      expect(handler).toContain('if (legacyLossPathRef.current === "autosave") autoSaveNow();');
+      expect(handler).toContain("else formElRef.current?.requestSubmit();");
+      // exactly one dispatch: the two branches are mutually exclusive
+      expect((handler.match(/autoSaveNow\(\)/g) ?? []).length).toBe(1);
+      expect((handler.match(/requestSubmit\(\)/g) ?? []).length).toBe(1);
+    });
+
+    it("the hold, the panel and any pending navigation are reset per certificate", () => {
+      const start = FORM.indexOf("const currentCertIdRef");
+      const reset = FORM.slice(start, FORM.indexOf("}, [certificate?.id]);", start));
+      expect(reset).toContain("legacyLossAckRef.current = false;");
+      expect(reset).toContain("setLegacyLossWarning(null);");
+      expect(reset).toContain("setLegacyLossPanelOpen(false);");
+      expect(reset).toContain("setPendingNav(null);");
+      // …and the cross-card write protections are still in place alongside them
+      expect(reset).toContain("autoSavePendingRef.current = false;");
+      expect(reset).toMatch(/autoSaveSeqRef\.current \+= 1;/);
+      expect(reset).toContain("setForm(buildFormStateFromCert(certificate));");
+    });
+
+    it("the hold is RELEASED once the selection no longer loses any wording", () => {
+      // otherwise the pause would be sticky and navigation stuck.
+      expect(FORM).toMatch(/if \(legacyLossWarning\) \{\s*\n\s*setLegacyLossWarning\(null\);/);
+      // behavioural: the helper returns [] once the wording is represented
+      expect(legacyFreeTextLostOnConversion({ currentVersion: 0, variantOther: "Cosmos Holo", finishVariant: "cosmos_holo" }))
+        .toEqual([]);
+    });
+
+    it("normal autosave is untouched when nothing is held", () => {
+      // the guard only engages when the helper returns a non-empty list
+      expect(FORM).toContain("if (!legacyLossAckRef.current) {");
+      expect(FORM).toMatch(/if \(lost\.length > 0\) \{/);
+      expect(legacyFreeTextLostOnConversion({ currentVersion: 0, finishVariant: "cosmos_holo" })).toEqual([]);
+      // and the serialiser/replay contract is unchanged
+      expect(FORM).toContain("void (autoSaveNowRef.current ?? autoSaveNow)();");
+    });
+  });
+
   it("an explicit label variant OVERRIDE still reaches the label on a v2 certificate", async () => {
     // Regression for a HIGH: the version-alone gate made the label variant override
     // (and the Manual Identity Override, which writes through the same legacy column)
@@ -706,7 +798,7 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     // the save path defers while the warning is unacknowledged…
     expect(FORM).toContain("if (!legacyLossAckRef.current) {");
     expect(FORM).toContain("setLegacyLossWarning(lost);");
-    expect(FORM).toMatch(/setLegacyLossWarning\(lost\);\s*\n\s*return;/);
+    expect(FORM).toMatch(/setLegacyLossWarning\(lost\);\s*\n\s*setLegacyLossPanelOpen\(true\);\s*\n\s*return;/);
     // …confirming acknowledges and saves; cancelling only dismisses (no save)
     expect(FORM).toContain('data-testid="legacy-freetext-warning-confirm"');
     expect(FORM).toContain('data-testid="legacy-freetext-warning-cancel"');
