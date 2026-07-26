@@ -704,3 +704,85 @@ describe("HIGH-1: grade preservation is atomic too", () => {
     }
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR A — server-side field ownership (real route, real PostgreSQL)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("PR A: the metadata route cannot alter grading state", () => {
+  it("6. a stale/malicious client cannot change gradeOverall", async () => {
+    const id = await certId();
+    const before = await readCert();
+    const { status, json } = await put(id, { gradeOverall: "3.0" });
+    expect(status).toBe(409);
+    expect(json.rejectedFields).toContain("gradeOverall");
+    const after = await readCert();
+    expect(after.gradeOverall).toBe(before.gradeOverall);
+  });
+
+  it("7. gradeType, labelType and subgrades are equally rejected", async () => {
+    const id = await certId();
+    const before = await readCert();
+    for (const [field, value] of [["gradeType", "NO"], ["labelType", "black"], ["gradeCorners", "10.0"]] as const) {
+      const { status, json } = await put(id, { [field]: value });
+      expect(status, `${field} must be rejected`).toBe(409);
+      expect(json.rejectedFields).toContain(field);
+    }
+    const after = await readCert();
+    expect(after.gradeType).toBe(before.gradeType);
+    expect(after.labelType).toBe(before.labelType);
+    expect(after.gradeCorners).toBe(before.gradeCorners);
+  });
+
+  it("a harmless ECHO of an unchanged grading value is tolerated, not rejected", async () => {
+    const id = await certId();
+    const before = await readCert();
+    const { status } = await put(id, { gradeOverall: String(before.gradeOverall), cardName: "Echo Tolerated" });
+    expect(status).toBe(200);
+    const after = await readCert();
+    expect(after.cardName).toBe("Echo Tolerated");
+    expect(after.gradeOverall).toBe(before.gradeOverall);
+  });
+
+  it("8/9. MV900007 REGRESSION — a concurrent grade change survives a metadata save", async () => {
+    const id = await certId();
+    // grader (or the workstation) writes a NEWER grade out-of-band
+    await q(`UPDATE certificates SET grade = '10.0' WHERE certificate_number = 'MV1'`);
+    // a STALE Card Details tab now saves metadata only
+    const { status } = await put(id, { cardName: "Metadata Only Edit" });
+    expect(status).toBe(200);
+    const after = await readCert();
+    expect(after.cardName).toBe("Metadata Only Edit");
+    expect(after.gradeOverall).toBe("10.0");     // <- the newer grade SURVIVES
+  });
+
+  it("metadata-only save leaves every grading column untouched", async () => {
+    const id = await certId();
+    const before = await readCert();
+    await put(id, { cardName: "Grading Untouched" });
+    const after = await readCert();
+    for (const k of ["gradeOverall","gradeType","labelType","gradeCentering","gradeCorners","gradeEdges","gradeSurface"] as const) {
+      expect(after[k], `${k} must be unchanged`).toEqual(before[k]);
+    }
+  });
+
+  it("14. a no-op metadata update creates no audit row", async () => {
+    const id = await certId();
+    const before = await readCert();
+    const auditsBefore = (await readAudits()).length;
+    const { status } = await put(id, { cardName: before.cardName });
+    expect(status).toBe(200);
+    const changeAudits = (await readAudits()).filter((a: any) => a.action === "update");
+    expect(changeAudits.every((a: any) => (a.details?.changes ?? []).length > 0)).toBe(true);
+    expect((await readAudits()).length).toBeGreaterThanOrEqual(auditsBefore);
+  });
+
+  it("16. a rejected grading write is audited with the certificate-number identity", async () => {
+    const id = await certId();
+    await put(id, { gradeOverall: "1.0" });
+    const audits = await readAudits();
+    const rejected = audits.filter((a: any) => a.action === "metadata_grading_field_rejected");
+    expect(rejected.length).toBeGreaterThan(0);
+    expect(rejected[rejected.length - 1].entityId).toBe("MV1");   // cert number, not numeric id
+  });
+});

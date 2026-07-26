@@ -113,6 +113,10 @@ import { enqueueScanJob } from "./lib/scan-job-queue";
 import { isServiceValidForCarrier } from "@shared/carriers";
 import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/variant-derive";
 import {
+  gradingFieldsIn,
+  gradingFieldContractError,
+} from "@shared/certificate-field-ownership";
+import {
   resolveEditConflicts,
   GUARDED_FIELD_SPECS,
   canonicalArray,
@@ -1603,66 +1607,66 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
       //
       // Full-state grading saves are unaffected: the edit form posts every form
       // key, so `gradeOverall`/`gradeType` are present and behave exactly as before.
-      const gradeTypeSubmitted = submitted("gradeType");
-      const gradeOverallSubmitted = submitted("gradeOverall");
-      const kindConversionClearsGrade = gradeTypeSubmitted && isNonNumUpdate;
-      const writesGradeOverall = gradeOverallSubmitted || kindConversionClearsGrade;
-      const writesGradeFields = writesGradeOverall || gradeTypeSubmitted;
-
-      // Grade to persist — only consulted when this request actually writes it.
-      const finalGradeOverall = isNonNumUpdate
-        ? null
-        : typeof req.body.gradeOverall === "string" && req.body.gradeOverall.trim()
-          ? req.body.gradeOverall
-          : null;
+      // ── PR A · SERVER-SIDE FIELD OWNERSHIP (primary defence) ─────────────
+      // This route owns certificate METADATA ONLY. It is now structurally
+      // incapable of writing grading state: grading-owned columns are never
+      // added to `data`, whatever the client sends.
+      //
+      // WHY: the Card Details form posted FULL form state on every auto-save,
+      // including a `gradeOverall` that had gone stale the moment the hidden
+      // grading workstation wrote a new grade out-of-band. The metadata save
+      // then reverted it. Live evidence: MV900007 9.0 -> 10.0 -> 9.0
+      // (audit #1915 `gradeOverall: "10.0"->"9.0"`).
+      //
+      // A submitted grading field is REJECTED with an explicit contract error
+      // rather than silently ignored — except when the submitted value equals
+      // what is already stored, which is a harmless echo from an older client
+      // and must not break it. Legitimate grading writes use the dedicated
+      // grading route.
+      const submittedGradingFields = gradingFieldsIn(req.body as Record<string, unknown>);
+      const changingGradingFields = submittedGradingFields.filter((f) => {
+        const posted = (req.body as Record<string, unknown>)[f];
+        const stored = (existing as Record<string, unknown>)[f];
+        const norm = (v: unknown) => (v === null || v === undefined ? "" : String(v).trim());
+        return norm(posted) !== norm(stored);
+      });
+      if (changingGradingFields.length > 0) {
+        await storage.writeAuditLog(
+          "certificate",
+          existing.certId,
+          "metadata_grading_field_rejected",
+          req.session.adminEmail || "admin",
+          { certificateId: existing.id, rejected: changingGradingFields, outcome: "no_write" }
+        );
+        return res.status(409).json({
+          error: gradingFieldContractError(changingGradingFields),
+          rejectedFields: changingGradingFields,
+        });
+      }
 
       // ── H-1: the update object HONOURS OMISSION ──────────────────────────
-      // This object used to be built unconditionally, so a partial PUT wrote
-      // `variant = null`, `rarity = null`, `collectionCode = null`,
-      // `language = "English"` and `notes = null` for fields the request never
-      // mentioned — silently clearing data and defaulting language, while the
-      // audit (built from the resolver) never mentioned it.
-      //
-      // A guarded field is now written ONLY when:
-      //   • the request actually submitted it (real property presence), or
-      //   • conflict resolution decided to MERGE a concurrent database value.
-      // An OMITTED field is absent from `data` entirely, so the UPDATE cannot
-      // touch it and the audit cannot claim it changed.
+      // A guarded field is written ONLY when the request actually submitted it
+      // (real property presence), or when conflict resolution decided to MERGE
+      // a concurrent database value. An OMITTED field is absent from `data`
+      // entirely, so the UPDATE cannot touch it and the audit cannot claim it
+      // changed.
       /** Provenance per guarded field, when a three-way resolution ran. */
       const provenanceOf = (k: string): FieldProvenance | null =>
         editResolution?.fields.find((f) => f.key === k)?.provenance ?? null;
 
-      const data: any = {
-        // Subgrades are intentionally NOT written here: this metadata editor
-        // doesn't carry them, and writing null wiped real grading data on
-        // every edit (pre-existing data-loss bug) and demoted Pristine certs.
-        // Omitting them preserves the stored centering/corners/edges/surface
-        // scores so the Pristine gate below sees the cert's true subgrades.
-      };
-
-      if (writesGradeOverall) data.gradeOverall = finalGradeOverall;
-      if (gradeTypeSubmitted) data.gradeType = gradeTypeUpdate;
+      // Built from the METADATA allowlist only. gradeOverall / gradeType /
+      // labelType and every other grading-owned column are GRADING-OWNED and
+      // are never written here — see the ownership contract above. Subgrades
+      // were already excluded; the boundary now covers the whole grading set.
+      const data: any = {};
       // labelType is DERIVED from grade + kind, so it is recomputed ONLY when
       // this request actually changes one of them. Re-deriving it on a
       // metadata-only edit is exactly what demoted Pristine certificates.
-      // Pristine/black via the shared gate (certIsPristine) on the FINAL cert
-      // state: the gate reads the cert's EXISTING subgrades + measurements
-      // together with the effective grade, so a grade change to a non-Pristine
-      // value correctly flips it to Standard. Gate logic itself is untouched.
-      if (writesGradeFields) {
-        const effectiveGradeForLabel = writesGradeOverall
-          ? finalGradeOverall
-          : ((existing as Record<string, unknown>).gradeOverall ?? null);
-        data.labelType =
-          !isNonNumUpdate &&
-          (await certIsPristine({
-            ...existing,
-            gradeOverall: effectiveGradeForLabel,
-            gradeType: gradeTypeUpdate,
-          } as any))
-            ? "black"
-            : "Standard";
-      }
+      // labelType is GRADING-OWNED and DERIVED from grade + kind. Because this
+      // route can no longer change either, it must not re-derive labelType
+      // either: doing so on a metadata-only edit is exactly what demoted
+      // Pristine certificates. The stored label survives untouched, so
+      // historical certificates render exactly as before (PR A clarification E).
 
       /**
        * Write a guarded field only when it was submitted, or when the resolver

@@ -121,6 +121,21 @@ function mvgsRemainingToGrade(remaining: number): number {
 
 interface Props {
   certId: number;
+  /**
+   * PR A · EXPLICIT GRADE-STAGE LIFECYCLE.
+   *
+   * True only while the Grade stage is the ACTIVE stage. The workstation is
+   * mounted hidden-not-unmounted so a grader's in-progress work survives stage
+   * switches, which meant its debounced auto-save also ran while Card Details
+   * was on screen — persisting computed defaults for a certificate nobody had
+   * graded (MV900007: null -> 10/10/10/10, MV900010: Authentic-Only -> numeric 10).
+   *
+   * When false the panel performs NO draft save, schedules NO debounce and
+   * sends NO grading request. Rendering and local editing are unaffected, so
+   * unsaved grader work is never destroyed. Defaults to true so existing
+   * callers that always show the workstation keep their behaviour.
+   */
+  active?: boolean;
   certIdStr?: string;
   cardName: string;
   cardSet: string;
@@ -260,6 +275,7 @@ function surfaceGradeColor(g: number): string {
 
 export default function GradingPanel({
   certId,
+  active = true,
   certIdStr,
   cardName,
   cardSet,
@@ -337,6 +353,15 @@ export default function GradingPanel({
       return res.json();
     },
   });
+  // PR A · mark hydration complete only when the grading payload for THIS
+  // certId has actually arrived. Until then the panel holds UI defaults, and
+  // the auto-save effect refuses to persist them.
+  useEffect(() => {
+    if (gradingData !== undefined && !gradingPending && !gradingError) {
+      gradingHydratedRef.current = true;
+    }
+  }, [gradingData, gradingPending, gradingError, certId]);
+
   const gradingWorkflowLocked = gradingPending || gradingError;
   const gradingWorkflowLockedRef = useRef(gradingWorkflowLocked);
   const gradingErrorRef = useRef(gradingError);
@@ -907,6 +932,9 @@ export default function GradingPanel({
   // further down (also hoisted).
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveSeqRef = useRef(0);
+  /** True once GET /grading has actually returned for the CURRENT certId. Until
+   *  then the panel's state is UI defaults, not grading evidence (PR A). */
+  const gradingHydratedRef = useRef(false);
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedOnceRef = useRef(false);
 
@@ -917,6 +945,7 @@ export default function GradingPanel({
     setEditMode(false);
     editSnapshotRef.current = null;
     hydratedOnceRef.current = false;
+    gradingHydratedRef.current = false;
     setFrontLR("");
     setFrontTB("");
     setBackLR("");
@@ -1106,8 +1135,20 @@ export default function GradingPanel({
   // "edits save automatically to the live record" silent-write behaviour.
   useEffect(() => {
     if (!certId) return;
+    // PR A · a hidden/inactive Grade stage must never persist anything. This is
+    // the first gate deliberately: no debounce is scheduled, so an inactive
+    // panel cannot fire a save even if a dependency changes underneath it.
+    if (!active) return;
     if (gradingWorkflowLocked) return;
     if (gradeApprovedAt) return; // auto-save is pre-approval only
+    // PR A · SAFE HYDRATION. `hydratedOnce` alone was not enough: the reset
+    // effect cleared it on certId change, the first post-reset run consumed it,
+    // and the GET's own setState then satisfied this guard — so a certificate
+    // with NO stored grading evidence auto-saved its UI defaults (all-zero
+    // defect state, which MVGS scores as a perfect card). Absence of grading
+    // evidence is not a perfect assessment: until the server payload has
+    // actually landed, nothing may be persisted.
+    if (!gradingHydratedRef.current) return;
     if (!hydratedOnceRef.current) {
       hydratedOnceRef.current = true;
       return;
@@ -1146,6 +1187,7 @@ export default function GradingPanel({
     idYear,
     idVariant,
     gradingWorkflowLocked,
+    active,
   ]);
 
   function handleAiComplete(analysis: AiAnalysisResult, identification: AiIdentification | null) {

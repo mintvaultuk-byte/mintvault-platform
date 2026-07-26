@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, useCallback, type ReactNode } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback, cloneElement, isValidElement, type ReactNode, type ReactElement } from "react";
 import { classifyLookupError } from "@/lib/lookup-errors";
 import { displayCollectorNumber } from "@shared/collector-number-format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,6 +9,7 @@ import { WorkstationPreviewAside } from "@/components/grading-workflow/Workstati
 import { CertificatePreviewPanel } from "@/components/grading-workflow/CertificatePreviewPanel";
 import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 import { VariantSummary } from "@/components/grading-workflow/VariantSummary";
+import { isMetadataOwnedField } from "@shared/certificate-field-ownership";
 import {
   GRADING_STAGES,
   deriveStageCompletion,
@@ -1251,11 +1252,27 @@ export default function CertificateForm({
   // is ONLY set true by the explicit "Save Changes to Published Certificate"
   // path — auto-save must never send it (see the server-side approval lock
   // in the PUT /api/admin/certificates/:id route).
+  /**
+   * PR A · CLIENT-SIDE METADATA PAYLOAD ALLOWLIST.
+   *
+   * This builder previously serialised the WHOLE form object, which meant every
+   * metadata auto-save also posted `gradeOverall` / `gradeType` / `labelType`.
+   * Those values go stale the instant the grading workstation writes a grade
+   * out-of-band, so the next metadata save silently reverted it (MV900007:
+   * 9.0 -> 10.0 -> 9.0). Card Details now sends ONLY the fields it owns, per the
+   * shared contract in shared/certificate-field-ownership.ts — the same module
+   * the server enforces, so the two cannot drift.
+   *
+   * This is the client half of the boundary; the server rejects grading-owned
+   * fields independently, so a stale or malicious client cannot bypass it.
+   */
   function buildCertFormData(confirmPublishedEdit = false): FormData {
     const formData = new FormData();
     const UI_ONLY_KEYS = ["unifiedSelect", "otherText"];
     Object.entries(form).forEach(([key, value]) => {
       if (UI_ONLY_KEYS.includes(key)) return;
+      // Grading-owned state is never sent from Card Details.
+      if (!isMetadataOwnedField(key)) return;
       if (value !== null && value !== undefined) {
         formData.append(key, String(value));
       }
@@ -3386,7 +3403,18 @@ export default function CertificateForm({
                     }
                   }}
                 >
-                  {workstationSlot}
+                  {/* PR A · tell the grading workstation whether the Grade stage is
+                      ACTIVE. The slot is mounted hidden-not-unmounted so a grader's
+                      unsaved work survives stage switches; without this flag its
+                      debounced auto-save also ran while Card Details was on screen
+                      and persisted UI defaults as real grading data. cloneElement
+                      keeps every existing call site unchanged — a slot that does
+                      not accept `active` simply ignores it. */}
+                  {isValidElement(workstationSlot)
+                    ? cloneElement(workstationSlot as ReactElement<{ active?: boolean }>, {
+                        active: wfStage === GRADE_STAGE,
+                      })
+                    : workstationSlot}
                 </div>
               )}
 
