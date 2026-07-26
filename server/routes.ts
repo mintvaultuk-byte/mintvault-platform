@@ -1572,6 +1572,11 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
       const gradeTypeUpdate = gradeTypeToPersist(storedGradeTypeUpdate, requestedKindUpdate);
       const isNonNumUpdate = requestedKindUpdate !== "numeric";
 
+      // ── OMISSION DISCIPLINE ──────────────────────────────────────────────
+      // Real property presence on the request body. This is the SINGLE test
+      // every writable field below is gated on — including the grade fields.
+      const submitted = (k: string) => Object.prototype.hasOwnProperty.call(req.body, k);
+
       if (!isNonNumUpdate && req.body.gradeOverall) {
         const g = Number(req.body.gradeOverall);
         if (!isValidNumericGrade(g)) {
@@ -1579,24 +1584,37 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
         }
       }
 
-      // Grade to persist — the edit form always sends it, so it's preserved.
-      // Reused for the gate below and the data object so they can't diverge.
+      // ── H-1 (final hostile review): the GRADE fields honour omission too ──
+      // `gradeOverall`, `gradeType` and `labelType` used to be written on EVERY
+      // request. A metadata-only PUT therefore nulled a stored grade, and the
+      // Pristine gate — fed that null — demoted a genuine black label to
+      // Standard, while the audit falsely attributed both to the request
+      // (`source: "request"` for a field the request never sent).
+      //
+      // This route now governs a grade field ONLY when the request carries one:
+      //   • `gradeOverall` submitted → that value, or an explicit "" clear;
+      //   • `gradeType` submitted AND converting to a non-numeric kind (NO/AA)
+      //     → the grade is cleared, which is the documented meaning of that
+      //     conversion (`rejectKindChange` above already refuses it outright on
+      //     a published certificate);
+      //   • otherwise → all three are ABSENT from `data`, so the UPDATE cannot
+      //     touch them, the stored subgrades stay intact, the Pristine/black
+      //     state survives, and the audit cannot claim they changed.
+      //
+      // Full-state grading saves are unaffected: the edit form posts every form
+      // key, so `gradeOverall`/`gradeType` are present and behave exactly as before.
+      const gradeTypeSubmitted = submitted("gradeType");
+      const gradeOverallSubmitted = submitted("gradeOverall");
+      const kindConversionClearsGrade = gradeTypeSubmitted && isNonNumUpdate;
+      const writesGradeOverall = gradeOverallSubmitted || kindConversionClearsGrade;
+      const writesGradeFields = writesGradeOverall || gradeTypeSubmitted;
+
+      // Grade to persist — only consulted when this request actually writes it.
       const finalGradeOverall = isNonNumUpdate
         ? null
         : typeof req.body.gradeOverall === "string" && req.body.gradeOverall.trim()
           ? req.body.gradeOverall
           : null;
-      // Pristine/black via the shared gate (certIsPristine) on the FINAL cert
-      // state. This is a metadata editor — it does NOT carry subgrades, so the
-      // gate reads the cert's EXISTING subgrades + measurements (preserved
-      // below — no longer wiped to null) with the final grade. A genuine
-      // Pristine cert keeps its black label through an unrelated metadata edit;
-      // a grade change to a non-Pristine value correctly flips it to Standard.
-      const computedLabelTypeUpdate =
-        !isNonNumUpdate &&
-        (await certIsPristine({ ...existing, gradeOverall: finalGradeOverall, gradeType: gradeTypeUpdate } as any))
-          ? "black"
-          : "Standard";
 
       // ── H-1: the update object HONOURS OMISSION ──────────────────────────
       // This object used to be built unconditionally, so a partial PUT wrote
@@ -1610,23 +1628,41 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
       //   • conflict resolution decided to MERGE a concurrent database value.
       // An OMITTED field is absent from `data` entirely, so the UPDATE cannot
       // touch it and the audit cannot claim it changed.
-      const submitted = (k: string) => Object.prototype.hasOwnProperty.call(req.body, k);
       /** Provenance per guarded field, when a three-way resolution ran. */
       const provenanceOf = (k: string): FieldProvenance | null =>
         editResolution?.fields.find((f) => f.key === k)?.provenance ?? null;
 
       const data: any = {
-        // Always-computed fields — derived from the grade pipeline, not from a
-        // posted metadata key, so presence does not apply to them.
-        labelType: computedLabelTypeUpdate,
-        gradeType: gradeTypeUpdate,
-        gradeOverall: finalGradeOverall,
         // Subgrades are intentionally NOT written here: this metadata editor
         // doesn't carry them, and writing null wiped real grading data on
         // every edit (pre-existing data-loss bug) and demoted Pristine certs.
         // Omitting them preserves the stored centering/corners/edges/surface
-        // scores so the gate above sees the cert's true subgrades.
+        // scores so the Pristine gate below sees the cert's true subgrades.
       };
+
+      if (writesGradeOverall) data.gradeOverall = finalGradeOverall;
+      if (gradeTypeSubmitted) data.gradeType = gradeTypeUpdate;
+      // labelType is DERIVED from grade + kind, so it is recomputed ONLY when
+      // this request actually changes one of them. Re-deriving it on a
+      // metadata-only edit is exactly what demoted Pristine certificates.
+      // Pristine/black via the shared gate (certIsPristine) on the FINAL cert
+      // state: the gate reads the cert's EXISTING subgrades + measurements
+      // together with the effective grade, so a grade change to a non-Pristine
+      // value correctly flips it to Standard. Gate logic itself is untouched.
+      if (writesGradeFields) {
+        const effectiveGradeForLabel = writesGradeOverall
+          ? finalGradeOverall
+          : ((existing as Record<string, unknown>).gradeOverall ?? null);
+        data.labelType =
+          !isNonNumUpdate &&
+          (await certIsPristine({
+            ...existing,
+            gradeOverall: effectiveGradeForLabel,
+            gradeType: gradeTypeUpdate,
+          } as any))
+            ? "black"
+            : "Standard";
+      }
 
       /**
        * Write a guarded field only when it was submitted, or when the resolver

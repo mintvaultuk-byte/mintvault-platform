@@ -405,6 +405,23 @@ describe("M-4: CertificateForm uses the shared workflow helpers", () => {
     const fn = FORM.slice(FORM.indexOf("const goToStage"), FORM.indexOf("const stageClass"));
     expect(fn).toContain("clampStageIndex(i)");
   });
+
+  it("Enter inside the Grade stage cannot advance the workflow or submit the form", () => {
+    // The Grade stage wraps the protected workstation in a keydown guard. Source
+    // text is the only available proof here: asserting that a real Enter keypress
+    // is swallowed needs DOM event dispatch (see KNOWN LIMIT in this file's header).
+    const gradeStage = FORM.slice(
+      FORM.indexOf('<div data-workflow-stage="grade"'),
+      FORM.indexOf('<div data-workflow-stage="review"'),
+    );
+    expect(gradeStage).toContain("onKeyDown");
+    expect(gradeStage).toMatch(/e\.key === "Enter" &&[\s\S]*?tagName === "INPUT"/);
+    expect(gradeStage).toContain("e.preventDefault()");
+    // The guard must never itself navigate — Enter is swallowed, not forwarded.
+    const guard = gradeStage.slice(gradeStage.indexOf("onKeyDown"), gradeStage.indexOf("{workstationSlot}"));
+    expect(guard).not.toContain("goToStage");
+    expect(guard).not.toContain("nextStageIndex");
+  });
 });
 
 describe("M-4: the wired transitions produce the approved production flow", () => {

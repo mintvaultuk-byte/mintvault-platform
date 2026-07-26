@@ -201,13 +201,48 @@ const STORED = {
   designations: ["PROMO", "FIRST_EDITION"],
   notes: "Grader notes that must survive",
   status: "graded",
-  // Derived columns the route always recomputes. Seeding them with the values
-  // the pipeline produces keeps a metadata-only edit genuinely metadata-only —
-  // otherwise the audit truthfully (but distractingly) reports them changing
-  // from blank on the first save.
-  labelType: "Standard",
+  // FINAL REVIEW / HIGH-1: this fixture carries a REAL grade and REAL subgrades.
+  // It previously left them blank, which made every "nothing else changed" loop
+  // self-fulfilling — the route was nulling `gradeOverall` on every partial PUT
+  // and no assertion could see it, because there was nothing to lose.
   gradeType: "numeric",
+  gradeOverall: "9.5",
+  gradeCentering: "9",
+  gradeCorners: "10",
+  gradeEdges: "9.5",
+  gradeSurface: "10",
+  labelType: "Standard",
 };
+
+/** Every column a metadata-only edit must never touch. */
+const GRADE_COLUMNS = [
+  "gradeOverall",
+  "gradeType",
+  "labelType",
+  "gradeCentering",
+  "gradeCorners",
+  "gradeEdges",
+  "gradeSurface",
+] as const;
+
+/** A genuine Pristine certificate: 10 overall, every subgrade 10, black label. */
+const PRISTINE = {
+  ...STORED,
+  gradeOverall: "10",
+  gradeCentering: "10",
+  gradeCorners: "10",
+  gradeEdges: "10",
+  gradeSurface: "10",
+  labelType: "black",
+};
+
+async function reseed(row: Record<string, unknown>): Promise<number> {
+  const { certificates, auditLog } = await import("../shared/schema");
+  await (runtime.db as any).delete(auditLog);
+  await (runtime.db as any).delete(certificates);
+  await (runtime.db as any).insert(certificates).values({ ...row } as any);
+  return await certId();
+}
 
 beforeEach(async () => {
   const { certificates, auditLog } = await import("../shared/schema");
@@ -487,6 +522,185 @@ describe("audit failure rolls the whole update back", () => {
       expect(await readAudits()).toHaveLength(0);
     } finally {
       await q(`ALTER TABLE audit_log DROP CONSTRAINT audit_block`);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FINAL HOSTILE REVIEW / HIGH-1 — grade fields honour omission
+//
+// The route used to write `gradeOverall`, `gradeType` and `labelType` on EVERY
+// request. A metadata-only PUT therefore nulled a stored grade and demoted a
+// Pristine black label, and the audit falsely attributed both to the request.
+// These cases drive the REAL handler over real PostgreSQL with a fixture that
+// carries a REAL grade and REAL subgrades, so a regression cannot hide.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("HIGH-1: a metadata-only edit preserves the grade", () => {
+  const metadataOnlyEdits: Array<[string, Record<string, unknown>]> = [
+    ["cardName-only", { cardName: "Charizard (typo fix)" }],
+    ["year-only", { year: "2000" }],
+    ["variant-only", { variant: "SHADOWLESS" }],
+    ["language-only", { language: "English" }],
+    ["notes-only", { notes: "Re-checked centering by hand" }],
+    ["designations-only", { designations: ["PROMO"] }],
+  ];
+
+  for (const [name, body] of metadataOnlyEdits) {
+    it(`${name}: every grade column is byte-for-byte unchanged`, async () => {
+      const id = await certId();
+      const before = await readCert();
+      const { status } = await put(id, body);
+      expect(status).toBe(200);
+
+      const after = await readCert();
+      for (const col of GRADE_COLUMNS) {
+        expect(after[col], `${col} must survive a ${name} edit`).toEqual(before[col]);
+      }
+      // ...and the edit itself really did land, so this is not a no-op pass.
+      const [[field, value]] = Object.entries(body);
+      if (field !== "designations") expect(String(after[field])).toBe(String(value));
+    });
+
+    it(`${name}: no grade field appears in the audit`, async () => {
+      const id = await certId();
+      const { status } = await put(id, body);
+      expect(status).toBe(200);
+
+      const [audit] = await readAudits();
+      const changed = (audit.details.changes as Array<{ field: string }>).map((c) => c.field);
+      for (const col of GRADE_COLUMNS) {
+        expect(changed, `${col} must not be reported as changed`).not.toContain(col);
+      }
+    });
+  }
+
+  it("a Pristine black-label certificate stays black — grade, subgrades and label all intact", async () => {
+    const id = await reseed(PRISTINE);
+    const { status } = await put(id, { cardName: "Charizard (typo fix)" });
+    expect(status).toBe(200);
+
+    const after = await readCert();
+    expect(after.gradeOverall).toBe("10.0");
+    expect(after.labelType).toBe("black");
+    expect(after.gradeType).toBe("numeric");
+    for (const col of ["gradeCentering", "gradeCorners", "gradeEdges", "gradeSurface"] as const) {
+      expect(after[col], `${col} must be untouched`).toBe("10.0");
+    }
+    expect(after.cardName).toBe("Charizard (typo fix)");
+
+    const [audit] = await readAudits();
+    expect((audit.details.changes as Array<{ field: string }>).map((c) => c.field)).toEqual(["cardName"]);
+  });
+
+  it("the audit exactly matches the committed row after a metadata-only edit", async () => {
+    const id = await certId();
+    const before = await readCert();
+    const { status } = await put(id, { cardName: "Audit Truth", year: "2001" });
+    expect(status).toBe(200);
+    const after = await readCert();
+
+    const [audit] = await readAudits();
+    const changes = audit.details.changes as Array<{ field: string; previous: unknown; next: unknown }>;
+
+    // Every audited change is real, and matches the committed row.
+    for (const c of changes) {
+      expect(c.previous, `${c.field}.previous`).toEqual(before[c.field]);
+      expect(String(after[c.field]), `${c.field}.next`).toBe(String(c.next));
+    }
+    // Every column that actually changed is audited — nothing changed silently.
+    // `updatedAt` is excluded: it is a mechanical row timestamp stamped by the
+    // storage layer on every write, not an editable business field, so it is
+    // deliberately absent from the field-level change list.
+    const reallyChanged = Object.keys(after).filter(
+      (k) => k !== "updatedAt" && JSON.stringify(after[k]) !== JSON.stringify(before[k]),
+    );
+    expect(reallyChanged.sort()).toEqual(changes.map((c) => c.field).sort());
+  });
+});
+
+describe("HIGH-1: an explicit, authorised grade edit still works", () => {
+  it("submitting gradeOverall updates the grade and audits it truthfully", async () => {
+    const id = await certId();
+    const { status } = await put(id, { gradeOverall: "8" });
+    expect(status).toBe(200);
+
+    const after = await readCert();
+    expect(after.gradeOverall).toBe("8.0");
+    expect(after.labelType).toBe("Standard");
+
+    const [audit] = await readAudits();
+    const change = (audit.details.changes as Array<{ field: string; previous: unknown; next: unknown }>).find(
+      (c) => c.field === "gradeOverall",
+    );
+    expect(change).toBeTruthy();
+    expect(change!.previous).toBe("9.5");
+    expect(change!.next).toBe("8");
+  });
+
+  it("a full-state save (the production edit form) still writes the grade", async () => {
+    const id = await certId();
+    const { status } = await put(id, {
+      cardGame: "pokemon",
+      setName: "Base Set",
+      cardName: "Charizard",
+      cardNumber: "4/102",
+      year: "1999",
+      gradeType: "numeric",
+      gradeOverall: "9",
+    });
+    expect(status).toBe(200);
+    expect((await readCert()).gradeOverall).toBe("9.0");
+  });
+
+  it("an explicit empty gradeOverall is a documented clear, and is audited", async () => {
+    const id = await certId();
+    const { status } = await put(id, { gradeOverall: "" });
+    expect(status).toBe(200);
+
+    const after = await readCert();
+    expect(after.gradeOverall).toBeNull();
+
+    const [audit] = await readAudits();
+    const fields = (audit.details.changes as Array<{ field: string }>).map((c) => c.field);
+    expect(fields).toContain("gradeOverall");
+  });
+
+  it("converting the kind to non-numeric clears the grade, and says so in the audit", async () => {
+    const id = await certId();
+    const { status } = await put(id, { gradeType: "NO" });
+    expect(status).toBe(200);
+
+    const after = await readCert();
+    expect(after.gradeOverall).toBeNull();
+    expect(after.labelType).toBe("Standard");
+
+    const [audit] = await readAudits();
+    const fields = (audit.details.changes as Array<{ field: string }>).map((c) => c.field);
+    expect(fields).toContain("gradeOverall");
+    expect(fields).toContain("gradeType");
+  });
+
+  it("an invalid grade is rejected and nothing is written", async () => {
+    const id = await certId();
+    const { status } = await put(id, { gradeOverall: "11" });
+    expect(status).toBe(400);
+    expect((await readCert()).gradeOverall).toBe("9.5");
+    expect(await readAudits()).toHaveLength(0);
+  });
+});
+
+describe("HIGH-1: grade preservation is atomic too", () => {
+  it("an audit failure rolls back a real grade edit", async () => {
+    const id = await certId();
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT audit_block2 CHECK (action <> 'update')`);
+    try {
+      const { status } = await put(id, { gradeOverall: "7" });
+      expect(status).toBe(500);
+      expect((await readCert()).gradeOverall).toBe("9.5"); // rolled back
+      expect(await readAudits()).toHaveLength(0);
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT audit_block2`);
     }
   });
 });

@@ -51,6 +51,42 @@ export function codeNamespaceFor(category: string): readonly string[] {
 }
 
 /**
+ * HIGH-2 (final hostile review) — WHICH CATEGORIES PERSIST `abbreviation`?
+ *
+ * Only `designation` and `attribute`. Both are mapped by `mapDesignationRow`
+ * (shared/catalogue-snapshot.ts), whose `code` is `abbreviation || value`, and
+ * both write that code into `certificates.designations`.
+ *
+ * Every other category persists its `value` and nothing else:
+ *
+ *   category     mapper             persisted identity        abbreviation is…
+ *   ──────────   ────────────────   ───────────────────────   ────────────────────
+ *   rarity       mapRarityRow       `value` (rarityCode)      display glyph + alias
+ *   finish       mapFinishRow       `value`                   unused
+ *   promo        mapPromoRow        `value`                   unused
+ *   subset       mapPromoRow        `value`                   unused
+ *   language     mapLanguageRow     `value`                   unused
+ *   era          inline {value,label} `value`                 unused
+ *   designation  mapDesignationRow  `abbreviation || value`   THE PERSISTED CODE
+ *   attribute    mapDesignationRow  `abbreviation || value`   THE PERSISTED CODE
+ *
+ * Applying the abbreviation-based rule to `rarity` was wrong and actively
+ * harmful: EN/JP rarity pairs legitimately share a printed abbreviation
+ * (hyper_rare/jp_hyper_rare both show "HR", rare/rare_holo both show "R"), so
+ * the rule rejected valid rows and blocked migration 0026 against real data.
+ * For those categories the existing per-category `value` uniqueness rule above
+ * is already the correct and sufficient guard.
+ *
+ * This list MUST stay identical to the category filter in
+ * migrations/0026_catalogue_abbreviation_unique.sql.
+ */
+export const ABBREVIATION_PERSISTING_CATEGORIES: readonly string[] = ["designation", "attribute"];
+
+export function persistsAbbreviationAsCode(category: string): boolean {
+  return ABBREVIATION_PERSISTING_CATEGORIES.includes(category);
+}
+
+/**
  * Characters permitted in a PERSISTED catalogue code (`value` / `abbreviation`).
  * Deliberately NOT applied to `label` or `description` — human-readable text may
  * contain spaces, punctuation and accents. Codes are what get written onto a
@@ -114,8 +150,13 @@ export function catalogueConflict(
   // M-2: scoped to LIVE rows, so a retired code can be reused by a replacement.
   // M-3: scoped to the shared NAMESPACE, so designation and attribute — which
   //      both land in certificates.designations — cannot collide either.
+  // HIGH-2: scoped to the categories that ACTUALLY persist `abbreviation ||
+  //      value`. Categories keyed by `value` (rarity, finish, promo, subset,
+  //      language, era) are covered by the per-category value rule above; their
+  //      `abbreviation` is a display glyph, so shared abbreviations across
+  //      language/region rows are legitimate and must not be rejected.
   const candidateCode = effectiveCatalogueCode(candidate);
-  if (candidateCode && isLiveCatalogueRow(candidate)) {
+  if (candidateCode && isLiveCatalogueRow(candidate) && persistsAbbreviationAsCode(candidate.category)) {
     const namespace = codeNamespaceFor(candidate.category);
     const codeClash = existing.find(
       (r) =>

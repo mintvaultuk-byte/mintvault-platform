@@ -226,3 +226,110 @@ describe("0026 — catalogue persisted-code uniqueness (real migration, real Pos
     expect(CREATE_0019).toContain("uq_catalogue_items_category_value");
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HIGH-2 (final hostile review) — the rule is scoped to the categories that
+// actually persist `abbreviation || value`. An earlier revision applied it to
+// every category and aborted against the real staging catalogue.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The REAL live staging rarity rows that the over-broad rule rejected. */
+const STAGING_RARITIES: Array<[string, string]> = [
+  ["ace_spec", "ACE"],
+  ["jp_ace_spec", "ACE"],
+  ["hyper_rare", "HR"],
+  ["jp_hyper_rare", "HR"],
+  ["rare", "R"],
+  ["rare_holo", "R"],
+  ["double_rare", "RR"],
+  ["jp_double_rare", "RR"],
+  ["shiny_rare", "SR"],
+  ["jp_super_rare", "SR"],
+  ["shiny_ultra_rare", "SSR"],
+  ["jp_shiny_super_rare", "SSR"],
+  ["ultra_rare", "UR"],
+  ["jp_ultra_rare", "UR"],
+];
+
+describe("0026 HIGH-2 — scoped to abbreviation-persisting categories", () => {
+  it("ACCEPTS the real staging rarity dataset (7 shared abbreviations, 14 rows)", async () => {
+    for (const [value, abbr] of STAGING_RARITIES) {
+      await insert({ category: "rarity", value, abbreviation: abbr });
+    }
+    // The forward migration must apply against this data, not abort.
+    await expect(pool!.query(MIGRATION)).resolves.toBeDefined();
+    expect(
+      (await q(`SELECT indexname FROM pg_indexes WHERE tablename = 'catalogue_items'`)).map((r) => r.indexname),
+    ).toContain("uq_catalogue_items_live_effective_code");
+    expect((await q(`SELECT count(*)::int AS n FROM catalogue_items`))[0].n).toBe(14);
+  });
+
+  it("still ACCEPTS shared rarity abbreviations AFTER the index exists", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "rarity", value: "hyper_rare", abbreviation: "HR" });
+    await expect(insert({ category: "rarity", value: "jp_hyper_rare", abbreviation: "HR" })).resolves.toBeDefined();
+  });
+
+  it("leaves every other value-keyed category free to share abbreviations", async () => {
+    await pool!.query(MIGRATION);
+    for (const category of ["finish", "promo", "subset", "language", "era"]) {
+      await insert({ category, value: `${category}_alpha`, abbreviation: "X" });
+      await expect(insert({ category, value: `${category}_beta`, abbreviation: "X" })).resolves.toBeDefined();
+    }
+  });
+
+  it("STILL rejects a genuine designation/attribute collision", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "designation", value: "promo_a", abbreviation: "PROMO" });
+    await expect(insert({ category: "attribute", value: "promo_b", abbreviation: "PROMO" })).rejects.toThrow(
+      /uq_catalogue_items_live_effective_code|duplicate key/i,
+    );
+  });
+
+  it("fails loudly on a designation collision, and NOT on a rarity one", async () => {
+    // Rarity duplicates present -> migration must still apply.
+    for (const [value, abbr] of STAGING_RARITIES) await insert({ category: "rarity", value, abbreviation: abbr });
+    await expect(pool!.query(MIGRATION)).resolves.toBeDefined();
+
+    // A real designation collision -> loud, named failure.
+    await q("DROP TABLE IF EXISTS catalogue_items CASCADE");
+    await pool!.query(CREATE_0019);
+    await insert({ category: "designation", value: "promo_a", abbreviation: "PROMO" });
+    await insert({ category: "designation", value: "promo_b", abbreviation: "PROMO" });
+    await expect(pool!.query(MIGRATION)).rejects.toThrow(/0026 BLOCKED.*designation\+attribute\/promo/is);
+  });
+
+  it("re-running CONVERGES on the scoped index even if the over-broad one exists", async () => {
+    // Simulate a cluster where the earlier, over-broad revision was applied.
+    await pool!.query(`
+      CREATE UNIQUE INDEX uq_catalogue_items_live_effective_code
+        ON catalogue_items (
+          (CASE WHEN category IN ('designation','attribute') THEN 'designation+attribute' ELSE category END),
+          lower(coalesce(nullif(btrim(abbreviation), ''), btrim(value)))
+        )
+        WHERE active = TRUE AND archived = FALSE
+          AND btrim(coalesce(nullif(btrim(abbreviation), ''), btrim(value))) <> '';
+    `);
+    // Under the OLD index these two rarity rows are rejected...
+    await insert({ category: "rarity", value: "hyper_rare", abbreviation: "HR" });
+    await expect(insert({ category: "rarity", value: "jp_hyper_rare", abbreviation: "HR" })).rejects.toThrow();
+    // ...re-running the migration replaces it with the correctly scoped index.
+    await pool!.query(MIGRATION);
+    await expect(insert({ category: "rarity", value: "jp_hyper_rare", abbreviation: "HR" })).resolves.toBeDefined();
+  });
+
+  it("forward, idempotent rerun and rollback all pass with the staging dataset present", async () => {
+    for (const [value, abbr] of STAGING_RARITIES) await insert({ category: "rarity", value, abbreviation: abbr });
+    await pool!.query(MIGRATION);
+    await pool!.query(MIGRATION); // rerun
+    expect(
+      (await q(`SELECT indexname FROM pg_indexes WHERE tablename='catalogue_items'`))
+        .filter((r) => r.indexname === "uq_catalogue_items_live_effective_code").length,
+    ).toBe(1);
+    await pool!.query(ROLLBACK);
+    expect(
+      (await q(`SELECT indexname FROM pg_indexes WHERE tablename='catalogue_items'`)).map((r) => r.indexname),
+    ).not.toContain("uq_catalogue_items_live_effective_code");
+    expect((await q(`SELECT count(*)::int AS n FROM catalogue_items`))[0].n).toBe(14); // no row rewritten
+  });
+});

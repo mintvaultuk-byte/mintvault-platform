@@ -43,15 +43,65 @@ describe("catalogueConflict — duplicate + one-category validation", () => {
     expect(catalogueConflict(rows, { id: 1, category: "rarity", value: "rare" }, 1)).toBeNull();
   });
 
-  it("rejects a duplicate abbreviation within a category", () => {
+  it("rejects a duplicate abbreviation within an ABBREVIATION-PERSISTING category", () => {
     // The dedicated abbreviation-only rule was folded into the broader
     // PERSISTED-CODE rule (it was a strict subset: equal abbreviations always
     // produce equal effective codes). The rejection still happens — the message
     // now names the stored code, which is the thing that actually collides.
-    const withAbbr = [...rows, { id: 4, category: "rarity", value: "rare_holo", label: "Rare Holo", abbreviation: "R" }];
-    expect(catalogueConflict(withAbbr, { category: "rarity", value: "new_one", abbreviation: "r" })).toMatch(
+    // HIGH-2: this applies to `designation`/`attribute`, the only categories
+    // whose persisted code is `abbreviation || value`.
+    const withAbbr = [
+      ...rows,
+      { id: 4, category: "designation", value: "first_edition", label: "1st Edition", abbreviation: "FE" },
+    ];
+    expect(catalogueConflict(withAbbr, { category: "designation", value: "new_one", abbreviation: "fe" })).toMatch(
       /unique stored code/i,
     );
+  });
+
+  it("HIGH-2: rarity rows MAY share a display abbreviation — it is not their persisted code", () => {
+    // These are the REAL live staging rows. `rarity` persists `value`
+    // (rarityCode); `abbreviation` is only the printed glyph, and EN/JP pairs
+    // deliberately share one. The old over-broad rule rejected all of these.
+    const rarities: CatalogueEntryLike[] = [
+      { id: 9, category: "rarity", value: "hyper_rare", label: "Hyper Rare", abbreviation: "HR" },
+      { id: 20, category: "rarity", value: "jp_hyper_rare", label: "JP Hyper Rare", abbreviation: "HR" },
+      { id: 3, category: "rarity", value: "rare", label: "Rare", abbreviation: "R" },
+      { id: 13, category: "rarity", value: "rare_holo", label: "Rare Holo", abbreviation: "R" },
+    ];
+    // Editing an existing JP row (label change only) is allowed.
+    expect(
+      catalogueConflict(rarities, {
+        id: 20,
+        category: "rarity",
+        value: "jp_hyper_rare",
+        label: "JP Hyper Rare (renamed)",
+        abbreviation: "HR",
+      }, 20),
+    ).toBeNull();
+    // Creating a NEW rarity that shares an existing printed abbreviation is allowed.
+    expect(
+      catalogueConflict(rarities, { category: "rarity", value: "jp_shiny_rare", label: "JP Shiny Rare", abbreviation: "R" }),
+    ).toBeNull();
+  });
+
+  it("HIGH-2: a duplicate rarity VALUE is still rejected by the per-category value rule", () => {
+    const rarities: CatalogueEntryLike[] = [
+      { id: 9, category: "rarity", value: "hyper_rare", label: "Hyper Rare", abbreviation: "HR" },
+    ];
+    expect(catalogueConflict(rarities, { category: "rarity", value: "hyper_rare", abbreviation: "XX" })).toMatch(
+      /already exists in rarity/,
+    );
+  });
+
+  it("HIGH-2: other value-keyed categories may also share abbreviations", () => {
+    for (const category of ["finish", "promo", "subset", "language", "era"]) {
+      const existing: CatalogueEntryLike[] = [{ id: 1, category, value: "alpha", label: "Alpha", abbreviation: "X" }];
+      expect(
+        catalogueConflict(existing, { category, value: "beta", label: "Beta", abbreviation: "X" }),
+        `${category} must allow a shared display abbreviation`,
+      ).toBeNull();
+    }
   });
 
   it("enforces one-classification-only across categories by default", () => {
