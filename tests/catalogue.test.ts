@@ -1,3 +1,5 @@
+import { readFileSync } from "fs";
+import { join } from "path";
 import { describe, it, expect } from "vitest";
 import {
   catalogueConflict,
@@ -15,6 +17,7 @@ import {
   searchCatalogue,
   buildStructuredVariant,
   SEED_CATALOGUE,
+  POKEMON_DESIGNATIONS,
   type CatalogueSnapshot,
 } from "../shared/pokemon-rarity-catalogue";
 import { validateStructuredVariant } from "../shared/structured-variant-validate";
@@ -265,5 +268,62 @@ describe("canReadCatalogue — role permission (read gate)", () => {
     expect(canReadCatalogue(undefined)).toBe(false);
     expect(canReadCatalogue(null)).toBe(false);
     expect(canReadCatalogue({})).toBe(false);
+  });
+});
+
+describe("designation + attribute categories reach the pickers (consolidation 2026-07-26)", () => {
+  it("designation rows map to chips, with abbreviation as the PERSISTED code", () => {
+    const snap = buildSnapshotFromRows(
+      [
+        { category: "designation", value: "first_edition", label: "1st Edition", abbreviation: "FIRST_EDITION", description: "WOTC 1st Ed." },
+      ],
+      new Set(["designation"]),
+    );
+    expect(snap.designations).toEqual([
+      { code: "FIRST_EDITION", label: "1st Edition", help: "WOTC 1st Ed." },
+    ]);
+  });
+
+  it("falls back to `value` only when no abbreviation is set", () => {
+    const snap = buildSnapshotFromRows(
+      [{ category: "designation", value: "custom_thing", label: "Custom Thing" }],
+      new Set(["designation"]),
+    );
+    expect(snap.designations[0].code).toBe("custom_thing");
+  });
+
+  it("an unseeded designation category falls back to the seed list (never empty)", () => {
+    const snap = buildSnapshotFromRows([], new Set([]));
+    expect(snap.designations.length).toBeGreaterThan(0);
+    expect(snap.designations.map((d) => d.code)).toContain("FIRST_EDITION");
+  });
+
+  it("attributes are NEVER seed-filled — an unseeded catalogue yields an empty list", () => {
+    expect(buildSnapshotFromRows([], new Set([])).attributes).toEqual([]);
+    const snap = buildSnapshotFromRows(
+      [{ category: "attribute", value: "signed", label: "Signed", abbreviation: "SIGNED" }],
+      new Set(["attribute"]),
+    );
+    expect(snap.attributes).toEqual([{ code: "SIGNED", label: "Signed", help: "" }]);
+  });
+
+  it("REGRESSION: every seeded designation code matches a historical hard-coded code, so no stored value is orphaned", () => {
+    // The seeder is the thing that populates the DB; if its codes drift from the
+    // codes already persisted on certificates, existing designations silently
+    // stop matching any chip. Assert the overlap explicitly.
+    // The seeder module reaches the DB at import time, so assert on its SOURCE
+    // (the repo's established pattern for scripts that cannot be imported pure).
+    const seeder = readFileSync(join(process.cwd(), "scripts/db/seed-catalogue.ts"), "utf8");
+    const block = seeder.slice(seeder.indexOf("const designations:"), seeder.indexOf("designations.forEach"));
+    expect(block.length).toBeGreaterThan(0);
+    const seederCodes = [...block.matchAll(/code:\s*"([A-Z_]+)"/g)].map((m) => m[1]);
+    expect(seederCodes.length).toBeGreaterThan(0);
+    // Every historical code the app has ever stored must still be seedable.
+    for (const legacy of POKEMON_DESIGNATIONS.map((d) => d.code)) {
+      expect(seederCodes, `historical designation "${legacy}" missing from the seeder`).toContain(legacy);
+    }
+    // And the mapper must read abbreviation first, else these codes never apply.
+    const snapshotSrc = readFileSync(join(process.cwd(), "shared/catalogue-snapshot.ts"), "utf8");
+    expect(snapshotSrc).toContain("row.abbreviation && row.abbreviation.trim()) || row.value");
   });
 });

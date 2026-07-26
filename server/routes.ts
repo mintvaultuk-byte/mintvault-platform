@@ -105,7 +105,7 @@ import { certIsPristine } from "./lib/cert-pristine";
 import { enqueueScanJob } from "./lib/scan-job-queue";
 import { isServiceValidForCarrier } from "@shared/carriers";
 import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/variant-derive";
-import { findStaleOverwrites } from "@shared/edit-conflict";
+import { resolveEditConflicts } from "@shared/edit-conflict";
 import { centeringAxisGrade } from "@shared/centering";
 import {
   SOCIAL_STUDIO_BACKGROUNDS,
@@ -4065,13 +4065,30 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             snapshot = null; // malformed → treat as legacy (no guard)
           }
           if (snapshot && typeof snapshot === "object") {
-            const conflicts = findStaleOverwrites(snapshot, req.body, existing as Record<string, unknown>);
+            // Owner spec 2026-07-26: only a genuine SAME-FIELD disagreement may
+            // interrupt the grader. Fields this tab never touched but that moved
+            // in the DB are merged silently (the DB value wins) instead of
+            // 409-ing the whole save — that false-conflict was the disruptive
+            // behaviour. See shared/edit-conflict.ts for the three-way rules.
+            const { conflicts, merged } = resolveEditConflicts(
+              snapshot,
+              req.body,
+              existing as Record<string, unknown>
+            );
             if (conflicts.length > 0) {
               return res.status(409).json({
                 error: `This certificate was changed elsewhere since you opened it (${conflicts.join(
                   ", "
                 )}) — refresh the page to see the latest values, then re-apply your edit.`,
+                conflicts,
               });
+            }
+            // MERGE: replace each untouched-but-moved field in the incoming body
+            // with the newer DB value, so the full-state post cannot write the
+            // stale value back. Audit history is unaffected — the write below
+            // records the same before/after it always did.
+            for (const f of merged) {
+              req.body[f] = (existing as Record<string, unknown>)[f] ?? "";
             }
           }
         }

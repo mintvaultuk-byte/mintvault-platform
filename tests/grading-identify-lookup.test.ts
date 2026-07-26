@@ -128,7 +128,7 @@ describe("existing vs proposed vs accepted — stale data never shown as a resul
   });
   it("Accept is the ONLY place a proposed result overwrites populated fields", () => {
     const accept = FORM.slice(
-      FORM.indexOf('data-testid="button-accept-identify"') - 1600,
+      FORM.indexOf('data-testid="button-accept-identify"') - 2200,
       FORM.indexOf('data-testid="button-accept-identify"')
     );
     expect(accept).toContain("if (identifyResult)");

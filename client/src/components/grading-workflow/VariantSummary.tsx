@@ -71,7 +71,7 @@ export function VariantSummary({ values }: { values: VariantSummaryValues }) {
         </span>
       </div>
       <Line label="Language">{lang?.label ?? values.language ?? <span className="text-[var(--admin-ink-faint)]">—</span>}</Line>
-      <Line label="Rarity">
+      <Line label="Variant">
         {rarity ? (
           <>
             <RaritySymbol symbol={rarity.symbol} size={14} />
@@ -85,7 +85,9 @@ export function VariantSummary({ values }: { values: VariantSummaryValues }) {
       <Line label="Promo">{promo?.label ?? <span className="text-[var(--admin-ink-faint)]">—</span>}</Line>
       {subset && <Line label="Subset">{subset.label}</Line>}
       {!anySet && (
-        <p className="pt-0.5 text-[10px] text-[var(--admin-ink-faint)]">No rarity, finish or promo selected yet.</p>
+        <p className="pt-0.5 text-[10px] text-[var(--admin-ink-faint)]">
+          No variant, finish or promo selected yet — all optional.
+        </p>
       )}
     </div>
   );

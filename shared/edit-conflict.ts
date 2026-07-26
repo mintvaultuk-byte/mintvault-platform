@@ -44,6 +44,11 @@ function norm(v: unknown): string {
 /**
  * Returns the guarded fields where a stale tab would overwrite someone else's
  * newer value — empty array means the save is safe to apply.
+ *
+ * NOTE: kept for backwards compatibility. It reports EVERY divergent field,
+ * including ones the editor never touched, which is why it was too disruptive
+ * on its own. Prefer `resolveEditConflicts` — it separates the fields that can
+ * be merged silently from the ones that genuinely need the operator.
  */
 export function findStaleOverwrites(
   loaded: Record<string, unknown>,
@@ -57,4 +62,53 @@ export function findStaleOverwrites(
     if (changedElsewhere && wouldOverwrite) conflicts.push(f);
   }
   return conflicts;
+}
+
+export interface EditConflictResolution {
+  /** TRUE conflicts: the editor changed this field AND someone else changed the
+   *  same field to something different. Only these justify interrupting. */
+  conflicts: string[];
+  /** Fields the editor never touched but that moved in the DB. The DB value
+   *  wins silently — the stale value in this tab is simply not written back. */
+  merged: string[];
+}
+
+/**
+ * Field-level three-way resolution for the full-state metadata editor
+ * (owner spec 2026-07-26: "Only interrupt when the SAME FIELD has changed
+ * elsewhere. If unrelated fields changed: merge safely, continue editing").
+ *
+ * For each guarded field, given what this tab LOADED, what it is POSTING, and
+ * what the DB CURRENTLY holds:
+ *
+ *   • DB unchanged since load                  → nothing to do (normal save).
+ *   • DB changed, editor did NOT touch it      → MERGE: keep the DB value. The
+ *     tab is only echoing its stale load; overwriting would be the clobber.
+ *   • DB changed, editor DID touch it, and the
+ *     editor's value differs from the DB's     → TRUE CONFLICT: interrupt.
+ *   • DB changed, editor DID touch it, but both
+ *     landed on the same value                 → converged, harmless.
+ *
+ * This is what turns the old "any divergence 409s the whole save" behaviour
+ * into "only a genuine same-field disagreement stops the grader".
+ */
+export function resolveEditConflicts(
+  loaded: Record<string, unknown>,
+  posted: Record<string, unknown>,
+  current: Record<string, unknown>
+): EditConflictResolution {
+  const conflicts: string[] = [];
+  const merged: string[] = [];
+  for (const f of CONFLICT_GUARDED_FIELDS) {
+    const changedElsewhere = norm(current[f]) !== norm(loaded[f]);
+    if (!changedElsewhere) continue;
+    const editorTouchedIt = norm(posted[f]) !== norm(loaded[f]);
+    if (!editorTouchedIt) {
+      merged.push(f);
+      continue;
+    }
+    if (norm(posted[f]) === norm(current[f])) continue; // converged on the same value
+    conflicts.push(f);
+  }
+  return { conflicts, merged };
 }

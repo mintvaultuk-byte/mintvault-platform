@@ -56,7 +56,7 @@ describe("read-only: no parallel state, no save on entry (spec 5, 10)", () => {
     expect(SUMMARY_CODE).not.toMatch(/mutate|handleSubmit|autoSaveNow|setForm/);
   });
   it("the only persistence path remains the existing save button", () => {
-    const review = FORM.slice(FORM.indexOf("Stage 4 · REVIEW"));
+    const review = FORM.slice(FORM.indexOf("Stage 3 · REVIEW"));
     expect(review).toContain("button-save-cert");
     // The summary is rendered above the notes + save, and takes no save handler.
     expect(FORM).toContain("<ReviewSummary");
@@ -73,10 +73,15 @@ describe("Edit links switch stage only (spec 6-8)", () => {
     expect(SUMMARY).toContain("onEditRarity");
     expect(SUMMARY).toContain("onEditGrade");
   });
-  it("form wires each Edit link to goToStage(0/1/2) only — no save/mutation", () => {
+  it("form wires each Edit link to a stage switch only — no save/mutation", () => {
+    // Consolidated flow: Card and Variant are the SAME stage (0), so both Edit
+    // links land on Card Details; Variant additionally scrolls to its section.
     expect(FORM).toMatch(/onEditCard=\{\(\) => goToStage\(0\)\}/);
-    expect(FORM).toMatch(/onEditRarity=\{\(\) => goToStage\(1\)\}/);
-    expect(FORM).toMatch(/onEditGrade=\{\(\) => goToStage\(2\)\}/);
+    const rarityHandler = FORM.slice(FORM.indexOf("onEditRarity="), FORM.indexOf("onEditGrade="));
+    expect(rarityHandler).toContain("goToStage(0)");
+    expect(rarityHandler).toContain('data-variant-section="variant"');
+    expect(rarityHandler).not.toMatch(/mutate|handleSubmit|autoSaveNow|fetch\(|setForm/);
+    expect(FORM).toMatch(/onEditGrade=\{\(\) => goToStage\(1\)\}/);
   });
 });
 
@@ -91,7 +96,7 @@ describe("summary derives strictly from existing form state (spec safety)", () =
 
 describe("notes stay collapsed + protected surfaces untouched (spec 11-16)", () => {
   it("Grader Notes remain collapsed by default behind Add Grader Notes", () => {
-    const review = FORM.slice(FORM.indexOf("Stage 4 · REVIEW"));
+    const review = FORM.slice(FORM.indexOf("Stage 3 · REVIEW"));
     expect(review).toContain('data-testid="button-add-grader-notes"');
     expect(FORM).toContain('useState<boolean>(() => Boolean(certificate?.notes))'); // collapsed unless pre-existing notes
   });

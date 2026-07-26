@@ -113,13 +113,13 @@ describe("3. Certificate Tools is a compact utility control, not a large isolate
   });
 });
 
-describe("4. Stage 4 Review restores the two-column workstation (card left, details right)", () => {
-  it("the preview aside now also renders for Review (wfStage === 3), not just Card/Rarity", () => {
-    expect(FORM).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?/);
+describe("4. Review restores the two-column workstation (card left, details right)", () => {
+  it("the preview aside renders for Review (wfStage === 2), not just Card Details", () => {
+    expect(FORM).toMatch(/wfStage === 0 \|\| wfStage === 2 \?/);
   });
-  it("Grade (wfStage 2) is deliberately excluded — its own protected card/defect tool is untouched", () => {
-    const cond = FORM.slice(FORM.indexOf("wfStage <= 1 || wfStage === 3 ?"), FORM.indexOf("wfStage <= 1 || wfStage === 3 ?") + 60);
-    expect(cond).not.toContain("wfStage === 2");
+  it("Grade (wfStage 1) is deliberately excluded — its own protected card/defect tool is untouched", () => {
+    const cond = FORM.slice(FORM.indexOf("wfStage === 0 || wfStage === 2 ?"), FORM.indexOf("wfStage === 0 || wfStage === 2 ?") + 60);
+    expect(cond).not.toContain("wfStage === 1");
   });
   it("preview and review-details are separate zones — no duplicated image", () => {
     // certificate-form.tsx no longer renders CardPreviewPanel directly at all —

@@ -211,12 +211,42 @@ export const POKEMON_PROMOS: readonly PokemonPromo[] = [
  * DEFAULTS to the seed — so existing callers are unchanged, and DB-driven callers pass
  * the live snapshot. This keeps ONE implementation over both data sources.
  */
+/** A designation / optional attribute chip. `code` is the persisted value —
+ *  it is NEVER derived from the label, so renaming a label in the Catalogue
+ *  Manager cannot change what is already stored on a certificate. */
+export interface PokemonDesignation {
+  code: string;
+  label: string;
+  help: string;
+}
+
+/** Seed designations — the historical hard-coded list, now the offline fallback
+ *  for the DB-backed `designation` catalogue category. */
+export const POKEMON_DESIGNATIONS: readonly PokemonDesignation[] = [
+  { code: "PROMO", label: "Promo", help: "Not from regular booster packs; promotional distribution." },
+  { code: "TOURNAMENT_STAMP", label: "Tournament / Event Stamp", help: "Stamped for tournament/event (often has year/stamp)." },
+  { code: "PRERELEASE", label: "Prerelease", help: "Prerelease stamp/marking." },
+  { code: "STAFF", label: "Staff", help: "Staff stamp/edition." },
+  { code: "ERROR_MISCUT", label: "Error / Miscut / Misprint", help: "Manufacturing error; document clearly." },
+  { code: "FIRST_EDITION", label: "1st Edition", help: "1st Edition marking (WOTC era)." },
+  { code: "SHADOWLESS", label: "Shadowless", help: "WOTC shadowless print variant." },
+  { code: "UNLIMITED", label: "Unlimited", help: "Unlimited print run variant." },
+  { code: "JAPANESE_PRINT", label: "Japanese Print", help: "Card is Japanese (language should also be set)." },
+  { code: "OTHER_LANGUAGE", label: "Other Language", help: "Non-English/Japanese language print." },
+];
+
+/** Seed optional attributes. Empty by default — the `attribute` catalogue
+ *  category exists so the owner can add their own without a code change. */
+export const POKEMON_ATTRIBUTES: readonly PokemonDesignation[] = [];
+
 export interface CatalogueSnapshot {
   languages: readonly PokemonLanguage[];
   rarities: readonly PokemonRarity[];
   finishes: readonly PokemonFinish[];
   promos: readonly PokemonPromo[];
   eras: readonly { value: PokemonEra | string; label: string }[];
+  designations: readonly PokemonDesignation[];
+  attributes: readonly PokemonDesignation[];
 }
 
 export const SEED_CATALOGUE: CatalogueSnapshot = {
@@ -225,6 +255,8 @@ export const SEED_CATALOGUE: CatalogueSnapshot = {
   finishes: POKEMON_FINISHES,
   promos: POKEMON_PROMOS,
   eras: POKEMON_ERAS,
+  designations: POKEMON_DESIGNATIONS,
+  attributes: POKEMON_ATTRIBUTES,
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────────

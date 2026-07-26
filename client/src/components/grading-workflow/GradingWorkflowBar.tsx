@@ -1,6 +1,7 @@
 /**
- * Persistent 4-stage grading workflow bar (Identify → Rarity & Variant → Grade →
- * Review & Save). Shows the current stage highlighted, completed stages with a
+ * Persistent 3-stage grading workflow bar (Card Details → Grade → Review & Save).
+ * Card Details carries ALL identity fields including Variant, which used to be a
+ * stage of its own. Shows the current stage highlighted, completed stages with a
  * gold tick, and pending stages inactive. Clicking a stage scrolls its section
  * into view (by data-workflow-stage) — it does NOT gate, save, grade, or change
  * any form value. Purely a navigation + progress indicator.

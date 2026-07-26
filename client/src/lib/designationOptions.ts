@@ -1,26 +1,23 @@
-export type DesignationOption = {
-  code: string;
-  label: string;
-  help: string;
-};
+/**
+ * Designation options.
+ *
+ * The list is now DB-backed via the Catalogue Manager (`designation` category)
+ * and reaches components through `useCatalogue().designations`. This module no
+ * longer owns a duplicate copy — it re-exports the canonical seed (which is the
+ * offline/placeholder fallback) and a label helper that resolves against a
+ * supplied snapshot, defaulting to the seed for legacy callers.
+ */
+import { POKEMON_DESIGNATIONS, type PokemonDesignation } from "@shared/pokemon-rarity-catalogue";
 
-export const DESIGNATION_OPTIONS: DesignationOption[] = [
-  { code: "PROMO", label: "Promo", help: "Not from regular booster packs; promotional distribution." },
-  { code: "TOURNAMENT_STAMP", label: "Tournament / Event Stamp", help: "Stamped for tournament/event (often has year/stamp)." },
-  { code: "PRERELEASE", label: "Prerelease", help: "Prerelease stamp/marking." },
-  { code: "STAFF", label: "Staff", help: "Staff stamp/edition." },
+export type DesignationOption = PokemonDesignation;
 
-  { code: "ERROR_MISCUT", label: "Error / Miscut / Misprint", help: "Manufacturing error; document clearly." },
+/** Seed/fallback only — prefer `useCatalogue().designations` in components. */
+export const DESIGNATION_OPTIONS: readonly DesignationOption[] = POKEMON_DESIGNATIONS;
 
-  { code: "FIRST_EDITION", label: "1st Edition", help: "1st Edition marking (WOTC era)." },
-  { code: "SHADOWLESS", label: "Shadowless", help: "WOTC shadowless print variant." },
-  { code: "UNLIMITED", label: "Unlimited", help: "Unlimited print run variant." },
-
-  { code: "JAPANESE_PRINT", label: "Japanese Print", help: "Card is Japanese (language should also be set)." },
-  { code: "OTHER_LANGUAGE", label: "Other Language", help: "Non-English/Japanese language print." },
-];
-
-export function getDesignationLabel(code: string): string {
-  const opt = DESIGNATION_OPTIONS.find(d => d.code === code);
+export function getDesignationLabel(
+  code: string,
+  options: readonly DesignationOption[] = POKEMON_DESIGNATIONS
+): string {
+  const opt = options.find((d) => d.code === code);
   return opt?.label || code;
 }

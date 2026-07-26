@@ -119,14 +119,14 @@ describe("beginner-friendly guidance (spec 6) + readable rarity names (spec 6, 8
   });
 });
 
-describe("four stages + protected surfaces unchanged (spec 16-24)", () => {
-  it("the four grading stages still exist", () => {
-    for (const key of ["identify", "rarity", "grade", "review"]) {
+describe("three stages + protected surfaces unchanged (spec 16-24)", () => {
+  it("the three grading stages still exist", () => {
+    for (const key of ["card-details", "grade", "review"]) {
       expect(FORM).toContain(`data-workflow-stage="${key}"`);
     }
   });
   it("workstationSlot renders with no transform/scale/zoom", () => {
-    const wrapper = stripComments(FORM.slice(FORM.indexOf('<div data-workflow-stage="grade"'), FORM.indexOf("Stage 3 nav")));
+    const wrapper = stripComments(FORM.slice(FORM.indexOf('<div data-workflow-stage="grade"'), FORM.indexOf("Grade-stage nav")));
     expect(wrapper).toContain("{workstationSlot}");
     expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
   });

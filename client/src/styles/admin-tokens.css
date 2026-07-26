@@ -1284,27 +1284,30 @@
   }
 }
 
-/* ── Canonical grading workstation — four-stage content gating ──────────────
-   The stage bar (Card / Rarity / Grade / Review) controls WHICH grading content
+/* ── Canonical grading workstation — THREE-stage content gating ─────────────
+   The stage bar (Card Details / Grade / Review) controls WHICH grading content
    is visible. Applied only inside `.grading-stage-gate[data-ws-stage=N]` (role
    routes; /admin gates via CertificateForm's own wfStage). hidden-not-unmounted
    (display:none) so section state / MVGS scoring is preserved.
 
+   Consolidated 2026-07-26: the former stage 1 (Rarity) was folded into stage 0.
+   `[data-canonical-section="rarity"]` is now VISIBLE on Card Details rather than
+   getting its own stage, and Grade/Review shifted down 2→1 and 3→2.
+
    NESTING-SAFE: grading-controls is the right column; grade-result + sub-grades +
    footer-actions (Approve/Submit) are SIBLINGS inside it. So grading-controls is
-   only hidden on stages that need NONE of its children (Card/Rarity); on
+   only hidden on the stage that needs NONE of its children (Card Details); on
    Grade/Review it stays visible and only specific sibling children are hidden —
    the submit button is always reachable on Review.
 
-   Card   = card identity (identification + identity-fields).
-   Rarity = the canonical structured rarity picker (data-canonical-section=rarity).
-   Grade  = the grading workstation (submit lives on Review).
-   Review = card summary + rarity + grade result + Approve/Submit. */
+   Card Details = identity (identification + identity-fields) AND the canonical
+                  structured variant picker (data-canonical-section=rarity).
+   Grade        = the grading workstation (submit lives on Review).
+   Review       = card summary + variant + grade result + Approve/Submit. */
 
-/* Stage 0 (Card): identity only. */
+/* Stage 0 (Card Details): identity + variant picker together. */
 .grading-stage-gate[data-ws-stage="0"]
   :where(
-    [data-canonical-section="rarity"],
     [data-canonical-section="workstation-header"],
     [data-canonical-section="preflight"],
     [data-canonical-section="ai-tools"],
@@ -1315,24 +1318,9 @@
   display: none !important;
 }
 
-/* Stage 1 (Rarity): the canonical structured rarity picker only. */
+/* Stage 1 (Grade): the grading workstation. Keep grading-controls visible; hide
+   identity, variant, and the submit button ONLY (submit lives on Review). */
 .grading-stage-gate[data-ws-stage="1"]
-  :where(
-    [data-canonical-section="identification"],
-    [data-canonical-section="identity-fields"],
-    [data-canonical-section="workstation-header"],
-    [data-canonical-section="preflight"],
-    [data-canonical-section="ai-tools"],
-    [data-canonical-section="card-images"],
-    [data-canonical-section="defect-marking"],
-    [data-canonical-section="grading-controls"]
-  ) {
-  display: none !important;
-}
-
-/* Stage 2 (Grade): the grading workstation. Keep grading-controls visible; hide
-   identity, rarity, and the submit button ONLY (submit lives on Review). */
-.grading-stage-gate[data-ws-stage="2"]
   :where(
     [data-canonical-section="identification"],
     [data-canonical-section="identity-fields"],
@@ -1342,10 +1330,10 @@
   display: none !important;
 }
 
-/* Stage 3 (Review): card summary + rarity + grade result + Approve/Submit. Keep
+/* Stage 2 (Review): card summary + variant + grade result + Approve/Submit. Keep
    grading-controls VISIBLE (grade-result + footer-actions show); hide only the
    detailed sub-grade control siblings and the card-setup sections. */
-.grading-stage-gate[data-ws-stage="3"]
+.grading-stage-gate[data-ws-stage="2"]
   :where(
     [data-canonical-section="identification"],
     [data-canonical-section="workstation-header"],

@@ -43,14 +43,14 @@ function slice(src: string, start: string, end: string): string {
   return src.slice(i, j);
 }
 
-describe("all four workflow stages render with labels intact", () => {
+describe("all three workflow stages render with labels intact", () => {
   it("GRADING_STAGES (imported from the shared workflow contract) drives every stage button", () => {
     expect(BAR).toContain("GRADING_STAGES.map((stage, i)");
     expect(BAR).toContain("data-testid={`workflow-stage-${stage.key}`}");
     const shared = read("shared/grading-workflow.ts");
     const stagesArray = shared.slice(shared.indexOf("export const GRADING_STAGES"), shared.indexOf("export type StageStatus"));
     const stageCount = (stagesArray.match(/\{\s*key:\s*"/g) ?? []).length;
-    expect(stageCount).toBe(4);
+    expect(stageCount).toBe(3);
   });
   it("stage label renders; sublabel is available via the tooltip only (compact hotfix removed the visible second line)", () => {
     expect(BAR).toContain("{stage.label}");

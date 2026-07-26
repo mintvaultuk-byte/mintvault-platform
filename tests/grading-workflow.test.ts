@@ -1,7 +1,11 @@
 /**
- * 4-stage grading workflow bar — pure stage logic + safe-wiring assertions.
+ * 3-stage grading workflow bar — pure stage logic + safe-wiring assertions.
  * The bar is navigation/progress only: it must never gate saving or grading,
  * and must not touch any protected grading/centering/cert-number/label file.
+ *
+ * Consolidated 2026-07-26: the former separate "Rarity" stage was folded into
+ * "Card Details", so the flow is Card Details → Grade → Review. Variant is
+ * OPTIONAL and deliberately excluded from the Card Details completion test.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
@@ -11,46 +15,68 @@ import {
   stageStatuses,
   deriveStageCompletion,
   furthestReached,
+  hasAnyVariantData,
 } from "../shared/grading-workflow";
 
 const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
 
 describe("stage model (pure)", () => {
-  it("has the four named stages in order (compact MacBook labels)", () => {
-    expect(GRADING_STAGES.map((s) => s.key)).toEqual(["identify", "rarity", "grade", "review"]);
-    expect(GRADING_STAGES.map((s) => s.label)).toEqual(["Card", "Rarity", "Grade", "Review"]);
+  it("has the three named stages in order (compact MacBook labels)", () => {
+    expect(GRADING_STAGES.map((s) => s.key)).toEqual(["card-details", "grade", "review"]);
+    expect(GRADING_STAGES.map((s) => s.label)).toEqual(["Card Details", "Grade", "Review"]);
+  });
+
+  it("there is no longer a standalone Rarity stage", () => {
+    expect(GRADING_STAGES.map((s) => s.key)).not.toContain("rarity");
+    expect(GRADING_STAGES.map((s) => s.label)).not.toContain("Rarity");
   });
 
   it("current is highlighted, earlier stages complete, later pending", () => {
-    expect(stageStatuses(2)).toEqual(["complete", "complete", "current", "pending"]);
-    expect(stageStatuses(0)).toEqual(["current", "pending", "pending", "pending"]);
-    expect(stageStatuses(3)).toEqual(["complete", "complete", "complete", "current"]);
+    expect(stageStatuses(1)).toEqual(["complete", "current", "pending"]);
+    expect(stageStatuses(0)).toEqual(["current", "pending", "pending"]);
+    expect(stageStatuses(2)).toEqual(["complete", "complete", "current"]);
   });
 
   it("stepping back keeps gold ticks via maxReached", () => {
-    // Grader reached stage 3 then went back to stage 1: stages 2 & 3 keep ticks.
-    expect(stageStatuses(0, 2)).toEqual(["current", "complete", "complete", "pending"]);
+    // Grader reached Review then went back to Card Details: Grade keeps its tick.
+    expect(stageStatuses(0, 1)).toEqual(["current", "complete", "pending"]);
   });
 
   it("out-of-range indices are clamped", () => {
-    expect(stageStatuses(99)).toEqual(["complete", "complete", "complete", "current"]);
-    expect(stageStatuses(-5)).toEqual(["current", "pending", "pending", "pending"]);
+    expect(stageStatuses(99)).toEqual(["complete", "complete", "current"]);
+    expect(stageStatuses(-5)).toEqual(["current", "pending", "pending"]);
   });
 
   it("deriveStageCompletion reflects real form data", () => {
-    expect(deriveStageCompletion({})).toEqual([false, false, false, false]);
-    expect(deriveStageCompletion({ cardName: "Pikachu", setName: "Base Set" })).toEqual([true, false, false, false]);
-    expect(deriveStageCompletion({ cardName: "P", setName: "S", rarityCode: "rare" })).toEqual([true, true, false, false]);
-    expect(deriveStageCompletion({ cardName: "P", setName: "S", finishVariant: "holo" })[1]).toBe(true);
-    expect(deriveStageCompletion({ cardName: "P", setName: "S", gradeOverall: "9.5" })[2]).toBe(true);
+    expect(deriveStageCompletion({})).toEqual([false, false, false]);
+    expect(deriveStageCompletion({ cardName: "Pikachu", setName: "Base Set" })).toEqual([true, false, false]);
+    expect(deriveStageCompletion({ cardName: "P", setName: "S", gradeOverall: "9.5" })[1]).toBe(true);
     // Review is never auto-complete (the form owns save).
-    expect(deriveStageCompletion({ cardName: "P", setName: "S", gradeOverall: "9.5" })[3]).toBe(false);
+    expect(deriveStageCompletion({ cardName: "P", setName: "S", gradeOverall: "9.5" })[2]).toBe(false);
+  });
+
+  it("Variant is OPTIONAL — it never affects Card Details completion", () => {
+    const withoutVariant = deriveStageCompletion({ cardName: "P", setName: "S" });
+    const withVariant = deriveStageCompletion({ cardName: "P", setName: "S", rarityCode: "rare" });
+    expect(withoutVariant[0]).toBe(true);
+    expect(withVariant).toEqual(withoutVariant);
+    // A card with a variant but no name/set is still incomplete.
+    expect(deriveStageCompletion({ rarityCode: "rare", finishVariant: "holo" })[0]).toBe(false);
+  });
+
+  it("hasAnyVariantData is advisory display only, and covers every classification field", () => {
+    expect(hasAnyVariantData({})).toBe(false);
+    expect(hasAnyVariantData({ rarityCode: "rare" })).toBe(true);
+    expect(hasAnyVariantData({ variant: "1st Edition" })).toBe(true);
+    expect(hasAnyVariantData({ finishVariant: "holo" })).toBe(true);
+    expect(hasAnyVariantData({ promoType: "staff" })).toBe(true);
+    expect(hasAnyVariantData({ subsetName: "Trainer Gallery" })).toBe(true);
   });
 
   it("furthestReached is the first incomplete stage", () => {
-    expect(furthestReached([false, false, false, false])).toBe(0);
-    expect(furthestReached([true, false, false, false])).toBe(1);
-    expect(furthestReached([true, true, true, false])).toBe(3);
+    expect(furthestReached([false, false, false])).toBe(0);
+    expect(furthestReached([true, false, false])).toBe(1);
+    expect(furthestReached([true, true, false])).toBe(2);
   });
 });
 
@@ -65,15 +91,18 @@ describe("bar component + form wiring (source assertions)", () => {
     expect(BAR).toContain('aria-current={isCurrent ? "step" : undefined}'); // accessible current step
   });
 
-  it("the form renders the persistent bar + the four scroll anchors", () => {
+  it("the form renders the persistent bar + the three scroll anchors", () => {
     // unified-shell pass: GradingWorkflowBar is rendered via the shared
-    // WorkstationHeaderStrip component (ONE render site for all four stages).
+    // WorkstationHeaderStrip component (ONE render site for all three stages).
     expect(FORM).toContain("<WorkstationHeaderStrip");
     const stripSrc = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
     expect(stripSrc).toContain("<GradingWorkflowBar");
-    for (const key of ["identify", "rarity", "grade", "review"]) {
+    for (const key of ["card-details", "grade", "review"]) {
       expect(FORM).toContain(`data-workflow-stage="${key}"`);
     }
+    // The retired Rarity stage must not leave a dangling anchor behind.
+    expect(FORM).not.toContain('data-workflow-stage="rarity"');
+    expect(FORM).not.toContain('data-workflow-stage="identify"');
   });
 
   it("the bar is advisory only — it never mutates/saves/sets form state", () => {

@@ -217,7 +217,7 @@ describe("Hotfix: bottom black bar + Admin Review identity-editor placement", ()
   });
 });
 
-describe("Hotfix: stage bar gates content (Card / Rarity / Grade / Review)", () => {
+describe("Hotfix: stage bar gates content (Card Details / Grade / Review)", () => {
   const ADMIN_TOKENS = read("client/src/styles/admin-tokens.css");
 
   it("SG1. the role workstation body applies the stage-gate wrapper + current stage", () => {
@@ -228,8 +228,8 @@ describe("Hotfix: stage bar gates content (Card / Rarity / Grade / Review)", () 
     expect(WORKSTATION).toMatch(/const goToStage = useCallback\(\(index: number\) => \{\s*setStage\(index\)/);
   });
 
-  it("SG2. the stage-gate CSS exists for all four stages (hidden-not-unmounted)", () => {
-    for (const n of [0, 1, 2, 3]) {
+  it("SG2. the stage-gate CSS exists for all three stages (hidden-not-unmounted)", () => {
+    for (const n of [0, 1, 2]) {
       expect(ADMIN_TOKENS, `stage ${n} gate rule`).toContain(`.grading-stage-gate[data-ws-stage="${n}"]`);
     }
     // display:none (hidden), never unmounts → GradingPanel state/scoring preserved.
@@ -243,26 +243,30 @@ describe("Hotfix: stage bar gates content (Card / Rarity / Grade / Review)", () 
       return ADMIN_TOKENS.slice(start, ADMIN_TOKENS.indexOf("display: none", start));
     };
     const sec = (name: string) => `[data-canonical-section="${name}"]`;
-    // Stage 0/1 (Card/Rarity): hide the whole grade column via grading-controls
-    // (nothing inside it is needed on these stages, so the cascade is intended).
+    // Stage 0 (Card Details): hide the whole grade column via grading-controls
+    // (nothing inside it is needed on this stage, so the cascade is intended).
     expect(stage(0)).toContain(sec("grading-controls"));
-    // Stage 2 (Grade): hide identity + submit ONLY. It must NEVER hide
+    // CONSOLIDATION: the variant picker is now part of Card Details, so stage 0
+    // must NOT hide it any more.
+    expect(stage(0)).not.toContain(sec("rarity"));
+    // Stage 1 (Grade): hide identity + variant + submit ONLY. It must NEVER hide
     // grading-controls (that would cascade-hide grade-result + the submit button).
-    expect(stage(2)).toContain(sec("identity-fields"));
-    expect(stage(2)).toContain(sec("footer-actions"));
+    expect(stage(1)).toContain(sec("identity-fields"));
+    expect(stage(1)).toContain(sec("rarity"));
+    expect(stage(1)).toContain(sec("footer-actions"));
+    expect(stage(1)).not.toContain(sec("grading-controls"));
+    expect(stage(1)).not.toContain(sec("grade-result"));
+    // Stage 2 (Review): CRITICAL — never hide grading-controls, grade-result, or
+    // footer-actions, so the Approve/Submit button stays REACHABLE on Review.
     expect(stage(2)).not.toContain(sec("grading-controls"));
     expect(stage(2)).not.toContain(sec("grade-result"));
-    // Stage 3 (Review): CRITICAL — never hide grading-controls, grade-result, or
-    // footer-actions, so the Approve/Submit button stays REACHABLE on Review.
-    expect(stage(3)).not.toContain(sec("grading-controls"));
-    expect(stage(3)).not.toContain(sec("grade-result"));
-    expect(stage(3)).not.toContain(sec("footer-actions"));
+    expect(stage(2)).not.toContain(sec("footer-actions"));
     // Review hides the detailed sub-grade control siblings.
-    expect(stage(3)).toContain(sec("mvgs-score"));
-    expect(stage(3)).toContain(sec("notes"));
+    expect(stage(2)).toContain(sec("mvgs-score"));
+    expect(stage(2)).toContain(sec("notes"));
   });
 
-  it("SG5. no grading section is hidden on ALL four stages (submit + every section reachable somewhere)", () => {
+  it("SG5. no grading section is hidden on ALL three stages (submit + every section reachable somewhere)", () => {
     const sections = [
       "workflow-banners", "identification", "identity-fields", "rarity", "workstation-header", "preflight",
       "ai-tools", "card-images", "defect-marking", "grading-controls", "mvgs-score", "grade-result",
@@ -274,24 +278,28 @@ describe("Hotfix: stage bar gates content (Card / Rarity / Grade / Review)", () 
     const childrenOfGradingControls = new Set([
       "mvgs-score", "grade-result", "d1-d2-d3", "centering", "surface", "authentication", "notes", "footer-actions",
     ]);
+    // Each stage now has its OWN rule block (the old 0/1 shared-block hack is
+    // gone with the Rarity stage). Slice each block through its display:none.
     const stageRule = (n: number) => {
       const start = ADMIN_TOKENS.indexOf(`.grading-stage-gate[data-ws-stage="${n}"]`);
-      // stage 0 and 1 share one comma-joined block; grab through its display:none.
+      expect(start, `stage ${n} rule block`).toBeGreaterThan(-1);
       return ADMIN_TOKENS.slice(start, ADMIN_TOKENS.indexOf("display: none", start));
     };
     const hiddenOn = (section: string, n: number) => {
-      const rule = n <= 1 ? stageRule(0) : stageRule(n); // 0/1 share the block
-      const nBlock = n === 1 ? rule.slice(rule.indexOf('[data-ws-stage="1"]')) : rule;
+      const nBlock = stageRule(n);
       const direct = nBlock.includes(`[data-canonical-section="${section}"]`);
       const viaParent = childrenOfGradingControls.has(section) && nBlock.includes('[data-canonical-section="grading-controls"]');
       return direct || viaParent;
     };
     for (const s of sections) {
-      const shownSomewhere = [0, 1, 2, 3].some((n) => !hiddenOn(s, n));
+      const shownSomewhere = [0, 1, 2].some((n) => !hiddenOn(s, n));
       expect(shownSomewhere, `section "${s}" is hidden on every stage (unreachable)`).toBe(true);
     }
-    // Explicit: the Approve/Submit button is reachable on Review.
-    expect(hiddenOn("footer-actions", 3), "submit hidden on Review").toBe(false);
+    // Explicit: the Approve/Submit button is reachable on Review (stage 2).
+    expect(hiddenOn("footer-actions", 2), "submit hidden on Review").toBe(false);
+    // CONSOLIDATION: identity AND variant are both visible on Card Details.
+    expect(hiddenOn("identity-fields", 0), "identity hidden on Card Details").toBe(false);
+    expect(hiddenOn("rarity", 0), "variant hidden on Card Details").toBe(false);
   });
 
   it("SG4. gating is canonical (adapter + CSS only) — /admin gates via its own wfStage, NOT the role gate", () => {
@@ -305,7 +313,7 @@ describe("Hotfix: stage bar gates content (Card / Rarity / Grade / Review)", () 
   });
 });
 
-describe("Four-stage workflow: canonical Rarity stage + one shared picker/catalogue", () => {
+describe("Three-stage workflow: Variant lives in Card Details + one shared picker/catalogue", () => {
   const ADMIN_TOKENS = read("client/src/styles/admin-tokens.css");
   const PANEL = read("client/src/components/grading/grading-panel.tsx");
   const GRADER_SERVER = read("server/grader.ts");
@@ -316,12 +324,13 @@ describe("Four-stage workflow: canonical Rarity stage + one shared picker/catalo
     return block.includes(`[data-canonical-section="${section}"]`);
   };
 
-  it("R1. Card and Rarity render DIFFERENT content (Card=identity, Rarity=picker)", () => {
-    // Card shows identity, hides rarity; Rarity shows rarity, hides identity.
-    expect(stageHides(0, "rarity")).toBe(true);
+  it("R1. CONSOLIDATED: Card Details renders identity AND the variant picker together", () => {
+    // Card Details (stage 0) shows BOTH — that is the whole point of the merge.
     expect(stageHides(0, "identity-fields")).toBe(false);
+    expect(stageHides(0, "rarity")).toBe(false);
+    // Grade (stage 1) hides both — it is the protected workstation only.
     expect(stageHides(1, "identity-fields")).toBe(true);
-    expect(stageHides(1, "rarity")).toBe(false);
+    expect(stageHides(1, "rarity")).toBe(true);
   });
 
   it("R2-R4. Rarity mounts the canonical structured picker; /admin + role routes use the SAME component + catalogue", () => {
@@ -375,11 +384,11 @@ describe("Four-stage workflow: canonical Rarity stage + one shared picker/catalo
     expect(PANEL).toMatch(/\{\(graderMode \|\| adminReview\) && \([\s\S]*data-canonical-section="rarity"/);
   });
 
-  it("R10-R12. Grade has no submit; Review keeps submit reachable; Review shows the card+rarity summary", () => {
-    expect(stageHides(2, "footer-actions")).toBe(true); // no submit on Grade
-    expect(stageHides(3, "footer-actions")).toBe(false); // submit reachable on Review
-    expect(stageHides(3, "identity-fields")).toBe(false); // card summary on Review
-    expect(stageHides(3, "rarity")).toBe(false); // rarity summary on Review
+  it("R10-R12. Grade has no submit; Review keeps submit reachable; Review shows the card+variant summary", () => {
+    expect(stageHides(1, "footer-actions")).toBe(true); // no submit on Grade
+    expect(stageHides(2, "footer-actions")).toBe(false); // submit reachable on Review
+    expect(stageHides(2, "identity-fields")).toBe(false); // card summary on Review
+    expect(stageHides(2, "rarity")).toBe(false); // variant summary on Review
   });
 
   it("R13-R15. one canonical picker only — no route-specific rarity component or role catalogue array", () => {

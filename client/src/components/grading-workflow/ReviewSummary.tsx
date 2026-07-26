@@ -135,7 +135,7 @@ export function ReviewSummary({
               </span>
             </div>
             <div className="flex items-baseline justify-between gap-2 py-0.5">
-              <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Rarity</span>
+              <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Variant</span>
               <span className="flex min-w-0 items-center justify-end gap-1 text-right text-[12px] text-[var(--admin-ink)]">
                 {rarity ? (
                   <>
