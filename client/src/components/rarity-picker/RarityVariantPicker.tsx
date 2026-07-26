@@ -20,11 +20,6 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  POKEMON_LANGUAGES,
-  POKEMON_ERAS,
-  POKEMON_FINISHES,
-  POKEMON_PROMOS,
-  POKEMON_RARITIES,
   filterRarities,
   searchCatalogue,
   rarityByValue,
@@ -41,6 +36,7 @@ import {
   type RaritySymbol as RaritySymbolMetaType,
 } from "@shared/pokemon-rarity-catalogue";
 import { validateStructuredVariant } from "@shared/structured-variant-validate";
+import { useCatalogue } from "@/hooks/useCatalogue";
 import { RaritySymbol } from "./RaritySymbol";
 
 // ── Founder's common choices, REGION-AWARE so Japanese codes don't dominate a
@@ -278,46 +274,52 @@ export function RarityVariantPicker({
   // CUSTOM_RARITY_VALUE is excluded from the generic list — it's reachable only
   // via a custom chip (below) or the "Add missing rarity" form, never as a bare
   // unlabelled catalogue entry mixed in with real printed rarities.
+  // Live catalogue (DB-backed, seed fallback) — every list below reads from it.
+  const cat = useCatalogue();
   const base = useMemo(
     () =>
-      filterRarities({ language, era: showAll ? null : era || null }).filter((r) => r.value !== CUSTOM_RARITY_VALUE),
-    [language, era, showAll]
+      filterRarities({ language, era: showAll ? null : era || null }, cat).filter(
+        (r) => r.value !== CUSTOM_RARITY_VALUE
+      ),
+    [language, era, showAll, cat]
   );
   const quickList =
-    (languageByValueOrLabel(language)?.region ?? "western") === "western"
+    (languageByValueOrLabel(language, cat)?.region ?? "western") === "western"
       ? QUICK_RARITIES_WESTERN
       : QUICK_RARITIES_EASTERN;
   const quickRarities = useMemo(
     () =>
       quickList
-        .map(rarityByValue)
+        .map((v) => rarityByValue(v, cat))
         .filter((r): r is PokemonRarity => Boolean(r) && base.some((b) => b.value === r!.value)),
     // quickList derives from `language`, so language stands in for it here.
-    [base, language]
+    [base, language, cat]
   );
   const moreRarities = useMemo(() => {
     const quickSet = new Set(quickRarities.map((r) => r.value));
     const inRegion = base.filter((r) => !quickSet.has(r.value));
     // Everything else in the catalogue (all regions/eras) so nothing is ever
     // permanently hidden when set data is incomplete — region set shown first.
-    const otherRegion = POKEMON_RARITIES.filter(
+    const otherRegion = cat.rarities.filter(
       (r) => r.value !== CUSTOM_RARITY_VALUE && !quickSet.has(r.value) && !base.some((b) => b.value === r.value)
     );
     return [...inRegion, ...otherRegion];
-  }, [base, quickRarities]);
+  }, [base, quickRarities, cat]);
 
-  const search = query.trim() ? searchCatalogue(query) : null;
+  const search = query.trim() ? searchCatalogue(query, cat) : null;
 
   const structured = useMemo(
-    () => buildStructuredVariant({ language, era: era || null, rarity, finish, promoOrSubset }),
-    [language, era, rarity, finish, promoOrSubset]
+    () => buildStructuredVariant({ language, era: era || null, rarity, finish, promoOrSubset }, cat),
+    [language, era, rarity, finish, promoOrSubset, cat]
   );
-  // Emit ONLY on a genuine change to the structured variant — never on mount, and
-  // never merely because the parent re-rendered (onChange is often an unstable
-  // inline function). Firing on mount/re-render made a consumer that seeds this
-  // picker asynchronously (the role grading workstation) mistake the mount echo
-  // for a user edit and wipe a stored rarity. `structured` only changes when the
-  // user actually picks/clears rarity/finish/promo/era/language.
+  // Emit ONLY on a genuine USER change to the selection — never on mount, never
+  // merely because the parent re-rendered (onChange is often an unstable inline
+  // function), and never merely because the live catalogue finished loading
+  // (which changes `structured`'s derived symbol but NOT the user's selection).
+  // Firing spuriously made a consumer that seeds this picker asynchronously (the
+  // role grading workstation) mistake the echo for a user edit and wipe a stored
+  // rarity. So we gate on the user-selection primitives, and emit the current
+  // catalogue-derived `structured` value when one of them actually changes.
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
@@ -329,7 +331,11 @@ export function RarityVariantPicker({
       return; // skip the mount echo — the value already reflects the seed
     }
     onChangeRef.current?.(structured);
-  }, [structured]);
+    // Deps are the user-selection primitives, NOT `structured`/`cat`: when a
+    // primitive changes, `structured` is recomputed this render and this effect's
+    // closure captures that fresh value; a catalogue load (cat-only change) does
+    // NOT re-run this effect, so it never looks like a user edit.
+  }, [rarity, finish, promoOrSubset, era, language]);
 
   const validation = useMemo(
     () =>
@@ -341,8 +347,8 @@ export function RarityVariantPicker({
         language: structured.language,
         era: structured.era,
         legacyVariant: legacyVariant ?? null,
-      }),
-    [structured, legacyVariant]
+      }, cat),
+    [structured, legacyVariant, cat]
   );
 
   const pickRarity = (v: string) => {
@@ -519,7 +525,10 @@ export function RarityVariantPicker({
     );
   };
 
-  const selectedRarity = rarity ? rarityByValue(rarity) : undefined;
+  // Resolve against the live catalogue, falling back to the seed so a stored
+  // rarity that a founder has since disabled/archived still resolves for display
+  // (never a null-assertion crash — see the render blocks below).
+  const selectedRarity = rarity ? rarityByValue(rarity, cat) ?? rarityByValue(rarity) : undefined;
   const selectedCustom = selectedCustomId ? customRarities.find((c) => c.id === selectedCustomId) : undefined;
 
   const pill = <T extends { value: string; label: string; description?: string }>(
@@ -544,13 +553,13 @@ export function RarityVariantPicker({
     </button>
   );
 
-  const favouriteRarities = favourites.map(rarityByValue).filter(Boolean) as PokemonRarity[];
-  const recentRarities = recent.map(rarityByValue).filter(Boolean) as PokemonRarity[];
+  const favouriteRarities = favourites.map((v) => rarityByValue(v, cat)).filter(Boolean) as PokemonRarity[];
+  const recentRarities = recent.map((v) => rarityByValue(v, cat)).filter(Boolean) as PokemonRarity[];
 
-  const quickFinishes = POKEMON_FINISHES.filter((f) => QUICK_FINISHES.includes(f.value));
-  const moreFinishes = POKEMON_FINISHES.filter((f) => !QUICK_FINISHES.includes(f.value));
-  const quickPromos = POKEMON_PROMOS.filter((p) => QUICK_PROMOS.includes(p.value));
-  const morePromos = POKEMON_PROMOS.filter((p) => !QUICK_PROMOS.includes(p.value));
+  const quickFinishes = cat.finishes.filter((f) => QUICK_FINISHES.includes(f.value));
+  const moreFinishes = cat.finishes.filter((f) => !QUICK_FINISHES.includes(f.value));
+  const quickPromos = cat.promos.filter((p) => QUICK_PROMOS.includes(p.value));
+  const morePromos = cat.promos.filter((p) => !QUICK_PROMOS.includes(p.value));
 
   return (
     <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/50 p-4" data-testid="rarity-picker">
@@ -564,7 +573,7 @@ export function RarityVariantPicker({
             data-testid="rarity-language"
             className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
           >
-            {POKEMON_LANGUAGES.map((l) => (
+            {cat.languages.map((l) => (
               <option key={l.value} value={l.value}>
                 {l.label}
               </option>
@@ -580,7 +589,7 @@ export function RarityVariantPicker({
             className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
           >
             <option value="">Any era</option>
-            {POKEMON_ERAS.map((x) => (
+            {cat.eras.map((x) => (
               <option key={x.value} value={x.value}>
                 {x.label}
               </option>
@@ -794,20 +803,21 @@ export function RarityVariantPicker({
           className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-slate-200"
           data-testid="rarity-preview-line"
         >
-          <span>{languageByValueOrLabel(structured.language)?.label ?? "—"}</span>
-          {structured.era && <span>· {POKEMON_ERAS.find((e) => e.value === structured.era)?.label}</span>}
-          {rarity && (
+          <span>{languageByValueOrLabel(structured.language, cat)?.label ?? "—"}</span>
+          {structured.era && <span>· {cat.eras.find((e) => e.value === structured.era)?.label}</span>}
+          {rarity && selectedRarity && (
             <span className="inline-flex items-center gap-1">
-              · <RaritySymbol symbol={rarityByValue(rarity)!.symbol} size={14} /> {rarityByValue(rarity)!.label}
+              · <RaritySymbol symbol={selectedRarity.symbol} size={14} /> {selectedRarity.label}
             </span>
           )}
-          <span>· {structured.finish ? finishByValue(structured.finish)?.label : "No finish"}</span>
+          {rarity && !selectedRarity && <span>· {rarity}</span>}
+          <span>· {structured.finish ? finishByValue(structured.finish, cat)?.label : "No finish"}</span>
           <span>
             ·{" "}
             {structured.promo
-              ? promoByValue(structured.promo)?.label
+              ? promoByValue(structured.promo, cat)?.label
               : structured.subset
-                ? promoByValue(structured.subset)?.label
+                ? promoByValue(structured.subset, cat)?.label
                 : "No promo"}
           </span>
         </div>
@@ -818,7 +828,7 @@ export function RarityVariantPicker({
           <summary className="cursor-pointer text-[10px] text-slate-400 hover:text-slate-200">View details</summary>
           <div className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-300 sm:grid-cols-3">
             <div>
-              Language: <b className="text-slate-100">{languageByValueOrLabel(structured.language)?.label ?? "—"}</b>
+              Language: <b className="text-slate-100">{languageByValueOrLabel(structured.language, cat)?.label ?? "—"}</b>
             </div>
             <div>
               Region: <b className="text-slate-100">{structured.region}</b>
@@ -826,16 +836,18 @@ export function RarityVariantPicker({
             <div>
               Era:{" "}
               <b className="text-slate-100">
-                {structured.era ? POKEMON_ERAS.find((e) => e.value === structured.era)?.label : "—"}
+                {structured.era ? cat.eras.find((e) => e.value === structured.era)?.label : "—"}
               </b>
             </div>
             <div className="flex items-center gap-1.5">
               Rarity:{" "}
-              {rarity ? (
+              {rarity && selectedRarity ? (
                 <>
-                  <RaritySymbol symbol={rarityByValue(rarity)!.symbol} size={18} />
-                  <b className="text-slate-100">{rarityByValue(rarity)!.label}</b>
+                  <RaritySymbol symbol={selectedRarity.symbol} size={18} />
+                  <b className="text-slate-100">{selectedRarity.label}</b>
                 </>
+              ) : rarity ? (
+                <b className="text-slate-100">{rarity}</b>
               ) : (
                 <span className="text-slate-500">—</span>
               )}
@@ -845,14 +857,14 @@ export function RarityVariantPicker({
             </div>
             <div>
               Finish:{" "}
-              <b className="text-slate-100">{structured.finish ? finishByValue(structured.finish)?.label : "—"}</b>
+              <b className="text-slate-100">{structured.finish ? finishByValue(structured.finish, cat)?.label : "—"}</b>
             </div>
             <div>
-              Promo: <b className="text-slate-100">{structured.promo ? promoByValue(structured.promo)?.label : "—"}</b>
+              Promo: <b className="text-slate-100">{structured.promo ? promoByValue(structured.promo, cat)?.label : "—"}</b>
             </div>
             <div>
               Subset:{" "}
-              <b className="text-slate-100">{structured.subset ? promoByValue(structured.subset)?.label : "—"}</b>
+              <b className="text-slate-100">{structured.subset ? promoByValue(structured.subset, cat)?.label : "—"}</b>
             </div>
           </div>
         </details>

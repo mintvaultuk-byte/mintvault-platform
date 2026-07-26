@@ -16,8 +16,9 @@ import {
   finishByValue,
   promoByValue,
   languageByValueOrLabel,
-  POKEMON_ERAS,
   mapLegacyVariant,
+  SEED_CATALOGUE,
+  type CatalogueSnapshot,
   type PokemonEra,
   type SymbolColour,
 } from "./pokemon-rarity-catalogue";
@@ -90,8 +91,8 @@ const clean = (v: string | null | undefined): string | null => {
   return s === "" ? null : s;
 };
 
-function isEra(v: string | null): v is PokemonEra {
-  return v != null && POKEMON_ERAS.some((e) => e.value === v);
+function isEra(v: string | null, cat: CatalogueSnapshot): v is PokemonEra {
+  return v != null && cat.eras.some((e) => e.value === v);
 }
 
 /** True when a normalised column set carries any structured data. */
@@ -139,7 +140,10 @@ export function structuredColumnsToCertFields(cols: StructuredVariantColumns): {
  * columns. Unknown catalogue codes are hard errors; unsupported era/region
  * pairings and a few UX pitfalls are soft warnings (still saveable).
  */
-export function validateStructuredVariant(input: StructuredVariantInput): StructuredVariantResult {
+export function validateStructuredVariant(
+  input: StructuredVariantInput,
+  cat: CatalogueSnapshot = SEED_CATALOGUE,
+): StructuredVariantResult {
   const errors: string[] = [];
   const warnings: string[] = [];
 
@@ -150,31 +154,31 @@ export function validateStructuredVariant(input: StructuredVariantInput): Struct
   const languageValue = clean(input.language);
   const eraCode = clean(input.era);
 
-  const rarity = rarityCode ? rarityByValue(rarityCode) : undefined;
+  const rarity = rarityCode ? rarityByValue(rarityCode, cat) : undefined;
   if (rarityCode && !rarity) errors.push(`Unknown rarity "${rarityCode}".`);
 
-  const finish = finishCode ? finishByValue(finishCode) : undefined;
+  const finish = finishCode ? finishByValue(finishCode, cat) : undefined;
   if (finishCode && !finish) errors.push(`Unknown finish "${finishCode}".`);
 
-  const promo = promoCode ? promoByValue(promoCode) : undefined;
+  const promo = promoCode ? promoByValue(promoCode, cat) : undefined;
   if (promoCode && !promo) errors.push(`Unknown promo "${promoCode}".`);
   else if (promo && promo.kind !== "promo") errors.push(`"${promo.label}" is a subset, not a promo.`);
 
-  const subset = subsetCode ? promoByValue(subsetCode) : undefined;
+  const subset = subsetCode ? promoByValue(subsetCode, cat) : undefined;
   if (subsetCode && !subset) errors.push(`Unknown subset "${subsetCode}".`);
   else if (subset && subset.kind !== "subset") errors.push(`"${subset.label}" is a promo, not a subset.`);
 
-  const lang = languageValue ? languageByValueOrLabel(languageValue) : undefined;
+  const lang = languageValue ? languageByValueOrLabel(languageValue, cat) : undefined;
   if (languageValue && !lang) errors.push(`Unknown language "${languageValue}".`);
 
-  if (eraCode && !isEra(eraCode)) errors.push(`Unknown era "${eraCode}".`);
+  if (eraCode && !isEra(eraCode, cat)) errors.push(`Unknown era "${eraCode}".`);
 
   if (errors.length > 0) {
     return { ok: false, columns: { ...EMPTY_COLUMNS }, errors, warnings };
   }
 
   const region = lang?.region ?? null;
-  const era = isEra(eraCode) ? eraCode : null;
+  const era = isEra(eraCode, cat) ? eraCode : null;
 
   // Symbol facts are DERIVED from the catalogue — never taken from the client.
   const columns: StructuredVariantColumns = {
@@ -199,7 +203,7 @@ export function validateStructuredVariant(input: StructuredVariantInput): Struct
     warnings.push(`"${rarity.label}" is not normally printed in the ${region} region — double-check the language.`);
   }
   if (rarity && era && rarity.eras !== "all" && !rarity.eras.includes(era)) {
-    const eraLabel = POKEMON_ERAS.find((e) => e.value === era)?.label ?? era;
+    const eraLabel = cat.eras.find((e) => e.value === era)?.label ?? era;
     warnings.push(`"${rarity.label}" did not exist in the ${eraLabel} era — double-check the set.`);
   }
   if (!rarity && (finish || promo)) {

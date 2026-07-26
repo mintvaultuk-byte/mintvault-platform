@@ -2,6 +2,7 @@ import { sendServerError } from "./lib/error-response";
 import { normalizeCertId, certNumberFromId } from "./lib/cert-id";
 import { ensurePerfIndexes } from "./lib/perf-indexes";
 import { applyStructuredVariantFromBody } from "./lib/structured-variant";
+import { getCatalogueSnapshot } from "./lib/catalogue-provider";
 import type {
   Express,
   Request as ExpressRequest,
@@ -61,6 +62,8 @@ import { registerConnectorOpsRoutes } from "./partner/connector-admin-routes";
 import { registerPartnerManagementRoutes } from "./partner/partner-management-routes";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
+import { registerCatalogueRoutes } from "./routes/admin/catalogue";
+import { registerLabelPreviewRoutes } from "./routes/admin/label-preview";
 import { registerCardIdentificationRoutes } from "./routes/card-identification";
 import { registerTransferRoutes } from "./routes/transfers";
 import { registerPreGradeRoutes } from "./routes/pre-grade";
@@ -1439,6 +1442,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerPartnerManagementRoutes(app); // G5 partner management (requireAdmin-gated, internal)
   registerRarityMappingRoutes(app);
   registerPokemonKnowledgeRoutes(app);
+  registerCatalogueRoutes(app);
+  registerLabelPreviewRoutes(app);
   registerCardIdentificationRoutes(app);
   registerTransferRoutes(app);
   registerPreGradeRoutes(app);
@@ -3956,7 +3961,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // Structured rarity/variant picker → new nullable columns (legacy
         // variant/rarity above are left untouched). Validated + symbol-derived
         // server-side; invalid catalogue values are rejected here, not at the DB.
-        const structuredCreate = applyStructuredVariantFromBody(req.body, data);
+        let structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
+        if (!structuredCreate.ok) {
+          // A stale cross-machine catalogue cache can reject a just-added value —
+          // force-refresh the snapshot once and retry before failing (data is not
+          // mutated on a failed apply, so the retry is safe).
+          structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true));
+        }
         if (!structuredCreate.ok) {
           return res.status(400).json({ error: "Invalid rarity selection.", details: structuredCreate.errors });
         }
@@ -4165,7 +4176,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // Structured rarity/variant picker → new nullable columns. Opt-in by key
         // presence, so a partial PUT (e.g. grade-only) never erases them; the
         // legacy variant/rarity remain the untouched historical source of truth.
-        const structuredUpdate = applyStructuredVariantFromBody(req.body, data);
+        let structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
+        if (!structuredUpdate.ok) {
+          // Stale cross-machine cache guard — force-refresh once and retry.
+          structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true));
+        }
         if (!structuredUpdate.ok) {
           return res.status(400).json({ error: "Invalid rarity selection.", details: structuredUpdate.errors });
         }

@@ -15,6 +15,7 @@ import {
   validateStructuredVariant,
   structuredColumnsToCertFields,
 } from "@shared/structured-variant-validate";
+import type { CatalogueSnapshot } from "@shared/pokemon-rarity-catalogue";
 
 const STRUCTURED_KEYS = ["rarityCode", "finishVariant", "promoType", "subsetName", "era"] as const;
 
@@ -41,19 +42,23 @@ function str(v: unknown): string | null {
 export function applyStructuredVariantFromBody(
   body: Record<string, unknown>,
   data: Record<string, unknown>,
+  cat?: CatalogueSnapshot,
 ): StructuredApplyResult {
   const optedIn = STRUCTURED_KEYS.some((k) => k in body);
   if (!optedIn) return { ok: true, errors: [], warnings: [], applied: false };
 
-  const result = validateStructuredVariant({
-    rarityCode: str(body.rarityCode),
-    finishVariant: str(body.finishVariant),
-    promoType: str(body.promoType),
-    subsetName: str(body.subsetName),
-    language: str(body.language),
-    era: str(body.era),
-    legacyVariant: str(body.variant),
-  });
+  const result = validateStructuredVariant(
+    {
+      rarityCode: str(body.rarityCode),
+      finishVariant: str(body.finishVariant),
+      promoType: str(body.promoType),
+      subsetName: str(body.subsetName),
+      language: str(body.language),
+      era: str(body.era),
+      legacyVariant: str(body.variant),
+    },
+    cat,
+  );
 
   if (!result.ok) {
     return { ok: false, errors: result.errors, warnings: result.warnings, applied: true };
