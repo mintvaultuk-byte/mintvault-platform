@@ -22,6 +22,7 @@ import NotFound from "@/pages/not-found";
 const LegalPage = lazy(() => import("@/pages/legal-page"));
 // DEV-ONLY: canonical grading workstation preview harness (never in prod builds).
 const DevCanonicalWorkstationHarness = lazy(() => import("@/pages/dev-canonical-workstation-harness"));
+const DevCardDetailsHarness = lazy(() => import("@/pages/dev-card-details-harness"));
 const CertDetailPage = lazy(() => import("@/pages/cert-detail"));
 const WhyMintVaultPage = lazy(() => import("@/pages/why-mintvault"));
 const LabelsPage = lazy(() => import("@/pages/labels"));
@@ -320,6 +321,9 @@ function Router() {
           <Route path="/pricing-demo" component={PricingDemo} />
           {import.meta.env.DEV && (
             <Route path="/dev/canonical-workstation" component={DevCanonicalWorkstationHarness} />
+          )}
+          {import.meta.env.DEV && (
+            <Route path="/dev/card-details" component={DevCardDetailsHarness} />
           )}
           <Route path="/admin" component={AdminPage} />
           <Route path="/admin/promotions" component={AdminPage} />

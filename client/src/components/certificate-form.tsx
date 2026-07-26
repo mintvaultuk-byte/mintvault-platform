@@ -14,6 +14,12 @@ import {
   deriveStageCompletion,
   furthestReached,
   clampStageIndex,
+  nextStageIndex,
+  prevStageIndex,
+  showsPreviewAside,
+  CARD_DETAILS_STAGE,
+  GRADE_STAGE,
+  REVIEW_STAGE,
 } from "@shared/grading-workflow";
 import { CONSOLIDATED_VARIANT_SCHEME, legacyFreeTextLostOnConversion } from "@shared/variant-line";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
@@ -1061,14 +1067,24 @@ export default function CertificateForm({
     }
   });
 
+  // ROBUSTNESS: these endpoints return a JSON ARRAY on success but a JSON OBJECT
+  // on failure (e.g. {error:"Unauthorized"} on an expired session). The `= []`
+  // default only covers `undefined`, so an error body flowed straight into a
+  // `for (const v of dbVariants)` and white-screened the whole editor. `select`
+  // normalises to an array at the query boundary, so no consumer can receive a
+  // non-iterable.
+  const asStringArray = (d: unknown): string[] => (Array.isArray(d) ? (d as string[]) : []);
+
   const { data: dbVariants = [] } = useQuery<string[]>({
     queryKey: ["/api/admin/variant-options"],
     staleTime: 60_000,
+    select: asStringArray,
   });
 
   const { data: dbRarityOthers = [] } = useQuery<string[]>({
     queryKey: ["/api/admin/rarity-other-options"],
     staleTime: 60_000,
+    select: asStringArray,
   });
   const [languageChangedByFallback, setLanguageChangedByFallback] = useState(false);
 
@@ -1918,7 +1934,7 @@ export default function CertificateForm({
     // viewport height, full width, two-panel columns, internal scroll), extracted
     // verbatim from this component's previously-inline geometry so /admin renders
     // identically; Staff / Grader / Admin Review use the exact same shell. Grade
-    // (wfStage 2) deliberately hides the preview aside because the protected
+    // (GRADE_STAGE) deliberately hides the preview aside because the protected
     // grading-panel.tsx workstation already renders its own interactive card
     // image + defect-marking tool (its own internal two-column split); mounting
     // the aside there would duplicate the image or narrow that protected grid — a
@@ -1929,7 +1945,7 @@ export default function CertificateForm({
     <div className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]" data-testid="grading-workspace-bound">
     <CanonicalGradingWorkstationShell
       previewAside={
-        wfStage === 0 || wfStage === 2 ? (
+        showsPreviewAside(wfStage) ? (
           <WorkstationPreviewAside
             certificateId={certificate?.id ?? null}
             frontFile={frontImage}
@@ -1971,7 +1987,7 @@ export default function CertificateForm({
             // today (buildCollectionLine is dead code), so they are deliberately not
             // claimed as live-updating — and no dead label field is activated here.
             below={
-              wfStage === 0 || wfStage === 2 ? (
+              showsPreviewAside(wfStage) ? (
                 <CertificatePreviewPanel
                   // Truthful caption: unsaved while editing, saved once the
                   // auto-save lands, and explicitly NOT-authoritative after a
@@ -2235,11 +2251,11 @@ export default function CertificateForm({
               if (e.key !== "Enter") return;
               const tag = (e.target as HTMLElement).tagName;
               if (tag === "TEXTAREA") return;
-              if (wfStage === 0) {
+              if (wfStage === CARD_DETAILS_STAGE) {
                 e.preventDefault();
                 if (form.cardName.trim() && form.cardNumber.trim()) {
                   captureLastCardContext();
-                  goToStage(1);
+                  goToStage(nextStageIndex(CARD_DETAILS_STAGE));
                 }
               }
             }}
@@ -2342,7 +2358,7 @@ export default function CertificateForm({
             )}
             {/* Identify controls (stages 0 + 1). The card preview now lives in the
             fixed workspace aside; this panel is just the stage controls. */}
-            <div data-workflow-stage="card-details" className={`space-y-2.5 ${stageClass(0)}`}>
+            <div data-workflow-stage="card-details" className={`space-y-2.5 ${stageClass(CARD_DETAILS_STAGE)}`}>
               {/* ── STAGE 1 · CARD DETAILS — identity fields ── */}
               <div className="space-y-3">
                 {/* AI-first card identification — the primary Card-stage experience.
@@ -2456,7 +2472,7 @@ export default function CertificateForm({
                     )}
 
                     {/* Primary actions. Once a card is identified, Accept is the
-                  strongest action (confirm & continue → Rarity); Search Again is
+                  strongest action (confirm in place, then Variant below); Search Again is
                   the secondary outline; Manual stays visually quiet. Before any
                   match exists, AI Identify is the strong primary. */}
                     <div className="flex flex-wrap items-center gap-2">
@@ -3319,7 +3335,7 @@ export default function CertificateForm({
                     type="button"
                     onClick={() => {
                       captureLastCardContext();
-                      goToStage(1);
+                      goToStage(nextStageIndex(CARD_DETAILS_STAGE));
                     }}
                     disabled={!form.cardName.trim() || !form.cardNumber.trim()}
                     title={
@@ -3350,7 +3366,7 @@ export default function CertificateForm({
             this wrapper. Hidden with CSS only (never unmounted, never scaled or
             transformed): the card tool reads getBoundingClientRect live per
             event, so visibility toggling cannot alter its coordinate system. */}
-            <div data-workflow-stage="grade" className={stageClass(1)}>
+            <div data-workflow-stage="grade" className={stageClass(GRADE_STAGE)}>
               {workstationSlot && (
                 // Plain in-flow wrapper — exists ONLY for the Enter-key guard below.
                 // It must not size or scroll: a height cap here becomes a second
@@ -3487,7 +3503,7 @@ export default function CertificateForm({
               <div className="flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={() => goToStage(0)}
+                  onClick={() => goToStage(prevStageIndex(GRADE_STAGE))}
                   data-testid="button-back-to-card-details"
                   className="px-3.5 py-1.5 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-[11px] font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
                 >
@@ -3495,7 +3511,7 @@ export default function CertificateForm({
                 </button>
                 <button
                   type="button"
-                  onClick={() => goToStage(2)}
+                  onClick={() => goToStage(nextStageIndex(GRADE_STAGE))}
                   data-testid="button-review-card"
                   className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-[11px] font-bold uppercase hover:opacity-90 transition-all"
                 >
@@ -3902,7 +3918,7 @@ export default function CertificateForm({
             {/* Stage 3 · REVIEW & SAVE — moved grader notes (collapsed) + the existing
             explicit save action. Note content, templates and persistence are the
             EXACT pre-existing implementation, only relocated. */}
-            <div data-workflow-stage="review" className={`space-y-2.5 ${stageClass(2)}`}>
+            <div data-workflow-stage="review" className={`space-y-2.5 ${stageClass(REVIEW_STAGE)}`}>
               {/* Compact approval header — frames Review as a final dashboard and keeps
             Back to Grade as a quiet inline control instead of a chunky button row. */}
               <div className="flex items-center justify-between gap-2">
@@ -3911,7 +3927,7 @@ export default function CertificateForm({
                 </span>
                 <button
                   type="button"
-                  onClick={() => goToStage(1)}
+                  onClick={() => goToStage(prevStageIndex(REVIEW_STAGE))}
                   data-testid="button-back-to-grade"
                   className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-gold)] transition-colors"
                 >
@@ -3948,9 +3964,9 @@ export default function CertificateForm({
                 }}
                 // Card and Variant are the SAME stage now — both Edit links land on
                 // Card Details; the Variant link additionally scrolls to its section.
-                onEditCard={() => goToStage(0)}
+                onEditCard={() => goToStage(CARD_DETAILS_STAGE)}
                 onEditRarity={() => {
-                  goToStage(0);
+                  goToStage(CARD_DETAILS_STAGE);
                   if (typeof document !== "undefined") {
                     window.setTimeout(() => {
                       document
@@ -3959,7 +3975,7 @@ export default function CertificateForm({
                     }, 60);
                   }
                 }}
-                onEditGrade={() => goToStage(1)}
+                onEditGrade={() => goToStage(GRADE_STAGE)}
               />
               {/* Authentication summary — shown only for non-numeric (Authentic /
             Authentic Altered) grade types, derived from the EXISTING form

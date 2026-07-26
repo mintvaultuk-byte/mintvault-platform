@@ -128,7 +128,7 @@ export function ReviewSummary({
 
       {/* Top row: card details · classification. The card image itself is NOT
           rendered here — it lives in the shared preview aside beside this
-          panel (same aside Card/Rarity use), so it is never duplicated. */}
+          panel (the same aside Card Details uses), so it is never duplicated. */}
       <div className="grid gap-2 lg:grid-cols-2">
         <Card title="Card" edit={<EditLink onClick={onEditCard} testId="review-edit-card" />}>
           <div data-testid="review-card-details">

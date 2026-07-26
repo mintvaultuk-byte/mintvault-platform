@@ -37,7 +37,7 @@ export function CardPreviewPanel({
   frontFile?: File | null;
   backFile?: File | null;
   /** When true, the panel fills its parent's height and the card contain-fits
-      that height (the Card/Rarity workstation aside). Default false keeps the
+      that height (the Card Details workstation aside). Default false keeps the
       capped thumbnail size used by the Review-stage summary. */
   fill?: boolean;
   /** Cert-scoped API base for the images query. Defaults to /api/admin (the

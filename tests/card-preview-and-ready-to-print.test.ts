@@ -52,7 +52,7 @@ describe("Card-stage live certificate preview (1-3, 13)", () => {
     // "Card Details" stage 0 and Review is 2, so this is the SAME coverage
     // expressed in the three-stage numbering, NOT a narrowing. Grade (now 1)
     // remains the one stage without the preview, exactly as before.
-    expect(FORM).toContain("wfStage === 0 || wfStage === 2");
+    expect(FORM).toContain("showsPreviewAside(wfStage)");
     // The retired four-stage gate must not come back.
     expect(FORM).not.toContain("wfStage === 0 || wfStage === 1 || wfStage === 3");
     // exactly ONE mount of the panel — the same element serves both stages

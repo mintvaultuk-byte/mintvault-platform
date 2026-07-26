@@ -290,7 +290,18 @@ export function resolveEditConflicts(
     const postedC = canonicalFor(spec, posted[k]);
     const editorEdited = postedC !== loadedC;
     if (editorEdited) push(editorEditedByGroup, spec.group, k);
-    if (changedElsewhere) push(movedElsewhereByGroup, spec.group, k);
+    // M-1: a field that moved in the DB but that this request is posting the
+    // SAME canonical value for has CONVERGED — both writers agree. Convergence
+    // is not disagreement, so it must not seed a compound conflict. Only a field
+    // that still DISAGREES with the database counts as "moved elsewhere".
+    //
+    // Worked example this fixes: set was "Base"; the editor changes it to
+    // "Jungle" and also picks a Variant; another writer independently sets the
+    // same "Jungle". The set agrees, so the Variant edit proceeds. Had the other
+    // writer chosen a DIFFERENT set, the disagreement stands and the compound
+    // conflict still fires.
+    const convergedWithDb = postedC === currentC;
+    if (changedElsewhere && !convergedWithDb) push(movedElsewhereByGroup, spec.group, k);
 
     if (changedElsewhere && editorEdited && postedC !== currentC) {
       conflicts.push(k);

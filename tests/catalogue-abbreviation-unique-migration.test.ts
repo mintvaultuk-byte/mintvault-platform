@@ -68,7 +68,7 @@ describe("0026 — catalogue persisted-code uniqueness (real migration, real Pos
     await pool!.query(MIGRATION);
     const after = await q(`SELECT indexname FROM pg_indexes WHERE tablename = 'catalogue_items'`);
     expect(after.length).toBe(before.length + 1);
-    expect(after.map((r) => r.indexname)).toContain("uq_catalogue_items_category_effective_code");
+    expect(after.map((r) => r.indexname)).toContain("uq_catalogue_items_live_effective_code");
   });
 
   it("is ADDITIVE — it creates/alters/drops no table or column", () => {
@@ -83,7 +83,7 @@ describe("0026 — catalogue persisted-code uniqueness (real migration, real Pos
     await insert({ category: "designation", value: "first_edition", abbreviation: "FIRST_EDITION" });
     // A second row whose VALUE collides with the first row's ABBREVIATION.
     await expect(insert({ category: "designation", value: "FIRST_EDITION" })).rejects.toThrow(
-      /uq_catalogue_items_category_effective_code|duplicate key/i,
+      /uq_catalogue_items_live_effective_code|duplicate key/i,
     );
   });
 
@@ -109,7 +109,7 @@ describe("0026 — catalogue persisted-code uniqueness (real migration, real Pos
     await expect(insert({ category: "finish", value: "unlimited", abbreviation: "UNLIMITED" })).resolves.toBeDefined();
   });
 
-  it("ALLOWS a retired row to keep a code a live replacement reuses", async () => {
+  it("M-2 POLICY: a retired row keeps its code and a live replacement may reuse it", async () => {
     await pool!.query(MIGRATION);
     await insert({ category: "designation", value: "old", abbreviation: "PROMO", archived: true });
     await insert({ category: "designation", value: "older", abbreviation: "PROMO", active: false });
@@ -122,10 +122,10 @@ describe("0026 — catalogue persisted-code uniqueness (real migration, real Pos
     // permits it, which is exactly the gap this migration closes.
     await insert({ category: "designation", value: "promo_a", abbreviation: "PROMO" });
     await insert({ category: "designation", value: "promo_b", abbreviation: "PROMO" });
-    await expect(pool!.query(MIGRATION)).rejects.toThrow(/0026 BLOCKED[\s\S]*designation\/promo/i);
+    await expect(pool!.query(MIGRATION)).rejects.toThrow(/0026 BLOCKED[\s\S]*designation\+attribute\/promo/i);
     // And it left NO half-built index behind.
     const idx = await q(
-      `SELECT indexname FROM pg_indexes WHERE indexname = 'uq_catalogue_items_category_effective_code'`,
+      `SELECT indexname FROM pg_indexes WHERE indexname = 'uq_catalogue_items_live_effective_code'`,
     );
     expect(idx).toHaveLength(0);
   });
@@ -153,13 +153,71 @@ describe("0026 — catalogue persisted-code uniqueness (real migration, real Pos
     await pool!.query(MIGRATION);
     await pool!.query(ROLLBACK);
     expect(
-      await q(`SELECT indexname FROM pg_indexes WHERE indexname = 'uq_catalogue_items_category_effective_code'`),
+      await q(`SELECT indexname FROM pg_indexes WHERE indexname = 'uq_catalogue_items_live_effective_code'`),
     ).toHaveLength(0);
     // After rollback the previously-blocked insert is possible again...
     await insert({ category: "designation", value: "promo_a", abbreviation: "PROMO" });
     await insert({ category: "designation", value: "promo_b", abbreviation: "PROMO" });
     // ...and re-applying now correctly refuses, naming the data to reconcile.
     await expect(pool!.query(MIGRATION)).rejects.toThrow(/0026 BLOCKED/);
+  });
+
+  it("M-3: designation and attribute SHARE one persisted-code namespace", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "designation", value: "promo_d", abbreviation: "PROMO" });
+    // Both categories write into certificates.designations, so the same code in
+    // the other category would be indistinguishable once stored.
+    await expect(insert({ category: "attribute", value: "promo_a", abbreviation: "PROMO" })).rejects.toThrow(
+      /duplicate key/i,
+    );
+  });
+
+  it("M-3: different codes across designation/attribute are allowed", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "designation", value: "promo", abbreviation: "PROMO" });
+    await expect(insert({ category: "attribute", value: "signed", abbreviation: "SIGNED" })).resolves.toBeDefined();
+  });
+
+  it("M-3: the shared namespace does NOT bleed into unrelated categories", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "designation", value: "holo", abbreviation: "HOLO" });
+    // finish is its own namespace — the same code is fine there.
+    await expect(insert({ category: "finish", value: "holo2", abbreviation: "HOLO" })).resolves.toBeDefined();
+  });
+
+  it("M-2: an ARCHIVED row in the shared namespace does not block a live replacement", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "attribute", value: "old_promo", abbreviation: "PROMO", archived: true });
+    await expect(insert({ category: "designation", value: "promo", abbreviation: "PROMO" })).resolves.toBeDefined();
+  });
+
+  it("M-2: REACTIVATING an archived duplicate fails at the database too", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "designation", value: "retired", abbreviation: "PROMO", archived: true });
+    await insert({ category: "designation", value: "live_one", abbreviation: "PROMO" });
+    // Restoring the retired row would create two LIVE rows with code PROMO.
+    await expect(
+      q(`UPDATE catalogue_items SET archived = FALSE WHERE value = 'retired'`),
+    ).rejects.toThrow(/duplicate key/i);
+  });
+
+  it("is idempotent — re-running the migration is a no-op", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "designation", value: "promo", abbreviation: "PROMO" });
+    await expect(pool!.query(MIGRATION)).resolves.toBeDefined();
+    const idx = await q(
+      `SELECT indexname FROM pg_indexes WHERE indexname = 'uq_catalogue_items_live_effective_code'`,
+    );
+    expect(idx).toHaveLength(1);
+  });
+
+  it("is a truthful NO-OP when catalogue_items does not exist (0019 not applied)", async () => {
+    await q("DROP TABLE IF EXISTS catalogue_items CASCADE");
+    // The guard must not be followed by a statement that fails anyway.
+    await expect(pool!.query(MIGRATION)).resolves.toBeDefined();
+    expect(
+      await q(`SELECT indexname FROM pg_indexes WHERE indexname = 'uq_catalogue_items_live_effective_code'`),
+    ).toHaveLength(0);
   });
 
   it("does not touch 0019 — that migration is already applied in production", () => {

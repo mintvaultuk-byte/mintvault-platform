@@ -3,4 +3,4 @@
 -- Drops ONLY the index the migration added. No table, column or row is touched,
 -- so this is a complete and lossless reversal.
 
-DROP INDEX IF EXISTS uq_catalogue_items_category_effective_code;
+DROP INDEX IF EXISTS uq_catalogue_items_live_effective_code;

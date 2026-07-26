@@ -91,9 +91,11 @@ describe("stage separation (spec 1-4)", () => {
     // WorkstationPreviewAside `below`), never a second per-stage LabelPreview.
     // Three-stage numbering: Card Details (0) + Review (2); Grade (1) excluded.
     expect(FORM).toContain("<CertificatePreviewPanel");
-    expect(FORM).toContain("wfStage === 0 || wfStage === 2");
-    // The removed duplicate must not come back — negative guard preserved, NOT
-    // inverted.
+    expect(FORM).toContain("showsPreviewAside(wfStage)");
+    // PROVENANCE: the duplicate Review LabelPreview was removed by CURRENT MAIN,
+    // not by this branch — this branch merely preserved main's negative guard
+    // (it did NOT invert it) and re-expressed the gate in three-stage numbering.
+    // LabelPreview.tsx no longer exists on main at all.
     expect(FORM).not.toContain("<LabelPreview");
     expect((FORM.match(/<CertificatePreviewPanel/g) ?? []).length).toBe(1);
   });

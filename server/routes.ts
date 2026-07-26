@@ -115,8 +115,10 @@ import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/va
 import {
   resolveEditConflicts,
   GUARDED_FIELD_SPECS,
+  canonicalArray,
   canonicalArrayValue,
   type EditConflictResolution,
+  type FieldProvenance,
 } from "@shared/edit-conflict";
 import { centeringAxisGrade } from "@shared/centering";
 import {
@@ -428,28 +430,41 @@ function designationCodesToLabels(codes: string[]): string[] {
 }
 
 /**
- * H6 fallback diff — used only when a legacy tab sends no `loadedSnapshot`, so
- * there is no three-way resolution to draw on. Compares the STORED row against
- * the values about to be written and reports only genuine changes. Fields the
- * write does not touch are skipped, so an unchanged field is never recorded as
- * a change.
+ * H-1 / H6 — the truthful audit diff, computed from the EXACT object that will
+ * be committed.
+ *
+ * Every key present in `data` is a field the UPDATE will write, so every one is
+ * compared against the stored row and reported if — and only if — it genuinely
+ * changed. A field ABSENT from `data` is not being written and therefore cannot
+ * appear as a change. This is what makes requirements 9 and 10 hold in both
+ * directions: nothing changes silently, and nothing is claimed that was not
+ * written.
+ *
+ * Array-valued fields use the SAME canonicaliser as shared/edit-conflict.ts
+ * (order-insensitive, duplicate-safe, unambiguous separator), so the audit and
+ * the conflict resolver can never disagree about whether a set changed.
  */
-function buildDirectFieldDiff(
+export function buildCommittedFieldDiff(
   existing: Record<string, unknown>,
-  data: Record<string, unknown>
-): Array<{ field: string; previous: string | string[]; next: string | string[]; source: "request" }> {
-  const out: Array<{ field: string; previous: string | string[]; next: string | string[]; source: "request" }> = [];
-  for (const spec of GUARDED_FIELD_SPECS) {
-    if (!Object.prototype.hasOwnProperty.call(data, spec.key)) continue;
-    if (spec.kind === "stringArray") {
-      const prev = canonicalArrayValue(existing[spec.key]);
-      const next = canonicalArrayValue(data[spec.key]);
-      if (prev.join(" ") !== next.join(" ")) out.push({ field: spec.key, previous: prev, next, source: "request" });
+  data: Record<string, unknown>,
+  provenanceFor: (key: string) => FieldProvenance = () => "request",
+): Array<{ field: string; previous: string | string[]; next: string | string[]; source: FieldProvenance }> {
+  const out: Array<{ field: string; previous: string | string[]; next: string | string[]; source: FieldProvenance }> = [];
+  const arrayFields = new Set(GUARDED_FIELD_SPECS.filter((f) => f.kind === "stringArray").map((f) => f.key));
+
+  for (const key of Object.keys(data)) {
+    if (arrayFields.has(key)) {
+      const prev = canonicalArrayValue(existing[key]);
+      const next = canonicalArrayValue(data[key]);
+      // canonicalArray is the shared, unambiguous comparison key.
+      if (canonicalArray(prev) !== canonicalArray(next)) {
+        out.push({ field: key, previous: prev, next, source: provenanceFor(key) });
+      }
       continue;
     }
-    const prev = existing[spec.key] == null ? "" : String(existing[spec.key]).trim();
-    const next = data[spec.key] == null ? "" : String(data[spec.key]).trim();
-    if (prev !== next) out.push({ field: spec.key, previous: prev, next, source: "request" });
+    const prev = existing[key] == null ? "" : String(existing[key]).trim();
+    const next = data[key] == null ? "" : String(data[key]).trim();
+    if (prev !== next) out.push({ field: key, previous: prev, next, source: provenanceFor(key) });
   }
   return out;
 }
@@ -1392,6 +1407,404 @@ async function createEbayPriceCacheTable() {
       CREATE INDEX IF NOT EXISTS idx_ebay_cache_updated ON ebay_price_cache(last_updated_at)
     `);
   } catch {}
+}
+
+/**
+ * H-1 (second hostile review) — the certificate metadata update handler,
+ * EXTRACTED VERBATIM from its former inline position so it can be mounted and
+ * driven directly by route-level tests against a disposable PostgreSQL cluster.
+ * Behaviour is unchanged by the extraction: `registerRoutes` mounts this exact
+ * function behind the same `requireAdmin` + multer chain it always had.
+ */
+export async function handleCertificateMetadataUpdate(req: any, res: any): Promise<void> {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const existing = await storage.getCertificate(id);
+      if (!existing) {
+        return res.status(404).json({ error: "Certificate not found" });
+      }
+
+      // Approval lock (2026-07-01): this metadata editor has no other guard
+      // against overwriting an already-approved/published certificate — the
+      // client's auto-save intentionally stops calling this route once a
+      // cert is approved, but a request already in flight when approval
+      // lands isn't cancelled client-side, so the server must be the real
+      // gate. Only the explicit "Save Changes to Published Certificate" UI
+      // path sends confirmPublishedEdit — auto-save never does.
+      if (existing.gradeApprovedAt && req.body.confirmPublishedEdit !== "true") {
+        return res.status(409).json({
+          error: "Certificate already approved and published — reload and use explicit save to edit it",
+        });
+      }
+
+      // Stale-tab guard (2026-07-06): this editor posts FULL state, so a tab
+      // opened before a concurrent change (repair script, another session)
+      // silently writes old values back — it clobbered MV237's repaired
+      // variant the same day it was fixed. FIELD-SCOPED on purpose: the
+      // grading workstation shares this page and bumps the row constantly
+      // without touching metadata, so a row-level updated_at check would
+      // false-conflict on routine grading. A field conflicts only when it
+      // changed in the DB since this tab loaded it AND this save would
+      // overwrite that newer value with something different (see
+      // shared/edit-conflict.ts). Tabs from before this deploy send no
+      // snapshot and pass through unchanged.
+      let editResolution: EditConflictResolution | null = null;
+      if (req.body.loadedSnapshot) {
+        let snapshot: Record<string, unknown> | null = null;
+        try {
+          snapshot = JSON.parse(String(req.body.loadedSnapshot));
+        } catch {
+          snapshot = null; // malformed → treat as legacy (no guard)
+        }
+        if (snapshot && typeof snapshot === "object") {
+          // Owner spec 2026-07-26 + hostile-review H5/MED: only a genuine
+          // SAME-FIELD disagreement (or a related-field hybrid) may interrupt
+          // the grader. Fields this tab never edited but that moved in the DB
+          // merge silently; fields the request never submitted are left alone
+          // and are NEVER treated as a clear.
+          editResolution = resolveEditConflicts(snapshot, req.body, existing as Record<string, unknown>);
+
+          if (editResolution.blocked) {
+            // H6: a blocked conflict must NOT produce a normal successful
+            // "update" audit event. Record a DISTINCT blocked event instead,
+            // so the trail is truthful in both directions, and write nothing
+            // to the certificate.
+            const compoundFields = editResolution.compoundConflicts.flatMap((c) => [
+              ...c.editorEdited,
+              ...c.movedElsewhere,
+            ]);
+            const reported = Array.from(new Set([...editResolution.conflicts, ...compoundFields]));
+            await storage.writeAuditLog(
+              "certificate",
+              existing.certId,
+              "update_conflict_blocked",
+              req.session.adminEmail || "admin",
+              {
+                certificateId: existing.id,
+                conflicts: editResolution.conflicts,
+                compoundConflicts: editResolution.compoundConflicts,
+                outcome: "no_write",
+              }
+            );
+            return res.status(409).json({
+              error:
+                editResolution.compoundConflicts.length > 0
+                  ? `This certificate's ${editResolution.compoundConflicts
+                      .map((c) => c.group)
+                      .join(" and ")} details were changed elsewhere while you were editing related fields (${reported.join(
+                      ", "
+                    )}) — refresh the page to see the latest values, then re-apply your edit.`
+                  : `This certificate was changed elsewhere since you opened it (${editResolution.conflicts.join(
+                      ", "
+                    )}) — refresh the page to see the latest values, then re-apply your edit.`,
+              conflicts: editResolution.conflicts,
+              compoundConflicts: editResolution.compoundConflicts,
+            });
+          }
+
+          // NOTE (review requirement 7): the request body is NOT mutated here.
+          // An earlier revision wrote merged values back into `req.body` to fake
+          // presence, which destroyed the distinction between "the client sent
+          // this" and "the server merged this". The merge is applied directly to
+          // the update object instead — see `putGuarded` below, which consults
+          // the resolution's per-field provenance.
+        }
+      }
+
+      // Required-identity fields (matches the client's create/edit validation)
+      // — enforced here too since auto-save posts directly to this route and
+      // must never persist a blank identity field.
+      // Required-identity fields must never be persisted BLANK. H-1: validate
+      // only the ones this request actually SUBMITTED — an absent field is not
+      // being written, so there is nothing to blank. Validating absence here
+      // was what forced every save to be a full-state post, which is precisely
+      // the pattern that made partial edits clobber unrelated columns.
+      const requiredKeys = ["cardGame", "setName", "cardName", "cardNumber", "year"] as const;
+      const blankField = requiredKeys
+        .filter((k) => Object.prototype.hasOwnProperty.call(req.body, k))
+        .find((k) => typeof req.body[k] !== "string" || !String(req.body[k]).trim());
+      if (blankField) {
+        return res.status(400).json({ error: `${blankField} is required and cannot be blank` });
+      }
+
+      const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+      const frontImage = files?.frontImage?.[0];
+      const backImage = files?.backImage?.[0];
+
+      const toValidate2 = [frontImage, backImage].filter((f): f is Express.Multer.File => !!f);
+      if (toValidate2.length > 0) {
+        const uploadErr = await rejectInvalidUploads(toValidate2);
+        if (uploadErr) return res.status(400).json({ error: uploadErr });
+      }
+
+      // Locked NO rule on the metadata editor too: its Grade Type dropdown could
+      // convert a PUBLISHED numeric certificate to authentication-only and null its
+      // grade in the same write (finalGradeOverall below is forced to null for a
+      // non-numeric kind). Ordinary editing of an unapproved certificate is still
+      // allowed; changing a published certificate's kind is refused and routed to
+      // Super Admin Correction Mode. Comparison only — no scoring logic touched.
+      const storedGradeTypeUpdate = normaliseGradeType(existing.gradeType);
+      const requestedKindUpdate = kindOfGradeType(req.body.gradeType || storedGradeTypeUpdate);
+      const kindRejectionUpdate = rejectKindChange({
+        storedGradeType: storedGradeTypeUpdate,
+        requestedKind: requestedKindUpdate,
+        isApproved: existing.gradeApprovedAt != null,
+        allowChangeWhenUnapproved: true,
+      });
+      if (kindRejectionUpdate) {
+        try {
+          await storage.writeAuditLog(
+            "certificate",
+            String((existing as { certId?: string }).certId ?? id),
+            "edit_kind_change_rejected",
+            (req.session as { adminEmail?: string })?.adminEmail || "admin",
+            {
+              stored_grade_type: storedGradeTypeUpdate,
+              requested_kind: requestedKindUpdate,
+              route: "certificate-update",
+            },
+          );
+        } catch (auditErr) {
+          console.warn("[cert-update] kind-rejection audit failed:", (auditErr as Error).message);
+        }
+        return res.status(400).json({ error: kindRejectionUpdate });
+      }
+      const gradeTypeUpdate = gradeTypeToPersist(storedGradeTypeUpdate, requestedKindUpdate);
+      const isNonNumUpdate = requestedKindUpdate !== "numeric";
+
+      if (!isNonNumUpdate && req.body.gradeOverall) {
+        const g = Number(req.body.gradeOverall);
+        if (!isValidNumericGrade(g)) {
+          return res.status(400).json({ error: "Grade must be a valid MVGS grade (1–10, including half grades)" });
+        }
+      }
+
+      // Grade to persist — the edit form always sends it, so it's preserved.
+      // Reused for the gate below and the data object so they can't diverge.
+      const finalGradeOverall = isNonNumUpdate
+        ? null
+        : typeof req.body.gradeOverall === "string" && req.body.gradeOverall.trim()
+          ? req.body.gradeOverall
+          : null;
+      // Pristine/black via the shared gate (certIsPristine) on the FINAL cert
+      // state. This is a metadata editor — it does NOT carry subgrades, so the
+      // gate reads the cert's EXISTING subgrades + measurements (preserved
+      // below — no longer wiped to null) with the final grade. A genuine
+      // Pristine cert keeps its black label through an unrelated metadata edit;
+      // a grade change to a non-Pristine value correctly flips it to Standard.
+      const computedLabelTypeUpdate =
+        !isNonNumUpdate &&
+        (await certIsPristine({ ...existing, gradeOverall: finalGradeOverall, gradeType: gradeTypeUpdate } as any))
+          ? "black"
+          : "Standard";
+
+      // ── H-1: the update object HONOURS OMISSION ──────────────────────────
+      // This object used to be built unconditionally, so a partial PUT wrote
+      // `variant = null`, `rarity = null`, `collectionCode = null`,
+      // `language = "English"` and `notes = null` for fields the request never
+      // mentioned — silently clearing data and defaulting language, while the
+      // audit (built from the resolver) never mentioned it.
+      //
+      // A guarded field is now written ONLY when:
+      //   • the request actually submitted it (real property presence), or
+      //   • conflict resolution decided to MERGE a concurrent database value.
+      // An OMITTED field is absent from `data` entirely, so the UPDATE cannot
+      // touch it and the audit cannot claim it changed.
+      const submitted = (k: string) => Object.prototype.hasOwnProperty.call(req.body, k);
+      /** Provenance per guarded field, when a three-way resolution ran. */
+      const provenanceOf = (k: string): FieldProvenance | null =>
+        editResolution?.fields.find((f) => f.key === k)?.provenance ?? null;
+
+      const data: any = {
+        // Always-computed fields — derived from the grade pipeline, not from a
+        // posted metadata key, so presence does not apply to them.
+        labelType: computedLabelTypeUpdate,
+        gradeType: gradeTypeUpdate,
+        gradeOverall: finalGradeOverall,
+        // Subgrades are intentionally NOT written here: this metadata editor
+        // doesn't carry them, and writing null wiped real grading data on
+        // every edit (pre-existing data-loss bug) and demoted Pristine certs.
+        // Omitting them preserves the stored centering/corners/edges/surface
+        // scores so the gate above sees the cert's true subgrades.
+      };
+
+      /**
+       * Write a guarded field only when it was submitted, or when the resolver
+       * merged a concurrent value. `transform` maps the RAW submitted value to
+       * the column value, so each field keeps its own documented clear
+       * representation (e.g. "" / null for a scalar).
+       */
+      const putGuarded = (key: string, transform: (raw: unknown) => unknown = (v) => v) => {
+        const prov = provenanceOf(key);
+        if (prov === "omitted") return; // resolver: never submitted → untouched
+        if (prov === "merged") {
+          // Concurrent database value wins. Taken from the resolver directly —
+          // req.body is NOT mutated to fake presence (review requirement 7).
+          data[key] = (existing as Record<string, unknown>)[key] ?? null;
+          return;
+        }
+        if (!submitted(key)) return; // legacy path (no snapshot): honour absence
+        data[key] = transform(req.body[key]);
+      };
+
+      // Scalars: an explicit "" or null is a legitimate clear and is preserved
+      // as-is; only genuine absence skips the write.
+      const scalarOrNull = (v: unknown) => (v === null || v === undefined || String(v).trim() === "" ? null : v);
+      putGuarded("cardGame");
+      putGuarded("setName");
+      putGuarded("cardName");
+      putGuarded("cardNumber");
+      putGuarded("year");
+      putGuarded("language", scalarOrNull);
+      putGuarded("rarity", scalarOrNull);
+      putGuarded("variant", scalarOrNull);
+      putGuarded("collectionCode", scalarOrNull);
+
+      // "OTHER" companions follow their GOVERNING field's presence: they are
+      // only meaningful when that field is being written in this request.
+      if (Object.prototype.hasOwnProperty.call(data, "rarity")) {
+        data.rarityOther = data.rarity === "OTHER" ? req.body.rarityOther || null : null;
+      }
+      if (Object.prototype.hasOwnProperty.call(data, "variant")) {
+        data.variantOther = data.variant === "OTHER" ? req.body.variantOther || null : null;
+      }
+      if (Object.prototype.hasOwnProperty.call(data, "collectionCode")) {
+        data.collectionOther =
+          data.collectionCode === "OTHER" ? req.body.collectionOther?.trim() || null : null;
+      }
+
+      // designations: explicit [] (or "[]") clears; absence leaves it alone.
+      if (provenanceOf("designations") === "merged") {
+        data.designations = (existing.designations as string[]) ?? [];
+      } else if (provenanceOf("designations") !== "omitted" && submitted("designations")) {
+        data.designations = parseDesignations(req.body.designations, existing.designations as string[]);
+      }
+
+      // notes is not a conflict-guarded field, but it had the SAME defect:
+      // `req.body.notes || null` cleared stored notes on any partial PUT.
+      if (submitted("notes")) data.notes = req.body.notes || null;
+      // status keeps its existing fallback (it is always meaningful).
+      data.status = req.body.status || existing.status;
+
+      if (data.collectionCode === "OTHER" && !data.collectionOther) {
+        return res.status(400).json({ error: "Collection 'Other (manual)' requires a manual entry value" });
+      }
+
+      // Front-label line 3 shows EITHER variant OR rarity — enforce at write
+      // time. Only reject when this edit actually CHANGES variant/rarity, so
+      // legacy both-set certs can still receive unrelated metadata edits.
+      //
+      // H-1: reason about the EFFECTIVE post-update state. A field absent from
+      // `data` is not being written, so its effective value is the stored one —
+      // reading `data.variant` directly would see `undefined` and mistake an
+      // untouched field for a cleared one.
+      const effective = (k: "variant" | "rarity") =>
+        (Object.prototype.hasOwnProperty.call(data, k)
+          ? data[k]
+          : (existing as Record<string, unknown>)[k]) ?? null;
+      const effVariant = effective("variant");
+      const effRarity = effective("rarity");
+      const touchesVariantRarity =
+        effVariant !== (existing.variant ?? null) || effRarity !== (existing.rarity ?? null);
+      if (effVariant && effRarity && touchesVariantRarity) {
+        return res.status(400).json({
+          error: "Set either Variant or Rarity, not both — the front label shows only one on line 3.",
+        });
+      }
+
+      // Structured rarity/variant picker → new nullable columns. Opt-in by key
+      // presence, so a partial PUT (e.g. grade-only) never erases them; the
+      // legacy variant/rarity remain the untouched historical source of truth.
+      let structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(), existing.structuredVariantVersion);
+      if (!structuredUpdate.ok) {
+        // Stale cross-machine cache guard — force-refresh once and retry.
+        structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true), existing.structuredVariantVersion);
+      }
+      if (!structuredUpdate.ok) {
+        return res.status(400).json({ error: "Invalid rarity selection.", details: structuredUpdate.errors });
+      }
+
+      if (frontImage) {
+        const ext = path.extname(frontImage.originalname).replace(".", "");
+        const r2Key = r2KeyForImage(existing.certId, "front", ext || "jpg");
+        await uploadToR2(r2Key, frontImage.buffer, frontImage.mimetype);
+        if (existing.frontImagePath) {
+          try {
+            await deleteFromR2(existing.frontImagePath);
+          } catch {}
+        }
+        data.frontImagePath = r2Key;
+        await storage.addCertificateImage({
+          certificateId: id,
+          imageType: "front",
+          url: r2Key,
+          sortOrder: 0,
+        });
+      }
+      if (backImage) {
+        const ext = path.extname(backImage.originalname).replace(".", "");
+        const r2Key = r2KeyForImage(existing.certId, "back", ext || "jpg");
+        await uploadToR2(r2Key, backImage.buffer, backImage.mimetype);
+        if (existing.backImagePath) {
+          try {
+            await deleteFromR2(existing.backImagePath);
+          } catch {}
+        }
+        data.backImagePath = r2Key;
+        await storage.addCertificateImage({
+          certificateId: id,
+          imageType: "back",
+          url: r2Key,
+          sortOrder: 1,
+        });
+      }
+
+      // ── H6: truthful FIELD-LEVEL audit ───────────────────────────────────
+      // The old payload recorded three CURRENT values and no previous values,
+      // so it could not answer "what actually changed?". Record the real diff:
+      // only fields whose value genuinely changed, each with its previous and
+      // next value and where the value came from (this request, or a safe
+      // merge that preserved a concurrent database value).
+      //
+      // H-1 (second review): the diff is computed from the EXACT object that is
+      // about to be committed — never from the resolver's view of it. The
+      // resolver does not know about the always-computed fields (labelType,
+      // gradeType, gradeOverall, status) or the "OTHER" companions, so a
+      // resolver-derived diff could omit a field the UPDATE really changed.
+      // Provenance is layered on top from the resolution where it is known.
+      const auditChanges = buildCommittedFieldDiff(
+        existing as Record<string, unknown>,
+        data as Record<string, unknown>,
+        (k) => editResolution?.fields.find((f) => f.key === k)?.provenance ?? "request",
+      );
+
+      const mergedFields = editResolution
+        ? editResolution.fields.filter((f) => f.provenance === "merged").map((f) => f.key)
+        : [];
+
+      // H7: the row change and its audit row commit together or not at all.
+      const cert = await storage.updateCertificateAudited(id, data, {
+        entityId: existing.certId,
+        action: "update",
+        adminUser: req.session.adminEmail || "admin",
+        details: {
+          certificateId: existing.id,
+          certId: existing.certId,
+          // certificate-only edit — this route never renames a catalogue entry.
+          scope: "certificate_only",
+          changes: auditChanges,
+          changedFields: auditChanges.map((c) => c.field),
+          // Unrelated concurrent edits that were preserved rather than clobbered.
+          mergedFromConcurrentEdit: mergedFields,
+          conflictGuard: editResolution ? "three_way_snapshot" : "legacy_no_snapshot",
+        },
+      });
+
+      res.json(cert ? { ...cert, certId: normalizeCertId(cert.certId) } : cert);
+    } catch (error: any) {
+      console.error("Update cert error:", error.message, error.stack);
+      res.status(500).json({ error: "Failed to update certificate" });
+    }
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
@@ -4122,327 +4535,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       { name: "frontImage", maxCount: 1 },
       { name: "backImage", maxCount: 1 },
     ]),
-    async (req, res) => {
-      try {
-        const id = parseInt(String(req.params.id), 10);
-        const existing = await storage.getCertificate(id);
-        if (!existing) {
-          return res.status(404).json({ error: "Certificate not found" });
-        }
-
-        // Approval lock (2026-07-01): this metadata editor has no other guard
-        // against overwriting an already-approved/published certificate — the
-        // client's auto-save intentionally stops calling this route once a
-        // cert is approved, but a request already in flight when approval
-        // lands isn't cancelled client-side, so the server must be the real
-        // gate. Only the explicit "Save Changes to Published Certificate" UI
-        // path sends confirmPublishedEdit — auto-save never does.
-        if (existing.gradeApprovedAt && req.body.confirmPublishedEdit !== "true") {
-          return res.status(409).json({
-            error: "Certificate already approved and published — reload and use explicit save to edit it",
-          });
-        }
-
-        // Stale-tab guard (2026-07-06): this editor posts FULL state, so a tab
-        // opened before a concurrent change (repair script, another session)
-        // silently writes old values back — it clobbered MV237's repaired
-        // variant the same day it was fixed. FIELD-SCOPED on purpose: the
-        // grading workstation shares this page and bumps the row constantly
-        // without touching metadata, so a row-level updated_at check would
-        // false-conflict on routine grading. A field conflicts only when it
-        // changed in the DB since this tab loaded it AND this save would
-        // overwrite that newer value with something different (see
-        // shared/edit-conflict.ts). Tabs from before this deploy send no
-        // snapshot and pass through unchanged.
-        let editResolution: EditConflictResolution | null = null;
-        if (req.body.loadedSnapshot) {
-          let snapshot: Record<string, unknown> | null = null;
-          try {
-            snapshot = JSON.parse(String(req.body.loadedSnapshot));
-          } catch {
-            snapshot = null; // malformed → treat as legacy (no guard)
-          }
-          if (snapshot && typeof snapshot === "object") {
-            // Owner spec 2026-07-26 + hostile-review H5/MED: only a genuine
-            // SAME-FIELD disagreement (or a related-field hybrid) may interrupt
-            // the grader. Fields this tab never edited but that moved in the DB
-            // merge silently; fields the request never submitted are left alone
-            // and are NEVER treated as a clear.
-            editResolution = resolveEditConflicts(snapshot, req.body, existing as Record<string, unknown>);
-
-            if (editResolution.blocked) {
-              // H6: a blocked conflict must NOT produce a normal successful
-              // "update" audit event. Record a DISTINCT blocked event instead,
-              // so the trail is truthful in both directions, and write nothing
-              // to the certificate.
-              const compoundFields = editResolution.compoundConflicts.flatMap((c) => [
-                ...c.editorEdited,
-                ...c.movedElsewhere,
-              ]);
-              const reported = Array.from(new Set([...editResolution.conflicts, ...compoundFields]));
-              await storage.writeAuditLog(
-                "certificate",
-                existing.certId,
-                "update_conflict_blocked",
-                req.session.adminEmail || "admin",
-                {
-                  certificateId: existing.id,
-                  conflicts: editResolution.conflicts,
-                  compoundConflicts: editResolution.compoundConflicts,
-                  outcome: "no_write",
-                }
-              );
-              return res.status(409).json({
-                error:
-                  editResolution.compoundConflicts.length > 0
-                    ? `This certificate's ${editResolution.compoundConflicts
-                        .map((c) => c.group)
-                        .join(" and ")} details were changed elsewhere while you were editing related fields (${reported.join(
-                        ", "
-                      )}) — refresh the page to see the latest values, then re-apply your edit.`
-                    : `This certificate was changed elsewhere since you opened it (${editResolution.conflicts.join(
-                        ", "
-                      )}) — refresh the page to see the latest values, then re-apply your edit.`,
-                conflicts: editResolution.conflicts,
-                compoundConflicts: editResolution.compoundConflicts,
-              });
-            }
-
-            // SAFE MERGE: write the concurrent DB value back into the request
-            // body for each field the editor never edited, so the full-state
-            // post cannot resurrect the stale value. Only fields the resolver
-            // decided to persist are written — an OMITTED field is deliberately
-            // absent from valuesToPersist and is left untouched below.
-            for (const [f, v] of Object.entries(editResolution.valuesToPersist)) {
-              if (editResolution.fields.find((x) => x.key === f)?.provenance !== "merged") continue;
-              req.body[f] = Array.isArray(v) ? JSON.stringify(v) : v;
-            }
-          }
-        }
-
-        // Required-identity fields (matches the client's create/edit validation)
-        // — enforced here too since auto-save posts directly to this route and
-        // must never persist a blank identity field.
-        const requiredFields: Array<[string, unknown]> = [
-          ["cardGame", req.body.cardGame],
-          ["setName", req.body.setName],
-          ["cardName", req.body.cardName],
-          ["cardNumber", req.body.cardNumber],
-          ["year", req.body.year],
-        ];
-        const blankField = requiredFields.find(([, v]) => typeof v !== "string" || !v.trim());
-        if (blankField) {
-          return res.status(400).json({ error: `${blankField[0]} is required and cannot be blank` });
-        }
-
-        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-        const frontImage = files?.frontImage?.[0];
-        const backImage = files?.backImage?.[0];
-
-        const toValidate2 = [frontImage, backImage].filter((f): f is Express.Multer.File => !!f);
-        if (toValidate2.length > 0) {
-          const uploadErr = await rejectInvalidUploads(toValidate2);
-          if (uploadErr) return res.status(400).json({ error: uploadErr });
-        }
-
-        // Locked NO rule on the metadata editor too: its Grade Type dropdown could
-        // convert a PUBLISHED numeric certificate to authentication-only and null its
-        // grade in the same write (finalGradeOverall below is forced to null for a
-        // non-numeric kind). Ordinary editing of an unapproved certificate is still
-        // allowed; changing a published certificate's kind is refused and routed to
-        // Super Admin Correction Mode. Comparison only — no scoring logic touched.
-        const storedGradeTypeUpdate = normaliseGradeType(existing.gradeType);
-        const requestedKindUpdate = kindOfGradeType(req.body.gradeType || storedGradeTypeUpdate);
-        const kindRejectionUpdate = rejectKindChange({
-          storedGradeType: storedGradeTypeUpdate,
-          requestedKind: requestedKindUpdate,
-          isApproved: existing.gradeApprovedAt != null,
-          allowChangeWhenUnapproved: true,
-        });
-        if (kindRejectionUpdate) {
-          try {
-            await storage.writeAuditLog(
-              "certificate",
-              String((existing as { certId?: string }).certId ?? id),
-              "edit_kind_change_rejected",
-              (req.session as { adminEmail?: string })?.adminEmail || "admin",
-              {
-                stored_grade_type: storedGradeTypeUpdate,
-                requested_kind: requestedKindUpdate,
-                route: "certificate-update",
-              },
-            );
-          } catch (auditErr) {
-            console.warn("[cert-update] kind-rejection audit failed:", (auditErr as Error).message);
-          }
-          return res.status(400).json({ error: kindRejectionUpdate });
-        }
-        const gradeTypeUpdate = gradeTypeToPersist(storedGradeTypeUpdate, requestedKindUpdate);
-        const isNonNumUpdate = requestedKindUpdate !== "numeric";
-
-        if (!isNonNumUpdate && req.body.gradeOverall) {
-          const g = Number(req.body.gradeOverall);
-          if (!isValidNumericGrade(g)) {
-            return res.status(400).json({ error: "Grade must be a valid MVGS grade (1–10, including half grades)" });
-          }
-        }
-
-        // Grade to persist — the edit form always sends it, so it's preserved.
-        // Reused for the gate below and the data object so they can't diverge.
-        const finalGradeOverall = isNonNumUpdate
-          ? null
-          : typeof req.body.gradeOverall === "string" && req.body.gradeOverall.trim()
-            ? req.body.gradeOverall
-            : null;
-        // Pristine/black via the shared gate (certIsPristine) on the FINAL cert
-        // state. This is a metadata editor — it does NOT carry subgrades, so the
-        // gate reads the cert's EXISTING subgrades + measurements (preserved
-        // below — no longer wiped to null) with the final grade. A genuine
-        // Pristine cert keeps its black label through an unrelated metadata edit;
-        // a grade change to a non-Pristine value correctly flips it to Standard.
-        const computedLabelTypeUpdate =
-          !isNonNumUpdate &&
-          (await certIsPristine({ ...existing, gradeOverall: finalGradeOverall, gradeType: gradeTypeUpdate } as any))
-            ? "black"
-            : "Standard";
-
-        const data: any = {
-          labelType: computedLabelTypeUpdate,
-          gradeType: gradeTypeUpdate,
-          cardGame: req.body.cardGame,
-          setName: req.body.setName,
-          cardName: req.body.cardName,
-          cardNumber: req.body.cardNumber,
-          rarity: req.body.rarity || null,
-          rarityOther: req.body.rarity === "OTHER" ? req.body.rarityOther || null : null,
-          designations: parseDesignations(req.body.designations, existing.designations as string[]),
-          variant: req.body.variant || null,
-          variantOther: req.body.variant === "OTHER" ? req.body.variantOther || null : null,
-          collection: null,
-          collectionCode: req.body.collectionCode || null,
-          collectionOther: req.body.collectionCode === "OTHER" ? req.body.collectionOther?.trim() || null : null,
-          language: req.body.language || "English",
-          year: req.body.year,
-          notes: req.body.notes || null,
-          gradeOverall: finalGradeOverall,
-          // Subgrades are intentionally NOT written here: this metadata editor
-          // doesn't carry them, and writing null wiped real grading data on
-          // every edit (pre-existing data-loss bug) and demoted Pristine certs.
-          // Omitting them preserves the stored centering/corners/edges/surface
-          // scores so the gate above sees the cert's true subgrades.
-          status: req.body.status || existing.status,
-        };
-
-        if (data.collectionCode === "OTHER" && !data.collectionOther) {
-          return res.status(400).json({ error: "Collection 'Other (manual)' requires a manual entry value" });
-        }
-
-        // Front-label line 3 shows EITHER variant OR rarity — enforce at write
-        // time. Only reject when this edit actually CHANGES variant/rarity, so
-        // legacy both-set certs can still receive unrelated metadata edits
-        // (this editor always posts full state).
-        const touchesVariantRarity =
-          (data.variant ?? null) !== (existing.variant ?? null) || (data.rarity ?? null) !== (existing.rarity ?? null);
-        if (data.variant && data.rarity && touchesVariantRarity) {
-          return res.status(400).json({
-            error: "Set either Variant or Rarity, not both — the front label shows only one on line 3.",
-          });
-        }
-
-        // Structured rarity/variant picker → new nullable columns. Opt-in by key
-        // presence, so a partial PUT (e.g. grade-only) never erases them; the
-        // legacy variant/rarity remain the untouched historical source of truth.
-        let structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(), existing.structuredVariantVersion);
-        if (!structuredUpdate.ok) {
-          // Stale cross-machine cache guard — force-refresh once and retry.
-          structuredUpdate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true), existing.structuredVariantVersion);
-        }
-        if (!structuredUpdate.ok) {
-          return res.status(400).json({ error: "Invalid rarity selection.", details: structuredUpdate.errors });
-        }
-
-        if (frontImage) {
-          const ext = path.extname(frontImage.originalname).replace(".", "");
-          const r2Key = r2KeyForImage(existing.certId, "front", ext || "jpg");
-          await uploadToR2(r2Key, frontImage.buffer, frontImage.mimetype);
-          if (existing.frontImagePath) {
-            try {
-              await deleteFromR2(existing.frontImagePath);
-            } catch {}
-          }
-          data.frontImagePath = r2Key;
-          await storage.addCertificateImage({
-            certificateId: id,
-            imageType: "front",
-            url: r2Key,
-            sortOrder: 0,
-          });
-        }
-        if (backImage) {
-          const ext = path.extname(backImage.originalname).replace(".", "");
-          const r2Key = r2KeyForImage(existing.certId, "back", ext || "jpg");
-          await uploadToR2(r2Key, backImage.buffer, backImage.mimetype);
-          if (existing.backImagePath) {
-            try {
-              await deleteFromR2(existing.backImagePath);
-            } catch {}
-          }
-          data.backImagePath = r2Key;
-          await storage.addCertificateImage({
-            certificateId: id,
-            imageType: "back",
-            url: r2Key,
-            sortOrder: 1,
-          });
-        }
-
-        // ── H6: truthful FIELD-LEVEL audit ───────────────────────────────────
-        // The old payload recorded three CURRENT values and no previous values,
-        // so it could not answer "what actually changed?". Record the real diff:
-        // only fields whose value genuinely changed, each with its previous and
-        // next value and where the value came from (this request, or a safe
-        // merge that preserved a concurrent database value).
-        //
-        // When no snapshot was sent (legacy tab), there is no three-way
-        // resolution to draw on, so the diff is computed directly from the
-        // stored row against the values about to be written.
-        const auditChanges = editResolution
-          ? editResolution.changes.map((c) => ({
-              field: c.key,
-              previous: c.previous,
-              next: c.next,
-              source: c.provenance,
-            }))
-          : buildDirectFieldDiff(existing as Record<string, unknown>, data as Record<string, unknown>);
-
-        const mergedFields = editResolution
-          ? editResolution.fields.filter((f) => f.provenance === "merged").map((f) => f.key)
-          : [];
-
-        // H7: the row change and its audit row commit together or not at all.
-        const cert = await storage.updateCertificateAudited(id, data, {
-          entityId: existing.certId,
-          action: "update",
-          adminUser: req.session.adminEmail || "admin",
-          details: {
-            certificateId: existing.id,
-            certId: existing.certId,
-            // certificate-only edit — this route never renames a catalogue entry.
-            scope: "certificate_only",
-            changes: auditChanges,
-            changedFields: auditChanges.map((c) => c.field),
-            // Unrelated concurrent edits that were preserved rather than clobbered.
-            mergedFromConcurrentEdit: mergedFields,
-            conflictGuard: editResolution ? "three_way_snapshot" : "legacy_no_snapshot",
-          },
-        });
-
-        res.json(cert ? { ...cert, certId: normalizeCertId(cert.certId) } : cert);
-      } catch (error: any) {
-        console.error("Update cert error:", error.message, error.stack);
-        res.status(500).json({ error: "Failed to update certificate" });
-      }
-    }
+    handleCertificateMetadataUpdate,
   );
 
   app.delete("/api/admin/certificates/:id", requireAdmin, async (req, res) => {

@@ -37,7 +37,7 @@ describe("AI banner collapsed into Identification tools drawer (spec 2, 6)", () 
 
 describe("Ownership + NFC moved out of the grading scroll (spec 8-13, 15-17)", () => {
   it("admin-dashboard no longer renders OwnershipSection/NfcSection beneath the form", () => {
-    // They must not sit inline below the four stages anymore.
+    // They must not sit inline below the grading stages anymore.
     expect(DASH).not.toMatch(/<OwnershipSection\b/);
     expect(DASH).not.toMatch(/<NfcSection\b/);
   });
@@ -75,7 +75,7 @@ describe("Ownership + NFC moved out of the grading scroll (spec 8-13, 15-17)", (
 });
 
 describe("two-column shell + density (spec 1, 3, 19)", () => {
-  it("Card/Rarity render the preview beside the controls (~40% left column)", () => {
+  it("Card Details renders the preview beside the controls (~40% left column)", () => {
     expect(FORM).toContain("<CanonicalGradingWorkstationShell");
     expect(CANON_SHELL).toContain("flex min-h-0 flex-1 flex-col gap-3 md:flex-row");
     // unified-shell pass: the column-ratio class now lives in ONE shared

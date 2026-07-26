@@ -74,7 +74,7 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
     expect(SHELL_SRC).toContain('data-testid="grading-control-panel"');
     // preview aside renders for Card, Rarity AND Review (Grade keeps its own
     // dedicated protected card/defect tool and is intentionally excluded).
-    expect(row).toMatch(/wfStage === 0 \|\| wfStage === 2 \?[\s\S]*WorkstationPreviewAside/);
+    expect(row).toMatch(/showsPreviewAside\(wfStage\)[\s\S]*WorkstationPreviewAside/);
   });
   it("preview is NOT rendered above the fields as a full-width block", () => {
     // certificate-form.tsx no longer renders CardPreviewPanel directly at
@@ -147,7 +147,7 @@ describe("10-11. navigation + stage reuse", () => {
   it("Card Details AND Review reuse the same side-by-side shell (aside shows for wfStage 0, 2)", () => {
     // The preview aside gate covers Card Details (0) and Review (2); Grade (1)
     // keeps its own dedicated protected card/defect tool instead.
-    expect(FORM).toMatch(/wfStage === 0 \|\| wfStage === 2 \?[\s\S]*WorkstationPreviewAside/);
+    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)[\s\S]*WorkstationPreviewAside/);
   });
 });
 

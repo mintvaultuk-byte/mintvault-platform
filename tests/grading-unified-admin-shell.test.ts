@@ -117,10 +117,10 @@ describe("4. all three stages use the same desktop breakpoint (md) for the two-c
 
 describe("5. the preview zone exists in Card Details AND Review (Grade is a documented exception)", () => {
   it("the aside gate covers wfStage 0 (Card Details) and 2 (Review)", () => {
-    expect(FORM).toMatch(/wfStage === 0 \|\| wfStage === 2 \?/);
+    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)/);
   });
   it("Grade (wfStage 1) is excluded from the shared aside — documented, not accidental", () => {
-    const gateIdx = FORM.indexOf("wfStage === 0 || wfStage === 2 ?");
+    const gateIdx = FORM.indexOf("showsPreviewAside(wfStage)");
     expect(gateIdx).toBeGreaterThan(-1);
     const gateLine = FORM.slice(gateIdx, gateIdx + 40);
     expect(gateLine).not.toContain("wfStage === 1");
@@ -188,7 +188,7 @@ describe("7. no duplicate preview in Grade or Review", () => {
     // The outer shell never mounts WorkstationPreviewAside for Grade (see
     // suite 5), so GradingPanel's own ImageViewer remains the only image
     // rendered for that stage.
-    const gateIdx = FORM.indexOf("wfStage === 0 || wfStage === 2 ?");
+    const gateIdx = FORM.indexOf("showsPreviewAside(wfStage)");
     const gateLine = FORM.slice(gateIdx, gateIdx + 40);
     expect(gateLine).not.toContain("wfStage === 1");
   });

@@ -1,5 +1,5 @@
 /**
- * Stage 4 Review summary — read-only confirmation panel. Source-assertion tests
+ * Review-stage summary — read-only confirmation panel. Source-assertion tests
  * (the admin grading form is auth-gated). Proves the summary derives only from
  * existing form state, holds no certificate state, computes no grade, saves
  * nothing on entry, and that Edit links only switch the local stage.
@@ -65,7 +65,7 @@ describe("read-only: no parallel state, no save on entry (spec 5, 10)", () => {
 });
 
 describe("Edit links switch stage only (spec 6-8)", () => {
-  it("summary exposes Edit Card/Rarity/Grade callbacks", () => {
+  it("summary exposes Edit Card / Variant / Grade callbacks", () => {
     for (const id of ["review-edit-card", "review-edit-rarity", "review-edit-grade"]) {
       expect(SUMMARY).toContain(`testId="${id}"`);
     }
@@ -76,12 +76,14 @@ describe("Edit links switch stage only (spec 6-8)", () => {
   it("form wires each Edit link to a stage switch only — no save/mutation", () => {
     // Consolidated flow: Card and Variant are the SAME stage (0), so both Edit
     // links land on Card Details; Variant additionally scrolls to its section.
-    expect(FORM).toMatch(/onEditCard=\{\(\) => goToStage\(0\)\}/);
+    // M-4: navigation goes through the SHARED constants, so these assertions
+    // now pin the production helper usage rather than a bare index.
+    expect(FORM).toMatch(/onEditCard=\{\(\) => goToStage\(CARD_DETAILS_STAGE\)\}/);
     const rarityHandler = FORM.slice(FORM.indexOf("onEditRarity="), FORM.indexOf("onEditGrade="));
-    expect(rarityHandler).toContain("goToStage(0)");
+    expect(rarityHandler).toContain("goToStage(CARD_DETAILS_STAGE)");
     expect(rarityHandler).toContain('data-variant-section="variant"');
     expect(rarityHandler).not.toMatch(/mutate|handleSubmit|autoSaveNow|fetch\(|setForm/);
-    expect(FORM).toMatch(/onEditGrade=\{\(\) => goToStage\(1\)\}/);
+    expect(FORM).toMatch(/onEditGrade=\{\(\) => goToStage\(GRADE_STAGE\)\}/);
   });
 });
 

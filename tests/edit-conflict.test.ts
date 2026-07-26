@@ -369,3 +369,80 @@ describe("H6: the resolution carries a truthful field diff", () => {
     expect(change.next).toEqual(["A", "C"]);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M-1 — converged governing field must not raise a false compound conflict
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("M-1: convergence is not disagreement", () => {
+  it("converged SET change + Variant edit succeeds", () => {
+    // Original "Base"; the editor moves it to "Jungle" AND picks a variant;
+    // another writer independently moved it to the same "Jungle".
+    const loaded = { ...base, setName: "Base", rarityCode: "" };
+    const current = { ...base, setName: "Jungle", rarityCode: "" };
+    const posted = post(loaded, { setName: "Jungle", rarityCode: "rare_holo" });
+    const r = resolveEditConflicts(loaded, posted, current);
+    expect(r.blocked).toBe(false);
+    expect(r.compoundConflicts).toEqual([]);
+    expect(r.valuesToPersist.rarityCode).toBe("rare_holo");
+    expect(r.valuesToPersist.setName).toBe("Jungle");
+  });
+
+  it("DIFFERENT set changes + Variant edit still conflicts", () => {
+    const loaded = { ...base, setName: "Base", rarityCode: "" };
+    const current = { ...base, setName: "Fossil", rarityCode: "" };
+    const posted = post(loaded, { setName: "Jungle", rarityCode: "rare_holo" });
+    const r = resolveEditConflicts(loaded, posted, current);
+    expect(r.blocked).toBe(true);
+    // setName itself is a genuine same-field conflict here.
+    expect(r.conflicts).toContain("setName");
+  });
+
+  it("converged GAME change does not create a false conflict", () => {
+    const loaded = { ...base, cardGame: "pokemon", finishVariant: "" };
+    const current = { ...base, cardGame: "lorcana", finishVariant: "" };
+    const posted = post(loaded, { cardGame: "lorcana", finishVariant: "holo" });
+    const r = resolveEditConflicts(loaded, posted, current);
+    expect(r.blocked).toBe(false);
+    expect(r.compoundConflicts).toEqual([]);
+  });
+
+  it("converged ERA change does not create a false conflict", () => {
+    const loaded = { ...base, era: "swsh", promoType: "" };
+    const current = { ...base, era: "sv", promoType: "" };
+    const posted = post(loaded, { era: "sv", promoType: "black_star" });
+    const r = resolveEditConflicts(loaded, posted, current);
+    expect(r.blocked).toBe(false);
+    expect(r.valuesToPersist.promoType).toBe("black_star");
+  });
+
+  it("a DIVERGENT governing field still produces a compound conflict when the editor did not touch it", () => {
+    // Editor edits only the variant; the set moved elsewhere and still disagrees
+    // with what this tab loaded → the hybrid risk is real.
+    const loaded = { ...base, setName: "Base", finishVariant: "" };
+    const current = { ...base, setName: "Jungle", finishVariant: "" };
+    const posted = post(loaded, { finishVariant: "holo" }); // setName echoes "Base"
+    const r = resolveEditConflicts(loaded, posted, current);
+    expect(r.blocked).toBe(true);
+    expect(r.compoundConflicts[0].group).toBe("variant");
+    expect(r.compoundConflicts[0].movedElsewhere).toContain("setName");
+  });
+
+  it("canonicalisation does not manufacture false convergence", () => {
+    // Casing differs → NOT the same canonical value → still a real conflict.
+    const loaded = { ...base, setName: "Base" };
+    const current = { ...base, setName: "Jungle" };
+    const posted = post(loaded, { setName: "JUNGLE" });
+    const r = resolveEditConflicts(loaded, posted, current);
+    expect(r.conflicts).toContain("setName"); // scalar comparison is case-SENSITIVE
+  });
+
+  it("array ordering DOES converge safely (designations are a set)", () => {
+    const loaded = { ...base, designations: ["A"] };
+    const current = { ...base, designations: ["B", "A"] };
+    const posted = post(loaded, { designations: ["A", "B"] }); // same set, other order
+    const r = resolveEditConflicts(loaded, posted, current);
+    expect(r.blocked).toBe(false);
+    expect(r.conflicts).toEqual([]);
+  });
+});

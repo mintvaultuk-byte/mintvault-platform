@@ -19,6 +19,8 @@
  * be a new dependency — deliberately not installed without owner sign-off.
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -350,5 +352,96 @@ describe("13. catalogue-backed options render (real snapshot -> real component)"
     expect(codes).toContain("FIRST_EDITION");
     expect(codes).toContain("ERROR_MISCUT");
     expect(new Set(codes).size).toBe(codes.length); // no duplicate persisted codes
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M-4 — the shared helpers are WIRED INTO PRODUCTION, not merely tested
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("M-4: CertificateForm uses the shared workflow helpers", () => {
+  const FORM = readFileSync(join(process.cwd(), "client/src/components/certificate-form.tsx"), "utf8");
+
+  it("imports the shared constants and transitions from the ONE workflow module", () => {
+    const imports = FORM.slice(0, FORM.indexOf("export"));
+    for (const sym of [
+      "nextStageIndex",
+      "prevStageIndex",
+      "showsPreviewAside",
+      "clampStageIndex",
+      "CARD_DETAILS_STAGE",
+      "GRADE_STAGE",
+      "REVIEW_STAGE",
+    ]) {
+      expect(imports, `${sym} must be imported`).toContain(sym);
+    }
+    expect(imports).toContain('from "@shared/grading-workflow"');
+  });
+
+  it("preview visibility is decided by showsPreviewAside, not a hard-coded index test", () => {
+    expect(FORM).toContain("showsPreviewAside(wfStage)");
+    // The literal gate must not linger anywhere.
+    expect(FORM).not.toContain("wfStage === 0 || wfStage === 2");
+    expect(FORM).not.toContain("wfStage === 0 || wfStage === 1 || wfStage === 3");
+  });
+
+  it("stage gating uses the shared constants", () => {
+    expect(FORM).toContain("stageClass(CARD_DETAILS_STAGE)");
+    expect(FORM).toContain("stageClass(GRADE_STAGE)");
+    expect(FORM).toContain("stageClass(REVIEW_STAGE)");
+    // No bare numeric stage gating remains.
+    expect(FORM).not.toMatch(/stageClass\(\s*[0-9]\s*\)/);
+  });
+
+  it("navigation uses the shared transitions / constants, not bare indices", () => {
+    expect(FORM).toContain("goToStage(nextStageIndex(CARD_DETAILS_STAGE))"); // Card Details -> Grade
+    expect(FORM).toContain("goToStage(nextStageIndex(GRADE_STAGE))"); // Grade -> Review
+    expect(FORM).toContain("goToStage(prevStageIndex(GRADE_STAGE))"); // Grade -> Card Details
+    expect(FORM).toContain("goToStage(prevStageIndex(REVIEW_STAGE))"); // Review -> Grade
+    expect(FORM).not.toMatch(/goToStage\(\s*[0-9]\s*\)/);
+  });
+
+  it("goToStage clamps through the shared clampStageIndex", () => {
+    const fn = FORM.slice(FORM.indexOf("const goToStage"), FORM.indexOf("const stageClass"));
+    expect(fn).toContain("clampStageIndex(i)");
+  });
+});
+
+describe("M-4: the wired transitions produce the approved production flow", () => {
+  it("Card Details -> Grade", () => {
+    expect(nextStageIndex(CARD_DETAILS_STAGE)).toBe(GRADE_STAGE);
+    expect(GRADING_STAGES[nextStageIndex(CARD_DETAILS_STAGE)].label).toBe("Grade");
+  });
+  it("Grade -> Review", () => {
+    expect(nextStageIndex(GRADE_STAGE)).toBe(REVIEW_STAGE);
+    expect(GRADING_STAGES[nextStageIndex(GRADE_STAGE)].label).toBe("Review");
+  });
+  it("Review -> Grade", () => {
+    expect(prevStageIndex(REVIEW_STAGE)).toBe(GRADE_STAGE);
+    expect(GRADING_STAGES[prevStageIndex(REVIEW_STAGE)].label).toBe("Grade");
+  });
+  it("Grade -> Card Details (never an intermediate Rarity step)", () => {
+    expect(prevStageIndex(GRADE_STAGE)).toBe(CARD_DETAILS_STAGE);
+    expect(GRADING_STAGES[prevStageIndex(GRADE_STAGE)].label).toBe("Card Details");
+  });
+  it("stage clamping saturates at both ends", () => {
+    expect(clampStageIndex(-1)).toBe(CARD_DETAILS_STAGE);
+    expect(clampStageIndex(3)).toBe(REVIEW_STAGE);
+    expect(nextStageIndex(REVIEW_STAGE)).toBe(REVIEW_STAGE);
+    expect(prevStageIndex(CARD_DETAILS_STAGE)).toBe(CARD_DETAILS_STAGE);
+  });
+  it("preview is visible on Card Details and Review ONLY", () => {
+    expect(showsPreviewAside(CARD_DETAILS_STAGE)).toBe(true);
+    expect(showsPreviewAside(GRADE_STAGE)).toBe(false);
+    expect(showsPreviewAside(REVIEW_STAGE)).toBe(true);
+  });
+  it("there is no Rarity stage to navigate to at any point in the flow", () => {
+    expect(stageIndexByKey("rarity")).toBe(-1);
+    const visited = new Set<number>();
+    let s = CARD_DETAILS_STAGE;
+    for (let i = 0; i < 6; i++) { visited.add(s); s = nextStageIndex(s); }
+    s = REVIEW_STAGE;
+    for (let i = 0; i < 6; i++) { visited.add(s); s = prevStageIndex(s); }
+    expect([...visited].sort()).toEqual([0, 1, 2]); // only the three approved stages are reachable
   });
 });

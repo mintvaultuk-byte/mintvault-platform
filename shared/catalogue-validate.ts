@@ -12,9 +12,64 @@ export interface CatalogueEntryLike {
   aliases?: string[] | null;
   description?: string | null;
   allowCrossCategory?: boolean;
+  /** Live-row state. Absent is treated as LIVE, which matches the column
+   *  defaults (active TRUE, archived FALSE) and keeps older callers working. */
+  active?: boolean;
+  archived?: boolean;
 }
 
 const norm = (s: string | null | undefined): string => (s ?? "").trim().toLowerCase();
+
+/**
+ * M-2 — ARCHIVED CATALOGUE CODE POLICY (single coherent rule, matched by the
+ * database constraint in migrations/0026_catalogue_abbreviation_unique.sql):
+ *
+ *   • Persisted-code uniqueness applies to LIVE rows only (active AND not archived).
+ *   • An archived/inactive historical row KEEPS its old code — it is never
+ *     rewritten, so certificates that stored that code stay readable.
+ *   • A new ACTIVE replacement may therefore reuse a retired code.
+ *   • Reactivating an archived row whose code is now taken by a live row FAILS
+ *     with a clear message (see `catalogueConflict`).
+ */
+export function isLiveCatalogueRow(r: { active?: boolean; archived?: boolean }): boolean {
+  return (r.active ?? true) && !(r.archived ?? false);
+}
+
+/**
+ * M-3 — SHARED PERSISTED-CODE NAMESPACES.
+ *
+ * `designation` and `attribute` rows BOTH persist into the same
+ * `certificates.designations` array, so a code from either category lands in one
+ * undifferentiated list. Two live rows across those categories must therefore
+ * not produce the same effective code, or a stored value becomes ambiguous.
+ * Every other category is its own namespace.
+ */
+export const SHARED_CODE_NAMESPACES: readonly (readonly string[])[] = [["designation", "attribute"]];
+
+export function codeNamespaceFor(category: string): readonly string[] {
+  return SHARED_CODE_NAMESPACES.find((g) => g.includes(category)) ?? [category];
+}
+
+/**
+ * Characters permitted in a PERSISTED catalogue code (`value` / `abbreviation`).
+ * Deliberately NOT applied to `label` or `description` — human-readable text may
+ * contain spaces, punctuation and accents. Codes are what get written onto a
+ * certificate and compared, so they stay to a conservative set.
+ */
+export const CATALOGUE_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
+
+export function invalidCatalogueCode(
+  field: "value" | "abbreviation",
+  raw: string | null | undefined,
+): string | null {
+  const v = (raw ?? "").trim();
+  if (v === "") return null; // empty abbreviation is legitimate; empty value is caught elsewhere
+  if (v.length > 64) return `${field} "${v}" is too long — persisted codes are limited to 64 characters.`;
+  if (!CATALOGUE_CODE_PATTERN.test(v)) {
+    return `${field} "${v}" is not a valid persisted code — use letters, digits, hyphen or underscore, starting with a letter or digit. (Labels and descriptions are unrestricted.)`;
+  }
+  return null;
+}
 
 /**
  * Returns a plain-English conflict message, or null when the candidate is valid:
@@ -44,32 +99,44 @@ export function catalogueConflict(
     return `"${candidate.value}" already exists in ${candidate.category}.`;
   }
 
-  const abbr = norm(candidate.abbreviation);
-  if (
-    abbr &&
-    existing.some((r) => r.id !== excludeId && r.category === candidate.category && norm(r.abbreviation) === abbr)
-  ) {
-    return `Abbreviation "${candidate.abbreviation}" is already used in ${candidate.category}.`;
-  }
+  // Persisted-code validity (low-risk fix 3) — codes only, never labels.
+  const badValue = invalidCatalogueCode("value", candidate.value);
+  if (badValue) return badValue;
+  const badAbbr = invalidCatalogueCode("abbreviation", candidate.abbreviation);
+  if (badAbbr) return badAbbr;
 
-  // ── PERSISTED-CODE uniqueness (hostile-review MEDIUM) ─────────────────────
+  // ── PERSISTED-CODE uniqueness ─────────────────────────────────────────────
   // Designations persist `abbreviation || value` onto the certificate. Checking
-  // abbreviation-against-abbreviation is therefore not enough: one row's
-  // ABBREVIATION can collide with another row's VALUE and both would write the
-  // same code, so a stored certificate value would resolve ambiguously. Compare
-  // the EFFECTIVE code both ways.
+  // abbreviation-against-abbreviation is not enough: one row's ABBREVIATION can
+  // collide with another row's VALUE and both would write the same code, so a
+  // stored certificate value would resolve ambiguously.
+  //
+  // M-2: scoped to LIVE rows, so a retired code can be reused by a replacement.
+  // M-3: scoped to the shared NAMESPACE, so designation and attribute — which
+  //      both land in certificates.designations — cannot collide either.
   const candidateCode = effectiveCatalogueCode(candidate);
-  if (candidateCode) {
+  if (candidateCode && isLiveCatalogueRow(candidate)) {
+    const namespace = codeNamespaceFor(candidate.category);
     const codeClash = existing.find(
       (r) =>
         r.id !== excludeId &&
-        r.category === candidate.category &&
+        isLiveCatalogueRow(r) &&
+        namespace.includes(r.category) &&
         effectiveCatalogueCode(r) === candidateCode,
     );
     if (codeClash) {
-      return `"${candidate.abbreviation || candidate.value}" would persist the same code as "${
-        codeClash.abbreviation || codeClash.value
-      }" in ${candidate.category}. Each entry must produce a unique stored code.`;
+      const crossCategory = codeClash.category !== candidate.category;
+      // A REACTIVATION is specifically: this row exists, was NOT live, and this
+      // change would make it live. Derived from the row's own prior state, never
+      // from "it has an id" — an unsaved candidate carries an id too.
+      const priorSelf = excludeId !== undefined ? existing.find((r) => r.id === excludeId) : undefined;
+      const reactivating = !!priorSelf && !isLiveCatalogueRow(priorSelf) && isLiveCatalogueRow(candidate);
+      const where = crossCategory
+        ? `by the live ${codeClash.category} entry "${codeClash.abbreviation || codeClash.value}" — ${candidate.category} and ${codeClash.category} share one persisted-code namespace because both write into the certificate's designations`
+        : `by the live ${codeClash.category} entry "${codeClash.abbreviation || codeClash.value}"`;
+      return reactivating
+        ? `Cannot make "${candidate.abbreviation || candidate.value}" live: its persisted code "${candidateCode}" is already used ${where}. Retire or rename that entry first.`
+        : `"${candidate.abbreviation || candidate.value}" would persist the code "${candidateCode}", already used ${where}. Each live entry must produce a unique stored code.`;
     }
   }
 

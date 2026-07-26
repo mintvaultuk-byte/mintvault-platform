@@ -4,6 +4,9 @@ import { describe, it, expect } from "vitest";
 import {
   catalogueConflict,
   effectiveCatalogueCode,
+  isLiveCatalogueRow,
+  codeNamespaceFor,
+  invalidCatalogueCode,
   catalogueSearchMatch,
   parseImportItems,
   type CatalogueEntryLike,
@@ -41,8 +44,14 @@ describe("catalogueConflict — duplicate + one-category validation", () => {
   });
 
   it("rejects a duplicate abbreviation within a category", () => {
+    // The dedicated abbreviation-only rule was folded into the broader
+    // PERSISTED-CODE rule (it was a strict subset: equal abbreviations always
+    // produce equal effective codes). The rejection still happens — the message
+    // now names the stored code, which is the thing that actually collides.
     const withAbbr = [...rows, { id: 4, category: "rarity", value: "rare_holo", label: "Rare Holo", abbreviation: "R" }];
-    expect(catalogueConflict(withAbbr, { category: "rarity", value: "new_one", abbreviation: "r" })).toMatch(/Abbreviation/);
+    expect(catalogueConflict(withAbbr, { category: "rarity", value: "new_one", abbreviation: "r" })).toMatch(
+      /unique stored code/i,
+    );
   });
 
   it("enforces one-classification-only across categories by default", () => {
@@ -346,7 +355,7 @@ describe("persisted-code uniqueness at the service/validation layer (hostile-rev
     // (category,value) index cannot see this — the effective-code rule must.
     const existing = [row({ id: 1, category: "designation", value: "promotional", abbreviation: "PROMO" })];
     const msg = catalogueConflict(existing, row({ id: 0, category: "designation", value: "PROMO" }));
-    expect(msg).toMatch(/same code/i);
+    expect(msg).toMatch(/unique stored code/i);
   });
 
   it("REJECTS a candidate whose ABBREVIATION collides with an existing row's VALUE", () => {
@@ -355,7 +364,7 @@ describe("persisted-code uniqueness at the service/validation layer (hostile-rev
       existing,
       row({ id: 0, category: "designation", value: "promotional", abbreviation: "PROMO" }),
     );
-    expect(msg).toMatch(/same code/i);
+    expect(msg).toMatch(/unique stored code/i);
   });
 
   it("ALLOWS the same persisted code in a DIFFERENT category", () => {
@@ -396,5 +405,138 @@ describe("persisted-code uniqueness at the service/validation layer (hostile-rev
     expect(block).not.toMatch(/TEST_PRINT|test_print/);
     // And the seed fallback the pickers use offline carries none either.
     expect(POKEMON_DESIGNATIONS.map((d) => d.code)).not.toContain("TEST_PRINT");
+  });
+});
+
+describe("M-2: archived catalogue-code policy (validator agrees with migration 0026)", () => {
+  const row = (o: Partial<CatalogueEntryLike> & { id: number; category: string; value: string }) =>
+    ({ label: o.value, ...o }) as CatalogueEntryLike;
+
+  it("isLiveCatalogueRow treats absent flags as LIVE (matches the column defaults)", () => {
+    expect(isLiveCatalogueRow({})).toBe(true);
+    expect(isLiveCatalogueRow({ active: true, archived: false })).toBe(true);
+    expect(isLiveCatalogueRow({ active: false })).toBe(false);
+    expect(isLiveCatalogueRow({ archived: true })).toBe(false);
+  });
+
+  it("an ARCHIVED row does NOT block a new live entry reusing its code", () => {
+    const existing = [row({ id: 1, category: "designation", value: "old", abbreviation: "PROMO", archived: true })];
+    expect(catalogueConflict(existing, row({ id: 0, category: "designation", value: "promo", abbreviation: "PROMO" }))).toBeNull();
+  });
+
+  it("an INACTIVE row does NOT block a new live entry reusing its code", () => {
+    const existing = [row({ id: 1, category: "designation", value: "old", abbreviation: "PROMO", active: false })];
+    expect(catalogueConflict(existing, row({ id: 0, category: "designation", value: "promo", abbreviation: "PROMO" }))).toBeNull();
+  });
+
+  it("REACTIVATING an archived duplicate fails with a clear, actionable message", () => {
+    const existing = [
+      row({ id: 1, category: "designation", value: "retired", abbreviation: "PROMO", archived: true }),
+      row({ id: 2, category: "designation", value: "live_one", abbreviation: "PROMO" }),
+    ];
+    // Restore row 1 → it would become a second LIVE row with code PROMO.
+    const msg = catalogueConflict(existing, row({ id: 1, category: "designation", value: "retired", abbreviation: "PROMO", archived: false }), 1);
+    expect(msg).toMatch(/Cannot make .* live/i);
+    expect(msg).toMatch(/Retire or rename/i);
+  });
+
+  it("ARCHIVING a row is always allowed, even when its code duplicates a live one", () => {
+    const existing = [row({ id: 2, category: "designation", value: "live_one", abbreviation: "PROMO" })];
+    const msg = catalogueConflict(existing, row({ id: 1, category: "designation", value: "retired", abbreviation: "PROMO", archived: true }), 1);
+    expect(msg).toBeNull(); // a non-live candidate is exempt
+  });
+
+  it("historical rows are never rewritten — the policy only gates what may be LIVE", () => {
+    const archived = row({ id: 1, category: "designation", value: "old", abbreviation: "PROMO", archived: true });
+    // Editing an archived row's label is unaffected by the live code being taken.
+    const existing = [archived, row({ id: 2, category: "designation", value: "promo", abbreviation: "PROMO" })];
+    expect(catalogueConflict(existing, { ...archived, label: "Old Promo (retired)" }, 1)).toBeNull();
+  });
+});
+
+describe("M-3: designation and attribute share ONE persisted-code namespace", () => {
+  const row = (o: Partial<CatalogueEntryLike> & { id: number; category: string; value: string }) =>
+    ({ label: o.value, ...o }) as CatalogueEntryLike;
+
+  it("codeNamespaceFor groups designation+attribute and isolates everything else", () => {
+    expect([...codeNamespaceFor("designation")].sort()).toEqual(["attribute", "designation"]);
+    expect([...codeNamespaceFor("attribute")].sort()).toEqual(["attribute", "designation"]);
+    expect(codeNamespaceFor("finish")).toEqual(["finish"]);
+    expect(codeNamespaceFor("rarity")).toEqual(["rarity"]);
+  });
+
+  it("designation PROMO + attribute PROMO cannot BOTH be live", () => {
+    const existing = [row({ id: 1, category: "designation", value: "promo", abbreviation: "PROMO" })];
+    const msg = catalogueConflict(existing, row({ id: 0, category: "attribute", value: "promo_attr", abbreviation: "PROMO" }));
+    expect(msg).toMatch(/designations/i); // explains WHY they share a namespace
+    expect(msg).toMatch(/PROMO/);
+  });
+
+  it("different codes across designation/attribute are allowed", () => {
+    const existing = [row({ id: 1, category: "designation", value: "promo", abbreviation: "PROMO" })];
+    expect(catalogueConflict(existing, row({ id: 0, category: "attribute", value: "signed", abbreviation: "SIGNED" }))).toBeNull();
+  });
+
+  it("the shared namespace does not bleed into unrelated categories", () => {
+    const existing = [row({ id: 1, category: "designation", value: "holo_d", abbreviation: "HOLO" })];
+    // `finish` is its own namespace — the same code is fine there.
+    expect(catalogueConflict(existing, row({ id: 0, category: "finish", value: "holo_f", abbreviation: "HOLO" }))).toBeNull();
+  });
+
+  it("an ARCHIVED cross-category row follows the same archived policy", () => {
+    const existing = [row({ id: 1, category: "attribute", value: "old", abbreviation: "PROMO", archived: true })];
+    expect(catalogueConflict(existing, row({ id: 0, category: "designation", value: "promo", abbreviation: "PROMO" }))).toBeNull();
+  });
+
+  it("existing stored certificate codes still resolve after the namespace rule", () => {
+    // The rule constrains what may be CREATED; it never rewrites stored values.
+    const snap = buildSnapshotFromRows(
+      [
+        { category: "designation", value: "first_edition", label: "1st Edition", abbreviation: "FIRST_EDITION" },
+        { category: "attribute", value: "signed", label: "Signed", abbreviation: "SIGNED" },
+      ],
+      new Set(["designation", "attribute"]),
+    );
+    expect(snap.designations.map((d) => d.code)).toContain("FIRST_EDITION");
+    expect(snap.attributes.map((a) => a.code)).toContain("SIGNED");
+  });
+});
+
+describe("low-risk fix 3: persisted-code character validation", () => {
+  const row = (o: Partial<CatalogueEntryLike> & { id: number; category: string; value: string }) =>
+    ({ label: o.value, ...o }) as CatalogueEntryLike;
+
+  it("accepts ordinary codes", () => {
+    for (const v of ["promo", "FIRST_EDITION", "rare-holo", "1SS", "a"]) {
+      expect(invalidCatalogueCode("value", v), v).toBeNull();
+    }
+  });
+
+  it("rejects codes that would be ambiguous or unsafe to persist", () => {
+    for (const v of ["has space", "semi;colon", "quote\"d", "sla/sh", "-leading", "emoji🎴"]) {
+      expect(invalidCatalogueCode("value", v), v).toMatch(/not a valid persisted code/i);
+    }
+  });
+
+  it("does NOT restrict human-readable labels or descriptions", () => {
+    const existing: CatalogueEntryLike[] = [];
+    const candidate = row({
+      id: 0,
+      category: "designation",
+      value: "tournament_stamp",
+      abbreviation: "TOURNAMENT_STAMP",
+      label: "Tournament / Event Stamp (2005–2010) — “stamped”",
+      description: "Any punctuation, accents & spaces are fine here.",
+    });
+    expect(catalogueConflict(existing, candidate)).toBeNull();
+  });
+
+  it("an empty abbreviation is legitimate (the value becomes the code)", () => {
+    expect(invalidCatalogueCode("abbreviation", "")).toBeNull();
+    expect(invalidCatalogueCode("abbreviation", null)).toBeNull();
+  });
+
+  it("rejects an over-long persisted code", () => {
+    expect(invalidCatalogueCode("value", "a".repeat(65))).toMatch(/too long/i);
   });
 });

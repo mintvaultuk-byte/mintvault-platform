@@ -69,7 +69,7 @@ describe("2. the final canonical grading entry point is CertificateForm", () => 
     expect(DASH).toContain("onManualIdentification");
     expect(DASH).toContain("onCertUpdated");
   });
-  it("CertificateForm itself still drives all four stages through the shared workstation primitives", () => {
+  it("CertificateForm itself still drives all three stages through the shared workstation primitives", () => {
     expect(FORM).toContain("<WorkstationHeaderStrip");
     expect(FORM).toContain("<WorkstationPreviewAside");
     expect(FORM).toContain("<ReviewSummary");
@@ -163,7 +163,7 @@ describe("8. shared primitives + all three grading stages still canonical (regre
     expect(staff).toContain("<AdminHeaderRow");
   });
   it("the preview aside gate still covers Card Details and Review (wfStage 0, 2) — Grade's protected exception is untouched", () => {
-    expect(FORM).toMatch(/wfStage === 0 \|\| wfStage === 2 \?/);
+    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)/);
   });
 });
 
