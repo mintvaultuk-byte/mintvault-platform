@@ -23,6 +23,16 @@ const norm = (s: string | null | undefined): string => (s ?? "").trim().toLowerC
  *  - the same value already classified in a DIFFERENT category (one-category-only)
  *    unless BOTH entries opt into allowCrossCategory.
  */
+/**
+ * The code a catalogue row PERSISTS onto a certificate: `abbreviation || value`.
+ * This is the single definition shared by the snapshot mapper, the validator and
+ * the database constraint, so the three can never drift apart.
+ */
+export function effectiveCatalogueCode(row: { value?: string | null; abbreviation?: string | null }): string {
+  const abbr = (row.abbreviation ?? "").trim();
+  return (abbr || (row.value ?? "").trim()).toLowerCase();
+}
+
 export function catalogueConflict(
   existing: CatalogueEntryLike[],
   candidate: CatalogueEntryLike,
@@ -40,6 +50,27 @@ export function catalogueConflict(
     existing.some((r) => r.id !== excludeId && r.category === candidate.category && norm(r.abbreviation) === abbr)
   ) {
     return `Abbreviation "${candidate.abbreviation}" is already used in ${candidate.category}.`;
+  }
+
+  // ── PERSISTED-CODE uniqueness (hostile-review MEDIUM) ─────────────────────
+  // Designations persist `abbreviation || value` onto the certificate. Checking
+  // abbreviation-against-abbreviation is therefore not enough: one row's
+  // ABBREVIATION can collide with another row's VALUE and both would write the
+  // same code, so a stored certificate value would resolve ambiguously. Compare
+  // the EFFECTIVE code both ways.
+  const candidateCode = effectiveCatalogueCode(candidate);
+  if (candidateCode) {
+    const codeClash = existing.find(
+      (r) =>
+        r.id !== excludeId &&
+        r.category === candidate.category &&
+        effectiveCatalogueCode(r) === candidateCode,
+    );
+    if (codeClash) {
+      return `"${candidate.abbreviation || candidate.value}" would persist the same code as "${
+        codeClash.abbreviation || codeClash.value
+      }" in ${candidate.category}. Each entry must produce a unique stored code.`;
+    }
   }
 
   // One-classification-only: a value may live in two categories ONLY when BOTH

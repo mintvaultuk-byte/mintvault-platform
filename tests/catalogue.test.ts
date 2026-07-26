@@ -3,6 +3,7 @@ import { join } from "path";
 import { describe, it, expect } from "vitest";
 import {
   catalogueConflict,
+  effectiveCatalogueCode,
   catalogueSearchMatch,
   parseImportItems,
   type CatalogueEntryLike,
@@ -325,5 +326,75 @@ describe("designation + attribute categories reach the pickers (consolidation 20
     // And the mapper must read abbreviation first, else these codes never apply.
     const snapshotSrc = readFileSync(join(process.cwd(), "shared/catalogue-snapshot.ts"), "utf8");
     expect(snapshotSrc).toContain("row.abbreviation && row.abbreviation.trim()) || row.value");
+  });
+});
+
+describe("persisted-code uniqueness at the service/validation layer (hostile-review MEDIUM)", () => {
+  const row = (o: Partial<CatalogueEntryLike> & { id: number; category: string; value: string }) =>
+    ({ label: o.value, ...o }) as CatalogueEntryLike;
+
+  it("effectiveCatalogueCode is `abbreviation || value`, trimmed and case-folded", () => {
+    expect(effectiveCatalogueCode({ value: "first_edition", abbreviation: "FIRST_EDITION" })).toBe("first_edition");
+    expect(effectiveCatalogueCode({ value: "custom_thing", abbreviation: null })).toBe("custom_thing");
+    expect(effectiveCatalogueCode({ value: "x", abbreviation: "  " })).toBe("x");
+    expect(effectiveCatalogueCode({ value: " Spaced ", abbreviation: null })).toBe("spaced");
+  });
+
+  it("REJECTS a candidate whose VALUE collides with an existing row's ABBREVIATION", () => {
+    // Existing row persists "PROMO" via its abbreviation; the candidate would
+    // persist "PROMO" via its value. Different `value`s, so 0019's
+    // (category,value) index cannot see this — the effective-code rule must.
+    const existing = [row({ id: 1, category: "designation", value: "promotional", abbreviation: "PROMO" })];
+    const msg = catalogueConflict(existing, row({ id: 0, category: "designation", value: "PROMO" }));
+    expect(msg).toMatch(/same code/i);
+  });
+
+  it("REJECTS a candidate whose ABBREVIATION collides with an existing row's VALUE", () => {
+    const existing = [row({ id: 1, category: "designation", value: "promo" })];
+    const msg = catalogueConflict(
+      existing,
+      row({ id: 0, category: "designation", value: "promotional", abbreviation: "PROMO" }),
+    );
+    expect(msg).toMatch(/same code/i);
+  });
+
+  it("ALLOWS the same persisted code in a DIFFERENT category", () => {
+    // The one-classification rule is SYMMETRIC: both sides must opt in.
+    const existing = [
+      row({ id: 1, category: "finish", value: "unlimited", abbreviation: "UNLIMITED", allowCrossCategory: true }),
+    ];
+    const msg = catalogueConflict(
+      existing,
+      row({ id: 0, category: "designation", value: "unlimited", abbreviation: "UNLIMITED", allowCrossCategory: true }),
+    );
+    expect(msg).toBeNull();
+  });
+
+  it("does not flag a row against ITSELF when editing", () => {
+    const existing = [row({ id: 7, category: "designation", value: "promo", abbreviation: "PROMO" })];
+    const msg = catalogueConflict(
+      existing,
+      row({ id: 7, category: "designation", value: "promo", abbreviation: "PROMO", label: "Promo (renamed)" }),
+      7,
+    );
+    expect(msg).toBeNull();
+  });
+
+  it("the shipped seeder produces NO duplicate persisted codes within a category", () => {
+    const seeder = readFileSync(join(process.cwd(), "scripts/db/seed-catalogue.ts"), "utf8");
+    const block = seeder.slice(seeder.indexOf("const designations:"), seeder.indexOf("designations.forEach"));
+    const codes = [...block.matchAll(/code:\s*"([A-Z_]+)"/g)].map((m) => m[1].toLowerCase());
+    const values = [...block.matchAll(/value:\s*"([a-z_]+)"/g)].map((m) => m[1].toLowerCase());
+    // Every designation carries an explicit code, and all effective codes are unique.
+    expect(codes.length).toBe(values.length);
+    expect(new Set(codes).size).toBe(codes.length);
+  });
+
+  it("CLEANUP: no test-only designation is present in production seed output", () => {
+    const seeder = readFileSync(join(process.cwd(), "scripts/db/seed-catalogue.ts"), "utf8");
+    const block = seeder.slice(seeder.indexOf("const designations:"), seeder.indexOf("designations.forEach"));
+    expect(block).not.toMatch(/TEST_PRINT|test_print/);
+    // And the seed fallback the pickers use offline carries none either.
+    expect(POKEMON_DESIGNATIONS.map((d) => d.code)).not.toContain("TEST_PRINT");
   });
 });

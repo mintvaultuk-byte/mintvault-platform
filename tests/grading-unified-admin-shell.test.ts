@@ -4,7 +4,7 @@
  * Root cause (confirmed by a read-only architecture audit before any edit):
  * Staff dashboard, Super Admin dashboard and the grading workstation had
  * three independently-implemented header/breadcrumb patterns, and the
- * grading workstation's own 4-stage workflow had its aside/header-strip
+ * grading workstation's own 3-stage workflow had its aside/header-strip
  * markup duplicated inline inside certificate-form.tsx with no single
  * source of truth — so fixing one stage's spacing repeatedly risked another
  * stage silently drifting. Stage 3 (Grade) visually "escaping" the
@@ -90,7 +90,7 @@ describe("2. role permissions remain distinct (Staff vs Super Admin)", () => {
   });
 });
 
-describe("3. all four grading stages use the SAME WorkstationHeaderStrip component", () => {
+describe("3. all three grading stages use the SAME WorkstationHeaderStrip component", () => {
   it("certificate-form.tsx renders WorkstationHeaderStrip exactly once, outside the per-stage sections", () => {
     expect((FORM.match(/<WorkstationHeaderStrip/g) ?? []).length).toBe(1);
     const stripCallIdx = FORM.indexOf("<WorkstationHeaderStrip");
@@ -104,7 +104,7 @@ describe("3. all four grading stages use the SAME WorkstationHeaderStrip compone
   });
 });
 
-describe("4. all four stages use the same desktop breakpoint (md) for the two-column shell", () => {
+describe("4. all three stages use the same desktop breakpoint (md) for the two-column shell", () => {
   it("the outer workspace row and the preview aside share the SAME md: breakpoint", () => {
     // CertificateForm mounts the shell; the two-column row lives in the shell.
     expect(FORM).toContain("<CanonicalGradingWorkstationShell");

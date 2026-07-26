@@ -85,15 +85,17 @@ describe("stage separation (spec 1-4)", () => {
     expect(STAGE_REVIEW).toContain('data-testid="button-add-grader-notes"');
     expect(STAGE_REVIEW).toContain("button-save-cert");
   });
-  it("Review stage shows the live certificate preview + confidence (item 1/9)", () => {
-    // Post four-build consolidation: the Review-stage live preview is the SINGLE
-    // canonical CertificatePreviewPanel, mounted once at the shell level for the
-    // Rarity (1) AND Review (3) stages (via WorkstationPreviewAside `below`), not
-    // a second per-stage LabelPreview. Assert the canonical panel covers Review.
+  it("Review stage shows the live certificate preview via the SINGLE canonical panel", () => {
+    // The Review-stage live preview is the SINGLE canonical
+    // CertificatePreviewPanel, mounted once at the shell level (via
+    // WorkstationPreviewAside `below`), never a second per-stage LabelPreview.
+    // Three-stage numbering: Card Details (0) + Review (2); Grade (1) excluded.
     expect(FORM).toContain("<CertificatePreviewPanel");
-    expect(FORM).toContain("wfStage === 1 || wfStage === 3");
-    // The removed duplicate must not come back.
+    expect(FORM).toContain("wfStage === 0 || wfStage === 2");
+    // The removed duplicate must not come back — negative guard preserved, NOT
+    // inverted.
     expect(FORM).not.toContain("<LabelPreview");
+    expect((FORM.match(/<CertificatePreviewPanel/g) ?? []).length).toBe(1);
   });
   it("Review stage exposes an explicit large Save button alongside auto-save (item 7)", () => {
     expect(STAGE_REVIEW).toContain('data-testid="button-save-now"');

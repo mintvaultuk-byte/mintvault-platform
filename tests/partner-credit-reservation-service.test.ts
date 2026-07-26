@@ -731,6 +731,11 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0019_catalogue_manager.sql'");
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0023_set_library_schema.sql'");
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0024_set_library_base_tables.sql'");
+    // And the catalogue persisted-code uniqueness index (also ≥0018) — index-only
+    // and additive, but its journal row still trips the later-migration guard first.
+    await admin.query(
+      "DELETE FROM schema_migrations WHERE filename = '0026_catalogue_abbreviation_unique.sql'"
+    );
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );

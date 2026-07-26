@@ -1,0 +1,170 @@
+/**
+ * catalogue-abbreviation-unique-migration.test.ts — DB-backed.
+ *
+ * Applies the REAL migrations/0026_catalogue_abbreviation_unique.sql (and its
+ * rollback) against a disposable PostgreSQL 17 cluster. Proves the persisted-code
+ * uniqueness rule the hostile review asked for, that it is additive, that it
+ * fails LOUDLY on incompatible pre-existing data instead of with a bare index
+ * error, and that it is fully reversible. Never touches staging or production.
+ */
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
+import pg from "pg";
+import fs from "node:fs";
+import path from "node:path";
+import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+
+const { Pool } = pg;
+
+let cluster: DisposablePostgres17 | null = null;
+let pool: pg.Pool | null = null;
+
+const readSql = (name: string) => fs.readFileSync(path.resolve(process.cwd(), "migrations", name), "utf8");
+const MIGRATION = readSql("0026_catalogue_abbreviation_unique.sql");
+const ROLLBACK = readSql("rollback-0026-catalogue-abbreviation-unique.sql");
+/** 0019 creates the table this migration indexes. */
+const CREATE_0019 = readSql("0019_catalogue_manager.sql");
+
+const q = async (text: string, params: unknown[] = []) => (await pool!.query(text, params)).rows;
+
+const insert = (row: {
+  category: string;
+  value: string;
+  label?: string;
+  abbreviation?: string | null;
+  active?: boolean;
+  archived?: boolean;
+}) =>
+  q(
+    `INSERT INTO catalogue_items (category, value, label, abbreviation, active, archived)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [
+      row.category,
+      row.value,
+      row.label ?? row.value,
+      row.abbreviation ?? null,
+      row.active ?? true,
+      row.archived ?? false,
+    ],
+  );
+
+beforeAll(async () => {
+  cluster = await startPostgres17("catalogue-abbr-unique");
+  pool = new Pool({ connectionString: cluster.url, max: 4 });
+}, 180_000);
+
+afterAll(async () => {
+  await pool?.end().catch(() => {});
+  await cluster?.stop().catch(() => {});
+});
+
+beforeEach(async () => {
+  await q("DROP TABLE IF EXISTS catalogue_items CASCADE");
+  await pool!.query(CREATE_0019);
+});
+
+describe("0026 — catalogue persisted-code uniqueness (real migration, real PostgreSQL)", () => {
+  it("applies cleanly on an empty catalogue and creates exactly one new index", async () => {
+    const before = await q(`SELECT indexname FROM pg_indexes WHERE tablename = 'catalogue_items'`);
+    await pool!.query(MIGRATION);
+    const after = await q(`SELECT indexname FROM pg_indexes WHERE tablename = 'catalogue_items'`);
+    expect(after.length).toBe(before.length + 1);
+    expect(after.map((r) => r.indexname)).toContain("uq_catalogue_items_category_effective_code");
+  });
+
+  it("is ADDITIVE — it creates/alters/drops no table or column", () => {
+    expect(MIGRATION).not.toMatch(/\bDROP\s+TABLE\b/i);
+    expect(MIGRATION).not.toMatch(/\bALTER\s+TABLE\b/i);
+    expect(MIGRATION).not.toMatch(/\bCREATE\s+TABLE\b/i);
+    expect(MIGRATION).not.toMatch(/\bDELETE\s+FROM\b|\bUPDATE\s+catalogue_items\b/i);
+  });
+
+  it("BLOCKS a duplicate persisted code where one row's abbreviation equals another's value", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "designation", value: "first_edition", abbreviation: "FIRST_EDITION" });
+    // A second row whose VALUE collides with the first row's ABBREVIATION.
+    await expect(insert({ category: "designation", value: "FIRST_EDITION" })).rejects.toThrow(
+      /uq_catalogue_items_category_effective_code|duplicate key/i,
+    );
+  });
+
+  it("BLOCKS two rows with the same abbreviation in one category", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "designation", value: "promo_a", abbreviation: "PROMO" });
+    await expect(insert({ category: "designation", value: "promo_b", abbreviation: "PROMO" })).rejects.toThrow(
+      /duplicate key/i,
+    );
+  });
+
+  it("is case-insensitive on the persisted code", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "designation", value: "staff", abbreviation: "STAFF" });
+    await expect(insert({ category: "designation", value: "other", abbreviation: "staff" })).rejects.toThrow(
+      /duplicate key/i,
+    );
+  });
+
+  it("ALLOWS the same code in DIFFERENT categories (cross-category is a separate rule)", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "designation", value: "unlimited", abbreviation: "UNLIMITED" });
+    await expect(insert({ category: "finish", value: "unlimited", abbreviation: "UNLIMITED" })).resolves.toBeDefined();
+  });
+
+  it("ALLOWS a retired row to keep a code a live replacement reuses", async () => {
+    await pool!.query(MIGRATION);
+    await insert({ category: "designation", value: "old", abbreviation: "PROMO", archived: true });
+    await insert({ category: "designation", value: "older", abbreviation: "PROMO", active: false });
+    // The live replacement is still permitted.
+    await expect(insert({ category: "designation", value: "new", abbreviation: "PROMO" })).resolves.toBeDefined();
+  });
+
+  it("fails LOUDLY, naming the offending codes, when pre-existing data is incompatible", async () => {
+    // Seed a collision BEFORE the index exists — the 0019 (category,value) index
+    // permits it, which is exactly the gap this migration closes.
+    await insert({ category: "designation", value: "promo_a", abbreviation: "PROMO" });
+    await insert({ category: "designation", value: "promo_b", abbreviation: "PROMO" });
+    await expect(pool!.query(MIGRATION)).rejects.toThrow(/0026 BLOCKED[\s\S]*designation\/promo/i);
+    // And it left NO half-built index behind.
+    const idx = await q(
+      `SELECT indexname FROM pg_indexes WHERE indexname = 'uq_catalogue_items_category_effective_code'`,
+    );
+    expect(idx).toHaveLength(0);
+  });
+
+  it("existing valid seed-shaped data applies without reconciliation", async () => {
+    // The shipped seeder's designation rows, which all carry distinct codes.
+    for (const [value, abbr] of [
+      ["promo", "PROMO"],
+      ["tournament_stamp", "TOURNAMENT_STAMP"],
+      ["prerelease", "PRERELEASE"],
+      ["staff", "STAFF"],
+      ["error_miscut", "ERROR_MISCUT"],
+      ["first_edition", "FIRST_EDITION"],
+      ["shadowless", "SHADOWLESS"],
+      ["unlimited", "UNLIMITED"],
+      ["japanese_print", "JAPANESE_PRINT"],
+      ["other_language", "OTHER_LANGUAGE"],
+    ]) {
+      await insert({ category: "designation", value, abbreviation: abbr });
+    }
+    await expect(pool!.query(MIGRATION)).resolves.toBeDefined();
+  });
+
+  it("is fully reversible and re-appliable", async () => {
+    await pool!.query(MIGRATION);
+    await pool!.query(ROLLBACK);
+    expect(
+      await q(`SELECT indexname FROM pg_indexes WHERE indexname = 'uq_catalogue_items_category_effective_code'`),
+    ).toHaveLength(0);
+    // After rollback the previously-blocked insert is possible again...
+    await insert({ category: "designation", value: "promo_a", abbreviation: "PROMO" });
+    await insert({ category: "designation", value: "promo_b", abbreviation: "PROMO" });
+    // ...and re-applying now correctly refuses, naming the data to reconcile.
+    await expect(pool!.query(MIGRATION)).rejects.toThrow(/0026 BLOCKED/);
+  });
+
+  it("does not touch 0019 — that migration is already applied in production", () => {
+    // Guard the checksum-safety promise: 0026 must never reference or rewrite 0019.
+    expect(MIGRATION).not.toMatch(/DROP\s+INDEX\s+IF\s+EXISTS\s+uq_catalogue_items_category_value/i);
+    expect(CREATE_0019).toContain("uq_catalogue_items_category_value");
+  });
+});

@@ -112,7 +112,12 @@ import { certIsPristine } from "./lib/cert-pristine";
 import { enqueueScanJob } from "./lib/scan-job-queue";
 import { isServiceValidForCarrier } from "@shared/carriers";
 import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/variant-derive";
-import { resolveEditConflicts } from "@shared/edit-conflict";
+import {
+  resolveEditConflicts,
+  GUARDED_FIELD_SPECS,
+  canonicalArrayValue,
+  type EditConflictResolution,
+} from "@shared/edit-conflict";
 import { centeringAxisGrade } from "@shared/centering";
 import {
   SOCIAL_STUDIO_BACKGROUNDS,
@@ -420,6 +425,33 @@ function rarityDisplayLabel(code: string | null | undefined, rarityOther: string
 
 function designationCodesToLabels(codes: string[]): string[] {
   return codes.map((c) => DESIGNATION_LABELS[c] || c);
+}
+
+/**
+ * H6 fallback diff — used only when a legacy tab sends no `loadedSnapshot`, so
+ * there is no three-way resolution to draw on. Compares the STORED row against
+ * the values about to be written and reports only genuine changes. Fields the
+ * write does not touch are skipped, so an unchanged field is never recorded as
+ * a change.
+ */
+function buildDirectFieldDiff(
+  existing: Record<string, unknown>,
+  data: Record<string, unknown>
+): Array<{ field: string; previous: string | string[]; next: string | string[]; source: "request" }> {
+  const out: Array<{ field: string; previous: string | string[]; next: string | string[]; source: "request" }> = [];
+  for (const spec of GUARDED_FIELD_SPECS) {
+    if (!Object.prototype.hasOwnProperty.call(data, spec.key)) continue;
+    if (spec.kind === "stringArray") {
+      const prev = canonicalArrayValue(existing[spec.key]);
+      const next = canonicalArrayValue(data[spec.key]);
+      if (prev.join(" ") !== next.join(" ")) out.push({ field: spec.key, previous: prev, next, source: "request" });
+      continue;
+    }
+    const prev = existing[spec.key] == null ? "" : String(existing[spec.key]).trim();
+    const next = data[spec.key] == null ? "" : String(data[spec.key]).trim();
+    if (prev !== next) out.push({ field: spec.key, previous: prev, next, source: "request" });
+  }
+  return out;
 }
 
 function parseDesignations(raw: unknown, fallback: string[] = []): string[] {
@@ -4122,6 +4154,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         // overwrite that newer value with something different (see
         // shared/edit-conflict.ts). Tabs from before this deploy send no
         // snapshot and pass through unchanged.
+        let editResolution: EditConflictResolution | null = null;
         if (req.body.loadedSnapshot) {
           let snapshot: Record<string, unknown> | null = null;
           try {
@@ -4130,30 +4163,59 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             snapshot = null; // malformed → treat as legacy (no guard)
           }
           if (snapshot && typeof snapshot === "object") {
-            // Owner spec 2026-07-26: only a genuine SAME-FIELD disagreement may
-            // interrupt the grader. Fields this tab never touched but that moved
-            // in the DB are merged silently (the DB value wins) instead of
-            // 409-ing the whole save — that false-conflict was the disruptive
-            // behaviour. See shared/edit-conflict.ts for the three-way rules.
-            const { conflicts, merged } = resolveEditConflicts(
-              snapshot,
-              req.body,
-              existing as Record<string, unknown>
-            );
-            if (conflicts.length > 0) {
+            // Owner spec 2026-07-26 + hostile-review H5/MED: only a genuine
+            // SAME-FIELD disagreement (or a related-field hybrid) may interrupt
+            // the grader. Fields this tab never edited but that moved in the DB
+            // merge silently; fields the request never submitted are left alone
+            // and are NEVER treated as a clear.
+            editResolution = resolveEditConflicts(snapshot, req.body, existing as Record<string, unknown>);
+
+            if (editResolution.blocked) {
+              // H6: a blocked conflict must NOT produce a normal successful
+              // "update" audit event. Record a DISTINCT blocked event instead,
+              // so the trail is truthful in both directions, and write nothing
+              // to the certificate.
+              const compoundFields = editResolution.compoundConflicts.flatMap((c) => [
+                ...c.editorEdited,
+                ...c.movedElsewhere,
+              ]);
+              const reported = Array.from(new Set([...editResolution.conflicts, ...compoundFields]));
+              await storage.writeAuditLog(
+                "certificate",
+                existing.certId,
+                "update_conflict_blocked",
+                req.session.adminEmail || "admin",
+                {
+                  certificateId: existing.id,
+                  conflicts: editResolution.conflicts,
+                  compoundConflicts: editResolution.compoundConflicts,
+                  outcome: "no_write",
+                }
+              );
               return res.status(409).json({
-                error: `This certificate was changed elsewhere since you opened it (${conflicts.join(
-                  ", "
-                )}) — refresh the page to see the latest values, then re-apply your edit.`,
-                conflicts,
+                error:
+                  editResolution.compoundConflicts.length > 0
+                    ? `This certificate's ${editResolution.compoundConflicts
+                        .map((c) => c.group)
+                        .join(" and ")} details were changed elsewhere while you were editing related fields (${reported.join(
+                        ", "
+                      )}) — refresh the page to see the latest values, then re-apply your edit.`
+                    : `This certificate was changed elsewhere since you opened it (${editResolution.conflicts.join(
+                        ", "
+                      )}) — refresh the page to see the latest values, then re-apply your edit.`,
+                conflicts: editResolution.conflicts,
+                compoundConflicts: editResolution.compoundConflicts,
               });
             }
-            // MERGE: replace each untouched-but-moved field in the incoming body
-            // with the newer DB value, so the full-state post cannot write the
-            // stale value back. Audit history is unaffected — the write below
-            // records the same before/after it always did.
-            for (const f of merged) {
-              req.body[f] = (existing as Record<string, unknown>)[f] ?? "";
+
+            // SAFE MERGE: write the concurrent DB value back into the request
+            // body for each field the editor never edited, so the full-state
+            // post cannot resurrect the stale value. Only fields the resolver
+            // decided to persist are written — an OMITTED field is deliberately
+            // absent from valuesToPersist and is left untouched below.
+            for (const [f, v] of Object.entries(editResolution.valuesToPersist)) {
+              if (editResolution.fields.find((x) => x.key === f)?.provenance !== "merged") continue;
+              req.body[f] = Array.isArray(v) ? JSON.stringify(v) : v;
             }
           }
         }
@@ -4334,12 +4396,45 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           });
         }
 
-        const cert = await storage.updateCertificate(id, data);
+        // ── H6: truthful FIELD-LEVEL audit ───────────────────────────────────
+        // The old payload recorded three CURRENT values and no previous values,
+        // so it could not answer "what actually changed?". Record the real diff:
+        // only fields whose value genuinely changed, each with its previous and
+        // next value and where the value came from (this request, or a safe
+        // merge that preserved a concurrent database value).
+        //
+        // When no snapshot was sent (legacy tab), there is no three-way
+        // resolution to draw on, so the diff is computed directly from the
+        // stored row against the values about to be written.
+        const auditChanges = editResolution
+          ? editResolution.changes.map((c) => ({
+              field: c.key,
+              previous: c.previous,
+              next: c.next,
+              source: c.provenance,
+            }))
+          : buildDirectFieldDiff(existing as Record<string, unknown>, data as Record<string, unknown>);
 
-        await storage.writeAuditLog("certificate", existing.certId, "update", req.session.adminEmail || "admin", {
-          cardName: data.cardName,
-          setName: data.setName,
-          gradeOverall: data.gradeOverall,
+        const mergedFields = editResolution
+          ? editResolution.fields.filter((f) => f.provenance === "merged").map((f) => f.key)
+          : [];
+
+        // H7: the row change and its audit row commit together or not at all.
+        const cert = await storage.updateCertificateAudited(id, data, {
+          entityId: existing.certId,
+          action: "update",
+          adminUser: req.session.adminEmail || "admin",
+          details: {
+            certificateId: existing.id,
+            certId: existing.certId,
+            // certificate-only edit — this route never renames a catalogue entry.
+            scope: "certificate_only",
+            changes: auditChanges,
+            changedFields: auditChanges.map((c) => c.field),
+            // Unrelated concurrent edits that were preserved rather than clobbered.
+            mergedFromConcurrentEdit: mergedFields,
+            conflictGuard: editResolution ? "three_way_snapshot" : "legacy_no_snapshot",
+          },
         });
 
         res.json(cert ? { ...cert, certId: normalizeCertId(cert.certId) } : cert);

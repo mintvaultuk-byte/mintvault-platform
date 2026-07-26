@@ -1,12 +1,12 @@
 /**
- * Stage 4 read-only confirmation summary.
+ * Review-stage read-only confirmation summary.
  *
  * Pure presentation: every value is passed in from the certificate form's
  * EXISTING state — this component holds no certificate state of its own, makes
  * no network/provider calls, computes no grade, and never mutates. The small
  * "Edit" links only call back to switch the local workflow stage. The card
- * image is NOT rendered here — Stage 4 now reuses the SAME preview aside as
- * Card/Rarity (certificate-form.tsx renders it for wfStage 3 too), so this
+ * image is NOT rendered here — Review reuses the SAME preview aside as
+ * Card Details (certificate-form.tsx renders it for the Review stage too), so this
  * summary only holds the review-details columns and never duplicates the image.
  */
 import { RaritySymbol } from "@/components/rarity-picker/RaritySymbol";

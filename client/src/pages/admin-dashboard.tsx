@@ -386,7 +386,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
         <div className="flex min-h-[100dvh] flex-col p-2.5">
           {/* Compact grading header — the SHARED AdminHeaderRow primitive (same
               breadcrumb-left/actions-right row every admin surface uses).
-              Replaces the tall "Edit MV####" header chrome so the four-stage
+              Replaces the tall "Edit MV####" header chrome so the three-stage
               form starts near the top on a 13-inch MacBook. Certificate Tools
               is the shared compact utility-button primitive beside the
               breadcrumb, not a large isolated top-right pill. */}

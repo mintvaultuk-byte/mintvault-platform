@@ -1,5 +1,5 @@
 /**
- * Read-only card viewer for the Card + Rarity stages.
+ * Read-only card viewer for the Card Details stage.
  *
  * A plain <img> fed by (a) the object URL of a just-uploaded file, or (b) the
  * existing signed display URLs from GET /api/admin/certificates/:id/images

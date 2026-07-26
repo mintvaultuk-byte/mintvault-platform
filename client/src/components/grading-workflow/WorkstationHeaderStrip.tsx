@@ -1,5 +1,5 @@
 /**
- * Shared workstation header strip — 4-stage workflow navigation (left/top
+ * Shared workstation header strip — 3-stage workflow navigation (left/top
  * zone) + queue/session statistics (right/bottom zone). ONE component
  * rendered once per grading session (outside the 4 per-stage sections), so
  * Card, Rarity, Grade and Review all see the byte-identical header — there

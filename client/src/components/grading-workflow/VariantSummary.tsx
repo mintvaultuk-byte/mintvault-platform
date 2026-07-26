@@ -1,6 +1,6 @@
 /**
  * Permanent classification summary shown directly beneath the rarity picker
- * (Rarity stage). Gives the grader an at-a-glance readout of the exact
+ * (Variant section of Card Details). Gives the grader an at-a-glance readout of the exact
  * language / rarity / finish / promo / subset they have selected, in the same
  * human-readable catalogue wording used on the Review summary and the public
  * certificate page.

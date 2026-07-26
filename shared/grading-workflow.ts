@@ -93,3 +93,39 @@ export function furthestReached(completion: boolean[]): number {
   while (i < completion.length && completion[i]) i++;
   return Math.min(i, GRADING_STAGES.length - 1);
 }
+
+// ── Stage transitions (pure, so Continue/Back are testable against PRODUCTION
+//    code rather than by matching source text) ─────────────────────────────────
+
+export const CARD_DETAILS_STAGE = 0;
+export const GRADE_STAGE = 1;
+export const REVIEW_STAGE = 2;
+
+/** Clamp any index (including NaN/±Infinity) into a real stage index. */
+export function clampStageIndex(i: number): number {
+  if (!Number.isFinite(i)) return 0;
+  return Math.min(GRADING_STAGES.length - 1, Math.max(0, Math.floor(i)));
+}
+
+/** Continue → the next stage, saturating at Review. */
+export function nextStageIndex(i: number): number {
+  return clampStageIndex(clampStageIndex(i) + 1);
+}
+
+/** Back → the previous stage, saturating at Card Details. */
+export function prevStageIndex(i: number): number {
+  return clampStageIndex(clampStageIndex(i) - 1);
+}
+
+/** Index of a stage by key; -1 when the key is not a stage (e.g. "rarity"). */
+export function stageIndexByKey(key: string): number {
+  return GRADING_STAGES.findIndex((s) => s.key === key);
+}
+
+/** The preview aside is shown on Card Details and Review. Grade is the single
+ *  documented exception: the protected grading workstation renders its own
+ *  interactive card image there, and a second copy would duplicate it. */
+export function showsPreviewAside(stage: number): boolean {
+  const s = clampStageIndex(stage);
+  return s === CARD_DETAILS_STAGE || s === REVIEW_STAGE;
+}
