@@ -5,11 +5,14 @@
  * Kept pure so it is unit-testable without importing the render pipeline.
  */
 // Collapse ALL whitespace runs to a single space and hard-cap the length before
-// any value reaches the (protected) label renderer. This neutralises a polynomial
-// ReDoS: the renderer matches set names with `/\s+black star promos?$/i`, which is
-// slow on long runs of spaces — collapsing runs to one space removes the repetition
-// the backtracker feeds on, and the length cap bounds it regardless. (Preview is
-// cosmetic, so normalising whitespace here is harmless.)
+// any value reaches the (protected) label renderer. (Preview is cosmetic, so
+// normalising whitespace here is harmless.)
+//
+// KEEP THIS — it is deliberate defence in depth, not dead weight. The renderer's
+// set-name match is now BOUNDED (`/\s{1,64}black star promos?$/i` in server/labels.ts),
+// so the polynomial-ReDoS shape this originally neutralised is gone at the source.
+// Collapsing runs to one space and capping the length still bounds every value the
+// renderer sees, independently of any future change to that regex.
 const str = (v: unknown, max = 200): string | null => {
   if (typeof v !== "string") return null;
   const s = v.replace(/\s+/g, " ").trim();

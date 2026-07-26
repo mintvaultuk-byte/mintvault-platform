@@ -11,7 +11,7 @@
  */
 import { RaritySymbol } from "@/components/rarity-picker/RaritySymbol";
 import { rarityByValue, finishByValue, promoByValue, languageByValueOrLabel } from "@shared/pokemon-rarity-catalogue";
-import { formatVariantLine } from "@shared/variant-line";
+import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 
 export interface VariantSummaryValues {
   language?: string;
@@ -24,6 +24,10 @@ export interface VariantSummaryValues {
   rarity?: string;
   variantOther?: string;
   rarityOther?: string;
+  /** The certificate's STORED scheme version. Once >= 2 the cert is consolidated
+   *  and prints structured-only even with everything cleared, so the stored value
+   *  must win over "is anything selected right now". */
+  storedVersion?: number | null;
 }
 
 function Line({ label, children }: { label: string; children: React.ReactNode }) {
@@ -45,6 +49,14 @@ export function VariantSummary({ values }: { values: VariantSummaryValues }) {
   const lang = languageByValueOrLabel(values.language ?? "");
 
   const anySet = rarity || finish || promo || subset;
+  // Mirrors the server: validate/clean() trims, so a whitespace-only code is NOT
+  // structured data. This is the predicate that decides the printed line's rule.
+  const willBeConsolidated = hasStructuredVariant({
+    rarityCode: values.rarityCode?.trim() || null,
+    finishVariant: values.finishVariant?.trim() || null,
+    promoType: values.promoType?.trim() || null,
+    subsetName: values.subsetName?.trim() || null,
+  });
   // The exact single line the front label will print — via the ONE shared formatter.
   const printedLine = formatVariantLine({
     rarityCode: values.rarityCode,
@@ -55,6 +67,22 @@ export function VariantSummary({ values }: { values: VariantSummaryValues }) {
     rarity: values.rarity,
     variantOther: values.variantOther,
     rarityOther: values.rarityOther,
+    // Show the line the label will print AFTER this save: saving any structured
+    // value stamps the consolidated scheme, under which the line is derived ONLY
+    // from the structured fields (no legacy fold). With nothing structured set,
+    // the save leaves the cert pre-consolidation and the legacy wording stands.
+    // Use the SERVER's post-clean() semantics (trim-then-truthy on the raw
+    // codes) — NOT catalogue resolution. `anySet` above resolves against the
+    // client's SEED catalogue, so a Catalogue-Manager-only code (or a
+    // whitespace-only value) would disagree with what the save actually stamps
+    // and this line would differ from the printed label.
+    // Sticky: an already-consolidated cert stays consolidated even when every
+    // field is cleared — otherwise this line would fold legacy wording back in
+    // while the printed label (correctly) shows nothing.
+    structuredVariantVersion:
+      Number(values.storedVersion ?? 0) >= CONSOLIDATED_VARIANT_SCHEME || willBeConsolidated
+        ? CONSOLIDATED_VARIANT_SCHEME
+        : null,
   });
 
   return (

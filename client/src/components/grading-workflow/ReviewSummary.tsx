@@ -11,7 +11,7 @@
  */
 import { RaritySymbol } from "@/components/rarity-picker/RaritySymbol";
 import { rarityByValue, finishByValue, promoByValue, POKEMON_ERAS, languageByValueOrLabel } from "@shared/pokemon-rarity-catalogue";
-import { formatVariantLine } from "@shared/variant-line";
+import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import { getDesignationLabel } from "@/lib/designationOptions";
 import { formatCollectorNumber } from "@shared/collector-number-format";
 
@@ -26,6 +26,8 @@ export interface ReviewSummaryValues {
   year: string;
   language: string;
   rarityCode: string;
+  /** The certificate's STORED scheme version (see VariantSummary). */
+  storedVersion?: number | null;
   finishVariant: string;
   promoType: string;
   subsetName: string;
@@ -104,6 +106,20 @@ export function ReviewSummary({
     rarity: v.rarity,
     variantOther: v.variantOther,
     rarityOther: v.rarityOther,
+    // Same canonical rule as the printed label: once anything structured is set,
+    // the save stamps the consolidated scheme and the line is structured-ONLY.
+    // Same predicate as VariantSummary and the server's clean(): trim first, so
+    // a whitespace-only code is not treated as structured data.
+    structuredVariantVersion:
+      Number((v as { storedVersion?: number | null }).storedVersion ?? 0) >= CONSOLIDATED_VARIANT_SCHEME ||
+      hasStructuredVariant({
+      rarityCode: v.rarityCode?.trim() || null,
+      finishVariant: v.finishVariant?.trim() || null,
+      promoType: v.promoType?.trim() || null,
+      subsetName: v.subsetName?.trim() || null,
+      })
+        ? CONSOLIDATED_VARIANT_SCHEME
+        : null,
   });
 
   return (

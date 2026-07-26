@@ -36,11 +36,24 @@ export interface VariantLineInput {
   finishVariant?: string | null;
   promoType?: string | null;
   subsetName?: string | null;
-  /** Legacy free-form columns, folded in only to fill an EMPTY structured slot. */
+  /**
+   * Legacy free-form columns. Folded in ONLY to fill an empty structured slot,
+   * and ONLY for a certificate that is not yet on the consolidated scheme — see
+   * `structuredVariantVersion` below.
+   */
   variant?: string | null;
   rarity?: string | null;
   variantOther?: string | null;
   rarityOther?: string | null;
+  /**
+   * The certificate's structured scheme version. At >= CONSOLIDATED_VARIANT_SCHEME
+   * the line is derived ONLY from the explicit structured fields: an empty
+   * rarity/finish/promo means that part is simply not displayed, and the legacy
+   * columns are NOT folded in. Below that (or absent) the legacy fold still
+   * applies, so an untouched pre-consolidation certificate keeps byte-identical
+   * wording. The legacy columns themselves are never modified either way.
+   */
+  structuredVariantVersion?: number | null;
 }
 
 /** Public-facing wording overrides where the catalogue's descriptive label is
@@ -75,13 +88,70 @@ function legacyDisplayLabel(code: string): string {
 function publicLabel(code: string | null | undefined, catalogueLabel: string | undefined): string {
   if (!code) return "";
   if (PUBLIC_LABEL_OVERRIDES[code]) return PUBLIC_LABEL_OVERRIDES[code];
-  if (!catalogueLabel) return "";
-  return catalogueLabel.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  if (catalogueLabel) return catalogueLabel.replace(/\s*\([^)]*\)\s*$/, "").trim();
+  // The code is SET but this process cannot resolve it. That happens for a code
+  // added through the Catalogue Manager (validated against the LIVE catalogue_items
+  // table) while this pure formatter only ever resolves against SEED_CATALOGUE.
+  // Returning "" would silently print an EMPTY variant line for a rarity/finish
+  // the grader explicitly selected — worse than imperfect wording. Humanise the
+  // code instead so the line is never blank and still reads correctly
+  // ("tera_hyper_rare" → "Tera Hyper Rare").
+  return legacyDisplayLabel(code);
 }
 
 /** True if any structured classification column is set (rarity/finish/promo/subset). */
 export function hasStructuredVariant(input: VariantLineInput): boolean {
   return !!(input.rarityCode || input.finishVariant || input.promoType || input.subsetName);
+}
+
+/**
+ * Legacy free-text wording that will STOP being printed when this save converts a
+ * certificate to the consolidated scheme.
+ *
+ * Converting is a one-way boundary for the LABEL (never for the data — the legacy
+ * columns are always kept): from version 2 on, only the explicit structured
+ * selections print. An operator-typed value such as "Prism Foil" cannot be
+ * reproduced by any catalogue code, so the UI must warn once, at the conversion
+ * itself, before that wording disappears from the label.
+ *
+ * Returns the wordings that will no longer print — empty when there is nothing to
+ * warn about. Deliberately empty when:
+ *   - the certificate is ALREADY consolidated (warn once, at the boundary only);
+ *   - this save will not consolidate it (nothing changes);
+ *   - there is no legacy free text;
+ *   - the wording is still represented in the resulting structured line.
+ */
+export function legacyFreeTextLostOnConversion(input: {
+  /** The certificate's CURRENT (pre-save) scheme version. */
+  currentVersion?: number | null;
+  /** Legacy free-text columns as they will be saved. */
+  variantOther?: string | null;
+  rarityOther?: string | null;
+  /** The structured selection this save will persist. */
+  rarityCode?: string | null;
+  finishVariant?: string | null;
+  promoType?: string | null;
+  subsetName?: string | null;
+}): string[] {
+  const alreadyConsolidated = Number(input.currentVersion ?? 0) >= CONSOLIDATED_VARIANT_SCHEME;
+  if (alreadyConsolidated) return [];
+  const willConsolidate = hasStructuredVariant(input);
+  if (!willConsolidate) return [];
+
+  const resultingLine = formatVariantLine({
+    rarityCode: input.rarityCode,
+    finishVariant: input.finishVariant,
+    promoType: input.promoType,
+    subsetName: input.subsetName,
+    structuredVariantVersion: CONSOLIDATED_VARIANT_SCHEME,
+  }).toLowerCase();
+
+  const candidates = [input.variantOther, input.rarityOther]
+    .map((v) => (typeof v === "string" ? v.trim() : ""))
+    .filter((v) => v.length > 0);
+
+  // "Represented" = the wording already appears in the line the label will print.
+  return candidates.filter((v) => !resultingLine.includes(v.toLowerCase()));
 }
 
 /**
@@ -127,8 +197,17 @@ export function formatVariantLine(input: VariantLineInput): string {
     if (nativeSlot === "rarity" && !rarityCode && !rarityLegacyFallback) rarityLegacyFallback = display;
     else if (nativeSlot === "finish" && !finishCode && !finishLegacyFallback) finishLegacyFallback = display;
   };
-  foldLegacy(input.variant, input.variantOther, "finish");
-  foldLegacy(input.rarity, input.rarityOther, "rarity");
+  // Consolidated-scheme certificates are structured-ONLY: a cleared rarity or
+  // finish must print as nothing, so a legacy leftover can never reappear on the
+  // label. (Before this, clearing the structured rarity/finish on a v2 cert
+  // still printed the legacy `rarity`/`variant` values — e.g. promo-only came
+  // out as "BASIC POKÉMON · MCDONALD'S PROMO · HOLO".) Pre-consolidation certs
+  // keep the legacy fold, so their wording is unchanged until they are edited.
+  const consolidated = Number(input.structuredVariantVersion ?? 0) >= CONSOLIDATED_VARIANT_SCHEME;
+  if (!consolidated) {
+    foldLegacy(input.variant, input.variantOther, "finish");
+    foldLegacy(input.rarity, input.rarityOther, "rarity");
+  }
 
   const rarity = rarityCode ? publicLabel(rarityCode, rarityByValue(rarityCode)?.label) : rarityLegacyFallback;
   const promo = promoCode ? publicLabel(promoCode, promoByValue(promoCode)?.label) : "";

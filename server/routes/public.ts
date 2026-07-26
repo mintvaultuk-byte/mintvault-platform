@@ -9,13 +9,13 @@ import { getStripePublishableKey } from "../stripeClient";
 import { getR2SignedUrl } from "../r2";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { assertSetLibrarySchemaReady } from "../services/set-library";
 import { APP_BASE_URL } from "../app-url";
 import { FEATURE_FLAGS } from "../config/feature-flags";
 import fs from "fs";
 import path from "path";
 import { normalizeCertId } from "../lib/cert-id";
 import { requireAdmin } from "../auth";
-import { ensureSetLibrarySchema } from "../services/set-library";
 
 export function registerPublicRoutes(app: Express): void {
   // ── Health check — no auth, no DB, no shared state ──────────────────────
@@ -489,14 +489,11 @@ export function registerPublicRoutes(app: Express): void {
         .toLowerCase()
         .trim();
     try {
-      await ensureSetLibrarySchema();
-      // Hand-added custom sets (always included).
+      await assertSetLibrarySchemaReady();
+      // Public catalogue reads must remain safe on read-only database sessions.
+      // Editing metadata and certificate linkage belong to authorised endpoints.
       const customRows = await db.execute(sql`
-        SELECT cs.*,
-          (SELECT COUNT(*) FROM certificates c
-            WHERE c.deleted_at IS NULL
-              AND LOWER(TRIM(COALESCE(c.set_name, ''))) = LOWER(TRIM(cs.set_name))
-              AND LOWER(TRIM(COALESCE(c.card_game, 'pokemon'))) = LOWER(TRIM(COALESCE(cs.card_game, 'pokemon'))))::int AS linked_certificates
+        SELECT cs.set_id, cs.set_name, cs.series, cs.ptcgo_code, cs.release_date, cs.total_cards
         FROM custom_sets cs
         WHERE COALESCE(cs.archived, false) = false
         ORDER BY cs.created_at DESC
@@ -509,18 +506,12 @@ export function registerPublicRoutes(app: Express): void {
         releaseDate: s.release_date ? new Date(s.release_date).toISOString().split("T")[0] : null,
         total: s.total_cards || 0,
         source: "custom",
-        updatedAt: s.updated_at ? new Date(s.updated_at).toISOString() : null,
-        linkedCertificates: Number(s.linked_certificates || 0),
       }));
 
       // Canonical TCGdex catalogue (DB-backed, imported). Preferred on collisions.
       const tcgdexRows = await db.execute(
         sql`
-          SELECT ts.*,
-            (SELECT COUNT(*) FROM certificates c
-              WHERE c.deleted_at IS NULL
-                AND LOWER(TRIM(COALESCE(c.set_name, ''))) = LOWER(TRIM(ts.set_name))
-                AND LOWER(TRIM(COALESCE(c.card_game, 'pokemon'))) = LOWER(TRIM(COALESCE(ts.card_game, 'pokemon'))))::int AS linked_certificates
+          SELECT ts.set_id, ts.set_name, ts.series, ts.ptcgo_code, ts.release_date, ts.total_cards
           FROM tcgdex_sets ts
           WHERE COALESCE(ts.archived, false) = false
           ORDER BY ts.release_date DESC NULLS LAST, ts.set_name ASC
@@ -534,8 +525,6 @@ export function registerPublicRoutes(app: Express): void {
         releaseDate: s.release_date ? new Date(s.release_date).toISOString().split("T")[0] : null,
         total: s.total_cards || 0,
         source: "tcgdex",
-        updatedAt: s.updated_at ? new Date(s.updated_at).toISOString() : null,
-        linkedCertificates: Number(s.linked_certificates || 0),
       }));
 
       if (tcgdexSets.length > 0) {
@@ -573,7 +562,7 @@ export function registerPublicRoutes(app: Express): void {
       return res.json(merged);
     } catch (err: any) {
       console.error("[pokemon-sets] error:", err.message);
-      res.json(cachedTcgSets || []);
+      res.status(503).json({ error: "Set catalogue is temporarily unavailable" });
     }
   });
 

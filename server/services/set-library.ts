@@ -80,7 +80,6 @@ export interface SetLibraryEditInput {
   reason?: unknown;
   approvedSuggestionId?: unknown;
   confirmLinkedCardUpdate?: unknown;
-  updatedAt?: unknown;
   version?: unknown;
 }
 
@@ -99,7 +98,7 @@ export class SetLibraryError extends Error {
   }
 }
 
-interface BaseSetRow {
+export interface BaseSetRow {
   source: SetLibrarySource;
   set_id: string;
   set_name: string;
@@ -110,6 +109,7 @@ interface BaseSetRow {
   subset: string | null;
   archived: boolean | null;
   updated_at: Date | string | null;
+  release_date_raw?: Date | string | null;
   linked_cards: number | string | null;
   linked_certificates: number | string | null;
 }
@@ -155,6 +155,20 @@ function parseYear(value: unknown): number | null {
   return year;
 }
 
+function rawReleaseDate(value: BaseSetRow["release_date_raw"]): string | null {
+  if (value == null) return null;
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value);
+}
+
+function releaseDateForPatch(current: BaseSetRow, requestedYear: number | null | undefined): string | null {
+  const raw = rawReleaseDate(current.release_date_raw);
+  if (requestedYear === undefined) return raw;
+  if (requestedYear === null) return null;
+
+  const currentYear = raw?.match(/^(\d{4})/)?.[1];
+  return currentYear === String(requestedYear) ? raw : `${requestedYear}-01-01`;
+}
+
 function parseCardCount(value: unknown): number | null {
   if (value === "" || value === null || value === undefined) return null;
   const count = Number(value);
@@ -164,19 +178,16 @@ function parseCardCount(value: unknown): number | null {
   return count;
 }
 
-function parseBool(value: unknown): boolean {
-  return value === true || value === "true" || value === 1 || value === "1";
+function hasOwn(input: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(input, key);
 }
 
-function cleanOptionalTimestamp(value: unknown): string | null {
-  const text = cleanText(value);
-  if (!text) return null;
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) throw new SetLibraryError(400, "Invalid set version timestamp");
-  return date.toISOString();
+function parseBooleanPatch(value: unknown): boolean {
+  if (typeof value !== "boolean") throw new SetLibraryError(400, "Archived must be a boolean");
+  return value;
 }
 
-function setLibraryVersion(row: BaseSetRow): string {
+export function setLibraryVersion(row: BaseSetRow): string {
   // `card_sets` predates updated_at. Version its editable fields so an open
   // legacy record still gets optimistic-concurrency protection.
   return Buffer.from(
@@ -187,6 +198,7 @@ function setLibraryVersion(row: BaseSetRow): string {
       row.card_game ?? "pokemon",
       row.series ?? null,
       row.release_year ?? null,
+      row.release_date_raw instanceof Date ? row.release_date_raw.toISOString() : (row.release_date_raw ?? null),
       row.total_cards ?? null,
       row.subset ?? null,
       !!row.archived,
@@ -201,24 +213,28 @@ function parseSource(value: unknown): SetLibrarySource {
 }
 
 export function validateSetLibraryEdit(input: SetLibraryEditInput) {
-  const setId = normalizeSetCode(input.setId);
-  const setName = cleanText(input.setName);
-  const tcg = cleanTcg(input.tcg);
-  const series = cleanText(input.series);
-  const subset = cleanText(input.subset);
-  const releaseYear = parseYear(input.releaseYear);
-  const totalCards = parseCardCount(input.totalCards);
-  const archived = parseBool(input.archived);
+  const setId = hasOwn(input, "setId") ? normalizeSetCode(input.setId) : undefined;
+  const setName = hasOwn(input, "setName") ? cleanText(input.setName) : undefined;
+  const tcg = hasOwn(input, "tcg") ? cleanTcg(input.tcg) : undefined;
+  const series = hasOwn(input, "series") ? cleanText(input.series) : undefined;
+  const subset = hasOwn(input, "subset") ? cleanText(input.subset) : undefined;
+  const releaseYear = hasOwn(input, "releaseYear") ? parseYear(input.releaseYear) : undefined;
+  const totalCards = hasOwn(input, "totalCards") ? parseCardCount(input.totalCards) : undefined;
+  const archived = hasOwn(input, "archived") ? parseBooleanPatch(input.archived) : undefined;
   const reason = cleanText(input.reason);
   const approvedSuggestionId = cleanText(input.approvedSuggestionId);
-  const confirmLinkedCardUpdate = parseBool(input.confirmLinkedCardUpdate);
-  const updatedAt = cleanOptionalTimestamp(input.updatedAt);
   const version = cleanText(input.version);
 
-  if (!setId) throw new SetLibraryError(400, "Set code is required");
-  if (!setName) throw new SetLibraryError(400, "Set name is required");
+  if (setId === "") throw new SetLibraryError(400, "Set code is required");
+  if (setName === null) throw new SetLibraryError(400, "Set name is required");
   if (!reason) throw new SetLibraryError(400, "Correction reason is required");
-  if (setId.length > 64 || setName.length > 200 || (series?.length ?? 0) > 120 || (subset?.length ?? 0) > 120) {
+  if (!version) throw new SetLibraryError(400, "Set version is required; refresh before saving.");
+  if (
+    (setId?.length ?? 0) > 64 ||
+    (setName?.length ?? 0) > 200 ||
+    (series?.length ?? 0) > 120 ||
+    (subset?.length ?? 0) > 120
+  ) {
     throw new SetLibraryError(400, "Set values are too long");
   }
 
@@ -233,40 +249,174 @@ export function validateSetLibraryEdit(input: SetLibraryEditInput) {
     subset,
     reason,
     approvedSuggestionId,
-    confirmLinkedCardUpdate,
-    updatedAt,
     version,
   };
 }
 
-export async function ensureSetLibrarySchema(executor: Pick<typeof db, "execute"> = db): Promise<void> {
-  await executor.execute(sql`
-    ALTER TABLE custom_sets
-      ADD COLUMN IF NOT EXISTS subset TEXT,
-      ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
-  `);
-  await executor.execute(sql`
-    ALTER TABLE tcgdex_sets
-      ADD COLUMN IF NOT EXISTS card_game TEXT NOT NULL DEFAULT 'pokemon',
-      ADD COLUMN IF NOT EXISTS subset TEXT,
-      ADD COLUMN IF NOT EXISTS archived BOOLEAN NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
-  `);
-  await executor.execute(sql`
-    CREATE TABLE IF NOT EXISTS set_review_decisions (
-      id SERIAL PRIMARY KEY,
-      source TEXT NOT NULL,
-      set_id TEXT NOT NULL,
-      suggestion_key TEXT NOT NULL,
-      decision TEXT NOT NULL,
-      reason TEXT,
-      actor_id TEXT,
-      actor_role TEXT,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      UNIQUE (source, set_id, suggestion_key)
-    )
-  `);
+type SchemaColumnContract = {
+  type: string;
+  notNull: boolean;
+  default?: RegExp;
+};
+
+const SET_LIBRARY_SCHEMA_CONTRACT: Record<string, Record<string, SchemaColumnContract>> = {
+  custom_sets: {
+    id: { type: "integer", notNull: true, default: /nextval\(/i },
+    set_id: { type: "text", notNull: true },
+    set_name: { type: "text", notNull: true },
+    series: { type: "text", notNull: false },
+    ptcgo_code: { type: "text", notNull: false },
+    release_date: { type: "date", notNull: false },
+    total_cards: { type: "integer", notNull: false },
+    card_game: { type: "text", notNull: true, default: /'pokemon'::text/i },
+    notes: { type: "text", notNull: false },
+    created_at: { type: "timestamp with time zone", notNull: true, default: /now\(\)/i },
+    created_by: { type: "text", notNull: false },
+    subset: { type: "text", notNull: false },
+    archived: { type: "boolean", notNull: true, default: /false/i },
+    updated_at: { type: "timestamp with time zone", notNull: false, default: /now\(\)/i },
+  },
+  tcgdex_sets: {
+    id: { type: "integer", notNull: true, default: /nextval\(/i },
+    set_id: { type: "text", notNull: true },
+    set_name: { type: "text", notNull: true },
+    series: { type: "text", notNull: false },
+    ptcgo_code: { type: "text", notNull: false },
+    release_date: { type: "date", notNull: false },
+    total_cards: { type: "integer", notNull: false },
+    source: { type: "text", notNull: true, default: /'tcgdex'::text/i },
+    synced_at: { type: "timestamp with time zone", notNull: true, default: /now\(\)/i },
+    card_game: { type: "text", notNull: true, default: /'pokemon'::text/i },
+    subset: { type: "text", notNull: false },
+    archived: { type: "boolean", notNull: true, default: /false/i },
+    updated_at: { type: "timestamp with time zone", notNull: false, default: /now\(\)/i },
+  },
+  set_review_decisions: {
+    id: { type: "integer", notNull: true, default: /nextval\(/i },
+    source: { type: "text", notNull: true },
+    set_id: { type: "text", notNull: true },
+    suggestion_key: { type: "text", notNull: true },
+    decision: { type: "text", notNull: true },
+    reason: { type: "text", notNull: false },
+    actor_id: { type: "text", notNull: false },
+    actor_role: { type: "text", notNull: false },
+    created_at: { type: "timestamp with time zone", notNull: true, default: /now\(\)/i },
+  },
+};
+
+const SET_LIBRARY_REQUIRED_CONSTRAINTS: Record<string, Array<{ type: "p" | "u"; columns: string[] }>> = {
+  custom_sets: [
+    { type: "p", columns: ["id"] },
+    { type: "u", columns: ["set_id"] },
+  ],
+  tcgdex_sets: [
+    { type: "p", columns: ["id"] },
+    { type: "u", columns: ["set_id"] },
+  ],
+  set_review_decisions: [
+    { type: "p", columns: ["id"] },
+    { type: "u", columns: ["source", "set_id", "suggestion_key"] },
+  ],
+};
+
+type SchemaInspectionRow = {
+  kind: "column" | "constraint";
+  relation_name: string;
+  relation_oid: string | null;
+  relation_schema: string | null;
+  relation_kind: string | null;
+  column_name: string | null;
+  column_type: string | null;
+  column_not_null: boolean | null;
+  column_default: string | null;
+  constraint_type: "p" | "u" | null;
+  constraint_columns: string[] | null;
+};
+
+// Cache only a successful check and only for the exact executor instance. A
+// failure is intentionally retried, so applying a migration can recover a live
+// process without a stale negative cache.
+let readyExecutors = new WeakSet<object>();
+
+export function resetSetLibrarySchemaReadinessCache(): void {
+  readyExecutors = new WeakSet<object>();
+}
+
+/**
+ * Migration 0023 is the sole owner of these objects. This bounded metadata
+ * read detects drift without attempting to repair it on an application path.
+ */
+export async function assertSetLibrarySchemaReady(executor: Pick<typeof db, "execute"> = db): Promise<void> {
+  const cacheKey = executor as object;
+  if (readyExecutors.has(cacheKey)) return;
+  try {
+    const result = await executor.execute(sql`
+      WITH expected(relation_name) AS (
+        VALUES ('custom_sets'::text), ('tcgdex_sets'::text), ('set_review_decisions'::text)
+      ), resolved AS (
+        SELECT relation_name, to_regclass(relation_name)::oid AS relation_oid FROM expected
+      ), relations AS (
+        SELECT r.relation_name, c.oid AS relation_oid, n.nspname AS relation_schema, c.relkind AS relation_kind
+        FROM resolved r
+        LEFT JOIN pg_class c ON c.oid = r.relation_oid
+        LEFT JOIN pg_namespace n ON n.oid = c.relnamespace
+      )
+      SELECT 'column'::text AS kind, r.relation_name, r.relation_oid::text, r.relation_schema, r.relation_kind,
+             a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS column_type,
+             a.attnotnull AS column_not_null, pg_get_expr(d.adbin, d.adrelid) AS column_default,
+             NULL::text AS constraint_type, NULL::text[] AS constraint_columns
+      FROM relations r
+      LEFT JOIN pg_attribute a ON a.attrelid = r.relation_oid AND a.attnum > 0 AND NOT a.attisdropped
+      LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+      UNION ALL
+      SELECT 'constraint'::text AS kind, r.relation_name, r.relation_oid::text, r.relation_schema, r.relation_kind,
+             NULL::text, NULL::text, NULL::boolean, NULL::text,
+             c.contype::text AS constraint_type,
+             ARRAY(SELECT a.attname FROM unnest(c.conkey) WITH ORDINALITY k(attnum, ord)
+                   JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.attnum
+                   ORDER BY k.ord) AS constraint_columns
+      FROM relations r
+      LEFT JOIN pg_constraint c ON c.conrelid = r.relation_oid AND c.contype IN ('p', 'u')
+    `);
+    const rows = result.rows as unknown as SchemaInspectionRow[];
+    const failures: string[] = [];
+    for (const [relationName, columns] of Object.entries(SET_LIBRARY_SCHEMA_CONTRACT)) {
+      const relationRows = rows.filter((row) => row.relation_name === relationName);
+      const relation = relationRows[0];
+      if (!relation || !relation.relation_oid || relation.relation_kind !== "r") {
+        failures.push(`${relationName} relation`);
+        continue;
+      }
+      for (const [columnName, contract] of Object.entries(columns)) {
+        const column = relationRows.find((row) => row.kind === "column" && row.column_name === columnName);
+        if (!column || column.column_type !== contract.type || column.column_not_null !== contract.notNull) {
+          failures.push(`${relationName}.${columnName}`);
+          continue;
+        }
+        if (contract.default && !contract.default.test(column.column_default ?? "")) {
+          failures.push(`${relationName}.${columnName} default`);
+        }
+      }
+      for (const constraint of SET_LIBRARY_REQUIRED_CONSTRAINTS[relationName]) {
+        const found = relationRows.some(
+          (row) =>
+            row.kind === "constraint" &&
+            row.constraint_type === constraint.type &&
+            JSON.stringify(row.constraint_columns) === JSON.stringify(constraint.columns)
+        );
+        if (!found) failures.push(`${relationName} ${constraint.type}(${constraint.columns.join(",")})`);
+      }
+    }
+    if (failures.length > 0) {
+      console.error(`[set-library] schema is incomplete (${failures.join(", ")}); apply database migrations`);
+      throw new SetLibraryError(503, "Set library schema is unavailable. Apply database migrations.");
+    }
+    readyExecutors.add(cacheKey);
+  } catch (error) {
+    if (error instanceof SetLibraryError) throw error;
+    console.error("[set-library] schema verification failed; apply database migrations");
+    throw new SetLibraryError(503, "Set library schema is unavailable. Apply database migrations.");
+  }
 }
 
 function toRow(
@@ -439,7 +589,7 @@ function parseFilters(input: unknown): Set<string> {
 }
 
 export async function listSetLibrary(input: ListSetLibraryInput = {}): Promise<ListSetLibraryResult> {
-  await ensureSetLibrarySchema();
+  await assertSetLibrarySchemaReady();
   const page = Math.max(1, Number.parseInt(String(input.page ?? "1"), 10) || 1);
   const pageSize = Math.min(100, Math.max(10, Number.parseInt(String(input.pageSize ?? "50"), 10) || 50));
   const q = cleanText(input.q)?.toLowerCase() ?? "";
@@ -451,16 +601,16 @@ export async function listSetLibrary(input: ListSetLibraryInput = {}): Promise<L
     await db.execute(sql`
     WITH all_sets AS (
       SELECT 'custom'::text AS source, set_id, set_name, card_game, series,
-             EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards, subset, archived, updated_at
+             EXTRACT(YEAR FROM release_date)::int AS release_year, release_date::text AS release_date_raw, total_cards, subset, archived, updated_at
       FROM custom_sets
       UNION ALL
       SELECT 'tcgdex'::text AS source, set_id, set_name, card_game, series,
-             EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards, subset, archived, updated_at
+             EXTRACT(YEAR FROM release_date)::int AS release_year, release_date::text AS release_date_raw, total_cards, subset, archived, updated_at
       FROM tcgdex_sets
       UNION ALL
       SELECT 'card_sets'::text AS source, set_id, set_name, game AS card_game, series,
              NULLIF(SUBSTRING(COALESCE(release_date, '') FROM '\\d{4}'), '')::int AS release_year,
-             total_cards, NULL::text AS subset, is_deleted AS archived, COALESCE(deleted_at, NOW()) AS updated_at
+             release_date AS release_date_raw, total_cards, NULL::text AS subset, is_deleted AS archived, deleted_at AS updated_at
       FROM card_sets
     )
     SELECT s.*,
@@ -566,9 +716,9 @@ export async function updateSetLibraryRecord(
   const target = normalizeSetCode(targetSetId);
   if (!target) throw new SetLibraryError(400, "Set code is required");
   const next = validateSetLibraryEdit(input);
+  await assertSetLibrarySchemaReady();
 
   return db.transaction(async (tx) => {
-    await ensureSetLibrarySchema(tx);
     const current = (
       await tx.execute(sql`
       SELECT s.*,
@@ -578,14 +728,14 @@ export async function updateSetLibraryRecord(
             AND LOWER(TRIM(COALESCE(c.set_name, ''))) = LOWER(TRIM(s.set_name))
             AND LOWER(TRIM(COALESCE(c.card_game, 'pokemon'))) = LOWER(TRIM(COALESCE(s.card_game, 'pokemon'))))::int AS linked_certificates
       FROM (
-        SELECT 'custom'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards, subset, archived, updated_at
+        SELECT 'custom'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, release_date::text AS release_date_raw, total_cards, subset, archived, updated_at
         FROM custom_sets
         UNION ALL
-        SELECT 'tcgdex'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards, subset, archived, updated_at
+        SELECT 'tcgdex'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, release_date::text AS release_date_raw, total_cards, subset, archived, updated_at
         FROM tcgdex_sets
         UNION ALL
         SELECT 'card_sets'::text AS source, set_id, set_name, game AS card_game, series, NULLIF(SUBSTRING(COALESCE(release_date, '') FROM '\\d{4}'), '')::int AS release_year,
-               total_cards, NULL::text AS subset, is_deleted AS archived, COALESCE(deleted_at, NOW()) AS updated_at
+             release_date AS release_date_raw, total_cards, NULL::text AS subset, is_deleted AS archived, deleted_at AS updated_at
         FROM card_sets
       ) s
       WHERE source = ${source} AND LOWER(TRIM(set_id)) = ${target}
@@ -594,52 +744,66 @@ export async function updateSetLibraryRecord(
     ).rows[0] as unknown as BaseSetRow | undefined;
     if (!current) throw new SetLibraryError(404, "Set not found");
 
-    if (source === "card_sets") {
-      if (!next.version) throw new SetLibraryError(400, "Set version is required; refresh before saving.");
-      if (next.version !== setLibraryVersion(current)) {
-        throw new SetLibraryError(409, "This set was changed by another operator. Refresh before saving.");
-      }
-    } else {
-      if (!next.updatedAt) throw new SetLibraryError(400, "Set version is required; refresh before saving.");
-      if (!current.updated_at)
-        throw new SetLibraryError(409, "This set has no current version. Refresh before saving.");
-      const currentVersion = new Date(current.updated_at).toISOString();
-      if (currentVersion !== next.updatedAt) {
-        throw new SetLibraryError(409, "This set was changed by another operator. Refresh before saving.");
-      }
+    if (next.version !== setLibraryVersion(current)) {
+      throw new SetLibraryError(409, "This set was changed by another operator. Refresh before saving.");
     }
 
-    if (next.setId !== target) {
+    if (next.setId !== undefined && next.setId !== target) {
       throw new SetLibraryError(400, "Set ID is stable and cannot be changed. Create a new set instead.");
     }
 
+    const merged = {
+      setId: normalizeSetCode(current.set_id),
+      setName: next.setName === undefined ? String(current.set_name) : next.setName,
+      tcg: next.tcg === undefined ? cleanTcg(current.card_game || "pokemon") : next.tcg,
+      series: next.series === undefined ? (current.series ?? null) : next.series,
+      subset: next.subset === undefined ? (current.subset ?? null) : next.subset,
+      releaseYear:
+        next.releaseYear === undefined
+          ? current.release_year == null
+            ? null
+            : Number(current.release_year)
+          : next.releaseYear,
+      totalCards:
+        next.totalCards === undefined
+          ? current.total_cards == null
+            ? null
+            : Number(current.total_cards)
+          : next.totalCards,
+      archived: next.archived === undefined ? !!current.archived : next.archived,
+    };
+
     const unchanged =
-      normalizeSetCode(current.set_id) === next.setId &&
-      String(current.set_name) === next.setName &&
-      String(current.card_game || "pokemon") === next.tcg &&
-      (current.series ?? null) === next.series &&
-      (current.subset ?? null) === next.subset &&
-      Number(current.release_year ?? 0) === Number(next.releaseYear ?? 0) &&
-      Number(current.total_cards ?? 0) === Number(next.totalCards ?? 0) &&
-      !!current.archived === next.archived;
+      String(current.set_name) === merged.setName &&
+      cleanTcg(current.card_game || "pokemon") === merged.tcg &&
+      (current.series ?? null) === merged.series &&
+      (current.subset ?? null) === merged.subset &&
+      Number(current.release_year ?? 0) === Number(merged.releaseYear ?? 0) &&
+      Number(current.total_cards ?? 0) === Number(merged.totalCards ?? 0) &&
+      !!current.archived === merged.archived;
     if (unchanged) throw new SetLibraryError(400, "No changes to save");
 
-    const identical = (
+    const candidates = (
       await tx.execute(sql`
-      SELECT source, set_id, set_name FROM (
+      SELECT source, set_id, set_name, card_game, series,
+             release_year, total_cards FROM (
         SELECT 'custom'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards FROM custom_sets
         UNION ALL SELECT 'tcgdex'::text AS source, set_id, set_name, card_game, series, EXTRACT(YEAR FROM release_date)::int AS release_year, total_cards FROM tcgdex_sets
         UNION ALL SELECT 'card_sets'::text AS source, set_id, set_name, game AS card_game, series, NULLIF(SUBSTRING(COALESCE(release_date, '') FROM '\\d{4}'), '')::int AS release_year, total_cards FROM card_sets
       ) s
       WHERE NOT (source = ${source} AND LOWER(TRIM(set_id)) = ${target})
-        AND btrim(regexp_replace(LOWER(TRIM(translate(set_name, 'éÉ', 'eE'))), '[^[:alnum:]]+', ' ', 'g')) = ${normalizeSetNameKey(next.setName)}
-        AND LOWER(TRIM(COALESCE(card_game, 'pokemon'))) = ${next.tcg}
-        AND COALESCE(LOWER(TRIM(series)), '') = COALESCE(LOWER(TRIM(${next.series})), '')
-        AND COALESCE(release_year, 0) = COALESCE(${next.releaseYear}, 0)
-        AND COALESCE(total_cards, 0) = COALESCE(${next.totalCards}, 0)
-      LIMIT 1
+      LIMIT 5001
     `)
-    ).rows[0];
+    ).rows as unknown as Array<BaseSetRow>;
+    if (candidates.length > 5000) throw new SetLibraryError(503, "Catalogue is too large to safely check duplicates");
+    const identical = candidates.find(
+      (candidate) =>
+        normalizeSetNameKey(candidate.set_name) === normalizeSetNameKey(merged.setName) &&
+        cleanTcg(candidate.card_game || "pokemon") === merged.tcg &&
+        normalizeSetNameKey(candidate.series ?? "") === normalizeSetNameKey(merged.series ?? "") &&
+        Number(candidate.release_year ?? 0) === Number(merged.releaseYear ?? 0) &&
+        Number(candidate.total_cards ?? 0) === Number(merged.totalCards ?? 0)
+    );
     if (identical) {
       const match = identical as { source?: string; set_id?: string; set_name?: string };
       throw new SetLibraryError(
@@ -648,31 +812,45 @@ export async function updateSetLibraryRecord(
       );
     }
 
-    const releaseDate = next.releaseYear ? `${next.releaseYear}-01-01` : null;
+    const releaseDate = releaseDateForPatch(current, next.releaseYear);
+    const legacyReleaseDate = releaseDateForPatch(current, next.releaseYear);
+    let writeResult: { rowCount?: number } | undefined;
     if (source === "custom") {
-      await tx.execute(sql`
+      writeResult = (await tx.execute(sql`
         UPDATE custom_sets
-        SET set_name = ${next.setName}, card_game = ${next.tcg}, series = ${next.series},
-            release_date = ${releaseDate}, total_cards = ${next.totalCards}, subset = ${next.subset},
-            archived = ${next.archived}, updated_at = NOW()
+        SET set_name = ${merged.setName}, card_game = ${merged.tcg}, series = ${merged.series},
+            release_date = ${releaseDate}, total_cards = ${merged.totalCards}, subset = ${merged.subset},
+            archived = ${merged.archived}, updated_at = NOW()
         WHERE LOWER(TRIM(set_id)) = ${target}
-      `);
+          AND updated_at IS NOT DISTINCT FROM ${current.updated_at}
+      `)) as { rowCount?: number };
     } else if (source === "tcgdex") {
-      await tx.execute(sql`
+      writeResult = (await tx.execute(sql`
         UPDATE tcgdex_sets
-        SET set_name = ${next.setName}, card_game = ${next.tcg}, series = ${next.series},
-            release_date = ${releaseDate}, total_cards = ${next.totalCards}, subset = ${next.subset},
-            archived = ${next.archived}, updated_at = NOW()
+        SET set_name = ${merged.setName}, card_game = ${merged.tcg}, series = ${merged.series},
+            release_date = ${releaseDate}, total_cards = ${merged.totalCards}, subset = ${merged.subset},
+            archived = ${merged.archived}, updated_at = NOW()
         WHERE LOWER(TRIM(set_id)) = ${target}
-      `);
+          AND updated_at IS NOT DISTINCT FROM ${current.updated_at}
+      `)) as { rowCount?: number };
     } else {
-      await tx.execute(sql`
+      writeResult = (await tx.execute(sql`
         UPDATE card_sets
-        SET set_name = ${next.setName}, game = ${next.tcg}, series = ${next.series},
-            release_date = ${next.releaseYear == null ? null : String(next.releaseYear)}, total_cards = ${next.totalCards},
-            is_deleted = ${next.archived}, deleted_at = CASE WHEN ${next.archived} THEN COALESCE(deleted_at, NOW()) ELSE NULL END
+        SET set_name = ${merged.setName}, game = ${merged.tcg}, series = ${merged.series},
+            release_date = ${legacyReleaseDate}, total_cards = ${merged.totalCards},
+            is_deleted = ${merged.archived}, deleted_at = CASE WHEN ${merged.archived} THEN COALESCE(deleted_at, NOW()) ELSE NULL END
         WHERE LOWER(TRIM(set_id)) = ${target}
-      `);
+          AND set_name IS NOT DISTINCT FROM ${current.set_name}
+          AND game IS NOT DISTINCT FROM ${current.card_game}
+          AND series IS NOT DISTINCT FROM ${current.series}
+          AND release_date IS NOT DISTINCT FROM ${current.release_date_raw ?? null}
+          AND total_cards IS NOT DISTINCT FROM ${current.total_cards}
+          AND is_deleted IS NOT DISTINCT FROM ${current.archived}
+          AND deleted_at IS NOT DISTINCT FROM ${current.updated_at}
+      `)) as { rowCount?: number };
+    }
+    if (writeResult?.rowCount === 0) {
+      throw new SetLibraryError(409, "This set was changed by another operator. Refresh before saving.");
     }
 
     const linkedCardsUpdated = 0;
@@ -680,7 +858,7 @@ export async function updateSetLibraryRecord(
     if (next.approvedSuggestionId) {
       await tx.execute(sql`
         INSERT INTO set_review_decisions (source, set_id, suggestion_key, decision, reason, actor_id, actor_role)
-        VALUES (${source}, ${next.setId}, ${next.approvedSuggestionId}, 'approve', ${next.reason}, ${actor.id}, ${actor.role})
+        VALUES (${source}, ${target}, ${next.approvedSuggestionId}, 'approve', ${next.reason}, ${actor.id}, ${actor.role})
         ON CONFLICT (source, set_id, suggestion_key)
         DO UPDATE SET decision = 'approve', reason = EXCLUDED.reason, actor_id = EXCLUDED.actor_id, actor_role = EXCLUDED.actor_role, created_at = NOW()
       `);
@@ -709,8 +887,8 @@ export async function updateSetLibraryRecord(
             subset: current.subset,
             archived: !!current.archived,
           },
-          new: next,
-          affectedGame: next.tcg,
+          new: merged,
+          affectedGame: merged.tcg,
           linkedCertificates: Number(current.linked_certificates ?? 0),
           reason: next.reason,
           approvedSuggestionId: next.approvedSuggestionId,
@@ -719,7 +897,7 @@ export async function updateSetLibraryRecord(
         }}::jsonb
       )
     `);
-    return { ok: true as const, source, oldSetId: target, set: next, linkedCardsUpdated, certificatesUpdated: 0 };
+    return { ok: true as const, source, oldSetId: target, set: merged, linkedCardsUpdated, certificatesUpdated: 0 };
   });
 }
 
@@ -739,7 +917,7 @@ export async function recordSetReviewDecision(
   if (!setId || !suggestionKey) throw new SetLibraryError(400, "Set and suggestion are required");
   if (!decision || !["approve", "reject", "ignore"].includes(decision))
     throw new SetLibraryError(400, "Invalid decision");
-  await ensureSetLibrarySchema();
+  await assertSetLibrarySchemaReady();
   await db.transaction(async (tx) => {
     await tx.execute(sql`
       INSERT INTO set_review_decisions (source, set_id, suggestion_key, decision, reason, actor_id, actor_role)

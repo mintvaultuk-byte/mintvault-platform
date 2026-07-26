@@ -14,6 +14,7 @@
 import {
   validateStructuredVariant,
   structuredColumnsToCertFields,
+  STRUCTURED_VARIANT_VERSION,
 } from "@shared/structured-variant-validate";
 import type { CatalogueSnapshot } from "@shared/pokemon-rarity-catalogue";
 
@@ -43,6 +44,15 @@ export function applyStructuredVariantFromBody(
   body: Record<string, unknown>,
   data: Record<string, unknown>,
   cat?: CatalogueSnapshot,
+  /**
+   * The certificate's CURRENT stored scheme version, when updating an existing
+   * row. Conversion to the consolidated scheme is ONE-WAY for the label: once a
+   * certificate is at >= CONSOLIDATED_VARIANT_SCHEME it stays there even if the
+   * operator later clears every structured field, so a full clear renders NO
+   * variant line instead of silently reverting to the legacy wording. Omit for
+   * the create flow (there is no prior version).
+   */
+  currentVersion?: number | null,
 ): StructuredApplyResult {
   const optedIn = STRUCTURED_KEYS.some((k) => k in body);
   if (!optedIn) return { ok: true, errors: [], warnings: [], applied: false };
@@ -63,6 +73,16 @@ export function applyStructuredVariantFromBody(
   if (!result.ok) {
     return { ok: false, errors: result.errors, warnings: result.warnings, applied: true };
   }
-  Object.assign(data, structuredColumnsToCertFields(result.columns));
+  const fields = structuredColumnsToCertFields(result.columns);
+  // Sticky version: never downgrade an already-consolidated certificate back to
+  // "no structured variant" just because every field was cleared — that would
+  // send it to the legacy renderer and resurrect the old wording.
+  if (
+    fields.structuredVariantVersion == null &&
+    Number(currentVersion ?? 0) >= STRUCTURED_VARIANT_VERSION
+  ) {
+    fields.structuredVariantVersion = Number(currentVersion);
+  }
+  Object.assign(data, fields);
   return { ok: true, errors: [], warnings: result.warnings, applied: true };
 }

@@ -8,7 +8,6 @@
 
 import { db } from "./db";
 import { sql } from "drizzle-orm";
-import { ensureTcgdexSetsTable } from "./services/tcgdex-sets-import";
 
 export async function migrateMarketplaceSchema(): Promise<void> {
   // ── Seller columns on users ───────────────────────────────────────────────
@@ -347,23 +346,6 @@ export async function migrateMarketplaceSchema(): Promise<void> {
   );
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_marketplace_dac7_year ON marketplace_dac7_quarterly(year)`);
 
-  // ── Custom sets (cards not in public TCG API) ────────────────────────────
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS custom_sets (
-      id SERIAL PRIMARY KEY,
-      set_id TEXT NOT NULL UNIQUE,
-      set_name TEXT NOT NULL,
-      series TEXT,
-      ptcgo_code TEXT,
-      release_date DATE,
-      total_cards INTEGER,
-      card_game TEXT NOT NULL DEFAULT 'pokemon',
-      notes TEXT,
-      created_at TIMESTAMPTZ DEFAULT NOW(),
-      created_by TEXT
-    )
-  `);
-
   // ── Custom variants/finishes (printed on slabs — managed list) ───────────
   // Mirrors custom_sets exactly: a small managed table the grader/admin can
   // extend inline when a card's finish isn't in the canonical VARIANT_OPTIONS
@@ -379,10 +361,8 @@ export async function migrateMarketplaceSchema(): Promise<void> {
     )
   `);
 
-  // ── TCGdex canonical Pokémon set catalogue (separate from hand-added customs) ──
-  // Populated by importTcgdexSets() (scripts/import-tcgdex-sets.ts or the admin
-  // /api/admin/tcgdex-sets/import endpoint), NOT at startup. DDL is idempotent.
-  await ensureTcgdexSetsTable();
+  // Set Library tables and columns are migration-managed. Runtime startup must
+  // never create or repair them; migration 0023 owns the Set Library additions.
 
   // ── Manual centering columns on certificates ─────────────────────────────
   await db.execute(sql`ALTER TABLE certificates ADD COLUMN IF NOT EXISTS centering_points_front JSONB`);

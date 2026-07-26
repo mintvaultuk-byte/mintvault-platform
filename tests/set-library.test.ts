@@ -19,6 +19,8 @@ import {
   normalizeSetNameKey,
   normalizeSetCode,
   recordSetReviewDecision,
+  resetSetLibrarySchemaReadinessCache,
+  setLibraryVersion,
   SetLibraryError,
   updateSetLibraryRecord,
   validateSetLibraryEdit,
@@ -35,11 +37,13 @@ const baseSetRow = {
   subset: null,
   archived: false,
   updated_at: "2026-01-01T00:00:00.000Z",
+  release_date_raw: "2024-01-01",
   linked_cards: 2,
   linked_certificates: 3,
 };
 
 beforeEach(() => {
+  resetSetLibrarySchemaReadinessCache();
   mockDb.execute.mockReset();
   mockDb.txExecute.mockReset();
   mockDb.transaction.mockReset();
@@ -48,10 +52,83 @@ beforeEach(() => {
   );
 });
 
-function mockEnsureSchema(execute: ReturnType<typeof vi.fn>) {
-  execute.mockResolvedValueOnce({ rows: [] });
-  execute.mockResolvedValueOnce({ rows: [] });
-  execute.mockResolvedValueOnce({ rows: [] });
+function mockSetLibrarySchemaReady(execute: ReturnType<typeof vi.fn>) {
+  const columns = [
+    ["custom_sets", "id", "integer", true, "nextval('custom_sets_id_seq'::regclass)"],
+    ["custom_sets", "set_id", "text", true, null],
+    ["custom_sets", "set_name", "text", true, null],
+    ["custom_sets", "series", "text", false, null],
+    ["custom_sets", "ptcgo_code", "text", false, null],
+    ["custom_sets", "release_date", "date", false, null],
+    ["custom_sets", "total_cards", "integer", false, null],
+    ["custom_sets", "card_game", "text", true, "'pokemon'::text"],
+    ["custom_sets", "notes", "text", false, null],
+    ["custom_sets", "created_at", "timestamp with time zone", true, "now()"],
+    ["custom_sets", "created_by", "text", false, null],
+    ["custom_sets", "subset", "text", false, null],
+    ["custom_sets", "archived", "boolean", true, "false"],
+    ["custom_sets", "updated_at", "timestamp with time zone", false, "now()"],
+    ["tcgdex_sets", "id", "integer", true, "nextval('tcgdex_sets_id_seq'::regclass)"],
+    ["tcgdex_sets", "set_id", "text", true, null],
+    ["tcgdex_sets", "set_name", "text", true, null],
+    ["tcgdex_sets", "series", "text", false, null],
+    ["tcgdex_sets", "ptcgo_code", "text", false, null],
+    ["tcgdex_sets", "release_date", "date", false, null],
+    ["tcgdex_sets", "total_cards", "integer", false, null],
+    ["tcgdex_sets", "source", "text", true, "'tcgdex'::text"],
+    ["tcgdex_sets", "synced_at", "timestamp with time zone", true, "now()"],
+    ["tcgdex_sets", "card_game", "text", true, "'pokemon'::text"],
+    ["tcgdex_sets", "subset", "text", false, null],
+    ["tcgdex_sets", "archived", "boolean", true, "false"],
+    ["tcgdex_sets", "updated_at", "timestamp with time zone", false, "now()"],
+    ["set_review_decisions", "id", "integer", true, "nextval('set_review_decisions_id_seq'::regclass)"],
+    ["set_review_decisions", "source", "text", true, null],
+    ["set_review_decisions", "set_id", "text", true, null],
+    ["set_review_decisions", "suggestion_key", "text", true, null],
+    ["set_review_decisions", "decision", "text", true, null],
+    ["set_review_decisions", "reason", "text", false, null],
+    ["set_review_decisions", "actor_id", "text", false, null],
+    ["set_review_decisions", "actor_role", "text", false, null],
+    ["set_review_decisions", "created_at", "timestamp with time zone", true, "now()"],
+  ] as const;
+  const constraints = [
+    ["custom_sets", "p", ["id"]],
+    ["custom_sets", "u", ["set_id"]],
+    ["tcgdex_sets", "p", ["id"]],
+    ["tcgdex_sets", "u", ["set_id"]],
+    ["set_review_decisions", "p", ["id"]],
+    ["set_review_decisions", "u", ["source", "set_id", "suggestion_key"]],
+  ] as const;
+  execute.mockResolvedValueOnce({
+    rows: [
+      ...columns.map(([relation_name, column_name, column_type, column_not_null, column_default]) => ({
+        kind: "column",
+        relation_name,
+        relation_oid: "1",
+        relation_schema: "public",
+        relation_kind: "r",
+        column_name,
+        column_type,
+        column_not_null,
+        column_default,
+        constraint_type: null,
+        constraint_columns: null,
+      })),
+      ...constraints.map(([relation_name, constraint_type, constraint_columns]) => ({
+        kind: "constraint",
+        relation_name,
+        relation_oid: "1",
+        relation_schema: "public",
+        relation_kind: "r",
+        column_name: null,
+        column_type: null,
+        column_not_null: null,
+        column_default: null,
+        constraint_type,
+        constraint_columns,
+      })),
+    ],
+  });
 }
 
 function sqlText(query: unknown): string {
@@ -67,6 +144,24 @@ function sqlText(query: unknown): string {
     .join("");
 }
 
+function versionFor(row: typeof baseSetRow): string {
+  return Buffer.from(
+    JSON.stringify([
+      row.source,
+      normalizeSetCode(row.set_id),
+      row.set_name,
+      row.card_game || "pokemon",
+      row.series || null,
+      row.release_year || null,
+      row.release_date_raw || null,
+      row.total_cards || null,
+      row.subset || null,
+      !!row.archived,
+      row.updated_at ? new Date(row.updated_at).toISOString() : null,
+    ])
+  ).toString("base64url");
+}
+
 describe("set library service", () => {
   it("normalizes set codes without creating duplicate code shapes", () => {
     expect(normalizeSetCode(" MV 10 EN ")).toBe("mv10en");
@@ -78,6 +173,15 @@ describe("set library service", () => {
     );
   });
 
+  it("uses one Unicode normalisation policy for accents, decomposed text, punctuation and whitespace", () => {
+    const equivalent = ["Pokémon", "Pokemon", "Flabébé", "Flabebe", "Flabe\u0301be", "Ö Ñ Á Ü", "O N A U"];
+    expect(normalizeSetNameKey(equivalent[0])).toBe(normalizeSetNameKey(equivalent[1]));
+    expect(normalizeSetNameKey(equivalent[2])).toBe(normalizeSetNameKey(equivalent[3]));
+    expect(normalizeSetNameKey(equivalent[2])).toBe(normalizeSetNameKey(equivalent[4]));
+    expect(normalizeSetNameKey(equivalent[5])).toBe(normalizeSetNameKey(equivalent[6]));
+    expect(normalizeSetNameKey("  Classic---Deck!! ")).toBe("classic deck");
+  });
+
   it("validates editable fields without allowing blank names, blank codes or invalid counts", () => {
     expect(() => validateSetLibraryEdit({ setId: "", setName: "Set" })).toThrow(SetLibraryError);
     expect(() => validateSetLibraryEdit({ setId: "mv2", setName: " " })).toThrow(SetLibraryError);
@@ -86,7 +190,13 @@ describe("set library service", () => {
       SetLibraryError
     );
     expect(
-      validateSetLibraryEdit({ setId: " MV2 ", setName: " Corrected ", totalCards: 0, reason: "Correction" })
+      validateSetLibraryEdit({
+        setId: " MV2 ",
+        setName: " Corrected ",
+        totalCards: 0,
+        reason: "Correction",
+        version: "current",
+      })
     ).toMatchObject({
       setId: "mv2",
       setName: "Corrected",
@@ -95,7 +205,7 @@ describe("set library service", () => {
   });
 
   it("lists bounded set records with data-quality suggestions and numeric code sorting", async () => {
-    mockEnsureSchema(mockDb.execute);
+    mockSetLibrarySchemaReady(mockDb.execute);
     mockDb.execute.mockResolvedValueOnce({
       rows: [
         {
@@ -130,7 +240,7 @@ describe("set library service", () => {
   });
 
   it("persists ignored or rejected review decisions so dismissed suggestions no longer need attention", async () => {
-    mockEnsureSchema(mockDb.execute);
+    mockSetLibrarySchemaReady(mockDb.execute);
     mockDb.execute.mockResolvedValueOnce({
       rows: [{ ...baseSetRow, set_id: "mv10", set_name: "Example Trainer Gallery", release_year: null }],
     });
@@ -144,8 +254,69 @@ describe("set library service", () => {
     expect(result.sets[0].issueLabels).not.toContain("Missing year");
   });
 
+  it("uses only read-only metadata and catalogue queries on all Set Library paths", async () => {
+    mockSetLibrarySchemaReady(mockDb.execute);
+    mockDb.execute.mockResolvedValueOnce({ rows: [baseSetRow] });
+    mockDb.execute.mockResolvedValueOnce({ rows: [] });
+    await listSetLibrary();
+
+    mockSetLibrarySchemaReady(mockDb.execute);
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [baseSetRow] });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
+    await updateSetLibraryRecord(
+      "custom",
+      "mv1",
+      { setName: "Renamed", reason: "Correction", version: versionFor(baseSetRow) },
+      { id: "admin@example.com", role: "admin" }
+    );
+
+    mockSetLibrarySchemaReady(mockDb.execute);
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
+    await recordSetReviewDecision("custom", "mv1", "missing_year", "ignore", "Not applicable", {
+      id: "admin@example.com",
+      role: "admin",
+    });
+
+    const statements = [...mockDb.execute.mock.calls, ...mockDb.txExecute.mock.calls].map((call) => sqlText(call[0]));
+    expect(statements.some((statement) => /\b(CREATE|ALTER|DROP)\b/i.test(statement))).toBe(false);
+    expect(statements.some((statement) => /to_regclass|pg_(class|attribute|constraint)/i.test(statement))).toBe(true);
+  });
+
+  it("fails closed before reads or writes when migration 0023 schema is incomplete", async () => {
+    mockDb.execute.mockResolvedValueOnce({ rows: [] });
+
+    await expect(listSetLibrary()).rejects.toMatchObject({
+      status: 503,
+      message: "Set library schema is unavailable. Apply database migrations.",
+    });
+    expect(mockDb.execute).toHaveBeenCalledTimes(1);
+    expect(mockDb.transaction).not.toHaveBeenCalled();
+  });
+
+  it("caches only successful readiness checks and retries a failed check", async () => {
+    mockSetLibrarySchemaReady(mockDb.execute);
+    mockDb.execute.mockResolvedValueOnce({ rows: [] });
+    mockDb.execute.mockResolvedValueOnce({ rows: [] });
+    await listSetLibrary();
+    mockDb.execute.mockResolvedValueOnce({ rows: [] });
+    mockDb.execute.mockResolvedValueOnce({ rows: [] });
+    await listSetLibrary();
+    expect(mockDb.execute).toHaveBeenCalledTimes(5);
+
+    resetSetLibrarySchemaReadinessCache();
+    mockDb.execute.mockResolvedValueOnce({ rows: [] });
+    await expect(listSetLibrary()).rejects.toMatchObject({ status: 503 });
+    mockSetLibrarySchemaReady(mockDb.execute);
+    mockDb.execute.mockResolvedValueOnce({ rows: [] });
+    mockDb.execute.mockResolvedValueOnce({ rows: [] });
+    await expect(listSetLibrary()).resolves.toMatchObject({ bounded: true });
+  });
+
   it("shows both source records in cross-source duplicate suggestions", async () => {
-    mockEnsureSchema(mockDb.execute);
+    mockSetLibrarySchemaReady(mockDb.execute);
     mockDb.execute.mockResolvedValueOnce({
       rows: [
         { ...baseSetRow, source: "custom", set_id: "mv1", set_name: "Shared Name" },
@@ -163,7 +334,7 @@ describe("set library service", () => {
   });
 
   it("updates an existing source row without changing its stable ID and records old/new audit details", async () => {
-    mockEnsureSchema(mockDb.txExecute);
+    mockSetLibrarySchemaReady(mockDb.execute);
     mockDb.txExecute.mockResolvedValueOnce({ rows: [baseSetRow] });
     mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
     mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
@@ -181,7 +352,7 @@ describe("set library service", () => {
         subset: "Trainer Gallery",
         archived: false,
         reason: "Correct source data",
-        updatedAt: "2026-01-01T00:00:00.000Z",
+        version: versionFor(baseSetRow),
       },
       { id: "admin@example.com", role: "admin" }
     );
@@ -208,8 +379,34 @@ describe("set library service", () => {
     expect(auditSql).toContain("set_library_update");
   });
 
-  it("rejects stale catalogue edits when the caller posts an old updatedAt version", async () => {
-    mockEnsureSchema(mockDb.txExecute);
+  it("uses PATCH semantics so a rename preserves omitted catalogue fields and false remains explicit", async () => {
+    mockSetLibrarySchemaReady(mockDb.execute);
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [baseSetRow] });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
+
+    await expect(
+      updateSetLibraryRecord(
+        "custom",
+        "mv1",
+        { setName: "Renamed Set", archived: false, reason: "Correct name", version: versionFor(baseSetRow) },
+        { id: "admin@example.com", role: "admin" }
+      )
+    ).resolves.toMatchObject({
+      set: {
+        setName: "Renamed Set",
+        tcg: "pokemon",
+        series: "Promo",
+        releaseYear: 2024,
+        totalCards: 10,
+        archived: false,
+      },
+    });
+  });
+
+  it("rejects stale catalogue edits when the caller posts an old content version", async () => {
+    mockSetLibrarySchemaReady(mockDb.execute);
     mockDb.txExecute.mockResolvedValueOnce({
       rows: [{ ...baseSetRow, updated_at: "2026-01-02T00:00:00.000Z" }],
     });
@@ -222,7 +419,7 @@ describe("set library service", () => {
           setId: "mv1",
           setName: "Corrected Set",
           tcg: "pokemon",
-          updatedAt: "2026-01-01T00:00:00.000Z",
+          version: versionFor(baseSetRow),
           reason: "Correction",
         },
         { id: "admin@example.com", role: "admin" }
@@ -232,7 +429,7 @@ describe("set library service", () => {
   });
 
   it("requires a reason and a current version before accepting a catalogue update", async () => {
-    mockEnsureSchema(mockDb.txExecute);
+    mockSetLibrarySchemaReady(mockDb.execute);
     mockDb.txExecute.mockResolvedValueOnce({ rows: [baseSetRow] });
 
     await expect(
@@ -247,7 +444,7 @@ describe("set library service", () => {
   });
 
   it("rejects attempts to change a stable set ID without touching linked cards", async () => {
-    mockEnsureSchema(mockDb.txExecute);
+    mockSetLibrarySchemaReady(mockDb.execute);
     mockDb.txExecute.mockResolvedValueOnce({ rows: [baseSetRow] });
 
     await expect(
@@ -259,6 +456,7 @@ describe("set library service", () => {
           setName: "Renamed Set",
           tcg: "pokemon",
           reason: "Correction",
+          version: versionFor(baseSetRow),
           updatedAt: "2026-01-01T00:00:00.000Z",
         },
         { id: "admin@example.com", role: "admin" }
@@ -268,7 +466,7 @@ describe("set library service", () => {
   });
 
   it("uses a content version for active legacy card-set records", async () => {
-    mockEnsureSchema(mockDb.txExecute);
+    mockSetLibrarySchemaReady(mockDb.execute);
     const legacy = { ...baseSetRow, source: "card_sets", updated_at: null };
     mockDb.txExecute.mockResolvedValueOnce({ rows: [legacy] });
 
@@ -282,8 +480,45 @@ describe("set library service", () => {
     ).rejects.toMatchObject({ status: 409 });
   });
 
+  it("uses the exact legacy release-date text in a successful card_sets compare-and-swap", async () => {
+    mockSetLibrarySchemaReady(mockDb.execute);
+    const legacy = {
+      ...baseSetRow,
+      source: "card_sets" as const,
+      release_year: 2023,
+      release_date_raw: "2023-09-22",
+      updated_at: null,
+    };
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [legacy] });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
+
+    await expect(
+      updateSetLibraryRecord(
+        "card_sets",
+        "mv1",
+        { setName: "Corrected Set", reason: "Correct source", version: versionFor(legacy) },
+        { id: "admin@example.com", role: "admin" }
+      )
+    ).resolves.toMatchObject({ ok: true, source: "card_sets" });
+    const update = mockDb.txExecute.mock.calls
+      .map((call) => sqlText(call[0]))
+      .find((text) => text.includes("UPDATE card_sets"));
+    expect(update).toContain("release_date IS NOT DISTINCT FROM");
+    expect(update).not.toContain("String(current.release_year)");
+  });
+
+  it("keeps active and archived legacy card-set versions deterministic across repeated reads", () => {
+    const active = { ...baseSetRow, source: "card_sets" as const, updated_at: null };
+    const archived = { ...active, archived: true, updated_at: "2024-05-01T00:00:00.000Z" };
+    expect(setLibraryVersion(active)).toBe(setLibraryVersion(active));
+    expect(setLibraryVersion(archived)).toBe(setLibraryVersion(archived));
+    expect(setLibraryVersion(active)).not.toBe(setLibraryVersion(archived));
+  });
+
   it("records approve/reject/ignore review decisions with audit trail", async () => {
-    mockEnsureSchema(mockDb.execute);
+    mockSetLibrarySchemaReady(mockDb.execute);
     mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
     mockDb.txExecute.mockResolvedValueOnce({ rows: [] });
 
@@ -311,5 +546,18 @@ describe("set library service", () => {
     expect(staffRoutes).not.toContain(
       'requireCapability("grade"), async (req: Request, res: Response) => {\n    try {\n      return res.json(await listSetLibrary'
     );
+  });
+
+  it("keeps the public set route read-only and free of certificate linkage disclosure", () => {
+    const publicRoutes = readFileSync("server/routes/public.ts", "utf8");
+    const route = publicRoutes.slice(
+      publicRoutes.indexOf('app.get("/api/pokemon-sets"'),
+      publicRoutes.indexOf("// ── Population report")
+    );
+    expect(route).not.toContain("ensureSetLibrarySchema");
+    expect(route).not.toContain("ALTER TABLE");
+    expect(route).not.toContain("CREATE TABLE");
+    expect(route).not.toContain("linked_certificates");
+    expect(route).not.toContain("FROM certificates");
   });
 });

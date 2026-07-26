@@ -29,6 +29,7 @@ export function managedTables(): string[] {
 
 export type UnmanagedClass =
   | "intentionally_unmanaged" // created by runtime migrate*() or hand-SQL by design; stays out of schema.ts
+  | "numbered_migration" // owned by immutable numbered SQL migration(s), not runtime DDL
   | "legacy_active" // older object still read/written; candidate for eventual retirement
   | "pending_schema_adoption" // should be brought into shared/schema.ts later
   | "unknown_investigate"; // presence/ownership unclear; must be investigated before adoption/removal
@@ -329,13 +330,13 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
     schema: "public",
     name: "custom_sets",
     objectType: "table",
-    class: "legacy_active",
+    class: "numbered_migration",
     purpose: "operator-defined custom card sets",
     active: true,
     owningSubsystem: "catalogue",
-    reason: "runtime-created",
-    futureDisposition: "review for adoption",
-    evidenceSource: INSPECTION,
+    reason: "migrations/0024_set_library_base_tables.sql",
+    futureDisposition: "keep numbered-migration-managed",
+    evidenceSource: "migration 0024 (canonical Set Library base schema)",
   },
   {
     schema: "public",
@@ -353,25 +354,25 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
     schema: "public",
     name: "tcgdex_sets",
     objectType: "table",
-    class: "intentionally_unmanaged",
-    purpose: "TCGdex canonical set cache",
+    class: "numbered_migration",
+    purpose: "TCGdex canonical set catalogue",
     active: true,
-    owningSubsystem: "card-identification",
-    reason: "runtime-created cache",
-    futureDisposition: "keep runtime-managed",
-    evidenceSource: INSPECTION,
+    owningSubsystem: "catalogue",
+    reason: "migrations/0024_set_library_base_tables.sql",
+    futureDisposition: "keep numbered-migration-managed",
+    evidenceSource: "migration 0024 (canonical Set Library base schema)",
   },
   {
     schema: "public",
     name: "set_review_decisions",
     objectType: "table",
-    class: "pending_schema_adoption",
+    class: "numbered_migration",
     purpose: "set-review decision log",
     active: true,
     owningSubsystem: "catalogue",
-    reason: "hand-SQL",
-    futureDisposition: "adopt into schema.ts",
-    evidenceSource: INSPECTION,
+    reason: "migrations/0023_set_library_schema.sql and migrations/0024_set_library_base_tables.sql",
+    futureDisposition: "keep numbered-migration-managed",
+    evidenceSource: "migrations 0023/0024 (canonical Set Library schema)",
   },
   {
     schema: "public",
