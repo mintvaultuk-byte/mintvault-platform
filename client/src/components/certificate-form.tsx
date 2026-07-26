@@ -248,7 +248,7 @@ export default function CertificateForm({
   onIdentifyAndGrade,
   externalIdentification,
   onExternalIdentificationConsumed,
-  workstationSlot,
+  workstationSlot: rawWorkstationSlot,
   queue,
   batch,
   correctionMode = false,
@@ -1265,14 +1265,24 @@ export default function CertificateForm({
    *
    * This is the client half of the boundary; the server rejects grading-owned
    * fields independently, so a stale or malicious client cannot bypass it.
+   *
+   * ONE DELIBERATE EXCEPTION, ON CREATE ONLY: `gradeType`. The POST create route
+   * establishes a certificate's INITIAL kind from `req.body.gradeType` (defaults
+   * to "numeric"), and at create time there is no certificate id yet, so the
+   * grading workstation — which owns the kind for an existing record via its
+   * authentication control — is not mounted. Omitting it on create would silently
+   * force every authentication-only card to be created numeric. The exception is
+   * scoped to `!isEdit`, so no UPDATE ever carries it and the boundary the
+   * metadata PUT enforces is untouched.
    */
   function buildCertFormData(confirmPublishedEdit = false): FormData {
     const formData = new FormData();
     const UI_ONLY_KEYS = ["unifiedSelect", "otherText"];
+    const CREATE_ONLY_GRADING_KEYS = isEdit ? [] : ["gradeType"];
     Object.entries(form).forEach(([key, value]) => {
       if (UI_ONLY_KEYS.includes(key)) return;
       // Grading-owned state is never sent from Card Details.
-      if (!isMetadataOwnedField(key)) return;
+      if (!isMetadataOwnedField(key) && !CREATE_ONLY_GRADING_KEYS.includes(key)) return;
       if (value !== null && value !== undefined) {
         formData.append(key, String(value));
       }
@@ -1878,6 +1888,33 @@ export default function CertificateForm({
   // (manual-card-tool.tsx), never caching mount-time sizes.
   const [wfStage, setWfStage] = useState(0);
   const [wfMaxStage, setWfMaxStage] = useState(0);
+
+  /**
+   * PR A · tell the grading workstation whether the Grade stage is ACTIVE.
+   *
+   * The slot is mounted hidden-not-unmounted so a grader's unsaved work survives
+   * a stage switch. Without this flag its debounced auto-save also ran while
+   * Card Details was on screen, and persisted all-zero UI defaults — which MVGS
+   * scores as a perfect card — as real grading data on records that had none.
+   *
+   * The flag is injected HERE rather than at the JSX render site, so the render
+   * site stays literally `{workstationSlot}`: the protected Stage-3 component is
+   * still passed through with no wrapper, no transform and no scale, exactly as
+   * the protected-surface guards in tests/grading-workstation-shell.test.ts,
+   * grading-density-pass.test.ts, grading-unified-admin-shell.test.ts,
+   * grading-workstation-ux-redesign.test.ts and grading-grade-stage-layout.test.ts
+   * require. A slot that does not accept `active` is passed through untouched by
+   * the fallback branch, so every existing call site is unaffected.
+   */
+  const workstationSlot = useMemo(
+    () =>
+      isValidElement(rawWorkstationSlot)
+        ? cloneElement(rawWorkstationSlot as ReactElement<{ active?: boolean }>, {
+            active: wfStage === GRADE_STAGE,
+          })
+        : rawWorkstationSlot,
+    [rawWorkstationSlot, wfStage],
+  );
   const goToStage = (i: number) => {
     // 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review.
     const next = clampStageIndex(i);
@@ -3403,18 +3440,7 @@ export default function CertificateForm({
                     }
                   }}
                 >
-                  {/* PR A · tell the grading workstation whether the Grade stage is
-                      ACTIVE. The slot is mounted hidden-not-unmounted so a grader's
-                      unsaved work survives stage switches; without this flag its
-                      debounced auto-save also ran while Card Details was on screen
-                      and persisted UI defaults as real grading data. cloneElement
-                      keeps every existing call site unchanged — a slot that does
-                      not accept `active` simply ignores it. */}
-                  {isValidElement(workstationSlot)
-                    ? cloneElement(workstationSlot as ReactElement<{ active?: boolean }>, {
-                        active: wfStage === GRADE_STAGE,
-                      })
-                    : workstationSlot}
+                  {workstationSlot}
                 </div>
               )}
 
@@ -3425,6 +3451,32 @@ export default function CertificateForm({
                   <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
                     Grade Type *
                   </label>
+                  {/* PR A · OWNERSHIP. On an EXISTING certificate the kind
+                      (numeric vs authentication-only) is owned by the grading
+                      workstation's authentication control, which persists it
+                      through the dedicated grading route as
+                      `overall_grade: "NO" | "AA"` + `auth_status`. This dropdown
+                      was a SECOND, competing writer of the same decision that
+                      saved through the metadata route — exactly the pattern that
+                      let a stale Card Details tab revert grading state. It is
+                      read-only here and editable only on CREATE, where the
+                      workstation is not mounted and the initial kind must be set.
+                      Overall Grade below has been read-only since 2026-07-01 for
+                      the same reason, so this makes the panel consistent. */}
+                  {isEdit ? (
+                    <div
+                      className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm"
+                      data-testid="display-grade-type"
+                    >
+                      {form.gradeType === "numeric"
+                        ? "Numeric (1–10)"
+                        : (NON_NUMERIC_GRADES.find((ng) => ng.value === form.gradeType)?.description ??
+                          form.gradeType)}
+                      <span className="text-[var(--admin-ink-dim)] text-xs ml-2">
+                        — set in the Grade stage (Authentication)
+                      </span>
+                    </div>
+                  ) : (
                   <select
                     value={form.gradeType}
                     onChange={(e) => {
@@ -3457,6 +3509,7 @@ export default function CertificateForm({
                       </option>
                     ))}
                   </select>
+                  )}
                 </div>
 
                 {isNonNum && (

@@ -353,12 +353,22 @@ export default function GradingPanel({
       return res.json();
     },
   });
-  // PR A · mark hydration complete only when the grading payload for THIS
-  // certId has actually arrived. Until then the panel holds UI defaults, and
-  // the auto-save effect refuses to persist them.
+  // PR A · record WHICH certificate the panel has actually hydrated for. Until
+  // the grading payload for the CURRENT certId has arrived, the panel holds UI
+  // defaults, and the auto-save effect refuses to persist them.
+  //
+  // This stores the certId rather than a boolean deliberately. A boolean had to
+  // be cleared by the per-certId reset effect below, and effects run in
+  // DECLARATION order: for a certificate whose grading payload was already in
+  // the react-query cache, `gradingPending` is false on the very first render
+  // after the switch, so this effect set the flag true and the reset effect
+  // (declared further down) immediately cleared it again. No dependency then
+  // changed, so the flag stayed false and grading auto-save was silently dead
+  // for the rest of that mount. A certId marker is self-invalidating, so the
+  // reset effect no longer touches it and the ordering cannot matter.
   useEffect(() => {
     if (gradingData !== undefined && !gradingPending && !gradingError) {
-      gradingHydratedRef.current = true;
+      gradingHydratedForRef.current = certId;
     }
   }, [gradingData, gradingPending, gradingError, certId]);
 
@@ -932,9 +942,10 @@ export default function GradingPanel({
   // further down (also hoisted).
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveSeqRef = useRef(0);
-  /** True once GET /grading has actually returned for the CURRENT certId. Until
-   *  then the panel's state is UI defaults, not grading evidence (PR A). */
-  const gradingHydratedRef = useRef(false);
+  /** The certId GET /grading has actually returned for. While this does not
+   *  equal the current certId the panel's state is UI defaults, not grading
+   *  evidence, and nothing may be persisted (PR A). */
+  const gradingHydratedForRef = useRef<number | null>(null);
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedOnceRef = useRef(false);
 
@@ -945,7 +956,9 @@ export default function GradingPanel({
     setEditMode(false);
     editSnapshotRef.current = null;
     hydratedOnceRef.current = false;
-    gradingHydratedRef.current = false;
+    // gradingHydratedForRef is deliberately NOT reset here — it stores the certId
+    // it hydrated for, so it invalidates itself on a card switch. Clearing it
+    // here would race the hydration effect declared above (see its comment).
     setFrontLR("");
     setFrontTB("");
     setBackLR("");
@@ -1148,7 +1161,8 @@ export default function GradingPanel({
     // defect state, which MVGS scores as a perfect card). Absence of grading
     // evidence is not a perfect assessment: until the server payload has
     // actually landed, nothing may be persisted.
-    if (!gradingHydratedRef.current) return;
+    // ...and it must be THIS certificate's payload, never a previous card's.
+    if (gradingHydratedForRef.current !== certId) return;
     if (!hydratedOnceRef.current) {
       hydratedOnceRef.current = true;
       return;

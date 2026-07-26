@@ -78,10 +78,12 @@ export const GRADING_OWNED_FIELDS = [
   "gradeCorners",
   "gradeEdges",
   "gradeSurface",
-  "centeringScore",
-  "cornersScore",
-  "edgesScore",
-  "surfaceScore",
+  // Authenticity outcome — decides NO / AA, i.e. whether the certificate is
+  // numeric at all. Owned by the grading workstation's authentication control.
+  // NOTE: `auth_status` is a real database column but is NOT declared in
+  // shared/schema.ts, so it is absent from a Drizzle-selected row. The route's
+  // comparison below fails CLOSED for that case (see `gradingFieldChanges`).
+  "authStatus",
   // Measurements + evidence feeding MVGS
   "centeringFrontLr",
   "centeringFrontTb",
@@ -111,7 +113,11 @@ export const GRADING_OWNED_FIELDS = [
   "tearSeverity",
   "gradeStrengthScore",
   "gradeExplanation",
-  "gradeManualOverride",
+  "aiDraftGrade",
+  // Operator's submitted snapshot (grading work product, not metadata)
+  "operatorGrade",
+  "operatorSubgrades",
+  "gradingReport",
   // Approval state
   "gradeApprovedBy",
   "gradeApprovedAt",
@@ -119,6 +125,107 @@ export const GRADING_OWNED_FIELDS = [
   "gradedBy",
   "graderStatus",
 ] as const;
+// NOTE: an earlier revision of this file listed "gradeManualOverride" and
+// "centeringScore"/"cornersScore"/"edgesScore"/"surfaceScore" as owned keys.
+// `gradeManualOverride` matches NO column, request key or client field anywhere
+// in the repository — it was invented, and has been removed. The four *Score
+// names ARE real, but they are the DATABASE column names for gradeCentering /
+// gradeCorners / gradeEdges / gradeSurface, not separate fields; listing them
+// here compared a submitted value against an always-undefined property. They
+// are now declared as aliases below, where they resolve to the real column.
+
+/**
+ * EVERY OTHER REAL NAME a grading-owned field travels under, mapped to its
+ * canonical Drizzle/TypeScript key above.
+ *
+ * WHY THIS MATTERS
+ * The metadata route builds its update object from METADATA_OWNED_FIELDS only,
+ * so an unrecognised key can never be WRITTEN whatever it is called. But a
+ * caller that submits a grading value under an unrecognised alias would receive
+ * a 200 and believe its grading write landed. The contract must name every real
+ * alias so the answer is an explicit rejection instead of a silent no-op.
+ *
+ * THREE NAMING FAMILIES EXIST IN THIS REPOSITORY
+ *   1. Drizzle / TypeScript keys — `gradeCorners` (shared/schema.ts).
+ *   2. Grading-API payload keys — `grade_corners`, `corners` (the body the
+ *      grading workstation posts to PUT /certificates/:id/grade).
+ *   3. Database / audit column names — `corners_score` (the actual column, and
+ *      the name that appears in raw SQL and audit payloads).
+ *
+ * Every entry below is a name that genuinely appears in the repository: a
+ * declared column in shared/schema.ts, a `b.<key>` read in the grade route, or
+ * an audit fieldMap entry. No speculative variants.
+ */
+export const GRADING_FIELD_ALIASES: Readonly<Record<string, GradingOwnedField>> = {
+  // ── Overall grade. Column is literally `grade` (shared/schema.ts:341). ──
+  grade: "gradeOverall",
+  grade_overall: "gradeOverall",
+  overallGrade: "gradeOverall",
+  overall_grade: "gradeOverall",
+  // ── Kind + derived label ──
+  grade_type: "gradeType",
+  label_type: "labelType",
+  // ── Sub-grades: API name, DB column name ──
+  grade_centering: "gradeCentering",
+  centeringScore: "gradeCentering",
+  centering_score: "gradeCentering",
+  grade_corners: "gradeCorners",
+  cornersScore: "gradeCorners",
+  corners_score: "gradeCorners",
+  grade_edges: "gradeEdges",
+  edgesScore: "gradeEdges",
+  edges_score: "gradeEdges",
+  grade_surface: "gradeSurface",
+  surfaceScore: "gradeSurface",
+  surface_score: "gradeSurface",
+  // ── Authenticity outcome ──
+  auth_status: "authStatus",
+  // ── Centering measurements ──
+  centering_front_lr: "centeringFrontLr",
+  centering_front_tb: "centeringFrontTb",
+  centering_back_lr: "centeringBackLr",
+  centering_back_tb: "centeringBackTb",
+  centering_outer_front: "centeringOuterFront",
+  centering_outer_back: "centeringOuterBack",
+  centering_inner_front: "centeringInnerFront",
+  centering_inner_back: "centeringInnerBack",
+  centering_method: "centeringMethod",
+  // ── Per-zone evidence. The grade route reads these as bare `corners` /
+  //    `edges` / `surface`; the columns are *_values. ──
+  corners: "cornerValues",
+  corner_values: "cornerValues",
+  edges: "edgeValues",
+  edge_values: "edgeValues",
+  surface: "surfaceValues",
+  surface_values: "surfaceValues",
+  // ── Defects ──
+  ai_defects: "aiDefects",
+  verified_defects: "verifiedDefects",
+  ai_defect_candidates: "aiDefectCandidates",
+  // ── MVGS modifiers / deduction inputs ──
+  dark_border: "darkBorder",
+  dark_border_front: "darkBorderFront",
+  dark_border_back: "darkBorderBack",
+  eye_appeal_modifier: "eyeAppealModifier",
+  whitening_lines: "whiteningLines",
+  crease_lines: "creaseLines",
+  crease_span_pct: "creaseSpanPct",
+  wrinkle_severity: "wrinkleSeverity",
+  tear_severity: "tearSeverity",
+  grade_strength_score: "gradeStrengthScore",
+  grade_explanation: "gradeExplanation",
+  ai_draft_grade: "aiDraftGrade",
+  // ── Operator snapshot + report ──
+  operator_grade: "operatorGrade",
+  operator_subgrades: "operatorSubgrades",
+  grading_report: "gradingReport",
+  // ── Approval state ──
+  grade_approved_by: "gradeApprovedBy",
+  grade_approved_at: "gradeApprovedAt",
+  graded_at: "gradedAt",
+  graded_by: "gradedBy",
+  grader_status: "graderStatus",
+};
 
 export type MetadataOwnedField = (typeof METADATA_OWNED_FIELDS)[number];
 export type GradingOwnedField = (typeof GRADING_OWNED_FIELDS)[number];
@@ -130,17 +237,66 @@ export function isMetadataOwnedField(key: string): boolean {
   return METADATA_SET.has(key);
 }
 
+/**
+ * The canonical grading column a request key refers to, or null when the key is
+ * not grading-owned under ANY of its names.
+ */
+export function canonicalGradingField(key: string): GradingOwnedField | null {
+  if (GRADING_SET.has(key)) return key as GradingOwnedField;
+  return GRADING_FIELD_ALIASES[key] ?? null;
+}
+
 export function isGradingOwnedField(key: string): boolean {
-  return GRADING_SET.has(key);
+  return canonicalGradingField(key) !== null;
 }
 
 /**
- * Grading-owned keys present in a request body. Used by the metadata route to
- * produce an explicit contract error instead of silently ignoring them.
+ * Grading-owned keys present in a request body, UNDER WHATEVER NAME the caller
+ * used. The submitted name is returned (not the canonical one) so the error
+ * names the key the client actually sent and is actionable.
  */
 export function gradingFieldsIn(body: Record<string, unknown>): string[] {
   if (!body || typeof body !== "object") return [];
-  return GRADING_OWNED_FIELDS.filter((k) => Object.prototype.hasOwnProperty.call(body, k));
+  return Object.keys(body).filter((k) => canonicalGradingField(k) !== null);
+}
+
+/**
+ * Split the grading-owned keys in a request body into the ones that would
+ * CHANGE stored grading state and the ones that merely echo it back.
+ *
+ * A harmless echo (older client posting the value it just read) is tolerated so
+ * the boundary does not break clients that predate it — it still writes nothing,
+ * because the route's update object is built from the metadata allowlist alone.
+ *
+ * FAILS CLOSED. When the canonical column is ABSENT from the stored row — which
+ * happens for a real database column that shared/schema.ts does not declare, so
+ * a Drizzle-selected row has no such property (`authStatus`) — a submitted
+ * non-empty value is treated as a CHANGE and rejected. It is never assumed to
+ * match.
+ *
+ * @param body     the request body
+ * @param stored   the certificate row as read before the write
+ */
+export function gradingFieldChanges(
+  body: Record<string, unknown>,
+  stored: Record<string, unknown>,
+): { submitted: string[]; changing: string[] } {
+  const submitted = gradingFieldsIn(body);
+  const norm = (v: unknown) => {
+    if (v === null || v === undefined) return "";
+    if (typeof v === "object") return JSON.stringify(v);
+    return String(v).trim();
+  };
+  const changing = submitted.filter((key) => {
+    const canonical = canonicalGradingField(key) as string;
+    const posted = norm(body[key]);
+    if (!Object.prototype.hasOwnProperty.call(stored ?? {}, canonical)) {
+      // Cannot prove this is an echo — only an empty submission is harmless.
+      return posted !== "";
+    }
+    return posted !== norm(stored[canonical]);
+  });
+  return { submitted, changing };
 }
 
 /**

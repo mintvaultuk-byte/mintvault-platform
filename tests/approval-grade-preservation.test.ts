@@ -381,12 +381,24 @@ describe("handler invariants: PUT /api/admin/certificates/:id/grade (draft save)
   // This third handler was also changed (auth_status) and must be pinned too, or the
   // change is unguarded — the draft-save route runs on EVERY auto-save, so an
   // auth_status reset here is far higher-frequency than on approval.
+  // PR A extracted this handler VERBATIM out of its inline `app.put(...)`
+  // registration into a named export (`handleCertificateGradeUpdate`), so it can
+  // be mounted in a route-level test over a disposable PostgreSQL cluster —
+  // exactly as `handleCertificateMetadataUpdate` already was. The registration
+  // line is now a one-line delegation, so the source slice must follow the
+  // handler, not the mount point. Every invariant asserted below is unchanged.
   const gradeHandler = (): string => {
-    const start = ROUTES.indexOf('app.put("/api/admin/certificates/:id/grade"');
+    const start = ROUTES.indexOf("export async function handleCertificateGradeUpdate");
     expect(start).toBeGreaterThan(0);
-    const end = ROUTES.indexOf("\n  app.", start + 10);
+    const end = ROUTES.indexOf("\nexport async function ", start + 10);
     return ROUTES.slice(start, end > start ? end : start + 20_000);
   };
+
+  it("is still mounted at the same path, behind requireAdmin", () => {
+    expect(ROUTES).toContain(
+      'app.put("/api/admin/certificates/:id/grade", requireAdmin, handleCertificateGradeUpdate);',
+    );
+  });
 
   it("preserves auth_status on omission instead of resetting it to 'genuine'", () => {
     const h = gradeHandler();
