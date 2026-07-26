@@ -9,7 +9,7 @@ import { WorkstationPreviewAside } from "@/components/grading-workflow/Workstati
 import { CertificatePreviewPanel } from "@/components/grading-workflow/CertificatePreviewPanel";
 import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 import { VariantSummary } from "@/components/grading-workflow/VariantSummary";
-import { isMetadataOwnedField } from "@shared/certificate-field-ownership";
+import { certificateFormEntriesToSend } from "@shared/certificate-field-ownership";
 import {
   GRADING_STAGES,
   deriveStageCompletion,
@@ -1266,27 +1266,33 @@ export default function CertificateForm({
    * This is the client half of the boundary; the server rejects grading-owned
    * fields independently, so a stale or malicious client cannot bypass it.
    *
-   * ONE DELIBERATE EXCEPTION, ON CREATE ONLY: `gradeType`. The POST create route
-   * establishes a certificate's INITIAL kind from `req.body.gradeType` (defaults
-   * to "numeric"), and at create time there is no certificate id yet, so the
-   * grading workstation — which owns the kind for an existing record via its
-   * authentication control — is not mounted. Omitting it on create would silently
-   * force every authentication-only card to be created numeric. The exception is
-   * scoped to `!isEdit`, so no UPDATE ever carries it and the boundary the
-   * metadata PUT enforces is untouched.
+   * CREATE-ONLY EXCEPTIONS (`CREATE_ONLY_FIELDS` in the shared contract — renamed
+   * from CREATE_ONLY_GRADING_KEYS because it now holds a non-grading field too):
+   *
+   *   • `gradeType` — the POST route establishes a certificate's INITIAL kind
+   *     from `req.body.gradeType` (defaulting to "numeric"). At create time there
+   *     is no certificate id, so the grading workstation — which owns the kind
+   *     for an existing record via its authentication control — is not mounted,
+   *     and omitting it would silently force every authentication-only card to be
+   *     created numeric.
+   *
+   *   • `submissionItemId` — the paid-submission linkage (hostile review H-1).
+   *     Filtering it out made the create form post no linkage at all, so every
+   *     certificate was created with `submission_item_id = NULL`, bypassing the
+   *     server's paid/not-already-linked validation entirely. It is create-only,
+   *     so it is NOT a grading bypass and an EDIT can never silently re-link an
+   *     existing certificate to a different submission item.
+   *
+   * Both are scoped to `!isEdit`, so no UPDATE carries either and the boundary
+   * the metadata PUT enforces is untouched. The key decision itself lives in
+   * `certificateFormEntriesToSend`, so it is unit-tested at runtime rather than
+   * by reading this function's source.
    */
   function buildCertFormData(confirmPublishedEdit = false): FormData {
     const formData = new FormData();
-    const UI_ONLY_KEYS = ["unifiedSelect", "otherText"];
-    const CREATE_ONLY_GRADING_KEYS = isEdit ? [] : ["gradeType"];
-    Object.entries(form).forEach(([key, value]) => {
-      if (UI_ONLY_KEYS.includes(key)) return;
-      // Grading-owned state is never sent from Card Details.
-      if (!isMetadataOwnedField(key) && !CREATE_ONLY_GRADING_KEYS.includes(key)) return;
-      if (value !== null && value !== undefined) {
-        formData.append(key, String(value));
-      }
-    });
+    for (const [key, value] of certificateFormEntriesToSend(form as Record<string, unknown>, { isEdit })) {
+      formData.append(key, value);
+    }
     formData.append("designations", JSON.stringify(designations));
     if (frontImage) formData.append("frontImage", frontImage);
     if (backImage) formData.append("backImage", backImage);
@@ -3448,7 +3454,16 @@ export default function CertificateForm({
                 <div className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest mb-1">Grade</div>
 
                 <div>
-                  <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
+                  {/* A11y: the label is bound to whichever control is rendered
+                      below, so a screen reader announces "Grade Type" together
+                      with the current value in BOTH modes. Before this it was a
+                      bare <label> with no htmlFor sitting above a plain <div>,
+                      which announced the value as unlabelled prose. */}
+                  <label
+                    htmlFor={isEdit ? "cert-grade-type-readonly" : "cert-grade-type"}
+                    id="cert-grade-type-label"
+                    className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1"
+                  >
                     Grade Type *
                   </label>
                   {/* PR A · OWNERSHIP. On an EXISTING certificate the kind
@@ -3464,20 +3479,41 @@ export default function CertificateForm({
                       Overall Grade below has been read-only since 2026-07-01 for
                       the same reason, so this makes the panel consistent. */}
                   {isEdit ? (
-                    <div
-                      className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm"
-                      data-testid="display-grade-type"
-                    >
-                      {form.gradeType === "numeric"
-                        ? "Numeric (1–10)"
-                        : (NON_NUMERIC_GRADES.find((ng) => ng.value === form.gradeType)?.description ??
-                          form.gradeType)}
-                      <span className="text-[var(--admin-ink-dim)] text-xs ml-2">
-                        — set in the Grade stage (Authentication)
+                    /* A11y (hostile review): a READ-ONLY form control, not a
+                       styled <div>. `readOnly` (never `disabled`) keeps it in the
+                       tab order and makes assistive tech announce the label, the
+                       value AND "read only", so a keyboard user is told plainly
+                       that it cannot be edited here rather than discovering it by
+                       trying. It carries no `name`, and the payload is built from
+                       form state via certificateFormEntriesToSend, so this adds
+                       no second grading writer of any kind. */
+                    <>
+                      <input
+                        id="cert-grade-type-readonly"
+                        type="text"
+                        readOnly
+                        aria-readonly="true"
+                        aria-describedby="cert-grade-type-hint"
+                        tabIndex={0}
+                        value={
+                          form.gradeType === "numeric"
+                            ? "Numeric (1–10)"
+                            : (NON_NUMERIC_GRADES.find((ng) => ng.value === form.gradeType)?.description ??
+                              String(form.gradeType ?? ""))
+                        }
+                        className="w-full bg-[var(--admin-panel2)] border border-[var(--admin-gold)]/20 rounded px-3 py-2 text-[var(--admin-ink)] text-sm cursor-default focus:outline-none focus:border-[var(--admin-gold)]"
+                        data-testid="display-grade-type"
+                      />
+                      <span
+                        id="cert-grade-type-hint"
+                        className="text-[var(--admin-ink-dim)] text-xs mt-1 block"
+                      >
+                        Set in the Grade stage (Authentication)
                       </span>
-                    </div>
+                    </>
                   ) : (
                   <select
+                    id="cert-grade-type"
                     value={form.gradeType}
                     onChange={(e) => {
                       const gt = e.target.value;

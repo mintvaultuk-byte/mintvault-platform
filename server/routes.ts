@@ -115,6 +115,7 @@ import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/va
 import {
   gradingFieldChanges,
   gradingFieldContractError,
+  assertServerMetadataCommitKeys,
 } from "@shared/certificate-field-ownership";
 import {
   resolveEditConflicts,
@@ -1768,40 +1769,69 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
         return res.status(400).json({ error: "Invalid rarity selection.", details: structuredUpdate.errors });
       }
 
-      if (frontImage) {
-        const ext = path.extname(frontImage.originalname).replace(".", "");
-        const r2Key = r2KeyForImage(existing.certId, "front", ext || "jpg");
-        await uploadToR2(r2Key, frontImage.buffer, frontImage.mimetype);
-        if (existing.frontImagePath) {
+      // ── M-3 · IMAGE REPLACEMENT MUST LEAVE TRUTHFUL AUDIT EVIDENCE ────────
+      // R2 keys are DETERMINISTIC (`images/{certId}/front.jpg`), so re-uploading
+      // a front image with the same extension replaces the OBJECT while the
+      // stored path STRING is unchanged. The committed-field diff therefore saw
+      // no change, the no-op early return fired, and a customer's card image was
+      // swapped with no audit row at all — the trail said nothing happened.
+      //
+      // Recorded per replacement below and audited unconditionally further down,
+      // whether or not any metadata column also changed. The evidence is the
+      // CONTENT identity (sha256 of the uploaded bytes + size + mime), not a
+      // fabricated path change: the audit states that the image content was
+      // replaced, and says explicitly when the path did not move.
+      type ImageReplacement = {
+        side: "front" | "back";
+        r2Key: string;
+        previousPath: string | null;
+        pathChanged: boolean;
+        contentSha256: string;
+        bytes: number;
+        contentType: string;
+        originalFilename: string;
+      };
+      const imageReplacements: ImageReplacement[] = [];
+
+      const applyImageUpload = async (
+        side: "front" | "back",
+        file: Express.Multer.File,
+        previousPath: string | null,
+        sortOrder: number,
+      ) => {
+        const ext = path.extname(file.originalname).replace(".", "");
+        const r2Key = r2KeyForImage(existing.certId, side, ext || "jpg");
+        await uploadToR2(r2Key, file.buffer, file.mimetype);
+        // Delete the superseded object ONLY when it is genuinely a DIFFERENT
+        // key. Deleting unconditionally removed the object that had just been
+        // uploaded whenever the extension was unchanged — the overwhelmingly
+        // common case — destroying the image the operator had just supplied.
+        if (previousPath && previousPath !== r2Key) {
           try {
-            await deleteFromR2(existing.frontImagePath);
+            await deleteFromR2(previousPath);
           } catch {}
         }
-        data.frontImagePath = r2Key;
+        data[side === "front" ? "frontImagePath" : "backImagePath"] = r2Key;
         await storage.addCertificateImage({
           certificateId: id,
-          imageType: "front",
+          imageType: side,
           url: r2Key,
-          sortOrder: 0,
+          sortOrder,
         });
-      }
-      if (backImage) {
-        const ext = path.extname(backImage.originalname).replace(".", "");
-        const r2Key = r2KeyForImage(existing.certId, "back", ext || "jpg");
-        await uploadToR2(r2Key, backImage.buffer, backImage.mimetype);
-        if (existing.backImagePath) {
-          try {
-            await deleteFromR2(existing.backImagePath);
-          } catch {}
-        }
-        data.backImagePath = r2Key;
-        await storage.addCertificateImage({
-          certificateId: id,
-          imageType: "back",
-          url: r2Key,
-          sortOrder: 1,
+        imageReplacements.push({
+          side,
+          r2Key,
+          previousPath: previousPath ?? null,
+          pathChanged: (previousPath ?? null) !== r2Key,
+          contentSha256: crypto.createHash("sha256").update(file.buffer).digest("hex"),
+          bytes: file.buffer.length,
+          contentType: file.mimetype,
+          originalFilename: file.originalname,
         });
-      }
+      };
+
+      if (frontImage) await applyImageUpload("front", frontImage, existing.frontImagePath ?? null, 0);
+      if (backImage) await applyImageUpload("back", backImage, existing.backImagePath ?? null, 1);
 
       // ── H6: truthful FIELD-LEVEL audit ───────────────────────────────────
       // The old payload recorded three CURRENT values and no previous values,
@@ -1843,13 +1873,64 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
       // field does not touch the row, so `updated_at` is NOT bumped. The row
       // timestamp means "when this certificate last actually changed". Tested.
       //
-      // An image upload that lands on the SAME deterministic R2 key
-      // (images/{certId}/front.jpg) also produces no committed field change: the
-      // object was replaced in R2 and the certificate_images row was already
-      // inserted above, and the certificates row already points at that key, so
-      // there is genuinely nothing left to write here. A new extension changes
-      // the key, which IS a change and takes the normal audited path.
+      // M-3: an image upload that lands on the SAME deterministic R2 key
+      // produces no committed FIELD change, but the customer's image content
+      // genuinely changed. That is NOT a no-op and must never take the silent
+      // path — it gets its own audit event below, carrying the content identity.
+      if (auditChanges.length === 0 && imageReplacements.length === 0) {
+        return res.json({ ...existing, certId: normalizeCertId(existing.certId) });
+      }
+
+      // ── M-5 · SERVER-SIDE COMMITTED-KEY ALLOWLIST (fail closed) ───────────
+      // `data` is assembled by convention — hard-coded putGuarded calls, the
+      // "OTHER" companions, image paths, and an in-place merge from the
+      // structured-variant applier. Nothing structurally prevented a future
+      // `putGuarded("gradeOverall")` from reintroducing the very defect PR A
+      // removes. Every key about to be persisted must now belong to an explicit
+      // approved set (metadata / image / structured / documented server-derived).
+      // Throws, so a mistake is loud (500 + logged) rather than a silent grading
+      // write; it is checked BEFORE any row or audit write, so a violation
+      // persists nothing.
+      assertServerMetadataCommitKeys(data as Record<string, unknown>);
+
+      const imageAuditDetail = imageReplacements.length
+        ? {
+            imageReplacements: imageReplacements.map((r) => ({
+              side: r.side,
+              r2Key: r.r2Key,
+              previousPath: r.previousPath,
+              // Stated explicitly rather than implied: when false, the stored
+              // path did NOT move and the object itself was overwritten.
+              pathChanged: r.pathChanged,
+              contentSha256: r.contentSha256,
+              bytes: r.bytes,
+              contentType: r.contentType,
+              originalFilename: r.originalFilename,
+            })),
+          }
+        : {};
+
+      // M-3: image content replaced but NO metadata column changed. There is
+      // nothing to UPDATE, so `updateCertificateAudited` (which pairs a row
+      // write with its audit row) has no row to write — the audit is recorded on
+      // its own. It is awaited and NOT swallowed: if it fails the handler's
+      // outer catch returns 500, so the caller is never told a replacement
+      // succeeded with no trail of it.
       if (auditChanges.length === 0) {
+        await storage.writeAuditLog(
+          "certificate",
+          existing.certId,
+          "certificate_image_replaced",
+          req.session.adminEmail || "admin",
+          {
+            certificateId: existing.id,
+            certId: existing.certId,
+            scope: "certificate_image_only",
+            changes: [],
+            changedFields: [],
+            ...imageAuditDetail,
+          },
+        );
         return res.json({ ...existing, certId: normalizeCertId(existing.certId) });
       }
 
@@ -1868,6 +1949,9 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
           // Unrelated concurrent edits that were preserved rather than clobbered.
           mergedFromConcurrentEdit: mergedFields,
           conflictGuard: editResolution ? "three_way_snapshot" : "legacy_no_snapshot",
+          // M-3: content identity travels with the ordinary update audit too, so
+          // a replacement is provable whether or not the path string moved.
+          ...imageAuditDetail,
         },
       });
 
@@ -1878,6 +1962,185 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
     }
 }
 
+
+/**
+ * POST /api/admin/certificates — the certificate CREATE handler.
+ *
+ * Extracted VERBATIM from its former inline `app.post` registration inside
+ * registerRoutes, exactly as `handleCertificateMetadataUpdate` and
+ * `handleCertificateGradeUpdate` already were, so the paid-submission linkage
+ * (hostile review H-1) can be driven over real HTTP against a disposable
+ * PostgreSQL cluster instead of being asserted from source text.
+ *
+ * NOT ONE LINE OF CREATE LOGIC IS CHANGED by the extraction: same body, same
+ * order, same comments, same validation, same audit. The mount point below is
+ * unchanged too — same path, same requireAdmin + multer chain, same position.
+ */
+export async function handleCertificateCreate(req: any, res: any): Promise<void> {
+      try {
+        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+        const frontImage = files?.frontImage?.[0];
+        const backImage = files?.backImage?.[0];
+
+        const toValidate = [frontImage, backImage].filter((f): f is Express.Multer.File => !!f);
+        if (toValidate.length > 0) {
+          const uploadErr = await rejectInvalidUploads(toValidate);
+          if (uploadErr) return res.status(400).json({ error: uploadErr });
+        }
+
+        const gradeType = req.body.gradeType || "numeric";
+        const isNonNum = isNonNumericGrade(gradeType);
+
+        if (!isNonNum && req.body.gradeOverall) {
+          const g = Number(req.body.gradeOverall);
+          if (!isValidNumericGrade(g)) {
+            return res.status(400).json({ error: "Grade must be a valid MVGS grade (1–10, including half grades)" });
+          }
+        }
+
+        const tempCertId = `MV-TEMP-${Date.now()}`;
+
+        let frontR2Key: string | null = null;
+        let backR2Key: string | null = null;
+
+        if (frontImage) {
+          const ext = path.extname(frontImage.originalname).replace(".", "");
+          frontR2Key = r2KeyForImage(tempCertId, "front", ext || "jpg");
+          await uploadToR2(frontR2Key, frontImage.buffer, frontImage.mimetype);
+        }
+        if (backImage) {
+          const ext = path.extname(backImage.originalname).replace(".", "");
+          backR2Key = r2KeyForImage(tempCertId, "back", ext || "jpg");
+          await uploadToR2(backR2Key, backImage.buffer, backImage.mimetype);
+        }
+
+        let validatedItemId: number | null = null;
+        if (req.body.submissionItemId) {
+          validatedItemId = parseInt(req.body.submissionItemId, 10);
+          const checkResult = await db.execute(sql`
+            SELECT si.id FROM submission_items si
+            JOIN submissions s ON s.id = si.submission_id
+            WHERE si.id = ${validatedItemId}
+              AND s.deleted_at IS NULL
+              AND s.status != 'draft'
+              AND si.id NOT IN (SELECT submission_item_id FROM certificates WHERE submission_item_id IS NOT NULL)
+          `);
+          if (checkResult.rows.length === 0) {
+            return res.status(400).json({ error: "Submission item not found, already linked, or submission not paid" });
+          }
+        }
+
+        const certGrade = !isNonNum ? parseFloat(req.body.gradeOverall || "0") : 0;
+        // Pristine/black via the shared MVGS gate, never grade alone. This path
+        // stores null subgrades (Pristine is established only by the grading-save
+        // paths that run the full subgrade+deduction gate), so isBlackLabel()
+        // returns false here → "Standard". Same gate as approve-grade/grade-card.
+        const computedLabelType =
+          !isNonNum && isBlackLabel({ centering: -1, corners: -1, edges: -1, surface: -1 }, certGrade)
+            ? "black"
+            : "Standard";
+
+        const data = {
+          labelType: computedLabelType,
+          gradeType,
+          submissionItemId: validatedItemId,
+          cardGame: req.body.cardGame,
+          setName: req.body.setName,
+          cardName: req.body.cardName,
+          cardNumber: req.body.cardNumber,
+          rarity: req.body.rarity || null,
+          rarityOther: req.body.rarity === "OTHER" ? req.body.rarityOther || null : null,
+          designations: parseDesignations(req.body.designations),
+          variant: req.body.variant || null,
+          variantOther: req.body.variant === "OTHER" ? req.body.variantOther || null : null,
+          collection: null,
+          collectionCode: req.body.collectionCode || null,
+          collectionOther: req.body.collectionCode === "OTHER" ? req.body.collectionOther?.trim() || null : null,
+          language: req.body.language || "English",
+          year: req.body.year,
+          notes: req.body.notes || null,
+          gradeOverall: isNonNum ? null : req.body.gradeOverall,
+          gradeCentering: null,
+          gradeCorners: null,
+          gradeEdges: null,
+          gradeSurface: null,
+          frontImagePath: frontR2Key,
+          backImagePath: backR2Key,
+          status: req.body.status || "draft",
+          createdBy: req.session.adminEmail || "admin",
+        };
+
+        if (data.collectionCode === "OTHER" && !data.collectionOther) {
+          return res.status(400).json({ error: "Collection 'Other (manual)' requires a manual entry value" });
+        }
+
+        // Front-label line 3 shows EITHER variant OR rarity — held by convention
+        // only until now. Enforce at write time so both can never be set (the
+        // label renderer would silently drop one → wrong physical product).
+        if (data.variant && data.rarity) {
+          return res.status(400).json({
+            error: "Set either Variant or Rarity, not both — the front label shows only one on line 3.",
+          });
+        }
+
+        // Structured rarity/variant picker → new nullable columns (legacy
+        // variant/rarity above are left untouched). Validated + symbol-derived
+        // server-side; invalid catalogue values are rejected here, not at the DB.
+        let structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
+        if (!structuredCreate.ok) {
+          // A stale cross-machine catalogue cache can reject a just-added value —
+          // force-refresh the snapshot once and retry before failing (data is not
+          // mutated on a failed apply, so the retry is safe).
+          structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true));
+        }
+        if (!structuredCreate.ok) {
+          return res.status(400).json({ error: "Invalid rarity selection.", details: structuredCreate.errors });
+        }
+
+        const cert = await storage.createCertificate(data, req.session.adminEmail || "admin");
+
+        await storage.writeAuditLog("certificate", cert.certId, "create", req.session.adminEmail || "admin", {
+          cardName: data.cardName,
+          setName: data.setName,
+          cardNumber: data.cardNumber,
+          gradeOverall: data.gradeOverall,
+        });
+
+        const realCertId = cert.certId;
+        if (frontR2Key) {
+          const ext = path.extname(frontImage!.originalname).replace(".", "");
+          const newKey = r2KeyForImage(realCertId, "front", ext || "jpg");
+          await uploadToR2(newKey, frontImage!.buffer, frontImage!.mimetype);
+          await deleteFromR2(frontR2Key);
+          await storage.updateCertificate(cert.id, { frontImagePath: newKey });
+          await storage.addCertificateImage({
+            certificateId: cert.id,
+            imageType: "front",
+            url: newKey,
+            sortOrder: 0,
+          });
+        }
+        if (backR2Key) {
+          const ext = path.extname(backImage!.originalname).replace(".", "");
+          const newKey = r2KeyForImage(realCertId, "back", ext || "jpg");
+          await uploadToR2(newKey, backImage!.buffer, backImage!.mimetype);
+          await deleteFromR2(backR2Key);
+          await storage.updateCertificate(cert.id, { backImagePath: newKey });
+          await storage.addCertificateImage({
+            certificateId: cert.id,
+            imageType: "back",
+            url: newKey,
+            sortOrder: 1,
+          });
+        }
+
+        const updated = await storage.getCertificate(cert.id);
+        res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : updated);
+      } catch (error: any) {
+        console.error("Create cert error:", error.message, error.stack);
+        res.status(500).json({ error: "Failed to create certificate" });
+      }
+}
 
 /**
  * PUT /api/admin/certificates/:id/grade — the DEDICATED grading write path.
@@ -4717,171 +4980,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       { name: "frontImage", maxCount: 1 },
       { name: "backImage", maxCount: 1 },
     ]),
-    async (req, res) => {
-      try {
-        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-        const frontImage = files?.frontImage?.[0];
-        const backImage = files?.backImage?.[0];
-
-        const toValidate = [frontImage, backImage].filter((f): f is Express.Multer.File => !!f);
-        if (toValidate.length > 0) {
-          const uploadErr = await rejectInvalidUploads(toValidate);
-          if (uploadErr) return res.status(400).json({ error: uploadErr });
-        }
-
-        const gradeType = req.body.gradeType || "numeric";
-        const isNonNum = isNonNumericGrade(gradeType);
-
-        if (!isNonNum && req.body.gradeOverall) {
-          const g = Number(req.body.gradeOverall);
-          if (!isValidNumericGrade(g)) {
-            return res.status(400).json({ error: "Grade must be a valid MVGS grade (1–10, including half grades)" });
-          }
-        }
-
-        const tempCertId = `MV-TEMP-${Date.now()}`;
-
-        let frontR2Key: string | null = null;
-        let backR2Key: string | null = null;
-
-        if (frontImage) {
-          const ext = path.extname(frontImage.originalname).replace(".", "");
-          frontR2Key = r2KeyForImage(tempCertId, "front", ext || "jpg");
-          await uploadToR2(frontR2Key, frontImage.buffer, frontImage.mimetype);
-        }
-        if (backImage) {
-          const ext = path.extname(backImage.originalname).replace(".", "");
-          backR2Key = r2KeyForImage(tempCertId, "back", ext || "jpg");
-          await uploadToR2(backR2Key, backImage.buffer, backImage.mimetype);
-        }
-
-        let validatedItemId: number | null = null;
-        if (req.body.submissionItemId) {
-          validatedItemId = parseInt(req.body.submissionItemId, 10);
-          const checkResult = await db.execute(sql`
-            SELECT si.id FROM submission_items si
-            JOIN submissions s ON s.id = si.submission_id
-            WHERE si.id = ${validatedItemId}
-              AND s.deleted_at IS NULL
-              AND s.status != 'draft'
-              AND si.id NOT IN (SELECT submission_item_id FROM certificates WHERE submission_item_id IS NOT NULL)
-          `);
-          if (checkResult.rows.length === 0) {
-            return res.status(400).json({ error: "Submission item not found, already linked, or submission not paid" });
-          }
-        }
-
-        const certGrade = !isNonNum ? parseFloat(req.body.gradeOverall || "0") : 0;
-        // Pristine/black via the shared MVGS gate, never grade alone. This path
-        // stores null subgrades (Pristine is established only by the grading-save
-        // paths that run the full subgrade+deduction gate), so isBlackLabel()
-        // returns false here → "Standard". Same gate as approve-grade/grade-card.
-        const computedLabelType =
-          !isNonNum && isBlackLabel({ centering: -1, corners: -1, edges: -1, surface: -1 }, certGrade)
-            ? "black"
-            : "Standard";
-
-        const data = {
-          labelType: computedLabelType,
-          gradeType,
-          submissionItemId: validatedItemId,
-          cardGame: req.body.cardGame,
-          setName: req.body.setName,
-          cardName: req.body.cardName,
-          cardNumber: req.body.cardNumber,
-          rarity: req.body.rarity || null,
-          rarityOther: req.body.rarity === "OTHER" ? req.body.rarityOther || null : null,
-          designations: parseDesignations(req.body.designations),
-          variant: req.body.variant || null,
-          variantOther: req.body.variant === "OTHER" ? req.body.variantOther || null : null,
-          collection: null,
-          collectionCode: req.body.collectionCode || null,
-          collectionOther: req.body.collectionCode === "OTHER" ? req.body.collectionOther?.trim() || null : null,
-          language: req.body.language || "English",
-          year: req.body.year,
-          notes: req.body.notes || null,
-          gradeOverall: isNonNum ? null : req.body.gradeOverall,
-          gradeCentering: null,
-          gradeCorners: null,
-          gradeEdges: null,
-          gradeSurface: null,
-          frontImagePath: frontR2Key,
-          backImagePath: backR2Key,
-          status: req.body.status || "draft",
-          createdBy: req.session.adminEmail || "admin",
-        };
-
-        if (data.collectionCode === "OTHER" && !data.collectionOther) {
-          return res.status(400).json({ error: "Collection 'Other (manual)' requires a manual entry value" });
-        }
-
-        // Front-label line 3 shows EITHER variant OR rarity — held by convention
-        // only until now. Enforce at write time so both can never be set (the
-        // label renderer would silently drop one → wrong physical product).
-        if (data.variant && data.rarity) {
-          return res.status(400).json({
-            error: "Set either Variant or Rarity, not both — the front label shows only one on line 3.",
-          });
-        }
-
-        // Structured rarity/variant picker → new nullable columns (legacy
-        // variant/rarity above are left untouched). Validated + symbol-derived
-        // server-side; invalid catalogue values are rejected here, not at the DB.
-        let structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
-        if (!structuredCreate.ok) {
-          // A stale cross-machine catalogue cache can reject a just-added value —
-          // force-refresh the snapshot once and retry before failing (data is not
-          // mutated on a failed apply, so the retry is safe).
-          structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true));
-        }
-        if (!structuredCreate.ok) {
-          return res.status(400).json({ error: "Invalid rarity selection.", details: structuredCreate.errors });
-        }
-
-        const cert = await storage.createCertificate(data, req.session.adminEmail || "admin");
-
-        await storage.writeAuditLog("certificate", cert.certId, "create", req.session.adminEmail || "admin", {
-          cardName: data.cardName,
-          setName: data.setName,
-          cardNumber: data.cardNumber,
-          gradeOverall: data.gradeOverall,
-        });
-
-        const realCertId = cert.certId;
-        if (frontR2Key) {
-          const ext = path.extname(frontImage!.originalname).replace(".", "");
-          const newKey = r2KeyForImage(realCertId, "front", ext || "jpg");
-          await uploadToR2(newKey, frontImage!.buffer, frontImage!.mimetype);
-          await deleteFromR2(frontR2Key);
-          await storage.updateCertificate(cert.id, { frontImagePath: newKey });
-          await storage.addCertificateImage({
-            certificateId: cert.id,
-            imageType: "front",
-            url: newKey,
-            sortOrder: 0,
-          });
-        }
-        if (backR2Key) {
-          const ext = path.extname(backImage!.originalname).replace(".", "");
-          const newKey = r2KeyForImage(realCertId, "back", ext || "jpg");
-          await uploadToR2(newKey, backImage!.buffer, backImage!.mimetype);
-          await deleteFromR2(backR2Key);
-          await storage.updateCertificate(cert.id, { backImagePath: newKey });
-          await storage.addCertificateImage({
-            certificateId: cert.id,
-            imageType: "back",
-            url: newKey,
-            sortOrder: 1,
-          });
-        }
-
-        const updated = await storage.getCertificate(cert.id);
-        res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : updated);
-      } catch (error: any) {
-        console.error("Create cert error:", error.message, error.stack);
-        res.status(500).json({ error: "Failed to create certificate" });
-      }
-    }
+    handleCertificateCreate,
   );
 
   app.put(

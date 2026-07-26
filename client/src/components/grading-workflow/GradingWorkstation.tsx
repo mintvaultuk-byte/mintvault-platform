@@ -30,9 +30,27 @@ import {
  */
 export type GradingWorkstationMode = "super-admin" | "admin" | "admin-review" | "staff" | "grader";
 
+/** 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review. */
+const GRADE_STAGE = 1;
+
 type GradingPanelProps = React.ComponentProps<typeof GradingPanel>;
 
-type Props = GradingPanelProps & {
+/**
+ * PR A (hostile review M-1) · `active` is OMITTED from this adapter's public
+ * props ON PURPOSE.
+ *
+ * /grader, /staff and /admin/staff all mount the workstation through here, and
+ * the stage that decides whether Grade is on screen is THIS component's own
+ * `stage` state (below) — the pages never see it. Letting a page pass `active`
+ * would let it contradict the stage the user is actually looking at, which is
+ * precisely the fail-open shape the review flagged. The adapter derives the flag
+ * from its own state and passes it explicitly to GradingPanel, so all three
+ * standalone surfaces are covered by construction rather than by remembering.
+ */
+type Props = Omit<
+  GradingPanelProps,
+  "active"
+> & {
   mode: GradingWorkstationMode;
   /** Optional queue position for the header strip (e.g. Staff "3 / 40"). */
   queue?: { position: number; total: number };
@@ -49,7 +67,7 @@ export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps 
   // Grade is the working stage for these role surfaces; Card Details is already
   // captured upstream. Start on Grade, keep every stage reachable.
   // 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review.
-  const [stage, setStage] = useState(1);
+  const [stage, setStage] = useState(GRADE_STAGE);
 
   // The stage bar GATES content (hidden-not-unmounted via the .grading-stage-gate
   // CSS on the body wrapper below): selecting a stage shows only that stage's
@@ -105,7 +123,13 @@ export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps 
           {identityEditor && <div data-testid="workstation-identity-editor">{identityEditor}</div>}
           {/* Remount per card so no identity/grade/approval state leaks between
               records (GradingPanel seeds a lot of state from props at mount). */}
-          <GradingPanel key={`${apiBase}:${certId}`} {...panelProps} />
+          {/* PR A · EXPLICIT lifecycle. The Grade panel is hidden-not-unmounted
+              by the stage gate above, so it must be told when it is genuinely on
+              screen — otherwise its debounced auto-save keeps running behind
+              Card Details / Review and persists UI defaults as grading data.
+              Derived from this adapter's own stage, which is the only thing that
+              knows; `active` is not accepted from the page for that reason. */}
+          <GradingPanel key={`${apiBase}:${certId}`} {...panelProps} active={stage === GRADE_STAGE} />
         </div>
       </CanonicalGradingWorkstationShell>
     </div>

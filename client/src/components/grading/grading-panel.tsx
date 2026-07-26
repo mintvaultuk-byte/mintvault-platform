@@ -26,6 +26,7 @@ import { type TcgCardPick } from "@/components/identity-tools";
 import { GradingIdentityVerification } from "@/components/grading/GradingIdentityVerification";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
 import type { StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
+import { decideGradingPersistence } from "@shared/grading-persistence-lifecycle";
 import { autofillCard } from "@/lib/api";
 
 // Shared calculation imports (client-side re-implementations)
@@ -122,7 +123,7 @@ function mvgsRemainingToGrade(remaining: number): number {
 interface Props {
   certId: number;
   /**
-   * PR A · EXPLICIT GRADE-STAGE LIFECYCLE.
+   * PR A · EXPLICIT GRADE-STAGE LIFECYCLE. REQUIRED — deliberately not optional.
    *
    * True only while the Grade stage is the ACTIVE stage. The workstation is
    * mounted hidden-not-unmounted so a grader's in-progress work survives stage
@@ -131,11 +132,19 @@ interface Props {
    * graded (MV900007: null -> 10/10/10/10, MV900010: Authentic-Only -> numeric 10).
    *
    * When false the panel performs NO draft save, schedules NO debounce and
-   * sends NO grading request. Rendering and local editing are unaffected, so
-   * unsaved grader work is never destroyed. Defaults to true so existing
-   * callers that always show the workstation keep their behaviour.
+   * sends NO grading request, and CANCELS any debounce already scheduled.
+   * Rendering and local editing are unaffected, so unsaved grader work is never
+   * destroyed.
+   *
+   * There is NO default (hostile review M-1). An earlier revision defaulted to
+   * `true`, which fails OPEN: three standalone surfaces (grader, staff,
+   * admin-staff) mounted this panel through GradingWorkstation without passing
+   * the flag, so hidden auto-save was still live on all three. Every mount site
+   * must now state the lifecycle explicitly, and the two legitimate mount paths
+   * — GradingWorkstation (from its own stage state) and CertificateForm (from
+   * its workflow stage, injected into the workstation slot) — both do.
    */
-  active?: boolean;
+  active: boolean;
   certIdStr?: string;
   cardName: string;
   cardSet: string;
@@ -275,7 +284,7 @@ function surfaceGradeColor(g: number): string {
 
 export default function GradingPanel({
   certId,
-  active = true,
+  active,
   certIdStr,
   cardName,
   cardSet,
@@ -1147,27 +1156,30 @@ export default function GradingPanel({
   // require entering edit mode and clicking Save. This kills the previous
   // "edits save automatically to the live record" silent-write behaviour.
   useEffect(() => {
-    if (!certId) return;
-    // PR A · a hidden/inactive Grade stage must never persist anything. This is
-    // the first gate deliberately: no debounce is scheduled, so an inactive
-    // panel cannot fire a save even if a dependency changes underneath it.
-    if (!active) return;
-    if (gradingWorkflowLocked) return;
-    if (gradeApprovedAt) return; // auto-save is pre-approval only
-    // PR A · SAFE HYDRATION. `hydratedOnce` alone was not enough: the reset
-    // effect cleared it on certId change, the first post-reset run consumed it,
-    // and the GET's own setState then satisfied this guard — so a certificate
-    // with NO stored grading evidence auto-saved its UI defaults (all-zero
-    // defect state, which MVGS scores as a perfect card). Absence of grading
-    // evidence is not a perfect assessment: until the server payload has
-    // actually landed, nothing may be persisted.
-    // ...and it must be THIS certificate's payload, never a previous card's.
-    if (gradingHydratedForRef.current !== certId) return;
-    if (!hydratedOnceRef.current) {
-      hydratedOnceRef.current = true;
-      return;
+    // PR A (hostile review M-1) · the ENTIRE lifecycle decision now lives in the
+    // shared pure function `decideGradingPersistence`
+    // (shared/grading-persistence-lifecycle.ts), so it is proven as BEHAVIOUR in
+    // a unit test rather than asserted as source text. This effect only executes
+    // the decision it is given.
+    const decision = decideGradingPersistence({
+      active,
+      certId,
+      hydratedForCertId: gradingHydratedForRef.current,
+      workflowLocked: gradingWorkflowLocked,
+      gradeApprovedAt,
+      settledAfterHydration: hydratedOnceRef.current,
+    });
+    // Cancel unconditionally on every NON-arming decision: leaving the Grade
+    // stage, switching card, a failed GET or an approval landing must all DROP a
+    // debounce armed under the previous state rather than let it fire against
+    // the new one. This does not rely on the dependency array happening to run
+    // the cleanup below.
+    if (decision.cancelPending && autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
     }
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    if (decision.markSettled) hydratedOnceRef.current = true;
+    if (!decision.arm) return;
     autoSaveTimerRef.current = setTimeout(() => {
       autoSaveNow();
     }, 500);
@@ -1202,6 +1214,9 @@ export default function GradingPanel({
     idVariant,
     gradingWorkflowLocked,
     active,
+    // Added with the lifecycle extraction: an approval landing must re-evaluate
+    // and CANCEL any pending debounce, not leave it armed from before approval.
+    gradeApprovedAt,
   ]);
 
   function handleAiComplete(analysis: AiAnalysisResult, identification: AiIdentification | null) {

@@ -44,10 +44,22 @@ vi.mock("../server/db", () => ({
 }));
 
 // R2 is never exercised — this suite posts no images.
+/** R2 is stubbed, but the calls are RECORDED: M-3 asserts that a same-key
+ *  replacement uploads the new object and does NOT delete it afterwards. */
+const r2Calls = vi.hoisted(() => ({ uploads: [] as Array<{ key: string; bytes: number }>, deletes: [] as string[] }));
 vi.mock("../server/r2", () => ({
-  uploadToR2: vi.fn(async (k: string) => k),
-  deleteFromR2: vi.fn(async () => {}),
+  uploadToR2: vi.fn(async (k: string, buf: Buffer) => {
+    r2Calls.uploads.push({ key: k, bytes: buf?.length ?? 0 });
+    return k;
+  }),
+  deleteFromR2: vi.fn(async (k: string) => {
+    r2Calls.deletes.push(k);
+  }),
   getR2SignedUrl: vi.fn(async () => "https://example.invalid/signed"),
+  // The REAL key builder — the deterministic-key behaviour is the whole point
+  // of M-3, so it must not be stubbed.
+  r2KeyForImage: (certId: string, side: "front" | "back", ext: string) => `images/${certId}/${side}.${ext}`,
+  r2KeyForLabel: (certId: string, side: string, format: string) => `labels/${certId}/${side}.${format}`,
 }));
 
 let cluster: DisposablePostgres17;
@@ -90,6 +102,42 @@ async function createSchema(p: pg.Pool): Promise<void> {
   await p.query(`ALTER TABLE "certificates" ADD COLUMN "auth_status" text DEFAULT 'genuine'`);
   await p.query(`ALTER TABLE "certificates" ADD COLUMN "auth_notes" text`);
   await p.query(`ALTER TABLE "certificates" ADD COLUMN "private_notes" text`);
+  // M-4: `grade_manual_override` is a REAL boolean column that shared/schema.ts
+  // does not declare (verified against the live database 2026-07-26). Created
+  // here so the fail-closed rejection is exercised against a column that really
+  // exists, rather than against a hypothetical one.
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "grade_manual_override" boolean DEFAULT false`);
+
+  // H-1 · paid-submission linkage. The create route validates
+  // submissionItemId against these two tables, so the real guard runs.
+  await p.query(`
+    CREATE TABLE submissions (
+      id SERIAL PRIMARY KEY,
+      status text NOT NULL DEFAULT 'paid',
+      deleted_at timestamp
+    )`);
+  await p.query(`
+    CREATE TABLE submission_items (
+      id SERIAL PRIMARY KEY,
+      submission_id integer NOT NULL,
+      card_name text
+    )`);
+  // cert_counter is created at boot by ensureCertCounterTable() in production;
+  // registerRoutes is not run here, so it is created directly.
+  await p.query(`
+    CREATE TABLE cert_counter (
+      id integer PRIMARY KEY,
+      last_issued bigint NOT NULL DEFAULT 0,
+      updated_at timestamp NOT NULL DEFAULT NOW()
+    )`);
+  await p.query(`CREATE TABLE certificate_images (
+      id SERIAL PRIMARY KEY,
+      certificate_id integer NOT NULL,
+      image_type text NOT NULL,
+      url text NOT NULL,
+      sort_order integer NOT NULL DEFAULT 0,
+      created_at timestamp NOT NULL DEFAULT NOW()
+    )`);
 }
 
 const q = async (text: string, params: unknown[] = []) => (await pool.query(text, params)).rows;
@@ -144,9 +192,15 @@ beforeAll(async () => {
   pool = new pg.Pool({ connectionString: cluster.url, max: 6 });
   runtime.pool = pool;
   runtime.db = drizzle(pool);
+  // storage.createCertificate reads getDatabaseUrl() purely to record the host
+  // in its CERT_ID_ALLOCATED audit. Point it at the disposable cluster so the
+  // create route runs exactly as it does in production. No real database is
+  // reachable from this value.
+  process.env.MINTVAULT_DATABASE_URL = cluster.url;
   await createSchema(pool);
 
-  const { handleCertificateMetadataUpdate, handleCertificateGradeUpdate } = await import("../server/routes");
+  const { handleCertificateMetadataUpdate, handleCertificateGradeUpdate, handleCertificateCreate } =
+    await import("../server/routes");
   const { requireAdmin } = await import("../server/auth");
   const multer = (await import("multer")).default;
   const upload = multer({ storage: multer.memoryStorage() });
@@ -188,6 +242,18 @@ beforeAll(async () => {
   // the grading edits PR A migrates off the metadata route are proven against the
   // real handler rather than a stand-in.
   app.put("/api/admin/certificates/:id/grade", requireAdmin, handleCertificateGradeUpdate as any);
+
+  // The CREATE route, mounted exactly as registerRoutes mounts it, so the
+  // paid-submission linkage (hostile review H-1) is proven end to end.
+  app.post(
+    "/api/admin/certificates",
+    requireAdmin,
+    upload.fields([
+      { name: "frontImage", maxCount: 1 },
+      { name: "backImage", maxCount: 1 },
+    ]),
+    handleCertificateCreate as any,
+  );
 
   server = app.listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
@@ -272,6 +338,12 @@ beforeEach(async () => {
   await (runtime.db as any).delete(auditLog);
   await (runtime.db as any).delete(certificates);
   await (runtime.db as any).insert(certificates).values({ ...STORED } as any);
+  await pool.query("DELETE FROM certificate_images");
+  await pool.query("DELETE FROM submission_items");
+  await pool.query("DELETE FROM submissions");
+  await pool.query("DELETE FROM cert_counter");
+  r2Calls.uploads.length = 0;
+  r2Calls.deletes.length = 0;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1201,5 +1273,384 @@ describe("PR A: a stale metadata form cannot revert a concurrent grading change"
     expect(after.finishVariant).toBe(before.finishVariant);
     expect(after.promoType).toBe(before.promoType);
     expect(after.rarityCode).toBe(before.rarityCode);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// H-1 (hostile review) — PAID-SUBMISSION LINKAGE, over the real create route
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** POST the real create route as urlencoded form data (no image attached). */
+async function post(body: Record<string, unknown>): Promise<{ status: number; json: any }> {
+  const form = new URLSearchParams();
+  for (const [k, v] of Object.entries(body)) {
+    form.append(k, typeof v === "string" ? v : JSON.stringify(v));
+  }
+  const res = await fetch(`${base}/api/admin/certificates`, {
+    method: "POST",
+    headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+  return { status: res.status, json: await res.json().catch(() => null) };
+}
+
+/** The minimum identity the create route requires. */
+const NEW_CERT = {
+  cardGame: "pokemon",
+  setName: "Base Set",
+  cardName: "Blastoise",
+  cardNumber: "2/102",
+  year: "1999",
+};
+
+async function seedSubmissionItem(status = "paid", deleted = false): Promise<number> {
+  const { rows } = await pool.query(
+    `INSERT INTO submissions (status, deleted_at) VALUES ($1, $2) RETURNING id`,
+    [status, deleted ? new Date() : null],
+  );
+  const { rows: itemRows } = await pool.query(
+    `INSERT INTO submission_items (submission_id, card_name) VALUES ($1, 'Blastoise') RETURNING id`,
+    [rows[0].id],
+  );
+  return itemRows[0].id as number;
+}
+
+async function readCertById(id: number) {
+  const { certificates } = await import("../shared/schema");
+  const { eq } = await import("drizzle-orm");
+  const [row] = await (runtime.db as any).select().from(certificates).where(eq(certificates.id, id));
+  return row;
+}
+
+describe("H-1: certificate creation stores the paid-submission link", () => {
+  it("MANDATORY 2: a certificate created from a valid paid submission item stores the link", async () => {
+    const itemId = await seedSubmissionItem("paid");
+    const { status, json } = await post({ ...NEW_CERT, submissionItemId: String(itemId) });
+    expect(status).toBe(200);
+    // The REGRESSION this covers: the client filtered submissionItemId out of
+    // the FormData, so the route saw nothing and stored NULL with a 200.
+    expect(json.submissionItemId).toBe(itemId);
+    const row = await readCertById(json.id);
+    expect(row.submissionItemId).toBe(itemId);
+  });
+
+  it("MANDATORY 3: a submission item cannot be silently reused", async () => {
+    const itemId = await seedSubmissionItem("paid");
+    expect((await post({ ...NEW_CERT, submissionItemId: String(itemId) })).status).toBe(200);
+
+    // second certificate claiming the SAME item
+    const second = await post({ ...NEW_CERT, cardName: "Venusaur", submissionItemId: String(itemId) });
+    expect(second.status).toBe(400);
+    expect(second.json.error).toMatch(/already linked|not found|not paid/i);
+
+    // and nothing was created
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM certificates`);
+    expect(rows[0].n).toBe(2); // the STORED fixture + the first creation only
+  });
+
+  it("an UNPAID (draft) submission is rejected", async () => {
+    const itemId = await seedSubmissionItem("draft");
+    const res = await post({ ...NEW_CERT, submissionItemId: String(itemId) });
+    expect(res.status).toBe(400);
+  });
+
+  it("a SOFT-DELETED submission is rejected", async () => {
+    const itemId = await seedSubmissionItem("paid", true);
+    expect((await post({ ...NEW_CERT, submissionItemId: String(itemId) })).status).toBe(400);
+  });
+
+  it("a non-existent submission item is rejected", async () => {
+    expect((await post({ ...NEW_CERT, submissionItemId: "987654" })).status).toBe(400);
+  });
+
+  it("creation WITHOUT a linkage still succeeds and stores NULL", async () => {
+    const { status, json } = await post({ ...NEW_CERT });
+    expect(status).toBe(200);
+    expect((await readCertById(json.id)).submissionItemId).toBeNull();
+  });
+
+  it("an EDIT cannot re-link an existing certificate", async () => {
+    const itemId = await seedSubmissionItem("paid");
+    const created = await post({ ...NEW_CERT, submissionItemId: String(itemId) });
+    const other = await seedSubmissionItem("paid");
+
+    // Even if a hostile client posts it, the metadata route's commit allowlist
+    // does not contain submissionItemId, so it can never be written.
+    const res = await put(created.json.id, { cardName: "Blastoise (edited)", submissionItemId: String(other) });
+    expect(res.status).toBe(200);
+    const row = await readCertById(created.json.id);
+    expect(row.cardName).toBe("Blastoise (edited)");
+    expect(row.submissionItemId, "the link must NOT move").toBe(itemId);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M-4 — gradeManualOverride is rejected by the metadata PUT
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("M-4: gradeManualOverride is protected on the metadata route", () => {
+  beforeEach(async () => {
+    await pool.query(`UPDATE certificates SET grade_manual_override = false WHERE certificate_number = 'MV1'`);
+  });
+
+  for (const key of ["gradeManualOverride", "grade_manual_override"]) {
+    it(`MANDATORY 13: a changed \`${key}\` returns the stable rejection and writes nothing`, async () => {
+      const id = await certId();
+      const before = await readCert();
+      const { status, json } = await put(id, { cardName: "Ignored", [key]: "true" });
+
+      expect(status).toBe(409);
+      expect(json.rejectedFields).toEqual([key]);
+      expect(json.error).toMatch(/grading route|\/grade/);
+
+      // no write at all — not even the metadata field that shared the request
+      const after = await readCert();
+      expect(after.cardName).toBe(before.cardName);
+      const { rows } = await pool.query(`SELECT grade_manual_override FROM certificates WHERE id = $1`, [id]);
+      expect(rows[0].grade_manual_override).toBe(false);
+
+      // exactly ONE audit, and it is the rejection — never a successful update
+      const audits = await readAudits();
+      const actions = audits.map((a: any) => a.action);
+      expect(actions).toContain("metadata_grading_field_rejected");
+      expect(actions).not.toContain("update");
+    });
+  }
+
+  it("MANDATORY 18: the echo contract for an UNDECLARED column is fail-CLOSED", async () => {
+    const id = await certId();
+    // DOCUMENTING THE DELIBERATE CONTRACT. `grade_manual_override` is a real
+    // column that shared/schema.ts does not declare, so a Drizzle-selected row
+    // has no property for it and the route CANNOT prove a submitted value is an
+    // echo. It therefore refuses to assume: any NON-EMPTY value is treated as a
+    // change and rejected — the same rule already applied to `auth_status`.
+    expect((await put(id, { gradeManualOverride: "false" })).status).toBe(409);
+
+    // Only an EMPTY submission carries no decision and passes through silently.
+    const empty = await put(id, { gradeManualOverride: "" });
+    expect(empty.status).toBe(200);
+    const audits = await readAudits();
+    expect(audits.map((a: any) => a.action)).not.toContain("update");
+  });
+
+  it("a DECLARED grading column still tolerates a genuine unchanged echo", async () => {
+    // Contrast with the above: `gradeOverall` IS declared, so the route can see
+    // the stored value and knows the echo changes nothing.
+    const id = await certId();
+    const { status } = await put(id, { gradeOverall: STORED.gradeOverall });
+    expect(status).toBe(200);
+    const audits = await readAudits();
+    expect(audits.map((a: any) => a.action)).not.toContain("metadata_grading_field_rejected");
+    expect(audits.map((a: any) => a.action)).not.toContain("update");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Task 7 — numeric echo normalisation, through the real route
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Task 7: a semantically-equal numeric grading echo is tolerated", () => {
+  it('stored "10.0" vs submitted "10" is NOT a rejection', async () => {
+    const id = await certId();
+    // Put a real 10 on the record through the DEDICATED grading route; Postgres
+    // `numeric` stores it and returns "10.0".
+    expect((await putGrade(id, { overall_grade: "10" })).status).toBe(200);
+    expect((await readCert()).gradeOverall).toBe("10.0");
+
+    // A legacy client echoes back what the UI showed it: "10".
+    const { status } = await put(id, { cardName: "Charizard (edited)", gradeOverall: "10" });
+    expect(status).toBe(200);
+    const after = await readCert();
+    expect(after.cardName).toBe("Charizard (edited)");
+    expect(after.gradeOverall, "the grade must be untouched").toBe("10.0");
+  });
+
+  it('stored "9.50" vs submitted "9.5" is NOT a rejection', async () => {
+    const id = await certId();
+    expect((await putGrade(id, { overall_grade: "9.5", grade_corners: "9.5" })).status).toBe(200);
+    const { status } = await put(id, { cardName: "Echo", gradeCorners: "9.5", corners_score: "9.50" });
+    expect(status).toBe(200);
+    expect((await readCert()).gradeCorners).toBe("9.5");
+  });
+
+  it("a MATERIALLY different numeric value is still rejected", async () => {
+    const id = await certId();
+    expect((await putGrade(id, { overall_grade: "10" })).status).toBe(200);
+    const { status, json } = await put(id, { cardName: "Revert attempt", gradeOverall: "9" });
+    expect(status).toBe(409);
+    expect(json.rejectedFields).toEqual(["gradeOverall"]);
+    expect((await readCert()).gradeOverall).toBe("10.0");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M-3 — image replacement always leaves truthful audit evidence
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Two DISTINCT real PNGs with the SAME extension, so the deterministic R2 key
+ *  is identical while the object content genuinely differs. */
+async function pngBuffer(r: number, g: number, b: number): Promise<Buffer> {
+  const sharp = (await import("sharp")).default;
+  return await sharp({
+    create: { width: 8, height: 8, channels: 3, background: { r, g, b } },
+  })
+    .png()
+    .toBuffer();
+}
+
+async function putMultipart(
+  id: number,
+  fields: Record<string, string>,
+  files: Array<{ field: string; filename: string; type: string; buffer: Buffer }>,
+): Promise<{ status: number; json: any }> {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) form.append(k, v);
+  for (const f of files) {
+    form.append(f.field, new Blob([new Uint8Array(f.buffer)], { type: f.type }), f.filename);
+  }
+  const res = await fetch(`${base}/api/admin/certificates/${id}`, {
+    method: "PUT",
+    headers: { cookie },
+    body: form,
+  });
+  return { status: res.status, json: await res.json().catch(() => null) };
+}
+
+describe("M-3: a same-path image replacement is auditable", () => {
+  beforeEach(async () => {
+    await pool.query(
+      `UPDATE certificates SET front_image_path = 'images/MV1/front.png', back_image_path = 'images/MV1/back.png' WHERE certificate_number = 'MV1'`,
+    );
+  });
+
+  it("MANDATORY 14: replacing the FRONT at the same key produces exactly one truthful audit", async () => {
+    const id = await certId();
+    const buf = await pngBuffer(10, 20, 30);
+    const { status } = await putMultipart(id, {}, [
+      { field: "frontImage", filename: "front.png", type: "image/png", buffer: buf },
+    ]);
+    expect(status).toBe(200);
+
+    const audits = await readAudits();
+    const events = audits.filter((a: any) => a.action === "certificate_image_replaced");
+    expect(events).toHaveLength(1);
+    // …and NO ordinary metadata update audit, because no column changed
+    expect(audits.filter((a: any) => a.action === "update")).toHaveLength(0);
+
+    const d = events[0].details as any;
+    expect(d.imageReplacements).toHaveLength(1);
+    const rep = d.imageReplacements[0];
+    expect(rep.side).toBe("front");
+    expect(rep.r2Key).toBe("images/MV1/front.png");
+    expect(rep.previousPath).toBe("images/MV1/front.png");
+    // TRUTHFUL: it says the path did NOT change, and proves the content did.
+    expect(rep.pathChanged).toBe(false);
+    expect(rep.contentSha256).toBe(
+      (await import("node:crypto")).createHash("sha256").update(buf).digest("hex"),
+    );
+    expect(rep.bytes).toBe(buf.length);
+    expect(rep.contentType).toBe("image/png");
+    // The stored path is unchanged and NOT fabricated as a change.
+    expect((await readCert()).frontImagePath).toBe("images/MV1/front.png");
+  });
+
+  it("replacing the BACK is covered by the same guarantee", async () => {
+    const id = await certId();
+    const buf = await pngBuffer(200, 100, 50);
+    expect(
+      (await putMultipart(id, {}, [{ field: "backImage", filename: "back.png", type: "image/png", buffer: buf }]))
+        .status,
+    ).toBe(200);
+    const events = (await readAudits()).filter((a: any) => a.action === "certificate_image_replaced");
+    expect(events).toHaveLength(1);
+    expect((events[0].details as any).imageReplacements[0].side).toBe("back");
+  });
+
+  it("front AND back in one request are both recorded", async () => {
+    const id = await certId();
+    const { status } = await putMultipart(id, {}, [
+      { field: "frontImage", filename: "front.png", type: "image/png", buffer: await pngBuffer(1, 2, 3) },
+      { field: "backImage", filename: "back.png", type: "image/png", buffer: await pngBuffer(4, 5, 6) },
+    ]);
+    expect(status).toBe(200);
+    const events = (await readAudits()).filter((a: any) => a.action === "certificate_image_replaced");
+    expect(events).toHaveLength(1);
+    const sides = (events[0].details as any).imageReplacements.map((r: any) => r.side).sort();
+    expect(sides).toEqual(["back", "front"]);
+  });
+
+  it("a same-key replacement does NOT delete the object it just uploaded", async () => {
+    const id = await certId();
+    await putMultipart(id, {}, [
+      { field: "frontImage", filename: "front.png", type: "image/png", buffer: await pngBuffer(9, 9, 9) },
+    ]);
+    expect(r2Calls.uploads.map((u) => u.key)).toContain("images/MV1/front.png");
+    // The old code deleted `existing.frontImagePath` unconditionally, which for
+    // an unchanged extension is the key just written — destroying the new image.
+    expect(r2Calls.deletes).not.toContain("images/MV1/front.png");
+  });
+
+  it("a DIFFERENT extension changes the path, deletes the old object, and audits the update", async () => {
+    const id = await certId();
+    const sharp = (await import("sharp")).default;
+    const jpg = await sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 5, g: 5, b: 5 } } })
+      .jpeg()
+      .toBuffer();
+    const { status } = await putMultipart(id, {}, [
+      { field: "frontImage", filename: "front.jpg", type: "image/jpeg", buffer: jpg },
+    ]);
+    expect(status).toBe(200);
+    expect((await readCert()).frontImagePath).toBe("images/MV1/front.jpg");
+    expect(r2Calls.deletes).toContain("images/MV1/front.png");
+
+    const audits = await readAudits();
+    const update = audits.find((a: any) => a.action === "update");
+    expect(update).toBeTruthy();
+    const d = update.details as any;
+    expect(d.changedFields).toContain("frontImagePath");
+    // content identity travels with the ordinary update audit too
+    expect(d.imageReplacements[0].pathChanged).toBe(true);
+    expect(d.imageReplacements[0].previousPath).toBe("images/MV1/front.png");
+  });
+
+  it("a metadata change AND an image replacement produce ONE combined update audit", async () => {
+    const id = await certId();
+    const { status } = await putMultipart(id, { cardName: "Charizard (rephotographed)" }, [
+      { field: "frontImage", filename: "front.png", type: "image/png", buffer: await pngBuffer(7, 7, 7) },
+    ]);
+    expect(status).toBe(200);
+    const audits = await readAudits();
+    expect(audits.filter((a: any) => a.action === "update")).toHaveLength(1);
+    expect(audits.filter((a: any) => a.action === "certificate_image_replaced")).toHaveLength(0);
+    const d = audits.find((a: any) => a.action === "update").details as any;
+    expect(d.changedFields).toContain("cardName");
+    expect(d.imageReplacements[0].pathChanged).toBe(false);
+  });
+
+  it("MANDATORY 15: a true metadata no-op with NO image creates no audit at all", async () => {
+    const id = await certId();
+    const { status } = await put(id, { cardName: STORED.cardName, setName: STORED.setName });
+    expect(status).toBe(200);
+    expect(await readAudits()).toHaveLength(0);
+  });
+
+  it("an unchanged legacy grading echo alone still creates no audit", async () => {
+    const id = await certId();
+    const { status } = await put(id, { gradeOverall: STORED.gradeOverall, gradeType: "numeric" });
+    expect(status).toBe(200);
+    expect(await readAudits()).toHaveLength(0);
+  });
+
+  it("an upload that FAILS validation creates no audit and writes nothing", async () => {
+    const id = await certId();
+    const before = await readCert();
+    const { status, json } = await putMultipart(id, { cardName: "Should not persist" }, [
+      { field: "frontImage", filename: "evil.png", type: "image/png", buffer: Buffer.from("not an image at all") },
+    ]);
+    expect(status).toBe(400);
+    expect(json.error).toMatch(/content-type validation/);
+    expect(await readAudits()).toHaveLength(0);
+    expect((await readCert()).cardName).toBe(before.cardName);
+    expect(r2Calls.uploads).toHaveLength(0);
   });
 });
