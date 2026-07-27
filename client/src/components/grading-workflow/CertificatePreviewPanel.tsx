@@ -45,7 +45,26 @@ export interface CertificatePreviewFields {
   gradeSurface?: number | null;
 }
 
-export function CertificatePreviewPanel({ fields }: { fields: CertificatePreviewFields }) {
+export function CertificatePreviewPanel({
+  fields,
+  /**
+   * Truthfulness of the caption (hostile-review MEDIUM).
+   *
+   * The panel renders CURRENT IN-MEMORY form values, which may not be what is
+   * stored. Saying "this is exactly what will print" is only true once those
+   * values are persisted, so the caption is driven by state rather than
+   * hard-coded:
+   *   • "unsaved"   — there are edits not yet persisted (the default, and the
+   *                   normal state while a grader types).
+   *   • "saved"     — the rendered values match what was last persisted.
+   *   • "conflict"  — a concurrent edit was rejected, so what is on screen is
+   *                   NOT authoritative and must not be presented as such.
+   */
+  persistence = "unsaved",
+}: {
+  fields: CertificatePreviewFields;
+  persistence?: "unsaved" | "saved" | "conflict";
+}) {
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -96,7 +115,19 @@ export function CertificatePreviewPanel({ fields }: { fields: CertificatePreview
       ) : (
         <p className="py-4 text-center text-xs text-slate-500">Preview will appear here.</p>
       )}
-      <p className="mt-1 text-[10px] text-slate-500">Read-only — this is exactly what will print.</p>
+      {/* Never claim persisted truth for unsaved state. The panel stays READ-ONLY
+          in every case — it renders an image and persists nothing. */}
+      <p
+        className={`mt-1 text-[10px] ${persistence === "conflict" ? "text-amber-400" : "text-slate-500"}`}
+        data-testid="certificate-preview-caption"
+        data-persistence={persistence}
+      >
+        {persistence === "saved"
+          ? "Read-only — saved. This is how the certificate will print."
+          : persistence === "conflict"
+            ? "Read-only — NOT saved. This certificate was changed elsewhere; refresh before trusting this preview."
+            : "Live unsaved preview — this is how the current details will print once saved."}
+      </p>
     </div>
   );
 }

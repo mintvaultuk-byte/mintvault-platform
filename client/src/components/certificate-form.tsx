@@ -9,7 +9,18 @@ import { WorkstationPreviewAside } from "@/components/grading-workflow/Workstati
 import { CertificatePreviewPanel } from "@/components/grading-workflow/CertificatePreviewPanel";
 import { CanonicalGradingWorkstationShell } from "@/components/grading-workflow/CanonicalGradingWorkstationShell";
 import { VariantSummary } from "@/components/grading-workflow/VariantSummary";
-import { deriveStageCompletion, furthestReached } from "@shared/grading-workflow";
+import {
+  GRADING_STAGES,
+  deriveStageCompletion,
+  furthestReached,
+  clampStageIndex,
+  nextStageIndex,
+  prevStageIndex,
+  showsPreviewAside,
+  CARD_DETAILS_STAGE,
+  GRADE_STAGE,
+  REVIEW_STAGE,
+} from "@shared/grading-workflow";
 import { CONSOLIDATED_VARIANT_SCHEME, legacyFreeTextLostOnConversion } from "@shared/variant-line";
 import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
@@ -50,7 +61,8 @@ import {
   getUnifiedDisplayLabel,
   type UnifiedOption,
 } from "@/lib/unifiedCardOptions";
-import { DESIGNATION_OPTIONS, getDesignationLabel } from "@/lib/designationOptions";
+import { getDesignationLabel } from "@/lib/designationOptions";
+import { useCatalogue } from "@/hooks/useCatalogue";
 import { readLastCardContext, writeLastCardContext, type LastCardContext } from "@/lib/last-card-context";
 import GradientButton from "@/components/ui/gradient-button";
 
@@ -248,7 +260,7 @@ export default function CertificateForm({
   const [form, setForm] = useState(() => buildFormStateFromCert(certificate));
 
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
-  // Grader notes live in Stage 4 (Review), collapsed unless the cert already has notes.
+  // Grader notes live in the Review stage, collapsed unless the cert already has notes.
   const [notesOpen, setNotesOpen] = useState<boolean>(() => Boolean(certificate?.notes));
 
   // Session HUD: count of cards completed (explicit save success) this session.
@@ -1055,14 +1067,24 @@ export default function CertificateForm({
     }
   });
 
+  // ROBUSTNESS: these endpoints return a JSON ARRAY on success but a JSON OBJECT
+  // on failure (e.g. {error:"Unauthorized"} on an expired session). The `= []`
+  // default only covers `undefined`, so an error body flowed straight into a
+  // `for (const v of dbVariants)` and white-screened the whole editor. `select`
+  // normalises to an array at the query boundary, so no consumer can receive a
+  // non-iterable.
+  const asStringArray = (d: unknown): string[] => (Array.isArray(d) ? (d as string[]) : []);
+
   const { data: dbVariants = [] } = useQuery<string[]>({
     queryKey: ["/api/admin/variant-options"],
     staleTime: 60_000,
+    select: asStringArray,
   });
 
   const { data: dbRarityOthers = [] } = useQuery<string[]>({
     queryKey: ["/api/admin/rarity-other-options"],
     staleTime: 60_000,
+    select: asStringArray,
   });
   const [languageChangedByFallback, setLanguageChangedByFallback] = useState(false);
 
@@ -1316,6 +1338,10 @@ export default function CertificateForm({
   // keep requiring an explicit save (see the "Save Changes" button below).
   const autoSaveEligible = isEdit && !!certificate?.id && !certificate?.gradeApprovedAt;
   const [autoSaveStatus, setAutoSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  // Preview truthfulness (hostile-review MEDIUM): once the server rejects a save
+  // with a same-field/compound conflict, what is on screen is NOT authoritative
+  // and the preview caption must say so until the grader refreshes or re-saves.
+  const [editConflict, setEditConflict] = useState(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveSeqRef = useRef(0);
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1481,12 +1507,17 @@ export default function CertificateForm({
       if (seq !== autoSaveSeqRef.current) return;
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
+        // 409 = the server refused because this tab is stale on a field it
+        // edited (or on a related field). Flag it so the preview stops
+        // presenting these values as authoritative.
+        if (res.status === 409) setEditConflict(true);
         throw new Error(data.error || `HTTP ${res.status}`);
       }
       // Clear picked files so an unrelated field edit moments later doesn't
       // re-submit (and the server re-upload+delete-old) the same image.
       setFrontImage(null);
       setBackImage(null);
+      setEditConflict(false);
       setAutoSaveStatus("saved");
       if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
       autoSavedClearTimerRef.current = setTimeout(() => {
@@ -1831,7 +1862,8 @@ export default function CertificateForm({
   const [wfStage, setWfStage] = useState(0);
   const [wfMaxStage, setWfMaxStage] = useState(0);
   const goToStage = (i: number) => {
-    const next = Math.min(3, Math.max(0, i));
+    // 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review.
+    const next = clampStageIndex(i);
     setWfStage(next);
     setWfMaxStage((m) => Math.max(m, next));
     if (typeof document !== "undefined") {
@@ -1875,12 +1907,34 @@ export default function CertificateForm({
   const hasCardMeta = !!(form.cardName.trim() || form.setName.trim() || form.cardNumber.trim());
   const aiIdentifyAvailable = isEdit && !!certificate?.id && identifyEnabled;
 
+  // Designation + optional-attribute chips come from the DB-backed Catalogue
+  // Manager (same snapshot the variant picker uses) — no duplicate option list
+  // in the client. The seed arrays remain the offline/placeholder fallback.
+  const catalogue = useCatalogue();
+  // ORPHAN GUARD (data safety): a certificate's stored designation codes are
+  // historical (e.g. "FIRST_EDITION") and need not exist in the catalogue — the
+  // catalogue seed uses its own values (e.g. "first_edition"). If a stored code
+  // had no chip, it would render as unselected and a later full-state save would
+  // silently drop it. So the chip list is the catalogue list UNION whatever this
+  // certificate already carries. Stored codes are never rewritten.
+  const catalogueDesignations = useMemo(() => {
+    const list = [...catalogue.designations];
+    const known = new Set(list.map((d) => d.code));
+    for (const code of designations) {
+      if (known.has(code) || catalogue.attributes.some((a) => a.code === code)) continue;
+      known.add(code);
+      list.push({ code, label: getDesignationLabel(code), help: "Existing value on this certificate." });
+    }
+    return list;
+  }, [catalogue.designations, catalogue.attributes, designations]);
+  const catalogueAttributes = catalogue.attributes;
+
   return (
     // Canonical grading workstation shell — the ONE shared outer geometry (fixed
     // viewport height, full width, two-panel columns, internal scroll), extracted
     // verbatim from this component's previously-inline geometry so /admin renders
     // identically; Staff / Grader / Admin Review use the exact same shell. Grade
-    // (wfStage 2) deliberately hides the preview aside because the protected
+    // (GRADE_STAGE) deliberately hides the preview aside because the protected
     // grading-panel.tsx workstation already renders its own interactive card
     // image + defect-marking tool (its own internal two-column split); mounting
     // the aside there would duplicate the image or narrow that protected grid — a
@@ -1891,16 +1945,23 @@ export default function CertificateForm({
     <div className="flex min-h-0 flex-col md:h-[calc(100dvh-4.5rem)]" data-testid="grading-workspace-bound">
     <CanonicalGradingWorkstationShell
       previewAside={
-        wfStage <= 1 || wfStage === 3 ? (
+        showsPreviewAside(wfStage) ? (
           <WorkstationPreviewAside
             certificateId={certificate?.id ?? null}
             frontFile={frontImage}
             backFile={backImage}
-            // Live front-certificate preview on Card (0), Rarity (1) and Review (3)
+            // Live front-certificate preview on Card Details (0) and Review (2)
             // — the SAME component, the SAME canonical server renderer, in the SAME
-            // left-column position directly under the card image. Grade (2) is the
+            // left-column position directly under the card image. Grade (1) is the
             // only stage without it, because that stage renders the grading
             // workstationSlot in this column instead.
+            //
+            // CONSOLIDATION NOTE: current main gated this on stages 0, 1 and 3 —
+            // Card, Rarity and Review under the old FOUR-stage numbering. Card and
+            // Rarity are now the single "Card Details" stage 0 and Review is 2, so
+            // `0 || 2` is the exact same coverage, not a narrowing. The founder spec
+            // additionally requires the preview to stay visible for the WHOLE of
+            // Card Details, which this satisfies.
             //
             // The panel is fed from CURRENT in-memory `form` state — never from the
             // saved `certificate` prop — so it tracks typing immediately and never
@@ -1926,8 +1987,12 @@ export default function CertificateForm({
             // today (buildCollectionLine is dead code), so they are deliberately not
             // claimed as live-updating — and no dead label field is activated here.
             below={
-              wfStage === 0 || wfStage === 1 || wfStage === 3 ? (
+              showsPreviewAside(wfStage) ? (
                 <CertificatePreviewPanel
+                  // Truthful caption: unsaved while editing, saved once the
+                  // auto-save lands, and explicitly NOT-authoritative after a
+                  // rejected concurrent edit.
+                  persistence={editConflict ? "conflict" : autoSaveStatus === "saved" ? "saved" : "unsaved"}
                   // Keyed per certificate: the panel holds the rendered blob in
                   // component state, so without a remount a "Next Card" switch left
                   // card A's label visible under card B's image until the new render
@@ -1973,9 +2038,9 @@ export default function CertificateForm({
       }
     >
           <div className="shrink-0 space-y-1">
-            {/* Shared workstation header strip (WorkstationHeaderStrip) — 4-stage
+            {/* Shared workstation header strip (WorkstationHeaderStrip) — 3-stage
                 workflow navigation + queue/session stats. ONE render site for
-                all four stages (outside the per-stage sections below), so
+                all three stages (outside the per-stage sections below), so
                 every stage sees byte-identical header geometry. Moved out of
                 the <form> into the fixed control-panel header so it stays put
                 while the form scrolls. Display-only: no queue-order or
@@ -2176,21 +2241,22 @@ export default function CertificateForm({
             ref={formElRef}
             onSubmit={handleSubmit}
             onKeyDown={(e) => {
-              // Enter advances the stage (Continue) when the grader isn't in a
-              // textarea and the stage's validation already passes — and never lets
-              // Enter submit/save the form from Stage 1/2. Textareas keep newlines.
+              // Enter advances Card Details → Grade when the grader isn't in a
+              // textarea and the name/number validation already passes — and never
+              // lets Enter submit/save the form. Textareas keep newlines.
+              //
+              // Only Card Details (stage 0) is handled. Stage 1 is now the
+              // PROTECTED grading workstation: an Enter there must not navigate
+              // away mid-measurement, so it is deliberately left alone.
               if (e.key !== "Enter") return;
               const tag = (e.target as HTMLElement).tagName;
               if (tag === "TEXTAREA") return;
-              if (wfStage === 0) {
+              if (wfStage === CARD_DETAILS_STAGE) {
                 e.preventDefault();
                 if (form.cardName.trim() && form.cardNumber.trim()) {
                   captureLastCardContext();
-                  goToStage(1);
+                  goToStage(nextStageIndex(CARD_DETAILS_STAGE));
                 }
-              } else if (wfStage === 1) {
-                e.preventDefault();
-                goToStage(2);
               }
             }}
             className="min-h-0 flex-1 space-y-2.5 overflow-y-auto md:pr-1"
@@ -2292,9 +2358,9 @@ export default function CertificateForm({
             )}
             {/* Identify controls (stages 0 + 1). The card preview now lives in the
             fixed workspace aside; this panel is just the stage controls. */}
-            <div data-workflow-stage="identify" className={`space-y-2.5 ${wfStage <= 1 ? "" : "hidden"}`}>
-              {/* ── STAGE 1 · CARD — identification fields only ── */}
-              <div className={`space-y-3 ${stageClass(0)}`}>
+            <div data-workflow-stage="card-details" className={`space-y-2.5 ${stageClass(CARD_DETAILS_STAGE)}`}>
+              {/* ── STAGE 1 · CARD DETAILS — identity fields ── */}
+              <div className="space-y-3">
                 {/* AI-first card identification — the primary Card-stage experience.
               The grader runs AI Identify (the EXISTING runIdentify — logic
               unchanged), then VERIFIES the auto-filled result via read-only
@@ -2406,7 +2472,7 @@ export default function CertificateForm({
                     )}
 
                     {/* Primary actions. Once a card is identified, Accept is the
-                  strongest action (confirm & continue → Rarity); Search Again is
+                  strongest action (confirm in place, then Variant below); Search Again is
                   the secondary outline; Manual stays visually quiet. Before any
                   match exists, AI Identify is the strong primary. */}
                     <div className="flex flex-wrap items-center gap-2">
@@ -2429,7 +2495,14 @@ export default function CertificateForm({
                               }));
                             }
                             captureLastCardContext();
-                            goToStage(1);
+                            // Variant now lives on THIS screen, so Accept no longer
+                            // navigates to a separate stage — it accepts in place and
+                            // brings the Variant section into view.
+                            if (typeof document !== "undefined") {
+                              document
+                                .querySelector('[data-variant-section="variant"]')
+                                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            }
                           }}
                           disabled={
                             identifyResult
@@ -2658,7 +2731,7 @@ export default function CertificateForm({
                       </p>
                     </div>
                     <div>
-                      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                      <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
                         Set Code
                       </label>
                       <input
@@ -2689,7 +2762,7 @@ export default function CertificateForm({
                       highlight={autofillRan && manuallyEdited.has("cardName")}
                     />
                     <div>
-                      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                      <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
                         Card Number *
                       </label>
                       <div className="flex gap-2">
@@ -2874,8 +2947,11 @@ export default function CertificateForm({
                   )}
                 </div>
               </div>
-              {/* ── STAGE 2 · RARITY — structured picker + finish + promo (+ legacy/advanced) ── */}
-              <div className={`space-y-3 ${stageClass(1)}`}>
+              {/* ── VARIANT (formerly the separate "Rarity" stage) — structured
+              picker + finish + promo + designations (+ legacy/advanced). Now
+              rendered INLINE beneath the identity fields on Card Details, not on
+              a page of its own. ── */}
+              <div className="space-y-3">
                 {/* Legacy flat Variant control — superseded for daily grading by the
               structured picker below. Kept fully functional (historical values,
               save compatibility) but collapsed under Legacy / advanced. */}
@@ -2937,7 +3013,7 @@ export default function CertificateForm({
 
                       return (
                         <div ref={unifiedRef} className="relative">
-                          <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                          <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
                             Variant
                           </label>
                           <button
@@ -3098,9 +3174,12 @@ export default function CertificateForm({
 
                 {/* Structured Pokémon rarity/variant picker (visual). Writes the new
               nullable columns only; the legacy Variant control above is unchanged. */}
-                <div data-workflow-stage="rarity">
-                  <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
-                    Structured Rarity &amp; Variant (visual picker)
+                <div data-variant-section="variant">
+                  <label className="text-[var(--admin-gold)]/70 text-[11px] uppercase tracking-wider block mb-1">
+                    Variant
+                    <span className="ml-1.5 normal-case tracking-normal text-[10px] text-[var(--admin-ink-faint)]">
+                      optional
+                    </span>
                     <a
                       href="/admin/pokemon-knowledge"
                       target="_blank"
@@ -3168,25 +3247,28 @@ export default function CertificateForm({
                   />
                 </div>
 
-                {/* Optional designations — collapsed by default so daily grading stays
-              compact. Auto-open when the cert already carries designations. */}
+                {/* Designation — chips come from the DB-backed Catalogue Manager
+              (`designation` category) via useCatalogue(); the seed list is only
+              the offline fallback. Collapsed by default so daily grading stays
+              compact; auto-opens when the cert already carries designations. */}
                 <details
-                  className="rounded-lg border border-[var(--admin-gold)]/10 px-3 py-2"
+                  className="rounded-lg border border-[var(--admin-gold)]/10 px-2.5 py-1.5"
                   open={designations.length > 0}
                   data-testid="designations-details"
                 >
                   <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
-                    Optional designations{designations.length > 0 ? ` (${designations.length})` : ""}
+                    Designation{designations.length > 0 ? ` (${designations.length})` : ""}
+                    <span className="ml-1.5 normal-case tracking-normal text-[var(--admin-ink-faint)]">optional</span>
                   </summary>
-                  <div className="pt-2 flex flex-wrap gap-2" data-testid="designations-chips">
-                    {DESIGNATION_OPTIONS.map((d) => {
+                  <div className="pt-1.5 flex flex-wrap gap-1.5" data-testid="designations-chips">
+                    {catalogueDesignations.map((d) => {
                       const active = designations.includes(d.code);
                       return (
                         <button
                           key={d.code}
                           type="button"
                           onClick={() => toggleDesignation(d.code)}
-                          className={`px-2.5 py-1 rounded-full text-xs border transition-all ${active ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-faint)] hover:border-[var(--admin-gold)]/30 hover:text-[var(--admin-ink-dim)]"}`}
+                          className={`px-2 py-0.5 rounded-full text-[11px] border transition-all ${active ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-faint)] hover:border-[var(--admin-gold)]/30 hover:text-[var(--admin-ink-dim)]"}`}
                           data-testid={`designation-${d.code}`}
                           title={d.help}
                         >
@@ -3198,45 +3280,62 @@ export default function CertificateForm({
                   </div>
                   {designations.length > 0 && (
                     <p
-                      className="text-[var(--admin-ink-faint)] text-[10px] mt-1.5"
+                      className="text-[var(--admin-ink-faint)] text-[10px] mt-1"
                       data-testid="text-designations-summary"
                     >
-                      Selected: {designations.map((c) => getDesignationLabel(c)).join(", ")}
+                      Selected: {designations.map((c) => getDesignationLabel(c, catalogueDesignations)).join(", ")}
                     </p>
                   )}
                 </details>
 
-                {/* Stage 2 nav */}
-                <div className="flex items-center justify-between pt-1">
-                  <button
-                    type="button"
-                    onClick={() => goToStage(0)}
-                    data-testid="button-back-to-card"
-                    className="px-4 py-2 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
+                {/* Optional attributes — same chip mechanism, `attribute` catalogue
+              category. Rendered ONLY when the owner has added attributes, so an
+              unseeded catalogue shows nothing rather than an empty box. */}
+                {catalogueAttributes.length > 0 && (
+                  <details
+                    className="rounded-lg border border-[var(--admin-gold)]/10 px-2.5 py-1.5"
+                    open={designations.some((c) => catalogueAttributes.some((a) => a.code === c))}
+                    data-testid="attributes-details"
                   >
-                    ← Back to Card
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => goToStage(2)}
-                    data-testid="button-continue-to-grade"
-                    className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all"
-                  >
-                    Continue to Grade →
-                  </button>
-                </div>
+                    <summary className="cursor-pointer text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)] hover:text-[var(--admin-ink-dim)]">
+                      Optional attributes
+                      <span className="ml-1.5 normal-case tracking-normal text-[var(--admin-ink-faint)]">optional</span>
+                    </summary>
+                    <div className="pt-1.5 flex flex-wrap gap-1.5" data-testid="attributes-chips">
+                      {catalogueAttributes.map((a) => {
+                        const active = designations.includes(a.code);
+                        return (
+                          <button
+                            key={a.code}
+                            type="button"
+                            onClick={() => toggleDesignation(a.code)}
+                            className={`px-2 py-0.5 rounded-full text-[11px] border transition-all ${active ? "bg-[var(--admin-gold)]/20 border-[var(--admin-gold)]/60 text-[var(--admin-gold)]" : "bg-transparent border-[var(--admin-gold)]/15 text-[var(--admin-ink-faint)] hover:border-[var(--admin-gold)]/30 hover:text-[var(--admin-ink-dim)]"}`}
+                            data-testid={`attribute-${a.code}`}
+                            title={a.help}
+                          >
+                            {active && <Check size={10} className="inline mr-1" />}
+                            {a.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </details>
+                )}
+
               </div>
 
-              {/* ── stage 1 (card) nav — all card fields (incl. Year + Language) now
-              live in the two dense rows above ── */}
-              <div className={`space-y-3 ${stageClass(0)}`}>
-                {/* Stage 1 nav */}
+              {/* ── Card Details nav — ONE continue, straight to Grade. The old
+              "Continue to Rarity" / "Back to Card" pair is gone: Variant now
+              lives on this same screen, so there is nothing to navigate to. The
+              card name + number precondition is preserved verbatim from the old
+              Card-stage button (Variant is NOT required — it is optional). ── */}
+              <div className="space-y-2">
                 <div className="flex items-center justify-end pt-1">
                   <button
                     type="button"
                     onClick={() => {
                       captureLastCardContext();
-                      goToStage(1);
+                      goToStage(nextStageIndex(CARD_DETAILS_STAGE));
                     }}
                     disabled={!form.cardName.trim() || !form.cardNumber.trim()}
                     title={
@@ -3244,14 +3343,14 @@ export default function CertificateForm({
                         ? "Enter the card name and number first."
                         : undefined
                     }
-                    data-testid="button-continue-to-rarity"
-                    className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                    data-testid="button-continue-to-grade"
+                    className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-[11px] font-bold uppercase hover:opacity-90 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    Continue to Rarity →
+                    Continue to Grade →
                   </button>
                 </div>
                 {(!form.cardName.trim() || !form.cardNumber.trim()) && (
-                  <p className={`text-[10px] text-[var(--admin-ink-faint)] text-right ${stageClass(0)}`}>
+                  <p className="text-[10px] text-[var(--admin-ink-faint)] text-right">
                     Enter the card name and number first.
                   </p>
                 )}
@@ -3267,7 +3366,7 @@ export default function CertificateForm({
             this wrapper. Hidden with CSS only (never unmounted, never scaled or
             transformed): the card tool reads getBoundingClientRect live per
             event, so visibility toggling cannot alter its coordinate system. */}
-            <div data-workflow-stage="grade" className={stageClass(2)}>
+            <div data-workflow-stage="grade" className={stageClass(GRADE_STAGE)}>
               {workstationSlot && (
                 // Plain in-flow wrapper — exists ONLY for the Enter-key guard below.
                 // It must not size or scroll: a height cap here becomes a second
@@ -3295,7 +3394,7 @@ export default function CertificateForm({
                 <div className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-widest mb-1">Grade</div>
 
                 <div>
-                  <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                  <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
                     Grade Type *
                   </label>
                   <select
@@ -3350,7 +3449,7 @@ export default function CertificateForm({
                 {!isNonNum && (
                   <>
                     <div>
-                      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                      <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
                         Overall Grade
                       </label>
                       {/* Read-only (owner directive 2026-07-01): the grade is set 100%
@@ -3372,7 +3471,7 @@ export default function CertificateForm({
                     </div>
 
                     <div>
-                      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">
+                      <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">
                         Service Tier
                       </label>
                       <select
@@ -3399,21 +3498,22 @@ export default function CertificateForm({
                 )}
               </div>
 
-              {/* Stage 3 nav */}
+              {/* Grade-stage nav — Back now returns to Card Details (the single
+              identity screen), per the consolidated 3-stage flow. */}
               <div className="flex items-center justify-between">
                 <button
                   type="button"
-                  onClick={() => goToStage(1)}
-                  data-testid="button-back-to-rarity"
-                  className="px-4 py-2 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-xs font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
+                  onClick={() => goToStage(prevStageIndex(GRADE_STAGE))}
+                  data-testid="button-back-to-card-details"
+                  className="px-3.5 py-1.5 rounded-lg border border-[var(--admin-gold)]/30 text-[var(--admin-gold)]/80 text-[11px] font-bold uppercase hover:bg-[var(--admin-gold)]/10 transition-colors"
                 >
-                  ← Back to Rarity
+                  ← Back to Card Details
                 </button>
                 <button
                   type="button"
-                  onClick={() => goToStage(3)}
+                  onClick={() => goToStage(nextStageIndex(GRADE_STAGE))}
                   data-testid="button-review-card"
-                  className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-xs font-bold uppercase hover:opacity-90 transition-all"
+                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-[var(--admin-gold)] to-[var(--admin-gold-deep)] text-[#1A1400] text-[11px] font-bold uppercase hover:opacity-90 transition-all"
                 >
                   Continue to Review →
                 </button>
@@ -3815,11 +3915,11 @@ export default function CertificateForm({
               </p>
             )}
 
-            {/* Stage 4 · REVIEW & SAVE — moved grader notes (collapsed) + the existing
+            {/* Stage 3 · REVIEW & SAVE — moved grader notes (collapsed) + the existing
             explicit save action. Note content, templates and persistence are the
             EXACT pre-existing implementation, only relocated. */}
-            <div data-workflow-stage="review" className={`space-y-2.5 ${stageClass(3)}`}>
-              {/* Compact approval header — frames Stage 4 as a final dashboard and keeps
+            <div data-workflow-stage="review" className={`space-y-2.5 ${stageClass(REVIEW_STAGE)}`}>
+              {/* Compact approval header — frames Review as a final dashboard and keeps
             Back to Grade as a quiet inline control instead of a chunky button row. */}
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--admin-gold)]/70">
@@ -3827,7 +3927,7 @@ export default function CertificateForm({
                 </span>
                 <button
                   type="button"
-                  onClick={() => goToStage(2)}
+                  onClick={() => goToStage(prevStageIndex(REVIEW_STAGE))}
                   data-testid="button-back-to-grade"
                   className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[var(--admin-gold)]/70 hover:bg-[var(--admin-gold)]/10 hover:text-[var(--admin-gold)] transition-colors"
                 >
@@ -3862,9 +3962,20 @@ export default function CertificateForm({
                   labelType: form.labelType,
                   status: form.status,
                 }}
-                onEditCard={() => goToStage(0)}
-                onEditRarity={() => goToStage(1)}
-                onEditGrade={() => goToStage(2)}
+                // Card and Variant are the SAME stage now — both Edit links land on
+                // Card Details; the Variant link additionally scrolls to its section.
+                onEditCard={() => goToStage(CARD_DETAILS_STAGE)}
+                onEditRarity={() => {
+                  goToStage(CARD_DETAILS_STAGE);
+                  if (typeof document !== "undefined") {
+                    window.setTimeout(() => {
+                      document
+                        .querySelector('[data-variant-section="variant"]')
+                        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }, 60);
+                  }
+                }}
+                onEditGrade={() => goToStage(GRADE_STAGE)}
               />
               {/* Authentication summary — shown only for non-numeric (Authentic /
             Authentic Altered) grade types, derived from the EXISTING form
@@ -4090,7 +4201,11 @@ function FormInput({
 }) {
   return (
     <div>
-      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
+      {/* V2 density: 10px label / mb-1 / py-1.5 input. Reclaims ~10px per field
+          row — with 7 identity fields plus the Variant block now on ONE screen,
+          that is what keeps Card Details inside a 1440p viewport without
+          shrinking the readable input text (kept at text-sm). */}
+      <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">{label}</label>
       <input
         type={type || "text"}
         value={value}
@@ -4100,7 +4215,7 @@ function FormInput({
         step={step}
         min={min}
         max={max}
-        className={`w-full bg-transparent border rounded px-3 py-2 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors ${highlight ? "border-[var(--admin-amber)]/50" : "border-[var(--admin-gold)]/30"}`}
+        className={`w-full bg-transparent border rounded px-2.5 py-1.5 text-[var(--admin-ink)] text-sm placeholder:text-[var(--admin-gold)]/20 focus:outline-none focus:border-[var(--admin-gold)] transition-colors ${highlight ? "border-[var(--admin-amber)]/50" : "border-[var(--admin-gold)]/30"}`}
         data-testid={testId}
       />
     </div>
@@ -4124,11 +4239,13 @@ function FormSelect({
 }) {
   return (
     <div>
-      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
+      {/* V2 density — matches FormInput exactly so mixed input/select rows in the
+          Card Details grid stay on a shared baseline. */}
+      <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">{label}</label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-[var(--admin-panel)] border border-[var(--admin-gold)]/30 rounded px-3 py-2 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
+        className="w-full bg-[var(--admin-panel)] border border-[var(--admin-gold)]/30 rounded px-2.5 py-1.5 text-[var(--admin-ink)] text-sm focus:outline-none focus:border-[var(--admin-gold)] transition-colors"
         data-testid={testId}
       >
         <option value="">Select...</option>
@@ -4169,7 +4286,7 @@ function FileUpload({
 
   return (
     <div>
-      <label className="text-[var(--admin-gold)]/70 text-xs uppercase tracking-wider block mb-1.5">{label}</label>
+      <label className="text-[var(--admin-gold)]/70 text-[10px] uppercase tracking-wider block mb-1">{label}</label>
       <label
         className={`relative block border-2 border-dashed rounded-xl cursor-pointer transition-all overflow-hidden
           ${dragging ? "border-[var(--admin-gold)] bg-[var(--admin-gold)]/5" : displaySrc ? "border-[var(--admin-gold)]/40 bg-[var(--admin-panel2)]" : "border-[var(--admin-line)] bg-[var(--admin-panel2)] hover:border-[var(--admin-gold)]/40 hover:bg-[var(--admin-panel)]"}`}

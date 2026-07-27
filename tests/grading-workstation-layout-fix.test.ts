@@ -1,7 +1,7 @@
 /**
  * Regression coverage for the two production grading-workstation layout defects:
  *
- *   1. Card/Rarity read-only preview zoom must step by 75 percentage points —
+ *   1. Card Details read-only preview zoom must step by 75 percentage points —
  *      100 → 175 → 250 → 325 → 400 (max 400%, min 100%), button-only, wheel never
  *      zooms, reset returns to 100%.
  *   2. The desktop workstation must be a real two-column shell with correct scroll

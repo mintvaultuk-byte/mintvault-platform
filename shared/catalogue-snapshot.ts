@@ -17,6 +17,7 @@ import {
   type SymbolShape,
   type SymbolColour,
   type RegionScope,
+  type PokemonDesignation,
 } from "./pokemon-rarity-catalogue";
 
 /** The subset of a catalogue_items row this mapping needs (structural). */
@@ -83,6 +84,17 @@ export function mapLanguageRow(row: CatalogueRowLike): PokemonLanguage {
  *   founder's intent), instead of silently resurrecting the seed. When omitted
  *   (e.g. unit tests), an empty category falls back to the seed slice.
  */
+/** Designations + optional attributes share one chip shape. The persisted code
+ *  is the row's `abbreviation` when present, else its `value` — never the label,
+ *  so relabelling in the Catalogue Manager never rewrites stored certificates. */
+export function mapDesignationRow(row: CatalogueRowLike): PokemonDesignation {
+  return {
+    code: (row.abbreviation && row.abbreviation.trim()) || row.value,
+    label: row.label,
+    help: row.description ?? "",
+  };
+}
+
 export function buildSnapshotFromRows(
   rows: CatalogueRowLike[],
   seededCategories?: Set<string>,
@@ -96,6 +108,8 @@ export function buildSnapshotFromRows(
   const promos = [...by("promo"), ...by("subset")];
   const languages = by("language");
   const eras = by("era");
+  const designations = by("designation");
+  const attributes = by("attribute");
   const promoSeeded = seededCategories
     ? seededCategories.has("promo") || seededCategories.has("subset")
     : promos.length > 0;
@@ -105,5 +119,11 @@ export function buildSnapshotFromRows(
     promos: promoSeeded ? promos.map(mapPromoRow) : SEED_CATALOGUE.promos,
     languages: useDb("language", languages) ? languages.map(mapLanguageRow) : SEED_CATALOGUE.languages,
     eras: useDb("era", eras) ? eras.map((r) => ({ value: r.value, label: r.label })) : SEED_CATALOGUE.eras,
+    designations: useDb("designation", designations)
+      ? designations.map(mapDesignationRow)
+      : SEED_CATALOGUE.designations,
+    // `attribute` has no seed rows, so an unseeded catalogue yields an empty
+    // list rather than falling back to something invented.
+    attributes: attributes.map(mapDesignationRow),
   };
 }

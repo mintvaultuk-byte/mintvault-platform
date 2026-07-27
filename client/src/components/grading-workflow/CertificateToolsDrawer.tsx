@@ -2,7 +2,7 @@
  * Certificate Tools drawer — Ownership + NFC, moved OUT of the grading scroll.
  *
  * These are fulfilment / admin tasks (often done by different staff, after
- * grading), so they no longer sit beneath the four grading stages. This drawer
+ * grading), so they no longer sit beneath the grading stages. This drawer
  * simply RE-PARENTS the existing OwnershipSection and NfcSection components —
  * their logic, endpoints and controls are unchanged. Both tabs stay mounted
  * (visibility toggled) so entered values are retained while the drawer is open.

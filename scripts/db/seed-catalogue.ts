@@ -110,20 +110,38 @@ function buildSeedRows(): SeedRow[] {
 
   // Designations — brief examples. unlimited/first_edition/shadowless also exist
   // as Finishes today, so they are marked allow-cross-category (one-classification
-  // guard permits the deliberate overlap). error/misprint/test_print are new.
-  const designations: Array<{ value: string; label: string; aliases: string[]; cross?: boolean }> = [
-    { value: "unlimited", label: "Unlimited", aliases: ["unlimited", "unlimited print"], cross: true },
-    { value: "first_edition", label: "1st Edition", aliases: ["1st edition", "first edition", "1st ed"], cross: true },
-    { value: "shadowless", label: "Shadowless", aliases: ["shadowless"], cross: true },
-    { value: "error", label: "Error", aliases: ["error", "error card"] },
-    { value: "misprint", label: "Misprint", aliases: ["misprint", "mis-print"] },
-    { value: "test_print", label: "Test Print", aliases: ["test print", "test-print"] },
+  // guard permits the deliberate overlap).
+  //
+  // TEST-ONLY VALUES ARE NOT SEEDED (hostile-review cleanup). An earlier draft
+  // seeded a "Test Print" designation; it is not one of the historical persisted
+  // codes, nothing in the app references it, and production seed output must not
+  // carry test-shaped entries. The catalogue is owner-editable by design, so a
+  // genuine Test Print designation can be added through the Catalogue Manager
+  // without a code change.
+  // `abbreviation` is the PERSISTED designation code. It MUST stay equal to the
+  // historical hard-coded code (POKEMON_DESIGNATIONS) for every designation that
+  // already exists on certificates — the snapshot mapper reads
+  // `abbreviation || value`, so omitting it here would hand the pickers a new
+  // code (e.g. "first_edition" instead of "FIRST_EDITION") and orphan every
+  // stored value. Rows without a legacy equivalent are new and carry their own.
+  const designations: Array<{ value: string; code: string; label: string; aliases: string[]; cross?: boolean }> = [
+    { value: "promo", code: "PROMO", label: "Promo", aliases: ["promo", "promotional"] },
+    { value: "tournament_stamp", code: "TOURNAMENT_STAMP", label: "Tournament / Event Stamp", aliases: ["tournament stamp", "event stamp"] },
+    { value: "prerelease", code: "PRERELEASE", label: "Prerelease", aliases: ["prerelease", "pre-release"] },
+    { value: "staff", code: "STAFF", label: "Staff", aliases: ["staff", "staff stamp"] },
+    { value: "error_miscut", code: "ERROR_MISCUT", label: "Error / Miscut / Misprint", aliases: ["error", "miscut", "misprint", "mis-print", "error card"] },
+    { value: "first_edition", code: "FIRST_EDITION", label: "1st Edition", aliases: ["1st edition", "first edition", "1st ed"], cross: true },
+    { value: "shadowless", code: "SHADOWLESS", label: "Shadowless", aliases: ["shadowless"], cross: true },
+    { value: "unlimited", code: "UNLIMITED", label: "Unlimited", aliases: ["unlimited", "unlimited print"], cross: true },
+    { value: "japanese_print", code: "JAPANESE_PRINT", label: "Japanese Print", aliases: ["japanese print", "japanese"] },
+    { value: "other_language", code: "OTHER_LANGUAGE", label: "Other Language", aliases: ["other language"] },
   ];
   designations.forEach((d, i) =>
     rows.push({
       category: "designation",
       value: d.value,
       label: d.label,
+      abbreviation: d.code,
       aliases: d.aliases,
       description: "",
       metadata: {},

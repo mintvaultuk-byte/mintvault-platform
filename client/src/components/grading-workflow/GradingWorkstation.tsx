@@ -46,9 +46,10 @@ type Props = GradingPanelProps & {
 export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps }: Props) {
   const apiBase = panelProps.apiBase ?? "/api/admin";
   const rootRef = useRef<HTMLDivElement>(null);
-  // Grade is the working stage for these role surfaces; Card/Rarity are already
+  // Grade is the working stage for these role surfaces; Card Details is already
   // captured upstream. Start on Grade, keep every stage reachable.
-  const [stage, setStage] = useState(2);
+  // 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review.
+  const [stage, setStage] = useState(1);
 
   // The stage bar GATES content (hidden-not-unmounted via the .grading-stage-gate
   // CSS on the body wrapper below): selecting a stage shows only that stage's
@@ -59,10 +60,10 @@ export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps 
     rootRef.current?.querySelector<HTMLElement>('[data-testid="grading-workstation-slot"]')?.scrollTo({ top: 0 });
   }, []);
 
-  // Grade is stage 2; showing the preview aside beside GradingPanel would
-  // duplicate its own image tool. Show it on the identity stages, and ALWAYS when
-  // the Admin Review identity editor is open (so the card is left / editor right).
-  const showPreviewAside = stage <= 1 || (mode === "admin-review" && !!identityEditor);
+  // Grade is stage 1; showing the preview aside beside GradingPanel would
+  // duplicate its own image tool. Show it on Card Details, and ALWAYS when the
+  // Admin Review identity editor is open (so the card is left / editor right).
+  const showPreviewAside = stage === 0 || (mode === "admin-review" && !!identityEditor);
   const certId = panelProps.certId;
 
   return (

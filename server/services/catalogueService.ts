@@ -86,7 +86,17 @@ export async function getCatalogueItem(id: number): Promise<CatalogueItem | unde
  *  category, and one-classification-only (a value cannot exist in two categories
  *  unless a super admin set allowCrossCategory on both). */
 async function assertValid(
-  candidate: { category: string; value: string; abbreviation?: string | null; allowCrossCategory?: boolean },
+  candidate: {
+    id?: number;
+    category: string;
+    value: string;
+    abbreviation?: string | null;
+    allowCrossCategory?: boolean;
+    /** POST-patch live state — required so a reactivation is checked against the
+     *  rows that are live NOW (M-2). Absent means live, matching column defaults. */
+    active?: boolean;
+    archived?: boolean;
+  },
   excludeId?: number,
 ): Promise<void> {
   const all = await db.select().from(catalogueItems);
@@ -153,10 +163,17 @@ export async function updateCatalogueItem(
   if (!before) throw new CatalogueValidationError("Catalogue item not found.");
   const { reason, ...fields } = patch;
   const candidate = {
+    id,
     category: before.category,
     value: before.value,
     abbreviation: fields.abbreviation ?? before.abbreviation,
     allowCrossCategory: fields.allowCrossCategory ?? before.allowCrossCategory,
+    // M-2: validate the state this patch RESULTS IN, not the state it had. A
+    // reactivation (archived -> false / active -> true) must be checked against
+    // the currently-live rows, or a retired duplicate could be restored on top
+    // of the live replacement that took over its code.
+    active: fields.active ?? before.active,
+    archived: fields.archived ?? before.archived,
   };
   await assertValid(candidate, id);
   const [updated] = await db

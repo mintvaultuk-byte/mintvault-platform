@@ -37,7 +37,7 @@ describe("Next Card (spec 1) — user-confirmed, never skips, nav only", () => {
 
 describe("queue progress + batch header (spec 2, 10) — read-only", () => {
   // unified-shell pass: this markup moved into the shared WorkstationHeaderStrip
-  // component (one render site for all four stages).
+  // component (one render site for all three stages).
   const STRIP_SRC = read("client/src/components/grading-workflow/WorkstationHeaderStrip.tsx");
   it("shows position / total", () => {
     expect(FORM).toContain("<WorkstationHeaderStrip");
@@ -69,10 +69,14 @@ describe("session HUD (spec 3,4,5) — client-only, no external tracking", () =>
 });
 
 describe("keyboard shortcuts (spec 6,7,8)", () => {
-  it("Enter continues when not in a textarea and validation passes (never submits Stage 1/2)", () => {
+  it("Enter continues when not in a textarea and validation passes (never submits)", () => {
     expect(FORM).toContain('if (e.key !== "Enter") return');
     expect(FORM).toContain('if (tag === "TEXTAREA") return');
-    expect(FORM).toContain("goToStage(1)");
+    // M-4: the advance goes through the SHARED transition helper, and Enter is
+    // handled ONLY on Card Details — it must never navigate away from the
+    // protected grading workstation mid-measurement.
+    expect(FORM).toContain("goToStage(nextStageIndex(CARD_DETAILS_STAGE))");
+    expect(FORM).toContain("if (wfStage === CARD_DETAILS_STAGE) {");
   });
   it("Space toggles front/back only inside the preview", () => {
     expect(VIEWER).toMatch(/e\.key === " " \|\| e\.code === "Space"/);

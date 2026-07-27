@@ -2,7 +2,7 @@
  * Grade-stage layout regression (2026-07-20).
  *
  * BUG (found by the owner in authenticated staging testing): entering the GRADE
- * step (stage 2 of Card/Rarity/Grade/Review) rendered the lower Grade form as a
+ * step (the Grade stage of Card Details/Grade/Review) rendered the lower Grade form as a
  * large panel covering roughly half the grading workspace on a Mac desktop
  * viewport, obscuring the card image, MVGS controls, overall grade panel and the
  * centering/corners/edges/surface sub-grades.
@@ -175,9 +175,9 @@ describe("A4. bottom navigation does not cover form fields", () => {
   });
 });
 
-describe("A5. blast radius — stages 0/1/3 and protected grading source are untouched", () => {
-  it("the workstation wrapper is doubly gated to stage 2 only, so other stages cannot regress", () => {
-    expect(FORM_CODE).toContain('<div data-workflow-stage="grade" className={stageClass(2)}>');
+describe("A5. blast radius — stages 0/2 and protected grading source are untouched", () => {
+  it("the workstation wrapper is doubly gated to stage 1 only, so other stages cannot regress", () => {
+    expect(FORM_CODE).toContain('<div data-workflow-stage="grade" className={stageClass(GRADE_STAGE)}>');
     // workstationSlot is RENDERED only inside the stage-2 block. Its prop-type
     // declaration and destructure legitimately live at the top of the file, so
     // count JSX usages (`{workstationSlot`) rather than every mention.
@@ -187,8 +187,8 @@ describe("A5. blast radius — stages 0/1/3 and protected grading source are unt
     expect(jsxUses).toBe(inStage); // ...and nowhere else in the file
   });
 
-  it("the deliberate preview-aside gate (stages 0/1/3, Grade excluded) is unchanged", () => {
-    expect(FORM).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?/);
+  it("the deliberate preview-aside gate (stages 0/2, Grade excluded) is unchanged", () => {
+    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)/);
   });
 
   it("the protected GradingPanel's own internal geometry is untouched", () => {

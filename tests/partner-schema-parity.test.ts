@@ -84,6 +84,21 @@ describe("partner schema ↔ migration parity", () => {
       // Set Library base-table ownership is completed by 0024; it is additive
       // and follows the already-applied 0023 schema additions.
       "0024_set_library_base_tables.sql",
+      // 0025 is DELIBERATELY ABSENT AND RESERVED. The separate branch
+      // fix/grading-optimistic-concurrency still carries an unapplied
+      // 0019_grading_optimistic_concurrency.sql that must be renumbered to the
+      // next free number, identified as 0025 at hostile-review time. Leaving the
+      // gap here means the two cannot collide whichever lands first, and this pin
+      // will fail loudly if anything else tries to claim 0025.
+      //
+      // 0026 (Catalogue Manager, hostile-review MEDIUM) adds a partial unique
+      // index on the EFFECTIVE persisted code — coalesce(nullif(abbreviation,''),
+      // value) — per category, over live rows only. Additive: index only, no
+      // table/column/data change. 0019 is already applied in production and is
+      // NOT edited or renamed by it, so 0019's checksum is untouched. Its
+      // rollback is intentionally named rollback-0026-catalogue-abbreviation-
+      // unique.sql (non-numbered) so the runner never applies it.
+      "0026_catalogue_abbreviation_unique.sql",
     ]);
   });
 

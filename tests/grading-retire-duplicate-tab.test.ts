@@ -69,7 +69,7 @@ describe("2. the final canonical grading entry point is CertificateForm", () => 
     expect(DASH).toContain("onManualIdentification");
     expect(DASH).toContain("onCertUpdated");
   });
-  it("CertificateForm itself still drives all four stages through the shared workstation primitives", () => {
+  it("CertificateForm itself still drives all three stages through the shared workstation primitives", () => {
     expect(FORM).toContain("<WorkstationHeaderStrip");
     expect(FORM).toContain("<WorkstationPreviewAside");
     expect(FORM).toContain("<ReviewSummary");
@@ -156,14 +156,14 @@ describe("7. Staff and Super Admin permissions remain unchanged", () => {
   });
 });
 
-describe("8. shared primitives + all four grading stages still canonical (regression guard)", () => {
+describe("8. shared primitives + all three grading stages still canonical (regression guard)", () => {
   it("AdminHeaderRow is still used by both Super Admin and Staff", () => {
     expect(DASH).toContain("<AdminHeaderRow");
     const staff = read("client/src/pages/staff.tsx");
     expect(staff).toContain("<AdminHeaderRow");
   });
-  it("the preview aside gate still covers Card, Rarity and Review (wfStage 0, 1, 3) — Grade's protected exception is untouched", () => {
-    expect(FORM).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?/);
+  it("the preview aside gate still covers Card Details and Review (wfStage 0, 2) — Grade's protected exception is untouched", () => {
+    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)/);
   });
 });
 

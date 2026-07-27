@@ -702,7 +702,7 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
   it("the conversion warning is rendered OUTSIDE the review-stage container (visible on every stage)", () => {
     // Regression for a CRITICAL: the guard defers the save on ALL stages, but the
     // panel that clears it was nested in the review-only container, which this
-    // codebase hides rather than unmounts — so on the Card/Rarity/Grade stages the
+    // codebase hides rather than unmounts — so on the Card Details/Grade stages the
     // save silently stopped with no visible reason.
     const warn = FORM.indexOf('data-testid="legacy-freetext-warning"');
     expect(warn).toBeGreaterThan(-1);

@@ -53,7 +53,10 @@ describe("AI-first Card stage (spec 1-2)", () => {
   it("uses the EXISTING runIdentify — no new identify logic, no save/API in the panel", () => {
     const panel = slice('data-testid="ai-identify-panel"', "Same as last card");
     expect(panel).toContain("onClick={runIdentify}"); // Search Again / AI Identify
-    expect(panel).toContain("goToStage(1)"); // Accept advances the stage only
+    // Consolidated flow: Variant is on the SAME screen, so Accept no longer
+    // navigates to another stage — it accepts in place and scrolls to Variant.
+    expect(panel).not.toContain("goToStage(");
+    expect(panel).toContain('data-variant-section="variant"');
     expect(panel).toContain("captureLastCardContext"); // same capture as the existing Continue
     expect(panel).toContain("manualEditorRef.current?.scrollIntoView"); // jump to the (always-visible) fields
     // The panel triggers no persistence / provider / grade work of its own.
@@ -121,13 +124,13 @@ describe("intelligent set search wired to the existing catalogue (spec 3)", () =
 
 describe("Review stage stays a compact dashboard (spec 5)", () => {
   it("uses the ReviewSummary dashboard + an authentication summary", () => {
-    const review = FORM.slice(FORM.indexOf("Stage 4 · REVIEW"));
+    const review = FORM.slice(FORM.indexOf("Stage 3 · REVIEW"));
     expect(review).toContain("<ReviewSummary");
     expect(review).toContain('data-testid="review-authentication"');
     expect(review).toContain("button-save-cert"); // existing save action unchanged
   });
   it("authentication is derived from the existing gradeType — no invented value", () => {
-    const review = FORM.slice(FORM.indexOf("Stage 4 · REVIEW"));
+    const review = FORM.slice(FORM.indexOf("Stage 3 · REVIEW"));
     expect(review).toContain("NON_NUMERIC_GRADES.find");
     expect(review).toContain("form.gradeType");
   });

@@ -4,12 +4,12 @@
  * Root cause (confirmed by a read-only architecture audit before any edit):
  * Staff dashboard, Super Admin dashboard and the grading workstation had
  * three independently-implemented header/breadcrumb patterns, and the
- * grading workstation's own 4-stage workflow had its aside/header-strip
+ * grading workstation's own 3-stage workflow had its aside/header-strip
  * markup duplicated inline inside certificate-form.tsx with no single
  * source of truth — so fixing one stage's spacing repeatedly risked another
  * stage silently drifting. Stage 3 (Grade) visually "escaping" the
  * two-column shell was traced to exactly one condition
- * (`wfStage <= 1 || wfStage === 3`, certificate-form.tsx) that omits the
+ * (`wfStage === 0 || wfStage === 2`, certificate-form.tsx) that omits the
  * preview aside for Grade — NOT a stray width class on Grade's own content.
  *
  * Fix: three new shared, stateless presentation primitives —
@@ -90,11 +90,11 @@ describe("2. role permissions remain distinct (Staff vs Super Admin)", () => {
   });
 });
 
-describe("3. all four grading stages use the SAME WorkstationHeaderStrip component", () => {
+describe("3. all three grading stages use the SAME WorkstationHeaderStrip component", () => {
   it("certificate-form.tsx renders WorkstationHeaderStrip exactly once, outside the per-stage sections", () => {
     expect((FORM.match(/<WorkstationHeaderStrip/g) ?? []).length).toBe(1);
     const stripCallIdx = FORM.indexOf("<WorkstationHeaderStrip");
-    const firstStageIdx = FORM.indexOf('data-workflow-stage="identify"');
+    const firstStageIdx = FORM.indexOf('data-workflow-stage="card-details"');
     expect(stripCallIdx).toBeLessThan(firstStageIdx);
   });
   it("the strip component itself is the single source of truth for stage-nav + session-stats geometry", () => {
@@ -104,7 +104,7 @@ describe("3. all four grading stages use the SAME WorkstationHeaderStrip compone
   });
 });
 
-describe("4. all four stages use the same desktop breakpoint (md) for the two-column shell", () => {
+describe("4. all three stages use the same desktop breakpoint (md) for the two-column shell", () => {
   it("the outer workspace row and the preview aside share the SAME md: breakpoint", () => {
     // CertificateForm mounts the shell; the two-column row lives in the shell.
     expect(FORM).toContain("<CanonicalGradingWorkstationShell");
@@ -115,15 +115,15 @@ describe("4. all four stages use the same desktop breakpoint (md) for the two-co
   });
 });
 
-describe("5. the preview zone exists in Card, Rarity AND Review (Grade is a documented exception)", () => {
-  it("the aside gate covers wfStage 0, 1 and 3", () => {
-    expect(FORM).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?/);
+describe("5. the preview zone exists in Card Details AND Review (Grade is a documented exception)", () => {
+  it("the aside gate covers wfStage 0 (Card Details) and 2 (Review)", () => {
+    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)/);
   });
-  it("Grade (wfStage 2) is excluded from the shared aside — documented, not accidental", () => {
-    const gateIdx = FORM.indexOf("wfStage <= 1 || wfStage === 3 ?");
+  it("Grade (wfStage 1) is excluded from the shared aside — documented, not accidental", () => {
+    const gateIdx = FORM.indexOf("showsPreviewAside(wfStage)");
     expect(gateIdx).toBeGreaterThan(-1);
     const gateLine = FORM.slice(gateIdx, gateIdx + 40);
-    expect(gateLine).not.toContain("wfStage === 2");
+    expect(gateLine).not.toContain("wfStage === 1");
     // the architecture rationale is captured in source, not just tribal knowledge.
     const context = FORM.slice(Math.max(0, gateIdx - 1400), gateIdx);
     expect(context).toMatch(/protected.*grading-panel|grading-panel.*protected/is);
@@ -188,9 +188,9 @@ describe("7. no duplicate preview in Grade or Review", () => {
     // The outer shell never mounts WorkstationPreviewAside for Grade (see
     // suite 5), so GradingPanel's own ImageViewer remains the only image
     // rendered for that stage.
-    const gateIdx = FORM.indexOf("wfStage <= 1 || wfStage === 3 ?");
+    const gateIdx = FORM.indexOf("showsPreviewAside(wfStage)");
     const gateLine = FORM.slice(gateIdx, gateIdx + 40);
-    expect(gateLine).not.toContain("wfStage === 2");
+    expect(gateLine).not.toContain("wfStage === 1");
   });
 });
 

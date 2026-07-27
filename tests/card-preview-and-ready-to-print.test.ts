@@ -4,7 +4,7 @@
  * BUILD 1 — the canonical Live Certificate Preview now also renders on the Card
  * stage (workflow stage 0), in the same left-column slot directly under the card
  * image, using the SAME component, the SAME preview payload builder and the SAME
- * server renderer as the Rarity stage. No second preview, no Card-specific
+ * server renderer as the Review stage. No second preview, no Card-specific
  * formatter, no new endpoint, no new label line.
  *
  * BUILD 2 — the existing PR #240 print queue is the canonical "Ready To Print"
@@ -45,9 +45,17 @@ const labelLineFor = (fields: Record<string, unknown>) =>
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("Card-stage live certificate preview (1-3, 13)", () => {
-  it("1/2. the canonical preview renders on Card (0), Rarity (1) and Review (3)", () => {
-    expect(FORM).toContain("wfStage === 0 || wfStage === 1 || wfStage === 3");
-    // exactly ONE mount of the panel — the same element serves all three stages
+  it("1/2. the canonical preview renders on Card Details (0) and Review (2)", () => {
+    // CONSOLIDATION (2026-07-26): this guard originally read
+    // `wfStage === 0 || wfStage === 1 || wfStage === 3` — Card, Rarity and Review
+    // under the FOUR-stage numbering. Card and Rarity are now the single
+    // "Card Details" stage 0 and Review is 2, so this is the SAME coverage
+    // expressed in the three-stage numbering, NOT a narrowing. Grade (now 1)
+    // remains the one stage without the preview, exactly as before.
+    expect(FORM).toContain("showsPreviewAside(wfStage)");
+    // The retired four-stage gate must not come back.
+    expect(FORM).not.toContain("wfStage === 0 || wfStage === 1 || wfStage === 3");
+    // exactly ONE mount of the panel — the same element serves both stages
     expect((FORM.match(/<CertificatePreviewPanel/g) ?? []).length).toBe(1);
   });
 
@@ -111,7 +119,11 @@ describe("the preview tracks CURRENT form values for every field the label print
   });
 
   it("the preview is fed from `form`, never from the saved certificate prop", () => {
-    const mount = FORM.slice(FORM.indexOf("<CertificatePreviewPanel"), FORM.indexOf("<CertificatePreviewPanel") + 1800);
+    // Slice to the END of the mount rather than a fixed character budget — the
+    // mount grew when the truthful `persistence` caption prop was added, and a
+    // fixed window silently stops covering the later fields.
+    const mountStart = FORM.indexOf("<CertificatePreviewPanel");
+    const mount = FORM.slice(mountStart, FORM.indexOf("/>", FORM.indexOf("labelType: form.labelType", mountStart)));
     for (const f of ["cardName", "setName", "year", "cardNumber"]) {
       expect(mount).toContain(`${f}: form.${f}`);
       expect(mount).not.toContain(`${f}: certificate?.${f}`);
@@ -151,7 +163,11 @@ describe("the preview cannot be rolled backwards (9-11)", () => {
     expect(buildPreviewFields({ certId: "MV-0000012345", cardName: "X" }).certId).toBe("MV-0000012345");
     // create flow still falls back to the placeholder
     expect(buildPreviewFields({ cardName: "X" }).certId).toBe("MV-PREVIEW");
-    const mount = FORM.slice(FORM.indexOf("<CertificatePreviewPanel"), FORM.indexOf("<CertificatePreviewPanel") + 1800);
+    // Slice to the END of the mount rather than a fixed character budget — the
+    // mount grew when the truthful `persistence` caption prop was added, and a
+    // fixed window silently stops covering the later fields.
+    const mountStart = FORM.indexOf("<CertificatePreviewPanel");
+    const mount = FORM.slice(mountStart, FORM.indexOf("/>", FORM.indexOf("labelType: form.labelType", mountStart)));
     expect(mount).toContain("certId:");
   });
 

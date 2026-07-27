@@ -1,12 +1,12 @@
 /**
- * Stage 4 read-only confirmation summary.
+ * Review-stage read-only confirmation summary.
  *
  * Pure presentation: every value is passed in from the certificate form's
  * EXISTING state — this component holds no certificate state of its own, makes
  * no network/provider calls, computes no grade, and never mutates. The small
  * "Edit" links only call back to switch the local workflow stage. The card
- * image is NOT rendered here — Stage 4 now reuses the SAME preview aside as
- * Card/Rarity (certificate-form.tsx renders it for wfStage 3 too), so this
+ * image is NOT rendered here — Review reuses the SAME preview aside as
+ * Card Details (certificate-form.tsx renders it for the Review stage too), so this
  * summary only holds the review-details columns and never duplicates the image.
  */
 import { RaritySymbol } from "@/components/rarity-picker/RaritySymbol";
@@ -128,7 +128,7 @@ export function ReviewSummary({
 
       {/* Top row: card details · classification. The card image itself is NOT
           rendered here — it lives in the shared preview aside beside this
-          panel (same aside Card/Rarity use), so it is never duplicated. */}
+          panel (the same aside Card Details uses), so it is never duplicated. */}
       <div className="grid gap-2 lg:grid-cols-2">
         <Card title="Card" edit={<EditLink onClick={onEditCard} testId="review-edit-card" />}>
           <div data-testid="review-card-details">
@@ -151,7 +151,7 @@ export function ReviewSummary({
               </span>
             </div>
             <div className="flex items-baseline justify-between gap-2 py-0.5">
-              <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Rarity</span>
+              <span className="shrink-0 text-[10px] uppercase tracking-wider text-[var(--admin-ink-faint)]">Variant</span>
               <span className="flex min-w-0 items-center justify-end gap-1 text-right text-[12px] text-[var(--admin-ink)]">
                 {rarity ? (
                   <>

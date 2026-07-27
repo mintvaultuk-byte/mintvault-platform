@@ -1,5 +1,5 @@
 /**
- * Read-only card viewer for the Card + Rarity stages.
+ * Read-only card viewer for the Card Details stage.
  *
  * A plain <img> fed by (a) the object URL of a just-uploaded file, or (b) the
  * existing signed display URLs from GET /api/admin/certificates/:id/images
@@ -37,7 +37,7 @@ export function CardPreviewPanel({
   frontFile?: File | null;
   backFile?: File | null;
   /** When true, the panel fills its parent's height and the card contain-fits
-      that height (the Card/Rarity workstation aside). Default false keeps the
+      that height (the Card Details workstation aside). Default false keeps the
       capped thumbnail size used by the Review-stage summary. */
   fill?: boolean;
   /** Cert-scoped API base for the images query. Defaults to /api/admin (the

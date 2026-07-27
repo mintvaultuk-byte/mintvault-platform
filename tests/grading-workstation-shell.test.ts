@@ -74,7 +74,7 @@ describe("1-4. two-panel workspace: preview aside + control panel are grid sibli
     expect(SHELL_SRC).toContain('data-testid="grading-control-panel"');
     // preview aside renders for Card, Rarity AND Review (Grade keeps its own
     // dedicated protected card/defect tool and is intentionally excluded).
-    expect(row).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?[\s\S]*WorkstationPreviewAside/);
+    expect(row).toMatch(/showsPreviewAside\(wfStage\)[\s\S]*WorkstationPreviewAside/);
   });
   it("preview is NOT rendered above the fields as a full-width block", () => {
     // certificate-form.tsx no longer renders CardPreviewPanel directly at
@@ -130,8 +130,8 @@ describe("5-6. fixed-height shell + internal scroll", () => {
 
 describe("7-9. old tall chrome is gone", () => {
   it("the large 1·CARD DETAILS fieldset is gone (now a plain div)", () => {
-    expect(FORM).not.toMatch(/<fieldset data-workflow-stage="identify"/);
-    expect(FORM).toContain('data-workflow-stage="identify"'); // still a stage container, just a div
+    expect(FORM).not.toMatch(/<fieldset data-workflow-stage="card-details"/);
+    expect(FORM).toContain('data-workflow-stage="card-details"'); // still a stage container, just a div
   });
   it("the large EDIT MV### title + 'Update certificate details' subtitle are removed", () => {
     expect(FORM).not.toContain('data-testid="text-form-title"');
@@ -140,14 +140,14 @@ describe("7-9. old tall chrome is gone", () => {
 });
 
 describe("10-11. navigation + stage reuse", () => {
-  it("Continue to Rarity stays inside the control panel form", () => {
+  it("Continue to Grade stays inside the control panel form", () => {
     const controlPanel = slice(FORM, "onSubmit={handleSubmit}", "</form>");
-    expect(controlPanel).toContain('data-testid="button-continue-to-rarity"');
+    expect(controlPanel).toContain('data-testid="button-continue-to-grade"');
   });
-  it("Rarity AND Review reuse the same side-by-side shell (aside shows for wfStage 0, 1, 3)", () => {
-    // The preview aside gate covers Card (0), Rarity (1) and Review (3); Grade
-    // (2) keeps its own dedicated protected card/defect tool instead.
-    expect(FORM).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?[\s\S]*WorkstationPreviewAside/);
+  it("Card Details AND Review reuse the same side-by-side shell (aside shows for wfStage 0, 2)", () => {
+    // The preview aside gate covers Card Details (0) and Review (2); Grade (1)
+    // keeps its own dedicated protected card/defect tool instead.
+    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)[\s\S]*WorkstationPreviewAside/);
   });
 });
 
@@ -197,7 +197,7 @@ describe("12-20. protected surfaces / save / queue / Ownership-NFC / providers u
     }
   });
   it("workstationSlot render + Stage-3 wrapper unchanged (no transform/scale added)", () => {
-    const wrapper = slice(FORM, 'data-workflow-stage="grade"', "Stage 3 nav");
+    const wrapper = slice(FORM, 'data-workflow-stage="grade"', "Grade-stage nav");
     expect(wrapper).toContain("{workstationSlot}");
     expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
   });

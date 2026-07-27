@@ -143,6 +143,19 @@ export interface IStorage {
   getCertificateByCertId(certId: string): Promise<CertificateRecord | undefined>;
   getCertificateByAnyCertId(certIds: string[]): Promise<CertificateRecord | undefined>;
   updateCertificate(id: number, data: Partial<CertificateRecord>): Promise<CertificateRecord | undefined>;
+  /**
+   * ATOMIC certificate update + audit insert (hostile-review H7).
+   *
+   * The metadata editor previously committed the UPDATE and then inserted the
+   * audit row separately, so a failed audit left a silently unaudited edit.
+   * Both statements now run in ONE database transaction: either the row change
+   * and its audit trail both land, or neither does.
+   */
+  updateCertificateAudited(
+    id: number,
+    data: Partial<CertificateRecord>,
+    audit: { entityId: string; action: string; adminUser: string | null; details: Record<string, unknown> }
+  ): Promise<CertificateRecord | undefined>;
   listCertificates(filters?: CertificateFilters): Promise<CertificateRecord[]>;
   searchCertificates(query: string): Promise<CertificateRecord[]>;
   getNextCertId(): Promise<string>;
@@ -917,6 +930,40 @@ export class DatabaseStorage implements IStorage {
     delete updateData.certId;
     const [cert] = await db.update(certificates).set(updateData).where(eq(certificates.id, id)).returning();
     return cert;
+  }
+
+  /**
+   * H7 — one transaction for the row change AND its audit row.
+   *
+   * Ordering inside the transaction is deliberate: the UPDATE runs first so a
+   * constraint violation aborts before any audit row exists, and the audit
+   * INSERT runs second so an audit failure rolls the UPDATE back. Anything that
+   * throws (validation, constraint, audit) leaves the certificate untouched and
+   * writes no audit row.
+   */
+  async updateCertificateAudited(
+    id: number,
+    data: Partial<CertificateRecord>,
+    audit: { entityId: string; action: string; adminUser: string | null; details: Record<string, unknown> }
+  ): Promise<CertificateRecord | undefined> {
+    const updateData: any = { ...data };
+    updateData.updatedAt = new Date();
+    delete updateData.id;
+    delete updateData.certId;
+
+    return await db.transaction(async (tx) => {
+      const [cert] = await tx.update(certificates).set(updateData).where(eq(certificates.id, id)).returning();
+      // A missing row must not produce an audit row claiming an edit happened.
+      if (!cert) throw new Error(`updateCertificateAudited: certificate ${id} not found`);
+      await tx.insert(auditLog).values({
+        entityType: "certificate",
+        entityId: audit.entityId,
+        action: audit.action,
+        adminUser: audit.adminUser,
+        details: audit.details,
+      });
+      return cert;
+    });
   }
 
   async getCertificateByNfcUid(uid: string): Promise<CertificateRecord | undefined> {

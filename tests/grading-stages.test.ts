@@ -1,8 +1,12 @@
 /**
- * Stage-gated grading workflow (Card → Rarity → Grade → Review) — source
+ * Stage-gated grading workflow (Card Details → Grade → Review) — source
  * assertions proving stage isolation, no-save navigation, notes relocation,
  * legacy-control collapse, compact chips, and that NO protected grading file
  * changed. Zero provider calls, zero credits.
+ *
+ * Consolidated 2026-07-26: Card and Rarity are now ONE stage ("Card Details").
+ * The Variant block (formerly the Rarity stage) is asserted to live INSIDE the
+ * Card Details section rather than in a stage of its own.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
@@ -23,27 +27,48 @@ function between(start: string, end: string): string {
   return FORM.slice(i, j);
 }
 
-const STAGE_CARD = between("STAGE 1 · CARD", "STAGE 2 · RARITY");
-const STAGE_RARITY = between("STAGE 2 · RARITY", "stage 1 (card) nav");
-const STAGE_REVIEW = FORM.slice(FORM.indexOf("Stage 4 · REVIEW"));
+/** The identity half of Card Details (game/set/name/number/year/language). */
+const CARD_IDENTITY = between("STAGE 1 · CARD DETAILS", "VARIANT (formerly the separate");
+/** The Variant half of Card Details — same screen, below the identity fields. */
+const VARIANT_BLOCK = between("VARIANT (formerly the separate", "Card Details nav");
+/** The whole consolidated Card Details stage. */
+const STAGE_CARD_DETAILS = between("STAGE 1 · CARD DETAILS", "Grading workstation — card tool");
+const STAGE_REVIEW = FORM.slice(FORM.indexOf("Stage 3 · REVIEW"));
 /** Code with comments stripped (comments deliberately describe what is NOT done). */
 const stripComments = (s: string) => s.replace(/\{\/\*[\s\S]*?\*\/\}/g, "").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 describe("stage separation (spec 1-4)", () => {
-  it("Card stage holds identification only — no rarity picker, designations or notes", () => {
-    expect(STAGE_CARD).toContain("Search TCG");
-    expect(STAGE_CARD).not.toContain("RarityVariantPicker");
-    expect(STAGE_CARD).not.toContain("designations-chips");
-    expect(STAGE_CARD).not.toContain("Grader Notes");
+  it("the identity half of Card Details holds identification fields, not the picker or notes", () => {
+    expect(CARD_IDENTITY).toContain("Search TCG");
+    expect(CARD_IDENTITY).not.toContain("RarityVariantPicker");
+    expect(CARD_IDENTITY).not.toContain("designations-chips");
+    expect(CARD_IDENTITY).not.toContain("Grader Notes");
   });
-  it("Rarity stage holds the structured picker + collapsed legacy/designations", () => {
-    expect(STAGE_RARITY).toContain("RarityVariantPicker");
-    expect(STAGE_RARITY).toContain('data-testid="legacy-variant-details"');
-    expect(STAGE_RARITY).toContain('data-testid="designations-details"');
-    expect(STAGE_RARITY).not.toContain("Grader Notes");
+  it("the Variant half holds the structured picker + collapsed legacy/designations", () => {
+    expect(VARIANT_BLOCK).toContain("RarityVariantPicker");
+    expect(VARIANT_BLOCK).toContain('data-testid="legacy-variant-details"');
+    expect(VARIANT_BLOCK).toContain('data-testid="designations-details"');
+    expect(VARIANT_BLOCK).not.toContain("Grader Notes");
   });
-  it("Rarity stage shows the permanent variant/classification summary below the picker (item 2)", () => {
-    expect(STAGE_RARITY).toContain("<VariantSummary");
+  it("CONSOLIDATION: identity AND Variant render on the SAME stage (one screen)", () => {
+    // Both halves are inside the single Card Details section...
+    expect(STAGE_CARD_DETAILS).toContain("Search TCG");
+    expect(STAGE_CARD_DETAILS).toContain("RarityVariantPicker");
+    expect(STAGE_CARD_DETAILS).toContain('data-testid="designations-details"');
+    // ...and there is exactly ONE stage wrapper around them.
+    expect(FORM).toContain('data-workflow-stage="card-details"');
+    expect(FORM).not.toContain('data-workflow-stage="rarity"');
+    // The old cross-stage navigation is gone entirely.
+    expect(FORM).not.toContain("Continue to Rarity →");
+    expect(FORM).not.toContain("← Back to Rarity");
+  });
+  it("Variant is presented as OPTIONAL and is not part of any gate", () => {
+    expect(VARIANT_BLOCK).toContain("optional");
+    // The only Continue gate on Card Details is card name + number.
+    expect(FORM).toMatch(/disabled=\{!form\.cardName\.trim\(\) \|\| !form\.cardNumber\.trim\(\)\}/);
+  });
+  it("Card Details shows the permanent variant/classification summary below the picker (item 2)", () => {
+    expect(VARIANT_BLOCK).toContain("<VariantSummary");
   });
   it("Grade→Review advance button reads 'Continue to Review' (item 6)", () => {
     expect(FORM).toContain("Continue to Review →");
@@ -51,7 +76,7 @@ describe("stage separation (spec 1-4)", () => {
   it("Grade stage renders the workstationSlot inside a plain visibility wrapper (no transform/scale)", () => {
     // Assert on the wrapper region only (up to the stage-3 nav), with comments
     // stripped — they deliberately describe what is NOT done.
-    const wrapper = stripComments(between('<div data-workflow-stage="grade"', "Stage 3 nav"));
+    const wrapper = stripComments(between('<div data-workflow-stage="grade"', "Grade-stage nav"));
     expect(wrapper).toContain("{workstationSlot}");
     expect(wrapper).not.toMatch(/transform|scale\(|zoom:/);
   });
@@ -60,15 +85,19 @@ describe("stage separation (spec 1-4)", () => {
     expect(STAGE_REVIEW).toContain('data-testid="button-add-grader-notes"');
     expect(STAGE_REVIEW).toContain("button-save-cert");
   });
-  it("Review stage shows the live certificate preview + confidence (item 1/9)", () => {
-    // Post four-build consolidation: the Review-stage live preview is the SINGLE
-    // canonical CertificatePreviewPanel, mounted once at the shell level for the
-    // Rarity (1) AND Review (3) stages (via WorkstationPreviewAside `below`), not
-    // a second per-stage LabelPreview. Assert the canonical panel covers Review.
+  it("Review stage shows the live certificate preview via the SINGLE canonical panel", () => {
+    // The Review-stage live preview is the SINGLE canonical
+    // CertificatePreviewPanel, mounted once at the shell level (via
+    // WorkstationPreviewAside `below`), never a second per-stage LabelPreview.
+    // Three-stage numbering: Card Details (0) + Review (2); Grade (1) excluded.
     expect(FORM).toContain("<CertificatePreviewPanel");
-    expect(FORM).toContain("wfStage === 1 || wfStage === 3");
-    // The removed duplicate must not come back.
+    expect(FORM).toContain("showsPreviewAside(wfStage)");
+    // PROVENANCE: the duplicate Review LabelPreview was removed by CURRENT MAIN,
+    // not by this branch — this branch merely preserved main's negative guard
+    // (it did NOT invert it) and re-expressed the gate in three-stage numbering.
+    // LabelPreview.tsx no longer exists on main at all.
     expect(FORM).not.toContain("<LabelPreview");
+    expect((FORM.match(/<CertificatePreviewPanel/g) ?? []).length).toBe(1);
   });
   it("Review stage exposes an explicit large Save button alongside auto-save (item 7)", () => {
     expect(STAGE_REVIEW).toContain('data-testid="button-save-now"');
@@ -87,13 +116,19 @@ describe("stage navigation is UI-state only (spec: no save/grade/issue)", () => 
     expect(fn).not.toMatch(/mutate|handleSubmit|autoSaveNow|fetch\(|setForm/);
   });
   it("all nav buttons are type=button (cannot submit the form)", () => {
-    for (const id of ["button-continue-to-rarity", "button-continue-to-grade", "button-back-to-card", "button-back-to-rarity", "button-review-card", "button-back-to-grade"]) {
+    // 3-stage flow: Card Details → Grade → Review, and back again.
+    for (const id of ["button-continue-to-grade", "button-back-to-card-details", "button-review-card", "button-back-to-grade"]) {
       const i = FORM.indexOf(id);
       expect(i, id).toBeGreaterThan(-1);
       expect(FORM.slice(i - 600, i)).toContain('type="button"');
     }
   });
-  it("Continue to Rarity gates only on genuinely mandatory fields with a plain reason", () => {
+  it("the retired Rarity-stage nav testids are gone", () => {
+    for (const id of ["button-continue-to-rarity", "button-back-to-rarity"]) {
+      expect(FORM).not.toContain(id);
+    }
+  });
+  it("Continue to Grade gates only on genuinely mandatory fields with a plain reason", () => {
     expect(FORM).toContain("Enter the card name and number first.");
     expect(FORM).toMatch(/disabled=\{!form\.cardName\.trim\(\) \|\| !form\.cardNumber\.trim\(\)\}/);
   });

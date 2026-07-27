@@ -58,7 +58,7 @@ describe("1. compact stage buttons (no more two-line dashboard cards)", () => {
     expect(BAR).not.toMatch(/<span[^>]*>\s*\{stage\.sublabel\}/);
     expect(BAR).not.toContain("xl:block"); // the breakpoint that used to reveal it
   });
-  it("all four stages are still labelled and click targets remain a real <button>", () => {
+  it("all three stages are still labelled and click targets remain a real <button>", () => {
     expect(BAR).toContain("GRADING_STAGES.map((stage, i)");
     expect(BAR).toContain("<button");
     expect(BAR).toContain("{stage.label}");
@@ -113,13 +113,13 @@ describe("3. Certificate Tools is a compact utility control, not a large isolate
   });
 });
 
-describe("4. Stage 4 Review restores the two-column workstation (card left, details right)", () => {
-  it("the preview aside now also renders for Review (wfStage === 3), not just Card/Rarity", () => {
-    expect(FORM).toMatch(/wfStage <= 1 \|\| wfStage === 3 \?/);
+describe("4. Review restores the two-column workstation (card left, details right)", () => {
+  it("the preview aside renders for Review as well as Card Details (via showsPreviewAside)", () => {
+    expect(FORM).toMatch(/showsPreviewAside\(wfStage\)/);
   });
-  it("Grade (wfStage 2) is deliberately excluded — its own protected card/defect tool is untouched", () => {
-    const cond = FORM.slice(FORM.indexOf("wfStage <= 1 || wfStage === 3 ?"), FORM.indexOf("wfStage <= 1 || wfStage === 3 ?") + 60);
-    expect(cond).not.toContain("wfStage === 2");
+  it("Grade (wfStage 1) is deliberately excluded — its own protected card/defect tool is untouched", () => {
+    const cond = FORM.slice(FORM.indexOf("showsPreviewAside(wfStage)"), FORM.indexOf("showsPreviewAside(wfStage)") + 60);
+    expect(cond).not.toContain("wfStage === 1");
   });
   it("preview and review-details are separate zones — no duplicated image", () => {
     // certificate-form.tsx no longer renders CardPreviewPanel directly at all —
@@ -134,7 +134,7 @@ describe("4. Stage 4 Review restores the two-column workstation (card left, deta
     expect(SUMMARY).toContain('className="grid gap-2 lg:grid-cols-2"');
     expect(SUMMARY).not.toMatch(/grid-cols-\[minmax\(150px/);
   });
-  it("Review reuses the SAME responsive breakpoint as the approved Card/Rarity workstation (md, not an excessively wide 2xl)", () => {
+  it("Review reuses the SAME responsive breakpoint as the approved Card Details workstation (md, not an excessively wide 2xl)", () => {
     // The aside/control-panel row is `md:flex-row` — Review renders inside that
     // exact same row (same aside gate, same flex row), so it inherits the
     // identical md breakpoint rather than requiring a new one. The column
@@ -146,7 +146,7 @@ describe("4. Stage 4 Review restores the two-column workstation (card left, deta
   it("mobile stacking remains supported (no md:/lg:-only mandatory two-column)", () => {
     // Base (mobile-first) classes are flex-col; md:flex-row only applies at
     // the md breakpoint and above, so below it the aside and control panel
-    // stack vertically like Card/Rarity already do.
+    // stack vertically like Card Details already does.
     expect(CANON_SHELL).toMatch(/flex min-h-0 flex-1 flex-col gap-3 md:flex-row/);
   });
 });
