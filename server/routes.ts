@@ -116,6 +116,8 @@ import {
   gradingFieldChanges,
   gradingFieldContractError,
   assertServerMetadataCommitKeys,
+  canonicalGradingField,
+  NUMERIC_GRADING_FIELDS,
 } from "@shared/certificate-field-ownership";
 import {
   resolveEditConflicts,
@@ -167,6 +169,12 @@ import fs from "fs";
 import crypto from "crypto";
 import { generatePdfToken, verifyPdfToken } from "./lib/pdf-token";
 import { uploadToR2, getR2SignedUrl, deleteFromR2, headR2, r2KeyForImage, r2KeyForLabel } from "./r2";
+import {
+  persistImageUploadAudited,
+  IMAGE_UPLOAD_JSONB_COLUMNS,
+  IMAGE_VARIANTS_AUDIT_ACTION,
+  COLUMN_TO_CERT_KEY,
+} from "./lib/certificate-image-persistence";
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
 import { sql, inArray } from "drizzle-orm";
@@ -1421,6 +1429,7 @@ async function createEbayPriceCacheTable() {
  * Behaviour is unchanged by the extraction: `registerRoutes` mounts this exact
  * function behind the same `requireAdmin` + multer chain it always had.
  */
+
 export async function handleCertificateMetadataUpdate(req: any, res: any): Promise<void> {
     try {
       const id = parseInt(String(req.params.id), 10);
@@ -2248,7 +2257,80 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
       // certs got changed after publication.
       const wasApproved = (cert as any).gradeApprovedAt != null;
 
-      await db.execute(sql`
+      // ── M-3 · THE GRADING WRITE AND ITS AUDIT COMMIT TOGETHER OR NOT AT ALL ─
+      //
+      // DIAGNOSIS (hostile review of PR #260, finding M-3). The UPDATE below ran
+      // on its own connection and committed immediately. The audit INSERT then
+      // ran afterwards inside `try { … } catch { console.warn(…) }`, so ANY
+      // audit failure — a bad connection, a constraint, a jsonb error, a pool
+      // timeout — was swallowed and the route still answered `{ ok: true }`. A
+      // grade could therefore change on a customer's certificate with NO durable
+      // record of who changed it or from what, and the operator would be told it
+      // saved. For a grading platform whose product is the trustworthiness of
+      // the record, an unauditable grade change is the failure that matters.
+      //
+      // The diff is computed BEFORE the transaction (it compares the payload
+      // against the row read at the top of this handler), so the transaction
+      // contains only the two durable writes and nothing that can fail slowly.
+      //
+      // ENTITY IDENTITY: this route recorded `entity_id` as the NUMERIC row id
+      // while the metadata route records the canonical `certId` ("MV1"), so an
+      // operator querying the trail by certificate ID silently missed every
+      // grading event. Both now write the canonical certId, with the numeric id
+      // retained inside `details` for continuity with historical rows.
+      const fieldsChanged = Object.keys(b || {});
+      const fieldMap: Array<[string, string]> = [
+        ["overall_grade", "gradeOverall"],
+        ["grade_centering", "gradeCentering"],
+        ["grade_corners", "gradeCorners"],
+        ["grade_edges", "gradeEdges"],
+        ["grade_surface", "gradeSurface"],
+        ["centering_front_lr", "centeringFrontLr"],
+        ["centering_front_tb", "centeringFrontTb"],
+        ["centering_back_lr", "centeringBackLr"],
+        ["centering_back_tb", "centeringBackTb"],
+        ["auth_status", "authStatus"],
+        ["auth_notes", "authNotes"],
+        ["grade_explanation", "gradeExplanation"],
+        ["private_notes", "privateNotes"],
+        ["corners", "cornerValues"],
+        ["edges", "edgeValues"],
+        ["surface", "surfaceValues"],
+        ["defects", "defects"],
+        ["ai_defect_candidates", "aiDefectCandidates"],
+      ];
+      const norm = (v: unknown) => (v == null ? null : typeof v === "object" ? JSON.stringify(v) : String(v));
+      // Same narrowly-scoped numeric rule the metadata route already uses: for
+      // the grading columns that are genuinely NUMERIC, Postgres returns "8.0"
+      // while the workstation posts "8", so a plain string compare recorded a
+      // FALSE change on every re-save. A debounced autosave re-sending an
+      // unchanged grade would then write an audit row per keystroke claiming the
+      // grade changed 8 -> 8. Applied ONLY when both sides are non-empty finite
+      // numbers; everything else keeps the strict comparison.
+      const NUMERIC_SET: ReadonlySet<string> = new Set(NUMERIC_GRADING_FIELDS);
+      const sameValue = (pKey: string, before: string | null, after: string | null): boolean => {
+        if (before === after) return true;
+        const canonical = canonicalGradingField(pKey);
+        if (!canonical || !NUMERIC_SET.has(canonical)) return false;
+        if (before == null || after == null || before === "" || after === "") return false;
+        const x = Number(before);
+        const y = Number(after);
+        return Number.isFinite(x) && Number.isFinite(y) && x === y;
+      };
+      const changed: Record<string, { from: unknown; to: unknown }> = {};
+      for (const [pKey, cKey] of fieldMap) {
+        if (!(pKey in (b || {}))) continue;
+        const before = norm((cert as any)[cKey]);
+        const after = norm((b as any)[pKey]);
+        if (!sameValue(pKey, before, after)) {
+          changed[pKey] = { from: (cert as any)[cKey] ?? null, to: (b as any)[pKey] ?? null };
+        }
+      }
+      const canonicalCertId = String((cert as { certId?: string }).certId ?? id);
+      const gradingActor = (req.session as { adminEmail?: string })?.adminEmail || "admin";
+
+      await db.transaction(async (tx) => {
+      await tx.execute(sql`
         UPDATE certificates SET
           centering_front_lr  = COALESCE(${txt(b.centering_front_lr)}, centering_front_lr),
           centering_front_tb  = COALESCE(${txt(b.centering_front_tb)}, centering_front_tb),
@@ -2364,60 +2446,38 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
       // semantic difference: pre-launch we want to know what % of certs
       // get edited after publication, and which fields.
       //
-      // Diff capture: compare payload values against the cert state read at
-      // the top of this handler. Only fields the payload actually carries
-      // (and that differ from the prior DB value) appear in `changed`. JSONB
-      // columns (corners/edges/surface/defects/ai_defect_candidates) are
-      // compared by JSON.stringify so a no-op re-submit doesn't pollute the
-      // log.
-      try {
-        const fieldsChanged = Object.keys(b || {});
-        // Mapping: payload key (snake_case) → cert column accessor (camelCase from Drizzle).
-        const fieldMap: Array<[string, string]> = [
-          ["overall_grade", "gradeOverall"],
-          ["grade_centering", "gradeCentering"],
-          ["grade_corners", "gradeCorners"],
-          ["grade_edges", "gradeEdges"],
-          ["grade_surface", "gradeSurface"],
-          ["centering_front_lr", "centeringFrontLr"],
-          ["centering_front_tb", "centeringFrontTb"],
-          ["centering_back_lr", "centeringBackLr"],
-          ["centering_back_tb", "centeringBackTb"],
-          ["auth_status", "authStatus"],
-          ["auth_notes", "authNotes"],
-          ["grade_explanation", "gradeExplanation"],
-          ["private_notes", "privateNotes"],
-          ["corners", "cornerValues"],
-          ["edges", "edgeValues"],
-          ["surface", "surfaceValues"],
-          ["defects", "defects"],
-          ["ai_defect_candidates", "aiDefectCandidates"],
-        ];
-        const norm = (v: unknown) => (v == null ? null : typeof v === "object" ? JSON.stringify(v) : String(v));
-        const changed: Record<string, { from: unknown; to: unknown }> = {};
-        for (const [pKey, cKey] of fieldMap) {
-          if (!(pKey in (b || {}))) continue;
-          const before = norm((cert as any)[cKey]);
-          const after = norm((b as any)[pKey]);
-          if (before !== after) {
-            changed[pKey] = { from: (cert as any)[cKey] ?? null, to: (b as any)[pKey] ?? null };
-          }
-        }
-        await db.execute(sql`
+      // M-3: this INSERT is now INSIDE the transaction and its failure is NOT
+      // caught. If it throws, the UPDATE above rolls back with it and the outer
+      // handler returns 500 — the caller is never told a grading change saved
+      // when no durable record of it exists.
+      //
+      // NO-OP: a submission that changes no mapped field writes no audit row, so
+      // the debounced auto-save cannot fill the trail with rows claiming an
+      // empty change set. The UPDATE itself still runs unconditionally, exactly
+      // as before, so COALESCE preservation semantics and `updated_at` are
+      // untouched — this changes what is AUDITED, never what is WRITTEN.
+      if (Object.keys(changed).length > 0) {
+        await tx.execute(sql`
           INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
           VALUES (
             'certificate',
-            ${String(id)},
+            ${canonicalCertId},
             ${wasApproved ? "cert_live_record_edit" : "draft_save"},
-            ${(req.session as any)?.adminEmail || "admin"},
-            ${JSON.stringify({ fields_changed: fieldsChanged, changed, was_approved: wasApproved })}::jsonb,
+            ${gradingActor},
+            ${JSON.stringify({
+              certificateId: id,
+              certId: canonicalCertId,
+              fields_changed: fieldsChanged,
+              changed,
+              changedFields: Object.keys(changed),
+              was_approved: wasApproved,
+              outcome: "committed",
+            })}::jsonb,
             NOW()
           )
         `);
-      } catch (auditErr: any) {
-        // Don't fail the save if audit insert fails — log and continue.
-        console.warn("[grade] audit_log insert failed:", auditErr.message);
       }
+      });
 
       res.json({ ok: true, wasApproved });
     } catch (error: any) {
@@ -6521,6 +6581,39 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         let frontCroppedBuf: Buffer | null = null;
         let backCroppedBuf: Buffer | null = null;
 
+        // ── M-2 · CONTENT IDENTITY FOR EVERY OBJECT THIS REQUEST WRITES ───────
+        // R2 keys here are DETERMINISTIC (`grading/{certId}/front_cropped.jpg`,
+        // `images/{certId}/front.jpg`), so a re-upload replaces the OBJECT while
+        // the stored path STRING stays the same. A path-only audit would
+        // therefore record "nothing changed" for a request that swapped a
+        // customer's card image. Every upload is recorded with the SHA-256 of the
+        // bytes actually sent, the byte count and the MIME type, so a replacement
+        // is provable even when no column value moves.
+        //
+        // `preexisting` marks a key that was ALREADY the committed value for its
+        // column before this request. It drives compensation below: an orphan
+        // from a failed transaction may be deleted, but an object that the last
+        // committed state still points at must never be.
+        type UploadedObject = {
+          key: string;
+          column: string;
+          sha256: string;
+          bytes: number;
+          contentType: string;
+          preexisting: boolean;
+        };
+        const uploadedObjects: UploadedObject[] = [];
+        const recordUpload = (key: string, column: string, buf: Buffer, contentType: string) => {
+          uploadedObjects.push({
+            key,
+            column,
+            sha256: crypto.createHash("sha256").update(buf).digest("hex"),
+            bytes: buf.length,
+            contentType,
+            preexisting: (cert as Record<string, unknown>)[COLUMN_TO_CERT_KEY[column] ?? ""] === key,
+          });
+        };
+
         async function processAngle(angle: "front" | "back" | "angled" | "closeup", buffer: Buffer) {
           const ext = "jpg";
           // 1. Save original — re-encode via sharp to strip EXIF/ICC/thumbnail
@@ -6537,6 +6630,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const origKey = `grading/${certId}/${angle}_original.${ext}`;
           await uploadToR2(origKey, reencodedOriginal, "image/jpeg");
           updates[`grading_${angle}_original`] = origKey;
+          recordUpload(origKey, `grading_${angle}_original`, reencodedOriginal, "image/jpeg");
 
           // 2. Deskew (straighten slight rotation before cropping)
           const { buffer: deskewedBuf, angle: deskewAngle } = await deskewCard(buffer);
@@ -6582,6 +6676,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const cropKey = `grading/${certId}/${angle}_cropped.${ext2}`;
           await uploadToR2(cropKey, croppedBuf, "image/jpeg");
           updates[`grading_${angle}_cropped`] = cropKey;
+          recordUpload(cropKey, `grading_${angle}_cropped`, croppedBuf, "image/jpeg");
 
           // 4. Quality check on cropped image
           const quality = await checkImageQuality(croppedBuf);
@@ -6595,11 +6690,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             const displayKey = r2KeyForImage(certId, "front", "jpg");
             updates["front_image_path"] = displayKey;
             await uploadToR2(displayKey, croppedBuf, "image/jpeg");
+            recordUpload(displayKey, "front_image_path", croppedBuf, "image/jpeg");
           } else if (angle === "back") {
             backCroppedBuf = croppedBuf;
             const displayKey = r2KeyForImage(certId, "back", "jpg");
             updates["back_image_path"] = displayKey;
             await uploadToR2(displayKey, croppedBuf, "image/jpeg");
+            recordUpload(displayKey, "back_image_path", croppedBuf, "image/jpeg");
           }
 
           // 5a. 1600px display derivative for the grading-panel viewer —
@@ -6610,6 +6707,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             const derivKey = `grading/${certId}/${angle}_display.jpg`;
             await uploadToR2(derivKey, displayDerivative, "image/jpeg");
             updates[`grading_${angle}_display`] = derivKey;
+            recordUpload(derivKey, `grading_${angle}_display`, displayDerivative, "image/jpeg");
           }
 
           // 6. Variants — fire-and-forget (don't block the response)
@@ -6622,17 +6720,44 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                 uploadToR2(`grading/${certId}/${angle}_edgeenhanced.jpg`, edgeenhanced, "image/jpeg"),
                 uploadToR2(`grading/${certId}/${angle}_inverted.jpg`, inverted, "image/jpeg"),
               ]);
-              // Persist variant paths for front/back
+              // M-2: the background variant pass writes real certificate
+              // columns, so it goes through the SAME allowlist + transaction +
+              // audit as the foreground upload rather than a bare UPDATE. It
+              // runs after the response, so its failure cannot roll the
+              // foreground commit back — it is audited separately under its own
+              // action and logged loudly if it fails.
               if (angle === "front" || angle === "back") {
-                await db.execute(sql`
-                  UPDATE certificates SET
-                    ${angle === "front" ? sql`grading_front_greyscale` : sql`grading_back_greyscale`}     = ${`grading/${certId}/${angle}_greyscale.jpg`},
-                    ${angle === "front" ? sql`grading_front_highcontrast` : sql`grading_back_highcontrast`} = ${`grading/${certId}/${angle}_highcontrast.jpg`},
-                    ${angle === "front" ? sql`grading_front_edgeenhanced` : sql`grading_back_edgeenhanced`} = ${`grading/${certId}/${angle}_edgeenhanced.jpg`},
-                    ${angle === "front" ? sql`grading_front_inverted` : sql`grading_back_inverted`}     = ${`grading/${certId}/${angle}_inverted.jpg`},
-                    updated_at = NOW()
-                  WHERE id = ${id}
-                `);
+                const variantBufs: Array<[string, Buffer]> = [
+                  ["greyscale", greyscale],
+                  ["highcontrast", highcontrast],
+                  ["edgeenhanced", edgeenhanced],
+                  ["inverted", inverted],
+                ];
+                const variantUpdates: Record<string, string> = {};
+                const variantObjects = variantBufs.map(([name, buf]) => {
+                  const key = `grading/${certId}/${angle}_${name}.jpg`;
+                  const column = `grading_${angle}_${name}`;
+                  variantUpdates[column] = key;
+                  return {
+                    key,
+                    column,
+                    sha256: crypto.createHash("sha256").update(buf).digest("hex"),
+                    bytes: buf.length,
+                    contentType: "image/jpeg",
+                    preexisting: false,
+                  };
+                });
+                const variantResult = await persistImageUploadAudited({
+                  id,
+                  certId,
+                  updates: variantUpdates,
+                  uploadedObjects: variantObjects,
+                  actor: (req.session as { adminEmail?: string })?.adminEmail || "admin",
+                  action: IMAGE_VARIANTS_AUDIT_ACTION,
+                });
+                if (!variantResult.committed) {
+                  console.error(`[upload-images] variant persist failed for cert=${id} angle=${angle}`);
+                }
               }
             } catch (varErr) {
               console.error(`[upload-images] variant generation failed for ${angle}:`, varErr);
@@ -6648,112 +6773,49 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           }
         }
 
-        // Persist image paths and quality results
+        // ── M-2 · ONE TRANSACTION, ONE TRUTHFUL AUDIT ROW ─────────────────────
+        // The durable half lives in server/lib/certificate-image-persistence.ts
+        // so it can be proven against a real PostgreSQL cluster without running
+        // the sharp pipeline. See that module for the full diagnosis and for the
+        // explicit statement of what is and is not atomic across R2 + Postgres.
+        //
+        // This also removes a real defect in the previous code: the old
+        // colMap/CASE loop re-ran a no-op UPDATE for every non-path key (its
+        // `${col} = 'front_image_path'` comparison bound `col` as a string
+        // LITERAL, so it was always false) and the targeted block then wrote the
+        // same columns a second time — up to ~14 sequential auto-committed
+        // statements per upload, none of them audited.
         updates["image_quality_checks"] = JSON.stringify(qualityResults);
-        const setClauses = Object.entries(updates).filter(
-          ([k]) => !k.includes("_image_path") || k === "front_image_path" || k === "back_image_path"
-        );
-
-        // Build dynamic update via raw SQL per-column
-        const colMap: Record<string, string> = {
-          grading_front_original: "grading_front_original",
-          grading_front_cropped: "grading_front_cropped",
-          grading_back_original: "grading_back_original",
-          grading_back_cropped: "grading_back_cropped",
-          grading_angled_original: "grading_angled_original",
-          grading_angled_cropped: "grading_angled_cropped",
-          grading_closeup_original: "grading_closeup_original",
-          grading_closeup_cropped: "grading_closeup_cropped",
-          image_quality_checks: "image_quality_checks",
-          front_image_path: "front_image_path",
-          back_image_path: "back_image_path",
-        };
-
-        for (const [key, val] of Object.entries(updates)) {
-          const col = colMap[key];
-          if (!col) continue;
-          if (col === "image_quality_checks") {
-            await db.execute(
-              sql`UPDATE certificates SET image_quality_checks = ${val}::jsonb, updated_at = NOW() WHERE id = ${id}`
-            );
-          } else {
-            await db.execute(
-              sql`UPDATE certificates SET front_image_path = CASE WHEN ${col} = 'front_image_path' THEN ${val} ELSE front_image_path END, back_image_path = CASE WHEN ${col} = 'back_image_path' THEN ${val} ELSE back_image_path END, updated_at = NOW() WHERE id = ${id}`
-            );
-            // Use separate targeted updates to avoid conditional SQL complexity
-          }
-        }
-
-        // Targeted column updates
-        if (updates.grading_front_original)
-          await db.execute(
-            sql`UPDATE certificates SET grading_front_original = ${updates.grading_front_original}, updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_front_cropped)
-          await db.execute(
-            sql`UPDATE certificates SET grading_front_cropped  = ${updates.grading_front_cropped},  updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_back_original)
-          await db.execute(
-            sql`UPDATE certificates SET grading_back_original  = ${updates.grading_back_original},  updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_back_cropped)
-          await db.execute(
-            sql`UPDATE certificates SET grading_back_cropped   = ${updates.grading_back_cropped},   updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_front_display)
-          await db.execute(
-            sql`UPDATE certificates SET grading_front_display  = ${updates.grading_front_display},  updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_back_display)
-          await db.execute(
-            sql`UPDATE certificates SET grading_back_display   = ${updates.grading_back_display},   updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_angled_original)
-          await db.execute(
-            sql`UPDATE certificates SET grading_angled_original = ${updates.grading_angled_original}, updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_angled_cropped)
-          await db.execute(
-            sql`UPDATE certificates SET grading_angled_cropped  = ${updates.grading_angled_cropped},  updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_closeup_original)
-          await db.execute(
-            sql`UPDATE certificates SET grading_closeup_original = ${updates.grading_closeup_original}, updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_closeup_cropped)
-          await db.execute(
-            sql`UPDATE certificates SET grading_closeup_cropped  = ${updates.grading_closeup_cropped},  updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.image_quality_checks)
-          await db.execute(
-            sql`UPDATE certificates SET image_quality_checks = ${updates.image_quality_checks}::jsonb, updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.front_image_path)
-          await db.execute(
-            sql`UPDATE certificates SET front_image_path = ${updates.front_image_path}, updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.back_image_path)
-          await db.execute(
-            sql`UPDATE certificates SET back_image_path  = ${updates.back_image_path},  updated_at = NOW() WHERE id = ${id}`
-          );
-
-        // Crop forensics — records reCentre asymmetry + whether padding was extended. Read-only signal.
         if (Object.keys(cropGeometryByAngle).length > 0) {
-          const cropGeometry = {
+          updates["crop_geometry"] = JSON.stringify({
             ...cropGeometryByAngle,
             pipeline_version: "converged_v1",
             recorded_at: new Date().toISOString(),
-          };
-          await db.execute(
-            sql`UPDATE certificates SET crop_geometry = ${JSON.stringify(cropGeometry)}::jsonb, updated_at = NOW() WHERE id = ${id}`
-          );
+          });
+        }
+
+        const persistResult = await persistImageUploadAudited({
+          id,
+          certId,
+          updates,
+          uploadedObjects,
+          actor: (req.session as { adminEmail?: string })?.adminEmail || "admin",
+        });
+        if (!persistResult.committed) {
+          // Truthful failure: nothing committed, nothing audited as committed,
+          // last committed certificate state preserved.
+          return res.status(500).json({
+            error: "Image upload could not be saved",
+            committed: false,
+            orphanCleanupFailed: persistResult.orphanCleanupFailed.length || undefined,
+          });
         }
 
         // Generate signed URLs for response
         const responseUrls: Record<string, string | null> = {};
         for (const [key, val] of Object.entries(updates)) {
-          if (key === "image_quality_checks") continue;
+          // JSONB columns hold documents, not R2 keys — signing them is nonsense.
+          if (IMAGE_UPLOAD_JSONB_COLUMNS.has(key)) continue;
           try {
             responseUrls[key] = await getR2SignedUrl(val, 3600);
           } catch {

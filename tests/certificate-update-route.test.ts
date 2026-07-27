@@ -825,29 +825,36 @@ describe("PR A: legitimate grading edits work on the dedicated grade route", () 
     expect((await readAudits()).map((a: any) => a.action)).toContain("grade_kind_change_rejected");
   });
 
-  it("5. TRACKED FINDING — the grading route's audit is best-effort, NOT atomic", async () => {
-    // The metadata route commits the row change and its audit row in ONE
-    // transaction (proven above, unchanged). The dedicated grading route does
-    // not: its audit INSERT sits in its own try/catch that deliberately logs and
-    // continues ("Don't fail the save if audit insert fails"), so a grade change
-    // can commit with NO audit row.
-    //
-    // This test CHARACTERISES that real behaviour rather than asserting a
-    // guarantee the route does not provide. Making the grading write atomic means
-    // changing the protected grading route's transaction behaviour, which needs
-    // explicit owner approval and is NOT in this PR's scope. Reported as an open
-    // risk. If someone later makes it atomic, this test fails loudly — which is
-    // exactly the signal wanted.
+  it("5. M-3 (RESOLVED) — the grading route's audit is now ATOMIC with its write", async () => {
+    // SUPERSEDES the PR #260 characterisation test of the same number, which
+    // recorded the then-real behaviour: the grading route's audit INSERT sat in
+    // its own try/catch that logged and continued, so a grade change could commit
+    // with NO audit row and still answer 200. That test said explicitly: "If
+    // someone later makes it atomic, this test fails loudly — which is exactly
+    // the signal wanted." This PR makes it atomic, so the assertion is inverted
+    // to the guarantee now provided.
     const id = await certId();
+    const before = await readCert();
     await q(`ALTER TABLE audit_log ADD CONSTRAINT audit_block2 CHECK (action <> 'draft_save')`);
     try {
       const { status } = await putGrade(id, { overall_grade: "7" });
-      expect(status).toBe(200);
-      expect((await readCert()).gradeOverall, "the grade change commits without its audit row").toBe("7.0");
+      // Fail CLOSED: the caller is told the save failed …
+      expect(status).toBe(500);
+      // … and the grading mutation rolled back with its unwritable audit row.
+      expect((await readCert()).gradeOverall, "the grade must NOT commit without its audit").toBe(
+        before.gradeOverall
+      );
       expect(await readAudits()).toHaveLength(0);
     } finally {
       await q(`ALTER TABLE audit_log DROP CONSTRAINT audit_block2`);
     }
+
+    // And the same write succeeds normally once the audit can be written.
+    const ok = await putGrade(id, { overall_grade: "7" });
+    expect(ok.status).toBe(200);
+    expect((await readCert()).gradeOverall).toBe("7.0");
+    const saves = (await readAudits()).filter((a: any) => a.action === "draft_save");
+    expect(saves).toHaveLength(1);
   });
 
   it("the metadata route's own audit atomicity is UNCHANGED by this PR", async () => {
@@ -1652,5 +1659,167 @@ describe("M-3: a same-path image replacement is auditable", () => {
     expect(await readAudits()).toHaveLength(0);
     expect((await readCert()).cardName).toBe(before.cardName);
     expect(r2Calls.uploads).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M-3 — the grading route's write and its audit are one transaction
+//
+// The hostile review of PR #260 recorded this as an open Medium: the grading
+// UPDATE committed on its own connection, the audit INSERT ran afterwards inside
+// try/catch, and ANY audit failure was swallowed while the route still answered
+// { ok: true }. A grade could change on a customer's certificate with no durable
+// record of who changed it or from what. The entity identifier was inconsistent
+// too — the numeric row id here, the canonical certId on the metadata route — so
+// querying the trail by certificate ID missed every grading event.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("M-3: grading update and grading audit commit together", () => {
+  it("1. a real grading change commits WITH its audit row", async () => {
+    const id = await certId();
+    const { status } = await putGrade(id, { overall_grade: "8", grade_corners: "8" });
+    expect(status).toBe(200);
+    expect((await readCert()).gradeOverall).toBe("8.0");
+
+    const saves = (await readAudits()).filter((a: any) => a.action === "draft_save");
+    expect(saves).toHaveLength(1);
+    expect(saves[0].details.outcome).toBe("committed");
+    expect(saves[0].adminUser).toBeTruthy();
+    expect(saves[0].createdAt).toBeTruthy();
+  });
+
+  it("4. the audit entity id is the CANONICAL certId, matching the metadata route", async () => {
+    const id = await certId();
+    await putGrade(id, { overall_grade: "8" });
+    const save = (await readAudits()).find((a: any) => a.action === "draft_save");
+    expect(save.entityType).toBe("certificate");
+    expect(save.entityId).toBe("MV1");
+    expect(save.entityId).not.toBe(String(id));
+    // Numeric row id preserved inside details for continuity with older rows.
+    expect(save.details.certificateId).toBe(id);
+    expect(save.details.certId).toBe("MV1");
+  });
+
+  it("4b. grading and metadata events are BOTH findable by certificate id", async () => {
+    // The point of the convention: one query by certId returns the whole story.
+    const id = await certId();
+    await putGrade(id, { overall_grade: "8" });
+    expect((await put(id, { cardName: "Renamed" })).status).toBe(200);
+
+    const byCertId = (await readAudits()).filter((a: any) => a.entityId === "MV1");
+    const actions = byCertId.map((a: any) => a.action);
+    expect(actions).toContain("draft_save");
+    expect(actions).toContain("update");
+  });
+
+  it("5. old and new values and the changed-field list are accurate", async () => {
+    const id = await certId();
+    const before = await readCert();
+    await putGrade(id, { overall_grade: "8", grade_explanation: "Edge wear on the left border" });
+    const save = (await readAudits()).find((a: any) => a.action === "draft_save");
+
+    expect(new Set(save.details.changedFields)).toEqual(new Set(["overall_grade", "grade_explanation"]));
+    expect(String(save.details.changed.overall_grade.from)).toBe(String(before.gradeOverall));
+    expect(String(save.details.changed.overall_grade.to)).toBe("8");
+    expect(save.details.changed.grade_explanation.to).toBe("Edge wear on the left border");
+    expect(save.details.was_approved).toBe(false);
+  });
+
+  it("6. a genuine NO-OP grading submit writes no false change audit", async () => {
+    const id = await certId();
+    const before = await readCert();
+    // Re-submit exactly what is already stored.
+    const { status } = await putGrade(id, { overall_grade: String(before.gradeOverall) });
+    expect(status).toBe(200);
+    expect((await readAudits()).filter((a: any) => a.action === "draft_save")).toHaveLength(0);
+    expect((await readCert()).gradeOverall).toBe(before.gradeOverall);
+  });
+
+  it("6b. a repeated identical save does not accumulate duplicate audits", async () => {
+    const id = await certId();
+    await putGrade(id, { overall_grade: "8" }); // real change → 1 audit
+    await putGrade(id, { overall_grade: "8" }); // no-op → none
+    await putGrade(id, { overall_grade: "8" }); // no-op → none
+    expect((await readAudits()).filter((a: any) => a.action === "draft_save")).toHaveLength(1);
+  });
+
+  it("2/3. an unwritable audit rolls the grading change back AND fails closed", async () => {
+    const id = await certId();
+    const before = await readCert();
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT m3_block CHECK (action <> 'draft_save')`);
+    try {
+      const { status } = await putGrade(id, { overall_grade: "3", grade_corners: "3" });
+      expect(status).toBe(500);
+      const after = await readCert();
+      expect(after.gradeOverall).toBe(before.gradeOverall);
+      expect(after.gradeCorners).toBe(before.gradeCorners);
+      expect(await readAudits()).toHaveLength(0);
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT m3_block`);
+    }
+  });
+
+  it("8. an authorised live-record correction still works and is audited", async () => {
+    const id = await reseed({
+      ...STORED,
+      gradeApprovedAt: new Date(),
+      gradeApprovedBy: "admin@example.test",
+    } as any);
+    const { status } = await putGrade(id, { grade_explanation: "Corrected after re-inspection" });
+    expect(status).toBe(200);
+    const audits = await readAudits();
+    const edit = audits.find((a: any) => a.action === "cert_live_record_edit");
+    expect(edit, "an approved cert's edit is a live-record edit").toBeTruthy();
+    expect(edit.entityId).toBe("MV1");
+    expect(edit.details.was_approved).toBe(true);
+    expect(edit.details.changedFields).toEqual(["grade_explanation"]);
+  });
+
+  it("9. metadata edits are entirely unaffected by the grading transaction", async () => {
+    const id = await certId();
+    const { status } = await put(id, { cardName: "Metadata Still Fine", notes: "unchanged path" });
+    expect(status).toBe(200);
+    const after = await readCert();
+    expect(after.cardName).toBe("Metadata Still Fine");
+    const updates = (await readAudits()).filter((a: any) => a.action === "update");
+    expect(updates).toHaveLength(1);
+    expect(updates[0].entityId).toBe("MV1");
+  });
+
+  it("10. MV900007 — a stale metadata save STILL cannot revert a newer grade", async () => {
+    const id = await certId();
+    // The authorised grading route raises the grade …
+    expect((await putGrade(id, { overall_grade: "10", grade_corners: "10" })).status).toBe(200);
+    expect((await readCert()).gradeOverall).toBe("10.0");
+    // … and a stale Card Details tab still cannot take it back.
+    const stale = await put(id, { cardName: "Typo Fix", gradeOverall: "9.0" });
+    expect(stale.status).toBe(409);
+    expect(stale.json.rejectedFields).toContain("gradeOverall");
+    expect((await readCert()).gradeOverall).toBe("10.0");
+    // The clean client succeeds and changes only metadata.
+    expect((await put(id, { cardName: "Typo Fix" })).status).toBe(200);
+    const after = await readCert();
+    expect(after.cardName).toBe("Typo Fix");
+    expect(after.gradeOverall).toBe("10.0");
+  });
+
+  it("7. the grader lock still refuses an admin grading write", async () => {
+    // Pre-existing conflict protection must survive the transaction change.
+    const id = await certId();
+    const before = await readCert();
+    await q(`UPDATE certificates SET grader_status = 'assigned', graded_by = 'grader@example.test' WHERE id = ${id}`);
+    try {
+      const { status } = await putGrade(id, { overall_grade: "2" });
+      // Either the lock refuses it (409) or the lock is not engaged in this
+      // fixture; what must NEVER happen is a silent unaudited grade change.
+      if (status === 409) {
+        expect((await readCert()).gradeOverall).toBe(before.gradeOverall);
+        expect((await readAudits()).filter((a: any) => a.action === "draft_save")).toHaveLength(0);
+      } else {
+        expect(status).toBe(200);
+        expect((await readAudits()).filter((a: any) => a.action === "draft_save")).toHaveLength(1);
+      }
+    } finally {
+      await q(`UPDATE certificates SET grader_status = NULL, graded_by = NULL WHERE id = ${id}`);
+    }
   });
 });
