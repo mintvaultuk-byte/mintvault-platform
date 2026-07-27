@@ -69,3 +69,9 @@ Thumbs.db
 .claude/controlled-code-lead/approvals/*.record.md
 .claude/controlled-code-lead/approvals/*.record.json
 .claude/controlled-code-lead/locks/
+
+# Catalogue reconciliation backups (PR #261 ops package) — never commit a
+# database export. The exporter refuses to write inside the repo; this is a
+# second line of defence.
+catalogue-backup-*.json
+mintvault-production-backups/

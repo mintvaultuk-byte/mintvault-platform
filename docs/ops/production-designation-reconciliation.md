@@ -1,31 +1,32 @@
 # Production designation-catalogue reconciliation (PR #259)
 
-**Status: PREPARATION ONLY — nothing in this package has been executed against production.**
+**Status: PREPARATION ONLY — no production execution has occurred.**
+Nothing in this package has been run against the production database. The
+identical reconciliation has been applied to **staging only**, and verified.
 
-## Why
+---
+
+## 1. Why
 
 PR #259 switches the Card Details designation picker from the hard-coded
-`DESIGNATION_OPTIONS` array to the DB-backed catalogue. Production's catalogue was
-seeded with lowercase internal values and **no abbreviations**, so after #259 ships
-the picker would present the wrong option set and persist codes that
+`DESIGNATION_OPTIONS` array to the DB-backed catalogue. Production's catalogue
+was seeded with lowercase internal values and **no abbreviations**, so after
+#259 ships the picker would present the wrong option set and persist codes that
 `DESIGNATION_LABELS` (`server/routes.ts`) cannot resolve.
 
-This package makes production's catalogue match the canonical contract. The same
-reconciliation has already been applied to staging and verified end to end.
+## 2. Two facts that bound the risk
 
-## Two facts that bound the risk
-
-1. **No certificate stores a designation.** Production: 700 certificates, **0** with
-   a non-empty `designations` array. Staging: 259, also 0. There is no historical
-   data to orphan and no certificate rewrite is required.
+1. **No certificate stores a designation.** Production: 700 certificates, **0**
+   with a non-empty `designations` array. Staging: 259, also 0. There is no
+   historical data to orphan and no certificate rewrite is required.
 2. **The change is inert until #259 deploys.** Pre-#259 `buildSnapshotFromRows`
-   emits no `designations` key and there is no `mapDesignationRow`, so the running
-   production app does not read designation rows at all. The reconciliation can be
-   run safely in advance of the deploy.
+   emits no `designations` key and there is no `mapDesignationRow`, so the
+   running production app does not read designation rows at all.
 
-## Canonical contract
+## 3. Canonical contract
 
-Ten codes, verified against **both** pre-#259 sources (a test asserts this):
+Ten codes, verified by test against **both** pre-#259 sources
+(`client/src/lib/designationOptions.ts` and `DESIGNATION_LABELS`):
 
 | value | abbreviation (persisted code) | label |
 |---|---|---|
@@ -40,145 +41,234 @@ Ten codes, verified against **both** pre-#259 sources (a test asserts this):
 | `japanese_print` | `JAPANESE_PRINT` | Japanese Print |
 | `other_language` | `OTHER_LANGUAGE` | Other Language |
 
-`error` and `misprint` are **absorbed** by `ERROR_MISCUT` (they appear in its alias
-list). `test_print` is **excluded** — it was never a historical persisted code.
-All three are **archived, never deleted**, so they remain readable and are exempt
-from migration 0026's uniqueness rule.
+`error` and `misprint` are **absorbed** by `ERROR_MISCUT` (both appear in its
+alias list). `test_print` is **excluded**. All three are **archived, never
+deleted**, so they remain readable and are exempt from migration 0026.
 
-## What the script does
+The reconciliation validates the **full** row contract — value, label,
+abbreviation, aliases, description, `allow_cross_category`, active, archived —
+not just the abbreviation.
 
-3 updates (add abbreviations) · 7 creates · 3 archives = **13 actions in one
-transaction**. Rows are resolved by `(category, value)` — **never** by hard-coded id.
-
-## Safety guards (all fail closed, before any write)
+## 4. Safety guards (all fail closed, before any write)
 
 | Guard | Behaviour |
 |---|---|
-| `--environment` | must be exactly `staging` or `production` |
-| default mode | **dry run** — `--apply` is required to write |
-| `--confirm-production` | required for `--apply` against production |
-| `--expected-app-sha` | compared to the live `/api/version`; mismatch refuses |
-| `--expected-db-host` | must be a substring of the connection host; mismatch refuses |
-| certificate check | refuses if **any** certificate stores a designation |
+| **environment ↔ database binding** | the hostname from `MINTVAULT_DATABASE_URL` must **exactly equal** the host the script has configured for `--environment`. No substring/prefix/suffix matching. A production URL labelled `--environment staging` is refused. |
+| `--expected-db-host` | second operator confirmation; must exactly equal **both** the configured host and the actual hostname |
+| default mode | **dry run** — `--apply` required to write |
+| `--confirm-production` | required for `--apply` against production; refused if paired with another `--environment` |
+| `--expected-app-sha` | hex-validated, min 7 chars; compared to live `/api/version`; a full 40-char SHA is additionally confirmed against git; refuses a SHA shorter than the live commit rather than truncating |
+| certificate check | refuses if **any** certificate stores a designation — re-checked inside the transaction |
 | baseline check | refuses unless the inventory is the approved 6-row baseline (or already reconciled → no-op) |
-| cross-category check | uses the shared `catalogueConflict` validator |
-| duplicate-code check | pre-flight **and** again inside the transaction before COMMIT |
-| transaction | single `BEGIN`/`COMMIT`; any error triggers `ROLLBACK` |
-| credentials | only the DB **host** is ever printed |
+| archived canonical row | detected in **preflight** and refused (resurrecting one is not an approved rule) |
+| pre-set abbreviation | refused — the persisted code is never silently overwritten |
+| cross-category / duplicate code | shared `catalogueConflict` + duplicate-effective-code check, re-run **inside** the transaction before COMMIT |
+| concurrency | `BEGIN ISOLATION LEVEL SERIALIZABLE`, `SELECT … FOR UPDATE` on existing designation rows, and an inventory-fingerprint comparison that aborts on any drift between preflight and transaction |
+| rollback ownership | only rows with `created_by = 'ops:reconcile-designation-catalogue'` may be deleted; a single unowned row aborts the whole rollback |
+| credentials | only the DB **host** is ever printed; a malformed URL yields "(value withheld)" |
+| backup path | refuses inside-repo destinations, symlink redirection, and overwrite without `--force-overwrite` |
 
-The script never touches certificates, grading, MVGS, Pristine/P10, centering,
-labels, `cert_counter`, the schema, or the migration journal.
+**Known concurrency limitation (stated honestly):** `SELECT … FOR UPDATE`
+cannot lock rows that do not yet exist, so a *phantom* insert of a designation
+row concurrent with the run is prevented by `SERIALIZABLE` isolation plus the
+`(category, value)` unique index rather than by row locks. Under Neon's pooler a
+serialization failure surfaces as an aborted transaction — the run fails closed
+with no partial write, and is safe to re-run.
 
-## Production change window — exact sequence
+## 5. Scope
 
-> Each step is gated on the previous one succeeding. Do not batch.
+Writes `catalogue_items` only. Never touches certificates, grading, MVGS,
+Pristine/P10, centering, image analysis, labels, certificate rendering,
+`cert_counter`, the schema, or the migration journal.
+
+---
+
+## 6. Production change window — exact sequence
+
+> Execute from the **reviewed commit** in a dedicated worktree — do **not** merge
+> PR #261 first (see §9). Each step is gated on the previous one. Do not batch.
+>
+> **FREEZE:** from step 2 (backup) through step 10 (verification), no one may
+> edit the Catalogue Manager. Announce the freeze before starting. The
+> reconciliation aborts if the catalogue changes mid-run, but the freeze avoids
+> a wasted window.
+>
+> **Approval boundary:** steps 1–3 are read-only and need no further approval.
+> **Steps 4, 7 and 9 are protected actions requiring the owner's explicit
+> go-ahead at the moment of execution.**
 
 ```bash
-# 0. environment (set MINTVAULT_DATABASE_URL to the PRODUCTION connection string)
+cd /Users/cornelius/mintvault-ops-designation-reconciliation
+git rev-parse HEAD          # must equal the reviewed PR #261 commit
 export MINTVAULT_DATABASE_URL='<production connection string>'
 export PROD_SHA=e6c7c1394b2cedee9033be76df3b2a93d788b2b3
+export PROD_DB=ep-wispy-morning-ab6f4o08-pooler.eu-west-2.aws.neon.tech
 ```
 
-**1 — verify version and DB identity (read-only)**
+### Step 1 — confirm app version and database identity (read-only)
 ```bash
 curl -s https://mintvault.fly.dev/api/version
 ```
+**Expect:** `"commit":"e6c7c139"`.
+**STOP if:** the commit differs — production has moved; re-review before continuing.
 
-**2 — export a catalogue backup (read-only)**
+### Step 2 — export the catalogue backup (read-only) 🔒 FREEZE STARTS
 ```bash
-curl -s -H "Cookie: <super-admin session>" \
-  https://mintvault.fly.dev/api/admin/catalogue/export \
-  > catalogue-backup-prod-$(date +%Y%m%dT%H%M%S).json
+npx tsx scripts/db/export-catalogue-backup.ts \
+  --environment production --expected-db-host "$PROD_DB"
 ```
-Or straight from the DB:
-```bash
-psql "$MINTVAULT_DATABASE_URL" -Atc \
-  "SELECT json_agg(t) FROM (SELECT * FROM catalogue_items ORDER BY id) t" \
-  > catalogue-backup-prod.json
-```
+**Expect:** `catalogue rows : 96`, a `sha256`, and a file under
+`~/Downloads/mintvault-production-backups/`.
+**STOP if:** the row count is not 96, or the command refuses.
+Record the sha256 in the change log.
 
-**3 — dry run**
+### Step 3 — reconciliation dry run
 ```bash
-npx tsx scripts/db/reconcile-designation-catalogue.ts --environment production
+npx tsx scripts/db/reconcile-designation-catalogue.ts \
+  --environment production --expected-db-host "$PROD_DB"
 ```
+**Expect:** `certificates: 700 total, 0 with designations`, six BEFORE rows, and
+`PLAN (13 actions)` — 3 UPDATE, 7 CREATE, 3 ARCHIVE.
+**STOP if:** the action count is not 13, any certificate carries a designation,
+or the script refuses. **Review the printed plan line by line before step 4.**
 
-**4 — apply (the approved change)**
+### Step 4 — execute the reconciliation 🔴 OWNER APPROVAL REQUIRED
 ```bash
 npx tsx scripts/db/reconcile-designation-catalogue.ts \
   --environment production --apply --confirm-production \
-  --expected-app-sha "$PROD_SHA" --expected-db-host ep-wispy-morning
+  --expected-app-sha "$PROD_SHA" --expected-db-host "$PROD_DB"
 ```
+**Expect:** `✔ committed 13 actions in one SERIALIZABLE transaction.` and ten
+AFTER rows with the canonical abbreviations.
+**STOP if:** anything other than a clean commit — the transaction rolls back
+whole, so a failure means **nothing was written**; diagnose before retrying.
 
-**5 — migration 0026 precondition (read-only, must return zero rows)**
+### Step 5 — migration 0026 precondition (read-only, must return **zero rows**)
 ```sql
 SELECT lower(coalesce(nullif(btrim(abbreviation), ''), btrim(value))) AS code,
        count(*) AS n
   FROM catalogue_items
- WHERE active = TRUE
-   AND archived = FALSE
+ WHERE active = TRUE AND archived = FALSE
    AND category IN ('designation', 'attribute')
    AND btrim(coalesce(nullif(btrim(abbreviation), ''), btrim(value))) <> ''
- GROUP BY 1
-HAVING count(*) > 1;
+ GROUP BY 1 HAVING count(*) > 1;
 ```
+**STOP if:** any row is returned — 0026 would abort. Do not proceed.
 
-**6 — apply migration 0026** (approved runner; dry run first)
+### Step 6 — migration 0026 plan (read-only)
 ```bash
-npx tsx scripts/db/migrate.ts            # plan only
-npx tsx scripts/db/migrate.ts --apply    # applies 0026
+npx tsx scripts/db/migrate.ts
 ```
+**Expect:** `pending: 0026_catalogue_abbreviation_unique.sql`, 0 inconsistent,
+0 checksum-mismatch.
 
-**7 — verify the unique index**
+### Step 7 — apply migration 0026 🔴 OWNER APPROVAL REQUIRED
+```bash
+npx tsx scripts/db/migrate.ts --apply
+```
+**Never** use `db:push`. **Never** run without the plan from step 6.
+
+### Step 8 — verify the unique index
 ```sql
 SELECT indexname FROM pg_indexes
  WHERE tablename = 'catalogue_items'
    AND indexname = 'uq_catalogue_items_live_effective_code';
 ```
+**Expect:** one row.
 
-**8 — deploy PR #259**
+### Step 9 — deploy PR #259 🔴 OWNER APPROVAL REQUIRED
 ```bash
 scripts/safe-deploy.sh prod
 ```
 
-**9 — production verification checklist**
-- `/api/version` reports the #259 commit
-- `/api/catalogue/snapshot` → `snapshot.designations` has the 10 canonical codes
-- the Card Details picker renders 10 options, no `test_print`
-- a disposable save stores e.g. `["FIRST_EDITION"]`, and Review renders "1st Edition"
-- `certificates` count unchanged
+### Step 10 — production verification 🔓 FREEZE ENDS after this passes
+```bash
+curl -s https://mintvault.fly.dev/api/version      # expect the #259 commit
+curl -s https://mintvault.fly.dev/api/health       # expect status ok, db ok
+```
+```sql
+-- catalogue after
+SELECT value, abbreviation, archived FROM catalogue_items
+ WHERE category='designation' ORDER BY archived, sort_order, id;   -- 10 live + 3 archived
+-- certificate designation count MUST still be zero
+SELECT count(*) FROM certificates
+ WHERE jsonb_array_length(COALESCE(designations,'[]'::jsonb)) > 0; -- expect 0
+-- certificate count unchanged
+SELECT count(*) FROM certificates;                                  -- expect 700
+```
+Then in the UI: `/api/catalogue/snapshot` → `snapshot.designations` has the ten
+canonical codes; the Card Details picker shows ten options with no `test_print`.
 
-**10 — land and deploy PR #260** once separately approved (it fixes the
-pre-existing hidden-autosave / Authentic-Only issues, which are **not** in scope here).
+### Step 11 — PR #260
+Land and deploy PR #260 promptly after its own final verification and separate
+approval. It fixes the pre-existing hidden-autosave / Authentic-Only issues,
+which are **not** in scope here.
 
-## Rollback
+---
+
+## 7. Rollback decision point
+
+**Decide at the end of step 4.** If the reconciliation committed but the plan
+was wrong, or step 5/8 fails in a way that implicates the catalogue, roll back
+**before** deploying #259 (step 9). After #259 is live, rolling the catalogue
+back without also reverting the deploy would leave the picker broken — revert
+the deploy first.
 
 ```bash
 # dry run
-npx tsx scripts/db/rollback-designation-catalogue.ts --environment production
+npx tsx scripts/db/rollback-designation-catalogue.ts \
+  --environment production --expected-db-host "$PROD_DB"
 
-# apply
+# apply  🔴 OWNER APPROVAL REQUIRED
 npx tsx scripts/db/rollback-designation-catalogue.ts \
   --environment production --apply --confirm-production \
-  --expected-app-sha "$PROD_SHA" --expected-db-host ep-wispy-morning
+  --expected-app-sha "$PROD_SHA" --expected-db-host "$PROD_DB"
 ```
 
-Restores `abbreviation = NULL` on the three pre-existing rows, **deletes only the
-seven rows the reconciliation created**, and un-archives `error` / `misprint` /
-`test_print`. Same guard surface; single transaction; refuses if any certificate
-has since stored a designation (which would make deletion unsafe). Unrelated
-catalogue rows are never touched.
+Restores `abbreviation = NULL` on the three pre-existing rows, deletes **only**
+rows carrying `created_by = 'ops:reconcile-designation-catalogue'`, and
+un-archives `error` / `misprint` / `test_print`. Refuses if any canonical row
+was created by someone else, or if any certificate has since stored a
+designation. Single SERIALIZABLE transaction; per-row audit records.
 
-Migration 0026 is **not** reverted by this rollback — it is additive and harmless
-on the restored baseline (the baseline has no duplicate effective codes). If it
-must be removed, use `migrations/rollback-0026-catalogue-abbreviation-unique.sql`.
+Migration 0026 is **not** reverted by this rollback — it is additive and
+harmless on the restored baseline. To remove it, use
+`migrations/rollback-0026-catalogue-abbreviation-unique.sql`.
 
-## Verification evidence (disposable PostgreSQL 17, never staging or production)
+## 8. Backups
 
-`tests/designation-catalogue-reconciliation.test.ts` — 25 tests covering the
-contract-vs-application match, the `effectiveCatalogueCode` ⇄ SQL equivalence,
-planning, apply, idempotent rerun, rollback, and every fail-closed inventory.
+Written **outside the repository**, default
+`~/Downloads/mintvault-production-backups/`, filename
+`catalogue-backup-<environment>-<timestamp>.json`, mode `0600`, with a printed
+SHA-256. The exporter refuses an inside-repo destination, symlink redirection,
+and silent overwrite. `.gitignore` carries `catalogue-backup-*.json` and
+`mintvault-production-backups/` as a second line of defence. The backup contains
+catalogue rows and the DB **hostname** only — never a connection string.
 
-The CLI itself was additionally exercised end-to-end against a throwaway cluster:
-dry run wrote nothing; all six guards refused; apply produced exactly the ten
-canonical rows with 7 create + 6 update audit rows; rerun was a no-op; rollback
-restored the exact six-row baseline; certificates and unrelated rows unchanged.
+## 9. Merge or execute from the reviewed commit?
+
+**Execute from the reviewed commit in this worktree. Do not merge PR #261
+first.**
+
+Merging would put an operational script that mutates production onto `main`,
+where it becomes part of every future deploy artifact and can be run by anyone
+with a checkout. The package's value is that it is reviewed, pinned and executed
+once under supervision. Verify with `git rev-parse HEAD` immediately before
+step 4. Merge (or close) PR #261 only **after** the change window, as a record.
+
+## 10. Verification evidence (disposable PostgreSQL 17 + temp dirs only)
+
+`tests/designation-catalogue-reconciliation.test.ts` — behavioural tests covering
+the environment↔database binding, CLI/SHA hardening, contract fidelity against
+both application sources, the `effectiveCatalogueCode` ⇄ 0026 SQL equivalence,
+full-contract reconciliation, idempotency, rollback ownership, concurrency
+fingerprinting, transaction rollback, and backup path safety.
+
+The CLI itself was additionally exercised end-to-end against a throwaway
+cluster: a local DB claimed as production was refused; a production-shaped host
+labelled staging was refused; `--expected-db-host ep-` was refused; dry run
+wrote nothing; apply produced exactly the ten canonical rows (7 create + 6
+update audits); rerun was a no-op; rollback refused a human-created `promo` row
+and, once ownership was correct, restored the exact six-row baseline with 13
+audit rows; the backup refused an inside-repo path and wrote a clean file
+outside it. **No staging or production database was involved in any of this.**
