@@ -108,8 +108,18 @@ a bug.
 - Verify the endpoint **only** via the `db host :` line the scripts print — they
   print the hostname alone and never the credentials.
 
-Note that `migrate.ts` (Phase B) has no such host guard; the branch/commit checks
-in Phase B step B1 are what bind it to the right target.
+**Two different bindings — do not confuse them.** `migrate.ts` (Phase B) has no
+host guard of its own, and the Phase B checks split the job in two:
+
+- the **branch and commit** checks (step B1) bind the **migration code and the
+  migration set** — they prove *which* migration files are on disk. They say
+  **nothing** about which database you are connected to.
+- the **hostname** check (step B1a) and the **production inventory** check
+  (step B1b) bind the **database target** — they are the only things that prove
+  you are pointed at production.
+
+Both are mandatory in Phase B, and both must pass **before** migration 0026 is
+applied.
 
 ## 5. Scope
 
@@ -179,19 +189,24 @@ window. Stop on the first unexpected output.**
 12. Record the rollback decision point (§7) — decide before leaving Phase A.
 13. **Leave the PR #261 worktree.**
 14. Enter the separately approved **PR #259** integration/release worktree.
-15. Verify branch, exact commit, clean worktree, and 0026 present on disk.
-16. Run the migration inventory (read-only).
-17. Run the exact migration 0026 duplicate precondition (read-only).
-18. Apply migration 0026 through the numbered migration runner 🔴.
-19. Verify the journal record **and** the exact index name
+15. Verify branch, exact commit, clean worktree, and 0026 present on disk
+    (binds the **migration code**).
+16. Verify the exact production **pooler hostname** (binds the **database
+    target** — B1a).
+17. Verify the owner-confirmed production **inventory** evidence (B1b).
+18. Run the migration inventory (read-only).
+19. Run the exact migration 0026 duplicate precondition (read-only).
+20. Obtain protected-action approval for the migration.
+21. Apply migration 0026 through the numbered migration runner 🔴.
+22. Verify the journal record **and** the exact index name
     `uq_catalogue_items_live_effective_code` (re-confirm it from the 0026 file
     in the PR #259 worktree — never from this document alone).
-20. Run post-migration catalogue and certificate checks.
-21. Deploy the approved PR #259 / release commit — **only** after separate
+23. Run post-migration catalogue and certificate checks.
+24. Deploy the approved PR #259 / release commit — **only** after separate
     deployment authorisation 🔴.
-22. Verify health, version, machines and production behaviour.
-23. Release the Catalogue Manager freeze.
-24. Merge or close PR #261 only after the completed window and evidence capture.
+25. Verify health, version, machines and production behaviour.
+26. Release the Catalogue Manager freeze.
+27. Merge or close PR #261 only after the completed window and evidence capture.
 
 **Explicitly prohibited throughout:** `npm run db:push` / `drizzle-kit push`;
 running migration 0026 from PR #261; deploying PR #261 as the application
@@ -208,17 +223,22 @@ Nothing in Phase A applies a migration or deploys anything.
 ### Step A1 — enter the worktree and pin the commit
 ```bash
 cd /Users/cornelius/mintvault-ops-designation-reconciliation
+git fetch origin
 git branch --show-current
 git rev-parse HEAD
 git status --short
+git status -sb | head -1
 ```
 - **Expected branch:** `ops/production-designation-reconciliation`
 - **Expected commit:** `869e5ea38f39625b356ec90bf1bc49db48ad21f1`
-- **Expected status:** empty (clean worktree)
-- **PASS:** all three match exactly.
+- **Expected `git status --short`:** empty (clean worktree)
+- **Expected `git status -sb` first line:**
+  `## ops/production-designation-reconciliation...origin/ops/production-designation-reconciliation`
+  with **no** `[ahead N]` / `[behind N]` suffix.
+- **PASS:** all four match exactly.
 - **STOP if:** the branch differs · the commit is not `869e5ea3…` · the worktree
-  is dirty · `git fetch origin && git status -sb` shows unexpected remote
-  movement on this branch. Re-review before continuing.
+  is dirty · the `-sb` line shows `ahead`/`behind` (unexpected remote movement on
+  this branch). Re-review before continuing.
 
 ### Step A2 — set the window variables (read-only)
 ```bash
@@ -330,6 +350,7 @@ git fetch origin
 git branch --show-current
 git rev-parse HEAD
 git status --short
+git status -sb | head -1
 ls -1 migrations/0026_catalogue_abbreviation_unique.sql
 ls -1 migrations/rollback-0026-catalogue-abbreviation-unique.sql
 ```
@@ -339,15 +360,91 @@ ls -1 migrations/rollback-0026-catalogue-abbreviation-unique.sql
   `d59311b9feb20342d9bd9938d743e7777eba6315` — this value is **informational
   only**. The operator MUST confirm the currently approved exact commit with the
   owner immediately before execution and use that.
-- **Expected status:** empty (clean worktree)
+- **Expected `git status --short`:** empty (clean worktree)
+- **Expected `git status -sb` first line:** the branch tracking line with **no**
+  `[ahead N]` / `[behind N]` suffix.
 - **Expected files:** both `ls` commands print a path (0026 and its rollback are
   present on disk).
 - **PASS:** branch matches · commit equals the *currently approved* #259 SHA ·
-  worktree clean · both migration files present.
+  worktree clean · `-sb` shows no ahead/behind · both migration files present.
 - **STOP if:** the wrong branch is checked out · the exact approved commit does
   not match · `migrations/0026_catalogue_abbreviation_unique.sql` is absent ·
-  the worktree is dirty · `git status -sb` shows unexpected remote movement.
-  **Do not improvise** a checkout, cherry-pick or rebase to make it match.
+  the worktree is dirty · the `-sb` line shows `ahead`/`behind` (unexpected
+  remote movement). **Do not improvise** a checkout, cherry-pick or rebase to
+  make it match.
+- ⚠️ **This step binds the migration CODE only.** It does not prove which
+  database you are connected to — steps **B1a** and **B1b** do that, and both
+  must pass before B4.
+
+### Step B1a — verify the DATABASE TARGET: exact production pooler hostname 🚦 HARD GATE
+
+B1 proved *which migration code* is on disk. It proved **nothing** about which
+database `MINTVAULT_DATABASE_URL` points at, and `migrate.ts` has no host guard
+of its own. This step is the database-target binding. It is mandatory.
+
+Print **only the parsed hostname** — never the URL:
+
+```bash
+node -e "const value=process.env.MINTVAULT_DATABASE_URL;if(!value)throw new Error('MINTVAULT_DATABASE_URL is missing');console.log(new URL(value).hostname)"
+```
+
+- **Expected output, exactly one line:**
+  `ep-wispy-morning-ab6f4o08-pooler.eu-west-2.aws.neon.tech`
+- **PASS:** the printed hostname is **character-for-character** that string.
+- 🚫 **Never print the complete connection string.** 🚫 **Never use shell `echo`
+  on `MINTVAULT_DATABASE_URL`** (`echo "$MINTVAULT_DATABASE_URL"`,
+  `env | grep`, `printenv`, `set -x` — all forbidden: they put the password in
+  your scrollback, your shell history and any captured terminal log). The
+  `node -e` form above parses the URL and prints the hostname alone.
+- **STOP if** the printed hostname is anything other than the exact expected
+  production pooler hostname. In particular STOP on:
+  - **the direct / non-pooler endpoint** —
+    `ep-wispy-morning-ab6f4o08.eu-west-2.aws.neon.tech` (same name without
+    `-pooler`);
+  - **the staging endpoint** — `ep-purple-voice-abfez796-pooler.eu-west-2.aws.neon.tech`;
+  - **any alias, CNAME, prefix, suffix, trailing dot or differing case**;
+  - **leading or trailing whitespace** anywhere in the printed value;
+  - **a malformed URL** — the command throws instead of printing a hostname;
+  - **a missing variable** — the command throws
+    `MINTVAULT_DATABASE_URL is missing` (common when Phase B is started in a
+    fresh terminal that never ran step A2).
+- 🚫 **Do not weaken or bypass this check.** Do not "eyeball" the URL instead,
+  do not substitute a partial match, and do not proceed on a hostname that is
+  merely *similar*. If the hostname is wrong, fix the exported variable — never
+  the check.
+
+### Step B1b — verify the DATABASE TARGET: approved production inventory 🚦 HARD GATE
+
+A second, independent line of evidence that this is the production database.
+Run it with the same read-only query method used for every other SQL step in
+this runbook:
+
+```sql
+SELECT count(*) AS total_certificates FROM certificates;
+```
+
+- **Expected:** the **owner-confirmed certificate count for this execution
+  window**. The count recorded by this runbook at authoring time was **700**
+  (staging was 259 — see §2), which is what makes this a useful discriminator.
+- **PASS:** the count equals the count the owner confirmed for *this* window.
+- **STOP if** it differs from the separately verified production inventory for
+  this window.
+- ⚠️ **This count is evidence supporting database identity — it is NOT a
+  permanent schema invariant and NOT a business rule.** Certificates are created
+  in the ordinary course of business, so this number legitimately grows.
+  - **Do not blindly rely on the historical value 700.** If production has
+    legitimately changed since this document was written, 700 is simply out of
+    date; a mismatch against 700 alone is not evidence of a problem.
+  - **The owner must confirm the current approved expected count before the
+    window opens**, and that confirmed number — not 700 — is what step B1b is
+    checked against. Record it in the change log alongside the backup SHA-256.
+  - The same applies to the `700` figures quoted in steps A3, A5, A8 and B6:
+    treat them as the authoring-time snapshot, and check against the
+    owner-confirmed count for this window.
+- 🚫 **The hostname check (B1a) is mandatory even if this count matches.** A
+  matching count is corroboration, not proof — restore a production backup onto
+  a non-production database and the count matches too. B1a and B1b must **both**
+  pass; neither substitutes for the other.
 
 ### Step B2 — migration inventory (read-only)
 ```bash
@@ -424,8 +521,10 @@ npx tsx scripts/db/migrate.ts --apply
   proof. Also STOP on any `🚫 BLOCKED` / `0026 BLOCKED` message.
 - 🚫 **Never** use `npm run db:push` / `drizzle-kit push` — it does not honour
   the journal and can drift or drop.
-- 🚫 **Never** run this step without the inventory from B2 and the precondition
-  from B3 both passing in this same worktree, in this order.
+- 🚫 **Never** run this step without **all four** of B1a (hostname), B1b
+  (inventory), B2 (migration inventory) and B3 (duplicate precondition) passing
+  in this same worktree and shell, in that order. B1 alone is not enough — it
+  binds the migration code, not the database.
 
 ### Step B5 — verify the migration record AND the exact index name (read-only)
 ```sql
@@ -498,8 +597,9 @@ scripts/safe-deploy.sh prod
 ```
 - **Deployment target:** Fly app `mintvault` (config `fly.toml`, host
   `https://mintvault.fly.dev`).
-- **Approved SHA:** `<APPROVED_RELEASE_SHA — confirm with the owner immediately
-  before running; must equal the `git rev-parse HEAD` printed above>`.
+- **Approved SHA:** `<APPROVED_RELEASE_SHA>` — a placeholder, not an approval.
+  Confirm the value with the owner immediately before running, and check that it
+  equals the commit printed by `git rev-parse HEAD` above.
 - All existing `safe-deploy.sh` requirements still apply: GUARD 1 (not behind
   `origin/main`) and GUARD 2 (poll `/api/version` until the live server reports
   the exact commit just built).
@@ -653,6 +753,8 @@ changed.** Acting on those two findings would have made step B5 look for an
 index that is never created and made step B3 halt the window on 7 legitimate
 `rarity` collisions. Verify both against the file in the PR #259 worktree at
 execution time (steps B3 and B5 tell you how).
+
+| 2026-07-27 | **Documentation-only safety fix** — no code, script, test or migration change. Added the Phase B **database-target** gates **B1a** (credential-safe `node -e` hostname print, exact-match against the production pooler hostname, with explicit STOPs for direct/staging/alias/whitespace/malformed/missing) and **B1b** (owner-confirmed production certificate inventory, explicitly evidence-not-invariant), both **before** B2/B3/B4. Corrected §4.1 to say branch/commit bind the *migration code and migration set* while hostname + inventory bind the *database target*. Renumbered the master sequence to 27 steps. Fixed the nested inline-code span in B7's Approved SHA line. Added `git status -sb` to the A1 and B1 command blocks their STOP conditions already referenced. Authoritative 0026 filename, index name `uq_catalogue_items_live_effective_code`, `('designation','attribute')` scope and effective-code-alone grouping are **unchanged**. | Final documentation review of `2b8870df` (finding M1, plus Low items L1 and L2) |
 
 **No production or staging database was contacted while preparing this
 revision, and no production execution has occurred.**
