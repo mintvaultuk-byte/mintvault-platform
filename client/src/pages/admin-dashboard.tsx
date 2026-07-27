@@ -488,6 +488,13 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
               workstationSlot={
                 editingCert && editingCert.id ? (
                   <GradingPanel
+                    /* PR A · fail-CLOSED initial lifecycle. This element is the
+                       CertificateForm workstation slot: the form injects the
+                       real `active` (true only on the Grade stage) before it is
+                       rendered. `false` here is the honest standalone value —
+                       if the injection were ever removed, hidden auto-save
+                       would stay OFF rather than silently switch back on. */
+                    active={false}
                     certId={editingCert.id}
                     cardName={editingCert.cardName || ""}
                     cardSet={editingCert.setName || ""}

@@ -113,6 +113,11 @@ import { enqueueScanJob } from "./lib/scan-job-queue";
 import { isServiceValidForCarrier } from "@shared/carriers";
 import { deriveVariantFromIdentification, splitSetDesignation } from "@shared/variant-derive";
 import {
+  gradingFieldChanges,
+  gradingFieldContractError,
+  assertServerMetadataCommitKeys,
+} from "@shared/certificate-field-ownership";
+import {
   resolveEditConflicts,
   GUARDED_FIELD_SPECS,
   canonicalArray,
@@ -1603,66 +1608,70 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
       //
       // Full-state grading saves are unaffected: the edit form posts every form
       // key, so `gradeOverall`/`gradeType` are present and behave exactly as before.
-      const gradeTypeSubmitted = submitted("gradeType");
-      const gradeOverallSubmitted = submitted("gradeOverall");
-      const kindConversionClearsGrade = gradeTypeSubmitted && isNonNumUpdate;
-      const writesGradeOverall = gradeOverallSubmitted || kindConversionClearsGrade;
-      const writesGradeFields = writesGradeOverall || gradeTypeSubmitted;
-
-      // Grade to persist — only consulted when this request actually writes it.
-      const finalGradeOverall = isNonNumUpdate
-        ? null
-        : typeof req.body.gradeOverall === "string" && req.body.gradeOverall.trim()
-          ? req.body.gradeOverall
-          : null;
+      // ── PR A · SERVER-SIDE FIELD OWNERSHIP (primary defence) ─────────────
+      // This route owns certificate METADATA ONLY. It is now structurally
+      // incapable of writing grading state: grading-owned columns are never
+      // added to `data`, whatever the client sends.
+      //
+      // WHY: the Card Details form posted FULL form state on every auto-save,
+      // including a `gradeOverall` that had gone stale the moment the hidden
+      // grading workstation wrote a new grade out-of-band. The metadata save
+      // then reverted it. Live evidence: MV900007 9.0 -> 10.0 -> 9.0
+      // (audit #1915 `gradeOverall: "10.0"->"9.0"`).
+      //
+      // A submitted grading field is REJECTED with an explicit contract error
+      // rather than silently ignored — except when the submitted value equals
+      // what is already stored, which is a harmless echo from an older client
+      // and must not break it. Legitimate grading writes use the dedicated
+      // grading route.
+      //
+      // ALIAS COVERAGE: detection is alias-aware (shared contract), because the
+      // same column travels under three naming families — `gradeCorners`
+      // (Drizzle), `grade_corners` (grading-API payload) and `corners_score`
+      // (the actual column, and the name in raw SQL and audit payloads). A
+      // multipart client using any of them is caught, and the comparison is made
+      // against the canonical stored column rather than an undefined property.
+      const { changing: changingGradingFields } = gradingFieldChanges(
+        req.body as Record<string, unknown>,
+        existing as unknown as Record<string, unknown>,
+      );
+      if (changingGradingFields.length > 0) {
+        await storage.writeAuditLog(
+          "certificate",
+          existing.certId,
+          "metadata_grading_field_rejected",
+          req.session.adminEmail || "admin",
+          { certificateId: existing.id, rejected: changingGradingFields, outcome: "no_write" }
+        );
+        return res.status(409).json({
+          error: gradingFieldContractError(changingGradingFields),
+          rejectedFields: changingGradingFields,
+        });
+      }
 
       // ── H-1: the update object HONOURS OMISSION ──────────────────────────
-      // This object used to be built unconditionally, so a partial PUT wrote
-      // `variant = null`, `rarity = null`, `collectionCode = null`,
-      // `language = "English"` and `notes = null` for fields the request never
-      // mentioned — silently clearing data and defaulting language, while the
-      // audit (built from the resolver) never mentioned it.
-      //
-      // A guarded field is now written ONLY when:
-      //   • the request actually submitted it (real property presence), or
-      //   • conflict resolution decided to MERGE a concurrent database value.
-      // An OMITTED field is absent from `data` entirely, so the UPDATE cannot
-      // touch it and the audit cannot claim it changed.
+      // A guarded field is written ONLY when the request actually submitted it
+      // (real property presence), or when conflict resolution decided to MERGE
+      // a concurrent database value. An OMITTED field is absent from `data`
+      // entirely, so the UPDATE cannot touch it and the audit cannot claim it
+      // changed.
       /** Provenance per guarded field, when a three-way resolution ran. */
       const provenanceOf = (k: string): FieldProvenance | null =>
         editResolution?.fields.find((f) => f.key === k)?.provenance ?? null;
 
-      const data: any = {
-        // Subgrades are intentionally NOT written here: this metadata editor
-        // doesn't carry them, and writing null wiped real grading data on
-        // every edit (pre-existing data-loss bug) and demoted Pristine certs.
-        // Omitting them preserves the stored centering/corners/edges/surface
-        // scores so the Pristine gate below sees the cert's true subgrades.
-      };
-
-      if (writesGradeOverall) data.gradeOverall = finalGradeOverall;
-      if (gradeTypeSubmitted) data.gradeType = gradeTypeUpdate;
+      // Built from the METADATA allowlist only. gradeOverall / gradeType /
+      // labelType and every other grading-owned column are GRADING-OWNED and
+      // are never written here — see the ownership contract above. Subgrades
+      // were already excluded; the boundary now covers the whole grading set.
+      const data: any = {};
       // labelType is DERIVED from grade + kind, so it is recomputed ONLY when
       // this request actually changes one of them. Re-deriving it on a
       // metadata-only edit is exactly what demoted Pristine certificates.
-      // Pristine/black via the shared gate (certIsPristine) on the FINAL cert
-      // state: the gate reads the cert's EXISTING subgrades + measurements
-      // together with the effective grade, so a grade change to a non-Pristine
-      // value correctly flips it to Standard. Gate logic itself is untouched.
-      if (writesGradeFields) {
-        const effectiveGradeForLabel = writesGradeOverall
-          ? finalGradeOverall
-          : ((existing as Record<string, unknown>).gradeOverall ?? null);
-        data.labelType =
-          !isNonNumUpdate &&
-          (await certIsPristine({
-            ...existing,
-            gradeOverall: effectiveGradeForLabel,
-            gradeType: gradeTypeUpdate,
-          } as any))
-            ? "black"
-            : "Standard";
-      }
+      // labelType is GRADING-OWNED and DERIVED from grade + kind. Because this
+      // route can no longer change either, it must not re-derive labelType
+      // either: doing so on a metadata-only edit is exactly what demoted
+      // Pristine certificates. The stored label survives untouched, so
+      // historical certificates render exactly as before (PR A clarification E).
 
       /**
        * Write a guarded field only when it was submitted, or when the resolver
@@ -1760,40 +1769,69 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
         return res.status(400).json({ error: "Invalid rarity selection.", details: structuredUpdate.errors });
       }
 
-      if (frontImage) {
-        const ext = path.extname(frontImage.originalname).replace(".", "");
-        const r2Key = r2KeyForImage(existing.certId, "front", ext || "jpg");
-        await uploadToR2(r2Key, frontImage.buffer, frontImage.mimetype);
-        if (existing.frontImagePath) {
+      // ── M-3 · IMAGE REPLACEMENT MUST LEAVE TRUTHFUL AUDIT EVIDENCE ────────
+      // R2 keys are DETERMINISTIC (`images/{certId}/front.jpg`), so re-uploading
+      // a front image with the same extension replaces the OBJECT while the
+      // stored path STRING is unchanged. The committed-field diff therefore saw
+      // no change, the no-op early return fired, and a customer's card image was
+      // swapped with no audit row at all — the trail said nothing happened.
+      //
+      // Recorded per replacement below and audited unconditionally further down,
+      // whether or not any metadata column also changed. The evidence is the
+      // CONTENT identity (sha256 of the uploaded bytes + size + mime), not a
+      // fabricated path change: the audit states that the image content was
+      // replaced, and says explicitly when the path did not move.
+      type ImageReplacement = {
+        side: "front" | "back";
+        r2Key: string;
+        previousPath: string | null;
+        pathChanged: boolean;
+        contentSha256: string;
+        bytes: number;
+        contentType: string;
+        originalFilename: string;
+      };
+      const imageReplacements: ImageReplacement[] = [];
+
+      const applyImageUpload = async (
+        side: "front" | "back",
+        file: Express.Multer.File,
+        previousPath: string | null,
+        sortOrder: number,
+      ) => {
+        const ext = path.extname(file.originalname).replace(".", "");
+        const r2Key = r2KeyForImage(existing.certId, side, ext || "jpg");
+        await uploadToR2(r2Key, file.buffer, file.mimetype);
+        // Delete the superseded object ONLY when it is genuinely a DIFFERENT
+        // key. Deleting unconditionally removed the object that had just been
+        // uploaded whenever the extension was unchanged — the overwhelmingly
+        // common case — destroying the image the operator had just supplied.
+        if (previousPath && previousPath !== r2Key) {
           try {
-            await deleteFromR2(existing.frontImagePath);
+            await deleteFromR2(previousPath);
           } catch {}
         }
-        data.frontImagePath = r2Key;
+        data[side === "front" ? "frontImagePath" : "backImagePath"] = r2Key;
         await storage.addCertificateImage({
           certificateId: id,
-          imageType: "front",
+          imageType: side,
           url: r2Key,
-          sortOrder: 0,
+          sortOrder,
         });
-      }
-      if (backImage) {
-        const ext = path.extname(backImage.originalname).replace(".", "");
-        const r2Key = r2KeyForImage(existing.certId, "back", ext || "jpg");
-        await uploadToR2(r2Key, backImage.buffer, backImage.mimetype);
-        if (existing.backImagePath) {
-          try {
-            await deleteFromR2(existing.backImagePath);
-          } catch {}
-        }
-        data.backImagePath = r2Key;
-        await storage.addCertificateImage({
-          certificateId: id,
-          imageType: "back",
-          url: r2Key,
-          sortOrder: 1,
+        imageReplacements.push({
+          side,
+          r2Key,
+          previousPath: previousPath ?? null,
+          pathChanged: (previousPath ?? null) !== r2Key,
+          contentSha256: crypto.createHash("sha256").update(file.buffer).digest("hex"),
+          bytes: file.buffer.length,
+          contentType: file.mimetype,
+          originalFilename: file.originalname,
         });
-      }
+      };
+
+      if (frontImage) await applyImageUpload("front", frontImage, existing.frontImagePath ?? null, 0);
+      if (backImage) await applyImageUpload("back", backImage, existing.backImagePath ?? null, 1);
 
       // ── H6: truthful FIELD-LEVEL audit ───────────────────────────────────
       // The old payload recorded three CURRENT values and no previous values,
@@ -1818,6 +1856,84 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
         ? editResolution.fields.filter((f) => f.provenance === "merged").map((f) => f.key)
         : [];
 
+      // ── PR A · A GENUINE NO-OP WRITES NOTHING AND AUDITS NOTHING ──────────
+      // DIAGNOSIS. `data.status` is assigned unconditionally
+      // (`req.body.status || existing.status`), so `data` was never empty and
+      // the audited UPDATE always ran. `buildCommittedFieldDiff` correctly
+      // produced an EMPTY change list for a request that submitted only values
+      // identical to the stored ones — but `updateCertificateAudited` writes its
+      // audit row regardless, so a no-op save produced an `update` audit event
+      // claiming `changes: []` and bumped `updated_at`. On the Card Details
+      // auto-save, which fires on a debounce while a grader tabs around, that
+      // filled the trail with meaningless rows and made a real edit harder to
+      // find. It was NOT caused by normalisation, derived metadata or tolerated
+      // grading echoes — a tolerated echo is not in `data` at all.
+      //
+      // INTENTIONAL updated_at BEHAVIOUR: a request that changes no business
+      // field does not touch the row, so `updated_at` is NOT bumped. The row
+      // timestamp means "when this certificate last actually changed". Tested.
+      //
+      // M-3: an image upload that lands on the SAME deterministic R2 key
+      // produces no committed FIELD change, but the customer's image content
+      // genuinely changed. That is NOT a no-op and must never take the silent
+      // path — it gets its own audit event below, carrying the content identity.
+      if (auditChanges.length === 0 && imageReplacements.length === 0) {
+        return res.json({ ...existing, certId: normalizeCertId(existing.certId) });
+      }
+
+      // ── M-5 · SERVER-SIDE COMMITTED-KEY ALLOWLIST (fail closed) ───────────
+      // `data` is assembled by convention — hard-coded putGuarded calls, the
+      // "OTHER" companions, image paths, and an in-place merge from the
+      // structured-variant applier. Nothing structurally prevented a future
+      // `putGuarded("gradeOverall")` from reintroducing the very defect PR A
+      // removes. Every key about to be persisted must now belong to an explicit
+      // approved set (metadata / image / structured / documented server-derived).
+      // Throws, so a mistake is loud (500 + logged) rather than a silent grading
+      // write; it is checked BEFORE any row or audit write, so a violation
+      // persists nothing.
+      assertServerMetadataCommitKeys(data as Record<string, unknown>);
+
+      const imageAuditDetail = imageReplacements.length
+        ? {
+            imageReplacements: imageReplacements.map((r) => ({
+              side: r.side,
+              r2Key: r.r2Key,
+              previousPath: r.previousPath,
+              // Stated explicitly rather than implied: when false, the stored
+              // path did NOT move and the object itself was overwritten.
+              pathChanged: r.pathChanged,
+              contentSha256: r.contentSha256,
+              bytes: r.bytes,
+              contentType: r.contentType,
+              originalFilename: r.originalFilename,
+            })),
+          }
+        : {};
+
+      // M-3: image content replaced but NO metadata column changed. There is
+      // nothing to UPDATE, so `updateCertificateAudited` (which pairs a row
+      // write with its audit row) has no row to write — the audit is recorded on
+      // its own. It is awaited and NOT swallowed: if it fails the handler's
+      // outer catch returns 500, so the caller is never told a replacement
+      // succeeded with no trail of it.
+      if (auditChanges.length === 0) {
+        await storage.writeAuditLog(
+          "certificate",
+          existing.certId,
+          "certificate_image_replaced",
+          req.session.adminEmail || "admin",
+          {
+            certificateId: existing.id,
+            certId: existing.certId,
+            scope: "certificate_image_only",
+            changes: [],
+            changedFields: [],
+            ...imageAuditDetail,
+          },
+        );
+        return res.json({ ...existing, certId: normalizeCertId(existing.certId) });
+      }
+
       // H7: the row change and its audit row commit together or not at all.
       const cert = await storage.updateCertificateAudited(id, data, {
         entityId: existing.certId,
@@ -1833,6 +1949,9 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
           // Unrelated concurrent edits that were preserved rather than clobbered.
           mergedFromConcurrentEdit: mergedFields,
           conflictGuard: editResolution ? "three_way_snapshot" : "legacy_no_snapshot",
+          // M-3: content identity travels with the ordinary update audit too, so
+          // a replacement is provable whether or not the path string moved.
+          ...imageAuditDetail,
         },
       });
 
@@ -1840,6 +1959,470 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
     } catch (error: any) {
       console.error("Update cert error:", error.message, error.stack);
       res.status(500).json({ error: "Failed to update certificate" });
+    }
+}
+
+
+/**
+ * POST /api/admin/certificates — the certificate CREATE handler.
+ *
+ * Extracted VERBATIM from its former inline `app.post` registration inside
+ * registerRoutes, exactly as `handleCertificateMetadataUpdate` and
+ * `handleCertificateGradeUpdate` already were, so the paid-submission linkage
+ * (hostile review H-1) can be driven over real HTTP against a disposable
+ * PostgreSQL cluster instead of being asserted from source text.
+ *
+ * NOT ONE LINE OF CREATE LOGIC IS CHANGED by the extraction: same body, same
+ * order, same comments, same validation, same audit. The mount point below is
+ * unchanged too — same path, same requireAdmin + multer chain, same position.
+ */
+export async function handleCertificateCreate(req: any, res: any): Promise<void> {
+      try {
+        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+        const frontImage = files?.frontImage?.[0];
+        const backImage = files?.backImage?.[0];
+
+        const toValidate = [frontImage, backImage].filter((f): f is Express.Multer.File => !!f);
+        if (toValidate.length > 0) {
+          const uploadErr = await rejectInvalidUploads(toValidate);
+          if (uploadErr) return res.status(400).json({ error: uploadErr });
+        }
+
+        const gradeType = req.body.gradeType || "numeric";
+        const isNonNum = isNonNumericGrade(gradeType);
+
+        if (!isNonNum && req.body.gradeOverall) {
+          const g = Number(req.body.gradeOverall);
+          if (!isValidNumericGrade(g)) {
+            return res.status(400).json({ error: "Grade must be a valid MVGS grade (1–10, including half grades)" });
+          }
+        }
+
+        const tempCertId = `MV-TEMP-${Date.now()}`;
+
+        let frontR2Key: string | null = null;
+        let backR2Key: string | null = null;
+
+        if (frontImage) {
+          const ext = path.extname(frontImage.originalname).replace(".", "");
+          frontR2Key = r2KeyForImage(tempCertId, "front", ext || "jpg");
+          await uploadToR2(frontR2Key, frontImage.buffer, frontImage.mimetype);
+        }
+        if (backImage) {
+          const ext = path.extname(backImage.originalname).replace(".", "");
+          backR2Key = r2KeyForImage(tempCertId, "back", ext || "jpg");
+          await uploadToR2(backR2Key, backImage.buffer, backImage.mimetype);
+        }
+
+        let validatedItemId: number | null = null;
+        if (req.body.submissionItemId) {
+          validatedItemId = parseInt(req.body.submissionItemId, 10);
+          const checkResult = await db.execute(sql`
+            SELECT si.id FROM submission_items si
+            JOIN submissions s ON s.id = si.submission_id
+            WHERE si.id = ${validatedItemId}
+              AND s.deleted_at IS NULL
+              AND s.status != 'draft'
+              AND si.id NOT IN (SELECT submission_item_id FROM certificates WHERE submission_item_id IS NOT NULL)
+          `);
+          if (checkResult.rows.length === 0) {
+            return res.status(400).json({ error: "Submission item not found, already linked, or submission not paid" });
+          }
+        }
+
+        const certGrade = !isNonNum ? parseFloat(req.body.gradeOverall || "0") : 0;
+        // Pristine/black via the shared MVGS gate, never grade alone. This path
+        // stores null subgrades (Pristine is established only by the grading-save
+        // paths that run the full subgrade+deduction gate), so isBlackLabel()
+        // returns false here → "Standard". Same gate as approve-grade/grade-card.
+        const computedLabelType =
+          !isNonNum && isBlackLabel({ centering: -1, corners: -1, edges: -1, surface: -1 }, certGrade)
+            ? "black"
+            : "Standard";
+
+        const data = {
+          labelType: computedLabelType,
+          gradeType,
+          submissionItemId: validatedItemId,
+          cardGame: req.body.cardGame,
+          setName: req.body.setName,
+          cardName: req.body.cardName,
+          cardNumber: req.body.cardNumber,
+          rarity: req.body.rarity || null,
+          rarityOther: req.body.rarity === "OTHER" ? req.body.rarityOther || null : null,
+          designations: parseDesignations(req.body.designations),
+          variant: req.body.variant || null,
+          variantOther: req.body.variant === "OTHER" ? req.body.variantOther || null : null,
+          collection: null,
+          collectionCode: req.body.collectionCode || null,
+          collectionOther: req.body.collectionCode === "OTHER" ? req.body.collectionOther?.trim() || null : null,
+          language: req.body.language || "English",
+          year: req.body.year,
+          notes: req.body.notes || null,
+          gradeOverall: isNonNum ? null : req.body.gradeOverall,
+          gradeCentering: null,
+          gradeCorners: null,
+          gradeEdges: null,
+          gradeSurface: null,
+          frontImagePath: frontR2Key,
+          backImagePath: backR2Key,
+          status: req.body.status || "draft",
+          createdBy: req.session.adminEmail || "admin",
+        };
+
+        if (data.collectionCode === "OTHER" && !data.collectionOther) {
+          return res.status(400).json({ error: "Collection 'Other (manual)' requires a manual entry value" });
+        }
+
+        // Front-label line 3 shows EITHER variant OR rarity — held by convention
+        // only until now. Enforce at write time so both can never be set (the
+        // label renderer would silently drop one → wrong physical product).
+        if (data.variant && data.rarity) {
+          return res.status(400).json({
+            error: "Set either Variant or Rarity, not both — the front label shows only one on line 3.",
+          });
+        }
+
+        // Structured rarity/variant picker → new nullable columns (legacy
+        // variant/rarity above are left untouched). Validated + symbol-derived
+        // server-side; invalid catalogue values are rejected here, not at the DB.
+        let structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
+        if (!structuredCreate.ok) {
+          // A stale cross-machine catalogue cache can reject a just-added value —
+          // force-refresh the snapshot once and retry before failing (data is not
+          // mutated on a failed apply, so the retry is safe).
+          structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true));
+        }
+        if (!structuredCreate.ok) {
+          return res.status(400).json({ error: "Invalid rarity selection.", details: structuredCreate.errors });
+        }
+
+        const cert = await storage.createCertificate(data, req.session.adminEmail || "admin");
+
+        await storage.writeAuditLog("certificate", cert.certId, "create", req.session.adminEmail || "admin", {
+          cardName: data.cardName,
+          setName: data.setName,
+          cardNumber: data.cardNumber,
+          gradeOverall: data.gradeOverall,
+        });
+
+        const realCertId = cert.certId;
+        if (frontR2Key) {
+          const ext = path.extname(frontImage!.originalname).replace(".", "");
+          const newKey = r2KeyForImage(realCertId, "front", ext || "jpg");
+          await uploadToR2(newKey, frontImage!.buffer, frontImage!.mimetype);
+          await deleteFromR2(frontR2Key);
+          await storage.updateCertificate(cert.id, { frontImagePath: newKey });
+          await storage.addCertificateImage({
+            certificateId: cert.id,
+            imageType: "front",
+            url: newKey,
+            sortOrder: 0,
+          });
+        }
+        if (backR2Key) {
+          const ext = path.extname(backImage!.originalname).replace(".", "");
+          const newKey = r2KeyForImage(realCertId, "back", ext || "jpg");
+          await uploadToR2(newKey, backImage!.buffer, backImage!.mimetype);
+          await deleteFromR2(backR2Key);
+          await storage.updateCertificate(cert.id, { backImagePath: newKey });
+          await storage.addCertificateImage({
+            certificateId: cert.id,
+            imageType: "back",
+            url: newKey,
+            sortOrder: 1,
+          });
+        }
+
+        const updated = await storage.getCertificate(cert.id);
+        res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : updated);
+      } catch (error: any) {
+        console.error("Create cert error:", error.message, error.stack);
+        res.status(500).json({ error: "Failed to create certificate" });
+      }
+}
+
+/**
+ * PUT /api/admin/certificates/:id/grade — the DEDICATED grading write path.
+ *
+ * Extracted VERBATIM from its inline `app.put` registration inside
+ * registerRoutes so it can be mounted in a route-level test over a disposable
+ * PostgreSQL cluster, exactly as `handleCertificateMetadataUpdate` above already
+ * is. PR A moves the last grading writes off the metadata route onto this one,
+ * and that migration is only meaningfully proven by driving THIS handler.
+ *
+ * NOT ONE LINE OF GRADING LOGIC IS CHANGED by the extraction: the body below is
+ * the original body, in the original order, with the original comments. Scoring,
+ * weights, the MVGS formula, the kind rules and the COALESCE preservation
+ * semantics are all untouched. The mount point is unchanged too — same path,
+ * same requireAdmin middleware, same position in the route table.
+ */
+export async function handleCertificateGradeUpdate(req: any, res: any): Promise<void> {
+    try {
+      const id = parseInt(String(req.params.id), 10);
+      const cert = await storage.getCertificate(id);
+      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+
+      // Restricted-grader lock (cert-level). An admin must NOT grade-write a card
+      // that is assigned to a grader and still in their workflow.
+      if (await isGraderLocked(id)) return res.status(409).json({ error: "This card is assigned to a grader" });
+      const b = req.body;
+      const overallGrade = b.overall_grade;
+      const isNonNumRequested = overallGrade === "AA" || overallGrade === "NO";
+      const parsedOverall = parseFloat(overallGrade);
+      const gradeNum = isNonNumRequested ? null : isNaN(parsedOverall) ? null : parsedOverall;
+
+      // grade_type used to be derived SOLELY from this request's overall_grade, so ANY
+      // partial auto-save that omitted the field (the common case — this route fires on
+      // every autosave) rewrote grade_type to 'numeric'. On an authentication-only
+      // record that silently converted it to numeric. Proven on staging 2026-07-25:
+      // an autosave body of {"grade_explanation":"..."} flipped a stored 'NO' to
+      // 'numeric'. Per the locked business rule, a numeric <-> authentication-only
+      // conversion must be an explicit, separately-confirmed Super Admin action, never
+      // a side effect of a save. Fix: only honour a kind the caller actually stated;
+      // otherwise preserve the stored value. Preservation only — no scoring or formula
+      // logic, and an explicit NO/AA/numeric from the workstation still applies.
+      const storedGradeType = normaliseGradeType((cert as { gradeType?: string | null }).gradeType);
+      const overallStated = overallGrade != null && String(overallGrade).trim() !== "";
+      // CRITICAL (found by hostile review of the first version of this fix): giving this
+      // route only preserve-on-omission left a one-key body — {"overall_grade":"NO"} —
+      // able to convert a LIVE PUBLISHED numeric certificate to authentication-only and
+      // null its grade AND all four sub-grades, with a 200. This route's UPDATE has no
+      // grade_approved_at guard, so published rows are writable here.
+      //
+      // Locked rule, applied through the shared helper: setting the kind on a certificate
+      // that has never been approved is ordinary grading work and stays allowed (a card
+      // must be gradeable as authentication-only in the first place); changing the kind of
+      // an ALREADY-PUBLISHED certificate is refused and routed to Super Admin Correction
+      // Mode. An unstated kind always preserves the stored value.
+      const requestedKind = overallStated ? kindOfOverallGrade(overallGrade) : kindOfGradeType(storedGradeType);
+      const kindRejection = overallStated
+        ? rejectKindChange({
+            storedGradeType,
+            requestedKind,
+            isApproved: (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt != null,
+            allowChangeWhenUnapproved: true,
+          })
+        : null;
+      if (kindRejection) {
+        try {
+          await storage.writeAuditLog(
+            "certificate",
+            String((cert as { certId?: string }).certId ?? id),
+            "grade_kind_change_rejected",
+            (req.session as { adminEmail?: string })?.adminEmail || "admin",
+            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "grade" },
+          );
+        } catch (auditErr) {
+          console.warn("[grade] kind-rejection audit failed:", (auditErr as Error).message);
+        }
+        return res.status(400).json({ error: kindRejection });
+      }
+      const nextGradeType = gradeTypeToPersist(storedGradeType, requestedKind);
+      // The NULL-out branches below must follow the RESOLVED kind, never the raw request:
+      // otherwise a body whose kind change was refused (or simply omitted) could still
+      // null the grade and sub-grades while grade_type kept its stored value.
+      const isNonNum = requestedKind !== "numeric";
+
+      // P0 preservation helpers — return null when payload field is missing/empty/invalid,
+      // so the SQL COALESCE below falls through to the existing column value.
+      // (Prior `parseFloat(x) || null` idiom silently nulled rows on partial saves.)
+      const num = (v: unknown): number | null => {
+        if (v == null || v === "") return null;
+        const n = typeof v === "number" ? v : parseFloat(String(v));
+        return isNaN(n) ? null : n;
+      };
+      const txt = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
+      const jsn = (v: unknown): string | null => (v != null ? JSON.stringify(v) : null);
+
+      // Strength score is calibrated to the AI's overall grade. If the admin
+      // changes the grade manually here, the AI-derived score is stale and
+      // must be cleared. fmt() normalises 9 vs 9.0 vs null cleanly.
+      const fmt = (n: number | null) => (n == null ? "" : n.toFixed(1));
+      const oldGradeNum = (cert as any).gradeOverall != null ? parseFloat(String((cert as any).gradeOverall)) : null;
+      const gradeChanged = fmt(gradeNum) !== fmt(oldGradeNum);
+
+      // Track approval state pre-write for the audit trail. Edits to an
+      // already-approved cert are LIVE-RECORD edits — same SQL path,
+      // different audit_log action so we can analyse post-launch which
+      // certs got changed after publication.
+      const wasApproved = (cert as any).gradeApprovedAt != null;
+
+      await db.execute(sql`
+        UPDATE certificates SET
+          centering_front_lr  = COALESCE(${txt(b.centering_front_lr)}, centering_front_lr),
+          centering_front_tb  = COALESCE(${txt(b.centering_front_tb)}, centering_front_tb),
+          centering_back_lr   = COALESCE(${txt(b.centering_back_lr)},  centering_back_lr),
+          centering_back_tb   = COALESCE(${txt(b.centering_back_tb)},  centering_back_tb),
+          centering_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_centering)}::numeric, centering_score)`},
+          corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_corners)}::numeric,   corners_score)`},
+          edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_edges)}::numeric,     edges_score)`},
+          surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_surface)}::numeric,   surface_score)`},
+          grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
+          -- Preserves the stored kind when the caller did not state one (see nextGradeType
+          -- above): an autosave must never convert an authentication-only record to numeric.
+          grade_type          = ${nextGradeType},
+          grade_strength_score = ${gradeChanged ? sql`NULL` : sql`grade_strength_score`},
+          corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
+          edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
+          surface_values      = COALESCE(${jsn(b.surface)}::jsonb, surface_values),
+          defects             = COALESCE(${jsn(b.defects)}::jsonb, defects),
+          ai_defect_candidates = ${
+            // Overwriteable — client is source of truth for confirm/reject state.
+            // Skip when key absent (legacy clients); apply when present (incl. []).
+            Array.isArray(b.ai_defect_candidates)
+              ? sql`${JSON.stringify(b.ai_defect_candidates)}::jsonb`
+              : sql`ai_defect_candidates`
+          },
+          -- Preserve on omission rather than resetting to the most permissive value:
+          -- a payload without auth_status must not silently downgrade an
+          -- 'authentic_altered' record to 'genuine'. New rows default to 'genuine'
+          -- at the column level, so behaviour for a genuinely-new cert is unchanged.
+          auth_status         = COALESCE(${txt(b.auth_status)}, auth_status, 'genuine'),
+          auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
+          grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
+          private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
+          dark_border_front   = ${
+            typeof b.dark_border_front === "boolean" ? b.dark_border_front : sql`dark_border_front`
+          },
+          dark_border_back    = ${typeof b.dark_border_back === "boolean" ? b.dark_border_back : sql`dark_border_back`},
+          dark_border         = ${
+            // Legacy mirror = front OR back. PostgreSQL UPDATE evaluates RHS
+            // against the OLD row, so we can't reference the new sibling
+            // values directly — express the same OR via column refs and
+            // payload values per-side.
+            (() => {
+              const fSet = typeof b.dark_border_front === "boolean";
+              const bSet = typeof b.dark_border_back === "boolean";
+              const frontExpr = fSet ? sql`${b.dark_border_front}::boolean` : sql`dark_border_front`;
+              const backExpr = bSet ? sql`${b.dark_border_back}::boolean` : sql`dark_border_back`;
+              if (fSet || bSet) return sql`(${frontExpr} OR ${backExpr})`;
+              // Neither new flag in payload — keep legacy semantics so old
+              // clients still toggle the column unchanged.
+              return typeof b.dark_border === "boolean" ? sql`${b.dark_border}` : sql`dark_border`;
+            })()
+          },
+          eye_appeal_modifier = ${
+            // Clamp ±2 server-side; ignore non-finite payloads.
+            (() => {
+              const n = Number(b.eye_appeal_modifier);
+              if (!Number.isFinite(n)) return sql`eye_appeal_modifier`;
+              const clamped = Math.max(-2, Math.min(2, Math.trunc(n)));
+              return sql`${clamped}`;
+            })()
+          },
+          whitening_lines     = ${
+            // MVGS v2 — operator-marked whitening lines per edge. Array
+            // present (incl. []) → overwrite; absent key → keep existing
+            // (legacy client / non-grading payload).
+            Array.isArray((b as any).whitening_lines)
+              ? sql`${JSON.stringify((b as any).whitening_lines)}::jsonb`
+              : sql`whitening_lines`
+          },
+          crease_lines        = ${
+            // MVGS v2.1 — multi-crease list with start/end persistence.
+            // Same array-overwrite pattern as whitening_lines.
+            Array.isArray((b as any).crease_lines)
+              ? sql`${JSON.stringify((b as any).crease_lines)}::jsonb`
+              : sql`crease_lines`
+          },
+          crease_span_pct     = ${
+            // Numeric 0..100 or null. Explicit null clears; undefined keeps.
+            // In v2.1 this is a derived mirror of max(crease_lines.spanPct)
+            // on the client (sent unconditionally in buildPayload) — server
+            // accepts whatever the client computes for back-compat readers.
+            (b as any).crease_span_pct === null
+              ? sql`NULL`
+              : typeof (b as any).crease_span_pct === "number" && Number.isFinite((b as any).crease_span_pct)
+                ? sql`${Math.max(0, Math.min(100, (b as any).crease_span_pct))}::numeric`
+                : sql`crease_span_pct`
+          },
+          wrinkle_severity    = ${
+            // Validate against the enum to prevent payload junk reaching the
+            // DB CHECK constraint with a more useful error before the SQL fires.
+            (() => {
+              const v = (b as any).wrinkle_severity;
+              if (v === null) return sql`NULL`;
+              if (v === "tiny_back" || v === "longer_back" || v === "small_front" || v === "multiple_front") {
+                return sql`${v}`;
+              }
+              return sql`wrinkle_severity`;
+            })()
+          },
+          tear_severity       = ${(() => {
+            const v = (b as any).tear_severity;
+            if (v === null) return sql`NULL`;
+            if (v === "minor" || v === "significant" || v === "major") return sql`${v}`;
+            return sql`tear_severity`;
+          })()},
+          updated_at          = NOW()
+        WHERE id = ${id}
+      `);
+
+      // Audit — distinguish draft saves from post-approve live-record edits.
+      // Both fire the same SQL above, but the audit trail captures the
+      // semantic difference: pre-launch we want to know what % of certs
+      // get edited after publication, and which fields.
+      //
+      // Diff capture: compare payload values against the cert state read at
+      // the top of this handler. Only fields the payload actually carries
+      // (and that differ from the prior DB value) appear in `changed`. JSONB
+      // columns (corners/edges/surface/defects/ai_defect_candidates) are
+      // compared by JSON.stringify so a no-op re-submit doesn't pollute the
+      // log.
+      try {
+        const fieldsChanged = Object.keys(b || {});
+        // Mapping: payload key (snake_case) → cert column accessor (camelCase from Drizzle).
+        const fieldMap: Array<[string, string]> = [
+          ["overall_grade", "gradeOverall"],
+          ["grade_centering", "gradeCentering"],
+          ["grade_corners", "gradeCorners"],
+          ["grade_edges", "gradeEdges"],
+          ["grade_surface", "gradeSurface"],
+          ["centering_front_lr", "centeringFrontLr"],
+          ["centering_front_tb", "centeringFrontTb"],
+          ["centering_back_lr", "centeringBackLr"],
+          ["centering_back_tb", "centeringBackTb"],
+          ["auth_status", "authStatus"],
+          ["auth_notes", "authNotes"],
+          ["grade_explanation", "gradeExplanation"],
+          ["private_notes", "privateNotes"],
+          ["corners", "cornerValues"],
+          ["edges", "edgeValues"],
+          ["surface", "surfaceValues"],
+          ["defects", "defects"],
+          ["ai_defect_candidates", "aiDefectCandidates"],
+        ];
+        const norm = (v: unknown) => (v == null ? null : typeof v === "object" ? JSON.stringify(v) : String(v));
+        const changed: Record<string, { from: unknown; to: unknown }> = {};
+        for (const [pKey, cKey] of fieldMap) {
+          if (!(pKey in (b || {}))) continue;
+          const before = norm((cert as any)[cKey]);
+          const after = norm((b as any)[pKey]);
+          if (before !== after) {
+            changed[pKey] = { from: (cert as any)[cKey] ?? null, to: (b as any)[pKey] ?? null };
+          }
+        }
+        await db.execute(sql`
+          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
+          VALUES (
+            'certificate',
+            ${String(id)},
+            ${wasApproved ? "cert_live_record_edit" : "draft_save"},
+            ${(req.session as any)?.adminEmail || "admin"},
+            ${JSON.stringify({ fields_changed: fieldsChanged, changed, was_approved: wasApproved })}::jsonb,
+            NOW()
+          )
+        `);
+      } catch (auditErr: any) {
+        // Don't fail the save if audit insert fails — log and continue.
+        console.warn("[grade] audit_log insert failed:", auditErr.message);
+      }
+
+      res.json({ ok: true, wasApproved });
+    } catch (error: any) {
+      console.error("[grade] save error:", error.message);
+      sendServerError(res, error);
     }
 }
 
@@ -4397,171 +4980,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       { name: "frontImage", maxCount: 1 },
       { name: "backImage", maxCount: 1 },
     ]),
-    async (req, res) => {
-      try {
-        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-        const frontImage = files?.frontImage?.[0];
-        const backImage = files?.backImage?.[0];
-
-        const toValidate = [frontImage, backImage].filter((f): f is Express.Multer.File => !!f);
-        if (toValidate.length > 0) {
-          const uploadErr = await rejectInvalidUploads(toValidate);
-          if (uploadErr) return res.status(400).json({ error: uploadErr });
-        }
-
-        const gradeType = req.body.gradeType || "numeric";
-        const isNonNum = isNonNumericGrade(gradeType);
-
-        if (!isNonNum && req.body.gradeOverall) {
-          const g = Number(req.body.gradeOverall);
-          if (!isValidNumericGrade(g)) {
-            return res.status(400).json({ error: "Grade must be a valid MVGS grade (1–10, including half grades)" });
-          }
-        }
-
-        const tempCertId = `MV-TEMP-${Date.now()}`;
-
-        let frontR2Key: string | null = null;
-        let backR2Key: string | null = null;
-
-        if (frontImage) {
-          const ext = path.extname(frontImage.originalname).replace(".", "");
-          frontR2Key = r2KeyForImage(tempCertId, "front", ext || "jpg");
-          await uploadToR2(frontR2Key, frontImage.buffer, frontImage.mimetype);
-        }
-        if (backImage) {
-          const ext = path.extname(backImage.originalname).replace(".", "");
-          backR2Key = r2KeyForImage(tempCertId, "back", ext || "jpg");
-          await uploadToR2(backR2Key, backImage.buffer, backImage.mimetype);
-        }
-
-        let validatedItemId: number | null = null;
-        if (req.body.submissionItemId) {
-          validatedItemId = parseInt(req.body.submissionItemId, 10);
-          const checkResult = await db.execute(sql`
-            SELECT si.id FROM submission_items si
-            JOIN submissions s ON s.id = si.submission_id
-            WHERE si.id = ${validatedItemId}
-              AND s.deleted_at IS NULL
-              AND s.status != 'draft'
-              AND si.id NOT IN (SELECT submission_item_id FROM certificates WHERE submission_item_id IS NOT NULL)
-          `);
-          if (checkResult.rows.length === 0) {
-            return res.status(400).json({ error: "Submission item not found, already linked, or submission not paid" });
-          }
-        }
-
-        const certGrade = !isNonNum ? parseFloat(req.body.gradeOverall || "0") : 0;
-        // Pristine/black via the shared MVGS gate, never grade alone. This path
-        // stores null subgrades (Pristine is established only by the grading-save
-        // paths that run the full subgrade+deduction gate), so isBlackLabel()
-        // returns false here → "Standard". Same gate as approve-grade/grade-card.
-        const computedLabelType =
-          !isNonNum && isBlackLabel({ centering: -1, corners: -1, edges: -1, surface: -1 }, certGrade)
-            ? "black"
-            : "Standard";
-
-        const data = {
-          labelType: computedLabelType,
-          gradeType,
-          submissionItemId: validatedItemId,
-          cardGame: req.body.cardGame,
-          setName: req.body.setName,
-          cardName: req.body.cardName,
-          cardNumber: req.body.cardNumber,
-          rarity: req.body.rarity || null,
-          rarityOther: req.body.rarity === "OTHER" ? req.body.rarityOther || null : null,
-          designations: parseDesignations(req.body.designations),
-          variant: req.body.variant || null,
-          variantOther: req.body.variant === "OTHER" ? req.body.variantOther || null : null,
-          collection: null,
-          collectionCode: req.body.collectionCode || null,
-          collectionOther: req.body.collectionCode === "OTHER" ? req.body.collectionOther?.trim() || null : null,
-          language: req.body.language || "English",
-          year: req.body.year,
-          notes: req.body.notes || null,
-          gradeOverall: isNonNum ? null : req.body.gradeOverall,
-          gradeCentering: null,
-          gradeCorners: null,
-          gradeEdges: null,
-          gradeSurface: null,
-          frontImagePath: frontR2Key,
-          backImagePath: backR2Key,
-          status: req.body.status || "draft",
-          createdBy: req.session.adminEmail || "admin",
-        };
-
-        if (data.collectionCode === "OTHER" && !data.collectionOther) {
-          return res.status(400).json({ error: "Collection 'Other (manual)' requires a manual entry value" });
-        }
-
-        // Front-label line 3 shows EITHER variant OR rarity — held by convention
-        // only until now. Enforce at write time so both can never be set (the
-        // label renderer would silently drop one → wrong physical product).
-        if (data.variant && data.rarity) {
-          return res.status(400).json({
-            error: "Set either Variant or Rarity, not both — the front label shows only one on line 3.",
-          });
-        }
-
-        // Structured rarity/variant picker → new nullable columns (legacy
-        // variant/rarity above are left untouched). Validated + symbol-derived
-        // server-side; invalid catalogue values are rejected here, not at the DB.
-        let structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot());
-        if (!structuredCreate.ok) {
-          // A stale cross-machine catalogue cache can reject a just-added value —
-          // force-refresh the snapshot once and retry before failing (data is not
-          // mutated on a failed apply, so the retry is safe).
-          structuredCreate = applyStructuredVariantFromBody(req.body, data, await getCatalogueSnapshot(true));
-        }
-        if (!structuredCreate.ok) {
-          return res.status(400).json({ error: "Invalid rarity selection.", details: structuredCreate.errors });
-        }
-
-        const cert = await storage.createCertificate(data, req.session.adminEmail || "admin");
-
-        await storage.writeAuditLog("certificate", cert.certId, "create", req.session.adminEmail || "admin", {
-          cardName: data.cardName,
-          setName: data.setName,
-          cardNumber: data.cardNumber,
-          gradeOverall: data.gradeOverall,
-        });
-
-        const realCertId = cert.certId;
-        if (frontR2Key) {
-          const ext = path.extname(frontImage!.originalname).replace(".", "");
-          const newKey = r2KeyForImage(realCertId, "front", ext || "jpg");
-          await uploadToR2(newKey, frontImage!.buffer, frontImage!.mimetype);
-          await deleteFromR2(frontR2Key);
-          await storage.updateCertificate(cert.id, { frontImagePath: newKey });
-          await storage.addCertificateImage({
-            certificateId: cert.id,
-            imageType: "front",
-            url: newKey,
-            sortOrder: 0,
-          });
-        }
-        if (backR2Key) {
-          const ext = path.extname(backImage!.originalname).replace(".", "");
-          const newKey = r2KeyForImage(realCertId, "back", ext || "jpg");
-          await uploadToR2(newKey, backImage!.buffer, backImage!.mimetype);
-          await deleteFromR2(backR2Key);
-          await storage.updateCertificate(cert.id, { backImagePath: newKey });
-          await storage.addCertificateImage({
-            certificateId: cert.id,
-            imageType: "back",
-            url: newKey,
-            sortOrder: 1,
-          });
-        }
-
-        const updated = await storage.getCertificate(cert.id);
-        res.json(updated ? { ...updated, certId: normalizeCertId(updated.certId) } : updated);
-      } catch (error: any) {
-        console.error("Create cert error:", error.message, error.stack);
-        res.status(500).json({ error: "Failed to create certificate" });
-      }
-    }
+    handleCertificateCreate,
   );
 
   app.put(
@@ -7222,275 +7641,8 @@ Defects (admin-confirmed): ${defectLines}`;
   });
 
   // PUT save draft grading data
-  app.put("/api/admin/certificates/:id/grade", requireAdmin, async (req, res) => {
-    try {
-      const id = parseInt(String(req.params.id), 10);
-      const cert = await storage.getCertificate(id);
-      if (!cert) return res.status(404).json({ error: "Certificate not found" });
+  app.put("/api/admin/certificates/:id/grade", requireAdmin, handleCertificateGradeUpdate);
 
-      // Restricted-grader lock (cert-level). An admin must NOT grade-write a card
-      // that's assigned to a grader and still in their workflow.
-      if (await isGraderLocked(id)) return res.status(409).json({ error: "This card is assigned to a grader" });
-
-      const b = req.body;
-      const overallGrade = b.overall_grade;
-      const isNonNumRequested = overallGrade === "AA" || overallGrade === "NO";
-      const parsedOverall = parseFloat(overallGrade);
-      const gradeNum = isNonNumRequested ? null : isNaN(parsedOverall) ? null : parsedOverall;
-
-      // grade_type used to be derived SOLELY from this request's overall_grade, so ANY
-      // partial auto-save that omitted the field (the common case — this route fires on
-      // every autosave) rewrote grade_type to 'numeric'. On an authentication-only
-      // record that silently converted it to numeric. Proven on staging 2026-07-25:
-      // an autosave body of {"grade_explanation":"..."} flipped a stored 'NO' to
-      // 'numeric'. Per the locked business rule, a numeric <-> authentication-only
-      // conversion must be an explicit, separately-confirmed Super Admin action, never
-      // a side effect of a save. Fix: only honour a kind the caller actually stated;
-      // otherwise preserve the stored value. Preservation only — no scoring or formula
-      // logic, and an explicit NO/AA/numeric from the workstation still applies.
-      const storedGradeType = normaliseGradeType((cert as { gradeType?: string | null }).gradeType);
-      const overallStated = overallGrade != null && String(overallGrade).trim() !== "";
-      // CRITICAL (found by hostile review of the first version of this fix): giving this
-      // route only preserve-on-omission left a one-key body — {"overall_grade":"NO"} —
-      // able to convert a LIVE PUBLISHED numeric certificate to authentication-only and
-      // null its grade AND all four sub-grades, with a 200. This route's UPDATE has no
-      // grade_approved_at guard, so published rows are writable here.
-      //
-      // Locked rule, applied through the shared helper: setting the kind on a certificate
-      // that has never been approved is ordinary grading work and stays allowed (a card
-      // must be gradeable as authentication-only in the first place); changing the kind of
-      // an ALREADY-PUBLISHED certificate is refused and routed to Super Admin Correction
-      // Mode. An unstated kind always preserves the stored value.
-      const requestedKind = overallStated ? kindOfOverallGrade(overallGrade) : kindOfGradeType(storedGradeType);
-      const kindRejection = overallStated
-        ? rejectKindChange({
-            storedGradeType,
-            requestedKind,
-            isApproved: (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt != null,
-            allowChangeWhenUnapproved: true,
-          })
-        : null;
-      if (kindRejection) {
-        try {
-          await storage.writeAuditLog(
-            "certificate",
-            String((cert as { certId?: string }).certId ?? id),
-            "grade_kind_change_rejected",
-            (req.session as { adminEmail?: string })?.adminEmail || "admin",
-            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "grade" },
-          );
-        } catch (auditErr) {
-          console.warn("[grade] kind-rejection audit failed:", (auditErr as Error).message);
-        }
-        return res.status(400).json({ error: kindRejection });
-      }
-      const nextGradeType = gradeTypeToPersist(storedGradeType, requestedKind);
-      // The NULL-out branches below must follow the RESOLVED kind, never the raw request:
-      // otherwise a body whose kind change was refused (or simply omitted) could still
-      // null the grade and sub-grades while grade_type kept its stored value.
-      const isNonNum = requestedKind !== "numeric";
-
-      // P0 preservation helpers — return null when payload field is missing/empty/invalid,
-      // so the SQL COALESCE below falls through to the existing column value.
-      // (Prior `parseFloat(x) || null` idiom silently nulled rows on partial saves.)
-      const num = (v: unknown): number | null => {
-        if (v == null || v === "") return null;
-        const n = typeof v === "number" ? v : parseFloat(String(v));
-        return isNaN(n) ? null : n;
-      };
-      const txt = (v: unknown): string | null => (v == null || v === "" ? null : String(v));
-      const jsn = (v: unknown): string | null => (v != null ? JSON.stringify(v) : null);
-
-      // Strength score is calibrated to the AI's overall grade. If the admin
-      // changes the grade manually here, the AI-derived score is stale and
-      // must be cleared. fmt() normalises 9 vs 9.0 vs null cleanly.
-      const fmt = (n: number | null) => (n == null ? "" : n.toFixed(1));
-      const oldGradeNum = (cert as any).gradeOverall != null ? parseFloat(String((cert as any).gradeOverall)) : null;
-      const gradeChanged = fmt(gradeNum) !== fmt(oldGradeNum);
-
-      // Track approval state pre-write for the audit trail. Edits to an
-      // already-approved cert are LIVE-RECORD edits — same SQL path,
-      // different audit_log action so we can analyse post-launch which
-      // certs got changed after publication.
-      const wasApproved = (cert as any).gradeApprovedAt != null;
-
-      await db.execute(sql`
-        UPDATE certificates SET
-          centering_front_lr  = COALESCE(${txt(b.centering_front_lr)}, centering_front_lr),
-          centering_front_tb  = COALESCE(${txt(b.centering_front_tb)}, centering_front_tb),
-          centering_back_lr   = COALESCE(${txt(b.centering_back_lr)},  centering_back_lr),
-          centering_back_tb   = COALESCE(${txt(b.centering_back_tb)},  centering_back_tb),
-          centering_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_centering)}::numeric, centering_score)`},
-          corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_corners)}::numeric,   corners_score)`},
-          edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_edges)}::numeric,     edges_score)`},
-          surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_surface)}::numeric,   surface_score)`},
-          grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
-          -- Preserves the stored kind when the caller did not state one (see nextGradeType
-          -- above): an autosave must never convert an authentication-only record to numeric.
-          grade_type          = ${nextGradeType},
-          grade_strength_score = ${gradeChanged ? sql`NULL` : sql`grade_strength_score`},
-          corner_values       = COALESCE(${jsn(b.corners)}::jsonb, corner_values),
-          edge_values         = COALESCE(${jsn(b.edges)}::jsonb,   edge_values),
-          surface_values      = COALESCE(${jsn(b.surface)}::jsonb, surface_values),
-          defects             = COALESCE(${jsn(b.defects)}::jsonb, defects),
-          ai_defect_candidates = ${
-            // Overwriteable — client is source of truth for confirm/reject state.
-            // Skip when key absent (legacy clients); apply when present (incl. []).
-            Array.isArray(b.ai_defect_candidates)
-              ? sql`${JSON.stringify(b.ai_defect_candidates)}::jsonb`
-              : sql`ai_defect_candidates`
-          },
-          -- Preserve on omission rather than resetting to the most permissive value:
-          -- a payload without auth_status must not silently downgrade an
-          -- 'authentic_altered' record to 'genuine'. New rows default to 'genuine'
-          -- at the column level, so behaviour for a genuinely-new cert is unchanged.
-          auth_status         = COALESCE(${txt(b.auth_status)}, auth_status, 'genuine'),
-          auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
-          grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
-          private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
-          dark_border_front   = ${
-            typeof b.dark_border_front === "boolean" ? b.dark_border_front : sql`dark_border_front`
-          },
-          dark_border_back    = ${typeof b.dark_border_back === "boolean" ? b.dark_border_back : sql`dark_border_back`},
-          dark_border         = ${
-            // Legacy mirror = front OR back. PostgreSQL UPDATE evaluates RHS
-            // against the OLD row, so we can't reference the new sibling
-            // values directly — express the same OR via column refs and
-            // payload values per-side.
-            (() => {
-              const fSet = typeof b.dark_border_front === "boolean";
-              const bSet = typeof b.dark_border_back === "boolean";
-              const frontExpr = fSet ? sql`${b.dark_border_front}::boolean` : sql`dark_border_front`;
-              const backExpr = bSet ? sql`${b.dark_border_back}::boolean` : sql`dark_border_back`;
-              if (fSet || bSet) return sql`(${frontExpr} OR ${backExpr})`;
-              // Neither new flag in payload — keep legacy semantics so old
-              // clients still toggle the column unchanged.
-              return typeof b.dark_border === "boolean" ? sql`${b.dark_border}` : sql`dark_border`;
-            })()
-          },
-          eye_appeal_modifier = ${
-            // Clamp ±2 server-side; ignore non-finite payloads.
-            (() => {
-              const n = Number(b.eye_appeal_modifier);
-              if (!Number.isFinite(n)) return sql`eye_appeal_modifier`;
-              const clamped = Math.max(-2, Math.min(2, Math.trunc(n)));
-              return sql`${clamped}`;
-            })()
-          },
-          whitening_lines     = ${
-            // MVGS v2 — operator-marked whitening lines per edge. Array
-            // present (incl. []) → overwrite; absent key → keep existing
-            // (legacy client / non-grading payload).
-            Array.isArray((b as any).whitening_lines)
-              ? sql`${JSON.stringify((b as any).whitening_lines)}::jsonb`
-              : sql`whitening_lines`
-          },
-          crease_lines        = ${
-            // MVGS v2.1 — multi-crease list with start/end persistence.
-            // Same array-overwrite pattern as whitening_lines.
-            Array.isArray((b as any).crease_lines)
-              ? sql`${JSON.stringify((b as any).crease_lines)}::jsonb`
-              : sql`crease_lines`
-          },
-          crease_span_pct     = ${
-            // Numeric 0..100 or null. Explicit null clears; undefined keeps.
-            // In v2.1 this is a derived mirror of max(crease_lines.spanPct)
-            // on the client (sent unconditionally in buildPayload) — server
-            // accepts whatever the client computes for back-compat readers.
-            (b as any).crease_span_pct === null
-              ? sql`NULL`
-              : typeof (b as any).crease_span_pct === "number" && Number.isFinite((b as any).crease_span_pct)
-                ? sql`${Math.max(0, Math.min(100, (b as any).crease_span_pct))}::numeric`
-                : sql`crease_span_pct`
-          },
-          wrinkle_severity    = ${
-            // Validate against the enum to prevent payload junk reaching the
-            // DB CHECK constraint with a more useful error before the SQL fires.
-            (() => {
-              const v = (b as any).wrinkle_severity;
-              if (v === null) return sql`NULL`;
-              if (v === "tiny_back" || v === "longer_back" || v === "small_front" || v === "multiple_front") {
-                return sql`${v}`;
-              }
-              return sql`wrinkle_severity`;
-            })()
-          },
-          tear_severity       = ${(() => {
-            const v = (b as any).tear_severity;
-            if (v === null) return sql`NULL`;
-            if (v === "minor" || v === "significant" || v === "major") return sql`${v}`;
-            return sql`tear_severity`;
-          })()},
-          updated_at          = NOW()
-        WHERE id = ${id}
-      `);
-
-      // Audit — distinguish draft saves from post-approve live-record edits.
-      // Both fire the same SQL above, but the audit trail captures the
-      // semantic difference: pre-launch we want to know what % of certs
-      // get edited after publication, and which fields.
-      //
-      // Diff capture: compare payload values against the cert state read at
-      // the top of this handler. Only fields the payload actually carries
-      // (and that differ from the prior DB value) appear in `changed`. JSONB
-      // columns (corners/edges/surface/defects/ai_defect_candidates) are
-      // compared by JSON.stringify so a no-op re-submit doesn't pollute the
-      // log.
-      try {
-        const fieldsChanged = Object.keys(b || {});
-        // Mapping: payload key (snake_case) → cert column accessor (camelCase from Drizzle).
-        const fieldMap: Array<[string, string]> = [
-          ["overall_grade", "gradeOverall"],
-          ["grade_centering", "gradeCentering"],
-          ["grade_corners", "gradeCorners"],
-          ["grade_edges", "gradeEdges"],
-          ["grade_surface", "gradeSurface"],
-          ["centering_front_lr", "centeringFrontLr"],
-          ["centering_front_tb", "centeringFrontTb"],
-          ["centering_back_lr", "centeringBackLr"],
-          ["centering_back_tb", "centeringBackTb"],
-          ["auth_status", "authStatus"],
-          ["auth_notes", "authNotes"],
-          ["grade_explanation", "gradeExplanation"],
-          ["private_notes", "privateNotes"],
-          ["corners", "cornerValues"],
-          ["edges", "edgeValues"],
-          ["surface", "surfaceValues"],
-          ["defects", "defects"],
-          ["ai_defect_candidates", "aiDefectCandidates"],
-        ];
-        const norm = (v: unknown) => (v == null ? null : typeof v === "object" ? JSON.stringify(v) : String(v));
-        const changed: Record<string, { from: unknown; to: unknown }> = {};
-        for (const [pKey, cKey] of fieldMap) {
-          if (!(pKey in (b || {}))) continue;
-          const before = norm((cert as any)[cKey]);
-          const after = norm((b as any)[pKey]);
-          if (before !== after) {
-            changed[pKey] = { from: (cert as any)[cKey] ?? null, to: (b as any)[pKey] ?? null };
-          }
-        }
-        await db.execute(sql`
-          INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
-          VALUES (
-            'certificate',
-            ${String(id)},
-            ${wasApproved ? "cert_live_record_edit" : "draft_save"},
-            ${(req.session as any)?.adminEmail || "admin"},
-            ${JSON.stringify({ fields_changed: fieldsChanged, changed, was_approved: wasApproved })}::jsonb,
-            NOW()
-          )
-        `);
-      } catch (auditErr: any) {
-        // Don't fail the save if audit insert fails — log and continue.
-        console.warn("[grade] audit_log insert failed:", auditErr.message);
-      }
-
-      res.json({ ok: true, wasApproved });
-    } catch (error: any) {
-      console.error("[grade] save error:", error.message);
-      sendServerError(res, error);
-    }
-  });
 
   // PUT approve grade — finalises, creates grading_session
   app.put("/api/admin/certificates/:id/approve", requireAdmin, async (req, res) => {

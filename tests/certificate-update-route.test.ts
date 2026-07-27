@@ -44,10 +44,22 @@ vi.mock("../server/db", () => ({
 }));
 
 // R2 is never exercised — this suite posts no images.
+/** R2 is stubbed, but the calls are RECORDED: M-3 asserts that a same-key
+ *  replacement uploads the new object and does NOT delete it afterwards. */
+const r2Calls = vi.hoisted(() => ({ uploads: [] as Array<{ key: string; bytes: number }>, deletes: [] as string[] }));
 vi.mock("../server/r2", () => ({
-  uploadToR2: vi.fn(async (k: string) => k),
-  deleteFromR2: vi.fn(async () => {}),
+  uploadToR2: vi.fn(async (k: string, buf: Buffer) => {
+    r2Calls.uploads.push({ key: k, bytes: buf?.length ?? 0 });
+    return k;
+  }),
+  deleteFromR2: vi.fn(async (k: string) => {
+    r2Calls.deletes.push(k);
+  }),
   getR2SignedUrl: vi.fn(async () => "https://example.invalid/signed"),
+  // The REAL key builder — the deterministic-key behaviour is the whole point
+  // of M-3, so it must not be stubbed.
+  r2KeyForImage: (certId: string, side: "front" | "back", ext: string) => `images/${certId}/${side}.${ext}`,
+  r2KeyForLabel: (certId: string, side: string, format: string) => `labels/${certId}/${side}.${format}`,
 }));
 
 let cluster: DisposablePostgres17;
@@ -83,6 +95,49 @@ async function createSchema(p: pg.Pool): Promise<void> {
   );
   await p.query(`ALTER TABLE "audit_log" ALTER COLUMN "details" SET DEFAULT '{}'::jsonb`);
   await p.query(`ALTER TABLE "certificates" ALTER COLUMN "language" SET DEFAULT 'English'`);
+  // Three columns the DEDICATED grading route writes by raw SQL that
+  // shared/schema.ts does not declare, so the Drizzle-derived DDL above misses
+  // them. They exist in the real database; without them the grading UPDATE would
+  // fail here for a reason production does not have.
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "auth_status" text DEFAULT 'genuine'`);
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "auth_notes" text`);
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "private_notes" text`);
+  // M-4: `grade_manual_override` is a REAL boolean column that shared/schema.ts
+  // does not declare (verified against the live database 2026-07-26). Created
+  // here so the fail-closed rejection is exercised against a column that really
+  // exists, rather than against a hypothetical one.
+  await p.query(`ALTER TABLE "certificates" ADD COLUMN "grade_manual_override" boolean DEFAULT false`);
+
+  // H-1 · paid-submission linkage. The create route validates
+  // submissionItemId against these two tables, so the real guard runs.
+  await p.query(`
+    CREATE TABLE submissions (
+      id SERIAL PRIMARY KEY,
+      status text NOT NULL DEFAULT 'paid',
+      deleted_at timestamp
+    )`);
+  await p.query(`
+    CREATE TABLE submission_items (
+      id SERIAL PRIMARY KEY,
+      submission_id integer NOT NULL,
+      card_name text
+    )`);
+  // cert_counter is created at boot by ensureCertCounterTable() in production;
+  // registerRoutes is not run here, so it is created directly.
+  await p.query(`
+    CREATE TABLE cert_counter (
+      id integer PRIMARY KEY,
+      last_issued bigint NOT NULL DEFAULT 0,
+      updated_at timestamp NOT NULL DEFAULT NOW()
+    )`);
+  await p.query(`CREATE TABLE certificate_images (
+      id SERIAL PRIMARY KEY,
+      certificate_id integer NOT NULL,
+      image_type text NOT NULL,
+      url text NOT NULL,
+      sort_order integer NOT NULL DEFAULT 0,
+      created_at timestamp NOT NULL DEFAULT NOW()
+    )`);
 }
 
 const q = async (text: string, params: unknown[] = []) => (await pool.query(text, params)).rows;
@@ -118,6 +173,17 @@ async function put(id: number, body: Record<string, unknown>): Promise<{ status:
   return { status: res.status, json };
 }
 
+/** PUT the DEDICATED grading route with its real snake_case JSON contract. */
+async function putGrade(id: number, body: Record<string, unknown>): Promise<{ status: number; json: any }> {
+  const res = await fetch(`${base}/api/admin/certificates/${id}/grade`, {
+    method: "PUT",
+    headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json().catch(() => null);
+  return { status: res.status, json };
+}
+
 /** The snapshot the browser sends so the three-way resolver engages. */
 const snapshotOf = (o: Record<string, unknown>) => JSON.stringify(o);
 
@@ -126,9 +192,15 @@ beforeAll(async () => {
   pool = new pg.Pool({ connectionString: cluster.url, max: 6 });
   runtime.pool = pool;
   runtime.db = drizzle(pool);
+  // storage.createCertificate reads getDatabaseUrl() purely to record the host
+  // in its CERT_ID_ALLOCATED audit. Point it at the disposable cluster so the
+  // create route runs exactly as it does in production. No real database is
+  // reachable from this value.
+  process.env.MINTVAULT_DATABASE_URL = cluster.url;
   await createSchema(pool);
 
-  const { handleCertificateMetadataUpdate } = await import("../server/routes");
+  const { handleCertificateMetadataUpdate, handleCertificateGradeUpdate, handleCertificateCreate } =
+    await import("../server/routes");
   const { requireAdmin } = await import("../server/auth");
   const multer = (await import("multer")).default;
   const upload = multer({ storage: multer.memoryStorage() });
@@ -164,6 +236,23 @@ beforeAll(async () => {
       { name: "backImage", maxCount: 1 },
     ]),
     handleCertificateMetadataUpdate as any,
+  );
+
+  // The DEDICATED grading route, mounted exactly as registerRoutes mounts it, so
+  // the grading edits PR A migrates off the metadata route are proven against the
+  // real handler rather than a stand-in.
+  app.put("/api/admin/certificates/:id/grade", requireAdmin, handleCertificateGradeUpdate as any);
+
+  // The CREATE route, mounted exactly as registerRoutes mounts it, so the
+  // paid-submission linkage (hostile review H-1) is proven end to end.
+  app.post(
+    "/api/admin/certificates",
+    requireAdmin,
+    upload.fields([
+      { name: "frontImage", maxCount: 1 },
+      { name: "backImage", maxCount: 1 },
+    ]),
+    handleCertificateCreate as any,
   );
 
   server = app.listen(0, "127.0.0.1");
@@ -249,6 +338,12 @@ beforeEach(async () => {
   await (runtime.db as any).delete(auditLog);
   await (runtime.db as any).delete(certificates);
   await (runtime.db as any).insert(certificates).values({ ...STORED } as any);
+  await pool.query("DELETE FROM certificate_images");
+  await pool.query("DELETE FROM submission_items");
+  await pool.query("DELETE FROM submissions");
+  await pool.query("DELETE FROM cert_counter");
+  r2Calls.uploads.length = 0;
+  r2Calls.deletes.length = 0;
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -619,69 +714,158 @@ describe("HIGH-1: a metadata-only edit preserves the grade", () => {
   });
 });
 
-describe("HIGH-1: an explicit, authorised grade edit still works", () => {
-  it("submitting gradeOverall updates the grade and audits it truthfully", async () => {
+// ─────────────────────────────────────────────────────────────────────────────
+// PR A — the five legitimate grading edits, MIGRATED to the dedicated route
+//
+// These five cases previously asserted that a legitimate grade edit works
+// THROUGH THE METADATA ROUTE. Under permanent full separation that path no
+// longer exists, so each one is re-proven against
+// PUT /api/admin/certificates/:id/grade using its real snake_case contract. The
+// behavioural guarantee each case encodes is preserved — only the endpoint the
+// guarantee is proven on has changed. Two cases document a REAL behavioural
+// difference between the two routes; both are called out inline and in the
+// report rather than papered over.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("PR A: legitimate grading edits work on the dedicated grade route", () => {
+  it("1. an explicit overall-grade update succeeds and audits truthfully", async () => {
     const id = await certId();
-    const { status } = await put(id, { gradeOverall: "8" });
+    const { status } = await putGrade(id, { overall_grade: "8" });
     expect(status).toBe(200);
 
     const after = await readCert();
     expect(after.gradeOverall).toBe("8.0");
-    expect(after.labelType).toBe("Standard");
+    expect(after.gradeType).toBe("numeric");
 
-    const [audit] = await readAudits();
-    const change = (audit.details.changes as Array<{ field: string; previous: unknown; next: unknown }>).find(
-      (c) => c.field === "gradeOverall",
-    );
-    expect(change).toBeTruthy();
-    expect(change!.previous).toBe("9.5");
-    expect(change!.next).toBe("8");
+    // The grading route audits under its own action with a payload-keyed diff.
+    const audits = await readAudits();
+    const save = audits.find((a: any) => a.action === "draft_save");
+    expect(save, "a grading save must be audited").toBeTruthy();
+    expect(save.details.changed.overall_grade.from).toBe("9.5");
+    expect(save.details.changed.overall_grade.to).toBe("8");
+    expect(save.details.was_approved).toBe(false);
+    // ...and no metadata `update` event is fabricated for a grading write.
+    expect(audits.map((a: any) => a.action)).not.toContain("update");
   });
 
-  it("a full-state save (the production edit form) still writes the grade", async () => {
+  it("2. a legitimate full Grade-stage save persists grade AND sub-grades", async () => {
     const id = await certId();
-    const { status } = await put(id, {
-      cardGame: "pokemon",
-      setName: "Base Set",
-      cardName: "Charizard",
-      cardNumber: "4/102",
-      year: "1999",
-      gradeType: "numeric",
-      gradeOverall: "9",
+    const { status } = await putGrade(id, {
+      overall_grade: "9",
+      grade_centering: "8.5",
+      grade_corners: "9",
+      grade_edges: "9.5",
+      grade_surface: "9",
+      centering_front_lr: "52/48",
+      grade_explanation: "Re-measured by hand",
     });
     expect(status).toBe(200);
-    expect((await readCert()).gradeOverall).toBe("9.0");
+
+    const after = await readCert();
+    expect(after.gradeOverall).toBe("9.0");
+    expect(after.gradeCentering).toBe("8.5");
+    expect(after.gradeCorners).toBe("9.0");
+    expect(after.gradeEdges).toBe("9.5");
+    expect(after.gradeSurface).toBe("9.0");
+    expect(after.centeringFrontLr).toBe("52/48");
+    // Metadata is NOT disturbed by a grading save.
+    expect(after.cardName).toBe("Charizard");
+    expect(after.variant).toBe("1ST EDITION");
+    expect(after.notes).toBe("Grader notes that must survive");
   });
 
-  it("an explicit empty gradeOverall is a documented clear, and is audited", async () => {
+  it("3. grade clearing: only the documented path clears, an empty payload preserves", async () => {
+    // BEHAVIOURAL DIFFERENCE, DELIBERATE. The metadata route treated an explicit
+    // empty `gradeOverall` as a clear. The dedicated route does NOT: it uses
+    // COALESCE preservation, precisely because an autosave arriving with an empty
+    // grade had erased published grades before (MV205, PR #251). The operator's
+    // real clear mechanism is the authentication-only conversion, proven in 4.
+    // Both halves are asserted so neither can regress.
     const id = await certId();
-    const { status } = await put(id, { gradeOverall: "" });
+
+    const empty = await putGrade(id, { overall_grade: "" });
+    expect(empty.status).toBe(200);
+    expect((await readCert()).gradeOverall, "an empty grade must NOT erase a stored grade").toBe("9.5");
+
+    const omitted = await putGrade(id, { grade_explanation: "note only" });
+    expect(omitted.status).toBe(200);
+    expect((await readCert()).gradeOverall, "an omitted grade must NOT erase a stored grade").toBe("9.5");
+
+    // The documented clear: convert to authentication-only.
+    const cleared = await putGrade(id, { overall_grade: "NO" });
+    expect(cleared.status).toBe(200);
+    expect((await readCert()).gradeOverall).toBeNull();
+  });
+
+  it("4. numeric → non-numeric conversion clears every incompatible numeric field", async () => {
+    const id = await certId();
+    const { status } = await putGrade(id, { overall_grade: "AA", auth_status: "authentic_altered" });
     expect(status).toBe(200);
 
     const after = await readCert();
+    expect(after.gradeType).toBe("AA");
     expect(after.gradeOverall).toBeNull();
+    for (const col of ["gradeCentering", "gradeCorners", "gradeEdges", "gradeSurface"] as const) {
+      expect(after[col], `${col} is incompatible with a non-numeric kind and must be cleared`).toBeNull();
+    }
 
-    const [audit] = await readAudits();
-    const fields = (audit.details.changes as Array<{ field: string }>).map((c) => c.field);
-    expect(fields).toContain("gradeOverall");
+    const save = (await readAudits()).find((a: any) => a.action === "draft_save");
+    expect(save.details.changed.overall_grade.to).toBe("AA");
   });
 
-  it("converting the kind to non-numeric clears the grade, and says so in the audit", async () => {
-    const id = await certId();
-    const { status } = await put(id, { gradeType: "NO" });
-    expect(status).toBe(200);
+  it("4b. converting a PUBLISHED certificate's kind is refused and audited", async () => {
+    const id = await reseed({ ...STORED, gradeApprovedAt: new Date(), gradeApprovedBy: "admin@example.test" } as any);
+    const { status, json } = await putGrade(id, { overall_grade: "NO" });
+    expect(status).toBe(400);
+    expect(json.error).toMatch(/Super Admin Correction Mode/);
 
     const after = await readCert();
-    expect(after.gradeOverall).toBeNull();
-    expect(after.labelType).toBe("Standard");
-
-    const [audit] = await readAudits();
-    const fields = (audit.details.changes as Array<{ field: string }>).map((c) => c.field);
-    expect(fields).toContain("gradeOverall");
-    expect(fields).toContain("gradeType");
+    expect(after.gradeType).toBe("numeric");
+    expect(after.gradeOverall).toBe("9.5");
+    expect((await readAudits()).map((a: any) => a.action)).toContain("grade_kind_change_rejected");
   });
 
-  it("an invalid grade is rejected and nothing is written", async () => {
+  it("5. TRACKED FINDING — the grading route's audit is best-effort, NOT atomic", async () => {
+    // The metadata route commits the row change and its audit row in ONE
+    // transaction (proven above, unchanged). The dedicated grading route does
+    // not: its audit INSERT sits in its own try/catch that deliberately logs and
+    // continues ("Don't fail the save if audit insert fails"), so a grade change
+    // can commit with NO audit row.
+    //
+    // This test CHARACTERISES that real behaviour rather than asserting a
+    // guarantee the route does not provide. Making the grading write atomic means
+    // changing the protected grading route's transaction behaviour, which needs
+    // explicit owner approval and is NOT in this PR's scope. Reported as an open
+    // risk. If someone later makes it atomic, this test fails loudly — which is
+    // exactly the signal wanted.
+    const id = await certId();
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT audit_block2 CHECK (action <> 'draft_save')`);
+    try {
+      const { status } = await putGrade(id, { overall_grade: "7" });
+      expect(status).toBe(200);
+      expect((await readCert()).gradeOverall, "the grade change commits without its audit row").toBe("7.0");
+      expect(await readAudits()).toHaveLength(0);
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT audit_block2`);
+    }
+  });
+
+  it("the metadata route's own audit atomicity is UNCHANGED by this PR", async () => {
+    const id = await certId();
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT audit_block3 CHECK (action <> 'update')`);
+    try {
+      const { status } = await put(id, { cardName: "Should Not Persist" });
+      expect(status).toBe(500);
+      expect((await readCert()).cardName).toBe("Charizard");
+      expect(await readAudits()).toHaveLength(0);
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT audit_block3`);
+    }
+  });
+
+  it("an invalid grade is rejected by the metadata route and nothing is written", async () => {
+    // Unchanged guarantee: value validation still runs before the ownership gate,
+    // so a nonsense grade is a 400 and never reaches the database or the audit.
     const id = await certId();
     const { status } = await put(id, { gradeOverall: "11" });
     expect(status).toBe(400);
@@ -690,17 +874,783 @@ describe("HIGH-1: an explicit, authorised grade edit still works", () => {
   });
 });
 
-describe("HIGH-1: grade preservation is atomic too", () => {
-  it("an audit failure rolls back a real grade edit", async () => {
+// ─────────────────────────────────────────────────────────────────────────────
+// PR A — server-side field ownership (real route, real PostgreSQL)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("PR A: the metadata route cannot alter grading state", () => {
+  it("6. a stale/malicious client cannot change gradeOverall", async () => {
     const id = await certId();
-    await q(`ALTER TABLE audit_log ADD CONSTRAINT audit_block2 CHECK (action <> 'update')`);
-    try {
-      const { status } = await put(id, { gradeOverall: "7" });
-      expect(status).toBe(500);
-      expect((await readCert()).gradeOverall).toBe("9.5"); // rolled back
-      expect(await readAudits()).toHaveLength(0);
-    } finally {
-      await q(`ALTER TABLE audit_log DROP CONSTRAINT audit_block2`);
+    const before = await readCert();
+    const { status, json } = await put(id, { gradeOverall: "3.0" });
+    expect(status).toBe(409);
+    expect(json.rejectedFields).toContain("gradeOverall");
+    const after = await readCert();
+    expect(after.gradeOverall).toBe(before.gradeOverall);
+  });
+
+  it("7. gradeType, labelType and subgrades are equally rejected", async () => {
+    const id = await certId();
+    const before = await readCert();
+    for (const [field, value] of [["gradeType", "NO"], ["labelType", "black"], ["gradeCorners", "3.0"]] as const) {
+      const { status, json } = await put(id, { [field]: value });
+      expect(status, `${field} must be rejected`).toBe(409);
+      expect(json.rejectedFields).toContain(field);
     }
+    const after = await readCert();
+    expect(after.gradeType).toBe(before.gradeType);
+    expect(after.labelType).toBe(before.labelType);
+    expect(after.gradeCorners).toBe(before.gradeCorners);
+  });
+
+  it("a harmless ECHO of an unchanged grading value is tolerated, not rejected", async () => {
+    const id = await certId();
+    const before = await readCert();
+    const { status } = await put(id, { gradeOverall: String(before.gradeOverall), cardName: "Echo Tolerated" });
+    expect(status).toBe(200);
+    const after = await readCert();
+    expect(after.cardName).toBe("Echo Tolerated");
+    expect(after.gradeOverall).toBe(before.gradeOverall);
+  });
+
+  it("8/9. MV900007 REGRESSION — a concurrent grade change survives a metadata save", async () => {
+    const id = await certId();
+    // grader (or the workstation) writes a NEWER grade out-of-band
+    await q(`UPDATE certificates SET grade = '10.0' WHERE certificate_number = 'MV1'`);
+    // a STALE Card Details tab now saves metadata only
+    const { status } = await put(id, { cardName: "Metadata Only Edit" });
+    expect(status).toBe(200);
+    const after = await readCert();
+    expect(after.cardName).toBe("Metadata Only Edit");
+    expect(after.gradeOverall).toBe("10.0");     // <- the newer grade SURVIVES
+  });
+
+  it("metadata-only save leaves every grading column untouched", async () => {
+    const id = await certId();
+    const before = await readCert();
+    await put(id, { cardName: "Grading Untouched" });
+    const after = await readCert();
+    for (const k of ["gradeOverall","gradeType","labelType","gradeCentering","gradeCorners","gradeEdges","gradeSurface"] as const) {
+      expect(after[k], `${k} must be unchanged`).toEqual(before[k]);
+    }
+  });
+
+  it("14. a no-op metadata update creates no audit row", async () => {
+    const id = await certId();
+    const before = await readCert();
+    const { status } = await put(id, { cardName: before.cardName });
+    expect(status).toBe(200);
+
+    // No audit row AT ALL — not an `update` row with an empty change list.
+    expect(await readAudits()).toHaveLength(0);
+    // Nothing else may be an audit row either (no rejection, no conflict event).
+    const changeAudits = (await readAudits()).filter((a: any) => a.action === "update");
+    expect(changeAudits.every((a: any) => (a.details?.changes ?? []).length > 0)).toBe(true);
+  });
+
+  it("14b. a no-op does not bump updated_at (intentional: the row did not change)", async () => {
+    const id = await certId();
+    await q(`UPDATE certificates SET updated_at = NOW() - INTERVAL '1 day' WHERE certificate_number = 'MV1'`);
+    const before = await readCert();
+    const { status } = await put(id, { cardName: before.cardName, year: before.year });
+    expect(status).toBe(200);
+    expect((await readCert()).updatedAt).toEqual(before.updatedAt);
+  });
+
+  it("14c. a REAL change still writes exactly one audit row and does bump updated_at", async () => {
+    const id = await certId();
+    await q(`UPDATE certificates SET updated_at = NOW() - INTERVAL '1 day' WHERE certificate_number = 'MV1'`);
+    const before = await readCert();
+    const { status } = await put(id, { cardName: "Genuinely Different" });
+    expect(status).toBe(200);
+    const audits = await readAudits();
+    expect(audits).toHaveLength(1);
+    expect(audits[0].action).toBe("update");
+    expect((audits[0].details.changes as any[]).map((c) => c.field)).toEqual(["cardName"]);
+    expect(new Date((await readCert()).updatedAt).getTime()).toBeGreaterThan(new Date(before.updatedAt).getTime());
+  });
+
+  it("14d. a tolerated grading echo alongside a no-op stays a no-op", async () => {
+    const id = await certId();
+    const before = await readCert();
+    const { status } = await put(id, {
+      cardName: before.cardName,
+      gradeOverall: String(before.gradeOverall),
+      grade_corners: String(before.gradeCorners),
+    });
+    expect(status).toBe(200);
+    expect(await readAudits()).toHaveLength(0);
+    expect((await readCert()).gradeOverall).toBe(before.gradeOverall);
+  });
+
+  it("16. a rejected grading write is audited with the certificate-number identity", async () => {
+    const id = await certId();
+    await put(id, { gradeOverall: "1.0" });
+    const audits = await readAudits();
+    const rejected = audits.filter((a: any) => a.action === "metadata_grading_field_rejected");
+    expect(rejected.length).toBeGreaterThan(0);
+    expect(rejected[rejected.length - 1].entityId).toBe("MV1");   // cert number, not numeric id
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR A — ALIAS COVERAGE through the real multipart route
+//
+// The metadata route builds its update object from the metadata allowlist, so an
+// unrecognised key can never be written whatever it is called. The risk closed
+// here is different: a caller submitting a grading value under an uncovered
+// alias used to receive 200 and believe its grading write landed.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("PR A: every real grading alias is rejected, none can write", () => {
+  /** [alias, a value that DIFFERS from the STORED fixture value] */
+  const CHANGING_ALIASES: Array<[string, string]> = [
+    ["gradeOverall", "3.0"],
+    ["grade", "3.0"],
+    ["grade_overall", "3.0"],
+    ["overallGrade", "3.0"],
+    ["overall_grade", "3.0"],
+    ["gradeType", "NO"],
+    ["grade_type", "AA"],
+    ["labelType", "black"],
+    ["label_type", "black"],
+    ["gradeCentering", "1.0"],
+    ["grade_centering", "1.0"],
+    ["centeringScore", "1.0"],
+    ["centering_score", "1.0"],
+    ["gradeCorners", "1.0"],
+    ["grade_corners", "1.0"],
+    ["cornersScore", "1.0"],
+    ["corners_score", "1.0"],
+    ["gradeEdges", "1.0"],
+    ["grade_edges", "1.0"],
+    ["edgesScore", "1.0"],
+    ["edges_score", "1.0"],
+    ["gradeSurface", "1.0"],
+    ["grade_surface", "1.0"],
+    ["surfaceScore", "1.0"],
+    ["surface_score", "1.0"],
+    ["auth_status", "authentic_altered"],
+    ["centeringFrontLr", "60/40"],
+    ["centering_front_lr", "60/40"],
+    ["centering_method", "manual"],
+    ["eye_appeal_modifier", "2"],
+    ["dark_border", "true"],
+    ["dark_border_front", "true"],
+    ["whitening_lines", "3"],
+    ["crease_span_pct", "40"],
+    ["wrinkle_severity", "small_front"],
+    ["tear_severity", "major"],
+    ["grade_strength_score", "100"],
+    ["grade_explanation", "smuggled"],
+    ["ai_draft_grade", "10"],
+    ["grade_approved_at", "2026-01-01T00:00:00.000Z"],
+    ["grade_approved_by", "attacker@example.test"],
+    ["graded_by", "attacker@example.test"],
+    ["grader_status", "approved"],
+    ["operator_grade", "10"],
+  ];
+
+  for (const [alias, value] of CHANGING_ALIASES) {
+    it(`alias "${alias}" is rejected with 409 and writes nothing`, async () => {
+      const id = await certId();
+      const before = await readCert();
+      const { status, json } = await put(id, { [alias]: value });
+      expect(status, `${alias} must be rejected`).toBe(409);
+      expect(json.rejectedFields).toContain(alias);
+
+      const after = await readCert();
+      for (const col of GRADE_COLUMNS) {
+        expect(after[col], `${col} must be untouched by a rejected ${alias}`).toEqual(before[col]);
+      }
+      expect(after.updatedAt).toEqual(before.updatedAt); // no write at all
+      // no successful metadata audit for a rejected request
+      const audits = await readAudits();
+      expect(audits.map((a: any) => a.action)).not.toContain("update");
+      expect(audits.map((a: any) => a.action)).toContain("metadata_grading_field_rejected");
+    });
+  }
+
+  it("an alias smuggled ALONGSIDE a legitimate metadata edit rejects the whole request", async () => {
+    const id = await certId();
+    const before = await readCert();
+    const { status } = await put(id, { cardName: "Should Not Land", corners_score: "1.0" });
+    expect(status).toBe(409);
+    const after = await readCert();
+    expect(after.cardName, "the metadata half must not sneak through").toBe(before.cardName);
+    expect(after.gradeCorners).toEqual(before.gradeCorners);
+  });
+
+  it("every rejected alias is named in the error message", async () => {
+    const id = await certId();
+    const { json } = await put(id, { overall_grade: "3.0", corners_score: "1.0" });
+    expect(json.rejectedFields.sort()).toEqual(["corners_score", "overall_grade"]);
+    expect(json.error).toContain("corners_score");
+    expect(json.error).toContain("overall_grade");
+    expect(json.error).toMatch(/\/grade/);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR A — LIFECYCLE SAFETY through the real routes and real PostgreSQL
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A sparse, image-less, never-graded record — the shape that got a phantom 10. */
+const SPARSE = {
+  certId: "MV1",
+  cardGame: "pokemon",
+  cardName: "Unknown Card",
+  setName: "Unknown Set",
+  cardNumber: "1/1",
+  year: "2024",
+  status: "draft",
+  gradeType: "numeric",
+  gradeOverall: null,
+  gradeCentering: null,
+  gradeCorners: null,
+  gradeEdges: null,
+  gradeSurface: null,
+  labelType: "Standard",
+};
+
+/** An Authentic-Only record: non-numeric kind, no numeric grade at all. */
+const AUTHENTIC_ONLY = {
+  ...SPARSE,
+  cardName: "Authenticated Only",
+  gradeType: "NO",
+};
+
+describe("PR A: lifecycle safety — opening or saving metadata never grades a card", () => {
+  it("null grading data stays null across a metadata edit", async () => {
+    const id = await reseed(SPARSE);
+    const { status } = await put(id, { cardName: "Now Identified" });
+    expect(status).toBe(200);
+
+    const after = await readCert();
+    expect(after.cardName).toBe("Now Identified");
+    for (const col of ["gradeOverall", "gradeCentering", "gradeCorners", "gradeEdges", "gradeSurface"] as const) {
+      expect(after[col], `${col} must stay null`).toBeNull();
+    }
+  });
+
+  it("a sparse, image-less record remains UNGRADED — zero-valued defaults are not perfect evidence", async () => {
+    const id = await reseed(SPARSE);
+    // Everything Card Details can legitimately send, in one full-state save.
+    const { status } = await put(id, {
+      cardGame: "pokemon",
+      setName: "Base Set",
+      cardName: "Charizard",
+      cardNumber: "4/102",
+      year: "1999",
+      language: "English",
+      notes: "identified from the scan",
+      designations: [],
+    });
+    expect(status).toBe(200);
+
+    const after = await readCert();
+    expect(after.gradeOverall, "an identity edit must never manufacture a grade").toBeNull();
+    expect(after.labelType, "and must never manufacture a black label").toBe("Standard");
+    for (const col of ["gradeCentering", "gradeCorners", "gradeEdges", "gradeSurface"] as const) {
+      expect(after[col]).toBeNull();
+    }
+  });
+
+  it("an Authentic-Only certificate stays non-numeric across a metadata edit", async () => {
+    const id = await reseed(AUTHENTIC_ONLY);
+    const { status } = await put(id, { cardName: "Renamed", notes: "checked" });
+    expect(status).toBe(200);
+
+    const after = await readCert();
+    expect(after.gradeType).toBe("NO");
+    expect(after.gradeOverall).toBeNull();
+    expect(after.labelType).toBe("Standard");
+  });
+
+  it("an Authentic-Only certificate cannot be converted to numeric by the metadata route", async () => {
+    const id = await reseed(AUTHENTIC_ONLY);
+    for (const body of [{ gradeType: "numeric" }, { grade_type: "numeric" }, { overall_grade: "10" }]) {
+      const { status } = await put(id, body);
+      expect(status, `${JSON.stringify(body)} must be rejected`).toBe(409);
+    }
+    const after = await readCert();
+    expect(after.gradeType).toBe("NO");
+    expect(after.gradeOverall).toBeNull();
+  });
+
+  it("repeated metadata saves (the auto-save debounce firing) never accumulate grading changes", async () => {
+    const id = await reseed(SPARSE);
+    for (let i = 0; i < 5; i++) {
+      const { status } = await put(id, { notes: `pass ${i}` });
+      expect(status).toBe(200);
+    }
+    const after = await readCert();
+    expect(after.notes).toBe("pass 4");
+    expect(after.gradeOverall).toBeNull();
+    const audits = await readAudits();
+    expect(audits.every((a: any) => a.action === "update")).toBe(true);
+    for (const a of audits) {
+      const fields = (a.details.changes as Array<{ field: string }>).map((c) => c.field);
+      for (const col of GRADE_COLUMNS) expect(fields).not.toContain(col);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PR A — CONCURRENCY PROOF (Task 7), both directions
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("PR A: a stale metadata form cannot revert a concurrent grading change", () => {
+  it("grade 9 → grading route sets 10 → stale metadata save → grade is still 10", async () => {
+    // 1. the metadata form loads while the grade is 9
+    const id = await reseed({ ...STORED, gradeOverall: "9.0" });
+    const loaded = await readCert();
+    expect(loaded.gradeOverall).toBe("9.0");
+    const staleSnapshot = snapshotOf({ ...STORED, gradeOverall: "9.0" });
+
+    // 2. the DEDICATED grading route raises it to 10
+    const graded = await putGrade(id, { overall_grade: "10" });
+    expect(graded.status).toBe(200);
+    expect((await readCert()).gradeOverall).toBe("10.0");
+
+    // 3. the STALE metadata form now saves a metadata field, still believing 9.0
+    const saved = await put(id, {
+      loadedSnapshot: staleSnapshot,
+      cardName: "Charizard (typo fix)",
+      // a stale client of the previous generation would also echo its grade:
+      gradeOverall: "9.0",
+    });
+
+    // 3b. that echo is a CHANGE against the new stored value, so it is refused
+    expect(saved.status).toBe(409);
+    expect(saved.json.rejectedFields).toContain("gradeOverall");
+    expect((await readCert()).gradeOverall, "the grader's 10 survives").toBe("10.0");
+
+    // 4. the CURRENT client sends no grading state at all, and succeeds
+    const clean = await put(id, { loadedSnapshot: staleSnapshot, cardName: "Charizard (typo fix)" });
+    expect(clean.status).toBe(200);
+
+    // 5-6. final grade is still 10 and grading state is intact
+    const after = await readCert();
+    expect(after.cardName).toBe("Charizard (typo fix)");
+    expect(after.gradeOverall).toBe("10.0");
+    expect(after.gradeType).toBe("numeric");
+    for (const col of ["gradeCentering", "gradeCorners", "gradeEdges", "gradeSurface"] as const) {
+      expect(after[col], `${col} intact`).toBe(String(Number((STORED as any)[col]).toFixed(1)));
+    }
+
+    // 7. the audit contains ONLY the intended metadata update (plus the honest
+    //    record of the refused stale write) — no grade change is attributed to it
+    const audits = await readAudits();
+    const updates = audits.filter((a: any) => a.action === "update");
+    expect(updates).toHaveLength(1);
+    expect((updates[0].details.changes as Array<{ field: string }>).map((c) => c.field)).toEqual(["cardName"]);
+    expect(audits.map((a: any) => a.action)).toContain("metadata_grading_field_rejected");
+  });
+
+  it("the reverse: a grading update does not overwrite unrelated metadata", async () => {
+    const id = await certId();
+    const before = await readCert();
+
+    // a metadata edit lands first
+    expect((await put(id, { cardName: "Metadata First", notes: "hand-checked" })).status).toBe(200);
+
+    // then the grading route writes a grade, carrying no metadata
+    const graded = await putGrade(id, { overall_grade: "10", grade_corners: "10" });
+    expect(graded.status).toBe(200);
+
+    const after = await readCert();
+    expect(after.gradeOverall).toBe("10.0");
+    expect(after.gradeCorners).toBe("10.0");
+    // every metadata column is exactly what the metadata edit left
+    expect(after.cardName).toBe("Metadata First");
+    expect(after.notes).toBe("hand-checked");
+    expect(after.setName).toBe(before.setName);
+    expect(after.variant).toBe(before.variant);
+    expect(after.collectionCode).toBe(before.collectionCode);
+    expect(after.language).toBe(before.language);
+    expect(after.designations).toEqual(before.designations);
+    expect(after.finishVariant).toBe(before.finishVariant);
+    expect(after.promoType).toBe(before.promoType);
+    expect(after.rarityCode).toBe(before.rarityCode);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// H-1 (hostile review) — PAID-SUBMISSION LINKAGE, over the real create route
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** POST the real create route as urlencoded form data (no image attached). */
+async function post(body: Record<string, unknown>): Promise<{ status: number; json: any }> {
+  const form = new URLSearchParams();
+  for (const [k, v] of Object.entries(body)) {
+    form.append(k, typeof v === "string" ? v : JSON.stringify(v));
+  }
+  const res = await fetch(`${base}/api/admin/certificates`, {
+    method: "POST",
+    headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+  return { status: res.status, json: await res.json().catch(() => null) };
+}
+
+/** The minimum identity the create route requires. */
+const NEW_CERT = {
+  cardGame: "pokemon",
+  setName: "Base Set",
+  cardName: "Blastoise",
+  cardNumber: "2/102",
+  year: "1999",
+};
+
+async function seedSubmissionItem(status = "paid", deleted = false): Promise<number> {
+  const { rows } = await pool.query(
+    `INSERT INTO submissions (status, deleted_at) VALUES ($1, $2) RETURNING id`,
+    [status, deleted ? new Date() : null],
+  );
+  const { rows: itemRows } = await pool.query(
+    `INSERT INTO submission_items (submission_id, card_name) VALUES ($1, 'Blastoise') RETURNING id`,
+    [rows[0].id],
+  );
+  return itemRows[0].id as number;
+}
+
+async function readCertById(id: number) {
+  const { certificates } = await import("../shared/schema");
+  const { eq } = await import("drizzle-orm");
+  const [row] = await (runtime.db as any).select().from(certificates).where(eq(certificates.id, id));
+  return row;
+}
+
+describe("H-1: certificate creation stores the paid-submission link", () => {
+  it("MANDATORY 2: a certificate created from a valid paid submission item stores the link", async () => {
+    const itemId = await seedSubmissionItem("paid");
+    const { status, json } = await post({ ...NEW_CERT, submissionItemId: String(itemId) });
+    expect(status).toBe(200);
+    // The REGRESSION this covers: the client filtered submissionItemId out of
+    // the FormData, so the route saw nothing and stored NULL with a 200.
+    expect(json.submissionItemId).toBe(itemId);
+    const row = await readCertById(json.id);
+    expect(row.submissionItemId).toBe(itemId);
+  });
+
+  it("MANDATORY 3: a submission item cannot be silently reused", async () => {
+    const itemId = await seedSubmissionItem("paid");
+    expect((await post({ ...NEW_CERT, submissionItemId: String(itemId) })).status).toBe(200);
+
+    // second certificate claiming the SAME item
+    const second = await post({ ...NEW_CERT, cardName: "Venusaur", submissionItemId: String(itemId) });
+    expect(second.status).toBe(400);
+    expect(second.json.error).toMatch(/already linked|not found|not paid/i);
+
+    // and nothing was created
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM certificates`);
+    expect(rows[0].n).toBe(2); // the STORED fixture + the first creation only
+  });
+
+  it("an UNPAID (draft) submission is rejected", async () => {
+    const itemId = await seedSubmissionItem("draft");
+    const res = await post({ ...NEW_CERT, submissionItemId: String(itemId) });
+    expect(res.status).toBe(400);
+  });
+
+  it("a SOFT-DELETED submission is rejected", async () => {
+    const itemId = await seedSubmissionItem("paid", true);
+    expect((await post({ ...NEW_CERT, submissionItemId: String(itemId) })).status).toBe(400);
+  });
+
+  it("a non-existent submission item is rejected", async () => {
+    expect((await post({ ...NEW_CERT, submissionItemId: "987654" })).status).toBe(400);
+  });
+
+  it("creation WITHOUT a linkage still succeeds and stores NULL", async () => {
+    const { status, json } = await post({ ...NEW_CERT });
+    expect(status).toBe(200);
+    expect((await readCertById(json.id)).submissionItemId).toBeNull();
+  });
+
+  it("an EDIT cannot re-link an existing certificate", async () => {
+    const itemId = await seedSubmissionItem("paid");
+    const created = await post({ ...NEW_CERT, submissionItemId: String(itemId) });
+    const other = await seedSubmissionItem("paid");
+
+    // Even if a hostile client posts it, the metadata route's commit allowlist
+    // does not contain submissionItemId, so it can never be written.
+    const res = await put(created.json.id, { cardName: "Blastoise (edited)", submissionItemId: String(other) });
+    expect(res.status).toBe(200);
+    const row = await readCertById(created.json.id);
+    expect(row.cardName).toBe("Blastoise (edited)");
+    expect(row.submissionItemId, "the link must NOT move").toBe(itemId);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M-4 — gradeManualOverride is rejected by the metadata PUT
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("M-4: gradeManualOverride is protected on the metadata route", () => {
+  beforeEach(async () => {
+    await pool.query(`UPDATE certificates SET grade_manual_override = false WHERE certificate_number = 'MV1'`);
+  });
+
+  for (const key of ["gradeManualOverride", "grade_manual_override"]) {
+    it(`MANDATORY 13: a changed \`${key}\` returns the stable rejection and writes nothing`, async () => {
+      const id = await certId();
+      const before = await readCert();
+      const { status, json } = await put(id, { cardName: "Ignored", [key]: "true" });
+
+      expect(status).toBe(409);
+      expect(json.rejectedFields).toEqual([key]);
+      expect(json.error).toMatch(/grading route|\/grade/);
+
+      // no write at all — not even the metadata field that shared the request
+      const after = await readCert();
+      expect(after.cardName).toBe(before.cardName);
+      const { rows } = await pool.query(`SELECT grade_manual_override FROM certificates WHERE id = $1`, [id]);
+      expect(rows[0].grade_manual_override).toBe(false);
+
+      // exactly ONE audit, and it is the rejection — never a successful update
+      const audits = await readAudits();
+      const actions = audits.map((a: any) => a.action);
+      expect(actions).toContain("metadata_grading_field_rejected");
+      expect(actions).not.toContain("update");
+    });
+  }
+
+  it("MANDATORY 18: the echo contract for an UNDECLARED column is fail-CLOSED", async () => {
+    const id = await certId();
+    // DOCUMENTING THE DELIBERATE CONTRACT. `grade_manual_override` is a real
+    // column that shared/schema.ts does not declare, so a Drizzle-selected row
+    // has no property for it and the route CANNOT prove a submitted value is an
+    // echo. It therefore refuses to assume: any NON-EMPTY value is treated as a
+    // change and rejected — the same rule already applied to `auth_status`.
+    expect((await put(id, { gradeManualOverride: "false" })).status).toBe(409);
+
+    // Only an EMPTY submission carries no decision and passes through silently.
+    const empty = await put(id, { gradeManualOverride: "" });
+    expect(empty.status).toBe(200);
+    const audits = await readAudits();
+    expect(audits.map((a: any) => a.action)).not.toContain("update");
+  });
+
+  it("a DECLARED grading column still tolerates a genuine unchanged echo", async () => {
+    // Contrast with the above: `gradeOverall` IS declared, so the route can see
+    // the stored value and knows the echo changes nothing.
+    const id = await certId();
+    const { status } = await put(id, { gradeOverall: STORED.gradeOverall });
+    expect(status).toBe(200);
+    const audits = await readAudits();
+    expect(audits.map((a: any) => a.action)).not.toContain("metadata_grading_field_rejected");
+    expect(audits.map((a: any) => a.action)).not.toContain("update");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Task 7 — numeric echo normalisation, through the real route
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("Task 7: a semantically-equal numeric grading echo is tolerated", () => {
+  it('stored "10.0" vs submitted "10" is NOT a rejection', async () => {
+    const id = await certId();
+    // Put a real 10 on the record through the DEDICATED grading route; Postgres
+    // `numeric` stores it and returns "10.0".
+    expect((await putGrade(id, { overall_grade: "10" })).status).toBe(200);
+    expect((await readCert()).gradeOverall).toBe("10.0");
+
+    // A legacy client echoes back what the UI showed it: "10".
+    const { status } = await put(id, { cardName: "Charizard (edited)", gradeOverall: "10" });
+    expect(status).toBe(200);
+    const after = await readCert();
+    expect(after.cardName).toBe("Charizard (edited)");
+    expect(after.gradeOverall, "the grade must be untouched").toBe("10.0");
+  });
+
+  it('stored "9.50" vs submitted "9.5" is NOT a rejection', async () => {
+    const id = await certId();
+    expect((await putGrade(id, { overall_grade: "9.5", grade_corners: "9.5" })).status).toBe(200);
+    const { status } = await put(id, { cardName: "Echo", gradeCorners: "9.5", corners_score: "9.50" });
+    expect(status).toBe(200);
+    expect((await readCert()).gradeCorners).toBe("9.5");
+  });
+
+  it("a MATERIALLY different numeric value is still rejected", async () => {
+    const id = await certId();
+    expect((await putGrade(id, { overall_grade: "10" })).status).toBe(200);
+    const { status, json } = await put(id, { cardName: "Revert attempt", gradeOverall: "9" });
+    expect(status).toBe(409);
+    expect(json.rejectedFields).toEqual(["gradeOverall"]);
+    expect((await readCert()).gradeOverall).toBe("10.0");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M-3 — image replacement always leaves truthful audit evidence
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Two DISTINCT real PNGs with the SAME extension, so the deterministic R2 key
+ *  is identical while the object content genuinely differs. */
+async function pngBuffer(r: number, g: number, b: number): Promise<Buffer> {
+  const sharp = (await import("sharp")).default;
+  return await sharp({
+    create: { width: 8, height: 8, channels: 3, background: { r, g, b } },
+  })
+    .png()
+    .toBuffer();
+}
+
+async function putMultipart(
+  id: number,
+  fields: Record<string, string>,
+  files: Array<{ field: string; filename: string; type: string; buffer: Buffer }>,
+): Promise<{ status: number; json: any }> {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) form.append(k, v);
+  for (const f of files) {
+    form.append(f.field, new Blob([new Uint8Array(f.buffer)], { type: f.type }), f.filename);
+  }
+  const res = await fetch(`${base}/api/admin/certificates/${id}`, {
+    method: "PUT",
+    headers: { cookie },
+    body: form,
+  });
+  return { status: res.status, json: await res.json().catch(() => null) };
+}
+
+describe("M-3: a same-path image replacement is auditable", () => {
+  beforeEach(async () => {
+    await pool.query(
+      `UPDATE certificates SET front_image_path = 'images/MV1/front.png', back_image_path = 'images/MV1/back.png' WHERE certificate_number = 'MV1'`,
+    );
+  });
+
+  it("MANDATORY 14: replacing the FRONT at the same key produces exactly one truthful audit", async () => {
+    const id = await certId();
+    const buf = await pngBuffer(10, 20, 30);
+    const { status } = await putMultipart(id, {}, [
+      { field: "frontImage", filename: "front.png", type: "image/png", buffer: buf },
+    ]);
+    expect(status).toBe(200);
+
+    const audits = await readAudits();
+    const events = audits.filter((a: any) => a.action === "certificate_image_replaced");
+    expect(events).toHaveLength(1);
+    // …and NO ordinary metadata update audit, because no column changed
+    expect(audits.filter((a: any) => a.action === "update")).toHaveLength(0);
+
+    const d = events[0].details as any;
+    expect(d.imageReplacements).toHaveLength(1);
+    const rep = d.imageReplacements[0];
+    expect(rep.side).toBe("front");
+    expect(rep.r2Key).toBe("images/MV1/front.png");
+    expect(rep.previousPath).toBe("images/MV1/front.png");
+    // TRUTHFUL: it says the path did NOT change, and proves the content did.
+    expect(rep.pathChanged).toBe(false);
+    expect(rep.contentSha256).toBe(
+      (await import("node:crypto")).createHash("sha256").update(buf).digest("hex"),
+    );
+    expect(rep.bytes).toBe(buf.length);
+    expect(rep.contentType).toBe("image/png");
+    // The stored path is unchanged and NOT fabricated as a change.
+    expect((await readCert()).frontImagePath).toBe("images/MV1/front.png");
+  });
+
+  it("replacing the BACK is covered by the same guarantee", async () => {
+    const id = await certId();
+    const buf = await pngBuffer(200, 100, 50);
+    expect(
+      (await putMultipart(id, {}, [{ field: "backImage", filename: "back.png", type: "image/png", buffer: buf }]))
+        .status,
+    ).toBe(200);
+    const events = (await readAudits()).filter((a: any) => a.action === "certificate_image_replaced");
+    expect(events).toHaveLength(1);
+    expect((events[0].details as any).imageReplacements[0].side).toBe("back");
+  });
+
+  it("front AND back in one request are both recorded", async () => {
+    const id = await certId();
+    const { status } = await putMultipart(id, {}, [
+      { field: "frontImage", filename: "front.png", type: "image/png", buffer: await pngBuffer(1, 2, 3) },
+      { field: "backImage", filename: "back.png", type: "image/png", buffer: await pngBuffer(4, 5, 6) },
+    ]);
+    expect(status).toBe(200);
+    const events = (await readAudits()).filter((a: any) => a.action === "certificate_image_replaced");
+    expect(events).toHaveLength(1);
+    const sides = (events[0].details as any).imageReplacements.map((r: any) => r.side).sort();
+    expect(sides).toEqual(["back", "front"]);
+  });
+
+  it("a same-key replacement does NOT delete the object it just uploaded", async () => {
+    const id = await certId();
+    await putMultipart(id, {}, [
+      { field: "frontImage", filename: "front.png", type: "image/png", buffer: await pngBuffer(9, 9, 9) },
+    ]);
+    expect(r2Calls.uploads.map((u) => u.key)).toContain("images/MV1/front.png");
+    // The old code deleted `existing.frontImagePath` unconditionally, which for
+    // an unchanged extension is the key just written — destroying the new image.
+    expect(r2Calls.deletes).not.toContain("images/MV1/front.png");
+  });
+
+  it("a DIFFERENT extension changes the path, deletes the old object, and audits the update", async () => {
+    const id = await certId();
+    const sharp = (await import("sharp")).default;
+    const jpg = await sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 5, g: 5, b: 5 } } })
+      .jpeg()
+      .toBuffer();
+    const { status } = await putMultipart(id, {}, [
+      { field: "frontImage", filename: "front.jpg", type: "image/jpeg", buffer: jpg },
+    ]);
+    expect(status).toBe(200);
+    expect((await readCert()).frontImagePath).toBe("images/MV1/front.jpg");
+    expect(r2Calls.deletes).toContain("images/MV1/front.png");
+
+    const audits = await readAudits();
+    const update = audits.find((a: any) => a.action === "update");
+    expect(update).toBeTruthy();
+    const d = update.details as any;
+    expect(d.changedFields).toContain("frontImagePath");
+    // content identity travels with the ordinary update audit too
+    expect(d.imageReplacements[0].pathChanged).toBe(true);
+    expect(d.imageReplacements[0].previousPath).toBe("images/MV1/front.png");
+  });
+
+  it("a metadata change AND an image replacement produce ONE combined update audit", async () => {
+    const id = await certId();
+    const { status } = await putMultipart(id, { cardName: "Charizard (rephotographed)" }, [
+      { field: "frontImage", filename: "front.png", type: "image/png", buffer: await pngBuffer(7, 7, 7) },
+    ]);
+    expect(status).toBe(200);
+    const audits = await readAudits();
+    expect(audits.filter((a: any) => a.action === "update")).toHaveLength(1);
+    expect(audits.filter((a: any) => a.action === "certificate_image_replaced")).toHaveLength(0);
+    const d = audits.find((a: any) => a.action === "update").details as any;
+    expect(d.changedFields).toContain("cardName");
+    expect(d.imageReplacements[0].pathChanged).toBe(false);
+  });
+
+  it("MANDATORY 15: a true metadata no-op with NO image creates no audit at all", async () => {
+    const id = await certId();
+    const { status } = await put(id, { cardName: STORED.cardName, setName: STORED.setName });
+    expect(status).toBe(200);
+    expect(await readAudits()).toHaveLength(0);
+  });
+
+  it("an unchanged legacy grading echo alone still creates no audit", async () => {
+    const id = await certId();
+    const { status } = await put(id, { gradeOverall: STORED.gradeOverall, gradeType: "numeric" });
+    expect(status).toBe(200);
+    expect(await readAudits()).toHaveLength(0);
+  });
+
+  it("an upload that FAILS validation creates no audit and writes nothing", async () => {
+    const id = await certId();
+    const before = await readCert();
+    const { status, json } = await putMultipart(id, { cardName: "Should not persist" }, [
+      { field: "frontImage", filename: "evil.png", type: "image/png", buffer: Buffer.from("not an image at all") },
+    ]);
+    expect(status).toBe(400);
+    expect(json.error).toMatch(/content-type validation/);
+    expect(await readAudits()).toHaveLength(0);
+    expect((await readCert()).cardName).toBe(before.cardName);
+    expect(r2Calls.uploads).toHaveLength(0);
   });
 });

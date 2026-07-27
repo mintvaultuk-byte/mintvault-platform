@@ -26,6 +26,7 @@ import { type TcgCardPick } from "@/components/identity-tools";
 import { GradingIdentityVerification } from "@/components/grading/GradingIdentityVerification";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
 import type { StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
+import { decideGradingPersistence } from "@shared/grading-persistence-lifecycle";
 import { autofillCard } from "@/lib/api";
 
 // Shared calculation imports (client-side re-implementations)
@@ -121,6 +122,29 @@ function mvgsRemainingToGrade(remaining: number): number {
 
 interface Props {
   certId: number;
+  /**
+   * PR A · EXPLICIT GRADE-STAGE LIFECYCLE. REQUIRED — deliberately not optional.
+   *
+   * True only while the Grade stage is the ACTIVE stage. The workstation is
+   * mounted hidden-not-unmounted so a grader's in-progress work survives stage
+   * switches, which meant its debounced auto-save also ran while Card Details
+   * was on screen — persisting computed defaults for a certificate nobody had
+   * graded (MV900007: null -> 10/10/10/10, MV900010: Authentic-Only -> numeric 10).
+   *
+   * When false the panel performs NO draft save, schedules NO debounce and
+   * sends NO grading request, and CANCELS any debounce already scheduled.
+   * Rendering and local editing are unaffected, so unsaved grader work is never
+   * destroyed.
+   *
+   * There is NO default (hostile review M-1). An earlier revision defaulted to
+   * `true`, which fails OPEN: three standalone surfaces (grader, staff,
+   * admin-staff) mounted this panel through GradingWorkstation without passing
+   * the flag, so hidden auto-save was still live on all three. Every mount site
+   * must now state the lifecycle explicitly, and the two legitimate mount paths
+   * — GradingWorkstation (from its own stage state) and CertificateForm (from
+   * its workflow stage, injected into the workstation slot) — both do.
+   */
+  active: boolean;
   certIdStr?: string;
   cardName: string;
   cardSet: string;
@@ -260,6 +284,7 @@ function surfaceGradeColor(g: number): string {
 
 export default function GradingPanel({
   certId,
+  active,
   certIdStr,
   cardName,
   cardSet,
@@ -337,6 +362,25 @@ export default function GradingPanel({
       return res.json();
     },
   });
+  // PR A · record WHICH certificate the panel has actually hydrated for. Until
+  // the grading payload for the CURRENT certId has arrived, the panel holds UI
+  // defaults, and the auto-save effect refuses to persist them.
+  //
+  // This stores the certId rather than a boolean deliberately. A boolean had to
+  // be cleared by the per-certId reset effect below, and effects run in
+  // DECLARATION order: for a certificate whose grading payload was already in
+  // the react-query cache, `gradingPending` is false on the very first render
+  // after the switch, so this effect set the flag true and the reset effect
+  // (declared further down) immediately cleared it again. No dependency then
+  // changed, so the flag stayed false and grading auto-save was silently dead
+  // for the rest of that mount. A certId marker is self-invalidating, so the
+  // reset effect no longer touches it and the ordering cannot matter.
+  useEffect(() => {
+    if (gradingData !== undefined && !gradingPending && !gradingError) {
+      gradingHydratedForRef.current = certId;
+    }
+  }, [gradingData, gradingPending, gradingError, certId]);
+
   const gradingWorkflowLocked = gradingPending || gradingError;
   const gradingWorkflowLockedRef = useRef(gradingWorkflowLocked);
   const gradingErrorRef = useRef(gradingError);
@@ -907,6 +951,10 @@ export default function GradingPanel({
   // further down (also hoisted).
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoSaveSeqRef = useRef(0);
+  /** The certId GET /grading has actually returned for. While this does not
+   *  equal the current certId the panel's state is UI defaults, not grading
+   *  evidence, and nothing may be persisted (PR A). */
+  const gradingHydratedForRef = useRef<number | null>(null);
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedOnceRef = useRef(false);
 
@@ -917,6 +965,9 @@ export default function GradingPanel({
     setEditMode(false);
     editSnapshotRef.current = null;
     hydratedOnceRef.current = false;
+    // gradingHydratedForRef is deliberately NOT reset here — it stores the certId
+    // it hydrated for, so it invalidates itself on a card switch. Clearing it
+    // here would race the hydration effect declared above (see its comment).
     setFrontLR("");
     setFrontTB("");
     setBackLR("");
@@ -1105,14 +1156,30 @@ export default function GradingPanel({
   // require entering edit mode and clicking Save. This kills the previous
   // "edits save automatically to the live record" silent-write behaviour.
   useEffect(() => {
-    if (!certId) return;
-    if (gradingWorkflowLocked) return;
-    if (gradeApprovedAt) return; // auto-save is pre-approval only
-    if (!hydratedOnceRef.current) {
-      hydratedOnceRef.current = true;
-      return;
+    // PR A (hostile review M-1) · the ENTIRE lifecycle decision now lives in the
+    // shared pure function `decideGradingPersistence`
+    // (shared/grading-persistence-lifecycle.ts), so it is proven as BEHAVIOUR in
+    // a unit test rather than asserted as source text. This effect only executes
+    // the decision it is given.
+    const decision = decideGradingPersistence({
+      active,
+      certId,
+      hydratedForCertId: gradingHydratedForRef.current,
+      workflowLocked: gradingWorkflowLocked,
+      gradeApprovedAt,
+      settledAfterHydration: hydratedOnceRef.current,
+    });
+    // Cancel unconditionally on every NON-arming decision: leaving the Grade
+    // stage, switching card, a failed GET or an approval landing must all DROP a
+    // debounce armed under the previous state rather than let it fire against
+    // the new one. This does not rely on the dependency array happening to run
+    // the cleanup below.
+    if (decision.cancelPending && autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
     }
-    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    if (decision.markSettled) hydratedOnceRef.current = true;
+    if (!decision.arm) return;
     autoSaveTimerRef.current = setTimeout(() => {
       autoSaveNow();
     }, 500);
@@ -1146,6 +1213,10 @@ export default function GradingPanel({
     idYear,
     idVariant,
     gradingWorkflowLocked,
+    active,
+    // Added with the lifecycle extraction: an approval landing must re-evaluate
+    // and CANCEL any pending debounce, not leave it armed from before approval.
+    gradeApprovedAt,
   ]);
 
   function handleAiComplete(analysis: AiAnalysisResult, identification: AiIdentification | null) {

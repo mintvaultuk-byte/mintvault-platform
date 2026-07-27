@@ -212,6 +212,9 @@ export default function DevCardDetailsHarness() {
         onSuccess={() => {}}
         workstationSlot={
           <GradingPanel
+            /* PR A · fail-closed initial lifecycle; CertificateForm injects the
+               real stage-derived value into this slot (see admin-dashboard). */
+            active={false}
             certId={1}
             certIdStr="MV-0000000001"
             cardName={SAMPLE.cardName || ""}
