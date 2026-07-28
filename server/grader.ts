@@ -971,6 +971,10 @@ async function gradeSnapshot(certId: number) {
   };
 }
 
+function sameGradeSnapshot(a: Awaited<ReturnType<typeof gradeSnapshot>>, b: Awaited<ReturnType<typeof gradeSnapshot>>): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 /**
  * Admin edits a pending_review cert's DRAFT grade during review (the grading
  * panel in adminReview mode auto-saves here). Deliberately NOT grader-locked —
@@ -997,7 +1001,9 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
     return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
   }
   const after = await gradeSnapshot(certId);
-  await storage.writeAuditLog("certificate", String(certId), "admin_grade_edit", adminUser, { before, after });
+  if (!sameGradeSnapshot(before, after)) {
+    await storage.writeAuditLog("certificate", String(certId), "admin_grade_edit", adminUser, { before, after });
+  }
   return { ok: true as const };
 }
 

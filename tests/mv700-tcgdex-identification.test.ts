@@ -232,6 +232,12 @@ describe("MV700 language, rarity and finish precedence", () => {
         { rarity_code: "silver_star_rare", language: "Spanish" },
       ),
     ).toThrow(GradeDraftValidationError);
+    expect(() =>
+      validateGradeDraftIdentityAndVariant(
+        { language: "Spanish", rarityCode: "holo_rare_v", finishVariant: "holo", promoType: null },
+        { rarity_code: "silver_star_rare", language: "Spanish", rarity_override_confirmed: true },
+      ),
+    ).toThrow(/does not match this rarity transition/);
     expect(
       validateGradeDraftIdentityAndVariant(
         { language: "Spanish", rarityCode: "holo_rare_v", finishVariant: "holo", promoType: null },

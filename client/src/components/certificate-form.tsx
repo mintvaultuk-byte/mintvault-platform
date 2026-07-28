@@ -267,6 +267,10 @@ export default function CertificateForm({
   const queryClient = useQueryClient();
 
   const [form, setForm] = useState(() => buildFormStateFromCert(certificate));
+  const formRef = useRef(form);
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
 
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
   const [rarityOverrideTransition, setRarityOverrideTransition] = useState<{ from: string; to: string } | null>(null);
@@ -347,19 +351,21 @@ export default function CertificateForm({
   // A no-op guard prevents the picker's mount-time
   // onChange from dirtying the form (which would trigger a spurious auto-save).
   const handleStructuredChange = useCallback((v: StructuredCardVariant) => {
-    setRarityOverrideTransition(null);
+    const current = formRef.current;
+    let nextRarity = v.rarity ?? "";
+    let confirmedTransition: { from: string; to: string } | null = null;
+    const decision = decideRarityChange(current.rarityCode, nextRarity);
+    if (decision.requiresConfirmation) {
+      const confirmed =
+        typeof window !== "undefined" &&
+        window.confirm(
+          "This symbol choice is less specific than the resolved card-record rarity. Override the resolved rarity anyway?"
+        );
+      if (!confirmed) nextRarity = current.rarityCode;
+      else confirmedTransition = { from: current.rarityCode, to: nextRarity };
+    }
+    setRarityOverrideTransition(confirmedTransition);
     setForm((f) => {
-      let nextRarity = v.rarity ?? "";
-      const decision = decideRarityChange(f.rarityCode, nextRarity);
-      if (decision.requiresConfirmation) {
-        const confirmed =
-          typeof window !== "undefined" &&
-          window.confirm(
-            "This symbol choice is less specific than the resolved card-record rarity. Override the resolved rarity anyway?"
-          );
-        if (!confirmed) nextRarity = f.rarityCode;
-        else setRarityOverrideTransition({ from: f.rarityCode, to: nextRarity });
-      }
       if (
         f.rarityCode === nextRarity &&
         f.finishVariant === (v.finish ?? "") &&

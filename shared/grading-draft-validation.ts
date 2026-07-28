@@ -92,10 +92,13 @@ export function validateGradeDraftIdentityAndVariant(cert: any, body: any): {
     if (decision.requiresConfirmation && overrideConfirmed) {
       const overrideFrom = String(payload.rarity_override_from ?? "").trim();
       const overrideTo = String(payload.rarity_override_to ?? "").trim();
-      if (overrideFrom || overrideTo) {
-        if (overrideFrom !== String(cert.rarityCode ?? "").trim() || overrideTo !== String(nextRarityCode ?? "").trim()) {
-          throw new GradeDraftValidationError("Rarity override confirmation does not match this rarity transition.");
-        }
+      if (
+        !overrideFrom ||
+        !overrideTo ||
+        overrideFrom !== String(cert.rarityCode ?? "").trim() ||
+        overrideTo !== String(nextRarityCode ?? "").trim()
+      ) {
+        throw new GradeDraftValidationError("Rarity override confirmation does not match this rarity transition.");
       }
     }
   }

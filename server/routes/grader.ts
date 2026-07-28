@@ -639,10 +639,12 @@ export function registerGraderRoutes(app: Express): void {
           if (String(before[f] ?? "") !== String(after[f] ?? ""))
             changed[f] = { from: before[f] ?? null, to: after[f] ?? null };
         }
-        await storage.writeAuditLog("certificate", String(certId), "grader_edit_submission", graderEmail, {
-          graded_by: before.graded_by ?? null,
-          changed,
-        });
+        if (Object.keys(changed).length > 0) {
+          await storage.writeAuditLog("certificate", String(certId), "grader_edit_submission", graderEmail, {
+            graded_by: before.graded_by ?? null,
+            changed,
+          });
+        }
 
         return res.json({ ok: true, gradingStatus: "pending_review", changed: Object.keys(changed) });
       } catch (e: any) {
