@@ -19,6 +19,7 @@ type Card = {
   cardName: string | null;
   cardNumber: string | null;
   year: string | null;
+  language: string | null;
   variant: string | null;
   grade: string | null;
   gradingStatus: string;
@@ -122,6 +123,7 @@ export default function GraderPage() {
           certIdStr={c.certIdStr}
           cardName={c.cardName || ""}
           cardSet={c.setName || ""}
+          cardLanguage={c.language}
           cardGame={c.cardGame || undefined}
           existingGrade={c.grade}
           onGradeApproved={async () => {

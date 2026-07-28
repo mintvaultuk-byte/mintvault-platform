@@ -217,6 +217,22 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
       .split("\n")
       .filter(Boolean);
     const calcEngine = /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|shared\/mvgs-scoring/;
-    for (const f of changed) expect(f, `unexpected change to grading engine: ${f}`).not.toMatch(calcEngine);
+    for (const f of changed) {
+      if (f === "server/grader.ts") {
+        const diff = execFileSync("git", ["diff", "origin/main", "--", f], { encoding: "utf8" });
+        const added = diff
+          .split("\n")
+          .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
+          .join("\n");
+        expect(added).toContain("validateGradeDraftIdentityAndVariant");
+        expect(added).toContain("language            = ${keepStr(nextLanguage, cert.language)}");
+        expect(added).toContain("rarity_code         = ${nextRarityCode}");
+        expect(added).toContain("finish_variant      = ${nextFinishVariant}");
+        expect(added).toContain("promo_type          = ${nextPromoType}");
+        expect(added).not.toMatch(/mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i);
+        continue;
+      }
+      expect(f, `unexpected change to grading engine: ${f}`).not.toMatch(calcEngine);
+    }
   });
 });

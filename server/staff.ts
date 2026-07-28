@@ -632,7 +632,7 @@ export async function unassignScanSubmissions(submissionIds: number[], adminUser
 async function scanCardsForSubmission(submissionId: number) {
   const r = await db.execute(sql`
     SELECT cert.id AS cert_id, cert.certificate_number AS cert_id_str, cert.card_name, cert.set_name,
-           cert.card_number_display AS card_number, cert.year_text AS year, cert.variant,
+           cert.card_number_display AS card_number, cert.year_text AS year, cert.language, cert.variant,
            cert.grading_front_original, cert.grading_back_original, cert.front_image_path, cert.back_image_path
     FROM certificates cert JOIN cards c ON cert.card_id = c.id
     WHERE c.submission_id = ${submissionId} AND cert.deleted_at IS NULL
@@ -645,6 +645,7 @@ async function scanCardsForSubmission(submissionId: number) {
     setName: row.set_name ?? null,
     cardNumber: row.card_number ?? null,
     year: row.year ?? null,
+    language: row.language ?? null,
     variant: row.variant ?? null,
     hasFront: !!(row.grading_front_original || row.front_image_path),
     hasBack: !!(row.grading_back_original || row.back_image_path),

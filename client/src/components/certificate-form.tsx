@@ -23,7 +23,14 @@ import {
   REVIEW_STAGE,
 } from "@shared/grading-workflow";
 import { CONSOLIDATED_VARIANT_SCHEME, legacyFreeTextLostOnConversion } from "@shared/variant-line";
-import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
+import {
+  finishByValue,
+  isLowerInformationRarityChange,
+  languageByValueOrLabel,
+  languageLabel,
+  tcgdexLanguageCode,
+  type StructuredCardVariant,
+} from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
 import {
@@ -261,6 +268,7 @@ export default function CertificateForm({
   const [form, setForm] = useState(() => buildFormStateFromCert(certificate));
 
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
+  const [rarityOverrideConfirmed, setRarityOverrideConfirmed] = useState(false);
   // Grader notes live in the Review stage, collapsed unless the cert already has notes.
   const [notesOpen, setNotesOpen] = useState<boolean>(() => Boolean(certificate?.notes));
 
@@ -333,31 +341,38 @@ export default function CertificateForm({
   }
 
   // ── Structured rarity/variant picker wiring ────────────────────────────────
-  // The picker emits a full StructuredCardVariant; we fan it out to the separate
-  // form keys (which auto-serialise to the save payload) and keep the existing
-  // `language` field in sync. A no-op guard prevents the picker's mount-time
+  // The picker emits rarity/finish/promo data; certificate language is owned by
+  // the identity fields, so clicking a rarity symbol can never rewrite it.
+  // A no-op guard prevents the picker's mount-time
   // onChange from dirtying the form (which would trigger a spurious auto-save).
   const handleStructuredChange = useCallback((v: StructuredCardVariant) => {
     setForm((f) => {
-      const langLabel = languageByValueOrLabel(v.language)?.label ?? f.language;
+      let nextRarity = v.rarity ?? "";
+      if (isLowerInformationRarityChange(f.rarityCode, nextRarity)) {
+        const confirmed =
+          typeof window !== "undefined" &&
+          window.confirm(
+            "This symbol choice is less specific than the resolved card-record rarity. Override the resolved rarity anyway?"
+          );
+        if (!confirmed) nextRarity = f.rarityCode;
+        else setRarityOverrideConfirmed(true);
+      }
       if (
-        f.rarityCode === (v.rarity ?? "") &&
+        f.rarityCode === nextRarity &&
         f.finishVariant === (v.finish ?? "") &&
         f.promoType === (v.promo ?? "") &&
         f.subsetName === (v.subset ?? "") &&
-        f.era === (v.era ?? "") &&
-        f.language === langLabel
+        f.era === (v.era ?? "")
       ) {
         return f;
       }
       return {
         ...f,
-        rarityCode: v.rarity ?? "",
+        rarityCode: nextRarity,
         finishVariant: v.finish ?? "",
         promoType: v.promo ?? "",
         subsetName: v.subset ?? "",
         era: v.era ?? "",
-        language: langLabel,
       };
     });
   }, []);
@@ -578,6 +593,7 @@ export default function CertificateForm({
   // until a real result arrives; cleared on any identify failure.
   const [identifyResult, setIdentifyResult] = useState<{
     name: string;
+    setName: string;
     number: string;
     year: string;
     language: string;
@@ -732,6 +748,7 @@ export default function CertificateForm({
     // proposed/verified identification so the panel shows it (not stale data).
     setIdentifyResult({
       name: card.name || "",
+      setName: card.setName || "",
       number: card.number || "",
       year: card.year || "",
       language: form.language || "",
@@ -822,6 +839,7 @@ export default function CertificateForm({
         // shows the real result (and never the pre-existing certificate values).
         setIdentifyResult({
           name: id.detected_name || id.officialName || "",
+          setName: "",
           number: id.detected_number || "",
           year: id.detected_year || "",
           language: id.detected_language || "",
@@ -901,19 +919,7 @@ export default function CertificateForm({
 
   /** TCGdex canonical metadata lookup — enriches set/card fields after AI identify */
   async function runTcgdexPrefill(setCode: string, cardNumber: string, language: string, certDbId?: number) {
-    const langMap: Record<string, string> = {
-      english: "en",
-      japanese: "ja",
-      french: "fr",
-      german: "de",
-      spanish: "es",
-      italian: "it",
-      portuguese: "pt",
-      korean: "ko",
-      "traditional chinese": "zh-tw",
-      "simplified chinese": "zh-cn",
-    };
-    const lang = langMap[language.toLowerCase()] || "en";
+    const lang = tcgdexLanguageCode(language) || "en";
     try {
       const r = await fetch(
         `/api/admin/tcgdex-lookup?code=${encodeURIComponent(setCode)}&number=${encodeURIComponent(cardNumber)}&lang=${encodeURIComponent(lang)}${certDbId ? `&certId=${certDbId}` : ""}`,
@@ -935,38 +941,43 @@ export default function CertificateForm({
       const td = await r.json();
       if (!td.found) return;
 
-      // Authoritative language: the endpoint the card actually resolved on (the set code
-      // determines it). Maps the TCGdex lang code to the form's Language value. Overrides
-      // identify's detected_language. Falls through to prev if the code is unknown.
-      const langLabel: Record<string, string> = {
-        ja: "Japanese",
-        en: "English",
-        ko: "Korean",
-        "zh-tw": "Chinese",
-        "zh-cn": "Chinese",
-        fr: "French",
-        de: "German",
-        es: "Spanish",
-        it: "Italian",
-        pt: "Portuguese",
-      };
+      const resolvedLanguage = td.resolved_lang ? languageLabel(td.resolved_lang, "") : "";
+      const finishLabel = td.finish_variant ? finishByValue(td.finish_variant)?.label : "";
 
       // Owner ruling (option B): strip a trailing designation from the TCGdex
       // set name — base set stays on the set line, designation fills Variant
       // (clearing Rarity: the two are exactly-one-of).
       const tdSplit = splitSetDesignation(td.set_name || "");
+      if (td.set_code || td.set_id) setSetId(String(td.set_code || td.set_id));
       setForm((prev) => ({
         ...prev,
         cardName: td.card_name?.toUpperCase() || prev.cardName,
         setName: tdSplit.baseSet || prev.setName,
         year: td.release_date ? td.release_date.split("-")[0] : prev.year,
-        language: (td.resolved_lang && langLabel[td.resolved_lang]) || prev.language,
+        language: resolvedLanguage || prev.language,
+        rarityCode: td.rarity_code || prev.rarityCode,
+        finishVariant: prev.finishVariant || td.finish_variant || "",
         ...(tdSplit.designation
           ? { variant: tdSplit.designation, rarity: "", unifiedSelect: `VARIANT:${tdSplit.designation}`, otherText: "" }
           : {}),
       }));
+      setIdentifyResult((prev) => ({
+        name: td.card_name || prev?.name || "",
+        setName: tdSplit.baseSet || td.set_name || prev?.setName || "",
+        number: prev?.number || cardNumber,
+        year: td.release_date ? td.release_date.split("-")[0] : prev?.year || "",
+        language: resolvedLanguage || prev?.language || "",
+        rarity: td.rarity_label || td.rarity || prev?.rarity || "",
+        variant: finishLabel || prev?.variant || "",
+      }));
 
-      const badge = td.auto_added ? " (set auto-added)" : td.needs_manual_add ? " (set needs manual add)" : "";
+      const badge = td.auto_added
+        ? " (set auto-added)"
+        : td.canonical_mapping_unresolved
+          ? " (set mapping unresolved)"
+          : td.needs_manual_add
+            ? " (set needs manual add)"
+            : "";
       toast({ title: `TCGdex enriched${badge}`, description: `${td.card_name} — ${td.set_name}` });
     } catch (e) {
       const c = classifyLookupError({ thrown: e });
@@ -1297,6 +1308,7 @@ export default function CertificateForm({
     if (frontImage) formData.append("frontImage", frontImage);
     if (backImage) formData.append("backImage", backImage);
     if (confirmPublishedEdit) formData.append("confirmPublishedEdit", "true");
+    if (rarityOverrideConfirmed) formData.append("rarity_override_confirmed", "true");
     // Stale-tab guard: tell the server which metadata values this form loaded;
     // it 409s only if a field changed elsewhere since AND this save would
     // overwrite that newer value (see PUT /:id + shared/edit-conflict.ts).
@@ -2496,6 +2508,7 @@ export default function CertificateForm({
                         <div className="flex flex-wrap items-center gap-1.5">
                           {[
                             identifyResult.name,
+                            identifyResult.setName,
                             displayCollectorNumber(identifyResult.number),
                             identifyResult.year,
                             identifyResult.language,
@@ -2568,6 +2581,7 @@ export default function CertificateForm({
                               setForm((prev) => ({
                                 ...prev,
                                 cardName: identifyResult.name || prev.cardName,
+                                setName: identifyResult.setName || prev.setName,
                                 cardNumber: identifyResult.number || prev.cardNumber,
                                 year: identifyResult.year || prev.year,
                                 language: identifyResult.language || prev.language,

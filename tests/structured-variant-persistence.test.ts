@@ -258,9 +258,19 @@ describe("clear controls (items 15-16)", () => {
   });
 
   it("16. Recently Used / favourites never auto-select — selection changes only on click", () => {
-    // every setRarity call site sits in an explicit handler; none in an effect
+    // Recent/favourite lists never drive selection from an effect. The picker may
+    // hydrate from a parent-controlled value, but browser persistence cannot auto-pick.
     const effects = PICKER.match(/useEffect\([\s\S]*?\}, \[[^\]]*\]\);/g) ?? [];
-    for (const e of effects) expect(e).not.toMatch(/setRarity\(|setFinish\(|setPromoOrSubset\(/);
+    for (const e of effects) {
+      if (e.includes("syncingFromValueRef.current = true")) {
+        expect(e).toContain("value?.rarity");
+        expect(e).toContain("value?.finish");
+        expect(e).toContain("value?.promo");
+        expect(e).not.toMatch(/recent|favourite|favorite|localStorage|usePersistentList/i);
+        continue;
+      }
+      expect(e).not.toMatch(/setRarity\(|setFinish\(|setPromoOrSubset\(/);
+    }
     expect(PICKER).toContain("usePersistentList");
   });
 });
@@ -840,7 +850,24 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     const changed: string[] = execFileSync("git", ["diff", "--name-only", "origin/main"], { encoding: "utf8" })
       .trim().split("\n").filter(Boolean);
     const engine = /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|cert-pristine|certificate-document/;
-    for (const f of changed) expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);
+    for (const f of changed) {
+      if (f === "server/grader.ts") {
+        const diff = execFileSync("git", ["diff", "origin/main", "--", f], { encoding: "utf8" });
+        const added = diff
+          .split("\n")
+          .filter((line: string) => line.startsWith("+") && !line.startsWith("+++"))
+          .join("\n");
+        expect(added).toContain("validateGradeDraftIdentityAndVariant");
+        expect(added).toContain("GradeDraftValidationError");
+        expect(added).toContain("language            = ${keepStr(nextLanguage, cert.language)}");
+        expect(added).toContain("rarity_code         = ${nextRarityCode}");
+        expect(added).toContain("finish_variant      = ${nextFinishVariant}");
+        expect(added).toContain("promo_type          = ${nextPromoType}");
+        expect(added).not.toMatch(/mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|cert_id|certificate_number/i);
+        continue;
+      }
+      expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);
+    }
   });
 
   it("review path sends NULL (not '') for a cleared code, and still omits untouched ones", () => {

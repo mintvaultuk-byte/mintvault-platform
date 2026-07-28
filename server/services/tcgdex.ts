@@ -10,6 +10,7 @@
  * Non-negotiable: this service supplies canonical set/card metadata.
  * AI models may ONLY supply the printed code + number + language hint.
  */
+import { tcgdexLanguageCode } from "@shared/pokemon-rarity-catalogue";
 
 // ── Language whitelist (OWASP: no arbitrary strings flow into URL) ─────────
 const ALLOWED_LANGS = new Set(["en", "ja", "fr", "de", "es", "it", "pt", "ko", "zh-tw", "zh-cn"]);
@@ -28,6 +29,8 @@ export interface TcgdexSetFull {
   serie: { id: string; name: string };
   releaseDate?: string;
   cardCount: { total: number; official: number };
+  tcgOnline?: string;
+  abbreviation?: { official?: string };
 }
 
 export interface TcgdexCard {
@@ -47,13 +50,20 @@ export interface CardLookupResult {
   card_name: string; // English (for a UK cert)
   card_name_local: string; // native-language original (kept in case it's wanted)
   set_id: string;
+  canonical_set_id: string;
   set_name: string; // English
   set_name_local: string; // native-language original
+  set_code: string | null;
+  canonical_mapping_status: "mapped" | "unresolved";
+  canonical_mapping_unresolved: boolean;
   series: string;
   release_date: string | null;
   total_cards: number;
   external_card_id: string;
   rarity: string | null;
+  rarity_code: string | null;
+  rarity_label: string | null;
+  finish_variant: string | null;
   resolved_lang: string; // TCGdex lang code the card actually resolved on (ja/en/ko/zh-tw/zh-cn/…) — authoritative for the card's language
 }
 
@@ -149,6 +159,24 @@ const JP_SET_ENGLISH_NAME: Record<string, string> = {
   // Add more JP SV-era codes here as needed (unmapped → localized name, logged).
 };
 
+const PRINTED_CODE_TO_TCGDEX_SET_ID: Record<string, string> = {
+  CRE: "swsh6",
+};
+
+const TCGDEX_RARITY_CANONICAL: Record<string, { rarityCode: string; rarityLabel: string }> = {
+  "holo rare v": { rarityCode: "holo_rare_v", rarityLabel: "Holo Rare V" },
+  "holo rara v": { rarityCode: "holo_rare_v", rarityLabel: "Holo Rare V" },
+  "rare holo v": { rarityCode: "holo_rare_v", rarityLabel: "Holo Rare V" },
+};
+
+function canonicalRarityFor(rarity: string | null | undefined): { rarityCode: string; rarityLabel: string } | null {
+  const key = String(rarity ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+  return TCGDEX_RARITY_CANONICAL[key] ?? null;
+}
+
 // Card-type suffix tokens (ex / V / VMAX / …). These are written in Latin at the
 // END of the card name in EVERY language — "リザードンex" / "Charizard ex",
 // "ザシアンV" / "Zacian V" — so the suffix survives across JP/KO/ZH. Longest-first
@@ -190,7 +218,12 @@ async function englishCardNameByDexId(dexId: number[] | undefined, localizedName
 
 /** Validate that a language string is in the whitelist. */
 export function isAllowedLang(lang: string): boolean {
-  return ALLOWED_LANGS.has(lang);
+  const code = tcgdexLanguageCode(lang);
+  return Boolean(code && ALLOWED_LANGS.has(code));
+}
+
+export function normalizeTcgdexLang(lang: string | null | undefined): string {
+  return tcgdexLanguageCode(lang) ?? "en";
 }
 
 /** Every Pokémon set summary ({ id, name }) for a language (24h-cached). Used by
@@ -230,17 +263,31 @@ export async function resolveSetId(
   lang: string
 ): Promise<{ tcgdexSetId: string; resolvedLang: string } | null> {
   const upper = printedCode.toUpperCase();
+  const safeLang = normalizeTcgdexLang(lang);
+  const aliasId = PRINTED_CODE_TO_TCGDEX_SET_ID[upper];
+  if (aliasId && (await fetchSet(aliasId, safeLang))) return { tcgdexSetId: aliasId, resolvedLang: safeLang };
 
   // Try language-scoped first
-  const primaryCache = await getSetList(lang);
+  const primaryCache = await getSetList(safeLang);
   const primaryId = primaryCache.byUpperId.get(upper);
-  if (primaryId) return { tcgdexSetId: primaryId, resolvedLang: lang };
+  if (primaryId) return { tcgdexSetId: primaryId, resolvedLang: safeLang };
+
+  const canonicalFromLanguageSet = primaryCache.sets.find((s) => {
+    const id = s.id.toUpperCase();
+    return id === upper || id.endsWith(upper) || upper.endsWith(id);
+  });
+  if (canonicalFromLanguageSet) return { tcgdexSetId: canonicalFromLanguageSet.id, resolvedLang: safeLang };
 
   // Fall back to English if different
-  if (lang !== "en") {
+  if (safeLang !== "en") {
     const enCache = await getSetList("en");
     const enId = enCache.byUpperId.get(upper);
     if (enId) return { tcgdexSetId: enId, resolvedLang: "en" };
+    const canonicalFromEnglishSet = enCache.sets.find((s) => {
+      const id = s.id.toUpperCase();
+      return id === upper || id.endsWith(upper) || upper.endsWith(id);
+    });
+    if (canonicalFromEnglishSet) return { tcgdexSetId: canonicalFromEnglishSet.id, resolvedLang: "en" };
   }
 
   return null;
@@ -261,10 +308,16 @@ export async function fetchSet(tcgdexSetId: string, lang: string): Promise<Tcgde
  */
 export async function fetchCard(tcgdexSetId: string, cardNumber: string, lang: string): Promise<TcgdexCard | null> {
   // TCGdex card IDs are {setId}-{localId} where localId is zero-padded
-  const cardId = `${tcgdexSetId}-${cardNumber}`;
-  const res = await rateLimitedFetch(`${BASE_URL}/${lang}/cards/${encodeURIComponent(cardId)}`, lang);
-  if (!res.ok) return null;
-  return res.json();
+  const raw = String(cardNumber || "").trim();
+  const local = raw.split("/")[0] || raw;
+  const stripped = local.replace(/^0+(?=\d)/, "");
+  const candidates = Array.from(new Set([local, stripped].filter(Boolean)));
+  for (const n of candidates) {
+    const cardId = `${tcgdexSetId}-${n}`;
+    const res = await rateLimitedFetch(`${BASE_URL}/${lang}/cards/${encodeURIComponent(cardId)}`, lang);
+    if (res.ok) return res.json();
+  }
+  return null;
 }
 
 /**
@@ -276,7 +329,8 @@ export async function lookupCard(
   cardNumber: string,
   lang: string
 ): Promise<CardLookupResult | null> {
-  const resolved = await resolveSetId(printedCode, lang);
+  const requestedLang = normalizeTcgdexLang(lang);
+  const resolved = await resolveSetId(printedCode, requestedLang);
   if (!resolved) {
     console.log(`[tcgdex] set not found for code="${printedCode}" lang="${lang}"`);
     return null;
@@ -299,6 +353,14 @@ export async function lookupCard(
   }
 
   const releaseDate = setData.releaseDate || null;
+  const englishSetData = resolvedLang === "en" ? setData : await fetchSet(tcgdexSetId, "en");
+  const canonicalMappingStatus: "mapped" | "unresolved" = englishSetData ? "mapped" : "unresolved";
+  const providerSetCode = englishSetData?.tcgOnline || englishSetData?.abbreviation?.official || setData.tcgOnline || setData.abbreviation?.official || null;
+  const submittedSetCode =
+    /^[A-Za-z]{2,6}$/.test(String(printedCode).trim()) && String(printedCode).trim().toUpperCase() !== tcgdexSetId.toUpperCase()
+      ? String(printedCode).trim().toUpperCase()
+      : null;
+  const setCode = providerSetCode || submittedSetCode;
 
   // ── English SET name: curated JP-code map → localized fallback ──────────────
   const upperSetId = tcgdexSetId.toUpperCase();
@@ -308,7 +370,7 @@ export async function lookupCard(
       `[tcgdex] no English set-name mapping for "${tcgdexSetId}" (lang=${resolvedLang}) — using localized "${setData.name}". Add it to JP_SET_ENGLISH_NAME if you want it in English.`
     );
   }
-  const setNameEnglish = mappedSetName || setData.name;
+  const setNameEnglish = englishSetData?.name || mappedSetName || setData.name;
 
   // ── English CARD name: englishName → dexId lookup → localized fallback ──────
   // PRIMARY: card.englishName (rarely present, but includes the full suffix).
@@ -318,18 +380,33 @@ export async function lookupCard(
     cardNameEnglish = await englishCardNameByDexId(card.dexId, card.name);
   }
   cardNameEnglish = cardNameEnglish || card.name;
+  const rarity = canonicalRarityFor(card.rarity);
+  const availablePrintings = Object.entries(card.variants ?? {}).filter(([, available]) => available);
+  const finishVariant =
+    availablePrintings.length === 1 && card.variants?.holo
+      ? "holo"
+      : availablePrintings.length === 1 && card.variants?.normal
+        ? "non_holo"
+        : null;
 
   return {
     card_name: cardNameEnglish,
     card_name_local: card.name,
     set_id: tcgdexSetId,
+    canonical_set_id: tcgdexSetId,
     set_name: setNameEnglish,
     set_name_local: setData.name,
-    series: englishSeriesName(setData.serie.id, setData.serie.name),
+    set_code: setCode,
+    canonical_mapping_status: canonicalMappingStatus,
+    canonical_mapping_unresolved: canonicalMappingStatus === "unresolved",
+    series: englishSeriesName((englishSetData ?? setData).serie.id, (englishSetData ?? setData).serie.name),
     release_date: releaseDate,
     total_cards: setData.cardCount.official,
     external_card_id: card.id,
     rarity: card.rarity || null,
+    rarity_code: rarity?.rarityCode ?? null,
+    rarity_label: rarity?.rarityLabel ?? null,
+    finish_variant: finishVariant,
     resolved_lang: resolvedLang,
   };
 }

@@ -125,6 +125,7 @@ type GCard = {
   cardName: string | null;
   cardNumber: string | null;
   year: string | null;
+  language: string | null;
   variant: string | null;
   grade: string | null;
   gradingStatus: string;
@@ -472,6 +473,7 @@ function GradeTab() {
           cardSet={c.setName || ""}
           cardNumber={c.cardNumber}
           cardYear={c.year}
+          cardLanguage={c.language}
           cardVariant={c.variant}
           cardGame={c.cardGame || undefined}
           existingGrade={c.grade}

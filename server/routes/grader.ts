@@ -45,6 +45,7 @@ import {
   GRADER_AUTO_PUBLISH,
   getOperatorReviewRate,
 } from "../grader";
+import { GradeDraftValidationError } from "@shared/grading-draft-validation";
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "../lib/correction-fields";
@@ -211,7 +212,7 @@ export function registerGraderRoutes(app: Express): void {
       const rows = await db.execute(sql`
         SELECT cert.id AS cert_id, cert.certificate_number AS cert_id_str, cert.grader_status, cert.assigned_at,
                cert.rejection_reason, cert.redo_count, cert.card_game, cert.set_name, cert.card_name,
-               cert.card_number_display AS card_number, cert.year_text AS year, cert.variant, cert.grade,
+               cert.card_number_display AS card_number, cert.year_text AS year, cert.language, cert.variant, cert.grade,
                cert.assigned_grader_id, cert.scanned_by, cert.graded_by, cert.grade_approved_at,
                cert.grading_front_display, cert.grading_front_cropped, cert.front_image_path,
                cert.grading_back_display, cert.grading_back_cropped, cert.back_image_path,
@@ -253,6 +254,7 @@ export function registerGraderRoutes(app: Express): void {
           cardName: r.card_name ?? null,
           cardNumber: r.card_number ?? null,
           year: r.year ?? null,
+          language: r.language ?? null,
           variant: r.variant ?? null,
           grade: r.grade ?? null,
           gradingStatus: r.grader_status,
@@ -418,6 +420,7 @@ export function registerGraderRoutes(app: Express): void {
       return res.json({ ok: true, gradingStatus: auth.gradingStatus });
     } catch (e: any) {
       console.error("[grader] draft save error:", e.message);
+      if (e instanceof GradeDraftValidationError) return res.status(e.status).json({ error: e.message });
       return sendServerError(res, e);
     }
   });
@@ -545,6 +548,7 @@ export function registerGraderRoutes(app: Express): void {
       return res.json({ ok: true, gradingStatus: "approved", autoApproved: true });
     } catch (e: any) {
       console.error("[grader] submit error:", e.message);
+      if (e instanceof GradeDraftValidationError) return res.status(e.status).json({ error: e.message });
       return sendServerError(res, e);
     }
   });
@@ -574,7 +578,8 @@ export function registerGraderRoutes(app: Express): void {
         // keeps graded_by attribution honest if the cert was later reassigned.
         const before = (
           await db.execute(sql`
-          SELECT graded_by, card_name, set_name, card_number_display, year_text, variant,
+          SELECT graded_by, card_name, set_name, card_number_display, year_text, language, variant,
+                 rarity_code, finish_variant, promo_type,
                  grade, centering_score, corners_score, edges_score, surface_score
           FROM certificates WHERE id = ${certId}`)
         ).rows[0] as any;
@@ -608,7 +613,8 @@ export function registerGraderRoutes(app: Express): void {
         // Audit — record what changed (before → after) for the locked schema.
         const after = (
           await db.execute(sql`
-          SELECT card_name, set_name, card_number_display, year_text, variant,
+          SELECT card_name, set_name, card_number_display, year_text, language, variant,
+                 rarity_code, finish_variant, promo_type,
                  grade, centering_score, corners_score, edges_score, surface_score
           FROM certificates WHERE id = ${certId}`)
         ).rows[0] as any;
@@ -617,7 +623,11 @@ export function registerGraderRoutes(app: Express): void {
           "set_name",
           "card_number_display",
           "year_text",
+          "language",
           "variant",
+          "rarity_code",
+          "finish_variant",
+          "promo_type",
           "grade",
           "centering_score",
           "corners_score",
@@ -637,6 +647,7 @@ export function registerGraderRoutes(app: Express): void {
         return res.json({ ok: true, gradingStatus: "pending_review", changed: Object.keys(changed) });
       } catch (e: any) {
         console.error("[grader] edit-submission error:", e.message);
+        if (e instanceof GradeDraftValidationError) return res.status(e.status).json({ error: e.message });
         return sendServerError(res, e);
       }
     }

@@ -29,10 +29,15 @@ export interface PokemonLanguage {
 
 export const POKEMON_LANGUAGES: readonly PokemonLanguage[] = [
   { value: "en", label: "English", region: "western", aliases: ["english", "eng", "en", "us", "uk"] },
+  { value: "es", label: "Spanish", region: "western", aliases: ["spanish", "es", "espanol", "español", "castellano"] },
+  { value: "fr", label: "French", region: "western", aliases: ["french", "fr", "francais", "français"] },
+  { value: "de", label: "German", region: "western", aliases: ["german", "de", "deutsch"] },
+  { value: "it", label: "Italian", region: "western", aliases: ["italian", "it", "italiano"] },
+  { value: "pt", label: "Portuguese", region: "western", aliases: ["portuguese", "pt", "portugues", "português"] },
   { value: "ja", label: "Japanese", region: "japan", aliases: ["japanese", "jp", "ja", "japan", "nihongo"] },
   { value: "ko", label: "Korean", region: "korea", aliases: ["korean", "ko", "kr", "korea", "hangul"] },
-  { value: "zh-Hans", label: "Simplified Chinese", region: "china", aliases: ["simplified chinese", "simplified", "zh-hans", "s-chinese", "cn"] },
-  { value: "zh-Hant", label: "Traditional Chinese", region: "china", aliases: ["traditional chinese", "traditional", "zh-hant", "t-chinese", "tw", "hk"] },
+  { value: "zh-cn", label: "Simplified Chinese", region: "china", aliases: ["simplified chinese", "simplified", "zh-hans", "zh-cn", "s-chinese", "cn"] },
+  { value: "zh-tw", label: "Traditional Chinese", region: "china", aliases: ["traditional chinese", "traditional", "zh-hant", "zh-tw", "t-chinese", "tw", "hk"] },
   { value: "id", label: "Indonesian", region: "sea", aliases: ["indonesian", "id", "indonesia", "bahasa"] },
   { value: "th", label: "Thai", region: "sea", aliases: ["thai", "th", "thailand"] },
   { value: "other", label: "Other", region: "other", aliases: ["other", "misc", "unknown"] },
@@ -94,6 +99,7 @@ export const POKEMON_RARITIES: readonly PokemonRarity[] = [
   r({ value: "common", label: "Common", description: "A common card — a filled black circle.", symbol: { shape: "circle", colour: "black", glyph: "●" }, codes: ["C"], regions: "all", eras: "all", aliases: ["common", "circle", "dot"] }),
   r({ value: "uncommon", label: "Uncommon", description: "An uncommon card — a black diamond.", symbol: { shape: "diamond", colour: "black", glyph: "◆" }, codes: ["U"], regions: "all", eras: "all", aliases: ["uncommon", "diamond"] }),
   r({ value: "rare", label: "Rare", description: "A rare card — a single black star.", symbol: { shape: "star", count: 1, colour: "black", glyph: "★" }, codes: ["R"], regions: "all", eras: "all", aliases: ["rare", "star", "one star", "black star"] }),
+  r({ value: "holo_rare_v", label: "Holo Rare V", description: "Sword & Shield Pokémon V card class with holo finish tracked separately.", symbol: { shape: "star", count: 1, colour: "silver", glyph: "★" }, codes: ["V"], regions: ["western"], eras: ["swsh"], aliases: ["holo rare v", "holo rara v", "rare holo v", "rare v", "rara v", "pokemon v", "pokémon v"] }),
   r({ value: "double_rare", label: "Double Rare", description: "Two black stars — the modern ex / high-HP rare.", symbol: { shape: "stars", count: 2, colour: "black", glyph: "★★" }, codes: ["RR"], regions: ["western"], eras: ["sv"], aliases: ["double rare", "rr", "two black stars", "2 black", "black double"] }),
   r({ value: "illustration_rare", label: "Illustration Rare", description: "One GOLD star — full-art illustration rare (IR / AR).", symbol: { shape: "star", count: 1, colour: "gold", glyph: "★" }, codes: ["IR", "AR"], regions: ["western", "japan"], eras: ["sv"], aliases: ["illustration rare", "ir", "ar", "art rare", "1 gold", "one gold star", "gold star"] }),
   r({ value: "ultra_rare", label: "Ultra Rare", description: "Two SILVER stars — ex / Supporter ultra rare.", symbol: { shape: "stars", count: 2, colour: "silver", glyph: "★★" }, codes: ["UR"], regions: ["western"], eras: ["sv"], aliases: ["ultra rare", "ur", "two silver stars", "2 silver", "silver double", "silver stars"] }),
@@ -284,8 +290,25 @@ export function languageByValueOrLabel(
   const q = norm(String(value));
   if (!q) return undefined;
   return cat.languages.find(
-    (l) => l.value === value || norm(l.label) === q || l.aliases.some((a) => norm(a) === q),
+    (l) => norm(l.value) === q || norm(l.label) === q || l.aliases.some((a) => norm(a) === q),
   );
+}
+
+export function normalizePokemonLanguage(
+  value: string | null | undefined,
+  cat: CatalogueSnapshot = SEED_CATALOGUE,
+): PokemonLanguage | undefined {
+  return languageByValueOrLabel(value, cat);
+}
+
+export function languageLabel(value: string | null | undefined, fallback = "English"): string {
+  return normalizePokemonLanguage(value)?.label ?? fallback;
+}
+
+export function tcgdexLanguageCode(value: string | null | undefined): string | null {
+  const lang = normalizePokemonLanguage(value);
+  if (!lang || lang.value === "other") return null;
+  return lang.value;
 }
 
 /** Rarities available for a given language + era + (optional) explicit region override. */
@@ -491,4 +514,63 @@ export function buildStructuredVariant(
     promo: promoSel?.kind === "promo" ? promoSel.value : null,
     subset: promoSel?.kind === "subset" ? promoSel.value : null,
   };
+}
+
+type RarityInformation =
+  | "generic_rare"
+  | "printed_symbol"
+  | "holo_class"
+  | "pokemon_v"
+  | "vmax"
+  | "vstar"
+  | "ex_lower"
+  | "ex_upper"
+  | "gx"
+  | "break"
+  | "prism_star"
+  | "amazing_rare"
+  | "radiant"
+  | "illustration"
+  | "special_illustration"
+  | "trainer_gallery"
+  | "ultra"
+  | "hyper"
+  | "promo";
+
+const RARITY_INFORMATION: Record<string, readonly RarityInformation[]> = {
+  rare: ["generic_rare"],
+  silver_star_rare: ["printed_symbol"],
+  rare_holo: ["generic_rare", "holo_class"],
+  holo_rare_v: ["generic_rare", "holo_class", "pokemon_v"],
+  double_rare: ["ex_lower"],
+  illustration_rare: ["illustration"],
+  special_illustration_rare: ["special_illustration"],
+  ultra_rare: ["ultra"],
+  hyper_rare: ["hyper"],
+  amazing_rare: ["amazing_rare"],
+  radiant_rare: ["radiant"],
+  prism_star: ["prism_star"],
+  character_rare: ["trainer_gallery"],
+  character_super_rare: ["trainer_gallery", "ultra"],
+  shiny_rare: ["radiant"],
+  shiny_ultra_rare: ["radiant", "ultra"],
+  jp_double_rare: ["ex_lower"],
+  jp_triple_rare: ["vmax"],
+  jp_super_rare: ["ultra"],
+  jp_hyper_rare: ["hyper"],
+  jp_ultra_rare: ["ultra"],
+  jp_art_rare: ["illustration"],
+  jp_special_art_rare: ["special_illustration"],
+  jp_promo_rarity: ["promo"],
+};
+
+export function isLowerInformationRarityChange(current: string | null | undefined, next: string | null | undefined): boolean {
+  const cur = String(current ?? "").trim();
+  const nxt = String(next ?? "").trim();
+  if (!cur || !nxt || cur === nxt) return false;
+  const currentInfo = RARITY_INFORMATION[cur];
+  const nextInfo = RARITY_INFORMATION[nxt];
+  if (!currentInfo || !nextInfo) return false;
+  const nextSet = new Set(nextInfo);
+  return currentInfo.some((token) => !nextSet.has(token));
 }

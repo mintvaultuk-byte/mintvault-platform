@@ -19,6 +19,7 @@ import { storage } from "./storage";
 import { getR2SignedUrl } from "./r2";
 import { hashPassword, verifyPassword, validatePassword } from "./account-auth";
 import { CORRECTION_DISPLAY_EXCLUDED_FIELDS } from "./lib/correction-fields";
+import { GradeDraftValidationError, validateGradeDraftIdentityAndVariant } from "@shared/grading-draft-validation";
 
 /**
  * AUTO-PUBLISH FLIP. When false (default) a grader's submit moves the card to
@@ -259,6 +260,7 @@ export async function getCertificatesForSubmission(submissionId: number): Promis
     cardName: string | null;
     cardNumber: string | null;
     year: string | null;
+    language: string | null;
     variant: string | null;
     grade: string | null;
     gradeApprovedAt: string | null;
@@ -269,7 +271,7 @@ export async function getCertificatesForSubmission(submissionId: number): Promis
 > {
   const r = await db.execute(sql`
     SELECT cert.id AS cert_id, cert.cert_id AS cert_id_str, cert.card_game, cert.set_name,
-           cert.card_name, cert.card_number_display AS card_number, cert.year_text AS year, cert.variant,
+           cert.card_name, cert.card_number_display AS card_number, cert.year_text AS year, cert.language, cert.variant,
            cert.grade AS grade, cert.grade_approved_at AS grade_approved_at,
            cert.assigned_grader_id, cert.grader_status, cert.redo_count
     FROM certificates cert
@@ -285,6 +287,7 @@ export async function getCertificatesForSubmission(submissionId: number): Promis
     cardName: row.card_name ?? null,
     cardNumber: row.card_number ?? null,
     year: row.year ?? null,
+    language: row.language ?? null,
     variant: row.variant ?? null,
     grade: row.grade ?? null,
     gradeApprovedAt: row.grade_approved_at ?? null,
@@ -605,6 +608,7 @@ const keepStr = (a: any, b: any) =>
 export async function applyCertGradeDraft(certId: number, body: any): Promise<boolean> {
   const cert = (await storage.getCertificate(certId)) as any;
   if (!cert) throw new Error("Certificate not found");
+  const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(cert, body);
 
   const overall = body.overall_grade;
   const gradeType = pick(body.grade_type, cert.gradeType) || "numeric";
@@ -624,10 +628,11 @@ export async function applyCertGradeDraft(certId: number, body: any): Promise<bo
       set_name            = ${keepStr(body.set_name, cert.setName)},
       card_number_display = ${keepStr(body.card_number_display, cert.cardNumber)},
       year_text           = ${keepStr(body.year_text, cert.year)},
+      language            = ${keepStr(nextLanguage, cert.language)},
       variant             = ${pick(body.variant, cert.variant)},
-      rarity_code         = ${pick(body.rarity_code, cert.rarityCode)},
-      finish_variant      = ${pick(body.finish_variant, cert.finishVariant)},
-      promo_type          = ${pick(body.promo_type, cert.promoType)},
+      rarity_code         = ${nextRarityCode},
+      finish_variant      = ${nextFinishVariant},
+      promo_type          = ${nextPromoType},
       centering_score = ${num(body.grade_centering, cert.gradeCentering)},
       corners_score   = ${num(body.grade_corners, cert.gradeCorners)},
       edges_score     = ${num(body.grade_edges, cert.gradeEdges)},
@@ -845,7 +850,7 @@ export async function unassignCerts(certIds: number[], adminUser: string) {
 export async function getCertsForSubmission(submissionId: number) {
   const r = await db.execute(sql`
     SELECT cert.id AS cert_id, cert.cert_id AS cert_id_str, cert.card_name, cert.set_name,
-           cert.card_number_display AS card_number, cert.year_text AS year, cert.variant,
+           cert.card_number_display AS card_number, cert.year_text AS year, cert.language, cert.variant,
            cert.assigned_grader_id, cert.grader_status, cert.redo_count, u.email AS grader_email
     FROM certificates cert JOIN cards c ON cert.card_id = c.id
     LEFT JOIN users u ON u.id = cert.assigned_grader_id
@@ -859,6 +864,7 @@ export async function getCertsForSubmission(submissionId: number) {
     setName: row.set_name ?? null,
     cardNumber: row.card_number ?? null,
     year: row.year ?? null,
+    language: row.language ?? null,
     variant: row.variant ?? null,
     assignedGraderId: row.assigned_grader_id ?? null,
     graderEmail: row.grader_email ?? null,
@@ -951,6 +957,10 @@ export async function approveGraderCert(certId: number, adminUser: string) {
 async function gradeSnapshot(certId: number) {
   const c = (await storage.getCertificate(certId)) as any;
   return {
+    language: c?.language ?? null,
+    rarityCode: c?.rarityCode ?? null,
+    finishVariant: c?.finishVariant ?? null,
+    promoType: c?.promoType ?? null,
     overall: c?.gradeOverall ?? null,
     subgrades: {
       centering: c?.gradeCentering ?? null,
@@ -974,7 +984,15 @@ export async function adminReviewSaveDraft(certId: number, body: any, adminUser:
   if (a.gradingStatus !== "pending_review")
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   const before = await gradeSnapshot(certId);
-  const saved = await applyCertGradeDraft(certId, body);
+  let saved = false;
+  try {
+    saved = await applyCertGradeDraft(certId, body);
+  } catch (e) {
+    if (e instanceof GradeDraftValidationError) {
+      return { ok: false as const, status: e.status, error: e.message };
+    }
+    throw e;
+  }
   if (!saved) {
     return { ok: false as const, status: 409, error: "Card status changed; refresh and try again" };
   }

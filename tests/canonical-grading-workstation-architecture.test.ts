@@ -355,19 +355,21 @@ describe("Three-stage workflow: Variant lives in Card Details + one shared picke
   it("R6-R7. finish + promo are independent structured fields (StructuredCardVariant), rarity single-select", () => {
     // The picker emits {rarity, finish, promo, ...} — separate fields, and the
     // role panel maps them to separate columns (rarity_code/finish_variant/promo_type).
-    expect(PANEL).toMatch(/setRarityCode\(v\.rarity/);
+    expect(PANEL).toMatch(/setRarityCode\((v\.rarity|nextRarity)/);
+    expect(PANEL).toContain("isLowerInformationRarityChange");
     expect(PANEL).toMatch(/setFinishVariant\(v\.finish/);
     expect(PANEL).toMatch(/setPromoType\(v\.promo/);
   });
 
-  it("R8. role save/read persist rarity ADDITIVELY (existing columns; pick() preserves)", () => {
+  it("R8. role save/read persist rarity ADDITIVELY (existing columns; validator preserves)", () => {
     // Read path exposes the fields; write path persists them via applyCertGradeDraft.
     expect(GRADER_SERVER).toContain("rarityCode: c.rarityCode");
     expect(GRADER_SERVER).toContain("finishVariant: c.finishVariant");
     expect(GRADER_SERVER).toContain("promoType: c.promoType");
-    expect(GRADER_SERVER).toMatch(/rarity_code\s*=\s*\$\{pick\(body\.rarity_code, cert\.rarityCode\)\}/);
-    expect(GRADER_SERVER).toMatch(/finish_variant\s*=\s*\$\{pick\(body\.finish_variant, cert\.finishVariant\)\}/);
-    expect(GRADER_SERVER).toMatch(/promo_type\s*=\s*\$\{pick\(body\.promo_type, cert\.promoType\)\}/);
+    expect(GRADER_SERVER).toContain("validateGradeDraftIdentityAndVariant");
+    expect(GRADER_SERVER).toMatch(/rarity_code\s*=\s*\$\{nextRarityCode\}/);
+    expect(GRADER_SERVER).toMatch(/finish_variant\s*=\s*\$\{nextFinishVariant\}/);
+    expect(GRADER_SERVER).toMatch(/promo_type\s*=\s*\$\{nextPromoType\}/);
     // GradingPanel sends them in its save payload.
     expect(PANEL).toContain("out.rarity_code = rarityCode.trim()");
     // Rarity hydrates AND persists for BOTH graderMode and adminReview (so

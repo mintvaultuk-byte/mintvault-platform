@@ -268,6 +268,17 @@ export function RarityVariantPicker({
     note: "",
   });
   const [addError, setAddError] = useState<string | null>(null);
+  const syncingFromValueRef = useRef(false);
+
+  useEffect(() => {
+    syncingFromValueRef.current = true;
+    setLanguage(languageByValueOrLabel(value?.language)?.value ?? "en");
+    setEra((value?.era as PokemonEra) ?? "");
+    setRarity(value?.rarity ?? null);
+    setFinish(value?.finish ?? null);
+    setPromoOrSubset(value?.promo ?? value?.subset ?? null);
+    setSelectedCustomId(null);
+  }, [value?.language, value?.era, value?.rarity, value?.finish, value?.promo, value?.subset]);
 
   // Region/era-aware base set; "Show all compatible" drops the era filter so
   // incomplete set data never permanently hides an option (Phase 8).
@@ -329,6 +340,10 @@ export function RarityVariantPicker({
     if (!emitMountedRef.current) {
       emitMountedRef.current = true;
       return; // skip the mount echo — the value already reflects the seed
+    }
+    if (syncingFromValueRef.current) {
+      syncingFromValueRef.current = false;
+      return;
     }
     onChangeRef.current?.(structured);
     // Deps are the user-selection primitives, NOT `structured`/`cat`: when a

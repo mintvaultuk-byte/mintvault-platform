@@ -108,6 +108,7 @@ import {
 import { mvgsTierName } from "@shared/mvgs-scoring";
 import type { PublicCertificate, ServiceTierRecord, CertificateRecord } from "@shared/schema";
 import { isBlackLabel } from "@shared/pristine";
+import { languageLabel, normalizePokemonLanguage } from "@shared/pokemon-rarity-catalogue";
 import { certIsPristine } from "./lib/cert-pristine";
 import { enqueueScanJob } from "./lib/scan-job-queue";
 import { isServiceValidForCarrier } from "@shared/carriers";
@@ -1704,12 +1705,19 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
       // Scalars: an explicit "" or null is a legitimate clear and is preserved
       // as-is; only genuine absence skips the write.
       const scalarOrNull = (v: unknown) => (v === null || v === undefined || String(v).trim() === "" ? null : v);
+      if (submitted("language") && scalarOrNull(req.body.language) != null && !normalizePokemonLanguage(String(req.body.language))) {
+        return res.status(400).json({ error: `Unsupported language: ${req.body.language}` });
+      }
       putGuarded("cardGame");
       putGuarded("setName");
       putGuarded("cardName");
       putGuarded("cardNumber");
       putGuarded("year");
-      putGuarded("language", scalarOrNull);
+      putGuarded("language", (v) => {
+        const raw = scalarOrNull(v);
+        if (raw == null) return null;
+        return languageLabel(String(raw));
+      });
       putGuarded("rarity", scalarOrNull);
       putGuarded("variant", scalarOrNull);
       putGuarded("collectionCode", scalarOrNull);
@@ -2048,6 +2056,9 @@ export async function handleCertificateCreate(req: any, res: any): Promise<void>
           !isNonNum && isBlackLabel({ centering: -1, corners: -1, edges: -1, surface: -1 }, certGrade)
             ? "black"
             : "Standard";
+        if (req.body.language && !normalizePokemonLanguage(req.body.language)) {
+          return res.status(400).json({ error: `Unsupported language: ${req.body.language}` });
+        }
 
         const data = {
           labelType: computedLabelType,
@@ -2065,7 +2076,7 @@ export async function handleCertificateCreate(req: any, res: any): Promise<void>
           collection: null,
           collectionCode: req.body.collectionCode || null,
           collectionOther: req.body.collectionCode === "OTHER" ? req.body.collectionOther?.trim() || null : null,
-          language: req.body.language || "English",
+          language: languageLabel(req.body.language || "English"),
           year: req.body.year,
           notes: req.body.notes || null,
           gradeOverall: isNonNum ? null : req.body.gradeOverall,
