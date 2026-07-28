@@ -116,6 +116,8 @@ import {
   gradingFieldChanges,
   gradingFieldContractError,
   assertServerMetadataCommitKeys,
+  canonicalGradingField,
+  NUMERIC_GRADING_FIELDS,
 } from "@shared/certificate-field-ownership";
 import {
   resolveEditConflicts,
@@ -167,6 +169,12 @@ import fs from "fs";
 import crypto from "crypto";
 import { generatePdfToken, verifyPdfToken } from "./lib/pdf-token";
 import { uploadToR2, getR2SignedUrl, deleteFromR2, headR2, r2KeyForImage, r2KeyForLabel } from "./r2";
+import {
+  persistImageUploadAudited,
+  IMAGE_UPLOAD_JSONB_COLUMNS,
+  IMAGE_VARIANTS_AUDIT_ACTION,
+  COLUMN_TO_CERT_KEY,
+} from "./lib/certificate-image-persistence";
 import { generateClaimInsertPNG, generateClaimInsertPDF, generateClaimInsertSheet } from "./claim-insert";
 import { db } from "./db";
 import { sql, inArray } from "drizzle-orm";
@@ -1421,6 +1429,7 @@ async function createEbayPriceCacheTable() {
  * Behaviour is unchanged by the extraction: `registerRoutes` mounts this exact
  * function behind the same `requireAdmin` + multer chain it always had.
  */
+
 export async function handleCertificateMetadataUpdate(req: any, res: any): Promise<void> {
     try {
       const id = parseInt(String(req.params.id), 10);
@@ -2248,17 +2257,276 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
       // certs got changed after publication.
       const wasApproved = (cert as any).gradeApprovedAt != null;
 
-      await db.execute(sql`
+      // ── M-3 · THE GRADING WRITE AND ITS AUDIT COMMIT TOGETHER OR NOT AT ALL ─
+      //
+      // DIAGNOSIS (hostile review of PR #260, finding M-3). The UPDATE below ran
+      // on its own connection and committed immediately. The audit INSERT then
+      // ran afterwards inside `try { … } catch { console.warn(…) }`, so ANY
+      // audit failure — a bad connection, a constraint, a jsonb error, a pool
+      // timeout — was swallowed and the route still answered `{ ok: true }`. A
+      // grade could therefore change on a customer's certificate with NO durable
+      // record of who changed it or from what, and the operator would be told it
+      // saved. For a grading platform whose product is the trustworthiness of
+      // the record, an unauditable grade change is the failure that matters.
+      //
+      // The diff is computed BEFORE the transaction (it compares the payload
+      // against the row read at the top of this handler), so the transaction
+      // contains only the two durable writes and nothing that can fail slowly.
+      //
+      // ENTITY IDENTITY: this route recorded `entity_id` as the NUMERIC row id
+      // while the metadata route records the canonical `certId` ("MV1"), so an
+      // operator querying the trail by certificate ID silently missed every
+      // grading event. Both now write the canonical certId, with the numeric id
+      // retained inside `details` for continuity with historical rows.
+      // ── M-1 (hostile review of PR #262) · EFFECTIVE WRITTEN VALUES ──────────
+      //
+      // Eight MVGS v2 defect-input columns are written by the UPDATE below but
+      // were absent from the audit field map, so — once PR #262 stopped writing
+      // an audit row for an empty change set — a save that touched ONLY these
+      // produced NO audit row at all. They are grading EVIDENCE (they feed the
+      // engine), so that was a real coverage hole. `buildPayload()` sends all
+      // eight on every save.
+      //
+      // They cannot simply be added to the map with their RAW payload values:
+      // unlike the other mapped fields, the SQL for these CLAMPS, VALIDATES or
+      // type-gates what it writes. `eye_appeal_modifier: 99` writes 2;
+      // `wrinkle_severity: "junk"` writes nothing at all. Auditing the payload
+      // would therefore claim changes the database never made — trading a
+      // missing row for a lying one.
+      //
+      // So the rule is resolved ONCE here, and the SAME resolved value is used
+      // by both the UPDATE and the audit diff. `undefined` means "this request
+      // does not write the column" (preserve stored), and such a field is never
+      // reported as changed.
+      const effDarkBorderFront = typeof b.dark_border_front === "boolean" ? b.dark_border_front : undefined;
+      const effDarkBorderBack = typeof b.dark_border_back === "boolean" ? b.dark_border_back : undefined;
+      const effEyeAppealModifier = (() => {
+        // Clamp ±2 server-side; ignore non-finite payloads.
+        const n = Number(b.eye_appeal_modifier);
+        if (!Number.isFinite(n)) return undefined;
+        return Math.max(-2, Math.min(2, Math.trunc(n)));
+      })();
+      const effWhiteningLines = Array.isArray((b as any).whitening_lines)
+        ? ((b as any).whitening_lines as unknown[])
+        : undefined;
+      const effCreaseLines = Array.isArray((b as any).crease_lines)
+        ? ((b as any).crease_lines as unknown[])
+        : undefined;
+      const effCreaseSpanPct = (() => {
+        const v = (b as any).crease_span_pct;
+        if (v === null) return null;
+        if (typeof v === "number" && Number.isFinite(v)) return Math.max(0, Math.min(100, v));
+        return undefined;
+      })();
+      const effWrinkleSeverity = (() => {
+        const v = (b as any).wrinkle_severity;
+        if (v === null) return null;
+        if (v === "tiny_back" || v === "longer_back" || v === "small_front" || v === "multiple_front") return v;
+        return undefined;
+      })();
+      const effTearSeverity = (() => {
+        const v = (b as any).tear_severity;
+        if (v === null) return null;
+        if (v === "minor" || v === "significant" || v === "major") return v;
+        return undefined;
+      })();
+      // ── H-3 · THE NO/AA NULL-OUT PATH MUST BE AUDITED AT WHAT POSTGRES STORES
+      //
+      // When `isNonNum` the SET clause writes `grade` and all four sub-grade
+      // columns as literal NULL, IGNORING the payload. Auditing the raw payload
+      // therefore recorded values the database never held: on an
+      // authentication-only certificate the workstation posts
+      // `overall_grade: "NO"` on every autosave, so the trail filled with rows
+      // claiming `overall_grade: null -> "NO"` while the column stayed NULL, and
+      // `{overall_grade:"NO", grade_centering:9}` was logged as
+      // `grade_centering -> 9` while the column was NULLed.
+      //
+      // These five now resolve the same way the eight MVGS inputs already do:
+      // one resolved value, consumed by BOTH the UPDATE and the audit diff.
+      const effOverallGrade = isNonNum ? null : gradeNum != null ? gradeNum : undefined;
+      const effGradeCentering = isNonNum ? null : (num(b.grade_centering) ?? undefined);
+      const effGradeCorners = isNonNum ? null : (num(b.grade_corners) ?? undefined);
+      const effGradeEdges = isNonNum ? null : (num(b.grade_edges) ?? undefined);
+      const effGradeSurface = isNonNum ? null : (num(b.grade_surface) ?? undefined);
+      // M-2r · `grade_type` is written UNCONDITIONALLY (`grade_type = ${nextGradeType}`),
+      // so it is never "not written" — it is always the resolved kind. It is also
+      // the one column the client never names in its payload, which is why the
+      // diff below keys effective fields off "did the UPDATE write it" rather
+      // than "is the key in the body". A numeric <-> NO/AA conversion is the
+      // highest-consequence change this route makes and went entirely unnamed.
+      const effGradeType = nextGradeType;
+
+      /** Payload key → the value the UPDATE will actually commit (undefined = not written). */
+      const EFFECTIVE_WRITTEN: Record<string, unknown> = {
+        dark_border_front: effDarkBorderFront,
+        dark_border_back: effDarkBorderBack,
+        eye_appeal_modifier: effEyeAppealModifier,
+        whitening_lines: effWhiteningLines,
+        crease_lines: effCreaseLines,
+        crease_span_pct: effCreaseSpanPct,
+        wrinkle_severity: effWrinkleSeverity,
+        tear_severity: effTearSeverity,
+        overall_grade: effOverallGrade,
+        grade_centering: effGradeCentering,
+        grade_corners: effGradeCorners,
+        grade_edges: effGradeEdges,
+        grade_surface: effGradeSurface,
+        grade_type: effGradeType,
+      };
+      const HAS_EFFECTIVE: ReadonlySet<string> = new Set(Object.keys(EFFECTIVE_WRITTEN));
+
+      const fieldsChanged = Object.keys(b || {});
+      const fieldMap: Array<[string, string]> = [
+        ["overall_grade", "gradeOverall"],
+        // M-2r · the resolved kind. Written unconditionally and never named by
+        // the client, so the diff loop keys effective fields off "did the UPDATE
+        // write it" rather than "is the key in the body".
+        ["grade_type", "gradeType"],
+        ["grade_centering", "gradeCentering"],
+        ["grade_corners", "gradeCorners"],
+        ["grade_edges", "gradeEdges"],
+        ["grade_surface", "gradeSurface"],
+        ["centering_front_lr", "centeringFrontLr"],
+        ["centering_front_tb", "centeringFrontTb"],
+        ["centering_back_lr", "centeringBackLr"],
+        ["centering_back_tb", "centeringBackTb"],
+        ["auth_status", "authStatus"],
+        ["auth_notes", "authNotes"],
+        ["grade_explanation", "gradeExplanation"],
+        ["private_notes", "privateNotes"],
+        ["corners", "cornerValues"],
+        ["edges", "edgeValues"],
+        ["surface", "surfaceValues"],
+        ["defects", "defects"],
+        ["ai_defect_candidates", "aiDefectCandidates"],
+        // M-1 · the eight MVGS v2 defect-input columns. Accessors are the
+        // Drizzle properties declared in shared/schema.ts, so a diff built from
+        // the selected row is real rather than fabricated (unlike authStatus,
+        // which is an undeclared column and fails closed elsewhere).
+        ["dark_border_front", "darkBorderFront"],
+        ["dark_border_back", "darkBorderBack"],
+        ["eye_appeal_modifier", "eyeAppealModifier"],
+        ["whitening_lines", "whiteningLines"],
+        ["crease_lines", "creaseLines"],
+        ["crease_span_pct", "creaseSpanPct"],
+        ["wrinkle_severity", "wrinkleSeverity"],
+        ["tear_severity", "tearSeverity"],
+      ];
+      // M-1 · structured values are compared SEMANTICALLY, not by raw string
+      // formatting. `whitening_lines` and `crease_lines` are jsonb: Postgres
+      // returns them with its own key ordering, while the workstation posts
+      // JavaScript insertion order. A plain JSON.stringify compare would then
+      // report a change on every save for objects whose keys happen to differ in
+      // order. Keys are sorted recursively; ARRAY order is preserved, because
+      // for a list of whitening lines or creases the order is part of the value.
+      const canonicalJson = (value: unknown): string => {
+        const walk = (x: unknown): unknown => {
+          if (Array.isArray(x)) return x.map(walk);
+          if (x && typeof x === "object") {
+            const src = x as Record<string, unknown>;
+            const out: Record<string, unknown> = {};
+            for (const k of Object.keys(src).sort()) out[k] = walk(src[k]);
+            return out;
+          }
+          return x;
+        };
+        return JSON.stringify(walk(value));
+      };
+      const norm = (v: unknown) => (v == null ? null : typeof v === "object" ? canonicalJson(v) : String(v));
+      // Same narrowly-scoped numeric rule the metadata route already uses: for
+      // the grading columns that are genuinely NUMERIC, Postgres returns "8.0"
+      // while the workstation posts "8", so a plain string compare recorded a
+      // FALSE change on every re-save. A debounced autosave re-sending an
+      // unchanged grade would then write an audit row per keystroke claiming the
+      // grade changed 8 -> 8. Applied ONLY when both sides are non-empty finite
+      // numbers; everything else keeps the strict comparison.
+      const NUMERIC_SET: ReadonlySet<string> = new Set(NUMERIC_GRADING_FIELDS);
+      const sameValue = (pKey: string, before: string | null, after: string | null): boolean => {
+        if (before === after) return true;
+        const canonical = canonicalGradingField(pKey);
+        if (!canonical || !NUMERIC_SET.has(canonical)) return false;
+        if (before == null || after == null || before === "" || after === "") return false;
+        const x = Number(before);
+        const y = Number(after);
+        return Number.isFinite(x) && Number.isFinite(y) && x === y;
+      };
+      const changed: Record<string, { from: unknown; to: unknown }> = {};
+      // ── H-2 · NO DIFF WITHOUT A REAL BEFORE-VALUE ────────────────────────────
+      // `auth_status`, `auth_notes` and `private_notes` are REAL database columns
+      // that this route writes, but shared/schema.ts does not declare them, so
+      // Drizzle's `.select()` never materialises them and `cert.authStatus` is
+      // `undefined` — not null, absent. `norm(undefined)` collapsed to `null`, so
+      // every save compared `null` against the value the client always sends and
+      // logged `auth_status: null -> "genuine"`.
+      //
+      // Two consequences, both proven against a real cluster: every audit row
+      // carried three fabricated field changes, and because `changed` was never
+      // empty the no-op suppression this PR added could never fire — a
+      // byte-identical re-save still wrote a row.
+      //
+      // Fail CLOSED: a field whose before-value cannot be read is not audited at
+      // all rather than audited from a fabricated one. A missing record is
+      // recoverable; a false record is not. The fields are still listed under
+      // `unauditableFields` so the omission is stated rather than silent.
+      const unauditableFields: string[] = [];
+      for (const [pKey, cKey] of fieldMap) {
+        const beforeRaw = (cert as Record<string, unknown>)[cKey];
+        // `undefined` means the column is not declared on the selected row.
+        // A declared column that is SQL NULL comes back as `null`, not undefined.
+        const beforeReadable = beforeRaw !== undefined;
+
+        let afterValue: unknown;
+        if (HAS_EFFECTIVE.has(pKey)) {
+          const eff = EFFECTIVE_WRITTEN[pKey];
+          // The UPDATE preserves the stored value for this request (payload was
+          // absent, malformed, or the wrong type). Nothing is written, so
+          // nothing may be reported as changed. Note this is keyed off what the
+          // UPDATE WRITES, not off `pKey in b` — `grade_type` is always written
+          // and is never named by the client.
+          if (eff === undefined) continue;
+          afterValue = eff;
+        } else {
+          if (!(pKey in (b || {}))) continue;
+          afterValue = (b as any)[pKey];
+        }
+
+        if (!beforeReadable) {
+          unauditableFields.push(pKey);
+          continue;
+        }
+        const before = norm(beforeRaw);
+        const after = norm(afterValue);
+        if (!sameValue(pKey, before, after)) {
+          changed[pKey] = { from: beforeRaw ?? null, to: afterValue ?? null };
+        }
+      }
+      const canonicalCertId = String((cert as { certId?: string }).certId ?? id);
+      const gradingActor = (req.session as { adminEmail?: string })?.adminEmail || "admin";
+
+      await db.transaction(async (tx) => {
+      await tx.execute(sql`
         UPDATE certificates SET
           centering_front_lr  = COALESCE(${txt(b.centering_front_lr)}, centering_front_lr),
           centering_front_tb  = COALESCE(${txt(b.centering_front_tb)}, centering_front_tb),
           centering_back_lr   = COALESCE(${txt(b.centering_back_lr)},  centering_back_lr),
           centering_back_tb   = COALESCE(${txt(b.centering_back_tb)},  centering_back_tb),
-          centering_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_centering)}::numeric, centering_score)`},
-          corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_corners)}::numeric,   corners_score)`},
-          edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_edges)}::numeric,     edges_score)`},
-          surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_surface)}::numeric,   surface_score)`},
-          grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
+          -- H-3: these five now read the SAME resolved values the audit diff
+          -- reads, so the trail can no longer report a payload value on a request
+          -- whose NULL-out discarded it. The COALESCE preserve-on-omission
+          -- mechanism is deliberately KEPT: it is the anti-erasure guard that
+          -- stops a partial autosave nulling a published grade (see
+          -- tests/approval-grade-preservation.test.ts). Nullish-coalescing to
+          -- null turns "not written" back into the COALESCE no-op, so the
+          -- emitted SQL is byte-identical to before for every input.
+          --
+          -- NOTE: never use a backtick in a comment inside this template literal.
+          -- It terminates the tagged template, silently truncating the statement
+          -- after the last placeholder rendered before it.
+          centering_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${effGradeCentering ?? null}::numeric, centering_score)`},
+          corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${effGradeCorners ?? null}::numeric,   corners_score)`},
+          edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${effGradeEdges ?? null}::numeric,     edges_score)`},
+          surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${effGradeSurface ?? null}::numeric,   surface_score)`},
+          grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${effOverallGrade ?? null}::numeric, grade)`},
           -- Preserves the stored kind when the caller did not state one (see nextGradeType
           -- above): an autosave must never convert an authentication-only record to numeric.
           grade_type          = ${nextGradeType},
@@ -2282,20 +2550,22 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
           auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
           private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
-          dark_border_front   = ${
-            typeof b.dark_border_front === "boolean" ? b.dark_border_front : sql`dark_border_front`
-          },
-          dark_border_back    = ${typeof b.dark_border_back === "boolean" ? b.dark_border_back : sql`dark_border_back`},
+          -- M-1: these expressions read the values resolved ABOVE, so the audit
+          -- diff and the write can never disagree about what this request
+          -- commits. Same rules, same clamps, same enum validation, same
+          -- preserve-on-omission — evaluated once instead of twice.
+          dark_border_front   = ${effDarkBorderFront === undefined ? sql`dark_border_front` : sql`${effDarkBorderFront}`},
+          dark_border_back    = ${effDarkBorderBack === undefined ? sql`dark_border_back` : sql`${effDarkBorderBack}`},
           dark_border         = ${
             // Legacy mirror = front OR back. PostgreSQL UPDATE evaluates RHS
             // against the OLD row, so we can't reference the new sibling
             // values directly — express the same OR via column refs and
             // payload values per-side.
             (() => {
-              const fSet = typeof b.dark_border_front === "boolean";
-              const bSet = typeof b.dark_border_back === "boolean";
-              const frontExpr = fSet ? sql`${b.dark_border_front}::boolean` : sql`dark_border_front`;
-              const backExpr = bSet ? sql`${b.dark_border_back}::boolean` : sql`dark_border_back`;
+              const fSet = effDarkBorderFront !== undefined;
+              const bSet = effDarkBorderBack !== undefined;
+              const frontExpr = fSet ? sql`${effDarkBorderFront}::boolean` : sql`dark_border_front`;
+              const backExpr = bSet ? sql`${effDarkBorderBack}::boolean` : sql`dark_border_back`;
               if (fSet || bSet) return sql`(${frontExpr} OR ${backExpr})`;
               // Neither new flag in payload — keep legacy semantics so old
               // clients still toggle the column unchanged.
@@ -2303,58 +2573,46 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
             })()
           },
           eye_appeal_modifier = ${
-            // Clamp ±2 server-side; ignore non-finite payloads.
-            (() => {
-              const n = Number(b.eye_appeal_modifier);
-              if (!Number.isFinite(n)) return sql`eye_appeal_modifier`;
-              const clamped = Math.max(-2, Math.min(2, Math.trunc(n)));
-              return sql`${clamped}`;
-            })()
+            effEyeAppealModifier === undefined ? sql`eye_appeal_modifier` : sql`${effEyeAppealModifier}`
           },
           whitening_lines     = ${
             // MVGS v2 — operator-marked whitening lines per edge. Array
             // present (incl. []) → overwrite; absent key → keep existing
             // (legacy client / non-grading payload).
-            Array.isArray((b as any).whitening_lines)
-              ? sql`${JSON.stringify((b as any).whitening_lines)}::jsonb`
-              : sql`whitening_lines`
+            effWhiteningLines === undefined ? sql`whitening_lines` : sql`${JSON.stringify(effWhiteningLines)}::jsonb`
           },
           crease_lines        = ${
             // MVGS v2.1 — multi-crease list with start/end persistence.
             // Same array-overwrite pattern as whitening_lines.
-            Array.isArray((b as any).crease_lines)
-              ? sql`${JSON.stringify((b as any).crease_lines)}::jsonb`
-              : sql`crease_lines`
+            effCreaseLines === undefined ? sql`crease_lines` : sql`${JSON.stringify(effCreaseLines)}::jsonb`
           },
           crease_span_pct     = ${
             // Numeric 0..100 or null. Explicit null clears; undefined keeps.
             // In v2.1 this is a derived mirror of max(crease_lines.spanPct)
             // on the client (sent unconditionally in buildPayload) — server
             // accepts whatever the client computes for back-compat readers.
-            (b as any).crease_span_pct === null
-              ? sql`NULL`
-              : typeof (b as any).crease_span_pct === "number" && Number.isFinite((b as any).crease_span_pct)
-                ? sql`${Math.max(0, Math.min(100, (b as any).crease_span_pct))}::numeric`
-                : sql`crease_span_pct`
+            effCreaseSpanPct === undefined
+              ? sql`crease_span_pct`
+              : effCreaseSpanPct === null
+                ? sql`NULL`
+                : sql`${effCreaseSpanPct}::numeric`
           },
           wrinkle_severity    = ${
-            // Validate against the enum to prevent payload junk reaching the
-            // DB CHECK constraint with a more useful error before the SQL fires.
-            (() => {
-              const v = (b as any).wrinkle_severity;
-              if (v === null) return sql`NULL`;
-              if (v === "tiny_back" || v === "longer_back" || v === "small_front" || v === "multiple_front") {
-                return sql`${v}`;
-              }
-              return sql`wrinkle_severity`;
-            })()
+            // Validated against the enum above, so payload junk never reaches
+            // the DB CHECK constraint.
+            effWrinkleSeverity === undefined
+              ? sql`wrinkle_severity`
+              : effWrinkleSeverity === null
+                ? sql`NULL`
+                : sql`${effWrinkleSeverity}`
           },
-          tear_severity       = ${(() => {
-            const v = (b as any).tear_severity;
-            if (v === null) return sql`NULL`;
-            if (v === "minor" || v === "significant" || v === "major") return sql`${v}`;
-            return sql`tear_severity`;
-          })()},
+          tear_severity       = ${
+            effTearSeverity === undefined
+              ? sql`tear_severity`
+              : effTearSeverity === null
+                ? sql`NULL`
+                : sql`${effTearSeverity}`
+          },
           updated_at          = NOW()
         WHERE id = ${id}
       `);
@@ -2364,60 +2622,42 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
       // semantic difference: pre-launch we want to know what % of certs
       // get edited after publication, and which fields.
       //
-      // Diff capture: compare payload values against the cert state read at
-      // the top of this handler. Only fields the payload actually carries
-      // (and that differ from the prior DB value) appear in `changed`. JSONB
-      // columns (corners/edges/surface/defects/ai_defect_candidates) are
-      // compared by JSON.stringify so a no-op re-submit doesn't pollute the
-      // log.
-      try {
-        const fieldsChanged = Object.keys(b || {});
-        // Mapping: payload key (snake_case) → cert column accessor (camelCase from Drizzle).
-        const fieldMap: Array<[string, string]> = [
-          ["overall_grade", "gradeOverall"],
-          ["grade_centering", "gradeCentering"],
-          ["grade_corners", "gradeCorners"],
-          ["grade_edges", "gradeEdges"],
-          ["grade_surface", "gradeSurface"],
-          ["centering_front_lr", "centeringFrontLr"],
-          ["centering_front_tb", "centeringFrontTb"],
-          ["centering_back_lr", "centeringBackLr"],
-          ["centering_back_tb", "centeringBackTb"],
-          ["auth_status", "authStatus"],
-          ["auth_notes", "authNotes"],
-          ["grade_explanation", "gradeExplanation"],
-          ["private_notes", "privateNotes"],
-          ["corners", "cornerValues"],
-          ["edges", "edgeValues"],
-          ["surface", "surfaceValues"],
-          ["defects", "defects"],
-          ["ai_defect_candidates", "aiDefectCandidates"],
-        ];
-        const norm = (v: unknown) => (v == null ? null : typeof v === "object" ? JSON.stringify(v) : String(v));
-        const changed: Record<string, { from: unknown; to: unknown }> = {};
-        for (const [pKey, cKey] of fieldMap) {
-          if (!(pKey in (b || {}))) continue;
-          const before = norm((cert as any)[cKey]);
-          const after = norm((b as any)[pKey]);
-          if (before !== after) {
-            changed[pKey] = { from: (cert as any)[cKey] ?? null, to: (b as any)[pKey] ?? null };
-          }
-        }
-        await db.execute(sql`
+      // M-3: this INSERT is now INSIDE the transaction and its failure is NOT
+      // caught. If it throws, the UPDATE above rolls back with it and the outer
+      // handler returns 500 — the caller is never told a grading change saved
+      // when no durable record of it exists.
+      //
+      // NO-OP: a submission that changes no mapped field writes no audit row, so
+      // the debounced auto-save cannot fill the trail with rows claiming an
+      // empty change set. The UPDATE itself still runs unconditionally, exactly
+      // as before, so COALESCE preservation semantics and `updated_at` are
+      // untouched — this changes what is AUDITED, never what is WRITTEN.
+      if (Object.keys(changed).length > 0) {
+        await tx.execute(sql`
           INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
           VALUES (
             'certificate',
-            ${String(id)},
+            ${canonicalCertId},
             ${wasApproved ? "cert_live_record_edit" : "draft_save"},
-            ${(req.session as any)?.adminEmail || "admin"},
-            ${JSON.stringify({ fields_changed: fieldsChanged, changed, was_approved: wasApproved })}::jsonb,
+            ${gradingActor},
+            ${JSON.stringify({
+              certificateId: id,
+              certId: canonicalCertId,
+              fields_changed: fieldsChanged,
+              changed,
+              changedFields: Object.keys(changed),
+              // H-2: columns this route wrote whose BEFORE value could not be
+              // read (undeclared in shared/schema.ts), so no truthful diff is
+              // possible. Stated rather than fabricated. Omitted when empty.
+              ...(unauditableFields.length > 0 ? { unauditableFields } : {}),
+              was_approved: wasApproved,
+              outcome: "committed",
+            })}::jsonb,
             NOW()
           )
         `);
-      } catch (auditErr: any) {
-        // Don't fail the save if audit insert fails — log and continue.
-        console.warn("[grade] audit_log insert failed:", auditErr.message);
       }
+      });
 
       res.json({ ok: true, wasApproved });
     } catch (error: any) {
@@ -6521,6 +6761,39 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         let frontCroppedBuf: Buffer | null = null;
         let backCroppedBuf: Buffer | null = null;
 
+        // ── M-2 · CONTENT IDENTITY FOR EVERY OBJECT THIS REQUEST WRITES ───────
+        // R2 keys here are DETERMINISTIC (`grading/{certId}/front_cropped.jpg`,
+        // `images/{certId}/front.jpg`), so a re-upload replaces the OBJECT while
+        // the stored path STRING stays the same. A path-only audit would
+        // therefore record "nothing changed" for a request that swapped a
+        // customer's card image. Every upload is recorded with the SHA-256 of the
+        // bytes actually sent, the byte count and the MIME type, so a replacement
+        // is provable even when no column value moves.
+        //
+        // `preexisting` marks a key that was ALREADY the committed value for its
+        // column before this request. It drives compensation below: an orphan
+        // from a failed transaction may be deleted, but an object that the last
+        // committed state still points at must never be.
+        type UploadedObject = {
+          key: string;
+          column: string;
+          sha256: string;
+          bytes: number;
+          contentType: string;
+          preexisting: boolean;
+        };
+        const uploadedObjects: UploadedObject[] = [];
+        const recordUpload = (key: string, column: string, buf: Buffer, contentType: string) => {
+          uploadedObjects.push({
+            key,
+            column,
+            sha256: crypto.createHash("sha256").update(buf).digest("hex"),
+            bytes: buf.length,
+            contentType,
+            preexisting: (cert as Record<string, unknown>)[COLUMN_TO_CERT_KEY[column] ?? ""] === key,
+          });
+        };
+
         async function processAngle(angle: "front" | "back" | "angled" | "closeup", buffer: Buffer) {
           const ext = "jpg";
           // 1. Save original — re-encode via sharp to strip EXIF/ICC/thumbnail
@@ -6537,6 +6810,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const origKey = `grading/${certId}/${angle}_original.${ext}`;
           await uploadToR2(origKey, reencodedOriginal, "image/jpeg");
           updates[`grading_${angle}_original`] = origKey;
+          recordUpload(origKey, `grading_${angle}_original`, reencodedOriginal, "image/jpeg");
 
           // 2. Deskew (straighten slight rotation before cropping)
           const { buffer: deskewedBuf, angle: deskewAngle } = await deskewCard(buffer);
@@ -6582,6 +6856,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const cropKey = `grading/${certId}/${angle}_cropped.${ext2}`;
           await uploadToR2(cropKey, croppedBuf, "image/jpeg");
           updates[`grading_${angle}_cropped`] = cropKey;
+          recordUpload(cropKey, `grading_${angle}_cropped`, croppedBuf, "image/jpeg");
 
           // 4. Quality check on cropped image
           const quality = await checkImageQuality(croppedBuf);
@@ -6595,11 +6870,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             const displayKey = r2KeyForImage(certId, "front", "jpg");
             updates["front_image_path"] = displayKey;
             await uploadToR2(displayKey, croppedBuf, "image/jpeg");
+            recordUpload(displayKey, "front_image_path", croppedBuf, "image/jpeg");
           } else if (angle === "back") {
             backCroppedBuf = croppedBuf;
             const displayKey = r2KeyForImage(certId, "back", "jpg");
             updates["back_image_path"] = displayKey;
             await uploadToR2(displayKey, croppedBuf, "image/jpeg");
+            recordUpload(displayKey, "back_image_path", croppedBuf, "image/jpeg");
           }
 
           // 5a. 1600px display derivative for the grading-panel viewer —
@@ -6610,6 +6887,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             const derivKey = `grading/${certId}/${angle}_display.jpg`;
             await uploadToR2(derivKey, displayDerivative, "image/jpeg");
             updates[`grading_${angle}_display`] = derivKey;
+            recordUpload(derivKey, `grading_${angle}_display`, displayDerivative, "image/jpeg");
           }
 
           // 6. Variants — fire-and-forget (don't block the response)
@@ -6622,17 +6900,44 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
                 uploadToR2(`grading/${certId}/${angle}_edgeenhanced.jpg`, edgeenhanced, "image/jpeg"),
                 uploadToR2(`grading/${certId}/${angle}_inverted.jpg`, inverted, "image/jpeg"),
               ]);
-              // Persist variant paths for front/back
+              // M-2: the background variant pass writes real certificate
+              // columns, so it goes through the SAME allowlist + transaction +
+              // audit as the foreground upload rather than a bare UPDATE. It
+              // runs after the response, so its failure cannot roll the
+              // foreground commit back — it is audited separately under its own
+              // action and logged loudly if it fails.
               if (angle === "front" || angle === "back") {
-                await db.execute(sql`
-                  UPDATE certificates SET
-                    ${angle === "front" ? sql`grading_front_greyscale` : sql`grading_back_greyscale`}     = ${`grading/${certId}/${angle}_greyscale.jpg`},
-                    ${angle === "front" ? sql`grading_front_highcontrast` : sql`grading_back_highcontrast`} = ${`grading/${certId}/${angle}_highcontrast.jpg`},
-                    ${angle === "front" ? sql`grading_front_edgeenhanced` : sql`grading_back_edgeenhanced`} = ${`grading/${certId}/${angle}_edgeenhanced.jpg`},
-                    ${angle === "front" ? sql`grading_front_inverted` : sql`grading_back_inverted`}     = ${`grading/${certId}/${angle}_inverted.jpg`},
-                    updated_at = NOW()
-                  WHERE id = ${id}
-                `);
+                const variantBufs: Array<[string, Buffer]> = [
+                  ["greyscale", greyscale],
+                  ["highcontrast", highcontrast],
+                  ["edgeenhanced", edgeenhanced],
+                  ["inverted", inverted],
+                ];
+                const variantUpdates: Record<string, string> = {};
+                const variantObjects = variantBufs.map(([name, buf]) => {
+                  const key = `grading/${certId}/${angle}_${name}.jpg`;
+                  const column = `grading_${angle}_${name}`;
+                  variantUpdates[column] = key;
+                  return {
+                    key,
+                    column,
+                    sha256: crypto.createHash("sha256").update(buf).digest("hex"),
+                    bytes: buf.length,
+                    contentType: "image/jpeg",
+                    preexisting: false,
+                  };
+                });
+                const variantResult = await persistImageUploadAudited({
+                  id,
+                  certId,
+                  updates: variantUpdates,
+                  uploadedObjects: variantObjects,
+                  actor: (req.session as { adminEmail?: string })?.adminEmail || "admin",
+                  action: IMAGE_VARIANTS_AUDIT_ACTION,
+                });
+                if (!variantResult.committed) {
+                  console.error(`[upload-images] variant persist failed for cert=${id} angle=${angle}`);
+                }
               }
             } catch (varErr) {
               console.error(`[upload-images] variant generation failed for ${angle}:`, varErr);
@@ -6648,112 +6953,49 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           }
         }
 
-        // Persist image paths and quality results
+        // ── M-2 · ONE TRANSACTION, ONE TRUTHFUL AUDIT ROW ─────────────────────
+        // The durable half lives in server/lib/certificate-image-persistence.ts
+        // so it can be proven against a real PostgreSQL cluster without running
+        // the sharp pipeline. See that module for the full diagnosis and for the
+        // explicit statement of what is and is not atomic across R2 + Postgres.
+        //
+        // This also removes a real defect in the previous code: the old
+        // colMap/CASE loop re-ran a no-op UPDATE for every non-path key (its
+        // `${col} = 'front_image_path'` comparison bound `col` as a string
+        // LITERAL, so it was always false) and the targeted block then wrote the
+        // same columns a second time — up to ~14 sequential auto-committed
+        // statements per upload, none of them audited.
         updates["image_quality_checks"] = JSON.stringify(qualityResults);
-        const setClauses = Object.entries(updates).filter(
-          ([k]) => !k.includes("_image_path") || k === "front_image_path" || k === "back_image_path"
-        );
-
-        // Build dynamic update via raw SQL per-column
-        const colMap: Record<string, string> = {
-          grading_front_original: "grading_front_original",
-          grading_front_cropped: "grading_front_cropped",
-          grading_back_original: "grading_back_original",
-          grading_back_cropped: "grading_back_cropped",
-          grading_angled_original: "grading_angled_original",
-          grading_angled_cropped: "grading_angled_cropped",
-          grading_closeup_original: "grading_closeup_original",
-          grading_closeup_cropped: "grading_closeup_cropped",
-          image_quality_checks: "image_quality_checks",
-          front_image_path: "front_image_path",
-          back_image_path: "back_image_path",
-        };
-
-        for (const [key, val] of Object.entries(updates)) {
-          const col = colMap[key];
-          if (!col) continue;
-          if (col === "image_quality_checks") {
-            await db.execute(
-              sql`UPDATE certificates SET image_quality_checks = ${val}::jsonb, updated_at = NOW() WHERE id = ${id}`
-            );
-          } else {
-            await db.execute(
-              sql`UPDATE certificates SET front_image_path = CASE WHEN ${col} = 'front_image_path' THEN ${val} ELSE front_image_path END, back_image_path = CASE WHEN ${col} = 'back_image_path' THEN ${val} ELSE back_image_path END, updated_at = NOW() WHERE id = ${id}`
-            );
-            // Use separate targeted updates to avoid conditional SQL complexity
-          }
-        }
-
-        // Targeted column updates
-        if (updates.grading_front_original)
-          await db.execute(
-            sql`UPDATE certificates SET grading_front_original = ${updates.grading_front_original}, updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_front_cropped)
-          await db.execute(
-            sql`UPDATE certificates SET grading_front_cropped  = ${updates.grading_front_cropped},  updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_back_original)
-          await db.execute(
-            sql`UPDATE certificates SET grading_back_original  = ${updates.grading_back_original},  updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_back_cropped)
-          await db.execute(
-            sql`UPDATE certificates SET grading_back_cropped   = ${updates.grading_back_cropped},   updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_front_display)
-          await db.execute(
-            sql`UPDATE certificates SET grading_front_display  = ${updates.grading_front_display},  updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_back_display)
-          await db.execute(
-            sql`UPDATE certificates SET grading_back_display   = ${updates.grading_back_display},   updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_angled_original)
-          await db.execute(
-            sql`UPDATE certificates SET grading_angled_original = ${updates.grading_angled_original}, updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_angled_cropped)
-          await db.execute(
-            sql`UPDATE certificates SET grading_angled_cropped  = ${updates.grading_angled_cropped},  updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_closeup_original)
-          await db.execute(
-            sql`UPDATE certificates SET grading_closeup_original = ${updates.grading_closeup_original}, updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.grading_closeup_cropped)
-          await db.execute(
-            sql`UPDATE certificates SET grading_closeup_cropped  = ${updates.grading_closeup_cropped},  updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.image_quality_checks)
-          await db.execute(
-            sql`UPDATE certificates SET image_quality_checks = ${updates.image_quality_checks}::jsonb, updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.front_image_path)
-          await db.execute(
-            sql`UPDATE certificates SET front_image_path = ${updates.front_image_path}, updated_at = NOW() WHERE id = ${id}`
-          );
-        if (updates.back_image_path)
-          await db.execute(
-            sql`UPDATE certificates SET back_image_path  = ${updates.back_image_path},  updated_at = NOW() WHERE id = ${id}`
-          );
-
-        // Crop forensics — records reCentre asymmetry + whether padding was extended. Read-only signal.
         if (Object.keys(cropGeometryByAngle).length > 0) {
-          const cropGeometry = {
+          updates["crop_geometry"] = JSON.stringify({
             ...cropGeometryByAngle,
             pipeline_version: "converged_v1",
             recorded_at: new Date().toISOString(),
-          };
-          await db.execute(
-            sql`UPDATE certificates SET crop_geometry = ${JSON.stringify(cropGeometry)}::jsonb, updated_at = NOW() WHERE id = ${id}`
-          );
+          });
+        }
+
+        const persistResult = await persistImageUploadAudited({
+          id,
+          certId,
+          updates,
+          uploadedObjects,
+          actor: (req.session as { adminEmail?: string })?.adminEmail || "admin",
+        });
+        if (!persistResult.committed) {
+          // Truthful failure: nothing committed, nothing audited as committed,
+          // last committed certificate state preserved.
+          return res.status(500).json({
+            error: "Image upload could not be saved",
+            committed: false,
+            orphanCleanupFailed: persistResult.orphanCleanupFailed.length || undefined,
+          });
         }
 
         // Generate signed URLs for response
         const responseUrls: Record<string, string | null> = {};
         for (const [key, val] of Object.entries(updates)) {
-          if (key === "image_quality_checks") continue;
+          // JSONB columns hold documents, not R2 keys — signing them is nonsense.
+          if (IMAGE_UPLOAD_JSONB_COLUMNS.has(key)) continue;
           try {
             responseUrls[key] = await getR2SignedUrl(val, 3600);
           } catch {

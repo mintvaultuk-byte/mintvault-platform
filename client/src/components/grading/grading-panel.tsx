@@ -26,7 +26,11 @@ import { type TcgCardPick } from "@/components/identity-tools";
 import { GradingIdentityVerification } from "@/components/grading/GradingIdentityVerification";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
 import type { StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
-import { decideGradingPersistence } from "@shared/grading-persistence-lifecycle";
+import {
+  decideGradingPersistence,
+  decideExplicitGradingSave,
+  decideGradingShortcut,
+} from "@shared/grading-persistence-lifecycle";
 import { autofillCard } from "@/lib/api";
 
 // Shared calculation imports (client-side re-implementations)
@@ -145,6 +149,19 @@ interface Props {
    * its workflow stage, injected into the workstation slot) — both do.
    */
   active: boolean;
+  /**
+   * M-2 · is the REVIEW stage on screen? `active` above means the GRADE stage.
+   *
+   * Approve/Publish lives on Review (the stage gate hides `footer-actions` on
+   * Grade and shows it on Review), so the Ctrl+Enter approval shortcut belongs
+   * to Review, not to Grade. Wired from the same stage state that drives
+   * `active` at each mount site — GradingWorkstation's own `stage`, and
+   * CertificateForm's `wfStage` injected into the workstation slot.
+   *
+   * Optional, defaulting to FALSE: a mount site that does not state it loses the
+   * shortcut rather than gaining one it never authorised.
+   */
+  approvalStageActive?: boolean;
   certIdStr?: string;
   cardName: string;
   cardSet: string;
@@ -285,6 +302,7 @@ function surfaceGradeColor(g: number): string {
 export default function GradingPanel({
   certId,
   active,
+  approvalStageActive = false,
   certIdStr,
   cardName,
   cardSet,
@@ -650,6 +668,30 @@ export default function GradingPanel({
   const [approved, setApproved] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // ── H-1 · A PENDING APPROVAL CONFIRMATION MUST NEVER OUTLIVE ITS CONTEXT ───
+  //
+  // The panel is mounted HIDDEN-not-unmounted, so `showConfirm` is ordinary
+  // React state that survives a stage switch. If the dialog were ever opened
+  // while the approving stage was off screen — or if the operator opened it and
+  // then navigated away — it stayed `true` behind a `display:none` subtree and
+  // reappeared, unbidden, the next time the panel became visible: an
+  // "Approve & Publish" confirmation nobody asked for, sitting over an
+  // irreversible action.
+  //
+  // Two cheap, explicit invariants close that:
+  //   1. the moment this panel is no longer the approving surface, any pending
+  //      confirmation is dropped;
+  //   2. a certificate switch drops it too, so a dialog opened for card A can
+  //      never be confirmed against card B.
+  // Unmount needs no handler — `showConfirm` is component state, and the panel
+  // is remounted per card (`key={apiBase:certId}`), so it dies with the mount.
+  useEffect(() => {
+    if (!approvalStageActive) setShowConfirm(false);
+  }, [approvalStageActive]);
+  useEffect(() => {
+    setShowConfirm(false);
+  }, [certId]);
+
   // Post-approval edit-mode gate. Pre-approval is unchanged (auto-save still
   // runs as a draft mechanism). Post-approval, edits to the live record
   // require explicit Save — see saveEditedGrade() and cancelEdit() below.
@@ -752,45 +794,133 @@ export default function GradingPanel({
   // typing bypassed the card-tool + defect-marking pipeline. Grading is now
   // 100% MVGS — the card tool (centering) and defect pins drive every sub-grade.
 
-  // Keyboard shortcuts
+  // ── M-1 · KEYBOARD SHORTCUTS MUST OBEY THE SAME LIFECYCLE AS AUTO-SAVE ─────
+  //
+  // DIAGNOSIS (hostile review of PR #260, finding M-1). This listener is bound
+  // to `document` and registered ONCE with an empty dependency array, so it
+  // stayed live for the panel's whole mount — including while the panel was
+  // HIDDEN behind Card Details or Review (the stage gate hides, it does not
+  // unmount). Ctrl+S therefore called `saveDraft()` from an off-screen panel and
+  // issued an authorised PUT to the grading route carrying `overall_grade`. If
+  // another surface had written a newer grade in the meantime, that keystroke
+  // reverted it — MV900007's failure class reached by keyboard instead of by
+  // debounce. Its only guard was `gradingWorkflowLocked`, which says the GET is
+  // not in flight; it does NOT say the panel is visible, nor that the hydrated
+  // payload belongs to the certificate now mounted.
+  //
+  // A SECOND, INDEPENDENT BUG in the same handler: because the dependency array
+  // is empty, `onKey` closed over the FIRST render's `saveDraft`,
+  // `deionizationComplete` and `cropGateBlockToast`. The Ctrl+Enter approval
+  // shortcut was therefore reading a stale deionization checkbox and a stale
+  // crop gate — it could open the approval dialog against conditions that no
+  // longer held.
+  //
+  // FIX. The listener registration stays exactly as it is (empty deps → exactly
+  // ONE document listener for the mount lifetime, no accumulation, cleaned up on
+  // unmount). Everything it reads now comes from a ref refreshed after every
+  // render, so there are no stale closures, and the persist decision comes from
+  // the SHARED fail-closed contract rather than a second weaker set of checks.
+  const shortcutStateRef = useRef({
+    active,
+    approvalStageActive,
+    certId,
+    hydratedForCertId: null as number | null,
+    workflowLocked: gradingWorkflowLocked,
+    gradeApprovedAt: gradeApprovedAt as unknown,
+    deionizationComplete,
+    saveDraft: (() => {}) as () => void,
+    cropGateBlockToast: (() => null) as () => { title: string; description?: string } | null,
+  });
+  // No dependency array: re-mirrored after EVERY render, so a keystroke always
+  // sees the current stage, the current certificate and the current callbacks.
+  useEffect(() => {
+    shortcutStateRef.current = {
+      active,
+      approvalStageActive,
+      certId,
+      hydratedForCertId: gradingHydratedForRef.current,
+      workflowLocked: gradingWorkflowLocked,
+      gradeApprovedAt,
+      deionizationComplete,
+      saveDraft,
+      cropGateBlockToast,
+    };
+  });
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      const tag = (e.target as HTMLElement).tagName;
-      if (["INPUT", "SELECT", "TEXTAREA"].includes(tag)) return;
-      if (e.ctrlKey && e.key === "s") {
-        e.preventDefault();
-        if (gradingWorkflowLockedRef.current) {
-          toast({
-            title: gradingErrorRef.current ? "Grading workflow unavailable" : "Checking approval state",
-            description: "Wait for this card's workflow data before saving changes.",
-            variant: gradingErrorRef.current ? "destructive" : undefined,
-          });
-          return;
+      // Cheap pre-filter so an ordinary keystroke does no work at all. The pure
+      // function below re-checks this as step 1 and remains authoritative; this
+      // only avoids evaluating the crop gate on every key the operator types.
+      if (!e.ctrlKey || (e.key !== "s" && e.key !== "Enter")) return;
+
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const s = shortcutStateRef.current;
+      const cropBlock = s.cropGateBlockToast();
+
+      // The decision itself is the shared pure function; this handler only
+      // EXECUTES what it is told (same split as the auto-save effect).
+      const outcome = decideGradingShortcut(
+        {
+          key: e.key,
+          ctrlKey: e.ctrlKey,
+          targetTag: tag ?? null,
+          targetIsContentEditable: target?.isContentEditable ?? false,
+        },
+        {
+          active: s.active,
+          approvalStageActive: s.approvalStageActive,
+          certId: s.certId,
+          hydratedForCertId: s.hydratedForCertId,
+          workflowLocked: s.workflowLocked,
+          gradeApprovedAt: s.gradeApprovedAt,
+          // Not consulted for an explicit save — the settle run exists only to
+          // swallow the GET's own echo, which a deliberate keystroke is not.
+          settledAfterHydration: true,
+          deionizationComplete: s.deionizationComplete,
+          cropGateBlocked: cropBlock != null,
         }
-        saveDraft();
-      } else if (e.ctrlKey && e.key === "Enter") {
-        e.preventDefault();
-        if (gradingWorkflowLockedRef.current) {
-          toast({
-            title: gradingErrorRef.current ? "Grading workflow unavailable" : "Checking approval state",
-            description: "Wait for this card's workflow data before submitting changes.",
-            variant: gradingErrorRef.current ? "destructive" : undefined,
-          });
-          return;
-        }
-        // Pre-grade checklist gate — Ctrl+Enter shortcut must respect the
-        // deionization checkbox the same way the Approve button does.
-        if (!deionizationComplete) {
-          toast({ title: "Confirm deionization first", description: "Tick 'Deionization complete' before approving." });
-          return;
-        }
-        const cropBlock = cropGateBlockToast();
-        if (cropBlock) {
-          toast(cropBlock);
-          return;
-        }
-        setShowConfirm(true);
+      );
+
+      if (outcome.action === "ignore") return;
+      e.preventDefault();
+
+      if (outcome.action === "blocked") {
+        toast(
+          outcome.reason === "workflow-locked"
+            ? {
+                title: gradingErrorRef.current ? "Grading workflow unavailable" : "Checking approval state",
+                description: "Wait for this card's workflow data before saving changes.",
+                variant: gradingErrorRef.current ? ("destructive" as const) : undefined,
+              }
+            : outcome.reason === "approved"
+              ? {
+                  title: "Certificate is published",
+                  description: "Use Correction Mode to edit a live record — Ctrl+S cannot change a published grade.",
+                }
+              : {
+                  title: "Grading data not ready",
+                  description: "This card's grading data is still loading. Try again in a moment.",
+                }
+        );
+        return;
       }
+
+      if (outcome.action === "blocked-checklist") {
+        toast(
+          outcome.reason === "deionization"
+            ? { title: "Confirm deionization first", description: "Tick 'Deionization complete' before approving." }
+            : (cropBlock ?? { title: "Cropping incomplete" })
+        );
+        return;
+      }
+
+      if (outcome.action === "save-draft") {
+        s.saveDraft();
+        return;
+      }
+      setShowConfirm(true);
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
@@ -955,6 +1085,10 @@ export default function GradingPanel({
    *  equal the current certId the panel's state is UI defaults, not grading
    *  evidence, and nothing may be persisted (PR A). */
   const gradingHydratedForRef = useRef<number | null>(null);
+  /** M-1: one explicit draft save in flight at a time (repeated Ctrl+S). */
+  const saveDraftInFlightRef = useRef(false);
+  /** M-2: one approval in flight at a time (repeated Ctrl+Enter / fast clicks). */
+  const approveInFlightRef = useRef(false);
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedOnceRef = useRef(false);
 
@@ -1885,17 +2019,48 @@ export default function GradingPanel({
   }
 
   async function saveDraft() {
-    if (gradingWorkflowLocked) {
-      toast({
-        title: "Workflow locked",
-        description: gradingWorkflowStatusCopy,
-        variant: gradingError ? "destructive" : undefined,
-      });
+    // ── M-1 · THE WRITE ITSELF IS GATED, not just its callers ────────────────
+    // The keyboard handler above already refuses when the panel is inactive or
+    // unhydrated, but the guard belongs on the function that actually issues the
+    // PUT: any future caller (a new button, a queue action, a retry) then
+    // inherits the same fail-closed contract instead of re-deriving a weaker
+    // one. Same shared decision as the debounced auto-save.
+    const gate = decideExplicitGradingSave({
+      active,
+      certId,
+      hydratedForCertId: gradingHydratedForRef.current,
+      workflowLocked: gradingWorkflowLocked,
+      gradeApprovedAt,
+      settledAfterHydration: true,
+    });
+    if (!gate.allow) {
+      if (gate.reason === "workflow-locked") {
+        toast({
+          title: "Workflow locked",
+          description: gradingWorkflowStatusCopy,
+          variant: gradingError ? "destructive" : undefined,
+        });
+      } else if (gate.reason === "approved") {
+        toast({
+          title: "Certificate is published",
+          description: "Use Correction Mode to edit a live record.",
+        });
+      } else if (gate.reason !== "inactive") {
+        // "inactive" is silent by design — an off-screen panel must not toast.
+        toast({ title: "Grading data not ready", description: "This card's grading data is still loading." });
+      }
       return;
     }
+    // Double-submission guard: a repeated Ctrl+S while a save is in flight must
+    // not stack a second PUT carrying the same payload.
+    if (saveDraftInFlightRef.current) return;
+    // Pin the certificate this save was authorised for, so a card switch that
+    // lands mid-flight cannot let the response be attributed to the new record.
+    const savingCertId = certId;
+    saveDraftInFlightRef.current = true;
     setSaving(true);
     try {
-      const res = await fetch(`${apiBase}/certificates/${certId}/grade`, {
+      const res = await fetch(`${apiBase}/certificates/${savingCertId}/grade`, {
         method: "PUT",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1905,10 +2070,11 @@ export default function GradingPanel({
       if (!res.ok) throw new Error(data.error || "Save failed");
       toast({ title: "Draft saved" });
       queryClient.invalidateQueries({ queryKey: ["/api/admin/certificates"] });
-      queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${certId}/grading`] });
+      queryClient.invalidateQueries({ queryKey: [`${apiBase}/certificates/${savingCertId}/grading`] });
     } catch (e: any) {
       toast({ title: "Save failed", description: e.message, variant: "destructive" });
     } finally {
+      saveDraftInFlightRef.current = false;
       setSaving(false);
     }
   }
@@ -2053,6 +2219,14 @@ export default function GradingPanel({
       toast({ ...block, variant: "destructive" });
       return;
     }
+    // M-2 · double-submission guard, mirroring saveDraft's. The confirm dialog's
+    // button is already `disabled={approving || ...}`, but that is React STATE:
+    // it only stops a second click once the re-render has landed. A ref flips
+    // synchronously, so two approvals can never be in flight at once no matter
+    // how the action was reached (dialog button, or a repeated Ctrl+Enter that
+    // re-opened it). Released in the same `finally` as `setApproving(false)`.
+    if (approveInFlightRef.current) return;
+    approveInFlightRef.current = true;
     setApproving(true);
     try {
       // v413: flush any pending debounced auto-save before approving so the
@@ -2148,6 +2322,7 @@ export default function GradingPanel({
     } catch (e: any) {
       toast({ title: "Approve failed", description: e.message, variant: "destructive" });
     } finally {
+      approveInFlightRef.current = false;
       setApproving(false);
     }
   }

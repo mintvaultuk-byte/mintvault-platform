@@ -74,7 +74,7 @@ const SAMPLE_CARD_IMAGE =
        <text x="367" y="70" text-anchor="middle" font-family="sans-serif" font-size="34" fill="#D4AF37">SAMPLE CARD</text>
        <text x="367" y="640" text-anchor="middle" font-family="sans-serif" font-size="30" fill="#cfcfd8">Charizard · Base Set 4/102</text>
        <text x="367" y="700" text-anchor="middle" font-family="sans-serif" font-size="22" fill="#8b8b96">dev harness placeholder — not a real scan</text>
-     </svg>`,
+     </svg>`
   );
 
 /** The representative payload for GET /api/admin/certificates/:id/grading. */
@@ -215,6 +215,7 @@ export default function DevCardDetailsHarness() {
             /* PR A · fail-closed initial lifecycle; CertificateForm injects the
                real stage-derived value into this slot (see admin-dashboard). */
             active={false}
+            approvalStageActive={false}
             certId={1}
             certIdStr="MV-0000000001"
             cardName={SAMPLE.cardName || ""}

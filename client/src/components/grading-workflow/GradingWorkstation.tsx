@@ -32,6 +32,8 @@ export type GradingWorkstationMode = "super-admin" | "admin" | "admin-review" | 
 
 /** 3-stage flow: 0 = Card Details, 1 = Grade, 2 = Review. */
 const GRADE_STAGE = 1;
+/** M-2 · Approve/Publish lives on Review, so the Ctrl+Enter shortcut does too. */
+const REVIEW_STAGE = 2;
 
 type GradingPanelProps = React.ComponentProps<typeof GradingPanel>;
 
@@ -47,9 +49,15 @@ type GradingPanelProps = React.ComponentProps<typeof GradingPanel>;
  * from its own state and passes it explicitly to GradingPanel, so all three
  * standalone surfaces are covered by construction rather than by remembering.
  */
+// MUST stay multi-line. Collapsed onto one line, `Omit<` and `GradingPanelProps`
+// become adjacent and form the JSX open-tag literal for the grading panel. The
+// protected architecture suite locates the single real render site by the FIRST
+// occurrence of that literal (it asserts the identity-editor slot comes above
+// it), so a one-line form silently breaks that check. Hence prettier-ignore.
+// prettier-ignore
 type Props = Omit<
   GradingPanelProps,
-  "active"
+  "active" | "approvalStageActive"
 > & {
   mode: GradingWorkstationMode;
   /** Optional queue position for the header strip (e.g. Staff "3 / 40"). */
@@ -59,7 +67,6 @@ type Props = Omit<
    *  forced on so the card sits left / editor right. */
   identityEditor?: ReactNode;
 };
-
 
 export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps }: Props) {
   const apiBase = panelProps.apiBase ?? "/api/admin";
@@ -129,7 +136,16 @@ export function GradingWorkstation({ mode, queue, identityEditor, ...panelProps 
               Card Details / Review and persists UI defaults as grading data.
               Derived from this adapter's own stage, which is the only thing that
               knows; `active` is not accepted from the page for that reason. */}
-          <GradingPanel key={`${apiBase}:${certId}`} {...panelProps} active={stage === GRADE_STAGE} />
+          {/* M-2 · each shortcut is wired to the stage that OWNS it: Ctrl+S to
+              Grade (`active`), Ctrl+Enter to Review (`approvalStageActive`).
+              Both derive from THIS adapter's own stage for the same reason —
+              a page must not be able to contradict what is on screen. */}
+          <GradingPanel
+            key={`${apiBase}:${certId}`}
+            {...panelProps}
+            active={stage === GRADE_STAGE}
+            approvalStageActive={stage === REVIEW_STAGE}
+          />
         </div>
       </CanonicalGradingWorkstationShell>
     </div>

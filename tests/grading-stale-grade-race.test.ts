@@ -744,9 +744,21 @@ describe("2/12/13. a hidden or inactive Grade stage never persists", () => {
     // memo above the return, not at the render site.
     expect(FORM).toContain("workstationSlot: rawWorkstationSlot");
     expect(FORM).toContain("{workstationSlot}");
-    const memo = FORM.slice(FORM.indexOf("const workstationSlot = useMemo("), FORM.indexOf("const workstationSlot = useMemo(") + 500);
+    const memoStart = FORM.indexOf("const workstationSlot = useMemo(");
+    // Bounded to the memo's REAL end (its dependency array) rather than a magic
+    // character count: a fixed window silently loosens every time the memo grows,
+    // and would let an injection moved OUT of the memo keep passing.
+    const memoEnd = FORM.indexOf("[rawWorkstationSlot, wfStage]", memoStart);
+    expect(memoEnd, "memo dependency array must be findable").toBeGreaterThan(memoStart);
+    const memo = FORM.slice(memoStart, memoEnd);
     expect(memo).toContain("isValidElement(rawWorkstationSlot)");
     expect(memo).toContain("active: wfStage === GRADE_STAGE");
+    // H-1: the approval flag is injected the SAME way, in the same memo, so the
+    // protected render site stays literally `{workstationSlot}`. On THIS surface
+    // the approving stage is GRADE — /admin shows the whole panel, Approve
+    // included, only on Grade (the role workstation is the one that approves on
+    // Review). Both directions are pinned in tests/grading-shortcut-lifecycle.
+    expect(memo).toContain("approvalStageActive: wfStage === GRADE_STAGE");
     expect(memo).toContain(": rawWorkstationSlot"); // untouched fallback
   });
 });

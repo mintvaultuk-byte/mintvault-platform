@@ -1915,8 +1915,29 @@ export default function CertificateForm({
   const workstationSlot = useMemo(
     () =>
       isValidElement(rawWorkstationSlot)
-        ? cloneElement(rawWorkstationSlot as ReactElement<{ active?: boolean }>, {
+        ? cloneElement(rawWorkstationSlot as ReactElement<{ active?: boolean; approvalStageActive?: boolean }>, {
             active: wfStage === GRADE_STAGE,
+            // ── H-1 · APPROVAL OWNERSHIP IS PER-SURFACE, AND THIS SURFACE IS
+            //         NOT THE WORKSTATION ────────────────────────────────────
+            // On the ROLE surfaces (GradingWorkstation) the panel's own
+            // section-level gate hides the footer actions on Grade and shows
+            // them on Review, so Approve lives on REVIEW there.
+            //
+            // /admin is the opposite, and deliberately so. This form does NOT
+            // use that role gate at all — it hides the WHOLE panel on any stage
+            // other than Grade (see the Stage-3 wrapper below), so every panel
+            // section, INCLUDING the footer actions / Approve & Publish, is on
+            // screen exactly when wfStage === GRADE_STAGE. /admin's Review stage
+            // carries no approve control at all — only "Back to Grade".
+            //
+            // So the approving stage here is GRADE. A previous revision copied
+            // the workstation's REVIEW condition onto this surface, which killed
+            // Ctrl+Enter where Approve actually is and opened an invisible
+            // confirmation on a stage where the panel is display:none.
+            //
+            // Do NOT generalise these two conditions into one shared rule: they
+            // are different because the two surfaces gate the panel differently.
+            approvalStageActive: wfStage === GRADE_STAGE,
           })
         : rawWorkstationSlot,
     [rawWorkstationSlot, wfStage],

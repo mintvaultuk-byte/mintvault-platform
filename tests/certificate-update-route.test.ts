@@ -742,7 +742,11 @@ describe("PR A: legitimate grading edits work on the dedicated grade route", () 
     const save = audits.find((a: any) => a.action === "draft_save");
     expect(save, "a grading save must be audited").toBeTruthy();
     expect(save.details.changed.overall_grade.from).toBe("9.5");
-    expect(save.details.changed.overall_grade.to).toBe("8");
+    // H-3: the audit records the value the UPDATE actually committed (the
+    // resolved number), not the raw payload string it echoed before. The row
+    // itself reads "8.0" — numerically the same value.
+    expect(save.details.changed.overall_grade.to).toBe(8);
+    expect(Number(save.details.changed.overall_grade.to)).toBe(Number(after.gradeOverall));
     expect(save.details.was_approved).toBe(false);
     // ...and no metadata `update` event is fabricated for a grading write.
     expect(audits.map((a: any) => a.action)).not.toContain("update");
@@ -810,7 +814,13 @@ describe("PR A: legitimate grading edits work on the dedicated grade route", () 
     }
 
     const save = (await readAudits()).find((a: any) => a.action === "draft_save");
-    expect(save.details.changed.overall_grade.to).toBe("AA");
+    // H-3: PostgreSQL stores NULL for a non-numeric kind, so the audit says NULL.
+    // It previously echoed the payload string "AA" against a column that was
+    // NULLed — a row that did not describe the database.
+    expect(save.details.changed.overall_grade.to).toBeNull();
+    expect(save.details.changed.overall_grade.to).not.toBe("AA");
+    // M-2r: the KIND transition is what actually happened, and is now named.
+    expect(save.details.changed.grade_type).toEqual({ from: "numeric", to: "AA" });
   });
 
   it("4b. converting a PUBLISHED certificate's kind is refused and audited", async () => {
@@ -825,29 +835,36 @@ describe("PR A: legitimate grading edits work on the dedicated grade route", () 
     expect((await readAudits()).map((a: any) => a.action)).toContain("grade_kind_change_rejected");
   });
 
-  it("5. TRACKED FINDING — the grading route's audit is best-effort, NOT atomic", async () => {
-    // The metadata route commits the row change and its audit row in ONE
-    // transaction (proven above, unchanged). The dedicated grading route does
-    // not: its audit INSERT sits in its own try/catch that deliberately logs and
-    // continues ("Don't fail the save if audit insert fails"), so a grade change
-    // can commit with NO audit row.
-    //
-    // This test CHARACTERISES that real behaviour rather than asserting a
-    // guarantee the route does not provide. Making the grading write atomic means
-    // changing the protected grading route's transaction behaviour, which needs
-    // explicit owner approval and is NOT in this PR's scope. Reported as an open
-    // risk. If someone later makes it atomic, this test fails loudly — which is
-    // exactly the signal wanted.
+  it("5. M-3 (RESOLVED) — the grading route's audit is now ATOMIC with its write", async () => {
+    // SUPERSEDES the PR #260 characterisation test of the same number, which
+    // recorded the then-real behaviour: the grading route's audit INSERT sat in
+    // its own try/catch that logged and continued, so a grade change could commit
+    // with NO audit row and still answer 200. That test said explicitly: "If
+    // someone later makes it atomic, this test fails loudly — which is exactly
+    // the signal wanted." This PR makes it atomic, so the assertion is inverted
+    // to the guarantee now provided.
     const id = await certId();
+    const before = await readCert();
     await q(`ALTER TABLE audit_log ADD CONSTRAINT audit_block2 CHECK (action <> 'draft_save')`);
     try {
       const { status } = await putGrade(id, { overall_grade: "7" });
-      expect(status).toBe(200);
-      expect((await readCert()).gradeOverall, "the grade change commits without its audit row").toBe("7.0");
+      // Fail CLOSED: the caller is told the save failed …
+      expect(status).toBe(500);
+      // … and the grading mutation rolled back with its unwritable audit row.
+      expect((await readCert()).gradeOverall, "the grade must NOT commit without its audit").toBe(
+        before.gradeOverall
+      );
       expect(await readAudits()).toHaveLength(0);
     } finally {
       await q(`ALTER TABLE audit_log DROP CONSTRAINT audit_block2`);
     }
+
+    // And the same write succeeds normally once the audit can be written.
+    const ok = await putGrade(id, { overall_grade: "7" });
+    expect(ok.status).toBe(200);
+    expect((await readCert()).gradeOverall).toBe("7.0");
+    const saves = (await readAudits()).filter((a: any) => a.action === "draft_save");
+    expect(saves).toHaveLength(1);
   });
 
   it("the metadata route's own audit atomicity is UNCHANGED by this PR", async () => {
@@ -1652,5 +1669,606 @@ describe("M-3: a same-path image replacement is auditable", () => {
     expect(await readAudits()).toHaveLength(0);
     expect((await readCert()).cardName).toBe(before.cardName);
     expect(r2Calls.uploads).toHaveLength(0);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// M-3 — the grading route's write and its audit are one transaction
+//
+// The hostile review of PR #260 recorded this as an open Medium: the grading
+// UPDATE committed on its own connection, the audit INSERT ran afterwards inside
+// try/catch, and ANY audit failure was swallowed while the route still answered
+// { ok: true }. A grade could change on a customer's certificate with no durable
+// record of who changed it or from what. The entity identifier was inconsistent
+// too — the numeric row id here, the canonical certId on the metadata route — so
+// querying the trail by certificate ID missed every grading event.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("M-3: grading update and grading audit commit together", () => {
+  it("1. a real grading change commits WITH its audit row", async () => {
+    const id = await certId();
+    const { status } = await putGrade(id, { overall_grade: "8", grade_corners: "8" });
+    expect(status).toBe(200);
+    expect((await readCert()).gradeOverall).toBe("8.0");
+
+    const saves = (await readAudits()).filter((a: any) => a.action === "draft_save");
+    expect(saves).toHaveLength(1);
+    expect(saves[0].details.outcome).toBe("committed");
+    expect(saves[0].adminUser).toBeTruthy();
+    expect(saves[0].createdAt).toBeTruthy();
+  });
+
+  it("4. the audit entity id is the CANONICAL certId, matching the metadata route", async () => {
+    const id = await certId();
+    await putGrade(id, { overall_grade: "8" });
+    const save = (await readAudits()).find((a: any) => a.action === "draft_save");
+    expect(save.entityType).toBe("certificate");
+    expect(save.entityId).toBe("MV1");
+    expect(save.entityId).not.toBe(String(id));
+    // Numeric row id preserved inside details for continuity with older rows.
+    expect(save.details.certificateId).toBe(id);
+    expect(save.details.certId).toBe("MV1");
+  });
+
+  it("4b. grading and metadata events are BOTH findable by certificate id", async () => {
+    // The point of the convention: one query by certId returns the whole story.
+    const id = await certId();
+    await putGrade(id, { overall_grade: "8" });
+    expect((await put(id, { cardName: "Renamed" })).status).toBe(200);
+
+    const byCertId = (await readAudits()).filter((a: any) => a.entityId === "MV1");
+    const actions = byCertId.map((a: any) => a.action);
+    expect(actions).toContain("draft_save");
+    expect(actions).toContain("update");
+  });
+
+  it("5. old and new values and the changed-field list are accurate", async () => {
+    const id = await certId();
+    const before = await readCert();
+    await putGrade(id, { overall_grade: "8", grade_explanation: "Edge wear on the left border" });
+    const save = (await readAudits()).find((a: any) => a.action === "draft_save");
+
+    expect(new Set(save.details.changedFields)).toEqual(new Set(["overall_grade", "grade_explanation"]));
+    expect(String(save.details.changed.overall_grade.from)).toBe(String(before.gradeOverall));
+    expect(String(save.details.changed.overall_grade.to)).toBe("8");
+    expect(save.details.changed.grade_explanation.to).toBe("Edge wear on the left border");
+    expect(save.details.was_approved).toBe(false);
+  });
+
+  it("6. a genuine NO-OP grading submit writes no false change audit", async () => {
+    const id = await certId();
+    const before = await readCert();
+    // Re-submit exactly what is already stored.
+    const { status } = await putGrade(id, { overall_grade: String(before.gradeOverall) });
+    expect(status).toBe(200);
+    expect((await readAudits()).filter((a: any) => a.action === "draft_save")).toHaveLength(0);
+    expect((await readCert()).gradeOverall).toBe(before.gradeOverall);
+  });
+
+  it("6b. a repeated identical save does not accumulate duplicate audits", async () => {
+    const id = await certId();
+    await putGrade(id, { overall_grade: "8" }); // real change → 1 audit
+    await putGrade(id, { overall_grade: "8" }); // no-op → none
+    await putGrade(id, { overall_grade: "8" }); // no-op → none
+    expect((await readAudits()).filter((a: any) => a.action === "draft_save")).toHaveLength(1);
+  });
+
+  it("2/3. an unwritable audit rolls the grading change back AND fails closed", async () => {
+    const id = await certId();
+    const before = await readCert();
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT m3_block CHECK (action <> 'draft_save')`);
+    try {
+      const { status } = await putGrade(id, { overall_grade: "3", grade_corners: "3" });
+      expect(status).toBe(500);
+      const after = await readCert();
+      expect(after.gradeOverall).toBe(before.gradeOverall);
+      expect(after.gradeCorners).toBe(before.gradeCorners);
+      expect(await readAudits()).toHaveLength(0);
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT m3_block`);
+    }
+  });
+
+  it("8. an authorised live-record correction still works and is audited", async () => {
+    const id = await reseed({
+      ...STORED,
+      gradeApprovedAt: new Date(),
+      gradeApprovedBy: "admin@example.test",
+    } as any);
+    const { status } = await putGrade(id, { grade_explanation: "Corrected after re-inspection" });
+    expect(status).toBe(200);
+    const audits = await readAudits();
+    const edit = audits.find((a: any) => a.action === "cert_live_record_edit");
+    expect(edit, "an approved cert's edit is a live-record edit").toBeTruthy();
+    expect(edit.entityId).toBe("MV1");
+    expect(edit.details.was_approved).toBe(true);
+    expect(edit.details.changedFields).toEqual(["grade_explanation"]);
+  });
+
+  it("9. metadata edits are entirely unaffected by the grading transaction", async () => {
+    const id = await certId();
+    const { status } = await put(id, { cardName: "Metadata Still Fine", notes: "unchanged path" });
+    expect(status).toBe(200);
+    const after = await readCert();
+    expect(after.cardName).toBe("Metadata Still Fine");
+    const updates = (await readAudits()).filter((a: any) => a.action === "update");
+    expect(updates).toHaveLength(1);
+    expect(updates[0].entityId).toBe("MV1");
+  });
+
+  it("10. MV900007 — a stale metadata save STILL cannot revert a newer grade", async () => {
+    const id = await certId();
+    // The authorised grading route raises the grade …
+    expect((await putGrade(id, { overall_grade: "10", grade_corners: "10" })).status).toBe(200);
+    expect((await readCert()).gradeOverall).toBe("10.0");
+    // … and a stale Card Details tab still cannot take it back.
+    const stale = await put(id, { cardName: "Typo Fix", gradeOverall: "9.0" });
+    expect(stale.status).toBe(409);
+    expect(stale.json.rejectedFields).toContain("gradeOverall");
+    expect((await readCert()).gradeOverall).toBe("10.0");
+    // The clean client succeeds and changes only metadata.
+    expect((await put(id, { cardName: "Typo Fix" })).status).toBe(200);
+    const after = await readCert();
+    expect(after.cardName).toBe("Typo Fix");
+    expect(after.gradeOverall).toBe("10.0");
+  });
+
+  it("7. the grader lock still refuses an admin grading write", async () => {
+    // Pre-existing conflict protection must survive the transaction change.
+    const id = await certId();
+    const before = await readCert();
+    await q(`UPDATE certificates SET grader_status = 'assigned', graded_by = 'grader@example.test' WHERE id = ${id}`);
+    try {
+      const { status } = await putGrade(id, { overall_grade: "2" });
+      // Either the lock refuses it (409) or the lock is not engaged in this
+      // fixture; what must NEVER happen is a silent unaudited grade change.
+      if (status === 409) {
+        expect((await readCert()).gradeOverall).toBe(before.gradeOverall);
+        expect((await readAudits()).filter((a: any) => a.action === "draft_save")).toHaveLength(0);
+      } else {
+        expect(status).toBe(200);
+        expect((await readAudits()).filter((a: any) => a.action === "draft_save")).toHaveLength(1);
+      }
+    } finally {
+      await q(`UPDATE certificates SET grader_status = NULL, graded_by = NULL WHERE id = ${id}`);
+    }
+  });
+});
+
+/**
+ * M-1 (hostile review of PR #262) · the eight MVGS v2 defect-input columns.
+ *
+ * WHAT WENT WRONG
+ * PR #262 correctly stopped the grading route writing an audit row for an empty
+ * change set. But eight columns the same UPDATE writes were never in the audit
+ * field map: `whitening_lines`, `crease_lines`, `crease_span_pct`,
+ * `wrinkle_severity`, `tear_severity`, `eye_appeal_modifier`,
+ * `dark_border_front` and `dark_border_back`. The combination meant a save that
+ * touched ONLY these produced NO audit row at all — and these are not cosmetic
+ * fields, they are the operator-marked evidence the MVGS engine reads.
+ * `buildPayload()` sends all eight on every save.
+ *
+ * These tests drive the REAL route against a REAL PostgreSQL cluster through
+ * the REAL `requireAdmin` chain, and assert the audit row against the value the
+ * database actually holds afterwards — never against the payload alone. That
+ * distinction is the point: the SQL for these columns clamps, validates and
+ * type-gates what it writes, so auditing the raw payload would have replaced a
+ * missing row with a lying one.
+ */
+describe("M-1 · MVGS v2 defect inputs are audited truthfully", () => {
+  const savesOf = async () => (await readAudits()).filter((a: any) => a.action === "draft_save");
+  const onlySave = async () => {
+    const s = await savesOf();
+    expect(s, "exactly one grading audit row").toHaveLength(1);
+    return s[0];
+  };
+
+  it("a whitening-line change ALONE writes exactly one truthful audit row", async () => {
+    const id = await certId();
+    const lines = [{ edge: "top", lengthPct: 12 }];
+    const { status } = await putGrade(id, { whitening_lines: lines });
+    expect(status).toBe(200);
+
+    // The column really moved…
+    expect((await readCert()).whiteningLines).toEqual(lines);
+    // …and exactly one row says so, with the full identity contract.
+    const save = await onlySave();
+    expect(save.entityType).toBe("certificate");
+    expect(save.entityId).toBe("MV1");
+    expect(save.adminUser).toBeTruthy();
+    expect(save.createdAt).toBeTruthy();
+    expect(save.details.changedFields).toEqual(["whitening_lines"]);
+    expect(save.details.changed.whitening_lines.from).toBeNull();
+    expect(save.details.changed.whitening_lines.to).toEqual(lines);
+    expect(save.details.outcome).toBe("committed");
+  });
+
+  it("a crease-line change ALONE is audited", async () => {
+    const id = await certId();
+    const creases = [{ id: "c1", spanPct: 30, start: { x: 1, y: 2 }, end: { x: 3, y: 4 } }];
+    expect((await putGrade(id, { crease_lines: creases })).status).toBe(200);
+    expect((await readCert()).creaseLines).toEqual(creases);
+    const save = await onlySave();
+    expect(save.details.changedFields).toEqual(["crease_lines"]);
+    expect(save.details.changed.crease_lines.to).toEqual(creases);
+  });
+
+  it("a severity / modifier change ALONE is audited", async () => {
+    const id = await certId();
+    expect(
+      (await putGrade(id, { wrinkle_severity: "small_front", tear_severity: "minor", eye_appeal_modifier: -1 })).status
+    ).toBe(200);
+    const cert = await readCert();
+    expect(cert.wrinkleSeverity).toBe("small_front");
+    expect(cert.tearSeverity).toBe("minor");
+    expect(cert.eyeAppealModifier).toBe(-1);
+
+    const save = await onlySave();
+    expect(new Set(save.details.changedFields)).toEqual(
+      new Set(["wrinkle_severity", "tear_severity", "eye_appeal_modifier"])
+    );
+    expect(save.details.changed.wrinkle_severity.to).toBe("small_front");
+    expect(save.details.changed.tear_severity.to).toBe("minor");
+    expect(save.details.changed.eye_appeal_modifier.to).toBe(-1);
+  });
+
+  it("a dark-border toggle ALONE is audited", async () => {
+    const id = await certId();
+    expect((await putGrade(id, { dark_border_front: true })).status).toBe(200);
+    expect((await readCert()).darkBorderFront).toBe(true);
+    const save = await onlySave();
+    expect(save.details.changedFields).toEqual(["dark_border_front"]);
+    expect(save.details.changed.dark_border_front.to).toBe(true);
+  });
+
+  it("a crease_span_pct change ALONE is audited", async () => {
+    const id = await certId();
+    expect((await putGrade(id, { crease_span_pct: 42.5 })).status).toBe(200);
+    expect(Number((await readCert()).creaseSpanPct)).toBe(42.5);
+    const save = await onlySave();
+    expect(save.details.changedFields).toEqual(["crease_span_pct"]);
+  });
+
+  it("several defect inputs changed together produce ONE row listing all of them", async () => {
+    const id = await certId();
+    const { status } = await putGrade(id, {
+      whitening_lines: [{ edge: "left", lengthPct: 5 }],
+      crease_lines: [{ id: "c9", spanPct: 8 }],
+      wrinkle_severity: "tiny_back",
+      tear_severity: "significant",
+      eye_appeal_modifier: 2,
+      dark_border_front: true,
+      dark_border_back: true,
+      crease_span_pct: 8,
+    });
+    expect(status).toBe(200);
+    const save = await onlySave();
+    expect(new Set(save.details.changedFields)).toEqual(
+      new Set([
+        "whitening_lines",
+        "crease_lines",
+        "wrinkle_severity",
+        "tear_severity",
+        "eye_appeal_modifier",
+        "dark_border_front",
+        "dark_border_back",
+        "crease_span_pct",
+      ])
+    );
+  });
+
+  it("resubmitting semantically identical defect inputs writes NO second row", async () => {
+    const id = await certId();
+    const payload = {
+      whitening_lines: [{ edge: "top", lengthPct: 12 }],
+      wrinkle_severity: "tiny_back",
+      eye_appeal_modifier: 1,
+      dark_border_front: true,
+      crease_span_pct: 10,
+    };
+    expect((await putGrade(id, payload)).status).toBe(200);
+    expect(await savesOf()).toHaveLength(1);
+
+    // Byte-identical re-save — the debounced auto-save's normal behaviour.
+    expect((await putGrade(id, payload)).status).toBe(200);
+    expect(await savesOf(), "a no-op must not accumulate rows").toHaveLength(1);
+  });
+
+  it("jsonb KEY ORDER is not a change — structured values compare semantically", async () => {
+    const id = await certId();
+    expect((await putGrade(id, { whitening_lines: [{ edge: "top", lengthPct: 12 }] })).status).toBe(200);
+    expect(await savesOf()).toHaveLength(1);
+
+    // Same value, keys written in the opposite order. Postgres returns jsonb in
+    // its OWN ordering, so a raw-string compare would call this a change.
+    expect((await putGrade(id, { whitening_lines: [{ lengthPct: 12, edge: "top" }] })).status).toBe(200);
+    expect(await savesOf()).toHaveLength(1);
+  });
+
+  it("ARRAY order IS a change — reordering creases is real evidence movement", async () => {
+    const id = await certId();
+    const a = { id: "a", spanPct: 1 };
+    const b = { id: "b", spanPct: 2 };
+    expect((await putGrade(id, { crease_lines: [a, b] })).status).toBe(200);
+    expect(await savesOf()).toHaveLength(1);
+    expect((await putGrade(id, { crease_lines: [b, a] })).status).toBe(200);
+    expect(await savesOf()).toHaveLength(2);
+  });
+
+  it("a CLAMPED modifier audits the value actually written, not the payload", async () => {
+    // The SQL clamps ±2. Auditing the raw payload would claim `to: 99`, which
+    // the database never held — a missing row traded for a false one.
+    const id = await certId();
+    expect((await putGrade(id, { eye_appeal_modifier: 99 })).status).toBe(200);
+    expect((await readCert()).eyeAppealModifier).toBe(2);
+    const save = await onlySave();
+    expect(save.details.changed.eye_appeal_modifier.to).toBe(2);
+    expect(save.details.changed.eye_appeal_modifier.to).not.toBe(99);
+  });
+
+  it("an INVALID severity writes nothing and audits nothing", async () => {
+    const id = await certId();
+    const before = await readCert();
+    expect((await putGrade(id, { wrinkle_severity: "not-a-real-severity" })).status).toBe(200);
+    // The SQL preserves the stored value for an unrecognised enum…
+    expect((await readCert()).wrinkleSeverity).toBe(before.wrinkleSeverity ?? null);
+    // …so nothing may be reported as changed.
+    expect(await savesOf()).toHaveLength(0);
+  });
+
+  it("an unwritable audit rolls a defect-input change BACK and fails closed", async () => {
+    const id = await certId();
+    const before = await readCert();
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT m1_block CHECK (action <> 'draft_save')`);
+    try {
+      const { status } = await putGrade(id, {
+        whitening_lines: [{ edge: "bottom", lengthPct: 40 }],
+        wrinkle_severity: "multiple_front",
+        dark_border_back: true,
+      });
+      expect(status).toBe(500);
+      const after = await readCert();
+      expect(after.whiteningLines).toEqual(before.whiteningLines ?? null);
+      expect(after.wrinkleSeverity).toBe(before.wrinkleSeverity ?? null);
+      expect(after.darkBorderBack).toBe(before.darkBorderBack);
+      expect(await readAudits()).toHaveLength(0);
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT m1_block`);
+    }
+  });
+
+  it("existing numeric-equivalence handling is intact (8 vs 8.0 is still no change)", async () => {
+    const id = await certId();
+    expect((await putGrade(id, { overall_grade: "8" })).status).toBe(200);
+    expect(await savesOf()).toHaveLength(1);
+    expect((await readCert()).gradeOverall).toBe("8.0");
+    // The stored value echoes back as "8.0"; the workstation posts "8".
+    expect((await putGrade(id, { overall_grade: "8" })).status).toBe(200);
+    expect(await savesOf()).toHaveLength(1);
+  });
+});
+
+/**
+ * H-2 / H-3 / M-2r (final hostile recheck) · the grading audit must describe what
+ * PostgreSQL actually holds, for the payload the REAL client actually sends.
+ *
+ * Every earlier test in this file posted a MINIMAL payload. That is why two
+ * defects survived two hostile reviews:
+ *
+ *   H-2 — `auth_status`, `auth_notes` and `private_notes` are real columns this
+ *         route writes, but shared/schema.ts does not declare them, so Drizzle's
+ *         `.select()` never materialises them and the before-value read back as
+ *         `undefined` → `null`. `buildPayload()` sends all three on EVERY save,
+ *         so every audit row carried three fabricated changes and `changed` was
+ *         never empty — which meant PR #262's no-op suppression could never fire.
+ *
+ *   H-3 — when the resolved kind is non-numeric the SET clause writes `grade` and
+ *         all four sub-grades as literal NULL, ignoring the payload, while the
+ *         audit reported the payload. An authentication-only certificate was
+ *         therefore audited on every autosave as `overall_grade: null -> "NO"`
+ *         against a column that stayed NULL.
+ *
+ *   M-2r — `grade_type` is the highest-consequence column this route writes and
+ *          was never named in the trail.
+ *
+ * These tests use the COMPLETE buildPayload() key set and assert the audit
+ * against the row re-read from the database, never against the payload.
+ */
+describe("H-2/H-3 · the audit matches the committed row, for the REAL payload", () => {
+  const savesOf = async () =>
+    (await readAudits()).filter((a: any) => ["draft_save", "cert_live_record_edit"].includes(a.action));
+
+  /** Exactly the key set client buildPayload() always emits (admin, non-grader). */
+  const fullPayload = (over: Record<string, unknown> = {}) => ({
+    overall_grade: "9.5",
+    auth_status: "genuine",
+    auth_notes: "",
+    grade_explanation: "Sample explanation",
+    private_notes: "",
+    defects: [],
+    ai_defect_candidates: [],
+    dark_border_front: false,
+    dark_border_back: false,
+    eye_appeal_modifier: 0,
+    whitening_lines: [],
+    crease_lines: [],
+    crease_span_pct: null,
+    wrinkle_severity: null,
+    tear_severity: null,
+    ...over,
+  });
+
+  it("H-2 · a byte-identical resave of the FULL payload writes ZERO new audit rows", async () => {
+    const id = await certId();
+    expect((await putGrade(id, fullPayload())).status).toBe(200);
+    const afterFirst = (await savesOf()).length;
+    const committed = await readCert();
+
+    // Same complete payload again — a genuine no-op.
+    expect((await putGrade(id, fullPayload())).status).toBe(200);
+    expect(await savesOf(), "a no-op resave must add nothing").toHaveLength(afterFirst);
+    // …and the row really did not move.
+    expect((await readCert()).gradeOverall).toBe(committed.gradeOverall);
+  });
+
+  it("H-2 · no audit row ever claims auth_status / auth_notes / private_notes changed", async () => {
+    const id = await certId();
+    await putGrade(id, fullPayload({ overall_grade: "7" }));
+    const rows = await savesOf();
+    for (const r of rows) {
+      for (const forbidden of ["auth_status", "auth_notes", "private_notes"]) {
+        expect(r.details.changed?.[forbidden], `${forbidden} must never be audited by this route`).toBeUndefined();
+        expect(r.details.changedFields ?? []).not.toContain(forbidden);
+      }
+    }
+    // The omission is STATED, not silent.
+    expect(new Set(rows[0].details.unauditableFields)).toEqual(
+      new Set(["auth_status", "auth_notes", "private_notes"])
+    );
+  });
+
+  it("H-2 · a genuine owned grading change still audits exactly once", async () => {
+    const id = await certId();
+    await putGrade(id, fullPayload({ whitening_lines: [{ edge: "top", lengthPct: 9 }] }));
+    const rows = await savesOf();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].details.changedFields).toContain("whitening_lines");
+  });
+
+  it("H-3 · an unchanged NO save writes no audit row", async () => {
+    const id = await certId();
+    await q(`UPDATE certificates SET grade_type='NO', grade=NULL, centering_score=NULL,
+             corners_score=NULL, edges_score=NULL, surface_score=NULL WHERE id=${id}`);
+    await q(`DELETE FROM audit_log`);
+    // First save settles anything else (defects/explanation), then the real test.
+    await putGrade(id, fullPayload({ overall_grade: "NO" }));
+    await q(`DELETE FROM audit_log`);
+    expect((await putGrade(id, fullPayload({ overall_grade: "NO" }))).status).toBe(200);
+    expect(await savesOf()).toHaveLength(0);
+    const cert = await readCert();
+    expect(cert.gradeOverall).toBeNull();
+    expect(cert.gradeCentering).toBeNull();
+  });
+
+  it("H-3 · an unchanged AA save writes no audit row", async () => {
+    const id = await certId();
+    await q(`UPDATE certificates SET grade_type='AA', grade=NULL, centering_score=NULL,
+             corners_score=NULL, edges_score=NULL, surface_score=NULL WHERE id=${id}`);
+    await q(`DELETE FROM audit_log`);
+    await putGrade(id, fullPayload({ overall_grade: "AA" }));
+    await q(`DELETE FROM audit_log`);
+    expect((await putGrade(id, fullPayload({ overall_grade: "AA" }))).status).toBe(200);
+    expect(await savesOf()).toHaveLength(0);
+  });
+
+  it("H-3 · the NULL-out is audited at NULL, never at the payload string", async () => {
+    // The exact previously-lying case: a numeric cert converted to NO while the
+    // payload also carries a sub-grade the UPDATE will discard.
+    const id = await certId();
+    const before = await readCert();
+    expect(before.gradeOverall).not.toBeNull();
+    await q(`DELETE FROM audit_log`);
+
+    expect((await putGrade(id, fullPayload({ overall_grade: "NO", grade_centering: 9 }))).status).toBe(200);
+    const after = await readCert();
+    expect(after.gradeOverall, "postgres stores NULL").toBeNull();
+    expect(after.gradeCentering, "postgres stores NULL").toBeNull();
+
+    const row = (await savesOf())[0];
+    // Truthful: from the old value TO NULL — not to "NO", not to 9.
+    expect(row.details.changed.overall_grade.to).toBeNull();
+    expect(row.details.changed.overall_grade.to).not.toBe("NO");
+    if (row.details.changed.grade_centering) {
+      expect(row.details.changed.grade_centering.to).toBeNull();
+      expect(row.details.changed.grade_centering.to).not.toBe(9);
+    }
+  });
+
+  it("H-3 · no audited value differs from the value re-read from PostgreSQL", async () => {
+    const id = await certId();
+    await q(`DELETE FROM audit_log`);
+    await putGrade(
+      id,
+      fullPayload({ overall_grade: "NO", grade_centering: 9, grade_corners: 8, eye_appeal_modifier: 99 })
+    );
+    const cert: any = await readCert();
+    const row = (await savesOf())[0];
+    const accessor: Record<string, string> = {
+      overall_grade: "gradeOverall",
+      grade_centering: "gradeCentering",
+      grade_corners: "gradeCorners",
+      grade_type: "gradeType",
+      eye_appeal_modifier: "eyeAppealModifier",
+    };
+    for (const [pKey, cKey] of Object.entries(accessor)) {
+      const audited = row.details.changed?.[pKey]?.to;
+      if (audited === undefined) continue; // not reported as changed
+      const stored = cert[cKey];
+      const norm = (v: unknown) => (v == null ? null : typeof v === "object" ? JSON.stringify(v) : String(Number(v) || v));
+      expect(norm(audited), `${pKey}: audit says ${audited}, database holds ${stored}`).toBe(norm(stored));
+    }
+  });
+
+  it("M-2r · numeric → NO records the grade_type transition", async () => {
+    const id = await certId();
+    await q(`DELETE FROM audit_log`);
+    await putGrade(id, fullPayload({ overall_grade: "NO" }));
+    const row = (await savesOf())[0];
+    expect(row.details.changedFields).toContain("grade_type");
+    expect(row.details.changed.grade_type.from).toBe("numeric");
+    expect(row.details.changed.grade_type.to).toBe("NO");
+    expect((await readCert()).gradeType).toBe("NO");
+  });
+
+  it("M-2r · numeric → AA records the grade_type transition", async () => {
+    const id = await certId();
+    await q(`DELETE FROM audit_log`);
+    await putGrade(id, fullPayload({ overall_grade: "AA" }));
+    const row = (await savesOf())[0];
+    expect(row.details.changed.grade_type).toEqual({ from: "numeric", to: "AA" });
+  });
+
+  it("M-2r · NO → numeric records the grade_type transition", async () => {
+    const id = await certId();
+    await q(`UPDATE certificates SET grade_type='NO', grade=NULL WHERE id=${id}`);
+    await q(`DELETE FROM audit_log`);
+    await putGrade(id, fullPayload({ overall_grade: "8" }));
+    const row = (await savesOf())[0];
+    expect(row.details.changed.grade_type).toEqual({ from: "NO", to: "numeric" });
+    expect((await readCert()).gradeType).toBe("numeric");
+  });
+
+  it("M-2r · AA → numeric records the grade_type transition", async () => {
+    const id = await certId();
+    await q(`UPDATE certificates SET grade_type='AA', grade=NULL WHERE id=${id}`);
+    await q(`DELETE FROM audit_log`);
+    await putGrade(id, fullPayload({ overall_grade: "8" }));
+    const row = (await savesOf())[0];
+    expect(row.details.changed.grade_type).toEqual({ from: "AA", to: "numeric" });
+  });
+
+  it("M-2r · an unchanged kind produces no grade_type diff", async () => {
+    const id = await certId();
+    await putGrade(id, fullPayload());
+    await q(`DELETE FROM audit_log`);
+    await putGrade(id, fullPayload({ grade_explanation: "changed text" }));
+    const row = (await savesOf())[0];
+    expect(row.details.changedFields).toContain("grade_explanation");
+    expect(row.details.changedFields).not.toContain("grade_type");
+  });
+
+  it("H-3 · audit failure still rolls the whole mutation back", async () => {
+    const id = await certId();
+    const before = await readCert();
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT h3_block CHECK (action <> 'draft_save')`);
+    try {
+      const { status } = await putGrade(id, fullPayload({ overall_grade: "NO" }));
+      expect(status).toBe(500);
+      const after = await readCert();
+      expect(after.gradeOverall).toBe(before.gradeOverall);
+      expect(after.gradeType).toBe(before.gradeType);
+      expect(await readAudits()).toHaveLength(0);
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT h3_block`);
+    }
   });
 });
