@@ -252,6 +252,46 @@ describe("MV700 language, rarity and finish precedence", () => {
     ).toMatchObject({ nextLanguage: "Spanish", nextRarityCode: "silver_star_rare" });
   });
 
+  it("server-side validation treats an exact empty rarity target as a deliberate clear", () => {
+    const cert = { language: "Spanish", rarityCode: "holo_rare_v", finishVariant: "holo", promoType: null };
+    expect(() => validateGradeDraftIdentityAndVariant(cert, { rarity_code: "", language: "Spanish" })).toThrow(
+      /Rarity override requires explicit confirmation/,
+    );
+    expect(
+      validateGradeDraftIdentityAndVariant(cert, {
+        rarity_code: "",
+        language: "Spanish",
+        rarity_override_confirmed: true,
+        rarity_override_from: "holo_rare_v",
+        rarity_override_to: "",
+      }),
+    ).toMatchObject({ nextLanguage: "Spanish", nextRarityCode: "" });
+    expect(() =>
+      validateGradeDraftIdentityAndVariant(cert, {
+        rarity_code: "",
+        language: "Spanish",
+        rarity_override_confirmed: true,
+        rarity_override_from: "rare",
+        rarity_override_to: "",
+      }),
+    ).toThrow(/does not match this rarity transition/);
+    expect(() =>
+      validateGradeDraftIdentityAndVariant(cert, {
+        rarity_code: "",
+        language: "Spanish",
+        rarity_override_confirmed: true,
+        rarity_override_from: "holo_rare_v",
+        rarity_override_to: "silver_star_rare",
+      }),
+    ).toThrow(/does not match this rarity transition/);
+    expect(
+      validateGradeDraftIdentityAndVariant(
+        { language: "Spanish", rarityCode: "", finishVariant: "holo", promoType: null },
+        { rarity_code: "", language: "Spanish" },
+      ),
+    ).toMatchObject({ nextLanguage: "Spanish", nextRarityCode: "" });
+  });
+
   it("keeps unchanged legacy Chinese editable but requires explicit canonical Chinese choices for new writes", () => {
     expect(
       validateGradeDraftIdentityAndVariant({ language: "Chinese", rarityCode: "rare" }, { language: "Chinese", finish_variant: "holo" }),

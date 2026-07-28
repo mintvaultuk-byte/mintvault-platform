@@ -472,6 +472,74 @@ describe("MV700 identity/variant validation on the admin metadata route", () => 
     expect((await readCert()).rarityCode).toBe("holo_rare_v");
   });
 
+  it("rejects known rarity clear without an exact empty-target override", async () => {
+    const id = await reseed({ ...STORED, rarityCode: "holo_rare_v", finishVariant: "holo" });
+    const missing = await put(id, { rarityCode: "" });
+    expect(missing.status).toBe(400);
+    expect(missing.json.error).toMatch(/Rarity override requires explicit confirmation/);
+    expect((await readCert()).rarityCode).toBe("holo_rare_v");
+
+    const staleFrom = await put(id, {
+      rarityCode: "",
+      rarity_override_confirmed: "true",
+      rarity_override_from: "rare",
+      rarity_override_to: "",
+    });
+    expect(staleFrom.status).toBe(400);
+    expect(staleFrom.json.error).toMatch(/does not match this rarity transition/);
+    expect((await readCert()).rarityCode).toBe("holo_rare_v");
+
+    const mismatchedTo = await put(id, {
+      rarityCode: "",
+      rarity_override_confirmed: "true",
+      rarity_override_from: "holo_rare_v",
+      rarity_override_to: "silver_star_rare",
+    });
+    expect(mismatchedTo.status).toBe(400);
+    expect(mismatchedTo.json.error).toMatch(/does not match this rarity transition/);
+    expect((await readCert()).rarityCode).toBe("holo_rare_v");
+    expect(await readAudits()).toHaveLength(0);
+  });
+
+  it("allows exact known rarity clear and a later no-op empty clear without duplicate audit rows", async () => {
+    const id = await reseed({ ...STORED, rarityCode: "holo_rare_v", finishVariant: "holo" });
+    const clear = await put(id, {
+      rarityCode: "",
+      rarity_override_confirmed: "true",
+      rarity_override_from: "holo_rare_v",
+      rarity_override_to: "",
+    });
+    expect(clear.status).toBe(200);
+    expect((await readCert()).rarityCode).toBeNull();
+    expect((await readAudits()).filter((a: any) => a.action === "update")).toHaveLength(1);
+
+    const noop = await put(id, { rarityCode: "" });
+    expect(noop.status).toBe(200);
+    expect((await readCert()).rarityCode).toBeNull();
+    expect((await readAudits()).filter((a: any) => a.action === "update")).toHaveLength(1);
+  });
+
+  it("grading-panel draft persistence allows an exact known rarity clear", async () => {
+    const id = await reseed({ ...STORED, rarityCode: "holo_rare_v", finishVariant: "holo", gradeApprovedAt: null });
+    const { applyCertGradeDraft } = await import("../server/grader");
+    await expect(
+      applyCertGradeDraft(id, {
+        rarity_code: null,
+        finish_variant: "holo",
+        promo_type: null,
+        overall_grade: "9.5",
+        grade_centering: "9",
+        grade_corners: "10",
+        grade_edges: "9.5",
+        grade_surface: "10",
+        rarity_override_confirmed: true,
+        rarity_override_from: "holo_rare_v",
+        rarity_override_to: "",
+      }),
+    ).resolves.toBe(true);
+    expect((await readCert()).rarityCode).toBeNull();
+  });
+
   it("keeps unchanged legacy Chinese editable without fabricating a language audit row", async () => {
     const id = await reseed({ ...STORED, language: "Chinese" });
     const res = await put(id, { language: "Chinese", notes: "updated note" });

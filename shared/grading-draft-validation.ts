@@ -90,11 +90,12 @@ export function validateGradeDraftIdentityAndVariant(cert: any, body: any): {
       throw new GradeDraftValidationError("Rarity override requires explicit confirmation.");
     }
     if (decision.requiresConfirmation && overrideConfirmed) {
+      const hasOverrideTo = has(payload, "rarity_override_to");
       const overrideFrom = String(payload.rarity_override_from ?? "").trim();
       const overrideTo = String(payload.rarity_override_to ?? "").trim();
       if (
         !overrideFrom ||
-        !overrideTo ||
+        !hasOverrideTo ||
         overrideFrom !== String(cert.rarityCode ?? "").trim() ||
         overrideTo !== String(nextRarityCode ?? "").trim()
       ) {

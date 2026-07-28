@@ -433,6 +433,10 @@ export function RarityVariantPicker({
     setPromoOrSubset(value);
     emitSelection({ promoOrSubset: value });
   };
+  const pickEra = (value: PokemonEra | "") => {
+    setEra(value);
+    emitSelection({ era: value || null });
+  };
 
   function resetAddForm() {
     setAddForm({
@@ -604,28 +608,13 @@ export function RarityVariantPicker({
 
   return (
     <div className="space-y-4 rounded-2xl border border-slate-800 bg-slate-950/50 p-4" data-testid="rarity-picker">
-      {/* Language / Region / Era + search */}
+      {/* Language is parent-owned; this picker consumes it only as a catalogue filter. */}
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Language / Region</span>
-          <select
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-            data-testid="rarity-language"
-            className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
-          >
-            {cat.languages.map((l) => (
-              <option key={l.value} value={l.value}>
-                {l.label}
-              </option>
-            ))}
-          </select>
-        </label>
         <label className="flex flex-col gap-1">
           <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Set era</span>
           <select
             value={era}
-            onChange={(e) => setEra(e.target.value as PokemonEra | "")}
+            onChange={(e) => pickEra(e.target.value as PokemonEra | "")}
             data-testid="rarity-era"
             className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-slate-100"
           >

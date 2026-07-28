@@ -98,11 +98,54 @@ async function renderHarness(options: {
   });
 }
 
+async function renderEchoHarness(options: {
+  initial?: Partial<StructuredCardVariant>;
+  onChange?: (v: StructuredCardVariant) => void;
+} = {}) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  function Harness() {
+    const [value, setValue] = useState<Partial<StructuredCardVariant>>({
+      language: options.initial?.language ?? "en",
+      era: options.initial?.era ?? "swsh",
+      rarity: options.initial?.rarity ?? null,
+      finish: options.initial?.finish ?? null,
+      promo: options.initial?.promo ?? null,
+      subset: options.initial?.subset ?? null,
+    });
+    return React.createElement(
+      QueryClientProvider,
+      { client },
+      React.createElement(RarityVariantPicker, {
+        value,
+        onChange: (v: StructuredCardVariant) => {
+          options.onChange?.(v);
+          setValue(v);
+        },
+      }),
+    );
+  }
+  await act(async () => {
+    root = createRoot(container);
+    root.render(React.createElement(Harness));
+  });
+}
+
 async function click(testId: string) {
   const el = document.querySelector(`[data-testid="${testId}"]`) as HTMLElement | null;
   if (!el) throw new Error(`Missing test id ${testId}`);
   await act(async () => {
     el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  });
+}
+
+async function selectValue(testId: string, value: string) {
+  const el = document.querySelector(`[data-testid="${testId}"]`) as HTMLSelectElement | null;
+  if (!el) throw new Error(`Missing test id ${testId}`);
+  await act(async () => {
+    el.value = value;
+    el.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
   });
 }
 
@@ -164,6 +207,24 @@ describe("RarityVariantPicker DOM emissions", () => {
     await click("rarity-chip-silver_star_rare");
     expect(changes).toHaveLength(1);
     expect(changes[0]).toMatchObject({ rarity: "silver_star_rare", language: "es" });
+  });
+
+  it("first era change emits exactly once and survives a parent echo", async () => {
+    const changes: StructuredCardVariant[] = [];
+    await renderEchoHarness({ initial: { language: "en", era: "swsh" }, onChange: (v) => changes.push(v) });
+    await selectValue("rarity-era", "sv");
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ language: "en", era: "sv" });
+    expect((document.querySelector('[data-testid="rarity-era"]') as HTMLSelectElement).value).toBe("sv");
+  });
+
+  it("does not render a language select; emitted language remains parent-owned", async () => {
+    const changes: StructuredCardVariant[] = [];
+    await renderHarness({ initial: { language: "es", rarity: "holo_rare_v" }, onChange: (v) => changes.push(v) });
+    expect(document.querySelector('[data-testid="rarity-language"]')).toBeNull();
+    await click("rarity-chip-silver_star_rare");
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ language: "es", rarity: "silver_star_rare" });
   });
 
   it("save/refetch echo does not swallow next click", async () => {
