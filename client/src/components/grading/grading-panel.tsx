@@ -668,6 +668,30 @@ export default function GradingPanel({
   const [approved, setApproved] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  // ── H-1 · A PENDING APPROVAL CONFIRMATION MUST NEVER OUTLIVE ITS CONTEXT ───
+  //
+  // The panel is mounted HIDDEN-not-unmounted, so `showConfirm` is ordinary
+  // React state that survives a stage switch. If the dialog were ever opened
+  // while the approving stage was off screen — or if the operator opened it and
+  // then navigated away — it stayed `true` behind a `display:none` subtree and
+  // reappeared, unbidden, the next time the panel became visible: an
+  // "Approve & Publish" confirmation nobody asked for, sitting over an
+  // irreversible action.
+  //
+  // Two cheap, explicit invariants close that:
+  //   1. the moment this panel is no longer the approving surface, any pending
+  //      confirmation is dropped;
+  //   2. a certificate switch drops it too, so a dialog opened for card A can
+  //      never be confirmed against card B.
+  // Unmount needs no handler — `showConfirm` is component state, and the panel
+  // is remounted per card (`key={apiBase:certId}`), so it dies with the mount.
+  useEffect(() => {
+    if (!approvalStageActive) setShowConfirm(false);
+  }, [approvalStageActive]);
+  useEffect(() => {
+    setShowConfirm(false);
+  }, [certId]);
+
   // Post-approval edit-mode gate. Pre-approval is unchanged (auto-save still
   // runs as a draft mechanism). Post-approval, edits to the live record
   // require explicit Save — see saveEditedGrade() and cancelEdit() below.

@@ -2330,6 +2330,32 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
         if (v === "minor" || v === "significant" || v === "major") return v;
         return undefined;
       })();
+      // ── H-3 · THE NO/AA NULL-OUT PATH MUST BE AUDITED AT WHAT POSTGRES STORES
+      //
+      // When `isNonNum` the SET clause writes `grade` and all four sub-grade
+      // columns as literal NULL, IGNORING the payload. Auditing the raw payload
+      // therefore recorded values the database never held: on an
+      // authentication-only certificate the workstation posts
+      // `overall_grade: "NO"` on every autosave, so the trail filled with rows
+      // claiming `overall_grade: null -> "NO"` while the column stayed NULL, and
+      // `{overall_grade:"NO", grade_centering:9}` was logged as
+      // `grade_centering -> 9` while the column was NULLed.
+      //
+      // These five now resolve the same way the eight MVGS inputs already do:
+      // one resolved value, consumed by BOTH the UPDATE and the audit diff.
+      const effOverallGrade = isNonNum ? null : gradeNum != null ? gradeNum : undefined;
+      const effGradeCentering = isNonNum ? null : (num(b.grade_centering) ?? undefined);
+      const effGradeCorners = isNonNum ? null : (num(b.grade_corners) ?? undefined);
+      const effGradeEdges = isNonNum ? null : (num(b.grade_edges) ?? undefined);
+      const effGradeSurface = isNonNum ? null : (num(b.grade_surface) ?? undefined);
+      // M-2r · `grade_type` is written UNCONDITIONALLY (`grade_type = ${nextGradeType}`),
+      // so it is never "not written" — it is always the resolved kind. It is also
+      // the one column the client never names in its payload, which is why the
+      // diff below keys effective fields off "did the UPDATE write it" rather
+      // than "is the key in the body". A numeric <-> NO/AA conversion is the
+      // highest-consequence change this route makes and went entirely unnamed.
+      const effGradeType = nextGradeType;
+
       /** Payload key → the value the UPDATE will actually commit (undefined = not written). */
       const EFFECTIVE_WRITTEN: Record<string, unknown> = {
         dark_border_front: effDarkBorderFront,
@@ -2340,12 +2366,22 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
         crease_span_pct: effCreaseSpanPct,
         wrinkle_severity: effWrinkleSeverity,
         tear_severity: effTearSeverity,
+        overall_grade: effOverallGrade,
+        grade_centering: effGradeCentering,
+        grade_corners: effGradeCorners,
+        grade_edges: effGradeEdges,
+        grade_surface: effGradeSurface,
+        grade_type: effGradeType,
       };
       const HAS_EFFECTIVE: ReadonlySet<string> = new Set(Object.keys(EFFECTIVE_WRITTEN));
 
       const fieldsChanged = Object.keys(b || {});
       const fieldMap: Array<[string, string]> = [
         ["overall_grade", "gradeOverall"],
+        // M-2r · the resolved kind. Written unconditionally and never named by
+        // the client, so the diff loop keys effective fields off "did the UPDATE
+        // write it" rather than "is the key in the body".
+        ["grade_type", "gradeType"],
         ["grade_centering", "gradeCentering"],
         ["grade_corners", "gradeCorners"],
         ["grade_edges", "gradeEdges"],
@@ -2415,23 +2451,53 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
         return Number.isFinite(x) && Number.isFinite(y) && x === y;
       };
       const changed: Record<string, { from: unknown; to: unknown }> = {};
+      // ── H-2 · NO DIFF WITHOUT A REAL BEFORE-VALUE ────────────────────────────
+      // `auth_status`, `auth_notes` and `private_notes` are REAL database columns
+      // that this route writes, but shared/schema.ts does not declare them, so
+      // Drizzle's `.select()` never materialises them and `cert.authStatus` is
+      // `undefined` — not null, absent. `norm(undefined)` collapsed to `null`, so
+      // every save compared `null` against the value the client always sends and
+      // logged `auth_status: null -> "genuine"`.
+      //
+      // Two consequences, both proven against a real cluster: every audit row
+      // carried three fabricated field changes, and because `changed` was never
+      // empty the no-op suppression this PR added could never fire — a
+      // byte-identical re-save still wrote a row.
+      //
+      // Fail CLOSED: a field whose before-value cannot be read is not audited at
+      // all rather than audited from a fabricated one. A missing record is
+      // recoverable; a false record is not. The fields are still listed under
+      // `unauditableFields` so the omission is stated rather than silent.
+      const unauditableFields: string[] = [];
       for (const [pKey, cKey] of fieldMap) {
-        if (!(pKey in (b || {}))) continue;
+        const beforeRaw = (cert as Record<string, unknown>)[cKey];
+        // `undefined` means the column is not declared on the selected row.
+        // A declared column that is SQL NULL comes back as `null`, not undefined.
+        const beforeReadable = beforeRaw !== undefined;
+
         let afterValue: unknown;
         if (HAS_EFFECTIVE.has(pKey)) {
           const eff = EFFECTIVE_WRITTEN[pKey];
           // The UPDATE preserves the stored value for this request (payload was
           // absent, malformed, or the wrong type). Nothing is written, so
-          // nothing may be reported as changed.
+          // nothing may be reported as changed. Note this is keyed off what the
+          // UPDATE WRITES, not off `pKey in b` — `grade_type` is always written
+          // and is never named by the client.
           if (eff === undefined) continue;
           afterValue = eff;
         } else {
+          if (!(pKey in (b || {}))) continue;
           afterValue = (b as any)[pKey];
         }
-        const before = norm((cert as any)[cKey]);
+
+        if (!beforeReadable) {
+          unauditableFields.push(pKey);
+          continue;
+        }
+        const before = norm(beforeRaw);
         const after = norm(afterValue);
         if (!sameValue(pKey, before, after)) {
-          changed[pKey] = { from: (cert as any)[cKey] ?? null, to: afterValue ?? null };
+          changed[pKey] = { from: beforeRaw ?? null, to: afterValue ?? null };
         }
       }
       const canonicalCertId = String((cert as { certId?: string }).certId ?? id);
@@ -2444,11 +2510,23 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
           centering_front_tb  = COALESCE(${txt(b.centering_front_tb)}, centering_front_tb),
           centering_back_lr   = COALESCE(${txt(b.centering_back_lr)},  centering_back_lr),
           centering_back_tb   = COALESCE(${txt(b.centering_back_tb)},  centering_back_tb),
-          centering_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_centering)}::numeric, centering_score)`},
-          corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_corners)}::numeric,   corners_score)`},
-          edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_edges)}::numeric,     edges_score)`},
-          surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${num(b.grade_surface)}::numeric,   surface_score)`},
-          grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${gradeNum}::numeric, grade)`},
+          -- H-3: these five now read the SAME resolved values the audit diff
+          -- reads, so the trail can no longer report a payload value on a request
+          -- whose NULL-out discarded it. The COALESCE preserve-on-omission
+          -- mechanism is deliberately KEPT: it is the anti-erasure guard that
+          -- stops a partial autosave nulling a published grade (see
+          -- tests/approval-grade-preservation.test.ts). Nullish-coalescing to
+          -- null turns "not written" back into the COALESCE no-op, so the
+          -- emitted SQL is byte-identical to before for every input.
+          --
+          -- NOTE: never use a backtick in a comment inside this template literal.
+          -- It terminates the tagged template, silently truncating the statement
+          -- after the last placeholder rendered before it.
+          centering_score     = ${isNonNum ? sql`NULL` : sql`COALESCE(${effGradeCentering ?? null}::numeric, centering_score)`},
+          corners_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${effGradeCorners ?? null}::numeric,   corners_score)`},
+          edges_score         = ${isNonNum ? sql`NULL` : sql`COALESCE(${effGradeEdges ?? null}::numeric,     edges_score)`},
+          surface_score       = ${isNonNum ? sql`NULL` : sql`COALESCE(${effGradeSurface ?? null}::numeric,   surface_score)`},
+          grade               = ${isNonNum ? sql`NULL` : sql`COALESCE(${effOverallGrade ?? null}::numeric, grade)`},
           -- Preserves the stored kind when the caller did not state one (see nextGradeType
           -- above): an autosave must never convert an authentication-only record to numeric.
           grade_type          = ${nextGradeType},
@@ -2568,6 +2646,10 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
               fields_changed: fieldsChanged,
               changed,
               changedFields: Object.keys(changed),
+              // H-2: columns this route wrote whose BEFORE value could not be
+              // read (undeclared in shared/schema.ts), so no truthful diff is
+              // possible. Stated rather than fabricated. Omitted when empty.
+              ...(unauditableFields.length > 0 ? { unauditableFields } : {}),
               was_approved: wasApproved,
               outcome: "committed",
             })}::jsonb,

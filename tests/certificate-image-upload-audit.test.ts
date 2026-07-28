@@ -766,3 +766,138 @@ describe("M-3 · an unrecoverable overwrite leaves a durable failure record", ()
     expect((await failureRows())[0].details.failureCategory).toBeTruthy();
   });
 });
+
+/**
+ * M-1r (final hostile recheck) · an UNPROVEN overwrite must not be reported as a
+ * proven one.
+ *
+ * The failure record previously classified objects into "orphan" and
+ * "everything else", and called everything else OVERWRITTEN. When the
+ * transaction failed BEFORE the FOR UPDATE read of the committed row completed
+ * — a pool timeout after BEGIN, a connection reset, a statement or lock timeout
+ * — nothing was provable, so EVERY uploaded key came through as overwritten and
+ * the audit asserted their previous bytes were unrecoverable. For a brand-new
+ * key with no previous content that claim is simply false, and it is durable.
+ *
+ * These tests make the prior-state read itself fail (the table is renamed out
+ * from under it), which is the only way to reach `priorCommitted === null`.
+ */
+describe("M-1r · unknown prior state is recorded as unknown, never as overwritten", () => {
+  const failureRows = async () => (await readAudits()).filter((a: any) => a.action === FAILURE_ACTION);
+
+  /** Run `persist` with the certificates table renamed away, so the FOR UPDATE
+   *  read cannot complete and nothing about prior object state is provable. */
+  const persistWithUnreadablePriorState = async (objects: ReturnType<typeof obj>[]) => {
+    await q(`ALTER TABLE certificates RENAME TO certificates_hidden`);
+    try {
+      return await persist({
+        id: certRowId,
+        certId: CERT_ID,
+        updates: Object.fromEntries(objects.map((o) => [o.column, o.key])),
+        uploadedObjects: objects,
+        actor: "admin@example.test",
+      });
+    } finally {
+      await q(`ALTER TABLE certificates_hidden RENAME TO certificates`);
+    }
+  };
+
+  it("a failure BEFORE the prior-state read reports zero overwritten and non-zero unknown", async () => {
+    const res = await persistWithUnreadablePriorState([
+      obj("grading/MV1/front_cropped.jpg", "grading_front_cropped", "NEW-A"),
+      obj("images/MV1/front.jpg", "front_image_path", "NEW-B"),
+    ]);
+
+    expect(res.committed, "the operation still fails normally").toBe(false);
+    expect(res.priorStateVerified).toBe(false);
+    expect(res.overwrittenCommittedObjects, "nothing may be claimed as overwritten").toEqual([]);
+    expect(res.unknownPriorStateObjects.sort()).toEqual(
+      ["grading/MV1/front_cropped.jpg", "images/MV1/front.jpg"].sort()
+    );
+    // Unknown objects are NEVER deleted — deleting one could destroy a live
+    // reference we simply could not read.
+    expect(r2.deletes, "no R2 delete may occur when nothing is provable").toEqual([]);
+    expect(res.orphansRemoved).toEqual([]);
+  });
+
+  it("the audit uses uncertainty wording and does NOT claim prior content was lost", async () => {
+    await persistWithUnreadablePriorState([obj("grading/MV1/back_cropped.jpg", "grading_back_cropped", "X")]);
+
+    const rows = await failureRows();
+    expect(rows).toHaveLength(1);
+    const d = rows[0].details;
+
+    expect(d.priorStateVerified).toBe(false);
+    expect(d.overwrittenCommittedObjectCount).toBe(0);
+    expect(d.overwrittenCommittedObjects).toEqual([]);
+    expect(d.unknownPriorStateObjectCount).toBe(1);
+    expect(d.unknownPriorStateObjects[0].key).toBe("grading/MV1/back_cropped.jpg");
+
+    // Uncertainty is stated…
+    expect(String(d.note)).toMatch(/UNVERIFIED/);
+    expect(String(d.note)).toMatch(/not known whether/i);
+    // …and the unrecoverability claim is NOT made.
+    expect(String(d.note)).not.toMatch(/previous content is unrecoverable/i);
+    // The row still cannot be mistaken for a success.
+    expect(d.committed).toBe(false);
+    expect(d.databaseMutationCommitted).toBe(false);
+    expect(d.outcome).toBe("not_committed");
+  });
+
+  it("a PROVEN overwrite still says unrecoverable — the wording is not blanket-softened", async () => {
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT m1r_block CHECK (action <> '${AUDIT_ACTION}')`);
+    try {
+      await persist({
+        id: certRowId,
+        certId: CERT_ID,
+        updates: { front_image_path: "images/MV1/front.jpg" },
+        uploadedObjects: [obj("images/MV1/front.jpg", "front_image_path", "REPLACED", true)],
+        actor: "admin@example.test",
+      });
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT m1r_block`);
+    }
+    const d = (await failureRows())[0].details;
+    expect(d.priorStateVerified).toBe(true);
+    expect(d.overwrittenCommittedObjectCount).toBe(1);
+    expect(d.unknownPriorStateObjectCount).toBe(0);
+    expect(String(d.note)).toMatch(/previous content is unrecoverable/i);
+    expect(String(d.note)).not.toMatch(/UNVERIFIED/);
+  });
+
+  it("recoverable orphan cleanup is unchanged and still writes no failure event", async () => {
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT m1r_block2 CHECK (action <> '${AUDIT_ACTION}')`);
+    let res: any;
+    try {
+      res = await persist({
+        id: certRowId,
+        certId: CERT_ID,
+        updates: { grading_closeup_cropped: "grading/MV1/closeup_cropped.jpg" },
+        uploadedObjects: [obj("grading/MV1/closeup_cropped.jpg", "grading_closeup_cropped", "NEW")],
+        actor: "admin@example.test",
+      });
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT m1r_block2`);
+    }
+    expect(res.priorStateVerified).toBe(true);
+    expect(res.orphansRemoved).toEqual(["grading/MV1/closeup_cropped.jpg"]);
+    expect(res.unknownPriorStateObjects).toEqual([]);
+    expect(await failureRows()).toHaveLength(0);
+  });
+
+  it("the unknown-state failure audit carries no signed URL, credential or stack", async () => {
+    await persistWithUnreadablePriorState([obj("grading/MV1/angled_cropped.jpg", "grading_angled_cropped", "X")]);
+    const raw = JSON.stringify((await failureRows())[0].details);
+    for (const forbidden of [
+      "X-Amz-Signature",
+      "Signature=",
+      "https://",
+      "AccessKey",
+      "secret",
+      "at Object.",
+      ".ts:",
+    ]) {
+      expect(raw, `must not contain ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+});

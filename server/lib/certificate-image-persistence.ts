@@ -135,6 +135,14 @@ export interface ImageUploadPersistResult {
    */
   overwrittenCommittedObjects: string[];
   /**
+   * M-1r · objects whose prior state could NOT be established, because the
+   * FOR UPDATE read of the committed row never completed. Nothing is claimed
+   * about them and none of them are ever deleted.
+   */
+  unknownPriorStateObjects: string[];
+  /** M-1r · false when the prior committed row was never read. */
+  priorStateVerified: boolean;
+  /**
    * M-3 · true when an unrecoverable overwrite occurred AND its durable failure
    * audit row was written. False when there was nothing to record, or when the
    * failure audit itself could not be written — which never masks the original
@@ -214,6 +222,8 @@ export async function persistImageUploadAudited(args: {
       orphansRemoved: [],
       orphanCleanupFailed: [],
       overwrittenCommittedObjects: [],
+      unknownPriorStateObjects: [],
+      priorStateVerified: true,
       failureAuditRecorded: false,
     };
   }
@@ -323,11 +333,38 @@ export async function persistImageUploadAudited(args: {
         ? Object.values(priorCommitted).filter((v): v is string => typeof v === "string" && v.length > 0)
         : []
     );
-    // If we never read the prior row, we cannot prove anything is an orphan.
+    // If we never read the prior row, we cannot prove anything about any object.
     const canProveOrphans = priorCommitted !== null;
-    const isOrphan = (o: UploadedObject) => canProveOrphans && !o.preexisting && !committedKeys.has(o.key);
-    const orphans = uploadedObjects.filter(isOrphan);
-    const overwritten = uploadedObjects.filter((o) => !isOrphan(o)).map((o) => o.key);
+
+    // ── M-1r · THREE STATES, NOT TWO ────────────────────────────────────────
+    // An earlier revision had only "orphan" and "everything else", and called
+    // everything else OVERWRITTEN. When the transaction failed BEFORE the
+    // FOR UPDATE read completed (pool timeout after BEGIN, connection reset,
+    // statement/lock timeout) nothing could be proven, so every uploaded key —
+    // including brand-new ones with no previous content at all — was reported as
+    // overwritten, and the failure audit asserted their previous bytes were
+    // unrecoverable. That is a durable record making a claim it cannot support.
+    //
+    //   provablyOverwritten — prior state WAS read, and the object is either
+    //                         flagged preexisting or matches a committed value.
+    //                         Its previous bytes really are gone.
+    //   provablyOrphaned    — prior state WAS read, and nothing committed
+    //                         references this key. Safe to delete.
+    //   unknownPriorState   — prior state was NOT read. Nothing is provable, so
+    //                         nothing is claimed and nothing is deleted.
+    type PriorState = "overwritten" | "orphan" | "unknown";
+    const classify = (o: UploadedObject): PriorState => {
+      if (!canProveOrphans) return "unknown";
+      if (o.preexisting || committedKeys.has(o.key)) return "overwritten";
+      return "orphan";
+    };
+    const provablyOverwritten = uploadedObjects.filter((o) => classify(o) === "overwritten");
+    const provablyOrphaned = uploadedObjects.filter((o) => classify(o) === "orphan");
+    const unknownPriorState = uploadedObjects.filter((o) => classify(o) === "unknown");
+    // Deletion eligibility is UNCHANGED: only a provable orphan is ever removed.
+    // Overwritten and unknown objects are both left alone.
+    const orphans = provablyOrphaned;
+    const overwritten = provablyOverwritten.map((o) => o.key);
     const orphansRemoved: string[] = [];
     const orphanCleanupFailed: string[] = [];
     for (const o of orphans) {
@@ -342,7 +379,7 @@ export async function persistImageUploadAudited(args: {
     console.error(
       `[upload-images] persist failed for cert=${id} (${persistErr?.message}); ` +
         `orphans_removed=${orphansRemoved.length} orphans_left=${orphanCleanupFailed.length} ` +
-        `overwritten_committed_objects=${overwritten.length}`
+        `overwritten_committed_objects=${overwritten.length} unknown_prior_state=${unknownPriorState.length}`
     );
 
     // ── M-3 · DURABLE FAILURE RECORD FOR AN UNRECOVERABLE OVERWRITE ─────────
@@ -354,11 +391,32 @@ export async function persistImageUploadAudited(args: {
     // the failure must survive the failure. Best-effort by construction: it can
     // neither rescue the request nor replace the 500 the caller returns.
     let failureAuditRecorded = false;
-    if (overwritten.length > 0) {
+    if (overwritten.length > 0 || unknownPriorState.length > 0) {
       const { category, sqlState } = classifyPersistFailure(persistErr);
-      const overwrittenDetail = uploadedObjects
-        .filter((o) => overwritten.includes(o.key))
-        .map((o) => ({ key: o.key, column: o.column, side: sideOfColumn(o.column), bytes: o.bytes }));
+      const describe = (o: UploadedObject) => ({
+        key: o.key,
+        column: o.column,
+        side: sideOfColumn(o.column),
+        bytes: o.bytes,
+      });
+      const overwrittenDetail = provablyOverwritten.map(describe);
+      const unknownDetail = unknownPriorState.map(describe);
+      // Only the PROVEN case may be described as destroying prior content. The
+      // unknown case gets uncertainty wording and nothing more.
+      const note = [
+        "Object storage was written before the database transaction and cannot be rolled back.",
+        overwrittenDetail.length > 0
+          ? "The objects listed under overwrittenCommittedObjects were overwritten in place; their previous content is unrecoverable."
+          : "",
+        unknownDetail.length > 0
+          ? "The objects listed under unknownPriorStateObjects are UNVERIFIED: the prior committed state could not be read, " +
+            "so it is NOT known whether they replaced existing content. No claim is made about prior content, and none of " +
+            "them were deleted."
+          : "",
+        "No certificate column changed — the database mutation did not commit.",
+      ]
+        .filter(Boolean)
+        .join(" ");
       try {
         await db.execute(sql`
           INSERT INTO audit_log (entity_type, entity_id, action, admin_user, details, created_at)
@@ -377,17 +435,20 @@ export async function persistImageUploadAudited(args: {
               outcome: "not_committed",
               committed: false,
               databaseMutationCommitted: false,
-              note:
-                "Object storage was written before the database transaction and cannot be rolled back. " +
-                "The listed objects were overwritten in place; their previous content is unrecoverable. " +
-                "No certificate column changed — the database mutation did not commit.",
+              note,
               failureCategory: category,
               ...(sqlState ? { sqlState } : {}),
+              // True when the prior committed row was read under FOR UPDATE. When
+              // false NOTHING about prior object state is provable, and the
+              // overwritten list is necessarily empty.
+              priorStateVerified: canProveOrphans,
               // Object KEYS and byte counts only — never a signed URL, never a
               // credential, never a request header, never a stack trace.
               overwrittenCommittedObjects: overwrittenDetail,
               overwrittenCommittedObjectCount: overwrittenDetail.length,
-              sides: Array.from(new Set(overwrittenDetail.map((o) => o.side))).sort(),
+              unknownPriorStateObjects: unknownDetail,
+              unknownPriorStateObjectCount: unknownDetail.length,
+              sides: Array.from(new Set([...overwrittenDetail, ...unknownDetail].map((o) => o.side))).sort(),
               orphansRemovedCount: orphansRemoved.length,
               orphanCleanupFailedCount: orphanCleanupFailed.length,
               orphanCleanupFailedKeys: orphanCleanupFailed,
@@ -415,6 +476,8 @@ export async function persistImageUploadAudited(args: {
       orphansRemoved,
       orphanCleanupFailed,
       overwrittenCommittedObjects: overwritten,
+      unknownPriorStateObjects: unknownPriorState.map((o) => o.key),
+      priorStateVerified: canProveOrphans,
       failureAuditRecorded,
     };
   }
@@ -426,6 +489,8 @@ export async function persistImageUploadAudited(args: {
     orphansRemoved: [],
     orphanCleanupFailed: [],
     overwrittenCommittedObjects: [],
+    unknownPriorStateObjects: [],
+    priorStateVerified: true,
     failureAuditRecorded: false,
   };
 }
