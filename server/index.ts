@@ -255,6 +255,23 @@ const adminRateLimit = rateLimit({
 });
 app.use("/api/admin", adminRateLimit);
 
+/**
+ * Prefixes whose JSON response BODY must never be written to the application log.
+ *
+ * `redactSensitive` masks credential-shaped keys (password/token/secret/…) but NOT personal
+ * data — `email`, `phone`, `full_name`, `address_*`, `company_number`, `vat_number` all pass
+ * through verbatim. That is tolerable for narrow single-record admin endpoints, but the partner
+ * dashboard returns MANY partners' details in one response and auto-refreshes, so logging its
+ * bodies would continuously write bulk partner PII into the Fly log.
+ *
+ * Method, path, status and duration are still logged — only the body is suppressed.
+ */
+const BODY_LOG_SUPPRESSED_PREFIXES = ["/api/super-admin/partner-dashboard"];
+
+function isBodyLogSuppressed(reqPath: string): boolean {
+  return BODY_LOG_SUPPRESSED_PREFIXES.some((prefix) => reqPath.startsWith(prefix));
+}
+
 app.use((req, res, next) => {
   const start = Date.now();
   const reqPath = req.path;
@@ -270,7 +287,7 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     if (reqPath.startsWith("/api")) {
       let logLine = `${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
+      if (capturedJsonResponse && !isBodyLogSuppressed(reqPath)) {
         const safeBody = redactSensitive(capturedJsonResponse);
         logLine += ` :: ${JSON.stringify(safeBody)}`;
       }

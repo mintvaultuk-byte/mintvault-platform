@@ -67,6 +67,7 @@ import { registerAdminConfigRoutes } from "./routes/admin-config";
 import { registerSuperAdminPartnerRoutes } from "./partner/admin-routes";
 import { registerConnectorOpsRoutes } from "./partner/connector-admin-routes";
 import { registerPartnerManagementRoutes } from "./partner/partner-management-routes";
+import { registerPartnerDashboardRoutes } from "./partner/dashboard-routes";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
 import { registerCatalogueRoutes } from "./routes/admin/catalogue";
@@ -2784,6 +2785,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerSuperAdminPartnerRoutes(app); // Phase 1 partner-network super-admin control shell (requireAdmin-gated)
   registerConnectorOpsRoutes(app); // G4 partner-connector operations (requireAdmin-gated, internal)
   registerPartnerManagementRoutes(app); // G5 partner management (requireAdmin-gated, internal)
+  registerPartnerDashboardRoutes(app); // Partner Master Dashboard (requireSuperAdmin-gated, read-only)
   registerRarityMappingRoutes(app);
   registerPokemonKnowledgeRoutes(app);
   registerCatalogueRoutes(app);
