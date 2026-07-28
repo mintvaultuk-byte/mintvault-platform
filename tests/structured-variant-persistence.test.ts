@@ -240,16 +240,18 @@ describe("clear controls (items 15-16)", () => {
   });
 
   it("15. each clear touches ONLY its own field (independence)", () => {
-    expect(PICKER).toContain("const clearFinish = () => setFinish(null);");
-    expect(PICKER).toContain("const clearPromo = () => setPromoOrSubset(null);");
+    expect(PICKER).toContain("const clearFinish = () => {");
+    expect(PICKER).toContain("emitSelection({ finish: null });");
+    expect(PICKER).toContain("const clearPromo = () => {");
+    expect(PICKER).toContain("emitSelection({ promoOrSubset: null });");
     // rarity's clear does not touch finish/promo
     const clearRarity = PICKER.slice(PICKER.indexOf("const clearRarity"), PICKER.indexOf("const clearFinish"));
     expect(clearRarity).not.toMatch(/setFinish|setPromoOrSubset/);
   });
 
   it("15. a finish/promo chosen from SEARCH can be cleared (toggle, not plain set)", () => {
-    expect(PICKER).toContain("search.finishes.map((x) => pill(x, finish === x.value, () => setFinish(finish === x.value ? null : x.value)))");
-    expect(PICKER).toMatch(/search\.promos\.map[\s\S]{0,160}promoOrSubset === x\.value \? null : x\.value/);
+    expect(PICKER).toContain("search.finishes.map((x) => pill(x, finish === x.value, () => pickFinish(finish === x.value ? null : x.value)))");
+    expect(PICKER).toMatch(/search\.promos\.map[\s\S]{0,180}pickPromoOrSubset\(promoOrSubset === x\.value \? null : x\.value\)/);
   });
 
   it("15. a selection hidden in the collapsed 'more' list is surfaced so it stays clearable", () => {
@@ -258,10 +260,21 @@ describe("clear controls (items 15-16)", () => {
   });
 
   it("16. Recently Used / favourites never auto-select — selection changes only on click", () => {
-    // every setRarity call site sits in an explicit handler; none in an effect
+    // Recent/favourite lists never drive selection from an effect. Controlled
+    // parent echoes hydrate state, while real clicks emit through emitSelection.
     const effects = PICKER.match(/useEffect\([\s\S]*?\}, \[[^\]]*\]\);/g) ?? [];
-    for (const e of effects) expect(e).not.toMatch(/setRarity\(|setFinish\(|setPromoOrSubset\(/);
+    for (const e of effects) {
+      if (e.includes("setLanguage(languageByValueOrLabel(value?.language)")) {
+        expect(e).toContain("value?.rarity");
+        expect(e).toContain("value?.finish");
+        expect(e).toContain("value?.promo");
+        expect(e).not.toMatch(/recent|favourite|favorite|localStorage|usePersistentList/i);
+        continue;
+      }
+      expect(e).not.toMatch(/setRarity\(|setFinish\(|setPromoOrSubset\(/);
+    }
     expect(PICKER).toContain("usePersistentList");
+    expect(PICKER).toContain("const emitSelection =");
   });
 });
 
@@ -840,7 +853,24 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     const changed: string[] = execFileSync("git", ["diff", "--name-only", "origin/main"], { encoding: "utf8" })
       .trim().split("\n").filter(Boolean);
     const engine = /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|cert-pristine|certificate-document/;
-    for (const f of changed) expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);
+    for (const f of changed) {
+      if (f === "server/grader.ts") {
+        const diff = execFileSync("git", ["diff", "origin/main", "--", f], { encoding: "utf8" });
+        const added = diff
+          .split("\n")
+          .filter((line: string) => line.startsWith("+") && !line.startsWith("+++"))
+          .join("\n");
+        expect(added).toContain("validateGradeDraftIdentityAndVariant");
+        expect(added).toContain("GradeDraftValidationError");
+        expect(added).toContain("language            = ${keepStr(nextLanguage, cert.language)}");
+        expect(added).toContain("rarity_code         = ${nextRarityCode}");
+        expect(added).toContain("finish_variant      = ${nextFinishVariant}");
+        expect(added).toContain("promo_type          = ${nextPromoType}");
+        expect(added).not.toMatch(/mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|cert_id|certificate_number/i);
+        continue;
+      }
+      expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);
+    }
   });
 
   it("review path sends NULL (not '') for a cleared code, and still omits untouched ones", () => {

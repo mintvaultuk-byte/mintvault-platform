@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { classifyLookupError } from "@/lib/lookup-errors";
 import { CheckCircle2, Loader2, Save, Zap, Sparkles, Trash2, Eye, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import ImageViewer, { mapLegacyTypeToMvgsCode } from "./image-viewer";
@@ -25,7 +26,14 @@ import ManualCardTool from "./manual-card-tool";
 import { type TcgCardPick } from "@/components/identity-tools";
 import { GradingIdentityVerification } from "@/components/grading/GradingIdentityVerification";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
-import type { StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
+import {
+  decideRarityChange,
+  isLowerInformationRarityChange,
+  languageByValueOrLabel,
+  languageLabel,
+  tcgdexLanguageCode,
+  type StructuredCardVariant,
+} from "@shared/pokemon-rarity-catalogue";
 import {
   decideGradingPersistence,
   decideExplicitGradingSave,
@@ -169,6 +177,7 @@ interface Props {
    *  CertificateForm above the panel instead). Optional — omitted fields hide. */
   cardNumber?: string | null;
   cardYear?: string | null;
+  cardLanguage?: string | null;
   cardVariant?: string | null;
   existingGrade?: string | null;
   onGradeApproved?: (certId?: string, grade?: string) => void;
@@ -308,6 +317,7 @@ export default function GradingPanel({
   cardSet,
   cardNumber,
   cardYear,
+  cardLanguage,
   cardVariant,
   existingGrade,
   onGradeApproved,
@@ -534,12 +544,14 @@ export default function GradingPanel({
   const [idSet, setIdSet] = useState(cardSet || "");
   const [idNumber, setIdNumber] = useState(cardNumber || "");
   const [idYear, setIdYear] = useState(cardYear || "");
+  const [idLanguage, setIdLanguage] = useState(cardLanguage || "English");
   const [idVariant, setIdVariant] = useState(cardVariant || "");
   // Structured rarity/finish/promo (role routes only) — same canonical fields as
   // the /admin CertificateForm rarity picker. Persisted via buildPayload.
   const [rarityCode, setRarityCode] = useState("");
   const [finishVariant, setFinishVariant] = useState("");
   const [promoType, setPromoType] = useState("");
+  const [rarityOverrideTransition, setRarityOverrideTransition] = useState<{ from: string; to: string } | null>(null);
   // Tracks a deliberate operator interaction with the rarity picker (including an
   // explicit "No rarity" clear). Only once touched do we persist an EMPTY rarity —
   // so an unhydrated/untouched picker can never wipe a stored value, but an
@@ -552,7 +564,19 @@ export default function GradingPanel({
   // interaction now, so handleRarityChange = a genuine edit → touched.)
   function handleRarityChange(v: StructuredCardVariant) {
     setRarityTouched(true);
-    setRarityCode(v.rarity ?? "");
+    setRarityOverrideTransition(null);
+    let nextRarity = v.rarity ?? "";
+    const decision = decideRarityChange(rarityCode, nextRarity);
+    if (decision.requiresConfirmation) {
+      const confirmed =
+        typeof window !== "undefined" &&
+        window.confirm(
+          "This symbol choice is less specific than the resolved card-record rarity. Override the resolved rarity anyway?"
+      );
+      if (!confirmed) nextRarity = rarityCode;
+      else setRarityOverrideTransition({ from: rarityCode, to: nextRarity });
+    }
+    setRarityCode(nextRarity);
     setFinishVariant(v.finish ?? "");
     setPromoType(v.promo ?? "");
   }
@@ -575,6 +599,7 @@ export default function GradingPanel({
     if (gd.setName && !idSet) setIdSet(String(gd.setName));
     if (gd.cardNumber && !idNumber) setIdNumber(String(gd.cardNumber));
     if (gd.year && !idYear) setIdYear(String(gd.year));
+    if (gd.language && (!idLanguage || idLanguage === "English")) setIdLanguage(String(gd.language));
     if (gd.variant && !idVariant) setIdVariant(String(gd.variant));
     // Intentionally fills only empty fields once on data arrival — id* values are
     // deliberately not deps (they'd re-fire and could re-fill after a grader edit).
@@ -1124,6 +1149,7 @@ export default function GradingPanel({
     setFinishVariant("");
     setPromoType("");
     setRarityTouched(false);
+    setRarityOverrideTransition(null);
   }, [certId]);
 
   // ── Post-approval explicit-save flow ──────────────────────────────────
@@ -1244,8 +1270,10 @@ export default function GradingPanel({
       }
       toast({ title: "Grade updated · audit logged" });
       editSnapshotRef.current = null;
+      setRarityOverrideTransition(null);
       setEditMode(false);
     } catch (e: any) {
+      setRarityOverrideTransition(null);
       // Keep edit mode open so the admin doesn't lose their changes.
       toast({ title: "Save failed", description: e.message, variant: "destructive" });
     } finally {
@@ -1268,6 +1296,7 @@ export default function GradingPanel({
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);
       }
+      setRarityOverrideTransition(null);
       setAutoSaveStatus("saved");
       if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
       autoSavedClearTimerRef.current = setTimeout(() => {
@@ -1276,6 +1305,7 @@ export default function GradingPanel({
       return true;
     } catch (e: any) {
       if (seq !== autoSaveSeqRef.current) return false;
+      setRarityOverrideTransition(null);
       setAutoSaveStatus("error");
       toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
       return false;
@@ -1508,20 +1538,7 @@ export default function GradingPanel({
 
   /** Fire TCGdex lookup and prefill set/name fields with canonical data */
   async function runTcgdexLookup(setCode: string, cardNumber: string, language?: string) {
-    // Map common language names to TCGdex lang codes
-    const langMap: Record<string, string> = {
-      english: "en",
-      japanese: "ja",
-      french: "fr",
-      german: "de",
-      spanish: "es",
-      italian: "it",
-      portuguese: "pt",
-      korean: "ko",
-      "traditional chinese": "zh-tw",
-      "simplified chinese": "zh-cn",
-    };
-    const lang = langMap[(language || "english").toLowerCase()] || "en";
+    const lang = tcgdexLanguageCode(language || "English") || "en";
 
     try {
       // Staff endpoint (admin OR grader) so this works on the grader panel too —
@@ -1530,14 +1547,30 @@ export default function GradingPanel({
         `/api/staff/tcgdex-lookup?code=${encodeURIComponent(setCode)}&number=${encodeURIComponent(cardNumber)}&lang=${encodeURIComponent(lang)}`,
         { credentials: "include" }
       );
-      if (!res.ok) return;
+      if (!res.ok) {
+        let body: { error?: string } | null = null;
+        try {
+          body = await res.json();
+        } catch {
+          /* non-JSON */
+        }
+        const c = classifyLookupError({ status: res.status, body });
+        toast({ title: c.title, description: c.message });
+        return;
+      }
       const data = await res.json();
-      if (!data.found) return;
+      if (!data.found) {
+        toast({ title: "Card not found", description: data.message || "TCGdex did not find this set and number." });
+        return;
+      }
 
       // Prefill with canonical TCGdex data (keep fields editable)
       if (data.card_name) setIdName(data.card_name.toUpperCase());
       if (data.set_name) setIdSet(data.set_name);
-      if (data.set_id) setIdSetCode(data.set_id);
+      if (data.set_code || data.set_id) setIdSetCode(String(data.set_code || data.set_id));
+      if (data.resolved_lang) setIdLanguage(languageLabel(data.resolved_lang, idLanguage));
+      if (data.rarity_code) setRarityCode(String(data.rarity_code));
+      if (!finishVariant && data.finish_variant) setFinishVariant(String(data.finish_variant));
       if (data.release_date) {
         const year = data.release_date.split("-")[0];
         if (year) setIdYear(year);
@@ -1545,10 +1578,17 @@ export default function GradingPanel({
       // Variant: best-effort only — don't overwrite if uncertain
       // TCGdex rarity != MintVault variant taxonomy
 
-      const badge = data.auto_added ? " (set auto-added)" : data.needs_manual_add ? " (set needs manual add)" : "";
+      const badge = data.auto_added
+        ? " (set auto-added)"
+        : data.canonical_mapping_unresolved
+          ? " (set mapping unresolved)"
+          : data.needs_manual_add
+            ? " (set needs manual add)"
+            : "";
       toast({ title: `TCGdex: ${data.card_name}${badge}`, description: `Set: ${data.set_name} · Source: TCGdex` });
-    } catch {
-      // Silent fail — TCGdex lookup is best-effort, form stays editable
+    } catch (e: any) {
+      const c = classifyLookupError({ thrown: e });
+      toast({ title: c.title, description: c.message });
     }
   }
 
@@ -1872,6 +1912,7 @@ export default function GradingPanel({
       out.set_name = idSet.trim();
       out.card_number_display = idNumber.trim();
       out.year_text = idYear.trim();
+      out.language = idLanguage.trim();
       out.variant = idVariant.trim();
     }
 
@@ -1894,6 +1935,11 @@ export default function GradingPanel({
         out.rarity_code = rarityCode.trim() || null;
         out.finish_variant = finishVariant.trim() || null;
         out.promo_type = promoType.trim() || null;
+        if (rarityOverrideTransition && rarityOverrideTransition.to === (out.rarity_code ?? "")) {
+          out.rarity_override_confirmed = true;
+          out.rarity_override_from = rarityOverrideTransition.from;
+          out.rarity_override_to = rarityOverrideTransition.to;
+        }
       } else {
         if (rarityCode.trim()) out.rarity_code = rarityCode.trim();
         if (finishVariant.trim()) out.finish_variant = finishVariant.trim();
@@ -2573,7 +2619,7 @@ export default function GradingPanel({
               key={certId ?? "none"}
               legacyVariant={idVariant || null}
               value={{
-                language: "en",
+                language: languageByValueOrLabel(idLanguage)?.value ?? "en",
                 era: null,
                 // Seed STRICTLY from the per-cert query (the picker only mounts once
                 // gradingData is present, so it is authoritative). No local-state

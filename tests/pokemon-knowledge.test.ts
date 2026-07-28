@@ -80,12 +80,12 @@ describe("era timeline (Phase 14)", () => {
 describe("language guide (Phase 13)", () => {
   it("includes the required languages incl. European ones", () => {
     const keys = LANGUAGE_GUIDE.map((l) => l.key);
-    for (const k of ["en", "ja", "ko", "zh-Hans", "zh-Hant", "th", "id", "fr", "de", "it", "es", "pt"]) {
+    for (const k of ["en", "ja", "ko", "zh-cn", "zh-tw", "th", "id", "fr", "de", "it", "es", "pt"]) {
       expect(keys).toContain(k);
     }
   });
   it("every entry maps to a real picker language value (safe filtering)", () => {
-    const pickerValues = new Set(["en", "ja", "ko", "zh-Hans", "zh-Hant", "id", "th", "other"]);
+    const pickerValues = new Set(["en", "ja", "ko", "zh-cn", "zh-tw", "id", "th", "fr", "de", "it", "es", "pt", "other"]);
     for (const l of LANGUAGE_GUIDE) expect(pickerValues.has(l.pickerValue)).toBe(true);
   });
 });

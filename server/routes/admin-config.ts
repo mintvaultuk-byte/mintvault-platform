@@ -1093,28 +1093,35 @@ export function registerAdminConfigRoutes(app: Express): void {
           message: "Card not found in TCGdex",
         });
       }
+      const canonicalUnresolved = result.canonical_mapping_unresolved;
 
       // ── Check if set exists in custom_sets ──────────────────────────────
       const existingSet = await db.execute(
-        sql`SELECT set_id FROM custom_sets WHERE LOWER(set_id) = LOWER(${result.set_id}) LIMIT 1`
+        sql`
+          SELECT set_id FROM custom_sets
+          WHERE LOWER(set_id) = LOWER(${result.canonical_set_id})
+             OR (${result.set_code}::text IS NOT NULL AND LOWER(COALESCE(ptcgo_code, '')) = LOWER(${result.set_code}))
+          LIMIT 1
+        `
       );
       const setExists = existingSet.rows.length > 0;
 
       let needs_manual_add = false;
       let auto_added = false;
 
-      if (!setExists) {
+      if (!setExists && !canonicalUnresolved) {
         const autoAddEnabled = await getFeatureFlag("AI_AUTO_ADD_MISSING_SETS_ENABLED");
 
         if (autoAddEnabled) {
           // ── Auto-seed: insert into custom_sets ────────────────────────
           try {
             await db.execute(sql`
-              INSERT INTO custom_sets (set_id, set_name, series, release_date, total_cards, created_by)
+              INSERT INTO custom_sets (set_id, set_name, series, ptcgo_code, release_date, total_cards, created_by)
               VALUES (
-                ${result.set_id},
+                ${result.canonical_set_id},
                 ${result.set_name},
                 ${result.series},
+                ${result.set_code},
                 ${result.release_date},
                 ${result.total_cards},
                 ${"auto:tcgdex"}
@@ -1122,20 +1129,21 @@ export function registerAdminConfigRoutes(app: Express): void {
             `);
             auto_added = true;
 
-            await storage.writeAuditLog("custom_set", result.set_id, "auto_seed", "system:tcgdex", {
+            await storage.writeAuditLog("custom_set", result.canonical_set_id, "auto_seed", "system:tcgdex", {
               source: "tcgdex",
               tcgdex_card_id: result.external_card_id,
               before: null,
               after: {
-                set_id: result.set_id,
+                set_id: result.canonical_set_id,
                 set_name: result.set_name,
+                ptcgo_code: result.set_code,
                 series: result.series,
                 release_date: result.release_date,
                 total_cards: result.total_cards,
               },
             });
 
-            console.log(`[card-lookup] auto-seeded set "${result.set_id}" — ${result.set_name}`);
+            console.log(`[card-lookup] auto-seeded set "${result.canonical_set_id}" — ${result.set_name}`);
           } catch (seedErr: any) {
             const pgCode = seedErr.code || seedErr.cause?.code;
             if (pgCode === "23505") {
@@ -1159,8 +1167,10 @@ export function registerAdminConfigRoutes(app: Express): void {
                 ${lang},
                 ${certId},
                 ${JSON.stringify({
-                  set_id: result.set_id,
+                  set_id: result.canonical_set_id,
+                  tcgdex_set_id: result.set_id,
                   set_name: result.set_name,
+                  set_code: result.set_code,
                   series: result.series,
                   release_date: result.release_date,
                   total_cards: result.total_cards,
@@ -1173,20 +1183,29 @@ export function registerAdminConfigRoutes(app: Express): void {
             console.error("[card-lookup] pending_set_lookups insert failed:", queueErr);
           }
         }
+      } else if (!setExists && canonicalUnresolved) {
+        needs_manual_add = true;
       }
 
       return res.json({
         found: true,
         card_name: result.card_name, // English — what the prefill uses
         card_name_local: result.card_name_local, // native-language original
-        set_id: result.set_id,
+        set_id: result.canonical_set_id,
+        tcgdex_set_id: result.set_id,
         set_name: result.set_name, // English
         set_name_local: result.set_name_local, // native-language original
+        set_code: result.set_code,
+        canonical_mapping_status: result.canonical_mapping_status,
+        canonical_mapping_unresolved: result.canonical_mapping_unresolved,
         series: result.series,
         release_date: result.release_date,
         total_cards: result.total_cards,
         external_card_id: result.external_card_id,
         rarity: result.rarity,
+        rarity_code: result.rarity_code,
+        rarity_label: result.rarity_label,
+        finish_variant: result.finish_variant,
         resolved_lang: result.resolved_lang, // lang the lookup resolved on — drives the form's Language auto-fill
         set_exists: setExists || auto_added,
         auto_added,

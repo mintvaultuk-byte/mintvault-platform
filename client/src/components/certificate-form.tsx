@@ -23,7 +23,15 @@ import {
   REVIEW_STAGE,
 } from "@shared/grading-workflow";
 import { CONSOLIDATED_VARIANT_SCHEME, legacyFreeTextLostOnConversion } from "@shared/variant-line";
-import { languageByValueOrLabel, type StructuredCardVariant } from "@shared/pokemon-rarity-catalogue";
+import {
+  decideRarityChange,
+  finishByValue,
+  isLowerInformationRarityChange,
+  languageByValueOrLabel,
+  languageLabel,
+  tcgdexLanguageCode,
+  type StructuredCardVariant,
+} from "@shared/pokemon-rarity-catalogue";
 import type { CertificateRecord, CardMaster } from "@shared/schema";
 import { NON_NUMERIC_GRADES, isNonNumericGrade, isValidNumericGrade } from "@shared/schema";
 import {
@@ -259,8 +267,13 @@ export default function CertificateForm({
   const queryClient = useQueryClient();
 
   const [form, setForm] = useState(() => buildFormStateFromCert(certificate));
+  const formRef = useRef(form);
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
 
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
+  const [rarityOverrideTransition, setRarityOverrideTransition] = useState<{ from: string; to: string } | null>(null);
   // Grader notes live in the Review stage, collapsed unless the cert already has notes.
   const [notesOpen, setNotesOpen] = useState<boolean>(() => Boolean(certificate?.notes));
 
@@ -333,31 +346,42 @@ export default function CertificateForm({
   }
 
   // ── Structured rarity/variant picker wiring ────────────────────────────────
-  // The picker emits a full StructuredCardVariant; we fan it out to the separate
-  // form keys (which auto-serialise to the save payload) and keep the existing
-  // `language` field in sync. A no-op guard prevents the picker's mount-time
+  // The picker emits rarity/finish/promo data; certificate language is owned by
+  // the identity fields, so clicking a rarity symbol can never rewrite it.
+  // A no-op guard prevents the picker's mount-time
   // onChange from dirtying the form (which would trigger a spurious auto-save).
   const handleStructuredChange = useCallback((v: StructuredCardVariant) => {
+    const current = formRef.current;
+    let nextRarity = v.rarity ?? "";
+    let confirmedTransition: { from: string; to: string } | null = null;
+    const decision = decideRarityChange(current.rarityCode, nextRarity);
+    if (decision.requiresConfirmation) {
+      const confirmed =
+        typeof window !== "undefined" &&
+        window.confirm(
+          "This symbol choice is less specific than the resolved card-record rarity. Override the resolved rarity anyway?"
+        );
+      if (!confirmed) nextRarity = current.rarityCode;
+      else confirmedTransition = { from: current.rarityCode, to: nextRarity };
+    }
+    setRarityOverrideTransition(confirmedTransition);
     setForm((f) => {
-      const langLabel = languageByValueOrLabel(v.language)?.label ?? f.language;
       if (
-        f.rarityCode === (v.rarity ?? "") &&
+        f.rarityCode === nextRarity &&
         f.finishVariant === (v.finish ?? "") &&
         f.promoType === (v.promo ?? "") &&
         f.subsetName === (v.subset ?? "") &&
-        f.era === (v.era ?? "") &&
-        f.language === langLabel
+        f.era === (v.era ?? "")
       ) {
         return f;
       }
       return {
         ...f,
-        rarityCode: v.rarity ?? "",
+        rarityCode: nextRarity,
         finishVariant: v.finish ?? "",
         promoType: v.promo ?? "",
         subsetName: v.subset ?? "",
         era: v.era ?? "",
-        language: langLabel,
       };
     });
   }, []);
@@ -578,6 +602,7 @@ export default function CertificateForm({
   // until a real result arrives; cleared on any identify failure.
   const [identifyResult, setIdentifyResult] = useState<{
     name: string;
+    setName: string;
     number: string;
     year: string;
     language: string;
@@ -732,6 +757,7 @@ export default function CertificateForm({
     // proposed/verified identification so the panel shows it (not stale data).
     setIdentifyResult({
       name: card.name || "",
+      setName: card.setName || "",
       number: card.number || "",
       year: card.year || "",
       language: form.language || "",
@@ -822,6 +848,7 @@ export default function CertificateForm({
         // shows the real result (and never the pre-existing certificate values).
         setIdentifyResult({
           name: id.detected_name || id.officialName || "",
+          setName: "",
           number: id.detected_number || "",
           year: id.detected_year || "",
           language: id.detected_language || "",
@@ -901,19 +928,7 @@ export default function CertificateForm({
 
   /** TCGdex canonical metadata lookup — enriches set/card fields after AI identify */
   async function runTcgdexPrefill(setCode: string, cardNumber: string, language: string, certDbId?: number) {
-    const langMap: Record<string, string> = {
-      english: "en",
-      japanese: "ja",
-      french: "fr",
-      german: "de",
-      spanish: "es",
-      italian: "it",
-      portuguese: "pt",
-      korean: "ko",
-      "traditional chinese": "zh-tw",
-      "simplified chinese": "zh-cn",
-    };
-    const lang = langMap[language.toLowerCase()] || "en";
+    const lang = tcgdexLanguageCode(language) || "en";
     try {
       const r = await fetch(
         `/api/admin/tcgdex-lookup?code=${encodeURIComponent(setCode)}&number=${encodeURIComponent(cardNumber)}&lang=${encodeURIComponent(lang)}${certDbId ? `&certId=${certDbId}` : ""}`,
@@ -935,38 +950,43 @@ export default function CertificateForm({
       const td = await r.json();
       if (!td.found) return;
 
-      // Authoritative language: the endpoint the card actually resolved on (the set code
-      // determines it). Maps the TCGdex lang code to the form's Language value. Overrides
-      // identify's detected_language. Falls through to prev if the code is unknown.
-      const langLabel: Record<string, string> = {
-        ja: "Japanese",
-        en: "English",
-        ko: "Korean",
-        "zh-tw": "Chinese",
-        "zh-cn": "Chinese",
-        fr: "French",
-        de: "German",
-        es: "Spanish",
-        it: "Italian",
-        pt: "Portuguese",
-      };
+      const resolvedLanguage = td.resolved_lang ? languageLabel(td.resolved_lang, "") : "";
+      const finishLabel = td.finish_variant ? finishByValue(td.finish_variant)?.label : "";
 
       // Owner ruling (option B): strip a trailing designation from the TCGdex
       // set name — base set stays on the set line, designation fills Variant
       // (clearing Rarity: the two are exactly-one-of).
       const tdSplit = splitSetDesignation(td.set_name || "");
+      if (td.set_code || td.set_id) setSetId(String(td.set_code || td.set_id));
       setForm((prev) => ({
         ...prev,
         cardName: td.card_name?.toUpperCase() || prev.cardName,
         setName: tdSplit.baseSet || prev.setName,
         year: td.release_date ? td.release_date.split("-")[0] : prev.year,
-        language: (td.resolved_lang && langLabel[td.resolved_lang]) || prev.language,
+        language: resolvedLanguage || prev.language,
+        rarityCode: td.rarity_code || prev.rarityCode,
+        finishVariant: prev.finishVariant || td.finish_variant || "",
         ...(tdSplit.designation
           ? { variant: tdSplit.designation, rarity: "", unifiedSelect: `VARIANT:${tdSplit.designation}`, otherText: "" }
           : {}),
       }));
+      setIdentifyResult((prev) => ({
+        name: td.card_name || prev?.name || "",
+        setName: tdSplit.baseSet || td.set_name || prev?.setName || "",
+        number: prev?.number || cardNumber,
+        year: td.release_date ? td.release_date.split("-")[0] : prev?.year || "",
+        language: resolvedLanguage || prev?.language || "",
+        rarity: td.rarity_label || td.rarity || prev?.rarity || "",
+        variant: finishLabel || prev?.variant || "",
+      }));
 
-      const badge = td.auto_added ? " (set auto-added)" : td.needs_manual_add ? " (set needs manual add)" : "";
+      const badge = td.auto_added
+        ? " (set auto-added)"
+        : td.canonical_mapping_unresolved
+          ? " (set mapping unresolved)"
+          : td.needs_manual_add
+            ? " (set needs manual add)"
+            : "";
       toast({ title: `TCGdex enriched${badge}`, description: `${td.card_name} — ${td.set_name}` });
     } catch (e) {
       const c = classifyLookupError({ thrown: e });
@@ -1297,6 +1317,11 @@ export default function CertificateForm({
     if (frontImage) formData.append("frontImage", frontImage);
     if (backImage) formData.append("backImage", backImage);
     if (confirmPublishedEdit) formData.append("confirmPublishedEdit", "true");
+    if (rarityOverrideTransition && rarityOverrideTransition.to === form.rarityCode) {
+      formData.append("rarity_override_confirmed", "true");
+      formData.append("rarity_override_from", rarityOverrideTransition.from);
+      formData.append("rarity_override_to", rarityOverrideTransition.to);
+    }
     // Stale-tab guard: tell the server which metadata values this form loaded;
     // it 409s only if a field changed elsewhere since AND this save would
     // overwrite that newer value (see PUT /:id + shared/edit-conflict.ts).
@@ -1344,6 +1369,7 @@ export default function CertificateForm({
       // re-submits/re-uploads the same File object once it's already persisted.
       setFrontImage(null);
       setBackImage(null);
+      setRarityOverrideTransition(null);
       // Session/feedback UI (display only — save behaviour is unchanged above).
       setSessionCompleted((c) => c + 1);
       setSavedToast(true);
@@ -1357,7 +1383,10 @@ export default function CertificateForm({
         onSuccess(isEdit ? undefined : data);
       }
     },
-    onError: (err: any) => setError(err.message),
+    onError: (err: any) => {
+      setRarityOverrideTransition(null);
+      setError(err.message);
+    },
   });
 
   // ── Silent auto-save for an EXISTING, NOT-YET-APPROVED certificate ─────────
@@ -1411,6 +1440,7 @@ export default function CertificateForm({
 
     // Re-seed every editable value from the NEW certificate (one shared mapping).
     setForm(buildFormStateFromCert(certificate));
+    setRarityOverrideTransition(null);
     setDesignations((certificate?.designations as string[]) || []);
     setNotesOpen(Boolean(certificate?.notes));
     setFrontImage(null);
@@ -1550,6 +1580,7 @@ export default function CertificateForm({
       // re-submit (and the server re-upload+delete-old) the same image.
       setFrontImage(null);
       setBackImage(null);
+      setRarityOverrideTransition(null);
       setEditConflict(false);
       setAutoSaveStatus("saved");
       if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
@@ -1558,6 +1589,7 @@ export default function CertificateForm({
       }, 2500);
     } catch (e: any) {
       if (seq !== autoSaveSeqRef.current) return;
+      setRarityOverrideTransition(null);
       setAutoSaveStatus("error");
       toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
     } finally {
@@ -2496,6 +2528,7 @@ export default function CertificateForm({
                         <div className="flex flex-wrap items-center gap-1.5">
                           {[
                             identifyResult.name,
+                            identifyResult.setName,
                             displayCollectorNumber(identifyResult.number),
                             identifyResult.year,
                             identifyResult.language,
@@ -2568,6 +2601,7 @@ export default function CertificateForm({
                               setForm((prev) => ({
                                 ...prev,
                                 cardName: identifyResult.name || prev.cardName,
+                                setName: identifyResult.setName || prev.setName,
                                 cardNumber: identifyResult.number || prev.cardNumber,
                                 year: identifyResult.year || prev.year,
                                 language: identifyResult.language || prev.language,

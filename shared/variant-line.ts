@@ -61,6 +61,7 @@ export interface VariantLineInput {
  *  prints as "Holo Rare", not the catalogue's "Rare Holo (classic)"). */
 const PUBLIC_LABEL_OVERRIDES: Record<string, string> = {
   rare_holo: "Holo Rare",
+  holo_rare_v: "Holo Rare V",
 };
 
 /** Wording for a LEGACY variant/rarity code that has no clean structured

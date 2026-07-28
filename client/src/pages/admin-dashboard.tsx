@@ -502,6 +502,7 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
                     certId={editingCert.id}
                     cardName={editingCert.cardName || ""}
                     cardSet={editingCert.setName || ""}
+                    cardLanguage={editingCert.language || "English"}
                     cardGame={editingCert.cardGame || ""}
                     existingGrade={editingCert.gradeOverall}
                     pendingAnalysis={pendingAnalysis}

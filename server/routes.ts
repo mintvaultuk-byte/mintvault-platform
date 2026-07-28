@@ -108,6 +108,8 @@ import {
 import { mvgsTierName } from "@shared/mvgs-scoring";
 import type { PublicCertificate, ServiceTierRecord, CertificateRecord } from "@shared/schema";
 import { isBlackLabel } from "@shared/pristine";
+import { languageLabel, normalizePokemonLanguage } from "@shared/pokemon-rarity-catalogue";
+import { GradeDraftValidationError, validateGradeDraftIdentityAndVariant } from "@shared/grading-draft-validation";
 import { certIsPristine } from "./lib/cert-pristine";
 import { enqueueScanJob } from "./lib/scan-job-queue";
 import { isServiceValidForCarrier } from "@shared/carriers";
@@ -1540,6 +1542,23 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
       if (blankField) {
         return res.status(400).json({ error: `${blankField} is required and cannot be blank` });
       }
+      const submittedSetNameBlank =
+        Object.prototype.hasOwnProperty.call(req.body, "setName") &&
+        (typeof req.body.setName !== "string" || !String(req.body.setName).trim());
+      const submittedCanonicalSetCode =
+        Object.prototype.hasOwnProperty.call(req.body, "setId") ||
+        Object.prototype.hasOwnProperty.call(req.body, "set_code") ||
+        Object.prototype.hasOwnProperty.call(req.body, "canonical_set_id");
+      const explicitUnresolvedSet =
+        req.body.canonical_mapping_unresolved === true ||
+        req.body.canonical_mapping_unresolved === "true" ||
+        req.body.needs_manual_add === true ||
+        req.body.needs_manual_add === "true";
+      if (submittedSetNameBlank && submittedCanonicalSetCode && !explicitUnresolvedSet) {
+        return res.status(400).json({
+          error: "Cannot save a canonical set code with a blank set name unless the set mapping is explicitly unresolved.",
+        });
+      }
 
       const files = req.files as { [fieldname: string]: Express.Multer.File[] };
       const frontImage = files?.frontImage?.[0];
@@ -1704,12 +1723,23 @@ export async function handleCertificateMetadataUpdate(req: any, res: any): Promi
       // Scalars: an explicit "" or null is a legitimate clear and is preserved
       // as-is; only genuine absence skips the write.
       const scalarOrNull = (v: unknown) => (v === null || v === undefined || String(v).trim() === "" ? null : v);
+      let validatedIdentityVariant: ReturnType<typeof validateGradeDraftIdentityAndVariant>;
+      try {
+        validatedIdentityVariant = validateGradeDraftIdentityAndVariant(existing, req.body);
+      } catch (e) {
+        if (e instanceof GradeDraftValidationError) return res.status(e.status).json({ error: e.message });
+        throw e;
+      }
       putGuarded("cardGame");
       putGuarded("setName");
       putGuarded("cardName");
       putGuarded("cardNumber");
       putGuarded("year");
-      putGuarded("language", scalarOrNull);
+      putGuarded("language", (v) => {
+        const raw = scalarOrNull(v);
+        if (raw == null) return null;
+        return validatedIdentityVariant.nextLanguage;
+      });
       putGuarded("rarity", scalarOrNull);
       putGuarded("variant", scalarOrNull);
       putGuarded("collectionCode", scalarOrNull);
@@ -2048,6 +2078,9 @@ export async function handleCertificateCreate(req: any, res: any): Promise<void>
           !isNonNum && isBlackLabel({ centering: -1, corners: -1, edges: -1, surface: -1 }, certGrade)
             ? "black"
             : "Standard";
+        if (req.body.language && !normalizePokemonLanguage(req.body.language)) {
+          return res.status(400).json({ error: `Unsupported language: ${req.body.language}` });
+        }
 
         const data = {
           labelType: computedLabelType,
@@ -2065,7 +2098,7 @@ export async function handleCertificateCreate(req: any, res: any): Promise<void>
           collection: null,
           collectionCode: req.body.collectionCode || null,
           collectionOther: req.body.collectionCode === "OTHER" ? req.body.collectionOther?.trim() || null : null,
-          language: req.body.language || "English",
+          language: languageLabel(req.body.language || "English"),
           year: req.body.year,
           notes: req.body.notes || null,
           gradeOverall: isNonNum ? null : req.body.gradeOverall,

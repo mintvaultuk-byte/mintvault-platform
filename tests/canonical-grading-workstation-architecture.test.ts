@@ -355,19 +355,21 @@ describe("Three-stage workflow: Variant lives in Card Details + one shared picke
   it("R6-R7. finish + promo are independent structured fields (StructuredCardVariant), rarity single-select", () => {
     // The picker emits {rarity, finish, promo, ...} — separate fields, and the
     // role panel maps them to separate columns (rarity_code/finish_variant/promo_type).
-    expect(PANEL).toMatch(/setRarityCode\(v\.rarity/);
+    expect(PANEL).toMatch(/setRarityCode\((v\.rarity|nextRarity)/);
+    expect(PANEL).toContain("isLowerInformationRarityChange");
     expect(PANEL).toMatch(/setFinishVariant\(v\.finish/);
     expect(PANEL).toMatch(/setPromoType\(v\.promo/);
   });
 
-  it("R8. role save/read persist rarity ADDITIVELY (existing columns; pick() preserves)", () => {
+  it("R8. role save/read persist rarity ADDITIVELY (existing columns; validator preserves)", () => {
     // Read path exposes the fields; write path persists them via applyCertGradeDraft.
     expect(GRADER_SERVER).toContain("rarityCode: c.rarityCode");
     expect(GRADER_SERVER).toContain("finishVariant: c.finishVariant");
     expect(GRADER_SERVER).toContain("promoType: c.promoType");
-    expect(GRADER_SERVER).toMatch(/rarity_code\s*=\s*\$\{pick\(body\.rarity_code, cert\.rarityCode\)\}/);
-    expect(GRADER_SERVER).toMatch(/finish_variant\s*=\s*\$\{pick\(body\.finish_variant, cert\.finishVariant\)\}/);
-    expect(GRADER_SERVER).toMatch(/promo_type\s*=\s*\$\{pick\(body\.promo_type, cert\.promoType\)\}/);
+    expect(GRADER_SERVER).toContain("validateGradeDraftIdentityAndVariant");
+    expect(GRADER_SERVER).toMatch(/rarity_code\s*=\s*\$\{nextRarityCode\}/);
+    expect(GRADER_SERVER).toMatch(/finish_variant\s*=\s*\$\{nextFinishVariant\}/);
+    expect(GRADER_SERVER).toMatch(/promo_type\s*=\s*\$\{nextPromoType\}/);
     // GradingPanel sends them in its save payload.
     expect(PANEL).toContain("out.rarity_code = rarityCode.trim()");
     // Rarity hydrates AND persists for BOTH graderMode and adminReview (so
@@ -439,17 +441,23 @@ describe("Rarity clear: explicit 'No rarity' persists an empty selection (option
   });
 
   it("C4. one consolidated Variant value — the picker emits a single StructuredCardVariant (finish/promo independent fields within it)", () => {
-    // The picker builds ONE structured variant and emits it via onChange (through a
-    // stable ref so an unstable inline onChange prop cannot re-fire the effect).
+    // The picker builds ONE structured variant and emits it through an explicit
+    // interaction helper. Controlled prop echoes only hydrate state; they do not
+    // replay onChange or suppress the next click.
     expect(PICKER).toContain("buildStructuredVariant({");
-    expect(PICKER).toMatch(/onChangeRef\.current\?\.\(structured\)/);
+    expect(PICKER).toMatch(/const emitSelection = \(next:/);
+    expect(PICKER).toMatch(/onChangeRef\.current\?\.\(\s*buildStructuredVariant\(/);
+    expect(PICKER).not.toContain("syncingFromValueRef");
   });
 
   it("C5. picker does NOT emit onChange on mount — only on genuine interaction (no spurious rarityTouched / stored-rarity wipe)", () => {
-    // The mount echo is suppressed via a ref guard so hydrating an existing cert's
-    // rarity into the (uncontrolled-after-mount) picker never looks like a user edit.
-    expect(PICKER).toMatch(/emitMountedRef\s*=\s*useRef\(false\)/);
-    expect(PICKER).toMatch(/if \(!emitMountedRef\.current\) \{\s*emitMountedRef\.current = true;\s*return;/);
+    // There is no effect-driven onChange at all: mount/refetch/parent echo only
+    // synchronise controlled state, while user handlers call emitSelection.
+    const effectBodies = Array.from(PICKER.matchAll(/useEffect\(\(\) => \{([\s\S]*?)\n {2}\},/g)).map((m) => m[1]);
+    expect(effectBodies.some((body) => body.includes("onChangeRef.current?.("))).toBe(false);
+    expect(PICKER).toMatch(/const pickRarity = \(v: string\) => \{/);
+    expect(PICKER).toMatch(/const pickFinish = \(value: string \| null\) => \{/);
+    expect(PICKER).toMatch(/const pickPromoOrSubset = \(value: string \| null\) => \{/);
     // GradingPanel mounts the picker only once gradingData is present and keys it by
     // certId, seeding from the stored value — both derived straight from the query, so
     // no effect-ordering race (hydration vs per-card reset) can strand it on "Loading".
