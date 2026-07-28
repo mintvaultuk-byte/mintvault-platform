@@ -164,12 +164,31 @@ export interface GradingShortcutEvent {
   ctrlKey: boolean;
   /** `event.target.tagName`, or null/undefined when there is no element target. */
   targetTag?: string | null;
+  /**
+   * M-2 · `event.target.isContentEditable`. A rich-text host is an editable
+   * control that is NOT an INPUT/SELECT/TEXTAREA, so the tag check alone would
+   * have swallowed the operator's keystroke inside one.
+   */
+  targetIsContentEditable?: boolean | null;
 }
 
 export interface GradingShortcutState extends GradingPersistenceState {
   deionizationComplete: boolean;
   /** True when the crop gate would block approval right now. */
   cropGateBlocked: boolean;
+  /**
+   * M-2 · is the stage that OWNS the approval action on screen right now?
+   *
+   * `active` means the GRADE stage — the stage that owns Ctrl+S. Approval lives
+   * on the REVIEW stage, which is a different stage, so it needs its own flag.
+   * Overloading `active` for both would either make Ctrl+Enter dead on Review
+   * (the defect this closes) or make the Grade stage able to approve — the two
+   * shortcuts belong to two different stages and now say so.
+   *
+   * Optional and defaulting to FALSE at every call site: a surface that forgets
+   * to wire it loses the shortcut rather than gaining an unowned one.
+   */
+  approvalStageActive?: boolean;
 }
 
 /** Controls whose native keyboard behaviour must never be intercepted. */
@@ -189,26 +208,48 @@ const EDITABLE_TAGS: ReadonlySet<string> = new Set(["INPUT", "SELECT", "TEXTAREA
  *
  * ORDER IS DELIBERATE:
  *  1. not a shortcut     — leave every other keystroke alone.
- *  2. editable target    — INPUT/SELECT/TEXTAREA keep native behaviour, checked
- *                          BEFORE anything else can preventDefault.
- *  3. INACTIVE           — a hidden panel is completely inert. Deliberately an
+ *  2. editable target    — INPUT/SELECT/TEXTAREA and any contentEditable host
+ *                          keep native behaviour, checked BEFORE anything else
+ *                          can preventDefault.
+ *  3. OWNING STAGE       — each shortcut belongs to exactly ONE stage: Ctrl+S to
+ *                          Grade (`active`), Ctrl+Enter to Review
+ *                          (`approvalStageActive`). A panel whose owning stage is
+ *                          off screen is completely inert. Deliberately an
  *                          "ignore", not a "blocked": swallowing the browser's
  *                          own Ctrl+S from an off-screen component would be
  *                          wrong, because the operator is looking at a different
  *                          stage and this panel has no claim on the keystroke.
- *  4. shared lifecycle   — the SAME chain the debounced auto-save uses.
+ *  4. shared lifecycle   — the SAME chain the debounced auto-save uses, run with
+ *                          the owning stage's flag substituted for `active`.
  *  5. checklist gates    — approval-only, read from CURRENT state.
+ *
+ * M-2 · WHY STEP 3 IS PER-ACTION. The first version of this function admitted
+ * BOTH shortcuts on `active` alone. `active` is true only on the GRADE stage,
+ * but the stage gate hides `[data-canonical-section="footer-actions"]` there and
+ * shows it on REVIEW — so Ctrl+Enter fired only on the stage where Approve is
+ * hidden and was dead on the stage where it is offered. Substituting the owning
+ * stage's flag INTO the shared chain (rather than skipping the chain for
+ * approval) is what keeps this from becoming a weaker second gate: workflow
+ * lock, approved state, hydration identity and certificate identity are all
+ * still enforced, unchanged, for both shortcuts.
  */
 export function decideGradingShortcut(ev: GradingShortcutEvent, s: GradingShortcutState): GradingShortcutOutcome {
   const isSave = ev.ctrlKey && ev.key === "s";
   const isApprove = ev.ctrlKey && ev.key === "Enter";
   if (!isSave && !isApprove) return { action: "ignore", reason: "not-a-shortcut" };
+  if (ev.targetIsContentEditable) return { action: "ignore", reason: "editable-target" };
   if (ev.targetTag && EDITABLE_TAGS.has(ev.targetTag)) {
     return { action: "ignore", reason: "editable-target" };
   }
-  if (!s.active) return { action: "ignore", reason: "inactive" };
 
-  const gate = decideExplicitGradingSave(s);
+  // The stage that OWNS this shortcut. Ctrl+S is Grade-stage work; Ctrl+Enter is
+  // Review-stage work. Absent (undefined) approval wiring reads as false.
+  const owningStageActive = isSave ? s.active : s.approvalStageActive === true;
+  if (!owningStageActive) return { action: "ignore", reason: "inactive" };
+
+  // Same chain, with the owning stage's flag in the `active` slot — NOT a second
+  // weaker set of conditions.
+  const gate = decideExplicitGradingSave({ ...s, active: owningStageActive });
   if (!gate.allow) return { action: "blocked", reason: gate.reason };
 
   if (isSave) return { action: "save-draft" };

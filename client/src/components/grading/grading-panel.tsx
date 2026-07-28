@@ -149,6 +149,19 @@ interface Props {
    * its workflow stage, injected into the workstation slot) — both do.
    */
   active: boolean;
+  /**
+   * M-2 · is the REVIEW stage on screen? `active` above means the GRADE stage.
+   *
+   * Approve/Publish lives on Review (the stage gate hides `footer-actions` on
+   * Grade and shows it on Review), so the Ctrl+Enter approval shortcut belongs
+   * to Review, not to Grade. Wired from the same stage state that drives
+   * `active` at each mount site — GradingWorkstation's own `stage`, and
+   * CertificateForm's `wfStage` injected into the workstation slot.
+   *
+   * Optional, defaulting to FALSE: a mount site that does not state it loses the
+   * shortcut rather than gaining one it never authorised.
+   */
+  approvalStageActive?: boolean;
   certIdStr?: string;
   cardName: string;
   cardSet: string;
@@ -289,6 +302,7 @@ function surfaceGradeColor(g: number): string {
 export default function GradingPanel({
   certId,
   active,
+  approvalStageActive = false,
   certIdStr,
   cardName,
   cardSet,
@@ -784,6 +798,7 @@ export default function GradingPanel({
   // the SHARED fail-closed contract rather than a second weaker set of checks.
   const shortcutStateRef = useRef({
     active,
+    approvalStageActive,
     certId,
     hydratedForCertId: null as number | null,
     workflowLocked: gradingWorkflowLocked,
@@ -797,6 +812,7 @@ export default function GradingPanel({
   useEffect(() => {
     shortcutStateRef.current = {
       active,
+      approvalStageActive,
       certId,
       hydratedForCertId: gradingHydratedForRef.current,
       workflowLocked: gradingWorkflowLocked,
@@ -809,6 +825,11 @@ export default function GradingPanel({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // Cheap pre-filter so an ordinary keystroke does no work at all. The pure
+      // function below re-checks this as step 1 and remains authoritative; this
+      // only avoids evaluating the crop gate on every key the operator types.
+      if (!e.ctrlKey || (e.key !== "s" && e.key !== "Enter")) return;
+
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       const s = shortcutStateRef.current;
@@ -817,9 +838,15 @@ export default function GradingPanel({
       // The decision itself is the shared pure function; this handler only
       // EXECUTES what it is told (same split as the auto-save effect).
       const outcome = decideGradingShortcut(
-        { key: e.key, ctrlKey: e.ctrlKey, targetTag: tag ?? null },
+        {
+          key: e.key,
+          ctrlKey: e.ctrlKey,
+          targetTag: tag ?? null,
+          targetIsContentEditable: target?.isContentEditable ?? false,
+        },
         {
           active: s.active,
+          approvalStageActive: s.approvalStageActive,
           certId: s.certId,
           hydratedForCertId: s.hydratedForCertId,
           workflowLocked: s.workflowLocked,
@@ -1036,6 +1063,8 @@ export default function GradingPanel({
   const gradingHydratedForRef = useRef<number | null>(null);
   /** M-1: one explicit draft save in flight at a time (repeated Ctrl+S). */
   const saveDraftInFlightRef = useRef(false);
+  /** M-2: one approval in flight at a time (repeated Ctrl+Enter / fast clicks). */
+  const approveInFlightRef = useRef(false);
   const autoSavedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hydratedOnceRef = useRef(false);
 
@@ -2166,6 +2195,14 @@ export default function GradingPanel({
       toast({ ...block, variant: "destructive" });
       return;
     }
+    // M-2 · double-submission guard, mirroring saveDraft's. The confirm dialog's
+    // button is already `disabled={approving || ...}`, but that is React STATE:
+    // it only stops a second click once the re-render has landed. A ref flips
+    // synchronously, so two approvals can never be in flight at once no matter
+    // how the action was reached (dialog button, or a repeated Ctrl+Enter that
+    // re-opened it). Released in the same `finally` as `setApproving(false)`.
+    if (approveInFlightRef.current) return;
+    approveInFlightRef.current = true;
     setApproving(true);
     try {
       // v413: flush any pending debounced auto-save before approving so the
@@ -2261,6 +2298,7 @@ export default function GradingPanel({
     } catch (e: any) {
       toast({ title: "Approve failed", description: e.message, variant: "destructive" });
     } finally {
+      approveInFlightRef.current = false;
       setApproving(false);
     }
   }

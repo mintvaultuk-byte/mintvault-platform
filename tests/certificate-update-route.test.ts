@@ -1823,3 +1823,216 @@ describe("M-3: grading update and grading audit commit together", () => {
     }
   });
 });
+
+/**
+ * M-1 (hostile review of PR #262) · the eight MVGS v2 defect-input columns.
+ *
+ * WHAT WENT WRONG
+ * PR #262 correctly stopped the grading route writing an audit row for an empty
+ * change set. But eight columns the same UPDATE writes were never in the audit
+ * field map: `whitening_lines`, `crease_lines`, `crease_span_pct`,
+ * `wrinkle_severity`, `tear_severity`, `eye_appeal_modifier`,
+ * `dark_border_front` and `dark_border_back`. The combination meant a save that
+ * touched ONLY these produced NO audit row at all — and these are not cosmetic
+ * fields, they are the operator-marked evidence the MVGS engine reads.
+ * `buildPayload()` sends all eight on every save.
+ *
+ * These tests drive the REAL route against a REAL PostgreSQL cluster through
+ * the REAL `requireAdmin` chain, and assert the audit row against the value the
+ * database actually holds afterwards — never against the payload alone. That
+ * distinction is the point: the SQL for these columns clamps, validates and
+ * type-gates what it writes, so auditing the raw payload would have replaced a
+ * missing row with a lying one.
+ */
+describe("M-1 · MVGS v2 defect inputs are audited truthfully", () => {
+  const savesOf = async () => (await readAudits()).filter((a: any) => a.action === "draft_save");
+  const onlySave = async () => {
+    const s = await savesOf();
+    expect(s, "exactly one grading audit row").toHaveLength(1);
+    return s[0];
+  };
+
+  it("a whitening-line change ALONE writes exactly one truthful audit row", async () => {
+    const id = await certId();
+    const lines = [{ edge: "top", lengthPct: 12 }];
+    const { status } = await putGrade(id, { whitening_lines: lines });
+    expect(status).toBe(200);
+
+    // The column really moved…
+    expect((await readCert()).whiteningLines).toEqual(lines);
+    // …and exactly one row says so, with the full identity contract.
+    const save = await onlySave();
+    expect(save.entityType).toBe("certificate");
+    expect(save.entityId).toBe("MV1");
+    expect(save.adminUser).toBeTruthy();
+    expect(save.createdAt).toBeTruthy();
+    expect(save.details.changedFields).toEqual(["whitening_lines"]);
+    expect(save.details.changed.whitening_lines.from).toBeNull();
+    expect(save.details.changed.whitening_lines.to).toEqual(lines);
+    expect(save.details.outcome).toBe("committed");
+  });
+
+  it("a crease-line change ALONE is audited", async () => {
+    const id = await certId();
+    const creases = [{ id: "c1", spanPct: 30, start: { x: 1, y: 2 }, end: { x: 3, y: 4 } }];
+    expect((await putGrade(id, { crease_lines: creases })).status).toBe(200);
+    expect((await readCert()).creaseLines).toEqual(creases);
+    const save = await onlySave();
+    expect(save.details.changedFields).toEqual(["crease_lines"]);
+    expect(save.details.changed.crease_lines.to).toEqual(creases);
+  });
+
+  it("a severity / modifier change ALONE is audited", async () => {
+    const id = await certId();
+    expect(
+      (await putGrade(id, { wrinkle_severity: "small_front", tear_severity: "minor", eye_appeal_modifier: -1 })).status
+    ).toBe(200);
+    const cert = await readCert();
+    expect(cert.wrinkleSeverity).toBe("small_front");
+    expect(cert.tearSeverity).toBe("minor");
+    expect(cert.eyeAppealModifier).toBe(-1);
+
+    const save = await onlySave();
+    expect(new Set(save.details.changedFields)).toEqual(
+      new Set(["wrinkle_severity", "tear_severity", "eye_appeal_modifier"])
+    );
+    expect(save.details.changed.wrinkle_severity.to).toBe("small_front");
+    expect(save.details.changed.tear_severity.to).toBe("minor");
+    expect(save.details.changed.eye_appeal_modifier.to).toBe(-1);
+  });
+
+  it("a dark-border toggle ALONE is audited", async () => {
+    const id = await certId();
+    expect((await putGrade(id, { dark_border_front: true })).status).toBe(200);
+    expect((await readCert()).darkBorderFront).toBe(true);
+    const save = await onlySave();
+    expect(save.details.changedFields).toEqual(["dark_border_front"]);
+    expect(save.details.changed.dark_border_front.to).toBe(true);
+  });
+
+  it("a crease_span_pct change ALONE is audited", async () => {
+    const id = await certId();
+    expect((await putGrade(id, { crease_span_pct: 42.5 })).status).toBe(200);
+    expect(Number((await readCert()).creaseSpanPct)).toBe(42.5);
+    const save = await onlySave();
+    expect(save.details.changedFields).toEqual(["crease_span_pct"]);
+  });
+
+  it("several defect inputs changed together produce ONE row listing all of them", async () => {
+    const id = await certId();
+    const { status } = await putGrade(id, {
+      whitening_lines: [{ edge: "left", lengthPct: 5 }],
+      crease_lines: [{ id: "c9", spanPct: 8 }],
+      wrinkle_severity: "tiny_back",
+      tear_severity: "significant",
+      eye_appeal_modifier: 2,
+      dark_border_front: true,
+      dark_border_back: true,
+      crease_span_pct: 8,
+    });
+    expect(status).toBe(200);
+    const save = await onlySave();
+    expect(new Set(save.details.changedFields)).toEqual(
+      new Set([
+        "whitening_lines",
+        "crease_lines",
+        "wrinkle_severity",
+        "tear_severity",
+        "eye_appeal_modifier",
+        "dark_border_front",
+        "dark_border_back",
+        "crease_span_pct",
+      ])
+    );
+  });
+
+  it("resubmitting semantically identical defect inputs writes NO second row", async () => {
+    const id = await certId();
+    const payload = {
+      whitening_lines: [{ edge: "top", lengthPct: 12 }],
+      wrinkle_severity: "tiny_back",
+      eye_appeal_modifier: 1,
+      dark_border_front: true,
+      crease_span_pct: 10,
+    };
+    expect((await putGrade(id, payload)).status).toBe(200);
+    expect(await savesOf()).toHaveLength(1);
+
+    // Byte-identical re-save — the debounced auto-save's normal behaviour.
+    expect((await putGrade(id, payload)).status).toBe(200);
+    expect(await savesOf(), "a no-op must not accumulate rows").toHaveLength(1);
+  });
+
+  it("jsonb KEY ORDER is not a change — structured values compare semantically", async () => {
+    const id = await certId();
+    expect((await putGrade(id, { whitening_lines: [{ edge: "top", lengthPct: 12 }] })).status).toBe(200);
+    expect(await savesOf()).toHaveLength(1);
+
+    // Same value, keys written in the opposite order. Postgres returns jsonb in
+    // its OWN ordering, so a raw-string compare would call this a change.
+    expect((await putGrade(id, { whitening_lines: [{ lengthPct: 12, edge: "top" }] })).status).toBe(200);
+    expect(await savesOf()).toHaveLength(1);
+  });
+
+  it("ARRAY order IS a change — reordering creases is real evidence movement", async () => {
+    const id = await certId();
+    const a = { id: "a", spanPct: 1 };
+    const b = { id: "b", spanPct: 2 };
+    expect((await putGrade(id, { crease_lines: [a, b] })).status).toBe(200);
+    expect(await savesOf()).toHaveLength(1);
+    expect((await putGrade(id, { crease_lines: [b, a] })).status).toBe(200);
+    expect(await savesOf()).toHaveLength(2);
+  });
+
+  it("a CLAMPED modifier audits the value actually written, not the payload", async () => {
+    // The SQL clamps ±2. Auditing the raw payload would claim `to: 99`, which
+    // the database never held — a missing row traded for a false one.
+    const id = await certId();
+    expect((await putGrade(id, { eye_appeal_modifier: 99 })).status).toBe(200);
+    expect((await readCert()).eyeAppealModifier).toBe(2);
+    const save = await onlySave();
+    expect(save.details.changed.eye_appeal_modifier.to).toBe(2);
+    expect(save.details.changed.eye_appeal_modifier.to).not.toBe(99);
+  });
+
+  it("an INVALID severity writes nothing and audits nothing", async () => {
+    const id = await certId();
+    const before = await readCert();
+    expect((await putGrade(id, { wrinkle_severity: "not-a-real-severity" })).status).toBe(200);
+    // The SQL preserves the stored value for an unrecognised enum…
+    expect((await readCert()).wrinkleSeverity).toBe(before.wrinkleSeverity ?? null);
+    // …so nothing may be reported as changed.
+    expect(await savesOf()).toHaveLength(0);
+  });
+
+  it("an unwritable audit rolls a defect-input change BACK and fails closed", async () => {
+    const id = await certId();
+    const before = await readCert();
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT m1_block CHECK (action <> 'draft_save')`);
+    try {
+      const { status } = await putGrade(id, {
+        whitening_lines: [{ edge: "bottom", lengthPct: 40 }],
+        wrinkle_severity: "multiple_front",
+        dark_border_back: true,
+      });
+      expect(status).toBe(500);
+      const after = await readCert();
+      expect(after.whiteningLines).toEqual(before.whiteningLines ?? null);
+      expect(after.wrinkleSeverity).toBe(before.wrinkleSeverity ?? null);
+      expect(after.darkBorderBack).toBe(before.darkBorderBack);
+      expect(await readAudits()).toHaveLength(0);
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT m1_block`);
+    }
+  });
+
+  it("existing numeric-equivalence handling is intact (8 vs 8.0 is still no change)", async () => {
+    const id = await certId();
+    expect((await putGrade(id, { overall_grade: "8" })).status).toBe(200);
+    expect(await savesOf()).toHaveLength(1);
+    expect((await readCert()).gradeOverall).toBe("8.0");
+    // The stored value echoes back as "8.0"; the workstation posts "8".
+    expect((await putGrade(id, { overall_grade: "8" })).status).toBe(200);
+    expect(await savesOf()).toHaveLength(1);
+  });
+});

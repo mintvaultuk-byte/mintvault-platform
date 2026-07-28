@@ -54,6 +54,7 @@ let pool: pg.Pool;
 let persist: typeof import("../server/lib/certificate-image-persistence").persistImageUploadAudited;
 let AUDIT_ACTION: string;
 let VARIANT_ACTION: string;
+let FAILURE_ACTION: string;
 
 const CERT_ID = "MV1";
 const q = async (text: string, params: unknown[] = []) => (await pool.query(text, params)).rows;
@@ -108,6 +109,7 @@ beforeAll(async () => {
   persist = mod.persistImageUploadAudited;
   AUDIT_ACTION = mod.IMAGE_UPLOAD_AUDIT_ACTION;
   VARIANT_ACTION = mod.IMAGE_VARIANTS_AUDIT_ACTION;
+  FAILURE_ACTION = mod.IMAGE_UPLOAD_FAILURE_AUDIT_ACTION;
 });
 
 afterAll(async () => {
@@ -556,5 +558,211 @@ describe("M-2 · the background variant pass is audited too", () => {
     } finally {
       await q(`ALTER TABLE audit_log DROP CONSTRAINT block_var`);
     }
+  });
+});
+
+/**
+ * M-3 (hostile review of PR #262) · the ONE unrecoverable outcome must leave a
+ * durable record.
+ *
+ * WHAT WENT WRONG
+ * R2 keys here are deterministic, so a re-upload replaces the BYTES at a key the
+ * committed row already points at. Objects are written before the transaction
+ * and cannot be rolled back, so when the transaction then fails the previous
+ * content is gone for good. Compensation correctly refuses to DELETE such an
+ * object — the committed row still references it — but the only evidence that a
+ * customer's card image had been replaced was a `console.error`, which is no
+ * evidence at all once the log rotates.
+ *
+ * The failure record is deliberately narrow: it is written ONLY when a committed
+ * object was actually overwritten. Ordinary orphan cleanup overwrote nothing and
+ * left committed state untouched; auditing that would train readers to ignore
+ * the event.
+ */
+describe("M-3 · an unrecoverable overwrite leaves a durable failure record", () => {
+  const failureRows = async () => (await readAudits()).filter((a: any) => a.action === FAILURE_ACTION);
+
+  it("an overwritten COMMITTED key + a failed transaction writes exactly one failure event", async () => {
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT m3_block1 CHECK (action <> '${AUDIT_ACTION}')`);
+    let res: any;
+    try {
+      res = await persist({
+        id: certRowId,
+        certId: CERT_ID,
+        updates: { front_image_path: "images/MV1/front.jpg" },
+        uploadedObjects: [obj("images/MV1/front.jpg", "front_image_path", "REPLACEMENT-BYTES", true)],
+        actor: "admin@example.test",
+      });
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT m3_block1`);
+    }
+
+    expect(res.committed).toBe(false);
+    expect(res.failureAuditRecorded).toBe(true);
+    // The object itself is untouched — the committed row still points at it.
+    expect(r2.deletes).toEqual([]);
+
+    const rows = await failureRows();
+    expect(rows).toHaveLength(1);
+    const row = rows[0];
+    expect(row.entity_type).toBe("certificate");
+    expect(row.entity_id).toBe("MV1");
+    expect(row.admin_user).toBe("admin@example.test");
+    expect(row.created_at).toBeTruthy();
+    expect(row.details.overwrittenCommittedObjects).toEqual([
+      { key: "images/MV1/front.jpg", column: "front_image_path", side: "front", bytes: "REPLACEMENT-BYTES".length },
+    ]);
+    expect(row.details.sides).toEqual(["front"]);
+    expect(row.details.overwrittenCommittedObjectCount).toBe(1);
+  });
+
+  it("the event states plainly that the database mutation did NOT commit", async () => {
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT m3_block2 CHECK (action <> '${AUDIT_ACTION}')`);
+    try {
+      await persist({
+        id: certRowId,
+        certId: CERT_ID,
+        updates: { front_image_path: "images/MV1/front.jpg" },
+        uploadedObjects: [obj("images/MV1/front.jpg", "front_image_path", "X", true)],
+        actor: "admin@example.test",
+      });
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT m3_block2`);
+    }
+    const d = (await failureRows())[0].details;
+    // No reader may mistake this for a successful upload…
+    expect(d.committed).toBe(false);
+    expect(d.databaseMutationCommitted).toBe(false);
+    expect(d.outcome).toBe("not_committed");
+    expect(d.outcome).not.toBe("committed");
+    // …and the R2/Postgres boundary is stated, not dressed up as atomicity.
+    expect(String(d.note)).toMatch(/cannot be rolled back/i);
+    expect(String(d.note)).toMatch(/did not commit/i);
+    // The certificate really is unchanged.
+    expect((await readCert()).front_image_path).toBe("images/MV1/front.jpg");
+  });
+
+  it("RECOVERABLE orphan cleanup writes NO failure event", async () => {
+    // A brand-new key this request created and then deleted overwrote nothing.
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT m3_block3 CHECK (action <> '${AUDIT_ACTION}')`);
+    let res: any;
+    try {
+      res = await persist({
+        id: certRowId,
+        certId: CERT_ID,
+        updates: { grading_closeup_cropped: "grading/MV1/closeup_cropped.jpg" },
+        uploadedObjects: [obj("grading/MV1/closeup_cropped.jpg", "grading_closeup_cropped", "NEW")],
+        actor: "admin@example.test",
+      });
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT m3_block3`);
+    }
+    expect(res.committed).toBe(false);
+    expect(res.orphansRemoved).toEqual(["grading/MV1/closeup_cropped.jpg"]);
+    expect(res.overwrittenCommittedObjects).toEqual([]);
+    expect(res.failureAuditRecorded).toBe(false);
+    expect(await failureRows(), "recoverable cleanup must not raise a failure event").toHaveLength(0);
+  });
+
+  it("a SUCCESSFUL commit writes no failure event", async () => {
+    const res = await persist({
+      id: certRowId,
+      certId: CERT_ID,
+      updates: { back_image_path: "images/MV1/back.jpg" },
+      uploadedObjects: [obj("images/MV1/back.jpg", "back_image_path", "B")],
+      actor: "admin@example.test",
+    });
+    expect(res.committed).toBe(true);
+    expect(res.failureAuditRecorded).toBe(false);
+    expect(await failureRows()).toHaveLength(0);
+  });
+
+  it("an unwritable FAILURE audit preserves the original failure and deletes nothing", async () => {
+    // Block BOTH the upload audit (causing the transaction to fail) and the
+    // failure audit (so the secondary write fails too).
+    await q(
+      `ALTER TABLE audit_log ADD CONSTRAINT m3_block4 CHECK (action NOT IN ('${AUDIT_ACTION}', '${FAILURE_ACTION}'))`
+    );
+    let res: any;
+    try {
+      res = await persist({
+        id: certRowId,
+        certId: CERT_ID,
+        updates: { front_image_path: "images/MV1/front.jpg" },
+        uploadedObjects: [obj("images/MV1/front.jpg", "front_image_path", "X", true)],
+        actor: "admin@example.test",
+      });
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT m3_block4`);
+    }
+    // The ORIGINAL failure still stands — it is never masked or upgraded.
+    expect(res.committed).toBe(false);
+    expect(res.failureAuditRecorded).toBe(false);
+    // It did not throw: the caller still gets to return its 500.
+    expect(res.overwrittenCommittedObjects).toEqual(["images/MV1/front.jpg"]);
+    // And above all, no committed object was deleted.
+    expect(r2.deletes).toEqual([]);
+    expect((await readCert()).front_image_path).toBe("images/MV1/front.jpg");
+    expect(await readAudits()).toHaveLength(0);
+  });
+
+  it("records orphan-cleanup failure alongside the overwrite, truthfully", async () => {
+    r2.failDelete.add("grading/MV1/angled_cropped.jpg");
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT m3_block5 CHECK (action <> '${AUDIT_ACTION}')`);
+    let res: any;
+    try {
+      res = await persist({
+        id: certRowId,
+        certId: CERT_ID,
+        updates: {
+          front_image_path: "images/MV1/front.jpg",
+          grading_angled_cropped: "grading/MV1/angled_cropped.jpg",
+        },
+        uploadedObjects: [
+          obj("images/MV1/front.jpg", "front_image_path", "X", true),
+          obj("grading/MV1/angled_cropped.jpg", "grading_angled_cropped", "NEW"),
+        ],
+        actor: "admin@example.test",
+      });
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT m3_block5`);
+    }
+    expect(res.committed).toBe(false);
+    expect(res.orphanCleanupFailed).toEqual(["grading/MV1/angled_cropped.jpg"]);
+    const d = (await failureRows())[0].details;
+    expect(d.orphanCleanupFailedCount).toBe(1);
+    expect(d.orphanCleanupFailedKeys).toEqual(["grading/MV1/angled_cropped.jpg"]);
+    expect(d.orphansRemovedCount).toBe(0);
+  });
+
+  it("carries NO signed URL, credential, secret, header or stack trace", async () => {
+    await q(`ALTER TABLE audit_log ADD CONSTRAINT m3_block6 CHECK (action <> '${AUDIT_ACTION}')`);
+    try {
+      await persist({
+        id: certRowId,
+        certId: CERT_ID,
+        updates: { front_image_path: "images/MV1/front.jpg" },
+        uploadedObjects: [obj("images/MV1/front.jpg", "front_image_path", "X", true)],
+        actor: "admin@example.test",
+      });
+    } finally {
+      await q(`ALTER TABLE audit_log DROP CONSTRAINT m3_block6`);
+    }
+    const raw = JSON.stringify((await failureRows())[0].details);
+    for (const forbidden of [
+      "X-Amz-Signature",
+      "Signature=",
+      "https://",
+      "AccessKey",
+      "secret",
+      "authorization",
+      "cookie",
+      "at Object.",
+      ".ts:",
+    ]) {
+      expect(raw, `failure audit must not contain ${forbidden}`).not.toContain(forbidden);
+    }
+    // A coarse category is enough to triage; a raw message is not carried.
+    expect((await failureRows())[0].details.failureCategory).toBeTruthy();
   });
 });

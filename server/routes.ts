@@ -2278,6 +2278,71 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
       // operator querying the trail by certificate ID silently missed every
       // grading event. Both now write the canonical certId, with the numeric id
       // retained inside `details` for continuity with historical rows.
+      // ── M-1 (hostile review of PR #262) · EFFECTIVE WRITTEN VALUES ──────────
+      //
+      // Eight MVGS v2 defect-input columns are written by the UPDATE below but
+      // were absent from the audit field map, so — once PR #262 stopped writing
+      // an audit row for an empty change set — a save that touched ONLY these
+      // produced NO audit row at all. They are grading EVIDENCE (they feed the
+      // engine), so that was a real coverage hole. `buildPayload()` sends all
+      // eight on every save.
+      //
+      // They cannot simply be added to the map with their RAW payload values:
+      // unlike the other mapped fields, the SQL for these CLAMPS, VALIDATES or
+      // type-gates what it writes. `eye_appeal_modifier: 99` writes 2;
+      // `wrinkle_severity: "junk"` writes nothing at all. Auditing the payload
+      // would therefore claim changes the database never made — trading a
+      // missing row for a lying one.
+      //
+      // So the rule is resolved ONCE here, and the SAME resolved value is used
+      // by both the UPDATE and the audit diff. `undefined` means "this request
+      // does not write the column" (preserve stored), and such a field is never
+      // reported as changed.
+      const effDarkBorderFront = typeof b.dark_border_front === "boolean" ? b.dark_border_front : undefined;
+      const effDarkBorderBack = typeof b.dark_border_back === "boolean" ? b.dark_border_back : undefined;
+      const effEyeAppealModifier = (() => {
+        // Clamp ±2 server-side; ignore non-finite payloads.
+        const n = Number(b.eye_appeal_modifier);
+        if (!Number.isFinite(n)) return undefined;
+        return Math.max(-2, Math.min(2, Math.trunc(n)));
+      })();
+      const effWhiteningLines = Array.isArray((b as any).whitening_lines)
+        ? ((b as any).whitening_lines as unknown[])
+        : undefined;
+      const effCreaseLines = Array.isArray((b as any).crease_lines)
+        ? ((b as any).crease_lines as unknown[])
+        : undefined;
+      const effCreaseSpanPct = (() => {
+        const v = (b as any).crease_span_pct;
+        if (v === null) return null;
+        if (typeof v === "number" && Number.isFinite(v)) return Math.max(0, Math.min(100, v));
+        return undefined;
+      })();
+      const effWrinkleSeverity = (() => {
+        const v = (b as any).wrinkle_severity;
+        if (v === null) return null;
+        if (v === "tiny_back" || v === "longer_back" || v === "small_front" || v === "multiple_front") return v;
+        return undefined;
+      })();
+      const effTearSeverity = (() => {
+        const v = (b as any).tear_severity;
+        if (v === null) return null;
+        if (v === "minor" || v === "significant" || v === "major") return v;
+        return undefined;
+      })();
+      /** Payload key → the value the UPDATE will actually commit (undefined = not written). */
+      const EFFECTIVE_WRITTEN: Record<string, unknown> = {
+        dark_border_front: effDarkBorderFront,
+        dark_border_back: effDarkBorderBack,
+        eye_appeal_modifier: effEyeAppealModifier,
+        whitening_lines: effWhiteningLines,
+        crease_lines: effCreaseLines,
+        crease_span_pct: effCreaseSpanPct,
+        wrinkle_severity: effWrinkleSeverity,
+        tear_severity: effTearSeverity,
+      };
+      const HAS_EFFECTIVE: ReadonlySet<string> = new Set(Object.keys(EFFECTIVE_WRITTEN));
+
       const fieldsChanged = Object.keys(b || {});
       const fieldMap: Array<[string, string]> = [
         ["overall_grade", "gradeOverall"],
@@ -2298,8 +2363,40 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
         ["surface", "surfaceValues"],
         ["defects", "defects"],
         ["ai_defect_candidates", "aiDefectCandidates"],
+        // M-1 · the eight MVGS v2 defect-input columns. Accessors are the
+        // Drizzle properties declared in shared/schema.ts, so a diff built from
+        // the selected row is real rather than fabricated (unlike authStatus,
+        // which is an undeclared column and fails closed elsewhere).
+        ["dark_border_front", "darkBorderFront"],
+        ["dark_border_back", "darkBorderBack"],
+        ["eye_appeal_modifier", "eyeAppealModifier"],
+        ["whitening_lines", "whiteningLines"],
+        ["crease_lines", "creaseLines"],
+        ["crease_span_pct", "creaseSpanPct"],
+        ["wrinkle_severity", "wrinkleSeverity"],
+        ["tear_severity", "tearSeverity"],
       ];
-      const norm = (v: unknown) => (v == null ? null : typeof v === "object" ? JSON.stringify(v) : String(v));
+      // M-1 · structured values are compared SEMANTICALLY, not by raw string
+      // formatting. `whitening_lines` and `crease_lines` are jsonb: Postgres
+      // returns them with its own key ordering, while the workstation posts
+      // JavaScript insertion order. A plain JSON.stringify compare would then
+      // report a change on every save for objects whose keys happen to differ in
+      // order. Keys are sorted recursively; ARRAY order is preserved, because
+      // for a list of whitening lines or creases the order is part of the value.
+      const canonicalJson = (value: unknown): string => {
+        const walk = (x: unknown): unknown => {
+          if (Array.isArray(x)) return x.map(walk);
+          if (x && typeof x === "object") {
+            const src = x as Record<string, unknown>;
+            const out: Record<string, unknown> = {};
+            for (const k of Object.keys(src).sort()) out[k] = walk(src[k]);
+            return out;
+          }
+          return x;
+        };
+        return JSON.stringify(walk(value));
+      };
+      const norm = (v: unknown) => (v == null ? null : typeof v === "object" ? canonicalJson(v) : String(v));
       // Same narrowly-scoped numeric rule the metadata route already uses: for
       // the grading columns that are genuinely NUMERIC, Postgres returns "8.0"
       // while the workstation posts "8", so a plain string compare recorded a
@@ -2320,10 +2417,21 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
       const changed: Record<string, { from: unknown; to: unknown }> = {};
       for (const [pKey, cKey] of fieldMap) {
         if (!(pKey in (b || {}))) continue;
+        let afterValue: unknown;
+        if (HAS_EFFECTIVE.has(pKey)) {
+          const eff = EFFECTIVE_WRITTEN[pKey];
+          // The UPDATE preserves the stored value for this request (payload was
+          // absent, malformed, or the wrong type). Nothing is written, so
+          // nothing may be reported as changed.
+          if (eff === undefined) continue;
+          afterValue = eff;
+        } else {
+          afterValue = (b as any)[pKey];
+        }
         const before = norm((cert as any)[cKey]);
-        const after = norm((b as any)[pKey]);
+        const after = norm(afterValue);
         if (!sameValue(pKey, before, after)) {
-          changed[pKey] = { from: (cert as any)[cKey] ?? null, to: (b as any)[pKey] ?? null };
+          changed[pKey] = { from: (cert as any)[cKey] ?? null, to: afterValue ?? null };
         }
       }
       const canonicalCertId = String((cert as { certId?: string }).certId ?? id);
@@ -2364,20 +2472,22 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
           auth_notes          = COALESCE(${txt(b.auth_notes)},        auth_notes),
           grade_explanation   = COALESCE(${txt(b.grade_explanation)}, grade_explanation),
           private_notes       = COALESCE(${txt(b.private_notes)},     private_notes),
-          dark_border_front   = ${
-            typeof b.dark_border_front === "boolean" ? b.dark_border_front : sql`dark_border_front`
-          },
-          dark_border_back    = ${typeof b.dark_border_back === "boolean" ? b.dark_border_back : sql`dark_border_back`},
+          -- M-1: these expressions read the values resolved ABOVE, so the audit
+          -- diff and the write can never disagree about what this request
+          -- commits. Same rules, same clamps, same enum validation, same
+          -- preserve-on-omission — evaluated once instead of twice.
+          dark_border_front   = ${effDarkBorderFront === undefined ? sql`dark_border_front` : sql`${effDarkBorderFront}`},
+          dark_border_back    = ${effDarkBorderBack === undefined ? sql`dark_border_back` : sql`${effDarkBorderBack}`},
           dark_border         = ${
             // Legacy mirror = front OR back. PostgreSQL UPDATE evaluates RHS
             // against the OLD row, so we can't reference the new sibling
             // values directly — express the same OR via column refs and
             // payload values per-side.
             (() => {
-              const fSet = typeof b.dark_border_front === "boolean";
-              const bSet = typeof b.dark_border_back === "boolean";
-              const frontExpr = fSet ? sql`${b.dark_border_front}::boolean` : sql`dark_border_front`;
-              const backExpr = bSet ? sql`${b.dark_border_back}::boolean` : sql`dark_border_back`;
+              const fSet = effDarkBorderFront !== undefined;
+              const bSet = effDarkBorderBack !== undefined;
+              const frontExpr = fSet ? sql`${effDarkBorderFront}::boolean` : sql`dark_border_front`;
+              const backExpr = bSet ? sql`${effDarkBorderBack}::boolean` : sql`dark_border_back`;
               if (fSet || bSet) return sql`(${frontExpr} OR ${backExpr})`;
               // Neither new flag in payload — keep legacy semantics so old
               // clients still toggle the column unchanged.
@@ -2385,58 +2495,46 @@ export async function handleCertificateGradeUpdate(req: any, res: any): Promise<
             })()
           },
           eye_appeal_modifier = ${
-            // Clamp ±2 server-side; ignore non-finite payloads.
-            (() => {
-              const n = Number(b.eye_appeal_modifier);
-              if (!Number.isFinite(n)) return sql`eye_appeal_modifier`;
-              const clamped = Math.max(-2, Math.min(2, Math.trunc(n)));
-              return sql`${clamped}`;
-            })()
+            effEyeAppealModifier === undefined ? sql`eye_appeal_modifier` : sql`${effEyeAppealModifier}`
           },
           whitening_lines     = ${
             // MVGS v2 — operator-marked whitening lines per edge. Array
             // present (incl. []) → overwrite; absent key → keep existing
             // (legacy client / non-grading payload).
-            Array.isArray((b as any).whitening_lines)
-              ? sql`${JSON.stringify((b as any).whitening_lines)}::jsonb`
-              : sql`whitening_lines`
+            effWhiteningLines === undefined ? sql`whitening_lines` : sql`${JSON.stringify(effWhiteningLines)}::jsonb`
           },
           crease_lines        = ${
             // MVGS v2.1 — multi-crease list with start/end persistence.
             // Same array-overwrite pattern as whitening_lines.
-            Array.isArray((b as any).crease_lines)
-              ? sql`${JSON.stringify((b as any).crease_lines)}::jsonb`
-              : sql`crease_lines`
+            effCreaseLines === undefined ? sql`crease_lines` : sql`${JSON.stringify(effCreaseLines)}::jsonb`
           },
           crease_span_pct     = ${
             // Numeric 0..100 or null. Explicit null clears; undefined keeps.
             // In v2.1 this is a derived mirror of max(crease_lines.spanPct)
             // on the client (sent unconditionally in buildPayload) — server
             // accepts whatever the client computes for back-compat readers.
-            (b as any).crease_span_pct === null
-              ? sql`NULL`
-              : typeof (b as any).crease_span_pct === "number" && Number.isFinite((b as any).crease_span_pct)
-                ? sql`${Math.max(0, Math.min(100, (b as any).crease_span_pct))}::numeric`
-                : sql`crease_span_pct`
+            effCreaseSpanPct === undefined
+              ? sql`crease_span_pct`
+              : effCreaseSpanPct === null
+                ? sql`NULL`
+                : sql`${effCreaseSpanPct}::numeric`
           },
           wrinkle_severity    = ${
-            // Validate against the enum to prevent payload junk reaching the
-            // DB CHECK constraint with a more useful error before the SQL fires.
-            (() => {
-              const v = (b as any).wrinkle_severity;
-              if (v === null) return sql`NULL`;
-              if (v === "tiny_back" || v === "longer_back" || v === "small_front" || v === "multiple_front") {
-                return sql`${v}`;
-              }
-              return sql`wrinkle_severity`;
-            })()
+            // Validated against the enum above, so payload junk never reaches
+            // the DB CHECK constraint.
+            effWrinkleSeverity === undefined
+              ? sql`wrinkle_severity`
+              : effWrinkleSeverity === null
+                ? sql`NULL`
+                : sql`${effWrinkleSeverity}`
           },
-          tear_severity       = ${(() => {
-            const v = (b as any).tear_severity;
-            if (v === null) return sql`NULL`;
-            if (v === "minor" || v === "significant" || v === "major") return sql`${v}`;
-            return sql`tear_severity`;
-          })()},
+          tear_severity       = ${
+            effTearSeverity === undefined
+              ? sql`tear_severity`
+              : effTearSeverity === null
+                ? sql`NULL`
+                : sql`${effTearSeverity}`
+          },
           updated_at          = NOW()
         WHERE id = ${id}
       `);

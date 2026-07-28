@@ -495,6 +495,10 @@ export default function AdminDashboard({ onLogout, initialTab }: Props) {
                        if the injection were ever removed, hidden auto-save
                        would stay OFF rather than silently switch back on. */
                     active={false}
+                    /* M-2 · same fail-CLOSED standalone value for the approval
+                       shortcut: CertificateForm injects the real Review-stage
+                       flag into this slot before it renders. */
+                    approvalStageActive={false}
                     certId={editingCert.id}
                     cardName={editingCert.cardName || ""}
                     cardSet={editingCert.setName || ""}

@@ -58,6 +58,16 @@ const READY: GradingShortcutState = {
   cropGateBlocked: false,
 };
 
+/**
+ * M-2 · the SAME panel with the REVIEW stage on screen.
+ *
+ * This is the real runtime combination the first version of the fix got wrong:
+ * on Review the stage gate sets `active` FALSE (Grade is off screen) while
+ * Approve/Publish is the only action visible. `approvalStageActive` is what says
+ * the approval shortcut's owning stage is up.
+ */
+const REVIEW_READY: GradingShortcutState = { ...READY, active: false, approvalStageActive: true };
+
 const CTRL_S = { key: "s", ctrlKey: true, targetTag: "DIV" };
 const CTRL_ENTER = { key: "Enter", ctrlKey: true, targetTag: "DIV" };
 
@@ -103,25 +113,26 @@ describe("M-1 · 3. an ACTIVE, hydrated Grade stage still saves normally", () =>
   });
 
   it("Ctrl+Enter opens the approval dialog when the checklist is clear", () => {
-    expect(decideGradingShortcut(CTRL_ENTER, READY)).toEqual({ action: "open-approval" });
+    // M-2: on the REVIEW stage, which is the stage that owns Approve/Publish.
+    expect(decideGradingShortcut(CTRL_ENTER, REVIEW_READY)).toEqual({ action: "open-approval" });
   });
 
   it("the approval shortcut still honours the deionization checklist", () => {
-    expect(decideGradingShortcut(CTRL_ENTER, { ...READY, deionizationComplete: false })).toEqual({
+    expect(decideGradingShortcut(CTRL_ENTER, { ...REVIEW_READY, deionizationComplete: false })).toEqual({
       action: "blocked-checklist",
       reason: "deionization",
     });
   });
 
   it("the approval shortcut still honours the crop gate", () => {
-    expect(decideGradingShortcut(CTRL_ENTER, { ...READY, cropGateBlocked: true })).toEqual({
+    expect(decideGradingShortcut(CTRL_ENTER, { ...REVIEW_READY, cropGateBlocked: true })).toEqual({
       action: "blocked-checklist",
       reason: "crop-gate",
     });
   });
 
   it("a checklist block is never a grading write", () => {
-    expect(isGradingWrite(decideGradingShortcut(CTRL_ENTER, { ...READY, cropGateBlocked: true }))).toBe(false);
+    expect(isGradingWrite(decideGradingShortcut(CTRL_ENTER, { ...REVIEW_READY, cropGateBlocked: true }))).toBe(false);
   });
 });
 
@@ -312,5 +323,223 @@ describe("M-1 · 6. structural guarantees the pure function cannot cover", () =>
     // The request must address the PINNED id, not whatever certId is current
     // by the time the fetch is constructed.
     expect(save).toMatch(/certificates\/\$\{savingCertId\}\/grade/);
+  });
+});
+
+/**
+ * M-2 (hostile review of PR #262) · each shortcut belongs to the stage that owns
+ * its action.
+ *
+ * WHAT WENT WRONG
+ * The first version admitted BOTH shortcuts on `active` alone. `active` is true
+ * only on the GRADE stage — but the stage gate hides
+ * `[data-canonical-section="footer-actions"]` on Grade and shows it on REVIEW,
+ * so Approve/Publish exists only on Review. Ctrl+Enter therefore fired only on
+ * the stage where Approve is hidden, and was dead on the stage where it is
+ * offered. Safe (it failed closed) but the documented operator shortcut was
+ * gone.
+ *
+ * The fix does NOT relax the lifecycle to let approval through: it substitutes
+ * the OWNING stage's flag into the same shared chain. Every other guard —
+ * workflow lock, approved state, hydration identity, certificate identity — is
+ * still enforced for both shortcuts, which the cross-check at the bottom pins.
+ */
+describe("M-2 · Ctrl+S belongs to Grade, Ctrl+Enter belongs to Review", () => {
+  it("Ctrl+S on the GRADE stage saves", () => {
+    expect(decideGradingShortcut(CTRL_S, READY)).toEqual({ action: "save-draft" });
+  });
+
+  it("Ctrl+S on the REVIEW stage does NOT save — Grade is off screen", () => {
+    // The regression this must never allow back: a save issued from a stage
+    // whose editing surface the operator cannot see.
+    const out = decideGradingShortcut(CTRL_S, REVIEW_READY);
+    expect(out).toEqual({ action: "ignore", reason: "inactive" });
+    expect(isGradingWrite(out)).toBe(false);
+  });
+
+  it("Ctrl+Enter on the REVIEW stage opens approval — the M-2 defect itself", () => {
+    expect(decideGradingShortcut(CTRL_ENTER, REVIEW_READY)).toEqual({ action: "open-approval" });
+  });
+
+  it("Ctrl+Enter on the GRADE stage does nothing — Approve is not offered there", () => {
+    expect(decideGradingShortcut(CTRL_ENTER, READY)).toEqual({ action: "ignore", reason: "inactive" });
+  });
+
+  it("a HIDDEN panel is inert for BOTH shortcuts", () => {
+    const hidden: GradingShortcutState = { ...READY, active: false, approvalStageActive: false };
+    expect(decideGradingShortcut(CTRL_S, hidden)).toEqual({ action: "ignore", reason: "inactive" });
+    expect(decideGradingShortcut(CTRL_ENTER, hidden)).toEqual({ action: "ignore", reason: "inactive" });
+  });
+
+  it("UNWIRED approval (flag absent) fails CLOSED rather than open", () => {
+    const unwired = { ...READY, active: false } as GradingShortcutState;
+    expect(unwired.approvalStageActive).toBeUndefined();
+    expect(decideGradingShortcut(CTRL_ENTER, unwired)).toEqual({ action: "ignore", reason: "inactive" });
+  });
+
+  it("both stages active at once still routes each key to its own action", () => {
+    // Not a real runtime combination, but it proves the two flags are read
+    // independently rather than one being derived from the other.
+    const both: GradingShortcutState = { ...READY, active: true, approvalStageActive: true };
+    expect(decideGradingShortcut(CTRL_S, both)).toEqual({ action: "save-draft" });
+    expect(decideGradingShortcut(CTRL_ENTER, both)).toEqual({ action: "open-approval" });
+  });
+});
+
+describe("M-2 · the Review-stage approval inherits EVERY lifecycle guard", () => {
+  it("a stale certificate identity refuses approval", () => {
+    expect(decideGradingShortcut(CTRL_ENTER, { ...REVIEW_READY, hydratedForCertId: 41 })).toEqual({
+      action: "blocked",
+      reason: "awaiting-hydration",
+    });
+  });
+
+  it("an unhydrated panel refuses approval", () => {
+    expect(decideGradingShortcut(CTRL_ENTER, { ...REVIEW_READY, hydratedForCertId: null })).toEqual({
+      action: "blocked",
+      reason: "awaiting-hydration",
+    });
+  });
+
+  it("a certificate SWITCH mid-review refuses until the new card hydrates", () => {
+    const switched: GradingShortcutState = { ...REVIEW_READY, certId: 43 };
+    expect(decideGradingShortcut(CTRL_ENTER, switched)).toEqual({
+      action: "blocked",
+      reason: "awaiting-hydration",
+    });
+    // …and allows it again once hydration catches up.
+    expect(decideGradingShortcut(CTRL_ENTER, { ...switched, hydratedForCertId: 43 })).toEqual({
+      action: "open-approval",
+    });
+  });
+
+  it("a locked workflow refuses approval", () => {
+    expect(decideGradingShortcut(CTRL_ENTER, { ...REVIEW_READY, workflowLocked: true })).toEqual({
+      action: "blocked",
+      reason: "workflow-locked",
+    });
+  });
+
+  it("an ALREADY-APPROVED certificate refuses approval", () => {
+    expect(decideGradingShortcut(CTRL_ENTER, { ...REVIEW_READY, gradeApprovedAt: "2026-07-01T00:00:00Z" })).toEqual({
+      action: "blocked",
+      reason: "approved",
+    });
+  });
+
+  it("no certificate at all refuses approval", () => {
+    expect(decideGradingShortcut(CTRL_ENTER, { ...REVIEW_READY, certId: null })).toEqual({
+      action: "blocked",
+      reason: "no-cert",
+    });
+  });
+
+  it("every state that refuses a Grade-stage SAVE also refuses a Review APPROVAL", () => {
+    const denials: Array<Partial<GradingShortcutState>> = [
+      { certId: null },
+      { workflowLocked: true },
+      { gradeApprovedAt: "2026-07-01T00:00:00Z" },
+      { hydratedForCertId: null },
+      { hydratedForCertId: 41 },
+    ];
+    for (const d of denials) {
+      const save = decideGradingShortcut(CTRL_S, { ...READY, ...d });
+      const approve = decideGradingShortcut(CTRL_ENTER, { ...REVIEW_READY, ...d });
+      expect(save.action, `save must not proceed for ${JSON.stringify(d)}`).not.toBe("save-draft");
+      expect(approve.action, `approval must not proceed for ${JSON.stringify(d)}`).not.toBe("open-approval");
+    }
+  });
+});
+
+describe("M-2 · editable targets keep native behaviour on BOTH shortcuts", () => {
+  for (const tag of ["INPUT", "SELECT", "TEXTAREA"]) {
+    it(`Ctrl+Enter inside a <${tag.toLowerCase()}> on Review is left alone`, () => {
+      expect(decideGradingShortcut({ ...CTRL_ENTER, targetTag: tag }, REVIEW_READY)).toEqual({
+        action: "ignore",
+        reason: "editable-target",
+      });
+    });
+  }
+
+  it("a contentEditable host is an editable target too", () => {
+    // A rich-text host is not an INPUT/SELECT/TEXTAREA, so the tag check alone
+    // would have swallowed the operator's keystroke inside one.
+    expect(
+      decideGradingShortcut(
+        { key: "Enter", ctrlKey: true, targetTag: "DIV", targetIsContentEditable: true },
+        REVIEW_READY
+      )
+    ).toEqual({ action: "ignore", reason: "editable-target" });
+    expect(
+      decideGradingShortcut({ key: "s", ctrlKey: true, targetTag: "DIV", targetIsContentEditable: true }, READY)
+    ).toEqual({ action: "ignore", reason: "editable-target" });
+  });
+
+  it("the editable check runs BEFORE the stage gate, so typing is never swallowed", () => {
+    // Even on a panel whose stage is off screen, an editable target is an
+    // "ignore" for the editable reason — the keystroke belongs to the control.
+    expect(
+      decideGradingShortcut({ ...CTRL_ENTER, targetTag: "TEXTAREA" }, { ...REVIEW_READY, approvalStageActive: false })
+    ).toEqual({ action: "ignore", reason: "editable-target" });
+  });
+
+  it("contentEditable false / null behaves like an ordinary element", () => {
+    expect(decideGradingShortcut({ ...CTRL_ENTER, targetIsContentEditable: false }, REVIEW_READY)).toEqual({
+      action: "open-approval",
+    });
+    expect(decideGradingShortcut({ ...CTRL_ENTER, targetIsContentEditable: null }, REVIEW_READY)).toEqual({
+      action: "open-approval",
+    });
+  });
+});
+
+describe("M-2 · repeated approval keystrokes cannot stack requests", () => {
+  it("repeated Ctrl+Enter is idempotent — it only ever opens the dialog", () => {
+    // The decision is pure, so N keystrokes give N identical "open" outcomes and
+    // never a write. Opening an already-open dialog issues no request; the
+    // component-level in-flight guard below is what stops a second SUBMIT.
+    const outs = [1, 2, 3].map(() => decideGradingShortcut(CTRL_ENTER, REVIEW_READY));
+    expect(outs.every((o) => o.action === "open-approval")).toBe(true);
+    expect(outs.some((o) => isGradingWrite(o))).toBe(false);
+  });
+
+  it("approveGrade holds a synchronous in-flight ref, not just React state", () => {
+    // STRUCTURAL: the confirm button is `disabled={approving || …}`, but that is
+    // state — it only stops a second click after the re-render lands. A ref
+    // flips synchronously. Asserted on source because there is no DOM runtime.
+    const src = readFileSync(path.join(process.cwd(), "client/src/components/grading/grading-panel.tsx"), "utf8");
+    expect(src).toMatch(/approveInFlightRef\s*=\s*useRef\(false\)/);
+    expect(src).toMatch(/if\s*\(approveInFlightRef\.current\)\s*return;/);
+    expect(src).toMatch(/approveInFlightRef\.current\s*=\s*false;/);
+  });
+});
+
+describe("M-2 · the approval stage is wired from stage state, never from a page", () => {
+  const read = (p: string) => readFileSync(path.join(process.cwd(), p), "utf8");
+
+  it("GradingWorkstation derives approvalStageActive from its OWN stage", () => {
+    const src = read("client/src/components/grading-workflow/GradingWorkstation.tsx");
+    expect(src).toMatch(/approvalStageActive=\{stage === REVIEW_STAGE\}/);
+    // Both flags are omitted from the adapter's public props, so a page cannot
+    // contradict the stage the operator is actually looking at.
+    expect(src).toMatch(/"active"\s*\|\s*"approvalStageActive"/);
+  });
+
+  it("CertificateForm injects it from its workflow stage into the slot", () => {
+    const src = read("client/src/components/certificate-form.tsx");
+    expect(src).toMatch(/approvalStageActive:\s*wfStage === REVIEW_STAGE/);
+  });
+
+  it("standalone mount sites state the fail-CLOSED value explicitly", () => {
+    expect(read("client/src/pages/admin-dashboard.tsx")).toMatch(/approvalStageActive=\{false\}/);
+    expect(read("client/src/pages/dev-card-details-harness.tsx")).toMatch(/approvalStageActive=\{false\}/);
+  });
+
+  it("the handler passes the live approval flag and contentEditable through", () => {
+    const src = read("client/src/components/grading/grading-panel.tsx");
+    expect(src).toMatch(/approvalStageActive:\s*s\.approvalStageActive/);
+    expect(src).toMatch(/targetIsContentEditable:\s*target\?\.isContentEditable/);
+    // Still mirrored through the ref, so no stale closure creeps back in.
+    expect(src).toMatch(/shortcutStateRef\.current = \{[\s\S]*?approvalStageActive,/);
   });
 });

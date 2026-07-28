@@ -744,9 +744,13 @@ describe("2/12/13. a hidden or inactive Grade stage never persists", () => {
     // memo above the return, not at the render site.
     expect(FORM).toContain("workstationSlot: rawWorkstationSlot");
     expect(FORM).toContain("{workstationSlot}");
-    const memo = FORM.slice(FORM.indexOf("const workstationSlot = useMemo("), FORM.indexOf("const workstationSlot = useMemo(") + 500);
+    const memoStart = FORM.indexOf("const workstationSlot = useMemo(");
+    const memo = FORM.slice(memoStart, memoStart + 1200);
     expect(memo).toContain("isValidElement(rawWorkstationSlot)");
     expect(memo).toContain("active: wfStage === GRADE_STAGE");
+    // M-2: the Review-stage approval flag is injected the SAME way, in the same
+    // memo, so the protected render site stays literally `{workstationSlot}`.
+    expect(memo).toContain("approvalStageActive: wfStage === REVIEW_STAGE");
     expect(memo).toContain(": rawWorkstationSlot"); // untouched fallback
   });
 });

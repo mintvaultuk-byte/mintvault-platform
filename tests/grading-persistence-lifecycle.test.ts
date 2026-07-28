@@ -196,9 +196,12 @@ describe("M-1 · every GradingPanel mount site states its lifecycle", () => {
     // (written multi-line so the source does not contain the literal
     //  "<GradingPanel", which a protected architecture suite uses to locate the
     //  single real GradingPanel render site.)
-    expect(ws).toMatch(/Omit<\s*GradingPanelProps,\s*"active"\s*>/);
-    // … and it passes the stage-derived value explicitly
+    // M-2: BOTH stage flags are excluded now — Ctrl+S belongs to Grade and
+    // Ctrl+Enter to Review, and neither may be supplied by a page.
+    expect(ws).toMatch(/Omit<\s*GradingPanelProps,\s*"active"\s*\|\s*"approvalStageActive"\s*>/);
+    // … and it passes both stage-derived values explicitly
     expect(ws).toContain("active={stage === GRADE_STAGE}");
+    expect(ws).toContain("approvalStageActive={stage === REVIEW_STAGE}");
   });
 
   it("the three standalone surfaces mount through that adapter", () => {

@@ -1915,8 +1915,13 @@ export default function CertificateForm({
   const workstationSlot = useMemo(
     () =>
       isValidElement(rawWorkstationSlot)
-        ? cloneElement(rawWorkstationSlot as ReactElement<{ active?: boolean }>, {
+        ? cloneElement(rawWorkstationSlot as ReactElement<{ active?: boolean; approvalStageActive?: boolean }>, {
             active: wfStage === GRADE_STAGE,
+            // M-2 · the Ctrl+Enter approval shortcut belongs to the stage that
+            // OWNS Approve/Publish, which is Review — not Grade. Injected from
+            // the same workflow stage as `active` so neither can contradict what
+            // the operator is actually looking at.
+            approvalStageActive: wfStage === REVIEW_STAGE,
           })
         : rawWorkstationSlot,
     [rawWorkstationSlot, wfStage],
