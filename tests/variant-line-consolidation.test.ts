@@ -102,10 +102,12 @@ describe("single rarity semantics (items 4, 5, 6)", () => {
 describe("structured finish / promo single-select is a replace-or-clear toggle (items 4-6 for finish/promo)", () => {
   const PICKER = read("client/src/components/rarity-picker/RarityVariantPicker.tsx");
   it("finish is a single value cleared by re-click", () => {
-    expect(PICKER).toContain("setFinish(finish === x.value ? null : x.value)");
+    expect(PICKER).toContain("const pickFinish = (value: string | null) => {");
+    expect(PICKER).toContain("pickFinish(finish === x.value ? null : x.value)");
   });
   it("promo/subset is a single value cleared by re-click", () => {
-    expect(PICKER).toContain("setPromoOrSubset(promoOrSubset === x.value ? null : x.value)");
+    expect(PICKER).toContain("const pickPromoOrSubset = (value: string | null) => {");
+    expect(PICKER).toContain("pickPromoOrSubset(promoOrSubset === x.value ? null : x.value)");
   });
 });
 

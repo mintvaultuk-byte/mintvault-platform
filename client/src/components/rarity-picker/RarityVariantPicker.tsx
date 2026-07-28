@@ -268,16 +268,14 @@ export function RarityVariantPicker({
     note: "",
   });
   const [addError, setAddError] = useState<string | null>(null);
-  const syncingFromValueRef = useRef(false);
 
   useEffect(() => {
-    syncingFromValueRef.current = true;
     setLanguage(languageByValueOrLabel(value?.language)?.value ?? "en");
     setEra((value?.era as PokemonEra) ?? "");
     setRarity(value?.rarity ?? null);
     setFinish(value?.finish ?? null);
     setPromoOrSubset(value?.promo ?? value?.subset ?? null);
-    setSelectedCustomId(null);
+    if (value?.rarity !== CUSTOM_RARITY_VALUE) setSelectedCustomId(null);
   }, [value?.language, value?.era, value?.rarity, value?.finish, value?.promo, value?.subset]);
 
   // Region/era-aware base set; "Show all compatible" drops the era filter so
@@ -323,34 +321,32 @@ export function RarityVariantPicker({
     () => buildStructuredVariant({ language, era: era || null, rarity, finish, promoOrSubset }, cat),
     [language, era, rarity, finish, promoOrSubset, cat]
   );
-  // Emit ONLY on a genuine USER change to the selection — never on mount, never
-  // merely because the parent re-rendered (onChange is often an unstable inline
-  // function), and never merely because the live catalogue finished loading
-  // (which changes `structured`'s derived symbol but NOT the user's selection).
-  // Firing spuriously made a consumer that seeds this picker asynchronously (the
-  // role grading workstation) mistake the echo for a user edit and wipe a stored
-  // rarity. So we gate on the user-selection primitives, and emit the current
-  // catalogue-derived `structured` value when one of them actually changes.
   const onChangeRef = useRef(onChange);
   useEffect(() => {
     onChangeRef.current = onChange;
   });
-  const emitMountedRef = useRef(false);
-  useEffect(() => {
-    if (!emitMountedRef.current) {
-      emitMountedRef.current = true;
-      return; // skip the mount echo — the value already reflects the seed
-    }
-    if (syncingFromValueRef.current) {
-      syncingFromValueRef.current = false;
-      return;
-    }
-    onChangeRef.current?.(structured);
-    // Deps are the user-selection primitives, NOT `structured`/`cat`: when a
-    // primitive changes, `structured` is recomputed this render and this effect's
-    // closure captures that fresh value; a catalogue load (cat-only change) does
-    // NOT re-run this effect, so it never looks like a user edit.
-  }, [rarity, finish, promoOrSubset, era, language]);
+
+  const emitSelection = (next: {
+    rarity?: string | null;
+    finish?: string | null;
+    promoOrSubset?: string | null;
+    era?: PokemonEra | null;
+    language?: string | null;
+  }) => {
+    onChangeRef.current?.(
+      buildStructuredVariant(
+        {
+          language,
+          era: era || null,
+          rarity,
+          finish,
+          promoOrSubset,
+          ...next,
+        },
+        cat,
+      ),
+    );
+  };
 
   const validation = useMemo(
     () =>
@@ -373,6 +369,7 @@ export function RarityVariantPicker({
     // catalogue `v`, so this only toggles the same catalogue chip off.
     if (nextCatalogueRarity(rarity, v, !!selectedCustomId) === null) {
       setRarity(null);
+      emitSelection({ rarity: null });
       return;
     }
     setRarity(v);
@@ -384,6 +381,7 @@ export function RarityVariantPicker({
       setSelectedCustomId(null);
       onCustomRarityNote?.(null);
     }
+    emitSelection({ rarity: v });
   };
 
   const pickCustomRarity = (entry: CustomRarityEntry) => {
@@ -392,12 +390,14 @@ export function RarityVariantPicker({
       setRarity(null);
       setSelectedCustomId(null);
       onCustomRarityNote?.(null);
+      emitSelection({ rarity: null });
       return;
     }
     setRarity(CUSTOM_RARITY_VALUE);
     setSelectedCustomId(entry.id);
     setRecent(addRecent(recent, CUSTOM_RARITY_VALUE));
     onCustomRarityNote?.(entry.composedNote);
+    emitSelection({ rarity: CUSTOM_RARITY_VALUE });
   };
 
   // Explicit "No rarity" — deliberately deselects the rarity (rarity optional;
@@ -406,6 +406,7 @@ export function RarityVariantPicker({
     setRarity(null);
     setSelectedCustomId(null);
     onCustomRarityNote?.(null);
+    emitSelection({ rarity: null });
   };
 
   // Explicit "No finish" / "No promo" — the same deliberate, always-visible
@@ -416,8 +417,22 @@ export function RarityVariantPicker({
   // with no way to remove it. Each clear touches ONLY its own field: rarity,
   // finish and promo/subset are independent, and zero selection is valid for
   // all three (promo-only is a legitimate saved state).
-  const clearFinish = () => setFinish(null);
-  const clearPromo = () => setPromoOrSubset(null);
+  const clearFinish = () => {
+    setFinish(null);
+    emitSelection({ finish: null });
+  };
+  const clearPromo = () => {
+    setPromoOrSubset(null);
+    emitSelection({ promoOrSubset: null });
+  };
+  const pickFinish = (value: string | null) => {
+    setFinish(value);
+    emitSelection({ finish: value });
+  };
+  const pickPromoOrSubset = (value: string | null) => {
+    setPromoOrSubset(value);
+    emitSelection({ promoOrSubset: value });
+  };
 
   function resetAddForm() {
     setAddForm({
@@ -661,9 +676,9 @@ export function RarityVariantPicker({
             {/* Toggle-to-clear here too — a finish/promo picked FROM SEARCH was
                 previously unclearable from the search results (plain set, no
                 toggle), which is how a selection could get stuck. */}
-            {search.finishes.map((x) => pill(x, finish === x.value, () => setFinish(finish === x.value ? null : x.value)))}
+            {search.finishes.map((x) => pill(x, finish === x.value, () => pickFinish(finish === x.value ? null : x.value)))}
             {search.promos.map((x) =>
-              pill(x, promoOrSubset === x.value, () => setPromoOrSubset(promoOrSubset === x.value ? null : x.value))
+              pill(x, promoOrSubset === x.value, () => pickPromoOrSubset(promoOrSubset === x.value ? null : x.value))
             )}
           </div>
         </div>
@@ -786,7 +801,7 @@ export function RarityVariantPicker({
           </button>
         </div>
         <div className="flex flex-wrap gap-1.5">
-          {quickFinishes.map((x) => pill(x, finish === x.value, () => setFinish(finish === x.value ? null : x.value)))}
+          {quickFinishes.map((x) => pill(x, finish === x.value, () => pickFinish(finish === x.value ? null : x.value)))}
         </div>
         {/* A finish chosen from search or the collapsed "more" list must never be
             invisible — surface it inline so the operator can always see (and
@@ -795,7 +810,7 @@ export function RarityVariantPicker({
           <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="finish-selected-outside-quick">
             {moreFinishes
               .filter((f) => f.value === finish)
-              .map((x) => pill(x, true, () => setFinish(null)))}
+              .map((x) => pill(x, true, () => pickFinish(null)))}
           </div>
         )}
         <button
@@ -807,7 +822,7 @@ export function RarityVariantPicker({
         </button>
         {showMoreFinish && (
           <div className="mt-2 flex flex-wrap gap-2 opacity-90">
-            {moreFinishes.map((x) => pill(x, finish === x.value, () => setFinish(finish === x.value ? null : x.value)))}
+            {moreFinishes.map((x) => pill(x, finish === x.value, () => pickFinish(finish === x.value ? null : x.value)))}
           </div>
         )}
       </div>
@@ -831,7 +846,7 @@ export function RarityVariantPicker({
         </div>
         <div className="flex flex-wrap gap-1.5">
           {quickPromos.map((x) =>
-            pill(x, promoOrSubset === x.value, () => setPromoOrSubset(promoOrSubset === x.value ? null : x.value))
+            pill(x, promoOrSubset === x.value, () => pickPromoOrSubset(promoOrSubset === x.value ? null : x.value))
           )}
         </div>
         {/* Same visibility guarantee as finish: a promo/subset selected from the
@@ -840,7 +855,7 @@ export function RarityVariantPicker({
           <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="promo-selected-outside-quick">
             {morePromos
               .filter((p) => p.value === promoOrSubset)
-              .map((x) => pill(x, true, () => setPromoOrSubset(null)))}
+              .map((x) => pill(x, true, () => pickPromoOrSubset(null)))}
           </div>
         )}
         <button
@@ -853,7 +868,7 @@ export function RarityVariantPicker({
         {showMorePromo && (
           <div className="mt-2 flex flex-wrap gap-2 opacity-90">
             {morePromos.map((x) =>
-              pill(x, promoOrSubset === x.value, () => setPromoOrSubset(promoOrSubset === x.value ? null : x.value))
+              pill(x, promoOrSubset === x.value, () => pickPromoOrSubset(promoOrSubset === x.value ? null : x.value))
             )}
           </div>
         )}

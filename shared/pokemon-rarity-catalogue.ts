@@ -516,61 +516,112 @@ export function buildStructuredVariant(
   };
 }
 
-type RarityInformation =
-  | "generic_rare"
-  | "printed_symbol"
-  | "holo_class"
-  | "pokemon_v"
-  | "vmax"
-  | "vstar"
-  | "ex_lower"
-  | "ex_upper"
-  | "gx"
-  | "break"
-  | "prism_star"
-  | "amazing_rare"
-  | "radiant"
-  | "illustration"
-  | "special_illustration"
-  | "trainer_gallery"
-  | "ultra"
-  | "hyper"
-  | "promo";
+export type RarityChangeDecision =
+  | { kind: "no_change"; requiresConfirmation: false; reason: string }
+  | { kind: "allowed"; requiresConfirmation: false; reason: string }
+  | { kind: "confirmation_required"; requiresConfirmation: true; reason: string };
 
-const RARITY_INFORMATION: Record<string, readonly RarityInformation[]> = {
-  rare: ["generic_rare"],
-  silver_star_rare: ["printed_symbol"],
-  rare_holo: ["generic_rare", "holo_class"],
-  holo_rare_v: ["generic_rare", "holo_class", "pokemon_v"],
-  double_rare: ["ex_lower"],
-  illustration_rare: ["illustration"],
-  special_illustration_rare: ["special_illustration"],
-  ultra_rare: ["ultra"],
-  hyper_rare: ["hyper"],
-  amazing_rare: ["amazing_rare"],
-  radiant_rare: ["radiant"],
-  prism_star: ["prism_star"],
-  character_rare: ["trainer_gallery"],
-  character_super_rare: ["trainer_gallery", "ultra"],
-  shiny_rare: ["radiant"],
-  shiny_ultra_rare: ["radiant", "ultra"],
-  jp_double_rare: ["ex_lower"],
-  jp_triple_rare: ["vmax"],
-  jp_super_rare: ["ultra"],
-  jp_hyper_rare: ["hyper"],
-  jp_ultra_rare: ["ultra"],
-  jp_art_rare: ["illustration"],
-  jp_special_art_rare: ["special_illustration"],
-  jp_promo_rarity: ["promo"],
-};
+const KNOWN_RARITY_CODES = new Set(POKEMON_RARITIES.map((rarity) => rarity.value));
 
-export function isLowerInformationRarityChange(current: string | null | undefined, next: string | null | undefined): boolean {
+const RARITY_UPGRADES = new Set<string>([
+  "rare->holo_rare_v",
+  "silver_star_rare->holo_rare_v",
+  "double_rare->ultra_rare",
+  "ultra_rare->hyper_rare",
+  "illustration_rare->special_illustration_rare",
+  "jp_art_rare->jp_special_art_rare",
+  "jp_double_rare->jp_super_rare",
+  "jp_super_rare->jp_hyper_rare",
+  "jp_ultra_rare->jp_hyper_rare",
+  "character_rare->character_super_rare",
+  "shiny_rare->shiny_ultra_rare",
+]);
+
+const RARITY_DOWNGRADES = new Set<string>([
+  "holo_rare_v->common",
+  "holo_rare_v->uncommon",
+  "holo_rare_v->rare",
+  "holo_rare_v->silver_star_rare",
+  "holo_rare_v->no_printed_symbol",
+  "rare_holo->common",
+  "rare_holo->uncommon",
+  "rare_holo->rare",
+  "special_illustration_rare->double_rare",
+  "special_illustration_rare->ultra_rare",
+  "special_illustration_rare->illustration_rare",
+  "hyper_rare->ultra_rare",
+  "hyper_rare->double_rare",
+  "ultra_rare->double_rare",
+  "jp_special_art_rare->jp_art_rare",
+  "jp_special_art_rare->jp_double_rare",
+  "jp_hyper_rare->jp_super_rare",
+  "jp_hyper_rare->jp_double_rare",
+  "character_super_rare->character_rare",
+  "shiny_ultra_rare->shiny_rare",
+]);
+
+const GENERIC_PRINTED_SYMBOLS = new Set(["common", "uncommon", "rare", "silver_star_rare", "no_printed_symbol"]);
+
+/**
+ * Decide whether a rarity change can be applied directly or needs an explicit
+ * operator confirmation. This is intentionally relational, not a single global
+ * rank: Pokemon rarity families do not form a clean total order across English,
+ * Japanese, promo/subset and printed-symbol-only cases.
+ */
+export function decideRarityChange(
+  current: string | null | undefined,
+  next: string | null | undefined,
+): RarityChangeDecision {
   const cur = String(current ?? "").trim();
   const nxt = String(next ?? "").trim();
-  if (!cur || !nxt || cur === nxt) return false;
-  const currentInfo = RARITY_INFORMATION[cur];
-  const nextInfo = RARITY_INFORMATION[nxt];
-  if (!currentInfo || !nextInfo) return false;
-  const nextSet = new Set(nextInfo);
-  return currentInfo.some((token) => !nextSet.has(token));
+  if (cur === nxt) return { kind: "no_change", requiresConfirmation: false, reason: "Rarity is unchanged." };
+  if (!cur) return { kind: "allowed", requiresConfirmation: false, reason: "No authoritative rarity exists yet." };
+  if (!nxt) {
+    return {
+      kind: "confirmation_required",
+      requiresConfirmation: true,
+      reason: "Clearing a known rarity removes certificate rarity information.",
+    };
+  }
+
+  const currentKnown = KNOWN_RARITY_CODES.has(cur);
+  const nextKnown = KNOWN_RARITY_CODES.has(nxt);
+  if (!currentKnown && nextKnown) {
+    return { kind: "allowed", requiresConfirmation: false, reason: "Deliberate correction from a legacy/unknown rarity." };
+  }
+  if (currentKnown && !nextKnown) {
+    return {
+      kind: "confirmation_required",
+      requiresConfirmation: true,
+      reason: "Changing a known authoritative rarity to an unknown code loses structured rarity information.",
+    };
+  }
+  if (!currentKnown && !nextKnown) {
+    return { kind: "allowed", requiresConfirmation: false, reason: "Both rarities are legacy/unknown values." };
+  }
+
+  const edge = `${cur}->${nxt}`;
+  if (RARITY_UPGRADES.has(edge)) {
+    return { kind: "allowed", requiresConfirmation: false, reason: "The proposed rarity is a more specific rarity in the same family." };
+  }
+  if (RARITY_DOWNGRADES.has(edge)) {
+    return {
+      kind: "confirmation_required",
+      requiresConfirmation: true,
+      reason: "The proposed rarity is lower-information than the authoritative card rarity.",
+    };
+  }
+  if (cur === "holo_rare_v" && GENERIC_PRINTED_SYMBOLS.has(nxt)) {
+    return {
+      kind: "confirmation_required",
+      requiresConfirmation: true,
+      reason: "A printed symbol alone must not silently downgrade Holo Rare V.",
+    };
+  }
+
+  return { kind: "allowed", requiresConfirmation: false, reason: "No information-losing relation is defined for this rarity change." };
+}
+
+export function isLowerInformationRarityChange(current: string | null | undefined, next: string | null | undefined): boolean {
+  return decideRarityChange(current, next).requiresConfirmation;
 }

@@ -24,6 +24,7 @@ import {
 } from "@shared/grading-workflow";
 import { CONSOLIDATED_VARIANT_SCHEME, legacyFreeTextLostOnConversion } from "@shared/variant-line";
 import {
+  decideRarityChange,
   finishByValue,
   isLowerInformationRarityChange,
   languageByValueOrLabel,
@@ -268,7 +269,7 @@ export default function CertificateForm({
   const [form, setForm] = useState(() => buildFormStateFromCert(certificate));
 
   const [designations, setDesignations] = useState<string[]>(() => (certificate?.designations as string[]) || []);
-  const [rarityOverrideConfirmed, setRarityOverrideConfirmed] = useState(false);
+  const [rarityOverrideTransition, setRarityOverrideTransition] = useState<{ from: string; to: string } | null>(null);
   // Grader notes live in the Review stage, collapsed unless the cert already has notes.
   const [notesOpen, setNotesOpen] = useState<boolean>(() => Boolean(certificate?.notes));
 
@@ -346,16 +347,18 @@ export default function CertificateForm({
   // A no-op guard prevents the picker's mount-time
   // onChange from dirtying the form (which would trigger a spurious auto-save).
   const handleStructuredChange = useCallback((v: StructuredCardVariant) => {
+    setRarityOverrideTransition(null);
     setForm((f) => {
       let nextRarity = v.rarity ?? "";
-      if (isLowerInformationRarityChange(f.rarityCode, nextRarity)) {
+      const decision = decideRarityChange(f.rarityCode, nextRarity);
+      if (decision.requiresConfirmation) {
         const confirmed =
           typeof window !== "undefined" &&
           window.confirm(
             "This symbol choice is less specific than the resolved card-record rarity. Override the resolved rarity anyway?"
           );
         if (!confirmed) nextRarity = f.rarityCode;
-        else setRarityOverrideConfirmed(true);
+        else setRarityOverrideTransition({ from: f.rarityCode, to: nextRarity });
       }
       if (
         f.rarityCode === nextRarity &&
@@ -1308,7 +1311,11 @@ export default function CertificateForm({
     if (frontImage) formData.append("frontImage", frontImage);
     if (backImage) formData.append("backImage", backImage);
     if (confirmPublishedEdit) formData.append("confirmPublishedEdit", "true");
-    if (rarityOverrideConfirmed) formData.append("rarity_override_confirmed", "true");
+    if (rarityOverrideTransition && rarityOverrideTransition.to === form.rarityCode) {
+      formData.append("rarity_override_confirmed", "true");
+      formData.append("rarity_override_from", rarityOverrideTransition.from);
+      formData.append("rarity_override_to", rarityOverrideTransition.to);
+    }
     // Stale-tab guard: tell the server which metadata values this form loaded;
     // it 409s only if a field changed elsewhere since AND this save would
     // overwrite that newer value (see PUT /:id + shared/edit-conflict.ts).
@@ -1356,6 +1363,7 @@ export default function CertificateForm({
       // re-submits/re-uploads the same File object once it's already persisted.
       setFrontImage(null);
       setBackImage(null);
+      setRarityOverrideTransition(null);
       // Session/feedback UI (display only — save behaviour is unchanged above).
       setSessionCompleted((c) => c + 1);
       setSavedToast(true);
@@ -1369,7 +1377,10 @@ export default function CertificateForm({
         onSuccess(isEdit ? undefined : data);
       }
     },
-    onError: (err: any) => setError(err.message),
+    onError: (err: any) => {
+      setRarityOverrideTransition(null);
+      setError(err.message);
+    },
   });
 
   // ── Silent auto-save for an EXISTING, NOT-YET-APPROVED certificate ─────────
@@ -1423,6 +1434,7 @@ export default function CertificateForm({
 
     // Re-seed every editable value from the NEW certificate (one shared mapping).
     setForm(buildFormStateFromCert(certificate));
+    setRarityOverrideTransition(null);
     setDesignations((certificate?.designations as string[]) || []);
     setNotesOpen(Boolean(certificate?.notes));
     setFrontImage(null);
@@ -1562,6 +1574,7 @@ export default function CertificateForm({
       // re-submit (and the server re-upload+delete-old) the same image.
       setFrontImage(null);
       setBackImage(null);
+      setRarityOverrideTransition(null);
       setEditConflict(false);
       setAutoSaveStatus("saved");
       if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
@@ -1570,6 +1583,7 @@ export default function CertificateForm({
       }, 2500);
     } catch (e: any) {
       if (seq !== autoSaveSeqRef.current) return;
+      setRarityOverrideTransition(null);
       setAutoSaveStatus("error");
       toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
     } finally {

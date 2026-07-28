@@ -240,16 +240,18 @@ describe("clear controls (items 15-16)", () => {
   });
 
   it("15. each clear touches ONLY its own field (independence)", () => {
-    expect(PICKER).toContain("const clearFinish = () => setFinish(null);");
-    expect(PICKER).toContain("const clearPromo = () => setPromoOrSubset(null);");
+    expect(PICKER).toContain("const clearFinish = () => {");
+    expect(PICKER).toContain("emitSelection({ finish: null });");
+    expect(PICKER).toContain("const clearPromo = () => {");
+    expect(PICKER).toContain("emitSelection({ promoOrSubset: null });");
     // rarity's clear does not touch finish/promo
     const clearRarity = PICKER.slice(PICKER.indexOf("const clearRarity"), PICKER.indexOf("const clearFinish"));
     expect(clearRarity).not.toMatch(/setFinish|setPromoOrSubset/);
   });
 
   it("15. a finish/promo chosen from SEARCH can be cleared (toggle, not plain set)", () => {
-    expect(PICKER).toContain("search.finishes.map((x) => pill(x, finish === x.value, () => setFinish(finish === x.value ? null : x.value)))");
-    expect(PICKER).toMatch(/search\.promos\.map[\s\S]{0,160}promoOrSubset === x\.value \? null : x\.value/);
+    expect(PICKER).toContain("search.finishes.map((x) => pill(x, finish === x.value, () => pickFinish(finish === x.value ? null : x.value)))");
+    expect(PICKER).toMatch(/search\.promos\.map[\s\S]{0,180}pickPromoOrSubset\(promoOrSubset === x\.value \? null : x\.value\)/);
   });
 
   it("15. a selection hidden in the collapsed 'more' list is surfaced so it stays clearable", () => {
@@ -258,11 +260,11 @@ describe("clear controls (items 15-16)", () => {
   });
 
   it("16. Recently Used / favourites never auto-select — selection changes only on click", () => {
-    // Recent/favourite lists never drive selection from an effect. The picker may
-    // hydrate from a parent-controlled value, but browser persistence cannot auto-pick.
+    // Recent/favourite lists never drive selection from an effect. Controlled
+    // parent echoes hydrate state, while real clicks emit through emitSelection.
     const effects = PICKER.match(/useEffect\([\s\S]*?\}, \[[^\]]*\]\);/g) ?? [];
     for (const e of effects) {
-      if (e.includes("syncingFromValueRef.current = true")) {
+      if (e.includes("setLanguage(languageByValueOrLabel(value?.language)")) {
         expect(e).toContain("value?.rarity");
         expect(e).toContain("value?.finish");
         expect(e).toContain("value?.promo");
@@ -272,6 +274,7 @@ describe("clear controls (items 15-16)", () => {
       expect(e).not.toMatch(/setRarity\(|setFinish\(|setPromoOrSubset\(/);
     }
     expect(PICKER).toContain("usePersistentList");
+    expect(PICKER).toContain("const emitSelection =");
   });
 });
 

@@ -441,17 +441,23 @@ describe("Rarity clear: explicit 'No rarity' persists an empty selection (option
   });
 
   it("C4. one consolidated Variant value — the picker emits a single StructuredCardVariant (finish/promo independent fields within it)", () => {
-    // The picker builds ONE structured variant and emits it via onChange (through a
-    // stable ref so an unstable inline onChange prop cannot re-fire the effect).
+    // The picker builds ONE structured variant and emits it through an explicit
+    // interaction helper. Controlled prop echoes only hydrate state; they do not
+    // replay onChange or suppress the next click.
     expect(PICKER).toContain("buildStructuredVariant({");
-    expect(PICKER).toMatch(/onChangeRef\.current\?\.\(structured\)/);
+    expect(PICKER).toMatch(/const emitSelection = \(next:/);
+    expect(PICKER).toMatch(/onChangeRef\.current\?\.\(\s*buildStructuredVariant\(/);
+    expect(PICKER).not.toContain("syncingFromValueRef");
   });
 
   it("C5. picker does NOT emit onChange on mount — only on genuine interaction (no spurious rarityTouched / stored-rarity wipe)", () => {
-    // The mount echo is suppressed via a ref guard so hydrating an existing cert's
-    // rarity into the (uncontrolled-after-mount) picker never looks like a user edit.
-    expect(PICKER).toMatch(/emitMountedRef\s*=\s*useRef\(false\)/);
-    expect(PICKER).toMatch(/if \(!emitMountedRef\.current\) \{\s*emitMountedRef\.current = true;\s*return;/);
+    // There is no effect-driven onChange at all: mount/refetch/parent echo only
+    // synchronise controlled state, while user handlers call emitSelection.
+    const effectBodies = Array.from(PICKER.matchAll(/useEffect\(\(\) => \{([\s\S]*?)\n {2}\},/g)).map((m) => m[1]);
+    expect(effectBodies.some((body) => body.includes("onChangeRef.current?.("))).toBe(false);
+    expect(PICKER).toMatch(/const pickRarity = \(v: string\) => \{/);
+    expect(PICKER).toMatch(/const pickFinish = \(value: string \| null\) => \{/);
+    expect(PICKER).toMatch(/const pickPromoOrSubset = \(value: string \| null\) => \{/);
     // GradingPanel mounts the picker only once gradingData is present and keys it by
     // certId, seeding from the stored value — both derived straight from the query, so
     // no effect-ordering race (hydration vs per-card reset) can strand it on "Loading".

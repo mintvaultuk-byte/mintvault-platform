@@ -27,6 +27,7 @@ import { type TcgCardPick } from "@/components/identity-tools";
 import { GradingIdentityVerification } from "@/components/grading/GradingIdentityVerification";
 import { RarityVariantPicker } from "@/components/rarity-picker/RarityVariantPicker";
 import {
+  decideRarityChange,
   isLowerInformationRarityChange,
   languageByValueOrLabel,
   languageLabel,
@@ -550,7 +551,7 @@ export default function GradingPanel({
   const [rarityCode, setRarityCode] = useState("");
   const [finishVariant, setFinishVariant] = useState("");
   const [promoType, setPromoType] = useState("");
-  const [rarityOverrideConfirmed, setRarityOverrideConfirmed] = useState(false);
+  const [rarityOverrideTransition, setRarityOverrideTransition] = useState<{ from: string; to: string } | null>(null);
   // Tracks a deliberate operator interaction with the rarity picker (including an
   // explicit "No rarity" clear). Only once touched do we persist an EMPTY rarity —
   // so an unhydrated/untouched picker can never wipe a stored value, but an
@@ -563,15 +564,17 @@ export default function GradingPanel({
   // interaction now, so handleRarityChange = a genuine edit → touched.)
   function handleRarityChange(v: StructuredCardVariant) {
     setRarityTouched(true);
+    setRarityOverrideTransition(null);
     let nextRarity = v.rarity ?? "";
-    if (isLowerInformationRarityChange(rarityCode, nextRarity)) {
+    const decision = decideRarityChange(rarityCode, nextRarity);
+    if (decision.requiresConfirmation) {
       const confirmed =
         typeof window !== "undefined" &&
         window.confirm(
           "This symbol choice is less specific than the resolved card-record rarity. Override the resolved rarity anyway?"
       );
       if (!confirmed) nextRarity = rarityCode;
-      else setRarityOverrideConfirmed(true);
+      else setRarityOverrideTransition({ from: rarityCode, to: nextRarity });
     }
     setRarityCode(nextRarity);
     setFinishVariant(v.finish ?? "");
@@ -1146,6 +1149,7 @@ export default function GradingPanel({
     setFinishVariant("");
     setPromoType("");
     setRarityTouched(false);
+    setRarityOverrideTransition(null);
   }, [certId]);
 
   // ── Post-approval explicit-save flow ──────────────────────────────────
@@ -1266,8 +1270,10 @@ export default function GradingPanel({
       }
       toast({ title: "Grade updated · audit logged" });
       editSnapshotRef.current = null;
+      setRarityOverrideTransition(null);
       setEditMode(false);
     } catch (e: any) {
+      setRarityOverrideTransition(null);
       // Keep edit mode open so the admin doesn't lose their changes.
       toast({ title: "Save failed", description: e.message, variant: "destructive" });
     } finally {
@@ -1290,6 +1296,7 @@ export default function GradingPanel({
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);
       }
+      setRarityOverrideTransition(null);
       setAutoSaveStatus("saved");
       if (autoSavedClearTimerRef.current) clearTimeout(autoSavedClearTimerRef.current);
       autoSavedClearTimerRef.current = setTimeout(() => {
@@ -1298,6 +1305,7 @@ export default function GradingPanel({
       return true;
     } catch (e: any) {
       if (seq !== autoSaveSeqRef.current) return false;
+      setRarityOverrideTransition(null);
       setAutoSaveStatus("error");
       toast({ title: "Auto-save failed", description: e.message, variant: "destructive" });
       return false;
@@ -1927,7 +1935,11 @@ export default function GradingPanel({
         out.rarity_code = rarityCode.trim() || null;
         out.finish_variant = finishVariant.trim() || null;
         out.promo_type = promoType.trim() || null;
-        if (rarityOverrideConfirmed) out.rarity_override_confirmed = true;
+        if (rarityOverrideTransition && rarityOverrideTransition.to === (out.rarity_code ?? "")) {
+          out.rarity_override_confirmed = true;
+          out.rarity_override_from = rarityOverrideTransition.from;
+          out.rarity_override_to = rarityOverrideTransition.to;
+        }
       } else {
         if (rarityCode.trim()) out.rarity_code = rarityCode.trim();
         if (finishVariant.trim()) out.finish_variant = finishVariant.trim();

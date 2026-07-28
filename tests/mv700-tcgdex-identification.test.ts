@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { lookupCard } from "../server/services/tcgdex";
+import { lookupCard, resolveSetId } from "../server/services/tcgdex";
 import {
+  decideRarityChange,
   finishByValue,
   isLowerInformationRarityChange,
   languageLabel,
@@ -47,6 +48,12 @@ function mockTcgdex({ variants = { holo: true, normal: false, reverse: false } }
           abbreviation: { official: "CRE" },
         });
       }
+      if (url.includes("/en/cards?dexId=896")) {
+        return jsonResponse(200, [
+          { id: "swsh6-45", localId: "45", name: "Ice Rider Calyrex V" },
+          { id: "swsh6-46", localId: "46", name: "Ice Rider Calyrex" },
+        ]);
+      }
       if (url.endsWith("/cards/swsh6-045")) return jsonResponse(404, {});
       if (url.includes("/cards/swsh6-45")) {
         const lang = decodeURIComponent(url.match(/\/v2\/([^/]+)\/cards\//)?.[1] ?? "en");
@@ -54,6 +61,12 @@ function mockTcgdex({ variants = { holo: true, normal: false, reverse: false } }
           id: "swsh6-45",
           localId: "45",
           name: lang === "es" ? "Calyrex Jinete Glacial V" : "Ice Rider Calyrex V",
+          dexId: [896],
+          illustrator: "5ban Graphics",
+          image: "https://assets.tcgdex.net/es/swsh/swsh6/45",
+          hp: 210,
+          types: ["Water"],
+          regulationMark: "E",
           set: { id: "swsh6", name: localizedSet[lang] ?? localizedSet.en, cardCount: { official: 198, total: 233 } },
           rarity: lang === "es" ? "Holo Rara V" : "Holo Rare V",
           variants,
@@ -75,7 +88,7 @@ describe("MV700 TCGdex identification regression", () => {
     const result = await lookupCard("CRE", "045/198", "es");
 
     expect(result).toMatchObject({
-      card_name: "Calyrex Jinete Glacial V",
+      card_name: "Ice Rider Calyrex V",
       card_name_local: "Calyrex Jinete Glacial V",
       set_id: "swsh6",
       canonical_set_id: "swsh6",
@@ -95,6 +108,7 @@ describe("MV700 TCGdex identification regression", () => {
     });
     expect(calls.some((url) => url.endsWith("/es/cards/swsh6-045"))).toBe(true);
     expect(calls.some((url) => url.endsWith("/es/cards/swsh6-45"))).toBe(true);
+    expect(calls.some((url) => url.includes("/en/cards?dexId=896"))).toBe(true);
   });
 
   it.each(["en", "es", "fr", "de", "it", "pt"])("%s editions resolve to the same canonical catalogue set", async (lang) => {
@@ -134,6 +148,52 @@ describe("MV700 TCGdex identification regression", () => {
   });
 });
 
+describe("TCGdex set resolution ambiguity guard", () => {
+  it("does not resolve loose suffixes, ambiguous suffixes, or typos", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/en/sets")) {
+          return jsonResponse(200, [
+            { id: "swsh6", name: "Chilling Reign" },
+            { id: "xy6", name: "Roaring Skies" },
+          ]);
+        }
+        return jsonResponse(404, {});
+      }),
+    );
+    await expect(resolveSetId("6", "en")).resolves.toBeNull();
+    await expect(resolveSetId("SWH6", "en")).resolves.toBeNull();
+  });
+
+  it("resolves exact stable provider id and trusted official printed CRE code without provider-order dependence", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith("/en/sets")) {
+          return jsonResponse(200, [
+            { id: "xy6", name: "Roaring Skies" },
+            { id: "swsh6", name: "Chilling Reign" },
+          ]);
+        }
+        if (url.endsWith("/en/sets/swsh6")) {
+          return jsonResponse(200, {
+            id: "swsh6",
+            name: "Chilling Reign",
+            serie: { id: "swsh", name: "Sword & Shield" },
+            cardCount: { official: 198, total: 233 },
+            tcgOnline: "CRE",
+            abbreviation: { official: "CRE" },
+          });
+        }
+        return jsonResponse(404, {});
+      }),
+    );
+    await expect(resolveSetId("swsh6", "en")).resolves.toMatchObject({ tcgdexSetId: "swsh6", resolvedLang: "en" });
+    await expect(resolveSetId("CRE", "en")).resolves.toMatchObject({ tcgdexSetId: "swsh6", resolvedLang: "en" });
+  });
+});
+
 describe("MV700 language, rarity and finish precedence", () => {
   it("shared language registry normalises TCGdex and UI values", () => {
     expect(normalizePokemonLanguage("es")?.label).toBe("Spanish");
@@ -148,6 +208,23 @@ describe("MV700 language, rarity and finish precedence", () => {
     expect(formatVariantLine({ rarityCode: "holo_rare_v", finishVariant: "holo" })).toBe("Holo Rare V · Holo");
   });
 
+  it.each([
+    ["holo_rare_v", "common", true],
+    ["holo_rare_v", "uncommon", true],
+    ["holo_rare_v", "rare", true],
+    ["holo_rare_v", "silver_star_rare", true],
+    ["rare", "holo_rare_v", false],
+    ["double_rare", "ultra_rare", false],
+    ["ultra_rare", "hyper_rare", false],
+    ["illustration_rare", "special_illustration_rare", false],
+    ["jp_art_rare", "jp_special_art_rare", false],
+    ["special_illustration_rare", "double_rare", true],
+    ["holo_rare_v", "future_unknown", true],
+    ["legacy_unknown", "rare", false],
+  ])("rarity decision %s → %s requires confirmation: %s", (from, to, requiresConfirmation) => {
+    expect(decideRarityChange(from, to).requiresConfirmation).toBe(requiresConfirmation);
+  });
+
   it("server-side validation blocks unconfirmed lower-information rarity downgrades", () => {
     expect(() =>
       validateGradeDraftIdentityAndVariant(
@@ -158,9 +235,34 @@ describe("MV700 language, rarity and finish precedence", () => {
     expect(
       validateGradeDraftIdentityAndVariant(
         { language: "Spanish", rarityCode: "holo_rare_v", finishVariant: "holo", promoType: null },
-        { rarity_code: "silver_star_rare", language: "es", rarity_override_confirmed: true },
+        {
+          rarity_code: "silver_star_rare",
+          language: "es",
+          rarity_override_confirmed: true,
+          rarity_override_from: "holo_rare_v",
+          rarity_override_to: "silver_star_rare",
+        },
       ),
     ).toMatchObject({ nextLanguage: "Spanish", nextRarityCode: "silver_star_rare" });
+  });
+
+  it("keeps unchanged legacy Chinese editable but requires explicit canonical Chinese choices for new writes", () => {
+    expect(
+      validateGradeDraftIdentityAndVariant({ language: "Chinese", rarityCode: "rare" }, { language: "Chinese", finish_variant: "holo" }),
+    ).toMatchObject({ nextLanguage: "Chinese", nextFinishVariant: "holo" });
+    expect(
+      validateGradeDraftIdentityAndVariant({ language: "Chinese", rarityCode: "rare" }, { language: "Simplified Chinese" }),
+    ).toMatchObject({ nextLanguage: "Simplified Chinese" });
+    expect(
+      validateGradeDraftIdentityAndVariant({ language: "Chinese", rarityCode: "rare" }, { language: "Traditional Chinese" }),
+    ).toMatchObject({ nextLanguage: "Traditional Chinese" });
+    expect(validateGradeDraftIdentityAndVariant({ language: null, rarityCode: "rare" }, { finish_variant: "holo" })).toMatchObject({
+      nextLanguage: null,
+      nextFinishVariant: "holo",
+    });
+    expect(() =>
+      validateGradeDraftIdentityAndVariant({ language: "English", rarityCode: "rare" }, { language: "Chinese" }),
+    ).toThrow(/Ambiguous legacy language/);
   });
 
   it("server-side validation rejects unsupported certificate languages", () => {

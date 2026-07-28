@@ -159,6 +159,10 @@ const JP_SET_ENGLISH_NAME: Record<string, string> = {
   // Add more JP SV-era codes here as needed (unmapped → localized name, logged).
 };
 
+// Interim trusted printed-code bridge. TCGdex set ids (for example `swsh6`) are
+// stable provider IDs, while physical English cards print public TCG Live/PTCGO
+// codes such as `CRE`. Add entries only when the provider's English set detail
+// independently confirms the same official abbreviation/tcgOnline code.
 const PRINTED_CODE_TO_TCGDEX_SET_ID: Record<string, string> = {
   CRE: "swsh6",
 };
@@ -272,22 +276,11 @@ export async function resolveSetId(
   const primaryId = primaryCache.byUpperId.get(upper);
   if (primaryId) return { tcgdexSetId: primaryId, resolvedLang: safeLang };
 
-  const canonicalFromLanguageSet = primaryCache.sets.find((s) => {
-    const id = s.id.toUpperCase();
-    return id === upper || id.endsWith(upper) || upper.endsWith(id);
-  });
-  if (canonicalFromLanguageSet) return { tcgdexSetId: canonicalFromLanguageSet.id, resolvedLang: safeLang };
-
   // Fall back to English if different
   if (safeLang !== "en") {
     const enCache = await getSetList("en");
     const enId = enCache.byUpperId.get(upper);
     if (enId) return { tcgdexSetId: enId, resolvedLang: "en" };
-    const canonicalFromEnglishSet = enCache.sets.find((s) => {
-      const id = s.id.toUpperCase();
-      return id === upper || id.endsWith(upper) || upper.endsWith(id);
-    });
-    if (canonicalFromEnglishSet) return { tcgdexSetId: canonicalFromEnglishSet.id, resolvedLang: "en" };
   }
 
   return null;
