@@ -16,7 +16,7 @@ import { Client } from "pg";
 import {
   provisionRealisticRoles,
   applyMigrationsRealistic,
-  PARTNER_MIGRATIONS_WITH_G5,
+  PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN_DB = process.env.PARTNER_MANAGEMENT_RT_ADMIN;
@@ -45,7 +45,9 @@ const PM = "/api/super-admin/partner-management";
   beforeAll(async () => {
     process.env.MINTVAULT_DATABASE_URL = ADMIN_DB;
     process.env.PARTNER_ADMIN_DATABASE_URL = ADMIN_DB;
+    process.env.PARTNER_DATABASE_URL = ADMIN_DB;
     process.env.SESSION_SECRET = "synthetic-test-session-secret-not-committed";
+    process.env.PARTNER_INVITE_ALLOW_ADMIN_LINK_COPY = "true";
 
     admin = new Client({ connectionString: ADMIN_DB });
     await admin.connect();
@@ -71,7 +73,9 @@ const PM = "/api/super-admin/partner-management";
     await admin.query("ALTER TABLE users OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
-    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_G5);
+    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT);
+    const { seedPartnerRbac } = await import("../server/partner/permissions");
+    await seedPartnerRbac();
 
     const authMod = await import("../server/auth");
     ADMIN_EMAIL = authMod.ADMIN_EMAIL;
@@ -319,6 +323,220 @@ const PM = "/api/super-admin/partner-management";
       "SELECT count(*)::int n FROM partner_organisations WHERE legal_name='Idem Cards Ltd'"
     );
     expect(n.rows[0].n).toBe(1);
+  });
+
+  it("Super Admin creates owner invitation; invite is single-use; accepted owner can log in", async () => {
+    const c = await cookie();
+    const create = await post(
+      `${PM}/partners/${A}/users`,
+      {
+        firstName: "Founder",
+        lastName: "Owner",
+        email: "owner-invite@a.example",
+        role: "OWNER",
+        reason: "founder setup",
+      },
+      c
+    );
+    expect(create.status).toBe(200);
+    const body = await create.json();
+    expect(body.result.invitationLink).toMatch(/\/partner\/invite\?token=/);
+    const token = new URL(body.result.invitationLink).searchParams.get("token")!;
+    const rawInvite = await admin.query<{ token_hash: string }>(
+      "SELECT token_hash FROM partner_invitations WHERE id=$1",
+      [body.result.invitationId]
+    );
+    expect(rawInvite.rows[0].token_hash).not.toBe(token);
+    expect(rawInvite.rows[0].token_hash).toMatch(/^[0-9a-f]{64}$/);
+
+    const users = await (await g(`${PM}/partners/${A}/users`, c)).json();
+    const invited = users.users.find((u: any) => u.email === "owner-invite@a.example");
+    expect(invited).toMatchObject({
+      first_name: "Founder",
+      last_name: "Owner",
+      role: "OWNER",
+      status: "INVITED",
+    });
+    expect(JSON.stringify(users)).not.toMatch(/password_hash|\$2[aby]\$|token_hash/i);
+
+    const { acceptPartnerInvitation } = await import("../server/partner/partner-management-service");
+    expect((await acceptPartnerInvitation(token, "owner-secure-password-1")).ok).toBe(true);
+    expect((await acceptPartnerInvitation(token, "owner-secure-password-2")).ok).toBe(false);
+
+    const stored = await admin.query<{ status: string; password_hash: string; raw: number }>(
+      "SELECT status, password_hash, (password_hash = 'owner-secure-password-1')::int AS raw FROM partner_users WHERE email=$1",
+      ["owner-invite@a.example"]
+    );
+    expect(stored.rows[0].status).toBe("ACTIVE");
+    expect(stored.rows[0].password_hash).toMatch(/^\$2[aby]\$/);
+    expect(stored.rows[0].raw).toBe(0);
+
+    const consumed = await admin.query<{ status: string; consumed_at: string | null }>(
+      "SELECT status, consumed_at FROM partner_invitations WHERE token_hash IS NOT NULL AND email=$1",
+      ["owner-invite@a.example"]
+    );
+    expect(consumed.rows[0].status).toBe("CONSUMED");
+    expect(consumed.rows[0].consumed_at).not.toBeNull();
+
+    await admin.query("UPDATE partner_organisations SET status='ACTIVE' WHERE id=$1", [A]);
+    const { partnerLogin } = await import("../server/partner/auth");
+    const login = await partnerLogin("owner-invite@a.example", "owner-secure-password-1", "127.0.0.1");
+    expect(login.ok).toBe(true);
+    expect(login.tenantId).toBe(A);
+    expect((await partnerLogin("owner-invite@a.example", "wrong-password", "127.0.0.1")).ok).toBe(false);
+    expect((await partnerLogin("unknown-partner@a.example", "owner-secure-password-1", "127.0.0.1")).ok).toBe(false);
+    const auditBlob = JSON.stringify(
+      (await admin.query("SELECT before_state, after_state FROM partner_management_audit WHERE tenant_id=$1", [A])).rows
+    );
+    expect(auditBlob).not.toContain(token);
+    expect(auditBlob).not.toMatch(/token_hash|owner-secure-password/i);
+  });
+
+  it("invitation resend supersedes old token; explicit revoke rejects the active token generically", async () => {
+    const c = await cookie();
+    const create = await post(
+      `${PM}/partners/${A}/users`,
+      {
+        firstName: "Staff",
+        lastName: "Pending",
+        email: "staff-pending@a.example",
+        role: "STAFF",
+        reason: "staff setup",
+      },
+      c
+    );
+    expect(create.status).toBe(200);
+    const created = await create.json();
+    const token1 = new URL(created.result.invitationLink).searchParams.get("token")!;
+    const userId = created.result.userId;
+    const resend = await post(`${PM}/partners/${A}/users/${userId}/resend-invitation`, { reason: "resend" }, c);
+    expect(resend.status).toBe(200);
+    const token2 = new URL((await resend.json()).result.invitationLink).searchParams.get("token")!;
+    expect(token2).not.toBe(token1);
+    const states = await admin.query<{ status: string }>(
+      "SELECT status FROM partner_invitations WHERE user_id=$1 ORDER BY created_at",
+      [userId]
+    );
+    expect(states.rows.map((r) => r.status)).toEqual(["REVOKED", "PENDING"]);
+    const { acceptPartnerInvitation } = await import("../server/partner/partner-management-service");
+    expect((await acceptPartnerInvitation(token1, "staff-secure-password-1")).ok).toBe(false);
+    const revoke = await post(
+      `${PM}/partners/${A}/users/${userId}/revoke-invitation`,
+      { reason: "staging revoke test" },
+      c
+    );
+    expect(revoke.status).toBe(200);
+    expect((await acceptPartnerInvitation(token2, "staff-secure-password-1")).ok).toBe(false);
+  });
+
+  it("invitation expiry, malformed token, suspended/revoked partner and duplicate email are rejected safely", async () => {
+    const c = await cookie();
+    const { acceptPartnerInvitation } = await import("../server/partner/partner-management-service");
+    expect((await acceptPartnerInvitation("malformed", "secure-password-1")).ok).toBe(false);
+
+    const dup = await post(
+      `${PM}/partners/${B}/users`,
+      { firstName: "Other", lastName: "Owner", email: "owner-invite@a.example", role: "OWNER", reason: "dup" },
+      c
+    );
+    expect(dup.status).toBe(409);
+    expect((await dup.json()).error.code).toBe("DUPLICATE_PARTNER_USER");
+
+    const create = await post(
+      `${PM}/partners/${A}/users`,
+      { firstName: "Expired", lastName: "User", email: "expired@a.example", role: "STAFF", reason: "expiry" },
+      c
+    );
+    const token = new URL((await create.json()).result.invitationLink).searchParams.get("token")!;
+    await admin.query("UPDATE partner_invitations SET expires_at=now() - interval '1 minute' WHERE email=$1", [
+      "expired@a.example",
+    ]);
+    expect((await acceptPartnerInvitation(token, "expired-secure-password-1")).ok).toBe(false);
+    expect(
+      (
+        await admin.query<{ status: string }>("SELECT status FROM partner_invitations WHERE email=$1", [
+          "expired@a.example",
+        ])
+      ).rows[0].status
+    ).toBe("EXPIRED");
+
+    await admin.query("UPDATE partner_organisations SET status='SUSPENDED' WHERE id=$1", [B]);
+    const suspended = await post(
+      `${PM}/partners/${B}/users`,
+      { firstName: "Blocked", lastName: "User", email: "blocked@b.example", role: "OWNER", reason: "suspended" },
+      c
+    );
+    expect(suspended.status).toBe(400);
+    await admin.query("UPDATE partner_organisations SET status='REVOKED' WHERE id=$1", [B]);
+    const revoked = await post(
+      `${PM}/partners/${B}/users`,
+      { firstName: "Blocked", lastName: "Two", email: "blocked2@b.example", role: "OWNER", reason: "revoked" },
+      c
+    );
+    expect(revoked.status).toBe(400);
+    await admin.query("UPDATE partner_organisations SET status='ACTIVE' WHERE id=$1", [B]);
+  });
+
+  it("final active owner cannot be suspended or demoted", async () => {
+    const c = await cookie();
+    const row = await admin.query<{ id: string }>("SELECT id FROM partner_users WHERE email=$1", [
+      "owner-invite@a.example",
+    ]);
+    const userId = row.rows[0].id;
+    const suspend = await post(
+      `${PM}/partners/${A}/users/${userId}/status`,
+      { status: "SUSPENDED", reason: "test final owner guard" },
+      c
+    );
+    expect(suspend.status).toBe(409);
+    expect((await suspend.json()).error.code).toBe("FINAL_OWNER_REQUIRED");
+    const demote = await post(
+      `${PM}/partners/${A}/users/${userId}/role`,
+      { role: "STAFF", reason: "test final owner guard" },
+      c
+    );
+    expect(demote.status).toBe(409);
+  });
+
+  it("suspension, membership revocation and role change invalidate active sessions", async () => {
+    const c = await cookie();
+    const { partnerLogin } = await import("../server/partner/auth");
+    const before = await partnerLogin("owner-invite@a.example", "owner-secure-password-1", "127.0.0.1");
+    expect(before.ok).toBe(true);
+    const owner2 = await post(
+      `${PM}/partners/${A}/users`,
+      { firstName: "Backup", lastName: "Owner", email: "backup-owner@a.example", role: "OWNER", reason: "backup" },
+      c
+    );
+    const token = new URL((await owner2.json()).result.invitationLink).searchParams.get("token")!;
+    const { acceptPartnerInvitation } = await import("../server/partner/partner-management-service");
+    expect((await acceptPartnerInvitation(token, "backup-owner-password-1")).ok).toBe(true);
+    const row = await admin.query<{ id: string }>("SELECT id FROM partner_users WHERE email=$1", [
+      "owner-invite@a.example",
+    ]);
+    const userId = row.rows[0].id;
+    expect(
+      (await post(`${PM}/partners/${A}/users/${userId}/role`, { role: "ADMIN", reason: "demote with backup" }, c))
+        .status
+    ).toBe(200);
+    expect(
+      (
+        await admin.query<{ n: number }>(
+          "SELECT count(*)::int n FROM partner_sessions WHERE user_id=$1 AND revoked_at IS NULL",
+          [userId]
+        )
+      ).rows[0].n
+    ).toBe(0);
+    const relogin = await partnerLogin("owner-invite@a.example", "owner-secure-password-1", "127.0.0.1");
+    expect(relogin.ok).toBe(true);
+    expect(
+      (await post(`${PM}/partners/${A}/users/${userId}/status`, { status: "SUSPENDED", reason: "suspend test" }, c))
+        .status
+    ).toBe(200);
+    expect((await partnerLogin("owner-invite@a.example", "owner-secure-password-1", "127.0.0.1")).ok).toBe(false);
+    expect(
+      (await post(`${PM}/partners/${A}/users/${userId}/status`, { status: "REVOKED", reason: "revoke test" }, c)).status
+    ).toBe(200);
   });
 
   it("invalid branding_status is a friendly 400 VALIDATION_ERROR, not a 500", async () => {

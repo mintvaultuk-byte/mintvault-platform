@@ -1601,3 +1601,33 @@ export async function sendVaultClubGraceExpiredEmail(data: {
     console.error(`[email] Vault Club grace expired notice for ${data.email}:`, err.message);
   }
 }
+
+export async function sendPartnerInvitationEmail(data: {
+  email: string;
+  partnerName: string;
+  roleCode: string;
+  invitationUrl: string;
+  expiresAt: Date;
+}): Promise<{ id: string } | null> {
+  const resend = getResend();
+  if (!resend) return null;
+  const safePartner = escapeHtmlForEmail(data.partnerName);
+  const safeRole = escapeHtmlForEmail(data.roleCode.replace(/^PARTNER_/, "").replace(/_/g, " "));
+  const safeUrl = escapeHtmlForEmail(data.invitationUrl);
+  const safeExpiry = escapeHtmlForEmail(data.expiresAt.toISOString());
+  const body = `
+<p style="margin:0 0 16px 0;">You have been invited to access the MintVault Partner Portal for <strong style="color:#fff;">${safePartner}</strong>.</p>
+<p style="margin:0 0 16px 0;">Invited role: <strong style="color:#D4AF37;">${safeRole}</strong></p>
+<p style="margin:0 0 20px 0;">This secure invitation expires at <strong style="color:#fff;">${safeExpiry}</strong>.</p>
+<p style="margin:20px 0;">
+<a href="${safeUrl}" style="display:inline-block;padding:12px 24px;background:#D4AF37;color:#111;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">SET UP PARTNER ACCESS</a>
+</p>
+<p style="color:#888;font-size:12px;line-height:1.6;margin:18px 0 0;">If you were not expecting this invitation, ignore this email. No password has been created.</p>`;
+  return sendViaResend(resend, {
+    from: getFromEmail(),
+    replyTo: REPLY_TO,
+    to: data.email,
+    subject: `MintVault Partner invitation — ${data.partnerName}`,
+    html: baseHtml("Partner Portal Invitation", body),
+  });
+}

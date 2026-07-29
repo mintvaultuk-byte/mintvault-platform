@@ -93,11 +93,22 @@ describe("G5 detail page source assertions", () => {
   const src = readFileSync(join(process.cwd(), "client/src/pages/admin/partner-management-detail.tsx"), "utf8");
   it("has the eight tabs (rendered from the TABS list) + admin session gate", () => {
     expect(src).toContain("pm-tab-"); // tabs render via `pm-tab-${k}`
-    expect(src).toContain(
-      'const TABS = ["overview", "profile", "contacts", "branding", "activity", "notes", "audit", "connector"]'
-    );
+    for (const key of [
+      "overview",
+      "users",
+      "profile",
+      "contacts",
+      "branding",
+      "activity",
+      "notes",
+      "audit",
+      "connector",
+    ]) {
+      expect(src).toContain(`"${key}"`);
+    }
     for (const label of [
       "Overview",
+      "Users",
       "Company Profile",
       "Contacts",
       "Branding",
@@ -109,6 +120,28 @@ describe("G5 detail page source assertions", () => {
       expect(src).toContain(label);
     }
     expect(src).toContain("/api/admin/session");
+  });
+  it("adds partner user management UI without password display or retrieval", () => {
+    for (const id of [
+      "pm-tab-",
+      "pm-users",
+      "pm-users-empty",
+      "pm-user-modal",
+      "pm-user-first-name",
+      "pm-user-last-name",
+      "pm-user-email",
+      "pm-user-role",
+      "pm-user-confirm",
+      "pm-user-revoke-invite-",
+      "pm-create-owner-login",
+      "pm-setup-checklist",
+    ]) {
+      expect(src).toContain(id);
+    }
+    expect(src).toContain("Create owner login");
+    expect(src).toContain("Create invitation");
+    expect(src).not.toContain("password_hash");
+    expect(src).not.toContain("existing password");
   });
   it("gates mutations on reason + expectedVersion + typed-confirm for high-risk; a11y modal", () => {
     expect(src).toContain("reasonValid(reason)");

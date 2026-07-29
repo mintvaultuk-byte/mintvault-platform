@@ -68,6 +68,13 @@ function mutationResponse(res: Response, requestId: string, r: { result: unknown
   res.json({ ok: true, result: r.result, requestId });
 }
 
+function requirePartnerUserRole(raw: unknown): svc.AdminPartnerRole {
+  if (typeof raw !== "string" || !(raw in svc.ADMIN_ROLE_TO_PARTNER_ROLE)) {
+    throw new G5RequestError("VALIDATION_ERROR", "Unknown partner user role.");
+  }
+  return raw as svc.AdminPartnerRole;
+}
+
 export function partnerManagementRouter(): Router {
   const r = Router();
   r.use(requireAdmin);
@@ -140,6 +147,13 @@ export function partnerManagementRouter(): Router {
       sendError(res, err);
     }
   });
+  r.get("/partners/:partnerId/users", async (req, res) => {
+    try {
+      res.json(await svc.listPartnerUsers(req.params.partnerId));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
 
   // ---- MUTATIONS ----
   r.use(g5MutationRateLimit);
@@ -150,6 +164,110 @@ export function partnerManagementRouter(): Router {
       const legalName = requireNonEmpty(req.body?.legalName, "legalName");
       const reason = optionalReason(req.body?.reason, "partner created");
       mutationResponse(res, actor.requestId, await svc.createPartner(actor, { legalName }, reason));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = optionalReason(req.body?.reason, "partner user invited");
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.invitePartnerUser(
+          actor,
+          req.params.partnerId,
+          {
+            firstName: requireNonEmpty(req.body?.firstName, "firstName"),
+            lastName: requireNonEmpty(req.body?.lastName, "lastName"),
+            email: requireNonEmpty(req.body?.email, "email"),
+            role: requirePartnerUserRole(req.body?.role),
+          },
+          reason
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users/:userId/resend-invitation", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = optionalReason(req.body?.reason, "partner invitation resent");
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.resendPartnerInvitation(actor, req.params.partnerId, req.params.userId, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users/:userId/revoke-invitation", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.revokePartnerInvitation(actor, req.params.partnerId, req.params.userId, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users/:userId/role", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.changePartnerUserRole(
+          actor,
+          req.params.partnerId,
+          req.params.userId,
+          requirePartnerUserRole(req.body?.role),
+          reason
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users/:userId/status", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      const status = req.body?.status;
+      if (status !== "ACTIVE" && status !== "SUSPENDED" && status !== "REVOKED") {
+        throw new G5RequestError("VALIDATION_ERROR", "Unknown partner user status.");
+      }
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.setPartnerUserStatus(actor, req.params.partnerId, req.params.userId, status, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users/:userId/revoke-sessions", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = optionalReason(req.body?.reason, "partner user sessions revoked");
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.revokePartnerUserSessions(actor, req.params.partnerId, req.params.userId, reason)
+      );
     } catch (err) {
       sendError(res, err);
     }

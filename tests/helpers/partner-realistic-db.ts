@@ -75,6 +75,12 @@ export const PARTNER_MIGRATIONS_WITH_G6B = [
   "0017_partner_credit_reservations",
 ] as const;
 
+/** Partner user management + invitations. Depends on G5 partner-management audit/profile tables. */
+export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT = [
+  ...PARTNER_MIGRATIONS_WITH_G5,
+  "0031_partner_user_management",
+] as const;
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 

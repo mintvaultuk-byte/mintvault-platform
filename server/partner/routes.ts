@@ -31,6 +31,7 @@ import { recoveryHash, mfaEncryptionConfigured } from "./mfa";
 import { writePartnerAudit } from "./audit";
 import { resetDeliveryConfigured, deliverResetToken } from "./delivery";
 import { switchLocation } from "./location";
+import { acceptPartnerInvitation } from "./partner-management-service";
 import {
   mfaEnrolStart,
   mfaEnrolConfirm,
@@ -143,6 +144,20 @@ export function partnerApiRouter(): Router {
     // tenant is derived from the token server-side (L6) — no client tenantId.
     const ok = await consumePasswordResetToken(token, newPassword);
     res.status(ok ? 200 : 400).json({ ok });
+  });
+
+  r.post("/invitations/accept", partnerResetLimiter, async (req, res) => {
+    const { token, password } = req.body ?? {};
+    if (typeof token !== "string" || typeof password !== "string") {
+      res.status(400).json({ error: "invalid invitation" });
+      return;
+    }
+    const result = await acceptPartnerInvitation(token, password);
+    if (!result.ok) {
+      res.status(400).json({ error: "invalid invitation" });
+      return;
+    }
+    res.json({ ok: true });
   });
 
   // ---- session ----

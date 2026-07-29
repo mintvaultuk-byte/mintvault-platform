@@ -25,10 +25,21 @@ import {
 } from "./partner-management-helpers";
 
 const BASE = "/api/super-admin/partner-management";
-const TABS = ["overview", "profile", "contacts", "branding", "activity", "notes", "audit", "connector"] as const;
+const TABS = [
+  "overview",
+  "users",
+  "profile",
+  "contacts",
+  "branding",
+  "activity",
+  "notes",
+  "audit",
+  "connector",
+] as const;
 type TabKey = (typeof TABS)[number];
 const TAB_LABELS: Record<TabKey, string> = {
   overview: "Overview",
+  users: "Users",
   profile: "Company Profile",
   contacts: "Contacts",
   branding: "Branding",
@@ -39,6 +50,7 @@ const TAB_LABELS: Record<TabKey, string> = {
 };
 
 const TYPED_CONFIRM = "CONFIRM";
+const USER_ROLES = ["OWNER", "ADMIN", "GRADER", "STAFF"] as const;
 
 export default function PartnerManagementDetailPage() {
   const [, navigate] = useLocation();
@@ -59,6 +71,8 @@ export default function PartnerManagementDetailPage() {
   // note modal
   const [noteBody, setNoteBody] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
+  const [userOpen, setUserOpen] = useState(false);
+  const [userForm, setUserForm] = useState({ firstName: "", lastName: "", email: "", role: "OWNER" });
 
   useEffect(() => {
     let live = true;
@@ -110,6 +124,11 @@ export default function PartnerManagementDetailPage() {
     queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/audit`).then((r) => r.json()),
     enabled: on && tab === "audit",
   });
+  const users = useQuery({
+    queryKey: pmKeys.users(partnerId),
+    queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/users`).then((r) => r.json()),
+    enabled: on && (tab === "users" || tab === "overview"),
+  });
 
   const org = detail.data?.organisation;
   const profile = detail.data?.profile;
@@ -138,6 +157,35 @@ export default function PartnerManagementDetailPage() {
     },
     onError: (err: unknown) =>
       setBanner((err as { body?: { error?: { message?: string } } })?.body?.error?.message ?? "Note failed."),
+  });
+  const userMutation = useMutation({
+    mutationFn: async () =>
+      (
+        await apiRequest("POST", `${BASE}/partners/${partnerId}/users`, {
+          ...userForm,
+          reason: "partner user invited",
+        })
+      ).json(),
+    onSuccess: (d) => {
+      const copy = d?.result?.invitationLink ? " Invitation link copied to the response for staging." : "";
+      setBanner(`Invitation created.${copy}`);
+      setUserOpen(false);
+      setUserForm({ firstName: "", lastName: "", email: "", role: "OWNER" });
+      queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
+      queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
+    },
+    onError: (err: unknown) =>
+      setBanner((err as { body?: { error?: { message?: string } } })?.body?.error?.message ?? "Invitation failed."),
+  });
+  const userActionMutation = useMutation({
+    mutationFn: async (run: () => Promise<unknown>) => run(),
+    onSuccess: () => {
+      setBanner("User action completed.");
+      queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
+      queryClient.invalidateQueries({ queryKey: pmKeys.audit(partnerId) });
+    },
+    onError: (err: unknown) =>
+      setBanner((err as { body?: { error?: { message?: string } } })?.body?.error?.message ?? "User action failed."),
   });
 
   function closeModal() {
@@ -265,9 +313,92 @@ export default function PartnerManagementDetailPage() {
               <div>Accreditation: {org.accreditation_level}</div>
               <div>Health: {org.health}</div>
               <div>Created: {new Date(org.created_at).toLocaleString()}</div>
+              <div style={{ marginTop: 12 }} data-testid="pm-setup-checklist">
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>Setup checklist</div>
+                <ChecklistItem done label="Company created" />
+                <ChecklistItem
+                  done={(users.data?.users ?? []).some((u: any) => u.role === "OWNER")}
+                  label="Create owner login"
+                />
+                <ChecklistItem
+                  done={!!profile?.trading_name || !!profile?.primary_email}
+                  label="Complete company profile"
+                />
+                <ChecklistItem done={!!detail.data?.primaryContact} label="Add contact details" />
+                <ChecklistItem done={(statistics.data?.locationCount ?? 0) > 0} label="Add grading location" />
+                <ChecklistItem done={!!detail.data?.branding} label="Configure branding" />
+                <ChecklistItem done={false} label="Configure device" />
+                <ChecklistItem done={false} label="Configure credits" />
+              </div>
+              {!(users.data?.users ?? []).some((u: any) => u.role === "OWNER") && (
+                <div style={{ marginTop: 8 }}>
+                  <AdminButton
+                    size="sm"
+                    variant="gold"
+                    onClick={() => setUserOpen(true)}
+                    data-testid="pm-create-owner-login"
+                  >
+                    Create owner login
+                  </AdminButton>
+                </div>
+              )}
               <div style={{ marginTop: 8, fontSize: 13, opacity: 0.8 }}>
                 Recent activity: {(activity.data?.activity ?? []).length} events
               </div>
+            </div>
+          </Panel>
+        )}
+
+        {tab === "users" && (
+          <Panel
+            title="Users"
+            sub="Partner membership and invitation management"
+            actions={
+              <AdminButton size="sm" variant="gold" onClick={() => setUserOpen(true)} data-testid="pm-user-add-open">
+                Add user
+              </AdminButton>
+            }
+          >
+            <div data-testid="pm-users">
+              {(users.data?.users ?? []).length === 0 ? (
+                <div data-testid="pm-users-empty">No partner users yet. Create the owner login first.</div>
+              ) : (
+                <table className="min-w-full text-left text-sm">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Status</th>
+                      <th>Last login</th>
+                      <th>Invitation</th>
+                      <th>Created</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(users.data?.users ?? []).map((u: any) => (
+                      <tr key={u.id} data-testid={`pm-user-${u.id}`}>
+                        <td>{[u.first_name, u.last_name].filter(Boolean).join(" ") || "—"}</td>
+                        <td>{u.email}</td>
+                        <td>{u.role}</td>
+                        <td>{u.status}</td>
+                        <td>{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "—"}</td>
+                        <td>{u.invitation_status ?? (u.status === "ACTIVE" ? "ACCEPTED" : "—")}</td>
+                        <td>{new Date(u.created_at).toLocaleString()}</td>
+                        <td>
+                          <UserActions
+                            user={u}
+                            busy={userActionMutation.isPending}
+                            onRun={(run) => userActionMutation.mutate(run)}
+                            partnerId={partnerId}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </Panel>
         )}
@@ -674,6 +805,91 @@ export default function PartnerManagementDetailPage() {
             </div>
           </div>
         )}
+
+        {userOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pm-user-title"
+            data-testid="pm-user-modal"
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,.6)",
+              display: "grid",
+              placeItems: "center",
+              zIndex: 50,
+            }}
+          >
+            <div
+              style={{
+                background: "var(--admin-panel, #141414)",
+                padding: 20,
+                borderRadius: 12,
+                width: "min(560px,92vw)",
+              }}
+            >
+              <h3 id="pm-user-title" style={{ marginBottom: 8 }}>
+                Create partner invitation
+              </h3>
+              <div style={{ display: "grid", gap: 10 }}>
+                <UserInput
+                  label="First name"
+                  value={userForm.firstName}
+                  onChange={(firstName) => setUserForm((f) => ({ ...f, firstName }))}
+                  testId="pm-user-first-name"
+                />
+                <UserInput
+                  label="Last name"
+                  value={userForm.lastName}
+                  onChange={(lastName) => setUserForm((f) => ({ ...f, lastName }))}
+                  testId="pm-user-last-name"
+                />
+                <UserInput
+                  label="Email"
+                  value={userForm.email}
+                  onChange={(email) => setUserForm((f) => ({ ...f, email }))}
+                  testId="pm-user-email"
+                  type="email"
+                />
+                <label style={{ display: "grid", gap: 4, fontSize: 12, opacity: 0.9 }}>
+                  Role
+                  <select
+                    value={userForm.role}
+                    onChange={(e) => setUserForm((f) => ({ ...f, role: e.target.value }))}
+                    data-testid="pm-user-role"
+                    style={{ background: "var(--admin-bg, #0d0d0d)", color: "#fff", borderRadius: 8, padding: 8 }}
+                  >
+                    {USER_ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+                <AdminButton size="sm" variant="ghost" onClick={() => setUserOpen(false)} data-testid="pm-user-cancel">
+                  Cancel
+                </AdminButton>
+                <AdminButton
+                  size="sm"
+                  variant="gold"
+                  disabled={
+                    !userForm.firstName.trim() ||
+                    !userForm.lastName.trim() ||
+                    !userForm.email.trim() ||
+                    userMutation.isPending
+                  }
+                  onClick={() => userMutation.mutate()}
+                  data-testid="pm-user-confirm"
+                >
+                  {userMutation.isPending ? "Creating…" : "Create invitation"}
+                </AdminButton>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AdminShell>
   );
@@ -734,6 +950,152 @@ function Field({ label, v }: { label: string; v?: string | null }) {
     <div style={{ display: "flex", gap: 8, padding: "2px 0" }}>
       <span style={{ opacity: 0.6, minWidth: 200 }}>{label}</span>
       <span>{v ?? "—"}</span>
+    </div>
+  );
+}
+
+function ChecklistItem({ done, label }: { done: boolean; label: string }) {
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "2px 0" }}>
+      <span aria-hidden="true">{done ? "✓" : "○"}</span>
+      <span style={{ opacity: done ? 0.85 : 0.65 }}>{label}</span>
+    </div>
+  );
+}
+
+function UserInput({
+  label,
+  value,
+  onChange,
+  testId,
+  type = "text",
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  testId: string;
+  type?: string;
+}) {
+  return (
+    <label style={{ display: "grid", gap: 4, fontSize: 12, opacity: 0.9 }}>
+      {label}
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        data-testid={testId}
+        style={{ background: "var(--admin-bg, #0d0d0d)", color: "#fff", borderRadius: 8, padding: 8 }}
+      />
+    </label>
+  );
+}
+
+function UserActions({
+  user,
+  busy,
+  onRun,
+  partnerId,
+}: {
+  user: any;
+  busy: boolean;
+  onRun: (run: () => Promise<unknown>) => void;
+  partnerId: string;
+}) {
+  const post = (path: string, body: Record<string, unknown>) => () =>
+    apiRequest("POST", `${BASE}${path}`, body).then((r) => r.json());
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy}
+        onClick={() =>
+          onRun(post(`/partners/${partnerId}/users/${user.id}/resend-invitation`, { reason: "invitation resent" }))
+        }
+        data-testid={`pm-user-resend-${user.id}`}
+      >
+        Resend
+      </AdminButton>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy || !["PENDING", "SENT", "DELIVERY_FAILED"].includes(user.invitation_status)}
+        onClick={() =>
+          onRun(
+            post(`/partners/${partnerId}/users/${user.id}/revoke-invitation`, {
+              reason: "invitation revoked by Super Admin",
+            })
+          )
+        }
+        data-testid={`pm-user-revoke-invite-${user.id}`}
+      >
+        Revoke invite
+      </AdminButton>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy || user.status === "SUSPENDED"}
+        onClick={() =>
+          onRun(
+            post(`/partners/${partnerId}/users/${user.id}/status`, {
+              status: "SUSPENDED",
+              reason: "suspended by Super Admin",
+            })
+          )
+        }
+        data-testid={`pm-user-suspend-${user.id}`}
+      >
+        Suspend
+      </AdminButton>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy || user.status === "ACTIVE"}
+        onClick={() =>
+          onRun(
+            post(`/partners/${partnerId}/users/${user.id}/status`, {
+              status: "ACTIVE",
+              reason: "reactivated by Super Admin",
+            })
+          )
+        }
+        data-testid={`pm-user-reactivate-${user.id}`}
+      >
+        Reactivate
+      </AdminButton>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy}
+        onClick={() => {
+          const role = window.prompt("New role: OWNER, ADMIN, GRADER or STAFF", user.role);
+          if (!role) return;
+          onRun(
+            post(`/partners/${partnerId}/users/${user.id}/role`, {
+              role: role.toUpperCase(),
+              reason: "role changed by Super Admin",
+            })
+          );
+        }}
+        data-testid={`pm-user-role-change-${user.id}`}
+      >
+        Change role
+      </AdminButton>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy}
+        onClick={() =>
+          onRun(
+            post(`/partners/${partnerId}/users/${user.id}/revoke-sessions`, {
+              reason: "sessions revoked by Super Admin",
+            })
+          )
+        }
+        data-testid={`pm-user-revoke-${user.id}`}
+      >
+        Revoke sessions
+      </AdminButton>
     </div>
   );
 }
