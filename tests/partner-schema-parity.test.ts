@@ -91,6 +91,11 @@ describe("partner schema ↔ migration parity", () => {
       // gap here means the two cannot collide whichever lands first, and this pin
       // will fail loudly if anything else tries to claim 0025.
       //
+      // STATUS 2026-07-29: that renumber has now been done on its own branch —
+      // fix/grading-optimistic-concurrency @ 6e5953fc carries
+      // 0025_grading_optimistic_concurrency.sql. 0025 is therefore claimed but not
+      // yet merged, so it stays absent from this pin until that branch lands.
+      //
       // 0026 (Catalogue Manager, hostile-review MEDIUM) adds a partial unique
       // index on the EFFECTIVE persisted code — coalesce(nullif(abbreviation,''),
       // value) — per category, over live rows only. Additive: index only, no
@@ -99,6 +104,16 @@ describe("partner schema ↔ migration parity", () => {
       // rollback is intentionally named rollback-0026-catalogue-abbreviation-
       // unique.sql (non-numbered) so the runner never applies it.
       "0026_catalogue_abbreviation_unique.sql",
+      // 0027 is likewise claimed but unmerged: the g6d submission-credit lifecycle was
+      // renumbered off the contested 0019 onto 0027 on 2026-07-29
+      // (codex/partner-g6d-submission-credit-integration @ 70dbc79c). Absent here until it lands.
+      //
+      // Not a partner migration — the Super Admin Project Control dashboard. It creates nine
+      // additive pc_* tables and touches nothing that already exists. 0030 is deliberately clear
+      // of the contested 0019–0024 band so the runner's duplicate-number hard-reject cannot fire
+      // whatever order the unmerged branches land in. Its rollback is intentionally named
+      // rollback-0030-project-control.sql (non-numbered) so the runner never applies it.
+      "0030_project_control.sql",
     ]);
   });
 

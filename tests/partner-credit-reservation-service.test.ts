@@ -736,6 +736,10 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     await admin.query(
       "DELETE FROM schema_migrations WHERE filename = '0026_catalogue_abbreviation_unique.sql'"
     );
+    // And the Project Control dashboard migration (also ≥0018). It creates only pc_* tables and
+    // has no relationship to partner credits — it is cleared purely so the later-migration guard
+    // stops tripping before the evidence guard can be reached.
+    await admin.query("DELETE FROM schema_migrations WHERE filename = '0030_project_control.sql'");
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );
