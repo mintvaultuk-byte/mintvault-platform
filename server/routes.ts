@@ -70,6 +70,7 @@ import { registerPartnerManagementRoutes } from "./partner/partner-management-ro
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
 import { registerCatalogueRoutes } from "./routes/admin/catalogue";
+import { registerProjectControlRoutes } from "./routes/admin/project-control";
 import { registerLabelPreviewRoutes } from "./routes/admin/label-preview";
 import { registerCardIdentificationRoutes } from "./routes/card-identification";
 import { registerTransferRoutes } from "./routes/transfers";
@@ -2787,6 +2788,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerRarityMappingRoutes(app);
   registerPokemonKnowledgeRoutes(app);
   registerCatalogueRoutes(app);
+  registerProjectControlRoutes(app); // Super Admin Project Control dashboard (super-admin-gated, internal)
   registerLabelPreviewRoutes(app);
   registerCardIdentificationRoutes(app);
   registerTransferRoutes(app);

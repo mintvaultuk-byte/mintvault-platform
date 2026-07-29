@@ -2382,3 +2382,289 @@ export const igSettings = pgTable("ig_settings", {
 });
 
 export type IgSettingsRow = typeof igSettings.$inferSelect;
+
+/* ============================================================================================ */
+/* Super Admin Project Control                                                                  */
+/*                                                                                              */
+/* The permanent engineering control centre. Nine additive tables, all prefixed `pc_`, all      */
+/* independent of every existing MintVault table — nothing here reads or writes certificates,   */
+/* grading, payments, partners, or storage. Domain logic lives in shared/project-control.ts.    */
+/* ============================================================================================ */
+
+/** A node in the MintVault programme hierarchy (MintVault › Partner Network › G6D › …). */
+export const pcNodes = pgTable(
+  "pc_nodes",
+  {
+    id: serial("id").primaryKey(),
+    // Stable kebab-case identifier used by the API, the UI and the seed.
+    key: text("key").notNull(),
+    // Parent node key; null for the single root.
+    parentKey: text("parent_key"),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    // Manual ordering among siblings.
+    sortOrder: integer("sort_order").notNull().default(0),
+    archived: boolean("archived").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uqKey: uniqueIndex("uq_pc_nodes_key").on(t.key),
+    idxParent: index("idx_pc_nodes_parent").on(t.parentKey, t.sortOrder),
+  })
+);
+
+/** A unit of engineering work hanging off a programme node. */
+export const pcWorkPackages = pgTable(
+  "pc_work_packages",
+  {
+    id: serial("id").primaryKey(),
+    key: text("key").notNull(),
+    nodeKey: text("node_key").notNull(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    // One of WORK_STATUSES in shared/project-control.ts.
+    status: text("status").notNull().default("not_started"),
+    // Founder-declared 0–100. The status engine cross-checks it and reports the lower figure.
+    declaredCompletion: integer("declared_completion").notNull().default(0),
+    // One of RISK_LEVELS.
+    risk: text("risk").notNull().default("low"),
+    // Governance issue class A–H.
+    classification: text("classification").notNull().default("A"),
+    // One of REVIEW_STATES / DEPLOYMENT_STATES / PRODUCTION_VERIFICATIONS.
+    reviewState: text("review_state").notNull().default("not_started"),
+    deploymentState: text("deployment_state").notNull().default("not_deployed"),
+    productionVerification: text("production_verification").notNull().default("not_verified"),
+    businessValue: integer("business_value").notNull().default(3),
+    engineeringRisk: integer("engineering_risk").notNull().default(3),
+    estimatedEffortDays: integer("estimated_effort_days"),
+    remainingWork: text("remaining_work").notNull().default(""),
+    branch: text("branch"),
+    worktreePath: text("worktree_path"),
+    baseCommit: text("base_commit"),
+    latestCommit: text("latest_commit"),
+    prUrl: text("pr_url"),
+    // Free-form labels for filtering (e.g. "shop-launch", "scanner").
+    tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    // Acceptance criteria ({id,text,met,evidenceRef}[]) — a criterion cannot count as met
+    // without an evidence reference. Carried forward from the superseded WIP.
+    acceptanceCriteria: jsonb("acceptance_criteria").$type<unknown[]>().notNull().default([]),
+    // Named gates that must pass before this work is done ({id,name,kind}[]).
+    requiredTests: jsonb("required_tests").$type<unknown[]>().notNull().default([]),
+    // Explicit per-category readiness state; anything absent is derived conservatively.
+    categoryStates: jsonb("category_states").$type<Record<string, string>>().notNull().default({}),
+    // Justification for any optional category declared not-applicable.
+    categoryNotes: jsonb("category_notes").$type<Record<string, string>>().notNull().default({}),
+    // Optimistic-locking version — incremented on every update; a stale writer is rejected.
+    version: integer("version").notNull().default(1),
+    archived: boolean("archived").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    createdBy: text("created_by"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: text("updated_by"),
+  },
+  (t) => ({
+    uqKey: uniqueIndex("uq_pc_work_packages_key").on(t.key),
+    idxNode: index("idx_pc_work_packages_node").on(t.nodeKey),
+    idxStatus: index("idx_pc_work_packages_status").on(t.status),
+    idxUpdated: index("idx_pc_work_packages_updated").on(t.updatedAt),
+  })
+);
+
+/** Evidence supporting (or contradicting) a work package's claimed state. */
+export const pcEvidence = pgTable(
+  "pc_evidence",
+  {
+    id: serial("id").primaryKey(),
+    packageKey: text("package_key").notNull(),
+    // One of EVIDENCE_KINDS.
+    kind: text("kind").notNull(),
+    // false = this evidence CONTRADICTS the claim (drives the Contradictory confidence).
+    supports: boolean("supports").notNull().default(true),
+    summary: text("summary").notNull().default(""),
+    // A commit SHA, a PR URL, a test-run id, a release version — never a secret.
+    sourceRef: text("source_ref"),
+    // Evidence for one commit never proves another; evidence from staging never proves production.
+    commitSha: text("commit_sha"),
+    environment: text("environment"),
+    capturedAt: timestamp("captured_at", { withTimezone: true }).notNull().defaultNow(),
+    capturedBy: text("captured_by"),
+  },
+  (t) => ({
+    idxPackage: index("idx_pc_evidence_package").on(t.packageKey, t.capturedAt),
+    idxKind: index("idx_pc_evidence_kind").on(t.kind),
+  })
+);
+
+/** Open/resolved blockers. A work package with an open blocker reads as Blocked, whatever its status says. */
+export const pcBlockers = pgTable(
+  "pc_blockers",
+  {
+    id: serial("id").primaryKey(),
+    packageKey: text("package_key").notNull(),
+    // One of BLOCKER_KINDS.
+    kind: text("kind").notNull(),
+    description: text("description").notNull(),
+    // Only meaningful for kind = 'security_issue'; high/critical drives the 49% readiness cap.
+    severity: text("severity").notNull().default("none"),
+    openedAt: timestamp("opened_at", { withTimezone: true }).notNull().defaultNow(),
+    openedBy: text("opened_by"),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by"),
+    resolutionNote: text("resolution_note"),
+  },
+  (t) => ({
+    idxPackageOpen: index("idx_pc_blockers_package_open").on(t.packageKey, t.resolvedAt),
+    idxKind: index("idx_pc_blockers_kind").on(t.kind),
+  })
+);
+
+/** "Work package A cannot finish until work package B does." */
+export const pcDependencies = pgTable(
+  "pc_dependencies",
+  {
+    id: serial("id").primaryKey(),
+    packageKey: text("package_key").notNull(),
+    dependsOnKey: text("depends_on_key").notNull(),
+    note: text("note").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uqEdge: uniqueIndex("uq_pc_dependencies_edge").on(t.packageKey, t.dependsOnKey),
+    idxDependsOn: index("idx_pc_dependencies_depends_on").on(t.dependsOnKey),
+  })
+);
+
+/** Append-only audit of every state transition. Never updated, never deleted. */
+export const pcStatusEvents = pgTable(
+  "pc_status_events",
+  {
+    id: serial("id").primaryKey(),
+    // "work_package" | "node" | "deployment".
+    subjectType: text("subject_type").notNull(),
+    subjectKey: text("subject_key").notNull(),
+    // The field that changed, e.g. "status", "review_state".
+    field: text("field").notNull(),
+    oldValue: text("old_value"),
+    newValue: text("new_value"),
+    reason: text("reason").notNull().default(""),
+    actor: text("actor").notNull().default("system"),
+    // Where the change came from: dashboard | scanner | seed | system.
+    source: text("source").notNull().default("dashboard"),
+    // Free-form evidence pointer (commit, PR, release, evidence row id).
+    evidenceRef: text("evidence_ref"),
+    // Set when the transition was not a legal pipeline move.
+    anomaly: text("anomaly"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    idxSubject: index("idx_pc_status_events_subject").on(t.subjectType, t.subjectKey, t.createdAt),
+    idxCreated: index("idx_pc_status_events_created").on(t.createdAt),
+  })
+);
+
+/** Deployment history per environment, including rollbacks and migration state. */
+export const pcDeployments = pgTable(
+  "pc_deployments",
+  {
+    id: serial("id").primaryKey(),
+    // One of ENVIRONMENTS: local | staging | production.
+    environment: text("environment").notNull(),
+    commitSha: text("commit_sha").notNull(),
+    releaseVersion: text("release_version"),
+    // One of DEPLOYMENT_RESULTS.
+    result: text("result").notNull().default("succeeded"),
+    // Plain-English migration state at the time of the release, e.g. "journal 22 rows, 0019+0022 applied".
+    migrationState: text("migration_state"),
+    packageKey: text("package_key"),
+    deployedAt: timestamp("deployed_at", { withTimezone: true }).notNull().defaultNow(),
+    deployedBy: text("deployed_by"),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    verifiedBy: text("verified_by"),
+    rollbackOfSha: text("rollback_of_sha"),
+    notes: text("notes").notNull().default(""),
+    // Provider's own release identifier (a Fly release, a CI run) when one exists.
+    externalId: text("external_id"),
+    /**
+     * STABLE identity for this release. Supplied by the caller or derived deterministically by
+     * the server from (environment, commit, release version, package, external id) — NEVER from a
+     * timestamp. The previous constraint included `deployed_at`, which defaults to NOW(), so two
+     * identical submissions simply got different timestamps and both succeeded.
+     */
+    idempotencyKey: text("idempotency_key").notNull(),
+  },
+  (t) => ({
+    idxEnvDeployed: index("idx_pc_deployments_env_deployed").on(t.environment, t.deployedAt),
+    idxSha: index("idx_pc_deployments_sha").on(t.commitSha),
+    uqIdempotency: uniqueIndex("uq_pc_deployments_idempotency").on(t.idempotencyKey),
+  })
+);
+
+/** Test / gate history — typescript, lint, vitest, integration, build, security, hostile, manual. */
+export const pcTestRuns = pgTable(
+  "pc_test_runs",
+  {
+    id: serial("id").primaryKey(),
+    packageKey: text("package_key"),
+    // One of EVIDENCE_KINDS.
+    kind: text("kind").notNull(),
+    // One of TEST_RESULTS.
+    result: text("result").notNull(),
+    commitSha: text("commit_sha"),
+    detail: text("detail").notNull().default(""),
+    ranAt: timestamp("ran_at", { withTimezone: true }).notNull().defaultNow(),
+    ranBy: text("ran_by"),
+    // CI run identifier, when the run came from a pipeline.
+    externalRunId: text("external_run_id"),
+    /** Stable identity — derived from (package, gate, commit, environment, external run), not time. */
+    idempotencyKey: text("idempotency_key").notNull(),
+  },
+  (t) => ({
+    idxPackageRan: index("idx_pc_test_runs_package_ran").on(t.packageKey, t.ranAt),
+    idxKind: index("idx_pc_test_runs_kind").on(t.kind, t.ranAt),
+    uqIdempotency: uniqueIndex("uq_pc_test_runs_idempotency").on(t.idempotencyKey),
+  })
+);
+
+/** Continuation prompts generated for a work package, kept so a prompt can be re-issued verbatim. */
+export const pcPrompts = pgTable(
+  "pc_prompts",
+  {
+    id: serial("id").primaryKey(),
+    packageKey: text("package_key").notNull(),
+    // One of PROMPT_TARGETS.
+    target: text("target").notNull(),
+    body: text("body").notNull(),
+    // Snapshot of the facts baked into the prompt, so a stale prompt is identifiable.
+    branch: text("branch"),
+    baseCommit: text("base_commit"),
+    // SHA-256 of `body` at generation time. Lets a stored prompt be proven unaltered.
+    contentHash: text("content_hash").notNull().default(""),
+    generatedAt: timestamp("generated_at", { withTimezone: true }).notNull().defaultNow(),
+    generatedBy: text("generated_by"),
+  },
+  (t) => ({
+    idxPackage: index("idx_pc_prompts_package").on(t.packageKey, t.generatedAt),
+  })
+);
+
+export type PcNode = typeof pcNodes.$inferSelect;
+export type PcWorkPackage = typeof pcWorkPackages.$inferSelect;
+export type PcEvidence = typeof pcEvidence.$inferSelect;
+export type PcBlocker = typeof pcBlockers.$inferSelect;
+export type PcDependency = typeof pcDependencies.$inferSelect;
+export type PcStatusEvent = typeof pcStatusEvents.$inferSelect;
+export type PcDeployment = typeof pcDeployments.$inferSelect;
+export type PcTestRun = typeof pcTestRuns.$inferSelect;
+export type PcPrompt = typeof pcPrompts.$inferSelect;
+
+export const insertPcNodeSchema = createInsertSchema(pcNodes).omit({ id: true, createdAt: true, updatedAt: true });
+export const insertPcWorkPackageSchema = createInsertSchema(pcWorkPackages).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertPcEvidenceSchema = createInsertSchema(pcEvidence).omit({ id: true, capturedAt: true });
+export const insertPcBlockerSchema = createInsertSchema(pcBlockers).omit({ id: true, openedAt: true });
+export const insertPcDeploymentSchema = createInsertSchema(pcDeployments).omit({ id: true, deployedAt: true });
+export const insertPcTestRunSchema = createInsertSchema(pcTestRuns).omit({ id: true, ranAt: true });
