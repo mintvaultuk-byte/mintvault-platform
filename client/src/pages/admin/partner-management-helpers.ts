@@ -77,6 +77,7 @@ const BASE = "/api/super-admin/partner-management";
 export const pmKeys = {
   partners: (filters: Record<string, unknown>) => [`${BASE}/partners`, filters] as const,
   partner: (id: string) => [`${BASE}/partners/${id}`] as const,
+  users: (id: string) => [`${BASE}/partners/${id}/users`] as const,
   contacts: (id: string) => [`${BASE}/partners/${id}/contacts`] as const,
   branding: (id: string) => [`${BASE}/partners/${id}/branding`] as const,
   notes: (id: string) => [`${BASE}/partners/${id}/notes`] as const,

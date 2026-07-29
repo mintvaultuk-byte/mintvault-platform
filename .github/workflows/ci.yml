@@ -41,6 +41,31 @@ jobs:
       # `ADMIN_URL.replace(/\/postgres$/, '/<db>')`, so any other path would silently leave them
       # connected to the admin database.
       PROJECT_CONTROL_TEST_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:55433/postgres
+
+      # ---- Partner User Management (PR: codex/partner-user-management) ----
+      # Five DB-backed suites gate on their own admin URL and are `describe.skip` without it. Before
+      # this block CI set only PARTNER_MANAGEMENT_RT_ADMIN, so the evidence for this feature —
+      # migration 0031's lifecycle, migration 0032's final-owner invariant, the public onboarding
+      # route mount, the whole Partner runtime, and the Partner Admin BYPASSRLS capability preflight
+      # that gates every Super Admin route — reported green while never running.
+      #
+      # All five use the PostgreSQL 17 server (port 55433): 0031/0032 are verified against 17, and
+      # the capability probe reads pg_roles.rolbypassrls on the real connection.
+      #
+      # Each gets its OWN database. The realistic-roles helper reassigns `public` schema ownership to
+      # the non-superuser pn_migrator and applies migrations as that role, so these suites can never
+      # share a database with each other, with Project Control, or with the shared test database.
+      #
+      # The *_RUNTIME roles (partner_app_test) are created by the suites themselves; only the URL
+      # shape is supplied here. Every credential below is synthetic and local to the CI container —
+      # no staging or production value belongs in this file.
+      PARTNER_CAPABILITY_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_capability
+      PARTNER_USER_MGMT_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_user_mgmt
+      PARTNER_FINAL_OWNER_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_final_owner
+      PARTNER_PUBLIC_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_public
+      PARTNER_PUBLIC_RT_RUNTIME: postgres://partner_app_test:synthetic@127.0.0.1:55433/mintvault_partner_public
+      PARTNER_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_runtime
+      PARTNER_RT_RUNTIME: postgres://partner_app_test:synthetic@127.0.0.1:55433/mintvault_partner_runtime
     services:
       postgres:
         # pgvector-enabled Postgres 16 (official pgvector image, same server as
@@ -162,6 +187,26 @@ jobs:
             exit 1
           fi
           psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc "SELECT rolcreatedb FROM pg_roles WHERE rolname = current_user" | grep -q "t"
+          # One database per Partner User Management suite on the same PostgreSQL 17 server.
+          # Same idempotent pattern as mintvault_partner_rt above: CREATE DATABASE has no
+          # IF NOT EXISTS, and \gexec is a psql meta-command that is not parsed under -c, so
+          # existence is queried first via command substitution (whose exit status propagates
+          # under set -e, rather than being swallowed by a pipe).
+          for partner_db in mintvault_partner_capability mintvault_partner_user_mgmt \
+                            mintvault_partner_final_owner mintvault_partner_public \
+                            mintvault_partner_runtime; do
+            present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
+              "SELECT 1 FROM pg_database WHERE datname = '$partner_db'")"
+            if [ "$present" != "1" ]; then
+              psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE $partner_db"
+            fi
+            echo "[ci-db] partner suite database ready: $partner_db"
+          done
+          # The capability suite creates and ALTERs roles (BYPASSRLS / NOBYPASSRLS), so the admin
+          # role must carry CREATEROLE — otherwise its two route-gating tests would fail deep
+          # inside beforeAll instead of reporting a clear precondition failure here.
+          psql "$PARTNER_CAPABILITY_RT_ADMIN" -v ON_ERROR_STOP=1 -tAc \
+            "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
 
       - name: Lint
         run: npm run lint

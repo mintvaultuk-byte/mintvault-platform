@@ -70,10 +70,67 @@ export function partnerRateLimit(opts: LimiterOpts) {
 // account identifier and the IP, so credential-stuffing across accounts from rotating IPs and
 // shared-NAT budget exhaustion are both bounded.
 const acct = (req: Request): string => `${(req.body?.email ?? "").toString().toLowerCase()}|${req.ip}`;
-export const partnerLoginLimiter = partnerRateLimit({ name: "partner_login", windowMs: 15 * 60_000, max: 10, failClosed: true, keyFn: acct });
-export const partnerMfaLimiter = partnerRateLimit({ name: "partner_mfa", windowMs: 15 * 60_000, max: 20, failClosed: true });
-export const partnerResetLimiter = partnerRateLimit({ name: "partner_reset", windowMs: 15 * 60_000, max: 5, failClosed: true, keyFn: acct });
-export const partnerLocationSwitchLimiter = partnerRateLimit({ name: "partner_locswitch", windowMs: 60_000, max: 30, failClosed: true });
+export const partnerLoginLimiter = partnerRateLimit({
+  name: "partner_login",
+  windowMs: 15 * 60_000,
+  max: 10,
+  failClosed: true,
+  keyFn: acct,
+});
+export const partnerMfaLimiter = partnerRateLimit({
+  name: "partner_mfa",
+  windowMs: 15 * 60_000,
+  max: 20,
+  failClosed: true,
+});
+export const partnerResetLimiter = partnerRateLimit({
+  name: "partner_reset",
+  windowMs: 15 * 60_000,
+  max: 5,
+  failClosed: true,
+  keyFn: acct,
+});
+export const partnerLocationSwitchLimiter = partnerRateLimit({
+  name: "partner_locswitch",
+  windowMs: 60_000,
+  max: 30,
+  failClosed: true,
+});
+/**
+ * Team-management mutations. Keyed on the AUTHENTICATED ACTOR, never on the request body — an
+ * invite/resend body carries the *target's* email, so keying on it (as `acct` does) hands every
+ * probed address its own fresh bucket and bounds nothing. This limiter runs after
+ * requirePartnerCapability, so req.partner is always set; the IP fallback only covers the
+ * theoretical unauthenticated path.
+ */
+const actorKey = (req: Request): string => req.partner?.userId ?? `anon|${req.ip}`;
+export const partnerInviteLimiter = partnerRateLimit({
+  name: "partner_invite",
+  windowMs: 15 * 60_000,
+  max: 20,
+  failClosed: true,
+  keyFn: actorKey,
+});
+/** Resend triggers a real outbound email per call — bound it per actor, not just per invite. */
+export const partnerTeamMutationLimiter = partnerRateLimit({
+  name: "partner_team_mutation",
+  windowMs: 60_000,
+  max: 30,
+  failClosed: true,
+  keyFn: actorKey,
+});
+/**
+ * Public invitation acceptance. Deliberately its OWN bucket namespace: sharing `partner_reset`
+ * meant an emailless accept body and an emailless password-reset-consume body collapsed to the same
+ * `partner_reset:|<ip>` key, so one office behind a single egress IP got five combined attempts per
+ * 15 minutes and either flow could starve the other.
+ */
+export const partnerAcceptLimiter = partnerRateLimit({
+  name: "partner_accept",
+  windowMs: 15 * 60_000,
+  max: 10,
+  failClosed: true,
+});
 
 // Phase 2: submission-mutation limiter. Runs AFTER requirePartnerAuth (so req.partner is set) —
 // keys per authenticated user, not per-IP, so it bounds one account's write volume regardless of

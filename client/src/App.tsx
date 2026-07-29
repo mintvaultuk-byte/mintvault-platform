@@ -140,11 +140,12 @@ const AdminPartnerDashboardPage = lazy(() => import("@/pages/admin/partner-dashb
 // backend (partner_portal_enabled flag + emergency stop) if the flag is off; not enabled in any
 // live environment yet. See INTEGRATION-ORDER.md.
 const PartnerLoginPage = lazy(() => import("@/pages/partner/login"));
+const PartnerInvitePage = lazy(() => import("@/pages/partner/invite"));
 const PartnerDashboardPage = lazy(() => import("@/pages/partner/dashboard"));
 const PartnerSubmissionsPage = lazy(() => import("@/pages/partner/submissions"));
 const PartnerSubmissionWizardPage = lazy(() => import("@/pages/partner/submission-wizard"));
 const PartnerSubmissionDetailPage = lazy(() => import("@/pages/partner/submission-detail"));
-const PartnerUsersPage = lazy(() => import("@/pages/partner/coming-soon"));
+const PartnerUsersPage = lazy(() => import("@/pages/partner/users"));
 const PartnerLocationsPage = lazy(() => import("@/pages/partner/locations"));
 const PartnerBillingPage = lazy(() => import("@/pages/partner/billing"));
 const PartnerHelpPage = lazy(() => import("@/pages/partner/help"));
@@ -254,6 +255,9 @@ function PartnerPortalRoutes() {
         <Route path="/partner/login">
           <PartnerLoginPage />
         </Route>
+        <Route path="/partner/invite">
+          <PartnerInvitePage />
+        </Route>
         <Route path="/partner/dashboard">
           <PartnerRouteGuard>
             <PartnerDashboardPage />
@@ -333,9 +337,7 @@ function Router() {
           {import.meta.env.DEV && (
             <Route path="/dev/canonical-workstation" component={DevCanonicalWorkstationHarness} />
           )}
-          {import.meta.env.DEV && (
-            <Route path="/dev/card-details" component={DevCardDetailsHarness} />
-          )}
+          {import.meta.env.DEV && <Route path="/dev/card-details" component={DevCardDetailsHarness} />}
           <Route path="/admin" component={AdminPage} />
           <Route path="/admin/promotions" component={AdminPage} />
           <Route path="/admin/graders" component={AdminStaffPage} />

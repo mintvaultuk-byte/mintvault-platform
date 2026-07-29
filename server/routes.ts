@@ -67,6 +67,7 @@ import { registerAdminConfigRoutes } from "./routes/admin-config";
 import { registerSuperAdminPartnerRoutes } from "./partner/admin-routes";
 import { registerConnectorOpsRoutes } from "./partner/connector-admin-routes";
 import { registerPartnerManagementRoutes } from "./partner/partner-management-routes";
+import { registerPartnerPublicRoutes } from "./partner/public-routes";
 import { registerPartnerDashboardRoutes } from "./partner/dashboard-routes";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
@@ -2791,6 +2792,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerCorrectionModeRoutes(app);
   registerStaffRoutes(app);
   registerPrintWorkflowRoutes(app); // Approval → Printing → Printed lifecycle (requireAdmin; staff via can_print proxy)
+  registerPartnerPublicRoutes(app); // minimal deployed Partner public auth/onboarding routes only
   registerSubmissionRoutes(app);
   registerAdminSubmissionRoutes(app);
   registerAdminConfigRoutes(app);

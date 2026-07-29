@@ -31,6 +31,7 @@ import {
 } from "./partner-management-errors";
 import * as svc from "./partner-management-service";
 import type { ActorContext } from "./partner-management-service";
+import { getLastPartnerAdminCapability, getPartnerAdminCapability } from "./admin-capability";
 
 const g5MutationRateLimit = rateLimit({
   windowMs: 60 * 1000,
@@ -60,6 +61,20 @@ function sendError(res: Response, err: unknown): void {
   res.status(g5StatusFor(g5.code)).json({ error: { code: g5.code, message: g5.message } });
 }
 
+async function requirePartnerAdminCapability(_req: Request, res: Response, next: () => void): Promise<void> {
+  const capability = await getPartnerAdminCapability();
+  if (!capability.ok) {
+    res.status(503).json({
+      error: {
+        code: "PARTNER_ADMIN_CAPABILITY_UNAVAILABLE",
+        message: "Partner Super Admin management is not ready.",
+      },
+    });
+    return;
+  }
+  next();
+}
+
 function mutationResponse(res: Response, requestId: string, r: { result: unknown; alreadyCompleted: boolean }): void {
   if (r.alreadyCompleted) {
     res.status(200).json({ ok: true, alreadyCompleted: true, requestId });
@@ -68,9 +83,30 @@ function mutationResponse(res: Response, requestId: string, r: { result: unknown
   res.json({ ok: true, result: r.result, requestId });
 }
 
+function requirePartnerUserRole(raw: unknown): svc.AdminPartnerRole {
+  if (!svc.isAdminPartnerRole(raw)) {
+    throw new G5RequestError("VALIDATION_ERROR", "Unknown partner user role.");
+  }
+  return raw;
+}
+
 export function partnerManagementRouter(): Router {
   const r = Router();
   r.use(requireAdmin);
+
+  r.get("/readiness", async (_req, res) => {
+    const last = getLastPartnerAdminCapability();
+    const current = last?.ok ? last : await getPartnerAdminCapability();
+    res.status(current.ok ? 200 : 503).json({
+      checked: true,
+      ready: current.ok,
+      capability: current.capability,
+      checkedAt: current.checkedAt,
+      failureCode: current.ok ? null : current.code,
+    });
+  });
+
+  r.use(requirePartnerAdminCapability);
 
   // ---- READS ----
   r.get("/partners", async (req, res) => {
@@ -140,6 +176,13 @@ export function partnerManagementRouter(): Router {
       sendError(res, err);
     }
   });
+  r.get("/partners/:partnerId/users", async (req, res) => {
+    try {
+      res.json(await svc.listPartnerUsers(req.params.partnerId));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
 
   // ---- MUTATIONS ----
   r.use(g5MutationRateLimit);
@@ -150,6 +193,110 @@ export function partnerManagementRouter(): Router {
       const legalName = requireNonEmpty(req.body?.legalName, "legalName");
       const reason = optionalReason(req.body?.reason, "partner created");
       mutationResponse(res, actor.requestId, await svc.createPartner(actor, { legalName }, reason));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = optionalReason(req.body?.reason, "partner user invited");
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.invitePartnerUser(
+          actor,
+          req.params.partnerId,
+          {
+            firstName: requireNonEmpty(req.body?.firstName, "firstName"),
+            lastName: requireNonEmpty(req.body?.lastName, "lastName"),
+            email: requireNonEmpty(req.body?.email, "email"),
+            role: requirePartnerUserRole(req.body?.role),
+          },
+          reason
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users/:userId/resend-invitation", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = optionalReason(req.body?.reason, "partner invitation resent");
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.resendPartnerInvitation(actor, req.params.partnerId, req.params.userId, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users/:userId/revoke-invitation", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.revokePartnerInvitation(actor, req.params.partnerId, req.params.userId, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users/:userId/role", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.changePartnerUserRole(
+          actor,
+          req.params.partnerId,
+          req.params.userId,
+          requirePartnerUserRole(req.body?.role),
+          reason
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users/:userId/status", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      const status = req.body?.status;
+      if (status !== "ACTIVE" && status !== "SUSPENDED" && status !== "REVOKED") {
+        throw new G5RequestError("VALIDATION_ERROR", "Unknown partner user status.");
+      }
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.setPartnerUserStatus(actor, req.params.partnerId, req.params.userId, status, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users/:userId/revoke-sessions", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = optionalReason(req.body?.reason, "partner user sessions revoked");
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.revokePartnerUserSessions(actor, req.params.partnerId, req.params.userId, reason)
+      );
     } catch (err) {
       sendError(res, err);
     }

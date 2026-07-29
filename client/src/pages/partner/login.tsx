@@ -13,6 +13,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { partnerAuth, partnerErrorMessage } from "@/lib/partner-api";
 import { usePartnerSession } from "@/hooks/use-partner-session";
 
+const GENERIC_LOGIN_ERROR = "We could not sign you in with those details.";
+
 export default function PartnerLoginPage() {
   const [, navigate] = useLocation();
   const { refresh } = usePartnerSession();
@@ -38,7 +40,8 @@ export default function PartnerLoginPage() {
         navigate("/partner/dashboard");
       }
     } catch (err) {
-      setError(partnerErrorMessage(err));
+      const status = (err as { status?: number })?.status;
+      setError(status === 401 || status === 429 || status === 503 ? GENERIC_LOGIN_ERROR : partnerErrorMessage(err));
     } finally {
       setSubmitting(false);
     }

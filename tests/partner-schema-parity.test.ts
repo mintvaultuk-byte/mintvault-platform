@@ -114,6 +114,8 @@ describe("partner schema ↔ migration parity", () => {
       // whatever order the unmerged branches land in. Its rollback is intentionally named
       // rollback-0030-project-control.sql (non-numbered) so the runner never applies it.
       "0030_project_control.sql",
+      "0031_partner_user_management.sql",
+      "0032_partner_final_owner_invariant.sql",
     ]);
   });
 
@@ -123,6 +125,21 @@ describe("partner schema ↔ migration parity", () => {
       expect(m0002.includes(t), `${t} should be created in migration 0002`).toBe(true);
       expect(drizzleTableNames().includes(t), `${t} is raw-SQL accessed, not Drizzle-modelled`).toBe(false);
     }
+  });
+
+  it("0031 user-management additions are migration-authoritative raw-SQL surfaces", () => {
+    const m0031 = readFileSync(join(process.cwd(), "migrations", "0031_partner_user_management.sql"), "utf8");
+    expect(m0031).toContain("CREATE TABLE IF NOT EXISTS partner_invitations");
+    expect(m0031).toContain("ALTER TABLE partner_users ADD COLUMN IF NOT EXISTS first_name");
+    expect(m0031).toContain("ALTER TABLE partner_users ADD COLUMN IF NOT EXISTS last_name");
+    expect(drizzleTableNames().includes("partner_invitations")).toBe(false);
+  });
+
+  it("0032 final-owner invariant is migration-authoritative raw-SQL surface", () => {
+    const m0032 = readFileSync(join(process.cwd(), "migrations", "0032_partner_final_owner_invariant.sql"), "utf8");
+    expect(m0032).toContain("CREATE TABLE IF NOT EXISTS partner_owner_invariant_tenants");
+    expect(m0032).toContain("CREATE CONSTRAINT TRIGGER partner_users_final_owner_invariant");
+    expect(drizzleTableNames().includes("partner_owner_invariant_tenants")).toBe(false);
   });
 
   it("all Drizzle partner table names are partner_* (classified by the registry)", () => {

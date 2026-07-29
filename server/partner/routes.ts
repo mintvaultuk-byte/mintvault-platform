@@ -25,12 +25,27 @@ import {
   partnerMfaLimiter,
   partnerResetLimiter,
   partnerLocationSwitchLimiter,
+  partnerInviteLimiter,
+  partnerTeamMutationLimiter,
 } from "./rate-limit";
 import { withTenant, partnerRuntimeQuery } from "./db";
+import { auditInOwnTxn } from "./audit";
 import { recoveryHash, mfaEncryptionConfigured } from "./mfa";
-import { writePartnerAudit } from "./audit";
 import { resetDeliveryConfigured, deliverResetToken } from "./delivery";
 import { switchLocation } from "./location";
+import { acceptPartnerInvitation } from "./partner-management-service";
+import { toG5Error, g5StatusFor, requireReason, optionalReason, G5RequestError } from "./partner-management-errors";
+import {
+  changeTeamMemberRole,
+  deliverTeamInvitationAfterCommit,
+  inviteTeamMember,
+  listTeamMembers,
+  requirePortalTeamRole,
+  resendTeamInvitation,
+  revokeTeamInvitation,
+  revokeTeamMemberSessions,
+  setTeamMemberStatus,
+} from "./team-service";
 import {
   mfaEnrolStart,
   mfaEnrolConfirm,
@@ -38,6 +53,66 @@ import {
   mfaDisable,
   verifyActiveTotpNoReplay,
 } from "./mfa-service";
+
+function sendPartnerTeamError(res: import("express").Response, err: unknown): void {
+  const g5 = toG5Error(err);
+  res.status(g5StatusFor(g5.code)).json({ error: { code: g5.code, message: g5.message } });
+}
+
+/**
+ * Denial codes worth an audit row. A denied privilege escalation is the single most useful
+ * forensic signal this surface produces, so it must survive the rollback that the denial itself
+ * triggers — every team mutation runs inside withTenant(), whose catch issues ROLLBACK, so a row
+ * written on that client is always erased. auditInOwnTxn() opens its own transaction on a fresh
+ * pooled client AFTER the mutation transaction has already rolled back, so the row commits.
+ */
+const AUDITED_DENIAL_CODES = new Set([
+  "FORBIDDEN",
+  "FINAL_OWNER_REQUIRED",
+  "INVALID_STATUS_TRANSITION",
+  "DUPLICATE_PARTNER_USER",
+  "PARTNER_USER_NOT_FOUND",
+  "PARTNER_UNAVAILABLE",
+  "VALIDATION_ERROR",
+  "IDEMPOTENCY_CONFLICT",
+]);
+
+/**
+ * Record a denied team-management action. Never allowed to change the response: an audit failure
+ * is logged, not surfaced, so a denial can never become a 500.
+ */
+async function auditTeamDenial(req: import("express").Request, action: string, err: unknown): Promise<void> {
+  const g5 = toG5Error(err);
+  if (!AUDITED_DENIAL_CODES.has(g5.code)) return;
+  const principal = req.partner;
+  if (!principal?.tenantId) return; // no authenticated tenant context → nothing to attribute it to
+  try {
+    await auditInOwnTxn({
+      tenantId: principal.tenantId,
+      actorUserId: principal.userId,
+      sessionId: principal.sessionId,
+      action: `${action}_denied`,
+      recordType: "partner_user",
+      recordId: typeof req.params?.id === "string" ? req.params.id : null,
+      ip: req.ip ?? null,
+      correlationId: typeof req.headers["x-request-id"] === "string" ? req.headers["x-request-id"] : null,
+      reason: g5.code, // stable code only — never the target email or any free text
+    });
+  } catch (auditErr) {
+    console.error("[partner team] denial audit write failed:", (auditErr as Error).message);
+  }
+}
+
+/** Send the denial response and durably record it. */
+function denyTeamAction(
+  req: import("express").Request,
+  res: import("express").Response,
+  action: string,
+  err: unknown
+): void {
+  sendPartnerTeamError(res, err);
+  void auditTeamDenial(req, action, err);
+}
 
 export function partnerApiRouter(): Router {
   const r = Router();
@@ -145,6 +220,20 @@ export function partnerApiRouter(): Router {
     res.status(ok ? 200 : 400).json({ ok });
   });
 
+  r.post("/invitations/accept", partnerResetLimiter, async (req, res) => {
+    const { token, password } = req.body ?? {};
+    if (typeof token !== "string" || typeof password !== "string") {
+      res.status(400).json({ error: "invalid invitation" });
+      return;
+    }
+    const result = await acceptPartnerInvitation(token, password);
+    if (!result.ok) {
+      res.status(400).json({ error: "invalid invitation" });
+      return;
+    }
+    res.json({ ok: true });
+  });
+
   // ---- session ----
   r.get("/session", (req, res) => {
     if (!req.partner) {
@@ -182,12 +271,117 @@ export function partnerApiRouter(): Router {
   });
 
   r.get("/users", requirePartnerCapability("partner.users.view"), async (req, res) => {
-    const rows = await withTenant({ tenantId: req.partner!.tenantId }, async (c) => {
-      const u = await c.query("SELECT id, email, status FROM partner_users ORDER BY email");
-      return u.rows;
-    });
-    res.json(rows);
+    try {
+      const rows = await withTenant({ tenantId: req.partner!.tenantId }, (c) => listTeamMembers(c));
+      res.json({ users: rows });
+    } catch (err) {
+      sendPartnerTeamError(res, err);
+    }
   });
+
+  r.post(
+    "/users",
+    partnerInviteLimiter,
+    requirePartnerCapability("partner.users.manage"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      try {
+        const reason = optionalReason(req.body?.reason, "Partner team member invited");
+        const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
+          inviteTeamMember(c, req.partner!, req.body, reason)
+        );
+        await deliverTeamInvitationAfterCommit(req.partner!.tenantId, result.invitationId, result.delivery);
+        const { delivery: _delivery, ...safeResult } = result;
+        res.json({ ok: true, result: safeResult });
+      } catch (err) {
+        denyTeamAction(req, res, "partner_user_invited", err);
+      }
+    }
+  );
+
+  r.post(
+    "/users/:id/resend-invitation",
+    partnerTeamMutationLimiter,
+    requirePartnerCapability("partner.users.manage"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      try {
+        const reason = optionalReason(req.body?.reason, "Partner invitation resent");
+        const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
+          resendTeamInvitation(c, req.partner!, String(req.params.id), reason)
+        );
+        await deliverTeamInvitationAfterCommit(req.partner!.tenantId, result.invitationId, result.delivery);
+        const { delivery: _delivery, ...safeResult } = result;
+        res.json({ ok: true, result: safeResult });
+      } catch (err) {
+        denyTeamAction(req, res, "partner_invitation_resent", err);
+      }
+    }
+  );
+
+  r.post(
+    "/users/:id/revoke-invitation",
+    partnerTeamMutationLimiter,
+    requirePartnerCapability("partner.users.manage"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      try {
+        const reason = requireReason(req.body?.reason);
+        const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
+          revokeTeamInvitation(c, req.partner!, String(req.params.id), reason)
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        denyTeamAction(req, res, "partner_invitation_revoked", err);
+      }
+    }
+  );
+
+  r.post(
+    "/users/:id/role",
+    partnerTeamMutationLimiter,
+    requirePartnerCapability("partner.users.manage"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      try {
+        const role = requirePortalTeamRole(req.body?.role);
+        const reason = requireReason(req.body?.reason);
+        const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
+          changeTeamMemberRole(c, req.partner!, String(req.params.id), role, reason)
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        denyTeamAction(req, res, "partner_user_role_changed", err);
+      }
+    }
+  );
+
+  r.post(
+    "/users/:id/status",
+    partnerTeamMutationLimiter,
+    requirePartnerCapability("partner.users.manage"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      try {
+        const status = req.body?.status;
+        if (status !== "ACTIVE" && status !== "SUSPENDED" && status !== "REVOKED") {
+          throw new G5RequestError("VALIDATION_ERROR", "Unknown team member status.");
+        }
+        const reason = requireReason(req.body?.reason);
+        const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
+          setTeamMemberStatus(c, req.partner!, String(req.params.id), status, reason)
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        denyTeamAction(req, res, "partner_user_status_changed", err);
+      }
+    }
+  );
 
   // Locations the current user may operate at — org-wide roles (owner/manager/finance-viewer) see
   // every ACTIVE location; everyone else sees only their explicit partner_user_locations
@@ -310,27 +504,20 @@ export function partnerApiRouter(): Router {
 
   r.post(
     "/users/:id/revoke-sessions",
+    partnerTeamMutationLimiter,
     requirePartnerCapability("partner.sessions.revoke"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
     async (req, res) => {
-      const targetId = String(req.params.id);
-      const n = await withTenant({ tenantId: req.partner!.tenantId }, async (c) => {
-        // RLS guarantees this only affects same-tenant users.
-        const r2 = await c.query(
-          "UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
-          [targetId]
+      try {
+        const reason = optionalReason(req.body?.reason, "Partner team member sessions revoked");
+        const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
+          revokeTeamMemberSessions(c, req.partner!, String(req.params.id), reason)
         );
-        await writePartnerAudit(c, {
-          tenantId: req.partner!.tenantId,
-          actorUserId: req.partner!.userId,
-          action: "partner_admin_revoke_sessions",
-          recordType: "partner_user",
-          recordId: targetId,
-        });
-        return r2.rowCount ?? 0;
-      });
-      res.json({ ok: true, revoked: n });
+        res.json({ ok: true, result });
+      } catch (err) {
+        denyTeamAction(req, res, "partner_user_sessions_revoked", err);
+      }
     }
   );
 

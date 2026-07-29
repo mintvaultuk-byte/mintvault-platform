@@ -6,7 +6,8 @@ export const STAFF_ABSOLUTE_SESSION_MS = 14 * 24 * 60 * 60 * 1000;
 
 const REDACTED = "[REDACTED]";
 const SENSITIVE_KEY_RE =
-  /(password|passphrase|pin|token|access_token|refresh_token|authorization|cookie|session|secret|passwordHash|pinHash)/i;
+  /(password|passphrase|pin|token|access_token|refresh_token|authorization|cookie|session|secret|passwordHash|pinHash|invitationLink|inviteToken)/i;
+const INVITATION_URL_TOKEN_RE = /(\/partner\/invite\?token=)[A-Za-z0-9_-]+/g;
 
 export function clearSessionCookie(res: Response) {
   res.clearCookie(SESSION_COOKIE_NAME, {
@@ -49,6 +50,9 @@ export async function destroySessionAndClearCookie(req: Request, res: Response):
 }
 
 export function redactSensitive(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.replace(INVITATION_URL_TOKEN_RE, "$1[REDACTED]");
+  }
   if (Array.isArray(value)) return value.map((item) => redactSensitive(item));
   if (!value || typeof value !== "object") return value;
   const out: Record<string, unknown> = {};
