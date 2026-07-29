@@ -44,7 +44,7 @@ describe("partner schema ↔ migration parity", () => {
     expect(drizzleTableNames().length).toBe(14);
   });
 
-  it("pins the full numbered migration inventory (0001–0019), so a new migration is noticed", () => {
+  it("pins the full numbered migration inventory (0001–0027), so a new migration is noticed", () => {
     const numbered = readdirSync(join(process.cwd(), "migrations"))
       .filter((f) => /^\d{4}_.+\.sql$/.test(f))
       .sort();
@@ -72,7 +72,7 @@ describe("partner schema ↔ migration parity", () => {
       "0018_correction_audit_index.sql",
       // G6D grants the trusted connector only the reservation-release privileges needed to
       // settle a terminal Partner submission; it creates no mutable wallet balance.
-      "0019_partner_submission_credit_lifecycle.sql",
+      "0027_partner_submission_credit_lifecycle.sql",
     ]);
   });
 

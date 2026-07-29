@@ -79,7 +79,7 @@ export const PARTNER_MIGRATIONS_WITH_G6B = [
 export const PARTNER_MIGRATIONS_WITH_G6D = [
   ...PARTNER_MIGRATIONS_WITH_G6B,
   "0018_correction_audit_index",
-  "0019_partner_submission_credit_lifecycle",
+  "0027_partner_submission_credit_lifecycle",
 ] as const;
 
 export const MIGRATOR_ROLE = "pn_migrator";
@@ -135,7 +135,7 @@ export async function applyMigrationsRealistic(
   migrations: readonly string[] = PARTNER_MIGRATIONS
 ): Promise<void> {
   await provisionRealisticRoles(admin);
-  if (migrations.includes("0019_partner_submission_credit_lifecycle")) {
+  if (migrations.includes("0027_partner_submission_credit_lifecycle")) {
     // Provision the dedicated G6D definer as an elevated one-time operation,
     // then let the migration login grant and revoke its own temporary
     // membership. The post-migration assertion proves no SET ROLE path remains.
@@ -162,7 +162,7 @@ export async function applyMigrationsRealistic(
   } finally {
     await migrator.end();
   }
-  if (migrations.includes("0019_partner_submission_credit_lifecycle")) {
+  if (migrations.includes("0027_partner_submission_credit_lifecycle")) {
     const membership = await admin.query<{ count: string }>(
       `SELECT count(*)::text AS count
          FROM pg_auth_members m

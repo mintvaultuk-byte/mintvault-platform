@@ -39,7 +39,7 @@ describe("G6D migration 0019 upgrade path", () => {
     await applyMigrationsRealistic(admin, cluster.url, PARTNER_MIGRATIONS_WITH_G6B);
     await applyMigrationsRealistic(admin, cluster.url, [
       "0018_correction_audit_index",
-      "0019_partner_submission_credit_lifecycle",
+      "0027_partner_submission_credit_lifecycle",
     ]);
   });
 
