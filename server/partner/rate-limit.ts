@@ -96,12 +96,40 @@ export const partnerLocationSwitchLimiter = partnerRateLimit({
   max: 30,
   failClosed: true,
 });
+/**
+ * Team-management mutations. Keyed on the AUTHENTICATED ACTOR, never on the request body — an
+ * invite/resend body carries the *target's* email, so keying on it (as `acct` does) hands every
+ * probed address its own fresh bucket and bounds nothing. This limiter runs after
+ * requirePartnerCapability, so req.partner is always set; the IP fallback only covers the
+ * theoretical unauthenticated path.
+ */
+const actorKey = (req: Request): string => req.partner?.userId ?? `anon|${req.ip}`;
 export const partnerInviteLimiter = partnerRateLimit({
   name: "partner_invite",
   windowMs: 15 * 60_000,
   max: 20,
   failClosed: true,
-  keyFn: acct,
+  keyFn: actorKey,
+});
+/** Resend triggers a real outbound email per call — bound it per actor, not just per invite. */
+export const partnerTeamMutationLimiter = partnerRateLimit({
+  name: "partner_team_mutation",
+  windowMs: 60_000,
+  max: 30,
+  failClosed: true,
+  keyFn: actorKey,
+});
+/**
+ * Public invitation acceptance. Deliberately its OWN bucket namespace: sharing `partner_reset`
+ * meant an emailless accept body and an emailless password-reset-consume body collapsed to the same
+ * `partner_reset:|<ip>` key, so one office behind a single egress IP got five combined attempts per
+ * 15 minutes and either flow could starve the other.
+ */
+export const partnerAcceptLimiter = partnerRateLimit({
+  name: "partner_accept",
+  windowMs: 15 * 60_000,
+  max: 10,
+  failClosed: true,
 });
 
 // Phase 2: submission-mutation limiter. Runs AFTER requirePartnerAuth (so req.partner is set) —

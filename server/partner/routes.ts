@@ -26,8 +26,10 @@ import {
   partnerResetLimiter,
   partnerLocationSwitchLimiter,
   partnerInviteLimiter,
+  partnerTeamMutationLimiter,
 } from "./rate-limit";
 import { withTenant, partnerRuntimeQuery } from "./db";
+import { auditInOwnTxn } from "./audit";
 import { recoveryHash, mfaEncryptionConfigured } from "./mfa";
 import { resetDeliveryConfigured, deliverResetToken } from "./delivery";
 import { switchLocation } from "./location";
@@ -55,6 +57,61 @@ import {
 function sendPartnerTeamError(res: import("express").Response, err: unknown): void {
   const g5 = toG5Error(err);
   res.status(g5StatusFor(g5.code)).json({ error: { code: g5.code, message: g5.message } });
+}
+
+/**
+ * Denial codes worth an audit row. A denied privilege escalation is the single most useful
+ * forensic signal this surface produces, so it must survive the rollback that the denial itself
+ * triggers — every team mutation runs inside withTenant(), whose catch issues ROLLBACK, so a row
+ * written on that client is always erased. auditInOwnTxn() opens its own transaction on a fresh
+ * pooled client AFTER the mutation transaction has already rolled back, so the row commits.
+ */
+const AUDITED_DENIAL_CODES = new Set([
+  "FORBIDDEN",
+  "FINAL_OWNER_REQUIRED",
+  "INVALID_STATUS_TRANSITION",
+  "DUPLICATE_PARTNER_USER",
+  "PARTNER_USER_NOT_FOUND",
+  "PARTNER_UNAVAILABLE",
+  "VALIDATION_ERROR",
+  "IDEMPOTENCY_CONFLICT",
+]);
+
+/**
+ * Record a denied team-management action. Never allowed to change the response: an audit failure
+ * is logged, not surfaced, so a denial can never become a 500.
+ */
+async function auditTeamDenial(req: import("express").Request, action: string, err: unknown): Promise<void> {
+  const g5 = toG5Error(err);
+  if (!AUDITED_DENIAL_CODES.has(g5.code)) return;
+  const principal = req.partner;
+  if (!principal?.tenantId) return; // no authenticated tenant context → nothing to attribute it to
+  try {
+    await auditInOwnTxn({
+      tenantId: principal.tenantId,
+      actorUserId: principal.userId,
+      sessionId: principal.sessionId,
+      action: `${action}_denied`,
+      recordType: "partner_user",
+      recordId: typeof req.params?.id === "string" ? req.params.id : null,
+      ip: req.ip ?? null,
+      correlationId: typeof req.headers["x-request-id"] === "string" ? req.headers["x-request-id"] : null,
+      reason: g5.code, // stable code only — never the target email or any free text
+    });
+  } catch (auditErr) {
+    console.error("[partner team] denial audit write failed:", (auditErr as Error).message);
+  }
+}
+
+/** Send the denial response and durably record it. */
+function denyTeamAction(
+  req: import("express").Request,
+  res: import("express").Response,
+  action: string,
+  err: unknown
+): void {
+  sendPartnerTeamError(res, err);
+  void auditTeamDenial(req, action, err);
 }
 
 export function partnerApiRouter(): Router {
@@ -238,13 +295,14 @@ export function partnerApiRouter(): Router {
         const { delivery: _delivery, ...safeResult } = result;
         res.json({ ok: true, result: safeResult });
       } catch (err) {
-        sendPartnerTeamError(res, err);
+        denyTeamAction(req, res, "partner_user_invited", err);
       }
     }
   );
 
   r.post(
     "/users/:id/resend-invitation",
+    partnerTeamMutationLimiter,
     requirePartnerCapability("partner.users.manage"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
@@ -258,13 +316,14 @@ export function partnerApiRouter(): Router {
         const { delivery: _delivery, ...safeResult } = result;
         res.json({ ok: true, result: safeResult });
       } catch (err) {
-        sendPartnerTeamError(res, err);
+        denyTeamAction(req, res, "partner_invitation_resent", err);
       }
     }
   );
 
   r.post(
     "/users/:id/revoke-invitation",
+    partnerTeamMutationLimiter,
     requirePartnerCapability("partner.users.manage"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
@@ -276,13 +335,14 @@ export function partnerApiRouter(): Router {
         );
         res.json({ ok: true, result });
       } catch (err) {
-        sendPartnerTeamError(res, err);
+        denyTeamAction(req, res, "partner_invitation_revoked", err);
       }
     }
   );
 
   r.post(
     "/users/:id/role",
+    partnerTeamMutationLimiter,
     requirePartnerCapability("partner.users.manage"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
@@ -295,13 +355,14 @@ export function partnerApiRouter(): Router {
         );
         res.json({ ok: true, result });
       } catch (err) {
-        sendPartnerTeamError(res, err);
+        denyTeamAction(req, res, "partner_user_role_changed", err);
       }
     }
   );
 
   r.post(
     "/users/:id/status",
+    partnerTeamMutationLimiter,
     requirePartnerCapability("partner.users.manage"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
@@ -317,7 +378,7 @@ export function partnerApiRouter(): Router {
         );
         res.json({ ok: true, result });
       } catch (err) {
-        sendPartnerTeamError(res, err);
+        denyTeamAction(req, res, "partner_user_status_changed", err);
       }
     }
   );
@@ -443,6 +504,7 @@ export function partnerApiRouter(): Router {
 
   r.post(
     "/users/:id/revoke-sessions",
+    partnerTeamMutationLimiter,
     requirePartnerCapability("partner.sessions.revoke"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
@@ -454,7 +516,7 @@ export function partnerApiRouter(): Router {
         );
         res.json({ ok: true, result });
       } catch (err) {
-        sendPartnerTeamError(res, err);
+        denyTeamAction(req, res, "partner_user_sessions_revoked", err);
       }
     }
   );
