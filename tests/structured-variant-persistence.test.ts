@@ -23,6 +23,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { addedCodeOf, addedJsOf, hasMalformedEscape } from "./helpers/strip-non-code";
 import {
   validateStructuredVariant,
   structuredColumnsToCertFields,
@@ -260,8 +261,12 @@ describe("clear controls (items 15-16)", () => {
   it("15. a finish/promo chosen from SEARCH can be cleared (toggle, not plain set)", () => {
     // main renamed setFinish -> pickFinish and setPromoOrSubset -> pickPromoOrSubset; these
     // assertions track the CURRENT picker. PR #254 only re-wrapped the same strings.
-    expect(PICKER).toContain("search.finishes.map((x) => pill(x, finish === x.value, () => pickFinish(finish === x.value ? null : x.value)))");
-    expect(PICKER).toMatch(/search\.promos\.map[\s\S]{0,180}pickPromoOrSubset\(promoOrSubset === x\.value \? null : x\.value\)/);
+    expect(PICKER).toContain(
+      "search.finishes.map((x) => pill(x, finish === x.value, () => pickFinish(finish === x.value ? null : x.value)))"
+    );
+    expect(PICKER).toMatch(
+      /search\.promos\.map[\s\S]{0,180}pickPromoOrSubset\(promoOrSubset === x\.value \? null : x\.value\)/
+    );
   });
 
   it("15. a selection hidden in the collapsed 'more' list is surfaced so it stays clearable", () => {
@@ -962,49 +967,37 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
     //      shared printability rule, applyCertGradeDraft normalising grade_type with a typed
     //      GradeDraftRejected.
     // The cert-numbering and calculation prohibition below is unchanged and applies to BOTH.
-    const engine = /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|cert-pristine|certificate-document/;
+    const engine =
+      /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|cert-pristine|certificate-document/;
     for (const f of changed) {
       if (f === "server/grader.ts") {
         const diff = execFileSync("git", ["diff", "origin/main", "--", f], { encoding: "utf8" });
-        const added = diff
-          .split("\n")
-          .filter((line: string) => line.startsWith("+") && !line.startsWith("+++"))
-          .join("\n");
+        // TWO representations, because the two questions are different (hostile-review N5):
+        //   addedCode — executable JS + tagged-template SQL, unicode-decoded. Used to detect
+        //               protected identifiers and database writes (F2/N4).
+        //   addedJs   — executable JavaScript ONLY, with ALL template text removed. Used to
+        //               prove an implementation exists, so SQL text can never fake a signature.
+        // Tokenisation is the TypeScript parser, so a regex literal containing a backtick can
+        // no longer swallow the rest of the diff (N1). See tests/helpers/strip-non-code.ts.
+        const addedCode = addedCodeOf(diff, "+");
+        const addedJs = addedJsOf(diff, "+");
+        // An escape the analyser cannot decode could hide an identifier, so it is refused
+        // outright rather than guessed at (N4).
+        expect(hasMalformedEscape(diff), "server/grader.ts contains a malformed escape sequence").toBe(false);
+        // Signature A: the JavaScript half is proven in JS mode; the SQL column assignments are
+        // a tagged-DOMAIN fact and are proven in guarded mode. Neither half can stand in for
+        // the other.
         const signatureA =
-          added.includes("validateGradeDraftIdentityAndVariant") &&
-          added.includes("GradeDraftValidationError") &&
-          added.includes("language            = ${keepStr(nextLanguage, cert.language)}") &&
-          added.includes("rarity_code         = ${nextRarityCode}") &&
-          added.includes("finish_variant      = ${nextFinishVariant}") &&
-          added.includes("promo_type          = ${nextPromoType}");
-        const signatureB =
-          added.includes("class GradeDraftRejected") && added.includes("checkPrintableGrade");
-        expect(
-          signatureA || signatureB,
-          "server/grader.ts changed but matches no founder-authorised signature"
-        ).toBe(true);
-        // Judge CODE, not prose. Comments and string literals are stripped first, because an
-        // operator-facing message may legitimately name the MVGS workstation — e.g. "Re-run the
-        // MVGS workstation so the grade and sub-grades populate, then approve." Matching that
-        // sentence would block a guard-only change while catching no calculation whatsoever.
-        // This is the same strip-then-judge discipline PR #254 applied to its own formula guard
-        // after hostile review found the identical false-positive class. A dynamic import or
-        // member access still trips it, because those sit OUTSIDE the quotes.
-        const addedCode = added
-          .split("\n")
-          .map((line: string) =>
-            line
-              .replace(/\/\*[\s\S]*?\*\//g, "")
-              .replace(/(^|\s)\/\/.*$/, "")
-              .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-              .replace(/'(?:[^'\\]|\\.)*'/g, "''")
-              .replace(/`(?:[^`\\]|\\.)*`/g, "``")
-          )
-          .filter((line: string) => {
-            const t = line.replace(/^\+/, "").trim();
-            return t && t !== "*" && !t.startsWith("*");
-          })
-          .join("\n");
+          /\bvalidateGradeDraftIdentityAndVariant\s*\(/.test(addedJs) &&
+          /\bGradeDraftValidationError\b/.test(addedJs) &&
+          /rarity_code\s*=\s*\$\{/.test(addedCode) &&
+          /finish_variant\s*=\s*\$\{/.test(addedCode) &&
+          /promo_type\s*=\s*\$\{/.test(addedCode);
+        // Signature B is purely JavaScript, so it is judged ONLY on the JS representation.
+        const signatureB = /class\s+GradeDraftRejected\b/.test(addedJs) && /\bcheckPrintableGrade\s*\(/.test(addedJs);
+        expect(signatureA || signatureB, "server/grader.ts changed but matches no founder-authorised signature").toBe(
+          true
+        );
         expect(addedCode).not.toMatch(
           /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|cert_id|certificate_number/i
         );

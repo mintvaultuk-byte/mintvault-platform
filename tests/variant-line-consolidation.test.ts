@@ -12,6 +12,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { execFileSync } from "child_process";
 import { join } from "path";
+import { addedCodeOf, addedJsOf, hasMalformedEscape, stripNonCode } from "./helpers/strip-non-code";
 import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import {
   STRUCTURED_VARIANT_VERSION,
@@ -244,45 +245,27 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     //      grade_type and refusing malformed kinds via a typed GradeDraftRejected.
     // A single-signature whitelist rejects the other authorised change, which is why this is
     // a union and not an overwrite.
-    const calcEngine = /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|shared\/mvgs-scoring/;
+    const calcEngine =
+      /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|shared\/mvgs-scoring/;
     for (const f of changed) {
       if (f === "server/grader.ts") {
         const diff = execFileSync("git", ["diff", "origin/main", "--", f], { encoding: "utf8" });
-        const added = diff
-          .split("\n")
-          .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
-          .join("\n");
+        // Two representations — see tests/helpers/strip-non-code.ts. `addedCode` keeps tagged
+        // SQL (for identifier/write detection, F2/N4); `addedJs` drops ALL template text so
+        // SQL can never satisfy a JavaScript signature (N5). Tokenised by the TypeScript
+        // parser, so a regex literal cannot swallow the diff (N1).
+        const addedCode = addedCodeOf(diff, "+");
+        const addedJs = addedJsOf(diff, "+");
+        expect(hasMalformedEscape(diff), "server/grader.ts contains a malformed escape sequence").toBe(false);
         const signatureA =
-          added.includes("validateGradeDraftIdentityAndVariant") &&
-          added.includes("language            = ${keepStr(nextLanguage, cert.language)}") &&
-          added.includes("rarity_code         = ${nextRarityCode}") &&
-          added.includes("finish_variant      = ${nextFinishVariant}") &&
-          added.includes("promo_type          = ${nextPromoType}");
-        const signatureB =
-          added.includes("class GradeDraftRejected") && added.includes("checkPrintableGrade");
-        expect(
-          signatureA || signatureB,
-          "server/grader.ts changed but matches no founder-authorised signature"
-        ).toBe(true);
-        // The formula-level prohibition applies to BOTH signatures, but is judged on CODE, not
-        // prose: comments and string literals are stripped first so an operator message naming
-        // the MVGS workstation cannot trip it. Same discipline as the dedicated formula test
-        // below, which hostile review hardened for exactly this reason.
-        const addedCode = added
-          .split("\n")
-          .map((line) =>
-            line
-              .replace(/\/\*[\s\S]*?\*\//g, "")
-              .replace(/(^|\s)\/\/.*$/, "")
-              .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-              .replace(/'(?:[^'\\]|\\.)*'/g, "''")
-              .replace(/`(?:[^`\\]|\\.)*`/g, "``")
-          )
-          .filter((line) => {
-            const t = line.replace(/^\+/, "").trim();
-            return t && t !== "*" && !t.startsWith("*");
-          })
-          .join("\n");
+          /\bvalidateGradeDraftIdentityAndVariant\s*\(/.test(addedJs) &&
+          /rarity_code\s*=\s*\$\{/.test(addedCode) &&
+          /finish_variant\s*=\s*\$\{/.test(addedCode) &&
+          /promo_type\s*=\s*\$\{/.test(addedCode);
+        const signatureB = /class\s+GradeDraftRejected\b/.test(addedJs) && /\bcheckPrintableGrade\s*\(/.test(addedJs);
+        expect(signatureA || signatureB, "server/grader.ts changed but matches no founder-authorised signature").toBe(
+          true
+        );
         expect(addedCode).not.toMatch(/mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i);
         continue;
       }
@@ -307,20 +290,12 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     const gradeIdent = /(grade|overall|centering|corners|edges|surface|subgrade|score)/i;
     const arithmetic = /[+\-*/]\s*-?\d|\d\s*[+\-*/]|Math\.(min|max|round|floor|ceil|abs|pow)/;
 
-    for (const raw of diff.split("\n")) {
-      if (!/^[+-]/.test(raw) || raw.startsWith("+++") || raw.startsWith("---")) continue;
-      let code = raw.slice(1);
-      // Strip comments FIRST, then judge what remains — so a leading /* … */ can no longer
-      // be used to hide an executable statement from this check.
-      code = code.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/, "");
-      // Then strip STRING LITERALS: an operator-facing message may legitimately mention the
-      // MVGS workstation, and a message containing digits must not read as arithmetic. A
-      // dynamic import is still caught, because the member access sits outside the quotes.
-      code = code
-        .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-        .replace(/'(?:[^'\\]|\\.)*'/g, "''")
-        .replace(/`(?:[^`\\]|\\.)*`/g, "``");
-      code = code.trim();
+    // Both added AND removed lines, stripped by the shared scanner. Stripping the whole block
+    // in one pass (rather than line-by-line regexes) is what closes hostile-review F2: a
+    // template literal — single-line or multi-line, nested or not — can no longer hide code,
+    // and a tagged sql`` keeps its SQL text where the guard can see it.
+    for (const raw of addedCodeOf(diff, "both").split("\n")) {
+      const code = raw.trim();
       if (!code || code === "*" || code.startsWith("*")) continue; // JSDoc continuation line
 
       expect(code, `grader workflow change must not name grade-calculation machinery: ${code}`).not.toMatch(
@@ -339,13 +314,7 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     const gradeIdent = /(grade|overall|centering|corners|edges|surface|subgrade|score)/i;
     const arithmetic = /[+\-*/]\s*-?\d|\d\s*[+\-*/]|Math\.(min|max|round|floor|ceil|abs|pow)/;
     const judge = (line: string): boolean => {
-      const code = line
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .replace(/(^|\s)\/\/.*$/, "")
-        .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-        .replace(/'(?:[^'\\]|\\.)*'/g, "''")
-        .replace(/`(?:[^`\\]|\\.)*`/g, "``")
-        .trim();
+      const code = stripNonCode(line).trim();
       if (!code) return true; // a pure comment is allowed
       if (identifiers.test(code)) return false;
       if (gradeIdent.test(code) && arithmetic.test(code)) return false;
@@ -356,6 +325,13 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     expect(judge("const penalty = defects.length * 0.5; grade -= penalty;")).toBe(false);
     expect(judge("/* guard */ const s = computeMvgsScore(inputs);")).toBe(false);
     expect(judge("gradeOverall = gradeOverall - 1;")).toBe(false);
+    // F2 — the template-literal bypasses, single-line and nested. Each of these passed the
+    // previous per-line stripper because the whole literal was blanked.
+    expect(
+      judge("await db.execute(sql`UPDATE certificates SET grade = ${computeMvgsScore(x)} WHERE id = ${id}`);")
+    ).toBe(false);
+    expect(judge("const q = sql`SELECT ${inner ? sql`${isPristine(c)}` : sql`1`} FROM certificates`;")).toBe(false);
+    expect(judge("const g = `${overall * 0.9}`;")).toBe(false);
     // These MUST be allowed (guards and plain comparisons are the whole point):
     expect(judge("if (!verdict.printable) return { ok: false as const, status: 409, error: verdict.message };")).toBe(
       true

@@ -13,6 +13,13 @@ jobs:
     env:
       TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_vq_phase10_local
       MINTVAULT_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_vq_phase10_local
+      # Partner Master Dashboard real-PostgreSQL suite (tests/partner-dashboard-integration.test.ts).
+      # Without this the whole file is `describe.skip` and 31 tests — RLS fail-closed behaviour,
+      # SQL-level risk filtering before pagination, deterministic audit ordering, consumed-credit
+      # counting and repeated-scalar-parameter rejection — silently do not run. It needs its OWN
+      # database because the realistic-roles helper reassigns `public` schema ownership to
+      # pn_migrator, which must not happen to the shared test database.
+      PARTNER_MANAGEMENT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55432/mintvault_partner_rt
     services:
       postgres:
         # pgvector-enabled Postgres 16 (official pgvector image, same server as
@@ -71,6 +78,24 @@ jobs:
           # shared/schema.ts `vector(1536)` embedding column. Idempotent; the
           # pgvector/pgvector image ships the extension files.
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          # Dedicated database for the Partner PostgreSQL suites (Partner Master Dashboard and
+          # Partner Management). Separate from the shared test DB because those suites hand
+          # `public` schema ownership to a non-superuser migrator role and apply the partner
+          # migrations as that role.
+          #
+          # `\gexec` is a psql META-COMMAND and is NOT parsed when passed via `-c`: the previous
+          # form failed with `syntax error at or near "\"` and never created the database.
+          # CREATE DATABASE also has no IF NOT EXISTS, so existence is queried first and the
+          # create is issued only when needed — idempotent on a re-run.
+          #
+          # No pipes, no grep/sed: the query result is captured by command substitution, whose
+          # exit status IS the assignment's exit status, so an unreachable server or bad
+          # credentials aborts the step under `set -e` instead of being silently swallowed.
+          partner_db_present="$(psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
+            "SELECT 1 FROM pg_database WHERE datname = 'mintvault_partner_rt'")"
+          if [ "$partner_db_present" != "1" ]; then
+            psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE mintvault_partner_rt"
+          fi
           npx drizzle-kit push --force
           for migration in migrations-vq/*.sql; do
             echo "[ci-db] applying ${migration}"

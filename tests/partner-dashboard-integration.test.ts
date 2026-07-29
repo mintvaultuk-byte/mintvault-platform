@@ -44,6 +44,33 @@ function isLoopback(u: string | undefined): boolean {
 }
 const isLocal = isLoopback(ADMIN_DB);
 
+/**
+ * FAIL CLOSED IN CI (hostile-review F4).
+ *
+ * This file gates on a loopback PARTNER_MANAGEMENT_RT_ADMIN so a developer without a local
+ * PostgreSQL still gets a green run. That gate silently disabled the entire suite in CI for
+ * its whole life: `.github/workflows/ci.yml` never set the variable, so 31 tests — the ONLY
+ * coverage for RLS fail-closed behaviour, SQL-level risk filtering before pagination,
+ * deterministic audit pagination, consumed-credit counting and repeated-parameter rejection —
+ * reported as "skipped" and nobody noticed.
+ *
+ * Skipping is now a LOCAL convenience only. In CI it is a hard failure, so the coverage can
+ * never be lost again by deleting an env var.
+ */
+describe("Partner Master Dashboard integration coverage is wired up", () => {
+  it("is not silently skipped in CI", () => {
+    // GITHUB_ACTIONS, not the generic CI flag — this asserts a property of THIS repository's
+    // workflow, which is where the env var is configured.
+    if (process.env.GITHUB_ACTIONS) {
+      expect(
+        isLocal,
+        "PARTNER_MANAGEMENT_RT_ADMIN must be set to a loopback PostgreSQL URL in CI, or the " +
+          "Partner Master Dashboard integration suite does not run at all"
+      ).toBe(true);
+    }
+  });
+});
+
 const BASE = "/api/super-admin/partner-dashboard";
 
 /** Stable synthetic partner ids. No real partner names, emails or addresses anywhere below. */

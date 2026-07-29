@@ -390,8 +390,21 @@ describe("certificate creation cannot mint an unprintable-but-plausible row", ()
     // stored value is canonical, so the shared rule and the renderer agree for every input.
     const { normaliseGradeType } = await import("../server/lib/grade-kind");
     const junk = [
-      " NO ", "NO ", " NO", "no", "  ", "", "banana", "AA ", " aa", "\nNO", "\tAA",
-      "not_original ", " authentic_altered", "numeric ", "NUMERIC",
+      " NO ",
+      "NO ",
+      " NO",
+      "no",
+      "  ",
+      "",
+      "banana",
+      "AA ",
+      " aa",
+      "\nNO",
+      "\tAA",
+      "not_original ",
+      " authentic_altered",
+      "numeric ",
+      "NUMERIC",
     ];
     for (const raw of junk) {
       const stored = normaliseGradeType(raw);
@@ -429,50 +442,67 @@ describe("certificate creation cannot mint an unprintable-but-plausible row", ()
  * founder-approved print-safety work while catching no design drift at all — a filename says
  * nothing about pixels.
  *
- * This replaces it with the assertion that actually matters: the RENDERED BYTES. The 26 hashes
- * below were captured on origin/main (6f182624) and independently verified to be byte-identical
- * on this branch after PR #254 landed — so a guard-only change passes, while any change to a
+ * This replaces it with the assertion that actually matters: the RENDERED BYTES. Any change to a
  * dimension, colour, font, position, tier name or the MVGS grade panel fails immediately.
  *
  * Truncated to 16 hex chars for readability; still 64 bits per label.
+ *
+ * ── WHY THESE HASHES ARE LINUX-ONLY (2026-07-29) ────────────────────────────────────────────
+ * The table originally held hashes captured on a macOS dev machine. Those values never
+ * described the product: macOS resolved `Arial` to Apple's licensed Monotype Arial, while the
+ * Fly production image resolves it to Nimbus Sans. The slabs customers hold have NEVER been
+ * rendered in Arial, so the old table pinned a rendering that only ever existed on one laptop
+ * — it would have failed the moment CI ran, and "fixing" it by re-capturing on macOS would
+ * have re-pinned the same fiction.
+ *
+ * Byte-identical PNGs across macOS and Linux are additionally IMPOSSIBLE, and not because of
+ * fonts: a canvas containing only a filled rectangle and a circle — no text at all — already
+ * hashes differently on the two platforms (0824d006b8d305d2 vs 7df18d6d92c86fe5 on the same
+ * node-canvas 3.2.2). That is the cairo/libpng build, which no amount of font work can align.
+ *
+ * So the pixel goldens are captured where the artefact is actually produced — the Linux
+ * production image — and this block runs on Linux only. Font determinism itself IS portable
+ * and is asserted separately, on every platform, by the advance-width golden below.
  *
  * IF ONE OF THESE FAILS: do not update the hash to make it pass. A change here means the
  * physical product changed. Re-render, look at the PNG, and get founder approval before
  * touching this table.
  */
+/** The pixel goldens describe the Linux production rendering; see the note above. */
+const isLinux = process.platform === "linux";
 const GOLDEN_NUMERIC: [string, string, string][] = [
-  ["1", "front", "547b647805113a59"],
-  ["1", "back", "8a102ab4d87b7ec7"],
-  ["1.5", "front", "2d07b82fdd222eb9"],
-  ["1.5", "back", "8a102ab4d87b7ec7"],
-  ["5", "front", "7738e3ba6e6fcaa3"],
-  ["5", "back", "8a102ab4d87b7ec7"],
-  ["7.5", "front", "ba1242d122104a95"],
-  ["7.5", "back", "8a102ab4d87b7ec7"],
-  ["8", "front", "786de34bafe7d72d"],
-  ["8", "back", "8a102ab4d87b7ec7"],
-  ["8.5", "front", "444c966af61361d1"],
-  ["8.5", "back", "8a102ab4d87b7ec7"],
-  ["9", "front", "07de8f3ac884ef59"],
-  ["9", "back", "8a102ab4d87b7ec7"],
-  ["9.5", "front", "0dc652ba63e986ad"],
-  ["9.5", "back", "8a102ab4d87b7ec7"],
-  ["10", "front", "a2852338ff620317"],
-  ["10", "back", "8a102ab4d87b7ec7"],
+  ["1", "front", "106eeb89e7da3a46"],
+  ["1", "back", "47258a60c48e403d"],
+  ["1.5", "front", "9060c533dbd9268d"],
+  ["1.5", "back", "47258a60c48e403d"],
+  ["5", "front", "983c96b2f6b16d04"],
+  ["5", "back", "47258a60c48e403d"],
+  ["7.5", "front", "4abbed8528c83a76"],
+  ["7.5", "back", "47258a60c48e403d"],
+  ["8", "front", "75bed94b4c32e24d"],
+  ["8", "back", "47258a60c48e403d"],
+  ["8.5", "front", "96ca7f0ade006884"],
+  ["8.5", "back", "47258a60c48e403d"],
+  ["9", "front", "e48329a484263a82"],
+  ["9", "back", "47258a60c48e403d"],
+  ["9.5", "front", "501f3857e4b978c6"],
+  ["9.5", "back", "47258a60c48e403d"],
+  ["10", "front", "d10c95e8ce8a97ea"],
+  ["10", "back", "47258a60c48e403d"],
 ];
 
 const GOLDEN_AUTH: [string, string, string][] = [
-  ["NO", "front", "db66f3e18b5a8466"],
-  ["NO", "back", "134ff634395e38dc"],
-  ["AA", "front", "9488ffde498dee77"],
-  ["AA", "back", "134ff634395e38dc"],
-  ["not_original", "front", "db66f3e18b5a8466"],
-  ["not_original", "back", "134ff634395e38dc"],
-  ["authentic_altered", "front", "9488ffde498dee77"],
-  ["authentic_altered", "back", "134ff634395e38dc"],
+  ["NO", "front", "bf6feb5c6bd124bc"],
+  ["NO", "back", "0eb351c1f318d16f"],
+  ["AA", "front", "24bcb38af5da6625"],
+  ["AA", "back", "0eb351c1f318d16f"],
+  ["not_original", "front", "bf6feb5c6bd124bc"],
+  ["not_original", "back", "0eb351c1f318d16f"],
+  ["authentic_altered", "front", "24bcb38af5da6625"],
+  ["authentic_altered", "back", "0eb351c1f318d16f"],
 ];
 
-describe("THE PROTECTED LABEL DESIGN — golden renders (do not update to make them pass)", () => {
+describe.skipIf(!isLinux)("THE PROTECTED LABEL DESIGN — golden renders (do not update to make them pass)", () => {
   it("every numeric ladder grade renders to its committed golden hash, front and back", async () => {
     for (const [grade, side, expected] of GOLDEN_NUMERIC) {
       const png = await generateLabelPNG(numericCert({ gradeOverall: grade }), side as "front" | "back");
@@ -489,14 +519,82 @@ describe("THE PROTECTED LABEL DESIGN — golden renders (do not update to make t
       expect(sha(png).slice(0, 16), `auth-only ${kind} ${side} label design changed`).toBe(expected);
     }
   }, 300_000);
+});
 
-  it("the golden table covers both sides of every grade and kind it claims to", () => {
+describe("the golden tables themselves (platform-independent)", () => {
+  it("covers both sides of every grade and kind it claims to", () => {
     // A table that silently lost rows would pass vacuously.
     expect(GOLDEN_NUMERIC.length).toBe(18);
     expect(GOLDEN_AUTH.length).toBe(8);
     for (const side of ["front", "back"]) {
       expect(GOLDEN_NUMERIC.filter(([, s]) => s === side).length).toBe(9);
       expect(GOLDEN_AUTH.filter(([, s]) => s === side).length).toBe(4);
+    }
+  });
+
+  /**
+   * THE PORTABLE HALF OF THE LABEL PROTECTION.
+   *
+   * Pixel hashes cannot cross an OS boundary (cairo/libpng differ), but ADVANCE WIDTHS come
+   * from the font file itself, so they can — and they are what actually determines typography,
+   * spacing, line fitting and centring on the slab. Pinning them here means a font swap,
+   * a missing bundled file falling back to a host font, or a metric-incompatible substitution
+   * fails on EVERY platform, including a developer's Mac, without waiting for CI.
+   *
+   * Captured from the Linux production image. The 0.05px tolerance absorbs a sub-pixel CFF
+   * scaling difference between platforms on the two OpenType (Nimbus) faces — measured at
+   * 0.0225px — while still being ~1000x tighter than any real font substitution, which moves
+   * these numbers by tens of pixels (e.g. Arial->DejaVu Sans moved SANS normal 603.14 -> 655.82).
+   */
+  it("every bundled face keeps its exact advance widths (portable font determinism)", async () => {
+    const { createCanvas } = await import("canvas");
+    const { ensureFontsRegistered, MV_SANS, MV_SERIF, MV_MONO, MV_BLACK } = await import("../server/labels");
+    await ensureFontsRegistered();
+    const SAMPLE = "CHARIZARD 8.5 MV-0000000900";
+    const GOLDEN_WIDTHS: [string, string, number][] = [
+      [MV_SANS, "normal", 603.1406],
+      [MV_SANS, "bold", 610.2607],
+      [MV_SERIF, "normal", 682.3828],
+      [MV_SERIF, "bold", 745.5469],
+      [MV_MONO, "normal", 647.9736],
+      [MV_MONO, "bold", 647.9736],
+      [MV_BLACK, "normal", 655.8203],
+      [MV_BLACK, "bold", 724.9219],
+    ];
+    for (const [family, weight, expected] of GOLDEN_WIDTHS) {
+      // A fresh context per measurement: node-canvas caches the resolved face on the context,
+      // so reusing one silently reports the FIRST font for every later measurement.
+      const ctx = createCanvas(10, 10).getContext("2d");
+      ctx.font = `${weight} 40px ${family}`;
+      const width = ctx.measureText(SAMPLE).width;
+      expect(
+        Math.abs(width - expected),
+        `${family} ${weight} advance width is ${width}, expected ~${expected}`
+      ).toBeLessThan(0.05);
+    }
+  });
+
+  it("refuses to render rather than silently falling back to host fonts", async () => {
+    // The whole mechanism is worthless if a bad asset degrades quietly. An existence check was
+    // NOT enough — a corrupt, zero-byte, unreadable or substituted file passed it and rendered
+    // with host fonts (hostile-review N2) — so integrity is now cryptographic. Every failure
+    // mode is exercised for real in tests/label-font-integrity.test.ts.
+    const src = readFileSync(new URL("../server/labels.ts", import.meta.url), "utf8");
+    expect(src).toContain("Bundled label font missing");
+    expect(src).toContain("BundledFontIntegrityError");
+    expect(src).toMatch(/digest !== entry\.sha256/);
+    expect(src).toMatch(/stat\.size !== entry\.bytes/);
+  });
+
+  it("is actually EXERCISED in CI, not skipped into vacuity", () => {
+    // The pixel goldens are the strongest protection the label design has, and they are
+    // Linux-gated. If CI ever moved to a non-Linux runner the gate would silently disable
+    // them and nothing else would notice — so CI itself asserts the platform.
+    // Keyed on GITHUB_ACTIONS, not the generic CI flag: this asserts a property of THIS
+    // repository's pipeline (ubuntu-latest), and a developer exporting CI=true on a Mac
+    // should not get a spurious failure.
+    if (process.env.GITHUB_ACTIONS) {
+      expect(process.platform, "CI must run on Linux or the pixel goldens skip").toBe("linux");
     }
   });
 });

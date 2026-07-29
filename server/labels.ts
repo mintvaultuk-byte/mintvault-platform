@@ -7,6 +7,8 @@ import { isPristine } from "@shared/pristine";
 import { assertPrintableGrade, parseStoredGrade, UnprintableGradeError } from "@shared/printable-grade";
 import { formatVariantLine, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
 import path from "path";
+import { readFileSync, statSync, type Stats } from "fs";
+import { createHash } from "crypto";
 import { APP_BASE_URL } from "./app-url";
 
 /**
@@ -92,14 +94,250 @@ const I_H = I_BOTTOM - I_TOP; // 224
 const LOGO_PATH = path.join(process.cwd(), "public", "brand", "logo.png");
 const NFC_ICON_PATH = path.join(process.cwd(), "public", "brand", "nfc-tap-icon.png");
 const BODONI_PATH = path.join(process.cwd(), "public", "brand", "BodoniModa-Black.ttf");
+const FONT_DIR = path.join(process.cwd(), "public", "brand", "fonts");
 
-// Register Bodoni Moda for canvas — runs once at module load.
-// Safe to call multiple times; canvas deduplicates by family+weight.
-import("canvas")
-  .then(({ registerFont }) => registerFont(BODONI_PATH, { family: "Bodoni Moda", weight: "900" }))
-  .catch(() => {
-    // canvas not available at import time in some build contexts — ignore
-  });
+/**
+ * DETERMINISTIC FONT RESOLUTION — the label is a physical product, so its glyphs must not
+ * depend on which fonts happen to be installed on the host.
+ *
+ * THE DEFECT (found 2026-07-29): the font stacks below name `Arial`, `Helvetica`, `Georgia`
+ * and `Times New Roman`, but only "Bodoni Moda" was ever registered. Everything else was
+ * resolved by the host's fontconfig, so the SAME certificate rendered differently per machine:
+ *
+ *   macOS dev      Arial -> /System/.../Arial.ttf      (Monotype, licensed to Apple)
+ *   Fly production Arial -> DejaVuSans.ttf             (the ONLY 6 font files in the image,
+ *                                                       pulled in transitively by libpango)
+ *
+ * The slabs customers actually hold are therefore rendered in DejaVu, NOT Arial — and the
+ * production image installs no font package explicitly, so a future base-image rebuild could
+ * silently change the typeface on a physical product.
+ *
+ * THE FIX: bundle the exact faces production already resolves to and register them under the
+ * family names the renderer asks for. Arial and Georgia cannot be bundled (proprietary
+ * Monotype faces, not redistributable), so the deterministic target is the one that is BOTH
+ * freely licensed AND already the live production rendering: DejaVu. Every environment now
+ * renders exactly what production renders today — the physical product is unchanged, and it
+ * can no longer drift.
+ *
+ * Nothing about layout, metrics, sizes, spacing, centring, QR/NFC placement or grade text is
+ * touched: only WHERE the glyphs come from.
+ */
+/**
+ * PRIVATE family names, deliberately not the names of any real installed font.
+ *
+ * A registered face CANNOT shadow a host font of the same name — measured on macOS, where
+ * registering a bundled file as "Arial" left rendering byte-identical to the system Arial
+ * (hash 745250a02438 before AND after), while the same file under a novel family took effect
+ * immediately (1433512364f0). Aliasing therefore cannot deliver determinism; only a family
+ * name no host can supply can. These three names are what the stacks below now request, so
+ * the bundled file is the ONLY possible resolution on every platform.
+ */
+/**
+ * CJK fallback family (hostile-review N3).
+ *
+ * The Latin faces below cover no Japanese, so a Japanese card name previously fell through to
+ * whatever the HOST had — it rendered differently once the bundled Latin faces were introduced,
+ * and still changed when the image's fonts were removed. MintVault grades Japanese cards, so
+ * that is a real determinism hole on a physical product.
+ *
+ * The bundled face is the EXACT one production resolves today (`fc-match :lang=ja` in a replica
+ * of the Dockerfile's production stage → DroidSansFallbackFull.ttf), so bundling it preserves
+ * the current Japanese appearance rather than restyling it.
+ *
+ * It is appended AFTER the Latin family in every stack, so Latin glyphs still come from
+ * Nimbus/DejaVu byte-for-byte and only uncovered code points reach it.
+ */
+export const MV_CJK = '"MV Slab CJK"';
+
+export const MV_SANS = `"MV Slab Sans", ${MV_CJK}`;
+export const MV_SERIF = `"MV Slab Serif", ${MV_CJK}`;
+export const MV_MONO = `"MV Slab Mono", ${MV_CJK}`;
+/** `"Arial Black", Arial, sans-serif` resolves to a DIFFERENT face in production than plain
+ *  `Arial` does (DejaVu Sans Bold, not Nimbus Sans Bold), so it gets its own family rather
+ *  than being folded into MV_SANS — folding them would silently restyle the claim insert. */
+export const MV_BLACK = `"MV Slab Black", ${MV_CJK}`;
+
+/**
+ * The bundled faces are EXACTLY the ones the production image resolves today, so bundling
+ * them changes no pixel of the physical product — it only stops the resolution being an
+ * accident of whatever the base image happens to ship. Measured with `fc-match` inside a
+ * faithful replica of the Dockerfile's production stage (45 font files, from libvips/librsvg
+ * pulling in fonts-urw-base35 + fonts-droid-fallback + fonts-noto-mono):
+ *
+ *   Arial / Helvetica            -> NimbusSans-Regular.otf      (URW Helvetica clone)
+ *   Arial:bold                   -> NimbusSans-Bold.otf
+ *   "Arial Black"                -> DejaVuSans-Bold.ttf         (a DIFFERENT face — see MV_BLACK)
+ *   Georgia                      -> DejaVuSerif.ttf / -Bold.ttf
+ *   'Courier New' / Courier      -> NimbusMonoPS-Regular.otf / -Bold.otf
+ *   :lang=ja (CJK fallback)      -> DroidSansFallbackFull.ttf   (see MV_CJK)
+ *
+ * All are freely redistributable (DejaVu: Bitstream Vera/public-domain terms; URW base35:
+ * AFPL/GPL with font exception, as shipped by Debian's fonts-urw-base35; Droid Sans Fallback:
+ * Apache-2.0, licence text committed alongside it as DroidSansFallback-LICENSE.txt).
+ *
+ * WEIGHTS: registering `normal` + `bold` is sufficient and correct. node-canvas resolves every
+ * numeric weight >= 600 to the registered bold face — measured on this exact pair:
+ *   normal/400 -> 603.1611   600/700/bold/800/900 -> 610.2832
+ * which is the same normal-vs-bold split production's fontconfig produces. No call site's
+ * weight literal changes, so `600` on the rarity strip and `900` on the band still draw bold
+ * exactly as they always have.
+ */
+const BUNDLED_FACES: ReadonlyArray<{ file: string; family: string; weight: string }> = [
+  { file: "NimbusSans-Regular.otf", family: "MV Slab Sans", weight: "normal" },
+  { file: "NimbusSans-Bold.otf", family: "MV Slab Sans", weight: "bold" },
+  { file: "DejaVuSerif.ttf", family: "MV Slab Serif", weight: "normal" },
+  { file: "DejaVuSerif-Bold.ttf", family: "MV Slab Serif", weight: "bold" },
+  // `"Arial Black"` resolves to DejaVu Sans Bold in production, NOT to the Nimbus sans above.
+  { file: "DejaVuSans.ttf", family: "MV Slab Black", weight: "normal" },
+  { file: "DejaVuSans-Bold.ttf", family: "MV Slab Black", weight: "bold" },
+  // The claim insert (server/claim-insert.ts) prints on the SAME physical sheet and had the
+  // same defect, so its mono face is registered here too — one registration point for
+  // everything that reaches paper.
+  { file: "NimbusMonoPS-Regular.otf", family: "MV Slab Mono", weight: "normal" },
+  { file: "NimbusMonoPS-Bold.otf", family: "MV Slab Mono", weight: "bold" },
+  // CJK fallback — last, so it is only consulted for code points the Latin faces lack.
+  { file: "DroidSansFallbackFull.ttf", family: "MV Slab CJK", weight: "normal" },
+  { file: "DroidSansFallbackFull.ttf", family: "MV Slab CJK", weight: "bold" },
+];
+
+/**
+ * CRYPTOGRAPHIC INTEGRITY MANIFEST for every bundled face (hostile-review N2).
+ *
+ * An existence check is not enough. A CORRUPT, ZERO-BYTE or UNREADABLE file passes
+ * `existsSync`, `registerFont` then fails, and the render silently falls back to host fonts —
+ * measured: a valid label hashed 9efe0f6669d3a022, the same label with one corrupted face
+ * hashed 87b58cc65f474b2f, with no error raised. A different typeface on a physical product,
+ * silently. Substituting a DIFFERENT valid font under an expected filename is the same class
+ * and would also have passed.
+ *
+ * Size and SHA-256 are therefore verified before any registration. These values are a
+ * reviewed, immutable constant: they are never computed from the files at runtime, so the
+ * table cannot "self-heal" around a tampered asset. `tests/label-font-integrity.test.ts`
+ * asserts that property directly.
+ */
+export const BUNDLED_FONT_MANIFEST: ReadonlyArray<{ file: string; bytes: number; sha256: string }> = [
+  {
+    file: "DejaVuSans-Bold.ttf",
+    bytes: 708920,
+    sha256: "0d977336a6d5fba34eab8e3199eb218327161b5143749f802982c2bc34df0c96",
+  },
+  { file: "DejaVuSans.ttf", bytes: 759720, sha256: "abdc775b21b1bc470d50c97e790d276f2054b7504e56e5bd3e64f48d68582322" },
+  {
+    file: "DejaVuSerif-Bold.ttf",
+    bytes: 356668,
+    sha256: "e2fd85eba2de65ac270d1cdb1685e252eb827f600850cf62af2d20c41b22e945",
+  },
+  {
+    file: "DejaVuSerif.ttf",
+    bytes: 380660,
+    sha256: "13e61509f5c81d7c3132810f4f903e3523df89c802bf6e0674621e8f659cdfe1",
+  },
+  {
+    file: "DroidSansFallbackFull.ttf",
+    bytes: 4033420,
+    sha256: "acb6440a713d880a13a21b468ba7cd43f5a2b2934972e51be791c880730777b8",
+  },
+  {
+    file: "NimbusMonoPS-Bold.otf",
+    bytes: 87520,
+    sha256: "f036d05d2168c7f71cb11d31e81d11133f3d09711e24ebde19d08a24842384d5",
+  },
+  {
+    file: "NimbusMonoPS-Regular.otf",
+    bytes: 77936,
+    sha256: "4f225ca8e13acb16f733ce741693105e527d5f7a5443901b9ecc190fca4e149b",
+  },
+  {
+    file: "NimbusSans-Bold.otf",
+    bytes: 83264,
+    sha256: "7f33328e6b4d4cd21b45fa625791928c9407dc702db6780e56b09ca9a3ecaa67",
+  },
+  {
+    file: "NimbusSans-Regular.otf",
+    bytes: 82264,
+    sha256: "7c25be4d78155523080ab85b10277150657ff7dabbcad7037bdd536c9b6d0d08",
+  },
+];
+
+/** Thrown when a bundled font is absent, the wrong size, or does not match its manifest hash. */
+export class BundledFontIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BundledFontIntegrityError";
+  }
+}
+
+/**
+ * Verify every bundled face against the manifest. Throws before a single glyph is drawn.
+ * Deliberately does NOT depend on `registerFont` raising — node-canvas does not reliably do so.
+ */
+function verifyBundledFonts(): void {
+  for (const entry of BUNDLED_FONT_MANIFEST) {
+    const file = path.join(FONT_DIR, entry.file);
+    let stat: Stats;
+    try {
+      stat = statSync(file);
+    } catch {
+      throw new BundledFontIntegrityError(
+        `Bundled label font missing: ${entry.file}. Label rendering would fall back to host fonts ` +
+          `and print a different typeface — refusing. Check public/brand/fonts/ is deployed.`
+      );
+    }
+    if (!stat.isFile() || stat.size !== entry.bytes) {
+      throw new BundledFontIntegrityError(
+        `Bundled label font ${entry.file} is ${stat.isFile() ? `${stat.size} bytes, expected ${entry.bytes}` : "not a regular file"} — refusing to render.`
+      );
+    }
+    let digest: string;
+    try {
+      digest = createHash("sha256").update(readFileSync(file)).digest("hex");
+    } catch (err) {
+      throw new BundledFontIntegrityError(
+        `Bundled label font ${entry.file} could not be read (${(err as Error).message}) — refusing to render.`
+      );
+    }
+    if (digest !== entry.sha256) {
+      throw new BundledFontIntegrityError(
+        `Bundled label font ${entry.file} failed its integrity check (sha256 ${digest.slice(0, 16)}…, ` +
+          `expected ${entry.sha256.slice(0, 16)}…). The typeface on a printed slab would change — refusing to render.`
+      );
+    }
+  }
+}
+
+/**
+ * Registration must COMPLETE before the first glyph is drawn. The previous code fired a
+ * floating `import("canvas").then(registerFont)` at module load and awaited nothing, so a
+ * render starting in the same tick could draw with the font not yet registered — a real
+ * nondeterminism source independent of the host-font one. This is awaited by every renderer
+ * and memoised, so it runs exactly once per process and is a no-op thereafter.
+ */
+let fontRegistration: Promise<void> | null = null;
+export function ensureFontsRegistered(): Promise<void> {
+  fontRegistration ??= import("canvas")
+    .then(({ registerFont }) => {
+      // INTEGRITY FIRST — before any registration, so a corrupt, truncated, unreadable or
+      // substituted face can never reach the renderer (N2).
+      verifyBundledFonts();
+      // Bodoni Moda — unchanged from before, still the MintVault wordmark face.
+      registerFont(BODONI_PATH, { family: "Bodoni Moda", weight: "900" });
+      for (const f of BUNDLED_FACES) {
+        registerFont(path.join(FONT_DIR, f.file), { family: f.family, weight: f.weight });
+      }
+    })
+    .catch((err) => {
+      // A FONT INTEGRITY FAILURE must never be swallowed — that is the silent fallback this
+      // whole mechanism exists to prevent, so it is re-thrown and stops the render.
+      if (err instanceof BundledFontIntegrityError) {
+        fontRegistration = null; // let a later call retry rather than cache the failure
+        throw err;
+      }
+      // Anything else means the canvas module itself is unavailable in this build context
+      // (it is imported dynamically). Rendering cannot proceed either way and fails loudly
+      // at its own `await import("canvas")`, so nothing is hidden by returning here.
+    });
+  return fontRegistration;
+}
 
 function getCertUrl(certId: string): string {
   return `${APP_BASE_URL}/vault/${certId}`;
@@ -124,7 +362,7 @@ function fitFontSize(
   maxSize: number,
   minSize: number,
   weight: string = "bold",
-  family: string = "Arial, Helvetica, sans-serif"
+  family: string = MV_SANS
 ): number {
   for (let s = maxSize; s >= minSize; s--) {
     ctx.font = `${weight} ${s}px ${family}`;
@@ -480,6 +718,9 @@ export async function generateLabelPNG(cert: CertificateRecord, side: "front" | 
   // (22 certificates rendered as 0 / POOR). Authentication-only certificates are
   // unaffected: carrying no grade is their correct state.
   assertPrintableGrade(cert as { gradeType?: string | null; gradeOverall?: string | number | null; certId?: string });
+  // Bundled faces must be registered BEFORE the first glyph, or the host's fonts decide what
+  // a physical slab looks like. Memoised — one registration per process.
+  await ensureFontsRegistered();
   const { createCanvas, loadImage } = await import("canvas");
 
   // Black Label / PRISTINE gate — uses the canonical isPristine() from
@@ -774,7 +1015,7 @@ async function drawFront(
     const cardNumPanelText = cert.cardNumber ? `#${cert.cardNumber}` : "";
     const cardNumFontSize = 30;
     if (cardNumPanelText) {
-      ctx.font = `bold ${cardNumFontSize}px Arial, Helvetica, sans-serif`;
+      ctx.font = `bold ${cardNumFontSize}px ${MV_SANS}`;
       ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : "#1A1A1A";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -803,7 +1044,7 @@ async function drawFront(
       ctx.shadowBlur = 1;
       ctx.shadowColor = "rgba(0,0,0,0.25)";
     }
-    ctx.font = `bold ${gradeFontSize}px Arial, Helvetica, sans-serif`;
+    ctx.font = `bold ${gradeFontSize}px ${MV_SANS}`;
     ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : "#1A1A1A";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -826,7 +1067,7 @@ async function drawFront(
     try {
       (ctx as any).letterSpacing = `${abbrLetterSpacing}px`;
     } catch {}
-    ctx.font = `bold ${abbrFontSize}px Arial, Helvetica, sans-serif`;
+    ctx.font = `bold ${abbrFontSize}px ${MV_SANS}`;
     ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : "#1A1A1A";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -839,16 +1080,16 @@ async function drawFront(
     ctx.textAlign = "center";
     if (gradeType === "AA" || gradeType === "authentic_altered") {
       ctx.textBaseline = "middle";
-      ctx.font = `bold 28px Arial, Helvetica, sans-serif`;
+      ctx.font = `bold 28px ${MV_SANS}`;
       ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : "#1A1A1A";
       ctx.fillText("AUTHENTIC", panelCX, panelY + panelH / 2 - 20);
-      ctx.font = `bold 22px Arial, Helvetica, sans-serif`;
+      ctx.font = `bold 22px ${MV_SANS}`;
       ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : GOLD_DARK;
       ctx.fillText("ALTERED", panelCX, panelY + panelH / 2 + 14);
     } else {
       const authSize = fitFontSize(ctx, "AUTHENTIC", PANEL_W - 8, 30, 18);
       ctx.textBaseline = "middle";
-      ctx.font = `bold ${authSize}px Arial, Helvetica, sans-serif`;
+      ctx.font = `bold ${authSize}px ${MV_SANS}`;
       ctx.fillStyle = HOLOGRAPHIC_PAPER ? WHITE : "#1A1A1A";
       ctx.fillText("AUTHENTIC", panelCX, panelY + panelH / 2);
     }
@@ -863,7 +1104,7 @@ async function drawFront(
   {
     const certStripSz = 24; // match back-label cert ID size (L815 certFontH)
     const certStripFit = fitFontSize(ctx, cert.certId, PANEL_W - 14, certStripSz, 16);
-    ctx.font = `bold ${certStripFit}px Arial, Helvetica, sans-serif`;
+    ctx.font = `bold ${certStripFit}px ${MV_SANS}`;
     ctx.fillStyle = labelFg;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
@@ -886,7 +1127,7 @@ async function drawFront(
       .join(" · ");
     if (rarityVariantStrip.trim().length > 0) {
       const rarityMaxW = panelX - textLeft - 8; // right edge stops 8px short of the grade panel column
-      const rarityFamily = "Arial, Helvetica, sans-serif";
+      const rarityFamily = MV_SANS;
       const rarityFit = fitFontSize(ctx, rarityVariantStrip, rarityMaxW, 28, 16, "700", rarityFamily);
       ctx.font = `600 ${rarityFit}px ${rarityFamily}`;
       ctx.fillStyle = labelFg;
@@ -912,7 +1153,7 @@ async function drawFront(
   const MV_LS = 2; // letter-spacing px
   const MV_TEXT = "MINTVAULT";
 
-  const mvFont = `900 ${MV_HDR_SZ}px "Bodoni Moda", "Times New Roman", serif`;
+  const mvFont = `900 ${MV_HDR_SZ}px "Bodoni Moda", ${MV_SERIF}`;
 
   // Step 1 — measure without letter-spacing so measureText is accurate
   try {
@@ -981,7 +1222,7 @@ async function drawFront(
   // Title family drops "Arial Black" so weight 600 (semibold) actually renders
   // as semibold via Arial — "Arial Black" is a single-weight (900) face and
   // would override the requested weight.
-  const TXT_FAMILY = "Arial, Helvetica, sans-serif";
+  const TXT_FAMILY = MV_SANS;
   const TXT_WEIGHT = "600"; // was "700" — lighter title per print pass
   const TARGET_SIZE = 48; // was 34 — raised so short-name lines grow to fill the 116px text zone
   const MIN_SIZE = 20; // was 24 — ~15% reduction
@@ -1104,7 +1345,7 @@ async function drawBack(
   const markPadY = HOLOGRAPHIC_PAPER ? 10 : 8;
   const bandFontSize = HOLOGRAPHIC_PAPER ? 18 : 14; // GRADED UNDER / GRADING STANDARD, was 14
   ctx.save();
-  ctx.font = `bold ${markFontSize}px Georgia, "Times New Roman", serif`;
+  ctx.font = `bold ${markFontSize}px ${MV_SERIF}`;
   (ctx as any).letterSpacing = "2px";
   const markTextW = ctx.measureText("MVGS").width;
   ctx.restore();
@@ -1121,7 +1362,7 @@ async function drawBack(
   // Left — "GRADED UNDER" centred between the gold left panel and the
   // MVGS box.
   ctx.save();
-  ctx.font = `900 ${bandFontSize}px Arial, Helvetica, sans-serif`;
+  ctx.font = `900 ${bandFontSize}px ${MV_SANS}`;
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle = "#FFFFFF";
   ctx.textAlign = "center";
@@ -1139,7 +1380,7 @@ async function drawBack(
   // hit whole pixels (no AA fuzz).
   ctx.save();
   (ctx as any).imageSmoothingEnabled = false;
-  ctx.font = `bold ${markFontSize}px Georgia, "Times New Roman", serif`;
+  ctx.font = `bold ${markFontSize}px ${MV_SERIF}`;
   (ctx as any).letterSpacing = "2px";
   ctx.strokeStyle = HOLOGRAPHIC_PAPER ? holoFg : GOLD_MARK;
   ctx.lineWidth = 3;
@@ -1153,7 +1394,7 @@ async function drawBack(
   // Right — "GRADING STANDARD" centred between the MVGS box right edge
   // and the QR's left edge.
   ctx.save();
-  ctx.font = `900 ${bandFontSize}px Arial, Helvetica, sans-serif`;
+  ctx.font = `900 ${bandFontSize}px ${MV_SANS}`;
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle = "#FFFFFF";
   ctx.textAlign = "center";
@@ -1172,7 +1413,7 @@ async function drawBack(
   ctx.save();
   ctx.translate(39, 118);
   ctx.rotate(-Math.PI / 2);
-  ctx.font = "bold 28px Georgia, 'Times New Roman', serif";
+  ctx.font = `bold 28px ${MV_SERIF}`;
   (ctx as any).letterSpacing = "3px";
   ctx.fillStyle = HOLOGRAPHIC_PAPER ? holoFg : INK;
   ctx.textAlign = "center";
@@ -1186,7 +1427,7 @@ async function drawBack(
   // banner above (verified by rendering — see commit note).
   ctx.save();
   const urlFontSize = HOLOGRAPHIC_PAPER ? 52 : 26;
-  ctx.font = `bold ${urlFontSize}px 'Cinzel', Georgia, 'Times New Roman', serif`;
+  ctx.font = `bold ${urlFontSize}px ${MV_SERIF}`;
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle = HOLOGRAPHIC_PAPER ? holoFg : INK;
   ctx.textAlign = "center";
@@ -1199,7 +1440,7 @@ async function drawBack(
   // -28 to -40 so the taller glyphs clear the inner frame below.
   ctx.save();
   const nfcFontSize = HOLOGRAPHIC_PAPER ? 40 : 20;
-  ctx.font = `bold ${nfcFontSize}px Georgia, 'Times New Roman', serif`;
+  ctx.font = `bold ${nfcFontSize}px ${MV_SERIF}`;
   (ctx as any).letterSpacing = "1.5px";
   ctx.fillStyle = HOLOGRAPHIC_PAPER ? holoFg : INK;
   ctx.textAlign = "center";
@@ -1226,7 +1467,7 @@ async function drawBack(
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
   const certBackFit = fitFontSize(ctx, cert.certId.replace(/^MV/, ""), qrSize - 8, certFontH, 14);
-  ctx.font = `bold ${certBackFit}px Arial, Helvetica, sans-serif`;
+  ctx.font = `bold ${certBackFit}px ${MV_SANS}`;
   ctx.fillStyle = HOLOGRAPHIC_PAPER ? holoFg : INK;
   ctx.fillText(cert.certId.replace(/^MV/, ""), qrX + qrSize - 8, certMidY);
   ctx.restore();

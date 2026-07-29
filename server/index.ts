@@ -154,6 +154,27 @@ app.use("/api/auth/signup", authRateLimit);
 app.use("/api/auth/forgot-password", authRateLimit);
 app.use("/api/auth/magic-link", authRateLimit);
 app.use("/api/admin", adminIpAllowlist);
+/**
+ * `/api/super-admin/*` inherits the SAME allowlist (hostile-review F5).
+ *
+ * The four super-admin routers — grading-partners, connector-ops, partner-management and the
+ * Partner Master Dashboard — are strictly MORE privileged than `/api/admin`: they read across
+ * every tenant and return bulk partner PII. Leaving them outside the allowlist inverted the
+ * security gradient, protecting the narrower surface and exposing the wider one.
+ *
+ * WHY THIS CANNOT LOCK ANYONE OUT: a super-admin session can only be created through
+ * `POST /api/admin/login` + `POST /api/admin/pin` (server/routes/auth.ts), both of which are
+ * already behind this exact middleware. Anyone able to authenticate has therefore already
+ * passed the allowlist from the same address, so no caller that could previously reach a
+ * super-admin route loses access.
+ *
+ * CONFIGURATION COMPATIBILITY: `adminIpAllowlist` returns `next()` immediately when
+ * ADMIN_IP_ALLOWLIST is unset or empty, so on any deployment not using the allowlist this is
+ * a no-op. It reuses the same variable and the same middleware — no new configuration, no new
+ * failure mode. It also adds defence against a stolen session cookie being replayed from an
+ * address the operator never uses.
+ */
+app.use("/api/super-admin", adminIpAllowlist);
 
 if (!process.env.STRIPE_SECRET_KEY) {
   console.warn("[stripe] STRIPE_SECRET_KEY not set — payments disabled");
