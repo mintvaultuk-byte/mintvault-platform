@@ -1150,7 +1150,9 @@ function UserActions({
           openModal({
             kind: "user-reactivate",
             title: `Reactivate ${user.email}?`,
-            body: <p style={{ fontSize: 12 }}>They will be able to sign in again with their existing password.</p>,
+            body: (
+              <p style={{ fontSize: 12 }}>They will be able to sign in again. No credential is changed or shown.</p>
+            ),
             run: post(`/partners/${partnerId}/users/${user.id}/status`, { status: "ACTIVE" }),
           })
         }
@@ -1233,7 +1235,9 @@ function UserActions({
             title: `Sign ${user.email} out of every device?`,
             highRisk: true,
             body: (
-              <p style={{ fontSize: 12 }}>All of their active sessions end immediately. Their password is unchanged.</p>
+              <p style={{ fontSize: 12 }}>
+                All of their active sessions end immediately. No credential is changed or shown.
+              </p>
             ),
             run: post(`/partners/${partnerId}/users/${user.id}/revoke-sessions`, {}),
           })
