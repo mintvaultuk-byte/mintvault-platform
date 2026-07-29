@@ -590,10 +590,11 @@ async function createInvitationRecord(
 ): Promise<{ invitationId: string; deliveryStatus: string; invitationLink?: string }> {
   const token = crypto.randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + INVITE_HOURS * 60 * 60 * 1000);
-  await partnerAdminQuery(
+  const previous = await partnerAdminQuery<{ id: string }>(
     `UPDATE partner_invitations
         SET status='REVOKED', revoked_at=now(), updated_at=now()
-      WHERE tenant_id=$1 AND user_id=$2 AND status IN ('PENDING','SENT','DELIVERY_FAILED')`,
+      WHERE tenant_id=$1 AND user_id=$2 AND status IN ('PENDING','SENT','DELIVERY_FAILED')
+      RETURNING id`,
     [tenantId, userId]
   );
   const { rows } = await partnerAdminQuery<{ id: string; partner_name: string }>(
@@ -606,6 +607,12 @@ async function createInvitationRecord(
      SELECT ins.id, o.legal_name AS partner_name FROM ins, partner_organisations o WHERE o.id=$1`,
     [tenantId, userId, email, roleCode, sha256(token), actor.actorUserId, actor.actorEmail, expiresAt]
   );
+  if (previous.rows.length > 0) {
+    await partnerAdminQuery("UPDATE partner_invitations SET superseded_by=$1 WHERE id = ANY($2::uuid[])", [
+      rows[0].id,
+      previous.rows.map((r) => r.id),
+    ]);
+  }
   let deliveryStatus = "DELIVERY_NOT_CONFIGURED";
   if (invitationDeliveryConfigured()) {
     try {

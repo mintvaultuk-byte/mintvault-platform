@@ -28,10 +28,20 @@ import {
 } from "./rate-limit";
 import { withTenant, partnerRuntimeQuery } from "./db";
 import { recoveryHash, mfaEncryptionConfigured } from "./mfa";
-import { writePartnerAudit } from "./audit";
 import { resetDeliveryConfigured, deliverResetToken } from "./delivery";
 import { switchLocation } from "./location";
 import { acceptPartnerInvitation } from "./partner-management-service";
+import { toG5Error, g5StatusFor, requireReason, optionalReason, G5RequestError } from "./partner-management-errors";
+import {
+  changeTeamMemberRole,
+  inviteTeamMember,
+  listTeamMembers,
+  requirePortalTeamRole,
+  resendTeamInvitation,
+  revokeTeamInvitation,
+  revokeTeamMemberSessions,
+  setTeamMemberStatus,
+} from "./team-service";
 import {
   mfaEnrolStart,
   mfaEnrolConfirm,
@@ -39,6 +49,11 @@ import {
   mfaDisable,
   verifyActiveTotpNoReplay,
 } from "./mfa-service";
+
+function sendPartnerTeamError(res: import("express").Response, err: unknown): void {
+  const g5 = toG5Error(err);
+  res.status(g5StatusFor(g5.code)).json({ error: { code: g5.code, message: g5.message } });
+}
 
 export function partnerApiRouter(): Router {
   const r = Router();
@@ -197,12 +212,108 @@ export function partnerApiRouter(): Router {
   });
 
   r.get("/users", requirePartnerCapability("partner.users.view"), async (req, res) => {
-    const rows = await withTenant({ tenantId: req.partner!.tenantId }, async (c) => {
-      const u = await c.query("SELECT id, email, status FROM partner_users ORDER BY email");
-      return u.rows;
-    });
-    res.json(rows);
+    try {
+      const rows = await withTenant({ tenantId: req.partner!.tenantId }, (c) => listTeamMembers(c));
+      res.json({ users: rows });
+    } catch (err) {
+      sendPartnerTeamError(res, err);
+    }
   });
+
+  r.post(
+    "/users",
+    requirePartnerCapability("partner.users.manage"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      try {
+        const reason = optionalReason(req.body?.reason, "Partner team member invited");
+        const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
+          inviteTeamMember(c, req.partner!, req.body, reason)
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        sendPartnerTeamError(res, err);
+      }
+    }
+  );
+
+  r.post(
+    "/users/:id/resend-invitation",
+    requirePartnerCapability("partner.users.manage"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      try {
+        const reason = optionalReason(req.body?.reason, "Partner invitation resent");
+        const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
+          resendTeamInvitation(c, req.partner!, String(req.params.id), reason)
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        sendPartnerTeamError(res, err);
+      }
+    }
+  );
+
+  r.post(
+    "/users/:id/revoke-invitation",
+    requirePartnerCapability("partner.users.manage"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      try {
+        const reason = requireReason(req.body?.reason);
+        const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
+          revokeTeamInvitation(c, req.partner!, String(req.params.id), reason)
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        sendPartnerTeamError(res, err);
+      }
+    }
+  );
+
+  r.post(
+    "/users/:id/role",
+    requirePartnerCapability("partner.users.manage"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      try {
+        const role = requirePortalTeamRole(req.body?.role);
+        const reason = requireReason(req.body?.reason);
+        const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
+          changeTeamMemberRole(c, req.partner!, String(req.params.id), role, reason)
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        sendPartnerTeamError(res, err);
+      }
+    }
+  );
+
+  r.post(
+    "/users/:id/status",
+    requirePartnerCapability("partner.users.manage"),
+    requireNotViewOnly,
+    requireNotSensitiveFrozen,
+    async (req, res) => {
+      try {
+        const status = req.body?.status;
+        if (status !== "ACTIVE" && status !== "SUSPENDED" && status !== "REVOKED") {
+          throw new G5RequestError("VALIDATION_ERROR", "Unknown team member status.");
+        }
+        const reason = requireReason(req.body?.reason);
+        const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
+          setTeamMemberStatus(c, req.partner!, String(req.params.id), status, reason)
+        );
+        res.json({ ok: true, result });
+      } catch (err) {
+        sendPartnerTeamError(res, err);
+      }
+    }
+  );
 
   // Locations the current user may operate at — org-wide roles (owner/manager/finance-viewer) see
   // every ACTIVE location; everyone else sees only their explicit partner_user_locations
@@ -329,23 +440,15 @@ export function partnerApiRouter(): Router {
     requireNotViewOnly,
     requireNotSensitiveFrozen,
     async (req, res) => {
-      const targetId = String(req.params.id);
-      const n = await withTenant({ tenantId: req.partner!.tenantId }, async (c) => {
-        // RLS guarantees this only affects same-tenant users.
-        const r2 = await c.query(
-          "UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL",
-          [targetId]
+      try {
+        const reason = optionalReason(req.body?.reason, "Partner team member sessions revoked");
+        const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
+          revokeTeamMemberSessions(c, req.partner!, String(req.params.id), reason)
         );
-        await writePartnerAudit(c, {
-          tenantId: req.partner!.tenantId,
-          actorUserId: req.partner!.userId,
-          action: "partner_admin_revoke_sessions",
-          recordType: "partner_user",
-          recordId: targetId,
-        });
-        return r2.rowCount ?? 0;
-      });
-      res.json({ ok: true, revoked: n });
+        res.json({ ok: true, result });
+      } catch (err) {
+        sendPartnerTeamError(res, err);
+      }
     }
   );
 

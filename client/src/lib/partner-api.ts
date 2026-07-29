@@ -88,6 +88,52 @@ export const partnerLocations = {
   list: () => req<PartnerLocation[]>("GET", "/api/partner/locations"),
 };
 
+// ---- team ----
+export type PartnerTeamRole = "OWNER" | "ADMIN" | "GRADER" | "STAFF";
+export type PartnerTeamStatus = "INVITED" | "ACTIVE" | "SUSPENDED" | "REVOKED";
+
+export interface PartnerTeamMember {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: PartnerTeamRole;
+  status: PartnerTeamStatus;
+  invitationStatus: string | null;
+  invitationExpiresAt: string | null;
+  invitationDeliveredAt: string | null;
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
+export const partnerTeam = {
+  list: () => req<{ users: PartnerTeamMember[] }>("GET", "/api/partner/users"),
+  invite: (input: { firstName: string; lastName: string; email: string; role: PartnerTeamRole; reason?: string }) =>
+    req<{ ok: boolean; result: { userId: string; invitationId: string; deliveryStatus: string } }>(
+      "POST",
+      "/api/partner/users",
+      input
+    ),
+  resend: (userId: string, reason?: string) =>
+    req<{ ok: boolean; result: { invitationId: string; deliveryStatus: string } }>(
+      "POST",
+      `/api/partner/users/${userId}/resend-invitation`,
+      { reason }
+    ),
+  revokeInvitation: (userId: string, reason: string) =>
+    req<{ ok: boolean; result: { revoked: number } }>("POST", `/api/partner/users/${userId}/revoke-invitation`, {
+      reason,
+    }),
+  changeRole: (userId: string, role: PartnerTeamRole, reason: string) =>
+    req<{ ok: boolean }>("POST", `/api/partner/users/${userId}/role`, { role, reason }),
+  setStatus: (userId: string, status: Exclude<PartnerTeamStatus, "INVITED">, reason: string) =>
+    req<{ ok: boolean }>("POST", `/api/partner/users/${userId}/status`, { status, reason }),
+  revokeSessions: (userId: string, reason?: string) =>
+    req<{ ok: boolean; result: { revoked: number } }>("POST", `/api/partner/users/${userId}/revoke-sessions`, {
+      reason,
+    }),
+};
+
 // ---- service tiers ----
 export interface AvailableServiceTier {
   tierCode: string;
