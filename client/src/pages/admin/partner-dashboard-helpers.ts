@@ -117,6 +117,45 @@ export function isAuthError(err: unknown): boolean {
   return (err as { status?: number })?.status === 401;
 }
 
+/**
+ * Server-side reasons the whole dashboard is unavailable rather than empty.
+ *
+ * These are NOT ordinary failures: the request was authorised and well-formed, but the backend
+ * cannot see partner data at all. The distinction matters because the alternative rendering —
+ * zeros and empty tables — would look like a healthy, empty partner network.
+ */
+export const VISIBILITY_ERROR_CODES = [
+  "PARTNER_ADMIN_RLS_VISIBILITY_UNAVAILABLE",
+  "PARTNER_ADMIN_SCHEMA_UNAVAILABLE",
+] as const;
+
+export function visibilityErrorCode(err: unknown): string | null {
+  const code = (err as { body?: { error?: { code?: string } } })?.body?.error?.code;
+  return typeof code === "string" && (VISIBILITY_ERROR_CODES as readonly string[]).includes(code) ? code : null;
+}
+
+/** True when partner data is unavailable for a configuration reason, not a transient error. */
+export function isVisibilityError(err: unknown): boolean {
+  return visibilityErrorCode(err) !== null;
+}
+
+/**
+ * How an alert's timestamp should read.
+ *
+ * A null `detectedAt` means the alert is a live threshold evaluation (e.g. "credits low"), not a
+ * recorded event — there is no moment at which it "happened". Labelling that as a detection time
+ * made every refresh look like a new incident.
+ */
+export function alertDetectedLabel(detectedAt: string | null | undefined): string {
+  return detectedAt == null ? "Evaluated now" : relativeTime(detectedAt);
+}
+
+export function alertDetectedTitle(detectedAt: string | null | undefined): string {
+  return detectedAt == null
+    ? "A live condition evaluated when this page loaded — not a recorded event time."
+    : formatDateTime(detectedAt);
+}
+
 /** Compact number formatting for dense KPI tiles. Large values must not blow the layout. */
 export function formatCount(n: number | null | undefined): string {
   if (n == null) return "—";

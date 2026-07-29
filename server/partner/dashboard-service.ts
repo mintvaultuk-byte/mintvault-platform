@@ -27,6 +27,7 @@ import {
   DASHBOARD_CONNECTOR_STATES,
   DASHBOARD_SUBMISSION_STATUSES,
   metric,
+  RISK_RANK,
   sortAlerts,
   unavailable,
   type AuditTimelineEntry,
@@ -46,6 +47,7 @@ import {
   type PartnerSubmissionsView,
   type PartnerTableRow,
   type PartnerWalletView,
+  type RiskLevel,
   type SortDirection,
 } from "@shared/partner-dashboard";
 
@@ -162,7 +164,7 @@ export const COMPLETED_UNAVAILABLE: MetricUnavailable = unavailable(
 // A. Network summary
 // ---------------------------------------------------------------------------
 
-export async function getNetworkSummary(): Promise<NetworkSummary> {
+export async function getNetworkSummary(walletSchema = true): Promise<NetworkSummary> {
   const [orgs, users, connector, submissions, security, credits, consumed] = await Promise.all([
     partnerAdminQuery<{ status: string; n: string }>(
       "SELECT status, count(*)::bigint AS n FROM partner_organisations GROUP BY status"
@@ -182,25 +184,41 @@ export async function getNetworkSummary(): Promise<NetworkSummary> {
         WHERE created_at > now() - interval '30 days'
         GROUP BY severity`
     ),
-    tolerateMissingTable(
-      () =>
-        partnerAdminQuery<{ available: string; reserved: string }>(
-          `SELECT COALESCE(SUM(available_balance),0)::bigint AS available,
-                  COALESCE(SUM(active_reserved),0)::bigint  AS reserved
-             FROM partner_credit_availability`
-        ),
-      null
-    ),
-    tolerateMissingTable(
-      () =>
-        partnerAdminQuery<{ n: string }>(
-          `SELECT COALESCE(-SUM(amount),0)::bigint AS n
-             FROM partner_credit_ledger
-            WHERE amount < 0
-              AND created_at >= date_trunc('month', now())`
-        ),
-      null
-    ),
+    walletSchema
+      ? tolerateMissingTable(
+          () =>
+            partnerAdminQuery<{ available: string; reserved: string }>(
+              `SELECT COALESCE(SUM(available_balance),0)::bigint AS available,
+                      COALESCE(SUM(active_reserved),0)::bigint  AS reserved
+                 FROM partner_credit_availability`
+            ),
+          null
+        )
+      : null,
+    /**
+     * Consumed grading credits = reservations that actually reached the `consumed` terminal
+     * state this month, counted at their real `consumed_at` timestamp.
+     *
+     * It is NOT "negative ledger entries". Consumption writes its ledger row with
+     * entry_type='admin_adjustment' (partner-credit-reservation-service.ts), which is
+     * indistinguishable from a genuine negative admin adjustment or a refund movement — so the
+     * old `SUM(amount) WHERE amount < 0` reported clawbacks and refunds as consumed cards.
+     * `reserved_credits` is CHECK-constrained to exactly 1 (migration 0017), preserving
+     * one-credit-per-card semantics.
+     */
+    walletSchema
+      ? tolerateMissingTable(
+          () =>
+            partnerAdminQuery<{ n: string }>(
+              `SELECT COALESCE(SUM(reserved_credits),0)::bigint AS n
+                 FROM partner_credit_reservations
+                WHERE status = 'consumed'
+                  AND consumed_at IS NOT NULL
+                  AND consumed_at >= date_trunc('month', now())`
+            ),
+          null
+        )
+      : null,
   ]);
 
   const orgByStatus = bucket(
@@ -281,14 +299,39 @@ export async function getNetworkSummary(): Promise<NetworkSummary> {
 // B. Partner table
 // ---------------------------------------------------------------------------
 
-/** Allowlist → literal ORDER BY. A client string NEVER reaches SQL. */
+/**
+ * Allowlist → literal ORDER BY. A client string NEVER reaches SQL.
+ * These name columns projected by the `scored` CTE below, not raw table columns.
+ */
 const SORT_SQL: Record<PartnerSortKey, string> = {
-  created_at: "o.created_at",
-  legal_name: "o.legal_name",
-  status: "o.status",
+  created_at: "created_at",
+  legal_name: "legal_name",
+  status: "status",
   submissions: "submissions",
   last_activity: "last_activity",
 };
+
+/**
+ * The risk ladder, in SQL. This is the SAME rule as `deriveRisk` below, and the two are held
+ * equivalent by an exhaustive matrix test (tests/partner-dashboard-risk-equivalence.test.ts)
+ * that evaluates THIS EXACT STRING against a VALUES table and compares to `deriveRisk`.
+ *
+ * Ordered high→low, so the first matching branch is the highest triggered level — which is what
+ * `deriveRisk`'s `raise()` (keep the max) computes. The `low` branch is only reached when the
+ * `medium` branch did not match, so `available_credits > 0` is already implied there, exactly
+ * mirroring the JS `else if`.
+ *
+ * It lives in SQL because filtering by risk MUST happen before LIMIT/OFFSET: filtering the page
+ * after pagination returns an incomplete set with an unfiltered total.
+ */
+export const RISK_LEVEL_SQL = `CASE
+    WHEN status IN ('SUSPENDED','REVOKED') OR security_alerts > 0 THEN 'high'
+    WHEN locked_staff > 0
+      OR open_corrections > 0
+      OR (available_credits IS NOT NULL AND available_credits <= 0) THEN 'medium'
+    WHEN available_credits IS NOT NULL AND available_credits < 10 THEN 'low'
+    ELSE 'none'
+  END`;
 
 export interface PartnerListFilters {
   search?: string;
@@ -298,21 +341,60 @@ export interface PartnerListFilters {
   direction?: SortDirection;
 }
 
-export async function listPartnersForDashboard(
-  filters: PartnerListFilters,
-  pageRaw: unknown,
-  pageSizeRaw: unknown
-): Promise<Paged<PartnerTableRow>> {
-  const { page, pageSize, offset } = clampDashboardPagination(pageRaw, pageSizeRaw);
+/**
+ * Per-tenant aggregates computed ONCE by a grouped scan each, then LEFT JOINed — instead of
+ * correlated subqueries re-evaluated per organisation.
+ *
+ * Two reasons, both load-bearing:
+ *   1. Correctness: risk filtering happens in SQL now, so every signal column must exist for
+ *      EVERY candidate row before the filter runs — not just the page.
+ *   2. Performance: sorting by `last_activity` previously forced the `max(updated_at)` subquery
+ *      to run once per organisation (measured 5003 loops → ~268 ms at 200k connector records).
+ *      One grouped pass removes the per-partner repetition.
+ */
+const AGGREGATE_CTES = `
+  staff AS (
+    SELECT tenant_id,
+           count(*) FILTER (WHERE status = 'ACTIVE')::int      AS active_staff,
+           count(*) FILTER (WHERE locked_until > now())::int   AS locked_staff
+      FROM partner_users GROUP BY tenant_id
+  ),
+  subs AS (
+    SELECT tenant_id,
+           count(*) FILTER (WHERE status = 'submitted_to_mintvault')::int AS submissions
+      FROM partner_submissions GROUP BY tenant_id
+  ),
+  conn AS (
+    SELECT tenant_id,
+           count(*) FILTER (WHERE state NOT IN ('imported','rejected','cancelled'))::int  AS cards_in_pipeline,
+           count(*) FILTER (WHERE state IN ('manual_review','reconciliation_required'))::int AS open_corrections,
+           max(updated_at) AS last_activity
+      FROM partner_connector_records GROUP BY tenant_id
+  ),
+  sec AS (
+    SELECT tenant_id, count(*)::int AS security_alerts
+      FROM partner_security_events
+     WHERE severity IN ('high','critical')
+       AND created_at > now() - interval '30 days'
+     GROUP BY tenant_id
+  )`;
 
+/**
+ * Build the shared CTE chain + WHERE for the partner list. The page query and the (rare) count
+ * fallback are generated from THIS ONE builder, so `total` can never be computed with different
+ * logic from the rows it describes.
+ */
+export function buildPartnerListBase(
+  filters: PartnerListFilters,
+  walletSchema: boolean
+): { sql: string; params: unknown[]; riskParamIndex: number } {
   const params: unknown[] = [];
   const clauses: string[] = [];
-  const add = (sqlFragment: string, val: unknown) => {
-    params.push(val);
-    clauses.push(sqlFragment.replace("$?", `$${params.length}`));
-  };
 
-  if (filters.status) add("o.status = $?", filters.status);
+  if (filters.status) {
+    params.push(filters.status);
+    clauses.push(`o.status = $${params.length}`);
+  }
   if (filters.search) {
     params.push(`%${filters.search}%`);
     const p = `$${params.length}`;
@@ -320,82 +402,99 @@ export async function listPartnersForDashboard(
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 
+  // Wallet relations are optional (0016/0017). When absent, project NULLs of the right type so
+  // the risk CASE sees "unknown credits" and skips the credit branches — the same thing
+  // `deriveRisk` does for `availableCredits === null`.
+  const walletSelect = walletSchema
+    ? `w.available_balance::bigint AS available_credits,
+       w.active_reserved::bigint   AS reserved_credits`
+    : `NULL::bigint AS available_credits,
+       NULL::bigint AS reserved_credits`;
+  const walletJoin = walletSchema ? `LEFT JOIN partner_credit_availability w ON w.tenant_id = o.id` : "";
+
+  params.push(filters.risk ?? null);
+  const riskParamIndex = params.length;
+
+  const sql = `
+    WITH ${AGGREGATE_CTES},
+    base AS (
+      SELECT o.id, o.public_ref, o.legal_name, o.status, o.created_at,
+             p.trading_name,
+             COALESCE(staff.active_staff, 0)      AS active_staff,
+             COALESCE(staff.locked_staff, 0)      AS locked_staff,
+             COALESCE(subs.submissions, 0)        AS submissions,
+             COALESCE(conn.cards_in_pipeline, 0)  AS cards_in_pipeline,
+             COALESCE(conn.open_corrections, 0)   AS open_corrections,
+             COALESCE(sec.security_alerts, 0)     AS security_alerts,
+             conn.last_activity                   AS last_activity,
+             ${walletSelect}
+        FROM partner_organisations o
+        LEFT JOIN partner_profiles p ON p.tenant_id = o.id
+        LEFT JOIN staff ON staff.tenant_id = o.id
+        LEFT JOIN subs  ON subs.tenant_id  = o.id
+        LEFT JOIN conn  ON conn.tenant_id  = o.id
+        LEFT JOIN sec   ON sec.tenant_id   = o.id
+        ${walletJoin}
+        ${where}
+    ),
+    scored AS (
+      SELECT base.*, ${RISK_LEVEL_SQL} AS risk_level FROM base
+    ),
+    matched AS (
+      SELECT * FROM scored
+       WHERE $${riskParamIndex}::text IS NULL OR risk_level = $${riskParamIndex}::text
+    )`;
+
+  return { sql, params, riskParamIndex };
+}
+
+export async function listPartnersForDashboard(
+  filters: PartnerListFilters,
+  pageRaw: unknown,
+  pageSizeRaw: unknown,
+  walletSchema = true
+): Promise<Paged<PartnerTableRow>> {
+  const { page, pageSize, offset } = clampDashboardPagination(pageRaw, pageSizeRaw);
+  const { sql, params } = buildPartnerListBase(filters, walletSchema);
+
   const sortKey: PartnerSortKey = filters.sort ?? "created_at";
   const direction = filters.direction === "asc" ? "ASC" : "DESC";
-  const orderBy = `${SORT_SQL[sortKey]} ${direction}, o.id ASC`;
+  // `id ASC` is the deterministic tiebreak — without it equal sort values make page boundaries
+  // plan-dependent, which silently repeats and skips rows across pages.
+  const orderBy = `${SORT_SQL[sortKey]} ${direction}, id ASC`;
 
-  params.push(pageSize, offset);
-  const limitIdx = params.length - 1;
-  const offsetIdx = params.length;
-
+  const pageParams = [...params, pageSize, offset];
   const { rows } = await partnerAdminQuery<Record<string, unknown>>(
-    `SELECT o.id, o.public_ref, o.legal_name, o.status, o.created_at,
-            p.trading_name,
-            (SELECT count(*)::int FROM partner_users u
-              WHERE u.tenant_id = o.id AND u.status = 'ACTIVE')            AS active_staff,
-            (SELECT count(*)::int FROM partner_users u
-              WHERE u.tenant_id = o.id AND u.locked_until > now())         AS locked_staff,
-            (SELECT count(*)::int FROM partner_submissions s
-              WHERE s.tenant_id = o.id AND s.status = 'submitted_to_mintvault') AS submissions,
-            (SELECT count(*)::int FROM partner_connector_records r
-              WHERE r.tenant_id = o.id
-                AND r.state NOT IN ('imported','rejected','cancelled'))    AS cards_in_pipeline,
-            (SELECT count(*)::int FROM partner_connector_records r
-              WHERE r.tenant_id = o.id
-                AND r.state IN ('manual_review','reconciliation_required')) AS open_corrections,
-            (SELECT count(*)::int FROM partner_security_events e
-              WHERE e.tenant_id = o.id
-                AND e.severity IN ('high','critical')
-                AND e.created_at > now() - interval '30 days')             AS security_alerts,
-            (SELECT max(r.updated_at) FROM partner_connector_records r
-              WHERE r.tenant_id = o.id)                                    AS last_activity
-       FROM partner_organisations o
-       LEFT JOIN partner_profiles p ON p.tenant_id = o.id
-       ${where}
+    `${sql}
+     SELECT matched.*, count(*) OVER () AS total_matching
+       FROM matched
       ORDER BY ${orderBy}
-      LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
-    params
+      LIMIT $${pageParams.length - 1} OFFSET $${pageParams.length}`,
+    pageParams
   );
 
-  const totalRes = await partnerAdminQuery<{ n: number }>(
-    `SELECT count(*)::int AS n
-       FROM partner_organisations o
-       LEFT JOIN partner_profiles p ON p.tenant_id = o.id
-       ${where}`,
-    params.slice(0, params.length - 2)
-  );
-
-  // Wallet figures are joined separately so a missing 0016/0017 degrades to null
-  // instead of failing the whole list.
-  const ids = rows.map((r) => String(r.id));
-  const wallets = ids.length
-    ? await tolerateMissingTable(
-        () =>
-          partnerAdminQuery<{ tenant_id: string; available_balance: string; active_reserved: string }>(
-            `SELECT tenant_id, available_balance, active_reserved
-               FROM partner_credit_availability
-              WHERE tenant_id = ANY($1::uuid[])`,
-            [ids]
-          ),
-        null
-      )
-    : null;
-  const walletByTenant = new Map<string, { available: number; reserved: number }>();
-  for (const w of wallets?.rows ?? []) {
-    walletByTenant.set(w.tenant_id, {
-      available: num(w.available_balance),
-      reserved: num(w.active_reserved),
-    });
+  // The window count is the filtered total and comes from the very rows returned, so rows and
+  // total can never disagree. It is only absent when the page is empty — which means either
+  // nothing matched at all, or the caller paged past the end. The second case needs one extra
+  // count; it is rare enough not to pay for on every request.
+  let total: number;
+  if (rows.length > 0) {
+    total = num(rows[0].total_matching);
+  } else if (page === 1) {
+    total = 0;
+  } else {
+    const countRes = await partnerAdminQuery<{ n: number }>(`${sql} SELECT count(*)::int AS n FROM matched`, params);
+    total = countRes.rows[0]?.n ?? 0;
   }
 
   const mapped: PartnerTableRow[] = rows.map((r) => {
-    const wallet = walletByTenant.get(String(r.id));
+    const availableCredits = r.available_credits == null ? null : num(r.available_credits);
     const risk = deriveRisk({
       status: String(r.status),
       openCorrections: num(r.open_corrections),
       securityAlerts: num(r.security_alerts),
       lockedStaff: num(r.locked_staff),
-      availableCredits: wallet?.available ?? null,
+      availableCredits,
     });
     return {
       partnerId: String(r.id),
@@ -407,8 +506,8 @@ export async function listPartnersForDashboard(
       onboardingStage: String(r.status) === "PENDING" ? "Onboarding" : "Onboarded",
       qualityRating: QUALITY_UNAVAILABLE,
       riskStatus: risk,
-      availableCredits: wallet?.available ?? null,
-      reservedCredits: wallet?.reserved ?? null,
+      availableCredits,
+      reservedCredits: r.reserved_credits == null ? null : num(r.reserved_credits),
       activeSubmissions: num(r.submissions),
       cardsInPipeline: num(r.cards_in_pipeline),
       openCorrections: num(r.open_corrections),
@@ -419,11 +518,8 @@ export async function listPartnersForDashboard(
     };
   });
 
-  const filtered = filters.risk ? mapped.filter((m) => m.riskStatus.level === filters.risk) : mapped;
-  const total = totalRes.rows[0]?.n ?? 0;
-
   return {
-    rows: filtered,
+    rows: mapped,
     page,
     pageSize,
     total,
@@ -440,11 +536,11 @@ export function deriveRisk(input: {
   availableCredits: number | null;
 }): PartnerRisk {
   const reasons: string[] = [];
-  let level: PartnerRisk["level"] = "none";
+  let level: RiskLevel = "none";
 
-  const raise = (to: PartnerRisk["level"]) => {
-    const rank = { none: 0, low: 1, medium: 2, high: 3 };
-    if (rank[to] > rank[level]) level = to;
+  // RISK_RANK is shared so the JS ladder and RISK_LEVEL_SQL cannot drift on precedence.
+  const raise = (to: RiskLevel) => {
+    if (RISK_RANK[to] > RISK_RANK[level]) level = to;
   };
 
   if (input.status === "SUSPENDED" || input.status === "REVOKED") {
@@ -578,19 +674,21 @@ export async function getPartnerStaff(partnerIdRaw: unknown): Promise<PartnerSta
   }));
 }
 
-export async function getPartnerWallet(partnerIdRaw: unknown): Promise<PartnerWalletView> {
+export async function getPartnerWallet(partnerIdRaw: unknown, walletSchema = true): Promise<PartnerWalletView> {
   const partnerId = requirePartnerId(partnerIdRaw);
   await loadOrg(partnerId);
 
-  const availability = await tolerateMissingTable(
-    () =>
-      partnerAdminQuery<Record<string, unknown>>(
-        `SELECT wallet_id, status, ledger_balance, active_reserved, available_balance, consumed_reservations
-           FROM partner_credit_availability WHERE tenant_id = $1`,
-        [partnerId]
-      ),
-    null
-  );
+  const availability = walletSchema
+    ? await tolerateMissingTable(
+        () =>
+          partnerAdminQuery<Record<string, unknown>>(
+            `SELECT wallet_id, status, ledger_balance, active_reserved, available_balance, consumed_reservations
+               FROM partner_credit_availability WHERE tenant_id = $1`,
+            [partnerId]
+          ),
+        null
+      )
+    : null;
 
   if (!availability) {
     return {
@@ -877,6 +975,12 @@ export async function getPartnerSecurity(partnerIdRaw: unknown): Promise<Partner
 
 // ---------------------------------------------------------------------------
 // J. Audit timeline — sources are TAGGED so evidential detail is not lost.
+//
+// ORDERING IS EVIDENTIAL. `created_at` defaults to now(), which is TRANSACTION time, so every
+// row written in one transaction shares an identical timestamp. Ordering on the timestamp alone
+// left tied rows in plan-dependent order, which silently repeats and SKIPS audit rows across
+// pages. (source, id) completes the key: `source` is a distinct literal per UNION branch and
+// `id` is unique within a branch, so the composite order is total and stable.
 // ---------------------------------------------------------------------------
 
 export async function getPartnerAuditTimeline(
@@ -907,7 +1011,7 @@ export async function getPartnerAuditTimeline(
                'connector_record', c.connector_record_id::text, NULL, c.created_at
           FROM partner_connector_admin_actions c WHERE c.partner_organisation_id = $1
      ) t
-     ORDER BY t.created_at DESC
+     ORDER BY t.created_at DESC, t.source ASC, t.id ASC
      LIMIT $2 OFFSET $3`,
     [partnerId, pageSize, offset]
   );
@@ -947,13 +1051,21 @@ export async function getPartnerAuditTimeline(
 // I. Alerts — real conditions only.
 // ---------------------------------------------------------------------------
 
-export async function getAlerts(limitRaw: unknown): Promise<DashboardAlert[]> {
+export async function getAlerts(limitRaw: unknown, walletSchema = true): Promise<DashboardAlert[]> {
   const limit = Math.min(200, Math.max(1, Number(limitRaw) || 100));
 
+  // Every source query is ORDERed and LIMITed in SQL. Previously each returned its entire
+  // matching set and the whole list was built in memory before `.slice(limit)` — unbounded in
+  // partner count, on an endpoint that auto-refreshes. `limit` bounds each source, and the
+  // severity sort still runs across the combined set, so prioritisation is unchanged for any
+  // realistic alert volume.
   const [orgs, security, escalations, lockedUsers, lowCredit] = await Promise.all([
     partnerAdminQuery<Record<string, unknown>>(
       `SELECT id, legal_name, status, created_at FROM partner_organisations
-        WHERE status IN ('SUSPENDED','PENDING')`
+        WHERE status IN ('SUSPENDED','PENDING')
+        ORDER BY (status = 'SUSPENDED') DESC, created_at DESC, id ASC
+        LIMIT $1`,
+      [limit]
     ),
     partnerAdminQuery<Record<string, unknown>>(
       `SELECT e.id, e.tenant_id, e.severity, e.kind, e.created_at, o.legal_name
@@ -962,33 +1074,45 @@ export async function getAlerts(limitRaw: unknown): Promise<DashboardAlert[]> {
         WHERE e.severity IN ('high','critical')
           AND e.created_at > now() - interval '30 days'
         ORDER BY e.id DESC
-        LIMIT 200`
+        LIMIT $1`,
+      [limit]
     ),
     partnerAdminQuery<Record<string, unknown>>(
       `SELECT r.tenant_id, o.legal_name, r.state, count(*)::int AS n, max(r.updated_at) AS updated_at
          FROM partner_connector_records r
          JOIN partner_organisations o ON o.id = r.tenant_id
         WHERE r.state IN ('manual_review','reconciliation_required','failed')
-        GROUP BY r.tenant_id, o.legal_name, r.state`
+        GROUP BY r.tenant_id, o.legal_name, r.state
+        ORDER BY (r.state = 'failed') DESC, count(*) DESC, r.tenant_id ASC
+        LIMIT $1`,
+      [limit]
     ),
     partnerAdminQuery<Record<string, unknown>>(
       `SELECT u.tenant_id, o.legal_name, count(*)::int AS n, max(u.locked_until) AS locked_until
          FROM partner_users u
          JOIN partner_organisations o ON o.id = u.tenant_id
         WHERE u.locked_until > now()
-        GROUP BY u.tenant_id, o.legal_name`
+        GROUP BY u.tenant_id, o.legal_name
+        ORDER BY count(*) DESC, u.tenant_id ASC
+        LIMIT $1`,
+      [limit]
     ),
     // Degrades to null where the wallet schema is not applied, rather than failing all alerts.
-    tolerateMissingTable(
-      () =>
-        partnerAdminQuery<Record<string, unknown>>(
-          `SELECT a.tenant_id, o.legal_name, a.available_balance
-             FROM partner_credit_availability a
-             JOIN partner_organisations o ON o.id = a.tenant_id
-            WHERE a.available_balance < 10`
-        ),
-      null
-    ),
+    walletSchema
+      ? tolerateMissingTable(
+          () =>
+            partnerAdminQuery<Record<string, unknown>>(
+              `SELECT a.tenant_id, o.legal_name, a.available_balance
+                 FROM partner_credit_availability a
+                 JOIN partner_organisations o ON o.id = a.tenant_id
+                WHERE a.available_balance < 10
+                ORDER BY a.available_balance ASC, a.tenant_id ASC
+                LIMIT $1`,
+              [limit]
+            ),
+          null
+        )
+      : null,
   ]);
 
   const alerts: DashboardAlert[] = [];
@@ -1006,7 +1130,9 @@ export async function getAlerts(limitRaw: unknown): Promise<DashboardAlert[]> {
           ? "No grading credits available — new work cannot be reserved."
           : `Only ${balance} grading credit(s) available.`,
       recommendedAction: "Contact the partner to top up before their next submission.",
-      detectedAt: new Date().toISOString(),
+      // A live balance threshold, not a recorded event: there is no stored moment at which this
+      // "happened". Stamping now() made it look like a fresh incident on every refresh.
+      detectedAt: null,
       link: `/admin/partners/dashboard?partner=${c.tenant_id}&tab=wallet`,
     });
   }
@@ -1023,7 +1149,7 @@ export async function getAlerts(limitRaw: unknown): Promise<DashboardAlert[]> {
       recommendedAction: suspended
         ? "Review the suspension reason in the audit timeline and decide on reinstatement."
         : "Complete onboarding checks and activate the partner.",
-      detectedAt: iso(o.created_at) ?? new Date().toISOString(),
+      detectedAt: iso(o.created_at),
       link: `/admin/partners/dashboard?partner=${o.id}`,
     });
   }
@@ -1037,7 +1163,7 @@ export async function getAlerts(limitRaw: unknown): Promise<DashboardAlert[]> {
       kind: String(e.kind),
       reason: `Security event "${e.kind}" recorded at ${String(e.severity)} severity.`,
       recommendedAction: "Open the partner's Security tab and confirm the event was expected.",
-      detectedAt: iso(e.created_at) ?? new Date().toISOString(),
+      detectedAt: iso(e.created_at),
       link: `/admin/partners/dashboard?partner=${e.tenant_id}&tab=security`,
     });
   }
@@ -1052,7 +1178,7 @@ export async function getAlerts(limitRaw: unknown): Promise<DashboardAlert[]> {
       kind: `connector_${state}`,
       reason: `${num(r.n)} connector record(s) in ${state}.`,
       recommendedAction: "Resolve from the Connector Operations console.",
-      detectedAt: iso(r.updated_at) ?? new Date().toISOString(),
+      detectedAt: iso(r.updated_at),
       link: `/admin/partner-network`,
     });
   }
@@ -1066,7 +1192,9 @@ export async function getAlerts(limitRaw: unknown): Promise<DashboardAlert[]> {
       kind: "accounts_locked",
       reason: `${num(u.n)} staff account(s) locked by repeated failed logins.`,
       recommendedAction: "Confirm with the partner that the lockouts are legitimate.",
-      detectedAt: iso(u.locked_until) ?? new Date().toISOString(),
+      // `locked_until` is when the lock EXPIRES (a future time), not when it was detected, so it
+      // must not be presented as a detection timestamp.
+      detectedAt: null,
       link: `/admin/partners/dashboard?partner=${u.tenant_id}&tab=staff`,
     });
   }

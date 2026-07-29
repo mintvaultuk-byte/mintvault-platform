@@ -221,9 +221,22 @@ export interface PartnerTableRow {
 
 /** Risk is DERIVED from real signals only (suspension, lockouts, escalations, security events). */
 export interface PartnerRisk {
-  level: "none" | "low" | "medium" | "high";
+  level: RiskLevel;
   reasons: string[];
 }
+
+export const RISK_LEVELS = ["none", "low", "medium", "high"] as const;
+export type RiskLevel = (typeof RISK_LEVELS)[number];
+
+export function isRiskLevel(v: unknown): v is RiskLevel {
+  return typeof v === "string" && (RISK_LEVELS as readonly string[]).includes(v);
+}
+
+/**
+ * Ordering of severity. Shared so the SQL `CASE` in dashboard-service and the JS `deriveRisk`
+ * cannot drift on which signal wins — there is one ranking, proven equivalent by test.
+ */
+export const RISK_RANK: Record<RiskLevel, number> = { none: 0, low: 1, medium: 2, high: 3 };
 
 // ---------------------------------------------------------------------------
 // C/D. Drill-down sections
@@ -408,7 +421,15 @@ export interface DashboardAlert {
   kind: string;
   reason: string;
   recommendedAction: string;
-  detectedAt: string;
+  /**
+   * When the underlying CONDITION was recorded in the database — a real stored timestamp.
+   *
+   * `null` for alerts derived from a live balance/threshold (e.g. "credits low"), which have no
+   * stored detection event. Those are conditions observed at query time, not things that
+   * "happened at" a moment, and stamping them with `now()` made every refresh look like a fresh
+   * incident. The UI must render null as an evaluated-now state, never as a detection time.
+   */
+  detectedAt: string | null;
   /** Admin-relative link to the record this alert is about. */
   link: string;
 }
@@ -424,7 +445,14 @@ export function sortAlerts(alerts: DashboardAlert[]): DashboardAlert[] {
   return [...alerts].sort((a, b) => {
     const bySeverity = ALERT_SEVERITY_RANK[a.severity] - ALERT_SEVERITY_RANK[b.severity];
     if (bySeverity !== 0) return bySeverity;
-    return b.detectedAt.localeCompare(a.detectedAt);
+    // Undated (live-condition) alerts sort after dated ones of equal severity; `id` is the final
+    // tiebreak so the order is deterministic across requests.
+    if (a.detectedAt !== b.detectedAt) {
+      if (a.detectedAt === null) return 1;
+      if (b.detectedAt === null) return -1;
+      return b.detectedAt.localeCompare(a.detectedAt);
+    }
+    return a.id.localeCompare(b.id);
   });
 }
 

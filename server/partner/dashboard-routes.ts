@@ -29,13 +29,14 @@
  * Known inherited limitation: the express-rate-limit default store is in-process, therefore
  * per-Fly-machine — the same accepted trade-off the G4/G5 routers document.
  */
-import { Router, type Express, type Request, type Response } from "express";
+import { Router, type Express, type Request, type Response, type NextFunction } from "express";
 import rateLimit from "express-rate-limit";
 import { requireSuperAdmin } from "../auth";
 import { storage } from "../storage";
 import * as svc from "./dashboard-service";
 import { DashboardError } from "./dashboard-service";
-import { isDashboardPartnerStatus, isPartnerSortKey, isSortDirection } from "@shared/partner-dashboard";
+import { getPartnerReadVisibility, type PartnerReadVisibility } from "./dashboard-visibility";
+import { isDashboardPartnerStatus, isPartnerSortKey, isRiskLevel, isSortDirection } from "@shared/partner-dashboard";
 
 export const PARTNER_DASHBOARD_BASE = "/api/super-admin/partner-dashboard";
 
@@ -50,11 +51,16 @@ const dashboardReadRateLimit = rateLimit({
   legacyHeaders: false,
   validate: false,
   message: { error: { code: "RATE_LIMITED", message: "Too many dashboard requests, please slow down." } },
-  keyGenerator: (req) => {
-    const fwd = req.headers["x-forwarded-for"];
-    if (fwd) return (Array.isArray(fwd) ? fwd[0] : fwd.split(",")[0]).trim();
-    return req.ip || req.socket.remoteAddress || "unknown";
-  },
+  /**
+   * `req.ip` — NOT a hand-parsed `X-Forwarded-For`.
+   *
+   * The app sets `trust proxy = 1` (server/index.ts), so Express already resolves `req.ip` to
+   * the client address one hop in front of Fly's proxy. Reading the raw header instead meant
+   * any caller could rotate the header and mint a fresh rate-limit bucket per request. Trusting
+   * exactly one hop also avoids the opposite failure — collapsing every client onto the proxy's
+   * own IP, which would let one noisy operator throttle all of them.
+   */
+  keyGenerator: (req) => req.ip || req.socket.remoteAddress || "unknown",
 });
 
 function statusFor(code: string): number {
@@ -102,8 +108,24 @@ async function auditRead(
   }
 }
 
-function str(v: unknown): string | undefined {
-  return typeof v === "string" && v.trim() !== "" ? v.trim() : undefined;
+/**
+ * Read a SCALAR query parameter.
+ *
+ * Express parses a repeated parameter (`?status=ACTIVE&status=PENDING`) into an ARRAY. Returning
+ * `undefined` for that shape silently DROPPED the filter and widened the result set — on a
+ * cross-tenant surface, showing more partners than were asked for is a disclosure, not a
+ * cosmetic bug, and it is exactly what the explicit unknown-value rejection below exists to
+ * prevent. So a repeated scalar parameter is a 400, never a silent first/last pick.
+ */
+function scalar(v: unknown, name: string): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (Array.isArray(v)) {
+    throw new DashboardError("INVALID_INPUT", `The "${name}" parameter must be supplied at most once.`);
+  }
+  if (typeof v !== "string") {
+    throw new DashboardError("INVALID_INPUT", `The "${name}" parameter must be a single value.`);
+  }
+  return v.trim() !== "" ? v.trim() : undefined;
 }
 
 /**
@@ -115,18 +137,53 @@ function paramId(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
+/**
+ * Fail-closed visibility gate (applies to EVERY endpoint on this router).
+ *
+ * See dashboard-visibility.ts: if the configured admin role cannot read the FORCE-RLS partner
+ * tables, every query below returns zero rows, and aggregates would render that as a confident
+ * "0 shops / 0 credits / no alerts". One gate in front of all handlers is what guarantees the
+ * dashboard cannot show some sections as zeros while others report unavailable.
+ *
+ * 503, not 500: the request was well-formed and authorised; the dependency is misconfigured.
+ */
+async function requirePartnerReadVisibility(req: Request, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const visibility = await getPartnerReadVisibility();
+    if (!visibility.ok) {
+      // Deliberately no role name, connection string or catalogue detail — the operator is told
+      // WHAT is wrong and that it is a deployment issue, not the database's internals.
+      res.status(503).json({ error: { code: visibility.code, message: visibility.message } });
+      return;
+    }
+    (req as Request & { partnerVisibility?: PartnerReadVisibility }).partnerVisibility = visibility;
+    next();
+  } catch (err) {
+    sendError(res, err);
+  }
+}
+
+/** Wallet relations present AND readable by this role. */
+function walletSchemaOf(req: Request): boolean {
+  const v = (req as Request & { partnerVisibility?: PartnerReadVisibility }).partnerVisibility;
+  return v?.ok === true ? v.walletSchema : false;
+}
+
 export function partnerDashboardRouter(): Router {
   const r = Router();
 
   // Order matters: authenticate first, then throttle, so an unauthenticated flood is
-  // rejected by the cheapest check and never consumes a real admin's rate budget.
+  // rejected by the cheapest check and never consumes a real admin's rate budget. The
+  // visibility probe runs last of the three — it costs a catalogue query (memoised), so it
+  // must sit behind both the auth and the rate gate.
   r.use(requireSuperAdmin);
   r.use(dashboardReadRateLimit);
+  r.use(requirePartnerReadVisibility);
 
   // ---- A. Network overview ----
   r.get("/summary", async (req: Request, res: Response) => {
     try {
-      const summary = await svc.getNetworkSummary();
+      const summary = await svc.getNetworkSummary(walletSchemaOf(req));
       await auditRead(req, "dashboard_summary_viewed", "network", { shops: summary.shops.total });
       res.json({ summary });
     } catch (err) {
@@ -137,10 +194,13 @@ export function partnerDashboardRouter(): Router {
   // ---- B. Partner table ----
   r.get("/partners", async (req: Request, res: Response) => {
     try {
-      const statusRaw = str(req.query.status);
-      const sortRaw = str(req.query.sort);
-      const dirRaw = str(req.query.direction);
-      const riskRaw = str(req.query.risk);
+      const statusRaw = scalar(req.query.status, "status");
+      const sortRaw = scalar(req.query.sort, "sort");
+      const dirRaw = scalar(req.query.direction, "direction");
+      const riskRaw = scalar(req.query.risk, "risk");
+      const searchRaw = scalar(req.query.search, "search");
+      const pageRaw = scalar(req.query.page, "page");
+      const pageSizeRaw = scalar(req.query.pageSize, "pageSize");
 
       // Reject rather than silently ignore an unknown filter/sort — a silently-dropped
       // filter shows the operator more partners than they asked for, which on a
@@ -154,25 +214,26 @@ export function partnerDashboardRouter(): Router {
       if (dirRaw && !isSortDirection(dirRaw)) {
         throw new DashboardError("INVALID_INPUT", "Unknown sort direction.");
       }
-      if (riskRaw && !["none", "low", "medium", "high"].includes(riskRaw)) {
+      if (riskRaw && !isRiskLevel(riskRaw)) {
         throw new DashboardError("INVALID_INPUT", "Unknown risk filter.");
       }
 
       const result = await svc.listPartnersForDashboard(
         {
-          search: str(req.query.search),
+          search: searchRaw,
           status: statusRaw,
           risk: riskRaw,
           sort: sortRaw as never,
           direction: dirRaw as never,
         },
-        req.query.page,
-        req.query.pageSize
+        pageRaw,
+        pageSizeRaw,
+        walletSchemaOf(req)
       );
       await auditRead(req, "dashboard_partners_listed", "network", {
         returned: result.rows.length,
         total: result.total,
-        filters: { status: statusRaw ?? null, risk: riskRaw ?? null, searched: Boolean(str(req.query.search)) },
+        filters: { status: statusRaw ?? null, risk: riskRaw ?? null, searched: Boolean(searchRaw) },
       });
       res.json(result);
     } catch (err) {
@@ -183,7 +244,7 @@ export function partnerDashboardRouter(): Router {
   // ---- I. Alerts ----
   r.get("/alerts", async (req: Request, res: Response) => {
     try {
-      const alerts = await svc.getAlerts(req.query.limit);
+      const alerts = await svc.getAlerts(scalar(req.query.limit, "limit"), walletSchemaOf(req));
       await auditRead(req, "dashboard_alerts_viewed", "network", { returned: alerts.length });
       res.json({ alerts });
     } catch (err) {
@@ -226,7 +287,7 @@ export function partnerDashboardRouter(): Router {
   section(
     "/partners/:partnerId/wallet",
     "dashboard_partner_wallet_viewed",
-    (id) => svc.getPartnerWallet(id),
+    (id, req) => svc.getPartnerWallet(id, walletSchemaOf(req)),
     () => 1
   );
   section(
@@ -263,7 +324,11 @@ export function partnerDashboardRouter(): Router {
   r.get("/partners/:partnerId/audit", async (req: Request, res: Response) => {
     try {
       const partnerId = paramId(req.params.partnerId);
-      const result = await svc.getPartnerAuditTimeline(partnerId, req.query.page, req.query.pageSize);
+      const result = await svc.getPartnerAuditTimeline(
+        partnerId,
+        scalar(req.query.page, "page"),
+        scalar(req.query.pageSize, "pageSize")
+      );
       await auditRead(req, "dashboard_partner_audit_viewed", partnerId, {
         returned: result.rows.length,
         total: result.total,
