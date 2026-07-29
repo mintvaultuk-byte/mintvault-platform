@@ -133,10 +133,18 @@ export async function withPartnerAdminTransaction<T>(fn: (client: pg.PoolClient)
   }
 }
 
-/** Test/shutdown helper. */
+/**
+ * Test/shutdown helper. Also drops the admin capability cache: that cache records a property of the
+ * ROLE behind adminPool, so once the pool is discarded the cached verdict describes a connection that
+ * no longer exists. Without this, replacing PARTNER_ADMIN_DATABASE_URL with a role that lacks
+ * BYPASSRLS keeps reporting ready. Verified: before this coupling, a swap to a non-BYPASSRLS role
+ * still returned ok=true.
+ */
 export async function closePartnerPools(): Promise<void> {
   await pool?.end().catch(() => {});
   await adminPool?.end().catch(() => {});
   pool = null;
   adminPool = null;
+  const { resetPartnerAdminCapabilityCache } = await import("./admin-capability");
+  resetPartnerAdminCapabilityCache();
 }
