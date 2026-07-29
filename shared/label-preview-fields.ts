@@ -19,6 +19,10 @@ const str = (v: unknown, max = 200): string | null => {
   return s ? s.slice(0, max) : null;
 };
 const num = (v: unknown): number | null => {
+  // Number("") is 0, not NaN — so an empty grade field used to arrive as the NUMBER 0,
+  // which the printability rule then reported as an off-ladder grade rather than
+  // "not graded yet". An empty or whitespace-only string is ABSENT, not zero.
+  if (typeof v === "string" && v.trim() === "") return null;
   const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
   return Number.isFinite(n) ? n : null;
 };

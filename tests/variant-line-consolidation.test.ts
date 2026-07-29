@@ -12,8 +12,13 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { execFileSync } from "child_process";
 import { join } from "path";
+import { addedCodeOf, addedJsOf, hasMalformedEscape, stripNonCode } from "./helpers/strip-non-code";
 import { formatVariantLine, hasStructuredVariant, CONSOLIDATED_VARIANT_SCHEME } from "@shared/variant-line";
-import { STRUCTURED_VARIANT_VERSION, validateStructuredVariant, structuredColumnsToCertFields } from "@shared/structured-variant-validate";
+import {
+  STRUCTURED_VARIANT_VERSION,
+  validateStructuredVariant,
+  structuredColumnsToCertFields,
+} from "@shared/structured-variant-validate";
 import { consolidatedVariantForLabel } from "../server/labels";
 import { nextCatalogueRarity } from "../client/src/components/rarity-picker/RarityVariantPicker";
 
@@ -51,7 +56,9 @@ describe("empty structured fields never create separators or placeholders (item 
     expect(formatVariantLine({ finishVariant: "cosmos_holo" })).not.toMatch(/^ ?· | ?· ?$/);
   });
   it("never emits a double separator", () => {
-    expect(formatVariantLine({ rarityCode: "rare_holo", promoType: "", finishVariant: "cosmos_holo" })).not.toContain("·  ·");
+    expect(formatVariantLine({ rarityCode: "rare_holo", promoType: "", finishVariant: "cosmos_holo" })).not.toContain(
+      "·  ·"
+    );
   });
 });
 
@@ -63,7 +70,9 @@ describe("legacy variant/rarity is folded in, never silently erased (item 11)", 
     expect(formatVariantLine({ rarityCode: "rare_holo", variant: "COSMOS_HOLO" })).toBe("Holo Rare · Cosmos Holo");
   });
   it("a structured finish takes precedence over a legacy one, without duplication", () => {
-    expect(formatVariantLine({ rarityCode: "rare_holo", finishVariant: "cosmos_holo", variant: "HOLO" })).toBe("Holo Rare · Cosmos Holo");
+    expect(formatVariantLine({ rarityCode: "rare_holo", finishVariant: "cosmos_holo", variant: "HOLO" })).toBe(
+      "Holo Rare · Cosmos Holo"
+    );
   });
   it("an ordinary legacy rarity is preserved, not dropped, on a mixed cert (backend hostile F1)", () => {
     // legacy rarity RARE_HOLO has no clean structured code — must still print.
@@ -132,7 +141,8 @@ describe("structured columns persist through the canonical mapper (items 1, 2, 3
 });
 
 describe("preview ↔ printed-label parity (items 8, 9, 10)", () => {
-  const v2 = (extra: Record<string, unknown>) => ({ structuredVariantVersion: CONSOLIDATED_VARIANT_SCHEME, ...extra }) as any;
+  const v2 = (extra: Record<string, unknown>) =>
+    ({ structuredVariantVersion: CONSOLIDATED_VARIANT_SCHEME, ...extra }) as any;
 
   it("the printed label wording equals the shared formatter output, upper-cased (summary shows the same words)", () => {
     const cert = v2({ rarityCode: "rare_holo", finishVariant: "cosmos_holo" });
@@ -143,7 +153,11 @@ describe("preview ↔ printed-label parity (items 8, 9, 10)", () => {
   it("saving then rendering produces the same wording the unsaved live preview shows", () => {
     // Preview and print both run the SAME renderer path (consolidatedVariantForLabel)
     // on a scheme-v2 cert, so the unsaved preview and the saved print are identical.
-    const draft = v2({ rarityCode: "special_illustration_rare", finishVariant: "cosmos_holo", promoType: "black_star_promo" });
+    const draft = v2({
+      rarityCode: "special_illustration_rare",
+      finishVariant: "cosmos_holo",
+      promoType: "black_star_promo",
+    });
     const rendered = consolidatedVariantForLabel(draft);
     expect(rendered).toBe(formatVariantLine(draft).toUpperCase());
     expect(rendered).toBe("SPECIAL ILLUSTRATION RARE · BLACK STAR PROMO · COSMOS HOLO");
@@ -211,30 +225,122 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     expect(importLines).not.toMatch(/mvgs|scoring|centering|pristine|grade|grader/i);
   });
   it("no MVGS/grading-CALCULATION engine file was modified on this branch", () => {
-    // The Review-polish + variant-line work may edit labels.ts (the label
-    // renderer, founder-authorised) but must NOT touch any grading-calculation
-    // engine: scoring, centering, pristine gate, input builder, or grader.
+    // labels.ts (the label renderer) and server/grader.ts (the grader WORKFLOW) are
+    // founder-authorised for narrowly scoped safety fixes — see the 2026-07-25 approval
+    // covering the print-batch grade gate, approveGraderCert and applyCertGradeDraft.
+    // The genuine CALCULATION engine is still hard-blocked: scoring tables, the centering
+    // maths, the Pristine gate, the MVGS input builder and the grading prompt.
     const changed = execFileSync("git", ["diff", "--name-only", "origin/main"], { encoding: "utf8" })
       .trim()
       .split("\n")
       .filter(Boolean);
-    const calcEngine = /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|shared\/mvgs-scoring/;
+    // `server/grader.ts` stays INSIDE calcEngine — it is NOT exempted. A change to it is
+    // permitted only if the added lines match one of the explicitly founder-authorised
+    // signatures below AND contain no calculation logic. Anything else fails.
+    //
+    // Two authorised signatures, kept as a UNION rather than replacing one with the other:
+    //   A) the identity/variant draft validation already on main;
+    //   B) PR #254's print-safety work (2026-07-25 approval) — approveGraderCert validating
+    //      against the shared printability rule, and applyCertGradeDraft normalising
+    //      grade_type and refusing malformed kinds via a typed GradeDraftRejected.
+    // A single-signature whitelist rejects the other authorised change, which is why this is
+    // a union and not an overwrite.
+    const calcEngine =
+      /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|shared\/mvgs-scoring/;
     for (const f of changed) {
       if (f === "server/grader.ts") {
         const diff = execFileSync("git", ["diff", "origin/main", "--", f], { encoding: "utf8" });
-        const added = diff
-          .split("\n")
-          .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
-          .join("\n");
-        expect(added).toContain("validateGradeDraftIdentityAndVariant");
-        expect(added).toContain("language            = ${keepStr(nextLanguage, cert.language)}");
-        expect(added).toContain("rarity_code         = ${nextRarityCode}");
-        expect(added).toContain("finish_variant      = ${nextFinishVariant}");
-        expect(added).toContain("promo_type          = ${nextPromoType}");
-        expect(added).not.toMatch(/mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i);
+        // Two representations — see tests/helpers/strip-non-code.ts. `addedCode` keeps tagged
+        // SQL (for identifier/write detection, F2/N4); `addedJs` drops ALL template text so
+        // SQL can never satisfy a JavaScript signature (N5). Tokenised by the TypeScript
+        // parser, so a regex literal cannot swallow the diff (N1).
+        const addedCode = addedCodeOf(diff, "+");
+        const addedJs = addedJsOf(diff, "+");
+        expect(hasMalformedEscape(diff), "server/grader.ts contains a malformed escape sequence").toBe(false);
+        const signatureA =
+          /\bvalidateGradeDraftIdentityAndVariant\s*\(/.test(addedJs) &&
+          /rarity_code\s*=\s*\$\{/.test(addedCode) &&
+          /finish_variant\s*=\s*\$\{/.test(addedCode) &&
+          /promo_type\s*=\s*\$\{/.test(addedCode);
+        const signatureB = /class\s+GradeDraftRejected\b/.test(addedJs) && /\bcheckPrintableGrade\s*\(/.test(addedJs);
+        expect(signatureA || signatureB, "server/grader.ts changed but matches no founder-authorised signature").toBe(
+          true
+        );
+        expect(addedCode).not.toMatch(/mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i);
         continue;
       }
       expect(f, `unexpected change to grading engine: ${f}`).not.toMatch(calcEngine);
     }
+  });
+
+  it("if the grader workflow changed, it added NO scoring, weighting or formula logic", () => {
+    // The narrow-scope half of the founder authorisation: server/grader.ts may gain GUARDS,
+    // but must never gain or alter grade CALCULATION. Hostile review broke the first version
+    // of this check twice — real weighted arithmetic containing none of the blocked
+    // identifiers passed, and prefixing an EXECUTABLE line with a block comment made the
+    // comment-skip swallow it. Both are closed below.
+    const diff = execFileSync("git", ["diff", "--unified=0", "origin/main", "--", "server/grader.ts"], {
+      encoding: "utf8",
+    });
+    if (!diff.trim()) return; // grader.ts untouched on this branch
+
+    const identifiers =
+      /computeMvgsScore|scoreMvgsV2|mvgsTierName|gradeFromMvgsScore|loadMvgsCalibration|isPristine|mvgs|calibration|WEIGHT|weight\s*[:=]|deduction\s*[:=]|penalt/i;
+    // Arithmetic on any grade-ish quantity: a formula does not have to name a helper.
+    const gradeIdent = /(grade|overall|centering|corners|edges|surface|subgrade|score)/i;
+    const arithmetic = /[+\-*/]\s*-?\d|\d\s*[+\-*/]|Math\.(min|max|round|floor|ceil|abs|pow)/;
+
+    // Both added AND removed lines, stripped by the shared scanner. Stripping the whole block
+    // in one pass (rather than line-by-line regexes) is what closes hostile-review F2: a
+    // template literal — single-line or multi-line, nested or not — can no longer hide code,
+    // and a tagged sql`` keeps its SQL text where the guard can see it.
+    for (const raw of addedCodeOf(diff, "both").split("\n")) {
+      const code = raw.trim();
+      if (!code || code === "*" || code.startsWith("*")) continue; // JSDoc continuation line
+
+      expect(code, `grader workflow change must not name grade-calculation machinery: ${code}`).not.toMatch(
+        identifiers
+      );
+      if (gradeIdent.test(code)) {
+        expect(code, `grader workflow change must not do arithmetic on a grade value: ${code}`).not.toMatch(arithmetic);
+      }
+    }
+  });
+
+  it("that guard actually catches a disguised formula (self-test)", () => {
+    // Pins the two bypasses hostile review demonstrated, so the guard cannot silently rot.
+    const identifiers =
+      /computeMvgsScore|scoreMvgsV2|mvgsTierName|gradeFromMvgsScore|loadMvgsCalibration|isPristine|mvgs|calibration|WEIGHT|weight\s*[:=]|deduction\s*[:=]|penalt/i;
+    const gradeIdent = /(grade|overall|centering|corners|edges|surface|subgrade|score)/i;
+    const arithmetic = /[+\-*/]\s*-?\d|\d\s*[+\-*/]|Math\.(min|max|round|floor|ceil|abs|pow)/;
+    const judge = (line: string): boolean => {
+      const code = stripNonCode(line).trim();
+      if (!code) return true; // a pure comment is allowed
+      if (identifiers.test(code)) return false;
+      if (gradeIdent.test(code) && arithmetic.test(code)) return false;
+      return true;
+    };
+    // These MUST be caught:
+    expect(judge("const overall = Math.min(10, c * 0.35 + co * 0.25 + e * 0.2 + s * 0.2);")).toBe(false);
+    expect(judge("const penalty = defects.length * 0.5; grade -= penalty;")).toBe(false);
+    expect(judge("/* guard */ const s = computeMvgsScore(inputs);")).toBe(false);
+    expect(judge("gradeOverall = gradeOverall - 1;")).toBe(false);
+    // F2 — the template-literal bypasses, single-line and nested. Each of these passed the
+    // previous per-line stripper because the whole literal was blanked.
+    expect(
+      judge("await db.execute(sql`UPDATE certificates SET grade = ${computeMvgsScore(x)} WHERE id = ${id}`);")
+    ).toBe(false);
+    expect(judge("const q = sql`SELECT ${inner ? sql`${isPristine(c)}` : sql`1`} FROM certificates`;")).toBe(false);
+    expect(judge("const g = `${overall * 0.9}`;")).toBe(false);
+    // These MUST be allowed (guards and plain comparisons are the whole point):
+    expect(judge("if (!verdict.printable) return { ok: false as const, status: 409, error: verdict.message };")).toBe(
+      true
+    );
+    expect(judge("// grade is recomputed by MVGS elsewhere")).toBe(true);
+    expect(judge("const storedGradeType = normaliseGradeType(cert.gradeType);")).toBe(true);
+    // An operator message may name the MVGS workstation, and may contain digits.
+    expect(judge('error: "Re-run the MVGS workstation so the grade and 4 sub-grades populate.",')).toBe(true);
+    // …but a dynamic import is still caught, because the member access is outside the quotes.
+    expect(judge('const sc = (await import("@shared/mvgs-scoring")).computeMvgsScore;')).toBe(false);
   });
 });

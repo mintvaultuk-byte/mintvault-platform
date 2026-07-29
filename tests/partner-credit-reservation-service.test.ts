@@ -733,7 +733,13 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0024_set_library_base_tables.sql'");
     // And the catalogue persisted-code uniqueness index (also ≥0018) — index-only
     // and additive, but its journal row still trips the later-migration guard first.
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0026_catalogue_abbreviation_unique.sql'");
+    await admin.query(
+      "DELETE FROM schema_migrations WHERE filename = '0026_catalogue_abbreviation_unique.sql'"
+    );
+    // And the Project Control dashboard migration (also ≥0018). It creates only pc_* tables and
+    // has no relationship to partner credits — it is cleared purely so the later-migration guard
+    // stops tripping before the evidence guard can be reached.
+    await admin.query("DELETE FROM schema_migrations WHERE filename = '0030_project_control.sql'");
     // Partner User Management is also a later migration in this branch; remove its
     // journal row to keep this test focused on G6B's immutable evidence guard.
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0031_partner_user_management.sql'");

@@ -130,6 +130,11 @@ const AdminCommunityPage = lazy(() => import("@/pages/admin/community"));
 const AdminPartnerNetworkPage = lazy(() => import("@/pages/admin/partner-network"));
 const AdminPartnerManagementPage = lazy(() => import("@/pages/admin/partner-management"));
 const AdminPartnerManagementDetailPage = lazy(() => import("@/pages/admin/partner-management-detail"));
+const AdminProjectControlPage = lazy(() => import("@/pages/admin/project-control"));
+const AdminProjectControlPackagePage = lazy(() => import("@/pages/admin/project-control-package"));
+const AdminProjectControlShopLaunchPage = lazy(() => import("@/pages/admin/project-control-shop-launch"));
+const AdminProjectControlScannerPage = lazy(() => import("@/pages/admin/project-control-scanner"));
+const AdminPartnerDashboardPage = lazy(() => import("@/pages/admin/partner-dashboard"));
 
 // Partner Portal (Phase 2, Increments A+B) — isolated /partner/* surface. Fails closed at the
 // backend (partner_portal_enabled flag + emergency stop) if the flag is off; not enabled in any
@@ -359,6 +364,17 @@ function Router() {
           <Route path="/admin/vault-quest/card-factory" component={AdminVaultQuestCardFactoryPage} />
           <Route path="/admin/vault-quest" component={AdminVaultQuestPage} />
           <Route path="/admin/community" component={AdminCommunityPage} />
+          {/* Project Control — most specific first, so /shop-launch and /scanner are not
+              swallowed by the /package/:key route or the bare index route. */}
+          <Route path="/admin/project-control/shop-launch" component={AdminProjectControlShopLaunchPage} />
+          <Route path="/admin/project-control/scanner" component={AdminProjectControlScannerPage} />
+          <Route path="/admin/project-control/package/:key" component={AdminProjectControlPackagePage} />
+          <Route path="/admin/project-control" component={AdminProjectControlPage} />
+          {/* Most-specific first. /admin/partners/dashboard MUST stay above any future
+              /admin/partners/:partnerId route, or wouter captures the literal "dashboard". */}
+          <Route path="/admin/partners/dashboard" component={AdminPartnerDashboardPage} />
+          {/* The two blocks above are disjoint prefixes (/admin/project-control* vs
+              /admin/partners/dashboard) and do not shadow one another. */}
           <Route path="/admin/partner-network/partners/:partnerId" component={AdminPartnerManagementDetailPage} />
           <Route path="/admin/partner-network/partners" component={AdminPartnerManagementPage} />
           <Route path="/admin/partner-network" component={AdminPartnerNetworkPage} />

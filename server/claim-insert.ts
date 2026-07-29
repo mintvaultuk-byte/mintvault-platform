@@ -2,6 +2,7 @@ import QRCode from "qrcode";
 import PDFDocument from "pdfkit";
 import path from "path";
 import { APP_BASE_URL } from "./app-url";
+import { ensureFontsRegistered, MV_BLACK, MV_MONO, MV_SANS } from "./labels";
 import { normalizeCertId } from "./lib/cert-id";
 
 const DPI = 360;
@@ -38,7 +39,6 @@ function formatClaimCode(code: string): string {
   if (c.length === 12) return `${c.slice(0, 4)}-${c.slice(4, 8)}-${c.slice(8, 12)}`;
   return c;
 }
-
 
 async function generateQR(url: string, size: number): Promise<Buffer> {
   return await QRCode.toBuffer(url, {
@@ -79,6 +79,9 @@ function roundRect(ctx: any, x: number, y: number, w: number, h: number, r: numb
 }
 
 export async function generateClaimInsertPNG(certId: string, claimCode: string): Promise<Buffer> {
+  // The insert prints on the same sheet as the labels, so it must resolve the SAME bundled
+  // faces rather than whatever fonts the host happens to have. See server/labels.ts.
+  await ensureFontsRegistered();
   const { createCanvas, loadImage } = await import("canvas");
 
   const canvas = createCanvas(PX_W * SCALE, PX_H * SCALE);
@@ -123,7 +126,7 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
     ctx.drawImage(logo, dx, pad, dw, dh);
     logoBottom = pad + dh;
   } else {
-    ctx.font = '900 48px "Arial Black", Arial, sans-serif';
+    ctx.font = `900 48px ${MV_BLACK}`;
     ctx.fillStyle = GOLD;
     ctx.textAlign = "center";
     ctx.fillText("MINTVAULT UK", PX_W / 2, pad + 6);
@@ -136,7 +139,7 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
   // Subtitle is 14px tall → subtitle BOTTOM at logoBottom + 26.
   // 20px gap → header divider at logoBottom + 26 + 20 = logoBottom + 46.
   const subtitleY = logoBottom + 12;
-  ctx.font = '900 30px "Arial Black", Arial, sans-serif';
+  ctx.font = `900 30px ${MV_BLACK}`;
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.fillText("PROFESSIONAL TRADING CARD GRADING", PX_W / 2, subtitleY);
@@ -158,32 +161,32 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
   let y = headerDivY + 22;
 
   // "CLAIM YOUR CARD" (28px) — dark text for inkjet print legibility on white
-  ctx.font = "bold 40px Arial, Helvetica, sans-serif";
+  ctx.font = `bold 40px ${MV_SANS}`;
   ctx.fillStyle = DARK;
   ctx.textAlign = "left";
   ctx.fillText("CLAIM YOUR CERTIFICATE", contentLeft, y);
   y += 60; // 20px gap before next section
 
   // "Certificate No." label (28px Arial Black, pure black)
-  ctx.font = '900 35px "Arial Black", Arial, sans-serif';
+  ctx.font = `900 35px ${MV_BLACK}`;
   ctx.fillStyle = "#000000";
   ctx.fillText("Certificate No.", contentLeft, y);
   y += 48; // 10px gap between label and its value
 
   // Certificate value — restored from PR #90: 28pt bold gold.
-  ctx.font = "bold 60px 'Courier New', Courier, monospace";
+  ctx.font = `bold 60px ${MV_MONO}`;
   ctx.fillStyle = GOLD;
   ctx.fillText(normalCertId, contentLeft, y);
   y += 73;
 
   // "Claim Code" label (28px Arial Black, pure black)
-  ctx.font = '900 35px "Arial Black", Arial, sans-serif';
+  ctx.font = `900 35px ${MV_BLACK}`;
   ctx.fillStyle = "#000000";
   ctx.fillText("Claim Code", contentLeft, y);
   y += 48;
 
   // Claim code value — restored from PR #90: 14pt Courier gold.
-  ctx.font = "bold 45px 'Courier New', Courier, monospace";
+  ctx.font = `bold 45px ${MV_MONO}`;
   ctx.fillStyle = GOLD;
   ctx.fillText(formattedCode, contentLeft, y);
   y += 78;
@@ -196,7 +199,7 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
   y += 19;
 
   // Steps (bold 28px Arial, pure black)
-  ctx.font = "bold 25px Arial, Helvetica, sans-serif";
+  ctx.font = `bold 25px ${MV_SANS}`;
   ctx.fillStyle = "#000000";
   const steps = [
     "1. Visit mintvaultuk.com/claim",
@@ -230,7 +233,7 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
   ctx.drawImage(qrImg, qrX + qrPad, qrY + qrPad, qrSize, qrSize);
 
   // "Scan to claim" caption (bold 22px Arial, pure black)
-  ctx.font = "bold 28px Arial, Helvetica, sans-serif";
+  ctx.font = `bold 28px ${MV_SANS}`;
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.fillText("Scan to claim", qrX + qrBoxSize / 2, qrY + qrBoxSize + 16);
@@ -253,7 +256,7 @@ export async function generateClaimInsertPNG(certId: string, claimCode: string):
   ctx.fillRect(pad, footerLineY, PX_W - pad * 2, 1);
   ctx.globalAlpha = 1;
 
-  ctx.font = '900 30px "Arial Black", Arial, sans-serif';
+  ctx.font = `900 30px ${MV_BLACK}`;
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.fillText("mintvaultuk.com", PX_W / 2, footerTextTop);
