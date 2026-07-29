@@ -31,6 +31,7 @@ import {
 } from "./partner-management-errors";
 import * as svc from "./partner-management-service";
 import type { ActorContext } from "./partner-management-service";
+import { getLastPartnerAdminCapability, getPartnerAdminCapability } from "./admin-capability";
 
 const g5MutationRateLimit = rateLimit({
   windowMs: 60 * 1000,
@@ -60,6 +61,20 @@ function sendError(res: Response, err: unknown): void {
   res.status(g5StatusFor(g5.code)).json({ error: { code: g5.code, message: g5.message } });
 }
 
+async function requirePartnerAdminCapability(_req: Request, res: Response, next: () => void): Promise<void> {
+  const capability = await getPartnerAdminCapability();
+  if (!capability.ok) {
+    res.status(503).json({
+      error: {
+        code: "PARTNER_ADMIN_CAPABILITY_UNAVAILABLE",
+        message: "Partner Super Admin management is not ready.",
+      },
+    });
+    return;
+  }
+  next();
+}
+
 function mutationResponse(res: Response, requestId: string, r: { result: unknown; alreadyCompleted: boolean }): void {
   if (r.alreadyCompleted) {
     res.status(200).json({ ok: true, alreadyCompleted: true, requestId });
@@ -78,6 +93,20 @@ function requirePartnerUserRole(raw: unknown): svc.AdminPartnerRole {
 export function partnerManagementRouter(): Router {
   const r = Router();
   r.use(requireAdmin);
+
+  r.get("/readiness", async (_req, res) => {
+    const last = getLastPartnerAdminCapability();
+    const current = last?.ok ? last : await getPartnerAdminCapability();
+    res.status(current.ok ? 200 : 503).json({
+      checked: true,
+      ready: current.ok,
+      capability: current.capability,
+      checkedAt: current.checkedAt,
+      failureCode: current.ok ? null : current.code,
+    });
+  });
+
+  r.use(requirePartnerAdminCapability);
 
   // ---- READS ----
   r.get("/partners", async (req, res) => {

@@ -23,6 +23,7 @@ vi.mock("@/lib/queryClient", () => ({
   queryClient: { invalidateQueries: vi.fn() },
 }));
 vi.mock("wouter", () => ({
+  Link: ({ href, children, ...props }: any) => createElement("a", { href, ...props }, children),
   useLocation: () => ["/admin/partner-network/partners/p1", vi.fn()],
   useRoute: () => [true, { partnerId: "p1" }],
 }));
@@ -73,6 +74,17 @@ const res = (body: unknown) => Promise.resolve({ ok: true, json: () => Promise.r
 const q = (sel: string) => container.querySelector<HTMLElement>(`[data-testid="${sel}"]`);
 const posts = () => apiRequest.mock.calls.filter((c) => c[0] === "POST");
 
+async function waitForTestId(id: string): Promise<HTMLElement> {
+  for (let i = 0; i < 20; i += 1) {
+    const el = q(id);
+    if (el) return el;
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+  }
+  throw new Error(`Timed out waiting for ${id}`);
+}
+
 function setValue(el: HTMLElement, value: string, evt = "input") {
   const proto =
     el instanceof HTMLTextAreaElement
@@ -93,16 +105,22 @@ async function mount(users: Row[]) {
   });
   (globalThis as { fetch?: unknown }).fetch = vi.fn(() => res({ authenticated: true }));
   const { default: Page } = await import("../client/src/pages/admin/partner-management-detail");
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const qc = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        queryFn: ({ queryKey }) => apiRequest("GET", String(queryKey[0])).then((r) => r.json()),
+      },
+    },
+  });
   await act(async () => {
     root.render(createElement(QueryClientProvider, { client: qc }, createElement(Page)));
   });
+  const usersTab = await waitForTestId("pm-tab-users");
   await act(async () => {
-    q("pm-tab-users")?.click();
+    usersTab.click();
   });
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 20));
-  });
+  if (users.length > 0) await waitForTestId(`pm-user-${users[0].id}`);
 }
 
 async function remount(users: Row[]) {

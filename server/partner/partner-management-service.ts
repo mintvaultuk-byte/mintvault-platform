@@ -778,6 +778,9 @@ export async function revokePartnerInvitation(actor: ActorContext, partnerId: st
         WHERE tenant_id=$1 AND user_id=$2 AND status IN ('PENDING','SENT','DELIVERY_FAILED')`,
       [org.id, userId]
     );
+    if ((r.rowCount ?? 0) < 1) {
+      throw new G5RequestError("PARTNER_INVITATION_NOT_FOUND", "No live invitation exists for this team member.");
+    }
     return {
       result: { revoked: r.rowCount ?? 0 },
       entityType: "partner_user",
@@ -910,15 +913,19 @@ export async function revokePartnerUserSessions(
       userId,
     ]);
     if (exists.rows.length !== 1) throw new G5RequestError("PARTNER_USER_NOT_FOUND", "Partner user not found.");
+    const activeBefore = await partnerAdminQuery(
+      "SELECT 1 FROM partner_sessions WHERE tenant_id=$1 AND user_id=$2 AND revoked_at IS NULL LIMIT 1",
+      [org.id, userId]
+    );
     const r = await partnerAdminQuery(
       "UPDATE partner_sessions SET revoked_at=now() WHERE tenant_id=$1 AND user_id=$2 AND revoked_at IS NULL",
       [org.id, userId]
     );
     return {
-      result: { revoked: r.rowCount ?? 0 },
+      result: { revoked: r.rowCount ?? 0, hadSessions: activeBefore.rows.length > 0 },
       entityType: "partner_user",
       entityId: userId,
-      afterState: { revoked: r.rowCount ?? 0 },
+      afterState: { revoked: r.rowCount ?? 0, hadSessions: activeBefore.rows.length > 0 },
     };
   });
 }

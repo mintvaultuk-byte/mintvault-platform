@@ -14,6 +14,8 @@ export const G5_ERROR_CODES = [
   "PARTNER_USER_NOT_FOUND",
   "PARTNER_ROLE_NOT_CONFIGURED",
   "PARTNER_UNAVAILABLE",
+  "PARTNER_ADMIN_CAPABILITY_UNAVAILABLE",
+  "PARTNER_INVITATION_NOT_FOUND",
   "CONTACT_NOT_FOUND",
   "BRANDING_NOT_FOUND",
   "INVALID_PARTNER_STATUS",
@@ -88,6 +90,7 @@ export function g5StatusFor(code: G5ErrorCode): number {
       return 403;
     case "PARTNER_NOT_FOUND":
     case "PARTNER_USER_NOT_FOUND":
+    case "PARTNER_INVITATION_NOT_FOUND":
     case "CONTACT_NOT_FOUND":
     case "BRANDING_NOT_FOUND":
       return 404;
@@ -99,6 +102,8 @@ export function g5StatusFor(code: G5ErrorCode): number {
       return 409;
     case "RATE_LIMITED":
       return 429;
+    case "PARTNER_ADMIN_CAPABILITY_UNAVAILABLE":
+      return 503;
     case "REQUEST_ALREADY_COMPLETED":
       return 200;
     case "INTERNAL_ERROR":

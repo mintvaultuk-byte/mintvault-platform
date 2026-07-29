@@ -9,6 +9,7 @@ import { Router, type Express, type Request, type Response } from "express";
 import { requireAdmin } from "../auth";
 import { partnerAdminQuery } from "./db";
 import { PARTNER_FLAGS } from "./flags";
+import { getPartnerAdminCapability } from "./admin-capability";
 import { g5StatusFor, toG5Error } from "./partner-management-errors";
 import { setPartnerUserStatus, type ActorContext } from "./partner-management-service";
 
@@ -42,9 +43,22 @@ function sendManagementError(res: Response, err: unknown): void {
   res.status(g5StatusFor(g5.code)).json({ error: g5.message, code: g5.code });
 }
 
+async function requirePartnerAdminCapability(_req: Request, res: Response, next: () => void): Promise<void> {
+  const capability = await getPartnerAdminCapability();
+  if (!capability.ok) {
+    res.status(503).json({
+      error: "Partner Super Admin management is not ready.",
+      code: "PARTNER_ADMIN_CAPABILITY_UNAVAILABLE",
+    });
+    return;
+  }
+  next();
+}
+
 export function superAdminPartnerRouter(): Router {
   const r = Router();
   r.use(requireAdmin);
+  r.use(requirePartnerAdminCapability);
 
   r.get("/", async (_req, res) => {
     const { rows } = await partnerAdminQuery(

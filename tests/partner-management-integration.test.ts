@@ -41,6 +41,13 @@ let ADMIN_EMAIL: string;
 
 const PM = "/api/super-admin/partner-management";
 
+function dbUrlAsRole(raw: string, username: string, password: string): string {
+  const u = new URL(raw);
+  u.username = username;
+  u.password = password;
+  return u.toString();
+}
+
 (isLocal ? describe : describe.skip)("G5 partner management (main app, real requireAdmin, disposable DB)", () => {
   beforeAll(async () => {
     process.env.MINTVAULT_DATABASE_URL = ADMIN_DB;
@@ -92,6 +99,34 @@ const PM = "/api/super-admin/partner-management";
     await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT);
     const { seedPartnerRbac } = await import("../server/partner/permissions");
     await seedPartnerRbac();
+
+    await admin.query("DROP OWNED BY partner_admin_bypass_test").catch(() => {});
+    await admin.query("DROP OWNED BY partner_app_test").catch(() => {});
+    await admin.query(
+      `DO $$ BEGIN
+         CREATE ROLE partner_admin_bypass_test LOGIN PASSWORD 'synthetic-admin' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+       EXCEPTION WHEN duplicate_object THEN
+         ALTER ROLE partner_admin_bypass_test WITH LOGIN PASSWORD 'synthetic-admin' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+       END$$;`
+    );
+    await admin.query(
+      `DO $$ BEGIN
+         CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+       EXCEPTION WHEN duplicate_object THEN
+         ALTER ROLE partner_app_test WITH LOGIN PASSWORD 'synthetic' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+       END$$;`
+    );
+    await admin.query("GRANT USAGE ON SCHEMA public TO partner_admin_bypass_test");
+    await admin.query(
+      "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO partner_admin_bypass_test"
+    );
+    await admin.query("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO partner_admin_bypass_test");
+    await admin.query("GRANT partner_runtime TO partner_app_test");
+
+    process.env.PARTNER_ADMIN_DATABASE_URL = dbUrlAsRole(ADMIN_DB!, "partner_admin_bypass_test", "synthetic-admin");
+    process.env.PARTNER_DATABASE_URL = dbUrlAsRole(ADMIN_DB!, "partner_app_test", "synthetic");
+    const { resetPartnerAdminCapabilityCache } = await import("../server/partner/admin-capability");
+    resetPartnerAdminCapabilityCache();
 
     const authMod = await import("../server/auth");
     ADMIN_EMAIL = authMod.ADMIN_EMAIL;
