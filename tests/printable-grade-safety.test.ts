@@ -417,3 +417,86 @@ describe("certificate creation cannot mint an unprintable-but-plausible row", ()
     }
   });
 });
+
+/* ------------------------------------------------------------------------------------------ */
+/* THE PROTECTED LABEL DESIGN — standing golden-render protection                              */
+/* ------------------------------------------------------------------------------------------ */
+
+/**
+ * server/labels.ts renders a PHYSICAL product. It used to be protected only by a filename check
+ * in tests/grading-stale-grade-race.test.ts ("PR A scope guard"), which was pinned to a moving
+ * HEAD. That could not tell an authorised change apart from a regression, so it blocked PR #254's
+ * founder-approved print-safety work while catching no design drift at all — a filename says
+ * nothing about pixels.
+ *
+ * This replaces it with the assertion that actually matters: the RENDERED BYTES. The 26 hashes
+ * below were captured on origin/main (6f182624) and independently verified to be byte-identical
+ * on this branch after PR #254 landed — so a guard-only change passes, while any change to a
+ * dimension, colour, font, position, tier name or the MVGS grade panel fails immediately.
+ *
+ * Truncated to 16 hex chars for readability; still 64 bits per label.
+ *
+ * IF ONE OF THESE FAILS: do not update the hash to make it pass. A change here means the
+ * physical product changed. Re-render, look at the PNG, and get founder approval before
+ * touching this table.
+ */
+const GOLDEN_NUMERIC: [string, string, string][] = [
+  ["1", "front", "547b647805113a59"],
+  ["1", "back", "8a102ab4d87b7ec7"],
+  ["1.5", "front", "2d07b82fdd222eb9"],
+  ["1.5", "back", "8a102ab4d87b7ec7"],
+  ["5", "front", "7738e3ba6e6fcaa3"],
+  ["5", "back", "8a102ab4d87b7ec7"],
+  ["7.5", "front", "ba1242d122104a95"],
+  ["7.5", "back", "8a102ab4d87b7ec7"],
+  ["8", "front", "786de34bafe7d72d"],
+  ["8", "back", "8a102ab4d87b7ec7"],
+  ["8.5", "front", "444c966af61361d1"],
+  ["8.5", "back", "8a102ab4d87b7ec7"],
+  ["9", "front", "07de8f3ac884ef59"],
+  ["9", "back", "8a102ab4d87b7ec7"],
+  ["9.5", "front", "0dc652ba63e986ad"],
+  ["9.5", "back", "8a102ab4d87b7ec7"],
+  ["10", "front", "a2852338ff620317"],
+  ["10", "back", "8a102ab4d87b7ec7"],
+];
+
+const GOLDEN_AUTH: [string, string, string][] = [
+  ["NO", "front", "db66f3e18b5a8466"],
+  ["NO", "back", "134ff634395e38dc"],
+  ["AA", "front", "9488ffde498dee77"],
+  ["AA", "back", "134ff634395e38dc"],
+  ["not_original", "front", "db66f3e18b5a8466"],
+  ["not_original", "back", "134ff634395e38dc"],
+  ["authentic_altered", "front", "9488ffde498dee77"],
+  ["authentic_altered", "back", "134ff634395e38dc"],
+];
+
+describe("THE PROTECTED LABEL DESIGN — golden renders (do not update to make them pass)", () => {
+  it("every numeric ladder grade renders to its committed golden hash, front and back", async () => {
+    for (const [grade, side, expected] of GOLDEN_NUMERIC) {
+      const png = await generateLabelPNG(numericCert({ gradeOverall: grade }), side as "front" | "back");
+      expect(sha(png).slice(0, 16), `numeric ${grade} ${side} label design changed`).toBe(expected);
+    }
+  }, 300_000);
+
+  it("every authentication-only kind renders to its committed golden hash, front and back", async () => {
+    for (const [kind, side, expected] of GOLDEN_AUTH) {
+      const png = await generateLabelPNG(
+        authOnlyCert({ gradeType: kind, gradeOverall: null }),
+        side as "front" | "back"
+      );
+      expect(sha(png).slice(0, 16), `auth-only ${kind} ${side} label design changed`).toBe(expected);
+    }
+  }, 300_000);
+
+  it("the golden table covers both sides of every grade and kind it claims to", () => {
+    // A table that silently lost rows would pass vacuously.
+    expect(GOLDEN_NUMERIC.length).toBe(18);
+    expect(GOLDEN_AUTH.length).toBe(8);
+    for (const side of ["front", "back"]) {
+      expect(GOLDEN_NUMERIC.filter(([, s]) => s === side).length).toBe(9);
+      expect(GOLDEN_AUTH.filter(([, s]) => s === side).length).toBe(4);
+    }
+  });
+});
