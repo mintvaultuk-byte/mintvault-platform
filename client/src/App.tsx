@@ -134,6 +134,7 @@ const AdminProjectControlPage = lazy(() => import("@/pages/admin/project-control
 const AdminProjectControlPackagePage = lazy(() => import("@/pages/admin/project-control-package"));
 const AdminProjectControlShopLaunchPage = lazy(() => import("@/pages/admin/project-control-shop-launch"));
 const AdminProjectControlScannerPage = lazy(() => import("@/pages/admin/project-control-scanner"));
+const AdminPartnerDashboardPage = lazy(() => import("@/pages/admin/partner-dashboard"));
 
 // Partner Portal (Phase 2, Increments A+B) — isolated /partner/* surface. Fails closed at the
 // backend (partner_portal_enabled flag + emergency stop) if the flag is off; not enabled in any
@@ -367,6 +368,11 @@ function Router() {
           <Route path="/admin/project-control/scanner" component={AdminProjectControlScannerPage} />
           <Route path="/admin/project-control/package/:key" component={AdminProjectControlPackagePage} />
           <Route path="/admin/project-control" component={AdminProjectControlPage} />
+          {/* Most-specific first. /admin/partners/dashboard MUST stay above any future
+              /admin/partners/:partnerId route, or wouter captures the literal "dashboard". */}
+          <Route path="/admin/partners/dashboard" component={AdminPartnerDashboardPage} />
+          {/* The two blocks above are disjoint prefixes (/admin/project-control* vs
+              /admin/partners/dashboard) and do not shadow one another. */}
           <Route path="/admin/partner-network/partners/:partnerId" component={AdminPartnerManagementDetailPage} />
           <Route path="/admin/partner-network/partners" component={AdminPartnerManagementPage} />
           <Route path="/admin/partner-network" component={AdminPartnerNetworkPage} />

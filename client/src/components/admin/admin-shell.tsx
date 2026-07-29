@@ -92,6 +92,7 @@ const NAV: NavSection[] = [
       { href: "/admin/security", label: "Security", icon: ShieldCheck },
       { href: "/admin/partner-network", label: "Partner Connectors", icon: PackageCheck },
       { href: "/admin/partner-network/partners", label: "Partners", icon: Users },
+      { href: "/admin/partners/dashboard", label: "Partner Dashboard", icon: PackageCheck },
     ],
   },
   {
