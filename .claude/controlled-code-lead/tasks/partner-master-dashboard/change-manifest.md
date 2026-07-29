@@ -42,3 +42,41 @@ Stage 4. Written BEFORE any edit. Baseline `6f182624`.
 ## Rollback
 Delete the 8 added files; revert the 4 modified files (each change is a small additive block).
 No DB change, no deploy, so rollback is `git revert` of a single local commit.
+
+---
+
+# Remediation pass (post hostile review)
+
+Hostile review verdict on `b2a3bdf1` was **NEEDS MORE WORK**: architecture and the Super Admin
+security boundary passed; three blocking correctness defects and five non-blockers were raised.
+
+## Files ADDED
+| File | Purpose | Class |
+|---|---|---|
+| `server/partner/dashboard-visibility.ts` | Catalogue-based cross-tenant READ precondition; fail-closed typed reasons | A |
+| `tests/partner-dashboard-integration.test.ts` | Real-Postgres HTTP suite: D1/D2/D3/N1/N3 + positive Super Admin path | A |
+| `tests/partner-dashboard-risk-equivalence.test.ts` | Proves `RISK_LEVEL_SQL` ≡ `deriveRisk` over 336 signal combinations | A |
+| `tests/partner-dashboard-ui-render.test.ts` | REAL component rendering (loading/error/empty/unavailable/lazy drill-down) | A |
+
+## Files MODIFIED
+| File | Change | Finding |
+|---|---|---|
+| `server/partner/dashboard-service.ts` | Risk ladder moved into SQL (`RISK_LEVEL_SQL`); partner list rebuilt on pre-aggregated CTEs with filtering before pagination and a window-function total; consumed credits derived from consumed reservations; audit ORDER BY made total; alert queries bounded and ordered in SQL; wallet reads gated on schema visibility | D2, D3, N1, N2, N6 |
+| `server/partner/dashboard-routes.ts` | Router-level visibility gate (503 + typed code); `scalar()` rejects repeated params with 400; rate-limit key uses `req.ip` | D1, N3, N5 |
+| `shared/partner-dashboard.ts` | `RISK_LEVELS`/`RISK_RANK`/`isRiskLevel`; `DashboardAlert.detectedAt` now nullable with deterministic sort | D2, N7 |
+| `client/src/pages/admin/partner-dashboard.tsx` | `VisibilityUnavailable` panel replaces the whole surface on a visibility failure; alert timestamps use honest labels; presentational components + `PartnerDrilldown` exported for render tests | D1, N7, N8 |
+| `client/src/pages/admin/partner-dashboard-helpers.ts` | `isVisibilityError`/`visibilityErrorCode`, `alertDetectedLabel`/`alertDetectedTitle` | D1, N7 |
+
+## Database changes
+**None.** No migration was added. The performance fix (N2) removed the per-partner correlated scan
+by restructuring the query, so no index was required — and per the migration rules an index is not
+added merely because it looks useful. Measured at 5,003 partners / 200,120 connector records:
+worst-case sort 206 ms → 33 ms, sort-to-sort spread 37.5× → 1.1×, `loops=5003` occurrences 0.
+
+## Deferred (unchanged scope)
+- **N4 — `/api/super-admin/*` IP allowlist.** NOT changed here. `adminIpAllowlist` is mounted only
+  on `/api/admin` (`server/index.ts:156`) and is opt-in via `ADMIN_IP_ALLOWLIST`. Extending it to
+  `/api/super-admin/*` would silently lock out legitimate Super Admin access wherever that env var
+  is already set, and would change the posture of three pre-existing routers that share the
+  prefix. Tracked as a separate security decision.
+- Manual credit adjustment remains out of scope — still no HTTP write path over the ledger.

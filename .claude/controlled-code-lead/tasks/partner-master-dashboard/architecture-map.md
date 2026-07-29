@@ -76,3 +76,56 @@ across tenants". Tenant scoping is by explicit `WHERE tenant_id = $1` in every q
    `adminIpAllowlist` nor `adminRateLimit` (both mounted on the `/api/admin` prefix only,
    `server/index.ts:156,256` — Lead-verified).
 6. **Render honest empty/unavailable states** mirroring `unavailable: [...]`, never a fake zero.
+
+---
+
+# 5. Remediation pass (post hostile review) — cross-tenant READ visibility
+
+## The requirement this branch now makes explicit
+
+**The Partner Master Dashboard requires an approved cross-tenant database read path.**
+
+Every tenant-scoped partner table is created with `ENABLE` **and `FORCE`** ROW LEVEL SECURITY
+(`migrations/0001_partner_foundation.sql`, `0016_partner_wallet_ledger.sql`,
+`0017_partner_credit_reservations.sql`). `FORCE` removes the owner exemption, so:
+
+> A role without `SUPERUSER` or `BYPASSRLS` **cannot** read the FORCE-RLS partner tables, even
+> when it OWNS them.
+
+`partnerAdminQuery` sets no tenant context (a Super Admin read is cross-tenant by definition), so
+under such a role every dashboard query returns zero rows. The danger is that this is **silent**:
+`count(*)` still returns one row containing `0`, and `SUM(...)` still returns one row containing
+`NULL → 0`. The dashboard would have rendered "0 shops / 0 credits / no alerts / partner not
+found" as fact.
+
+The repository already encodes this requirement elsewhere:
+`migrations/0006_partner_definer_role.sql` REFUSES to apply unless an elevated role can create the
+`BYPASSRLS` `partner_definer` role.
+
+## How the dashboard now fails closed
+
+`server/partner/dashboard-visibility.ts` probes the **catalogue**, not the data, and classifies
+four distinct conditions:
+
+| Condition | Detection | Result |
+|---|---|---|
+| Genuine empty network | visibility OK, queries return 0 rows | **Real zeros**, HTTP 200 |
+| RLS-invisible role | `relrowsecurity` AND NOT (`rolsuper` OR `rolbypassrls`) AND (`relforcerowsecurity` OR owner ≠ current_user) | HTTP 503 `PARTNER_ADMIN_RLS_VISIBILITY_UNAVAILABLE` |
+| Missing schema | a `REQUIRED_RELATIONS` entry absent from `pg_class` | HTTP 503 `PARTNER_ADMIN_SCHEMA_UNAVAILABLE` |
+| Database error | probe throws | HTTP 500, **not cached** |
+
+Applied as router-level middleware, so it covers **every** endpoint uniformly — no section can
+report zeros while another reports unavailable. Wallet relations (0016/0017) are checked
+separately and degrade to `MetricUnavailable` without blocking the rest of the dashboard.
+
+**Deliberately NOT done:** RLS is not weakened or disabled; no tenant context is fabricated; no
+`SECURITY DEFINER` function is added; no privilege is granted.
+
+## Deployment verification requirement (OPEN)
+
+Production and staging role configuration **remains a deployment verification requirement**. Before
+this dashboard is trusted in an environment, confirm the role behind
+`PARTNER_ADMIN_DATABASE_URL` (or `MINTVAULT_DATABASE_URL`) satisfies the visibility precondition.
+If it does not, the dashboard now says so plainly instead of showing zeros — but the underlying
+capability still has to be provisioned, and the same question applies to the pre-existing G4/G5
+partner admin surfaces, which share the pool and have no equivalent guard.
