@@ -203,13 +203,23 @@ describe("programme tree is iterative", () => {
     expect(second).toEqual(first);
   });
 
-  it("no package disappears in a deep tree", () => {
-    const nodes = chain(1000);
-    const packages = nodes.map((n, i) => pkg({ key: `p${i}`, nodeKey: n.key }));
-    const tree = buildProgrammeTree(nodes, packages, NOW);
-    expect(tree.roots[0].rollup.packageCount).toBe(packages.length);
-    expect(tree.orphanedPackages).toHaveLength(0);
-  });
+  // Explicit timeout. This builds 1,000 nodes AND 1,000 packages and rolls the whole tree up,
+  // which is the heaviest case in the file. It passes comfortably in isolation (53/53, three
+  // consecutive runs) but exceeded vitest's 5s default when the full 220-file suite runs it in
+  // parallel with the DB-backed and canvas-rendering suites. That is scheduling contention, not
+  // slow code — the iterative rollup this test exists to prove is what stops the stack overflow.
+  // 30s matches the convention used by the other deliberately-heavy suites in tests/.
+  it(
+    "no package disappears in a deep tree",
+    () => {
+      const nodes = chain(1000);
+      const packages = nodes.map((n, i) => pkg({ key: `p${i}`, nodeKey: n.key }));
+      const tree = buildProgrammeTree(nodes, packages, NOW);
+      expect(tree.roots[0].rollup.packageCount).toBe(packages.length);
+      expect(tree.orphanedPackages).toHaveLength(0);
+    },
+    30_000
+  );
 });
 
 /* ------------------------------------------------------------------------------------------ */
