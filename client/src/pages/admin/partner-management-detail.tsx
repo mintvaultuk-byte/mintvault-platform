@@ -8,7 +8,7 @@
  * so). Unavailable statistics are labeled, never shown as a fake 0. No future-phase controls appear.
  * Logic is in ./partner-management-helpers (unit-tested); this is a thin renderer with data-testids.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminShell, Panel, Badge, AdminButton, Chip } from "@/components/admin";
@@ -52,6 +52,19 @@ const TAB_LABELS: Record<TabKey, string> = {
 const TYPED_CONFIRM = "CONFIRM";
 const USER_ROLES = ["OWNER", "ADMIN", "GRADER", "STAFF"] as const;
 
+/** Shape of one row from GET /partners/:id/users (see listPartnerUsers in partner-management-service). */
+interface PartnerUserRow {
+  id: string;
+  email: string;
+  first_name: string | null;
+  last_name: string | null;
+  role: string;
+  status: string;
+  invitation_status: string | null;
+  last_login_at: string | null;
+  created_at: string;
+}
+
 export default function PartnerManagementDetailPage() {
   const [, navigate] = useLocation();
   const [, params] = useRoute("/admin/partner-network/partners/:partnerId");
@@ -64,6 +77,7 @@ export default function PartnerManagementDetailPage() {
     kind: string;
     title: string;
     highRisk?: boolean;
+    body?: ReactNode;
     run: (reason: string) => Promise<unknown>;
   } | null>(null);
   const [reason, setReason] = useState("");
@@ -130,6 +144,13 @@ export default function PartnerManagementDetailPage() {
     enabled: on && (tab === "users" || tab === "overview"),
   });
 
+  // Only meaningful for the final-owner warning; the server + the 0032 DB trigger are the real guards.
+  const activeOwnerCount = useMemo(
+    () =>
+      ((users.data?.users ?? []) as PartnerUserRow[]).filter((u) => u.role === "OWNER" && u.status === "ACTIVE").length,
+    [users.data]
+  );
+
   const org = detail.data?.organisation;
   const profile = detail.data?.profile;
   const version = profile?.version ?? 1;
@@ -140,7 +161,8 @@ export default function PartnerManagementDetailPage() {
       setBanner("Action completed.");
       closeModal();
       queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
-      queryClient.invalidateQueries({ queryKey: [`${BASE}/partners/${partnerId}`] });
+      queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
+      queryClient.invalidateQueries({ queryKey: pmKeys.audit(partnerId) });
     },
     onError: (err: unknown) =>
       setBanner((err as { body?: { error?: { message?: string } } })?.body?.error?.message ?? "Action failed."),
@@ -158,12 +180,13 @@ export default function PartnerManagementDetailPage() {
     onError: (err: unknown) =>
       setBanner((err as { body?: { error?: { message?: string } } })?.body?.error?.message ?? "Note failed."),
   });
+  const [userReason, setUserReason] = useState("");
   const userMutation = useMutation({
     mutationFn: async () =>
       (
         await apiRequest("POST", `${BASE}/partners/${partnerId}/users`, {
           ...userForm,
-          reason: "partner user invited",
+          reason: userReason,
         })
       ).json(),
     onSuccess: (d) => {
@@ -171,21 +194,12 @@ export default function PartnerManagementDetailPage() {
       setBanner(`Invitation created.${copy}`);
       setUserOpen(false);
       setUserForm({ firstName: "", lastName: "", email: "", role: "OWNER" });
+      setUserReason("");
       queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
     },
     onError: (err: unknown) =>
       setBanner((err as { body?: { error?: { message?: string } } })?.body?.error?.message ?? "Invitation failed."),
-  });
-  const userActionMutation = useMutation({
-    mutationFn: async (run: () => Promise<unknown>) => run(),
-    onSuccess: () => {
-      setBanner("User action completed.");
-      queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
-      queryClient.invalidateQueries({ queryKey: pmKeys.audit(partnerId) });
-    },
-    onError: (err: unknown) =>
-      setBanner((err as { body?: { error?: { message?: string } } })?.body?.error?.message ?? "User action failed."),
   });
 
   function closeModal() {
@@ -194,16 +208,17 @@ export default function PartnerManagementDetailPage() {
     setTyped("");
   }
   useEffect(() => {
-    if (!modal && !noteOpen) return;
+    if (!modal && !noteOpen && !userOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         closeModal();
         setNoteOpen(false);
+        setUserOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [modal, noteOpen]);
+  }, [modal, noteOpen, userOpen]);
 
   const nextStatuses = useMemo(() => (org ? allowedNextStatuses(org.status) : []), [org]);
 
@@ -389,9 +404,10 @@ export default function PartnerManagementDetailPage() {
                         <td>
                           <UserActions
                             user={u}
-                            busy={userActionMutation.isPending}
-                            onRun={(run) => userActionMutation.mutate(run)}
+                            busy={mutation.isPending}
+                            openModal={setModal}
                             partnerId={partnerId}
+                            activeOwnerCount={activeOwnerCount}
                           />
                         </td>
                       </tr>
@@ -700,6 +716,11 @@ export default function PartnerManagementDetailPage() {
                   padding: 8,
                 }}
               />
+              {modal.body && (
+                <div style={{ marginTop: 8, color: "var(--admin-dim, #9c9c9c)" }} data-testid="pm-modal-body">
+                  {modal.body}
+                </div>
+              )}
               {modal.highRisk && (
                 <div style={{ marginTop: 10 }} data-testid="pm-typed-confirm-wrap">
                   <label
@@ -867,9 +888,27 @@ export default function PartnerManagementDetailPage() {
                     ))}
                   </select>
                 </label>
+                <label style={{ display: "grid", gap: 4, fontSize: 12, opacity: 0.9 }}>
+                  Reason (recorded in the audit trail)
+                  <textarea
+                    value={userReason}
+                    onChange={(e) => setUserReason(e.target.value)}
+                    rows={2}
+                    data-testid="pm-user-reason"
+                    style={{ background: "var(--admin-bg, #0d0d0d)", color: "#fff", borderRadius: 8, padding: 8 }}
+                  />
+                </label>
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
-                <AdminButton size="sm" variant="ghost" onClick={() => setUserOpen(false)} data-testid="pm-user-cancel">
+                <AdminButton
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setUserOpen(false);
+                    setUserReason("");
+                  }}
+                  data-testid="pm-user-cancel"
+                >
                   Cancel
                 </AdminButton>
                 <AdminButton
@@ -879,6 +918,7 @@ export default function PartnerManagementDetailPage() {
                     !userForm.firstName.trim() ||
                     !userForm.lastName.trim() ||
                     !userForm.email.trim() ||
+                    !reasonValid(userReason) ||
                     userMutation.isPending
                   }
                   onClick={() => userMutation.mutate()}
@@ -990,42 +1030,89 @@ function UserInput({
   );
 }
 
+/**
+ * Super Admin per-user actions.
+ *
+ * Every one of these is destructive and audited, so every one goes through the page's shared
+ * reason-modal (`openModal`) exactly like the partner status / contact / branding mutations do.
+ * They must never fire on a bare click with a canned reason: the `reason` written to
+ * partner_management_audit is the only record of WHY an operator suspended someone, and a constant
+ * makes the ledger unable to tell "suspended for fraud" from "suspended by mistake".
+ *
+ * Actions that end a person's access (suspend, remove, revoke sessions, demote the last owner) are
+ * marked highRisk, which additionally demands the typed CONFIRM.
+ */
 function UserActions({
   user,
   busy,
-  onRun,
+  openModal,
   partnerId,
+  activeOwnerCount,
 }: {
-  user: any;
+  user: PartnerUserRow;
   busy: boolean;
-  onRun: (run: () => Promise<unknown>) => void;
+  openModal: (m: {
+    kind: string;
+    title: string;
+    highRisk?: boolean;
+    body?: ReactNode;
+    run: (reason: string) => Promise<unknown>;
+  }) => void;
   partnerId: string;
+  activeOwnerCount: number;
 }) {
-  const post = (path: string, body: Record<string, unknown>) => () =>
-    apiRequest("POST", `${BASE}${path}`, body).then((r) => r.json());
+  const post = (path: string, body: Record<string, unknown>) => (reason: string) =>
+    apiRequest("POST", `${BASE}${path}`, { ...body, reason }).then((r) => r.json());
+
+  const [nextRole, setNextRole] = useState<(typeof USER_ROLES)[number]>(
+    (USER_ROLES as readonly string[]).includes(user.role) ? (user.role as (typeof USER_ROLES)[number]) : "STAFF"
+  );
+
+  const pendingInvite = ["PENDING", "SENT", "DELIVERY_FAILED"].includes(user.invitation_status ?? "");
+  // Only warn when the action would actually take the tenant to zero active owners.
+  const isLastActiveOwner = user.role === "OWNER" && user.status === "ACTIVE" && activeOwnerCount <= 1;
+  const lastOwnerWarning = isLastActiveOwner ? (
+    <p
+      style={{ color: "var(--admin-red, #cd8073)", fontSize: 12, marginTop: 6 }}
+      data-testid="pm-user-last-owner-warning"
+    >
+      This is the partner&rsquo;s only active owner. Removing or demoting them locks the partner out of their own
+      account, and the database will reject it.
+    </p>
+  ) : null;
+
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-      <AdminButton
-        size="sm"
-        variant="ghost"
-        disabled={busy}
-        onClick={() =>
-          onRun(post(`/partners/${partnerId}/users/${user.id}/resend-invitation`, { reason: "invitation resent" }))
-        }
-        data-testid={`pm-user-resend-${user.id}`}
-      >
-        Resend
-      </AdminButton>
-      <AdminButton
-        size="sm"
-        variant="ghost"
-        disabled={busy || !["PENDING", "SENT", "DELIVERY_FAILED"].includes(user.invitation_status)}
-        onClick={() =>
-          onRun(
-            post(`/partners/${partnerId}/users/${user.id}/revoke-invitation`, {
-              reason: "invitation revoked by Super Admin",
+      {/* Setup invitations only exist for accounts that have not completed setup. */}
+      {user.status === "INVITED" && pendingInvite && (
+        <AdminButton
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() =>
+            openModal({
+              kind: "user-resend",
+              title: `Resend the setup invitation to ${user.email}?`,
+              body: <p style={{ fontSize: 12 }}>This cancels their current invitation link and emails a new one.</p>,
+              run: post(`/partners/${partnerId}/users/${user.id}/resend-invitation`, {}),
             })
-          )
+          }
+          data-testid={`pm-user-resend-${user.id}`}
+        >
+          Resend
+        </AdminButton>
+      )}
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy || !pendingInvite}
+        onClick={() =>
+          openModal({
+            kind: "user-revoke-invite",
+            title: `Revoke the outstanding invitation for ${user.email}?`,
+            body: <p style={{ fontSize: 12 }}>Their existing setup link stops working immediately.</p>,
+            run: post(`/partners/${partnerId}/users/${user.id}/revoke-invitation`, {}),
+          })
         }
         data-testid={`pm-user-revoke-invite-${user.id}`}
       >
@@ -1034,14 +1121,22 @@ function UserActions({
       <AdminButton
         size="sm"
         variant="ghost"
-        disabled={busy || user.status === "SUSPENDED"}
+        disabled={busy || user.status !== "ACTIVE"}
         onClick={() =>
-          onRun(
-            post(`/partners/${partnerId}/users/${user.id}/status`, {
-              status: "SUSPENDED",
-              reason: "suspended by Super Admin",
-            })
-          )
+          openModal({
+            kind: "user-suspend",
+            title: `Suspend ${user.email}?`,
+            highRisk: true,
+            body: (
+              <>
+                <p style={{ fontSize: 12 }}>
+                  They are signed out immediately and cannot sign in again until reactivated.
+                </p>
+                {lastOwnerWarning}
+              </>
+            ),
+            run: post(`/partners/${partnerId}/users/${user.id}/status`, { status: "SUSPENDED" }),
+          })
         }
         data-testid={`pm-user-suspend-${user.id}`}
       >
@@ -1050,14 +1145,14 @@ function UserActions({
       <AdminButton
         size="sm"
         variant="ghost"
-        disabled={busy || user.status === "ACTIVE"}
+        disabled={busy || user.status !== "SUSPENDED"}
         onClick={() =>
-          onRun(
-            post(`/partners/${partnerId}/users/${user.id}/status`, {
-              status: "ACTIVE",
-              reason: "reactivated by Super Admin",
-            })
-          )
+          openModal({
+            kind: "user-reactivate",
+            title: `Reactivate ${user.email}?`,
+            body: <p style={{ fontSize: 12 }}>They will be able to sign in again with their existing password.</p>,
+            run: post(`/partners/${partnerId}/users/${user.id}/status`, { status: "ACTIVE" }),
+          })
         }
         data-testid={`pm-user-reactivate-${user.id}`}
       >
@@ -1066,17 +1161,64 @@ function UserActions({
       <AdminButton
         size="sm"
         variant="ghost"
+        disabled={busy || user.status === "REVOKED"}
+        onClick={() =>
+          openModal({
+            kind: "user-remove",
+            title: `Remove ${user.email} from this partner?`,
+            highRisk: true,
+            body: (
+              <>
+                <p style={{ fontSize: 12 }}>
+                  This is permanent. Removed members cannot be reactivated &mdash; they must be invited again from
+                  scratch.
+                </p>
+                {lastOwnerWarning}
+              </>
+            ),
+            run: post(`/partners/${partnerId}/users/${user.id}/status`, { status: "REVOKED" }),
+          })
+        }
+        data-testid={`pm-user-remove-${user.id}`}
+      >
+        Remove
+      </AdminButton>
+      {/* Role picker + explicit old → new confirmation. Replaces a window.prompt that accepted any string. */}
+      <select
+        aria-label={`New role for ${user.email}`}
+        value={nextRole}
         disabled={busy}
-        onClick={() => {
-          const role = window.prompt("New role: OWNER, ADMIN, GRADER or STAFF", user.role);
-          if (!role) return;
-          onRun(
-            post(`/partners/${partnerId}/users/${user.id}/role`, {
-              role: role.toUpperCase(),
-              reason: "role changed by Super Admin",
-            })
-          );
-        }}
+        onChange={(e) => setNextRole(e.target.value as (typeof USER_ROLES)[number])}
+        data-testid={`pm-user-role-select-${user.id}`}
+        style={{ background: "var(--admin-bg, #0d0d0d)", color: "#fff", borderRadius: 8, padding: "2px 6px" }}
+      >
+        {USER_ROLES.map((r) => (
+          <option key={r} value={r}>
+            {r}
+          </option>
+        ))}
+      </select>
+      <AdminButton
+        size="sm"
+        variant="ghost"
+        disabled={busy || nextRole === user.role}
+        onClick={() =>
+          openModal({
+            kind: "user-role",
+            title: `Change ${user.email} from ${user.role} to ${nextRole}?`,
+            highRisk: user.role === "OWNER",
+            body: (
+              <>
+                <p style={{ fontSize: 12 }}>
+                  Current role <strong>{user.role}</strong> &rarr; new role <strong>{nextRole}</strong>. They will be
+                  signed out and must sign in again.
+                </p>
+                {nextRole !== "OWNER" ? lastOwnerWarning : null}
+              </>
+            ),
+            run: post(`/partners/${partnerId}/users/${user.id}/role`, { role: nextRole }),
+          })
+        }
         data-testid={`pm-user-role-change-${user.id}`}
       >
         Change role
@@ -1086,11 +1228,15 @@ function UserActions({
         variant="ghost"
         disabled={busy}
         onClick={() =>
-          onRun(
-            post(`/partners/${partnerId}/users/${user.id}/revoke-sessions`, {
-              reason: "sessions revoked by Super Admin",
-            })
-          )
+          openModal({
+            kind: "user-revoke-sessions",
+            title: `Sign ${user.email} out of every device?`,
+            highRisk: true,
+            body: (
+              <p style={{ fontSize: 12 }}>All of their active sessions end immediately. Their password is unchanged.</p>
+            ),
+            run: post(`/partners/${partnerId}/users/${user.id}/revoke-sessions`, {}),
+          })
         }
         data-testid={`pm-user-revoke-${user.id}`}
       >
