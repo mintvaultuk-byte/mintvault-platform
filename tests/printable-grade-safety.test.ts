@@ -468,41 +468,70 @@ describe("certificate creation cannot mint an unprintable-but-plausible row", ()
  * physical product changed. Re-render, look at the PNG, and get founder approval before
  * touching this table.
  */
-/** The pixel goldens describe the Linux production rendering; see the note above. */
-const isLinux = process.platform === "linux";
+/**
+ * THE GOLDENS DESCRIBE linux/x64 — THE PRODUCTION ARCHITECTURE. Do not change this to a
+ * bare platform check.
+ *
+ * ROOT CAUSE, measured 2026-07-29 (do not re-diagnose from scratch):
+ * The BACK-label goldens were originally captured in a Linux container on an arm64 developer
+ * Mac. Fly production is linux/amd64 — proven by the deployed image's own manifest
+ * (`registry.fly.io/mintvault:deployment-01KYN8J3JPPTKWZ281B99X2345` →
+ * `{"architecture":"amd64","os":"linux"}`) — and GitHub's ubuntu runners are amd64 too. The
+ * first time these goldens ever ran on hosted CI they therefore failed, against an arm64
+ * reference that matched neither production nor CI.
+ *
+ * The difference is NOT a design change, a font change, a layout change or a scaling-mode
+ * change. Bisected stage by stage across both architectures — blank canvas, QR buffer bytes,
+ * PNG decode, each raster asset scaled, alpha compositing over white, full composite, PNG
+ * encoding — EVERY stage hashes identically on arm64 and amd64. The whole back label differs
+ * by 19 pixels out of 1,121,812 (0.0017 %) with a maximum channel delta of 1: a
+ * last-significant-bit anti-aliasing difference in the stroked MVGS mark, which is the only
+ * place the label strokes vector text rather than filling glyphs. Fronts, which only fill,
+ * are byte-identical on both architectures — which is exactly why fronts passed CI and backs
+ * did not.
+ *
+ * The values below were regenerated INSIDE the real Fly production image (amd64) with this
+ * branch's source overlaid, and every FRONT hash came back identical to the original table —
+ * confirming the fronts were always right and only the backs were captured on the wrong
+ * architecture.
+ *
+ * IF ONE OF THESE FAILS on linux/x64: it is a real change to the physical product. Do not
+ * update the hash to make it pass.
+ */
+const isProdArch = process.platform === "linux" && process.arch === "x64";
 const GOLDEN_NUMERIC: [string, string, string][] = [
   ["1", "front", "106eeb89e7da3a46"],
-  ["1", "back", "47258a60c48e403d"],
+  ["1", "back", "b8eb321264e8d4d1"],
   ["1.5", "front", "9060c533dbd9268d"],
-  ["1.5", "back", "47258a60c48e403d"],
+  ["1.5", "back", "b8eb321264e8d4d1"],
   ["5", "front", "983c96b2f6b16d04"],
-  ["5", "back", "47258a60c48e403d"],
+  ["5", "back", "b8eb321264e8d4d1"],
   ["7.5", "front", "4abbed8528c83a76"],
-  ["7.5", "back", "47258a60c48e403d"],
+  ["7.5", "back", "b8eb321264e8d4d1"],
   ["8", "front", "75bed94b4c32e24d"],
-  ["8", "back", "47258a60c48e403d"],
+  ["8", "back", "b8eb321264e8d4d1"],
   ["8.5", "front", "96ca7f0ade006884"],
-  ["8.5", "back", "47258a60c48e403d"],
+  ["8.5", "back", "b8eb321264e8d4d1"],
   ["9", "front", "e48329a484263a82"],
-  ["9", "back", "47258a60c48e403d"],
+  ["9", "back", "b8eb321264e8d4d1"],
   ["9.5", "front", "501f3857e4b978c6"],
-  ["9.5", "back", "47258a60c48e403d"],
+  ["9.5", "back", "b8eb321264e8d4d1"],
   ["10", "front", "d10c95e8ce8a97ea"],
-  ["10", "back", "47258a60c48e403d"],
+  ["10", "back", "b8eb321264e8d4d1"],
 ];
 
 const GOLDEN_AUTH: [string, string, string][] = [
   ["NO", "front", "bf6feb5c6bd124bc"],
-  ["NO", "back", "0eb351c1f318d16f"],
+  ["NO", "back", "c4ba630206ffb5bf"],
   ["AA", "front", "24bcb38af5da6625"],
-  ["AA", "back", "0eb351c1f318d16f"],
+  ["AA", "back", "c4ba630206ffb5bf"],
   ["not_original", "front", "bf6feb5c6bd124bc"],
-  ["not_original", "back", "0eb351c1f318d16f"],
+  ["not_original", "back", "c4ba630206ffb5bf"],
   ["authentic_altered", "front", "24bcb38af5da6625"],
-  ["authentic_altered", "back", "0eb351c1f318d16f"],
+  ["authentic_altered", "back", "c4ba630206ffb5bf"],
 ];
 
-describe.skipIf(!isLinux)("THE PROTECTED LABEL DESIGN — golden renders (do not update to make them pass)", () => {
+describe.skipIf(!isProdArch)("THE PROTECTED LABEL DESIGN — golden renders (do not update to make them pass)", () => {
   it("every numeric ladder grade renders to its committed golden hash, front and back", async () => {
     for (const [grade, side, expected] of GOLDEN_NUMERIC) {
       const png = await generateLabelPNG(numericCert({ gradeOverall: grade }), side as "front" | "back");
@@ -595,6 +624,11 @@ describe("the golden tables themselves (platform-independent)", () => {
     // should not get a spurious failure.
     if (process.env.GITHUB_ACTIONS) {
       expect(process.platform, "CI must run on Linux or the pixel goldens skip").toBe("linux");
+      // ARCHITECTURE matters as much as the OS. The goldens describe linux/x64 — the
+      // architecture of Fly production AND of the ubuntu runners. Captured on arm64 they
+      // matched neither, which is how they went red the first time they ever ran hosted.
+      // Asserting it here means the gate below can never silently skip in CI.
+      expect(process.arch, "CI must run on x64 — the goldens describe the production architecture").toBe("x64");
     }
   });
 });

@@ -60,6 +60,29 @@ afterAll(async () => {
   }
 });
 
+/**
+ * FAIL CLOSED IN CI.
+ *
+ * The default admin URL above is a LOCAL-DEVELOPER convenience (127.0.0.1:5432). CI never had
+ * PROJECT_CONTROL_TEST_ADMIN_URL set, so these suites pointed at a port nothing listens on and
+ * 12 tests — migration 0030's shape, idempotency and rollback, plus the concurrency proofs —
+ * could not run. They already fail rather than skip; this pins the CONFIGURATION so the
+ * variable cannot be dropped, and so `PROJECT_CONTROL_DB_TESTS=optional` can never be used to
+ * downgrade them to a silent skip on a hosted runner.
+ */
+describe("Project Control migration coverage is wired up", () => {
+  it("is not silently skipped in CI", () => {
+    if (process.env.GITHUB_ACTIONS) {
+      expect(
+        process.env.PROJECT_CONTROL_TEST_ADMIN_URL,
+        "PROJECT_CONTROL_TEST_ADMIN_URL must be set in CI or migration 0030 is never proven"
+      ).toBeTruthy();
+      expect(OPTIONAL, "PROJECT_CONTROL_DB_TESTS=optional must never be used in CI").toBe(false);
+      expect(reachable, `the Project Control database must be reachable in CI: ${bootError}`).toBe(true);
+    }
+  });
+});
+
 /** Fails the suite when the database is unreachable, unless explicitly downgraded. */
 function db(): pg.Client {
   if (!reachable) {

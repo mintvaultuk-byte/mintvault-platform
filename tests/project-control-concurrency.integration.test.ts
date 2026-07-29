@@ -63,6 +63,25 @@ afterAll(async () => {
   }
 });
 
+/**
+ * FAIL CLOSED IN CI — see the matching block in
+ * tests/project-control-migration.integration.test.ts. The optimistic-locking proofs are the
+ * only thing standing between Project Control and a silent lost update, so their configuration
+ * is asserted rather than assumed.
+ */
+describe("Project Control concurrency coverage is wired up", () => {
+  it("is not silently skipped in CI", () => {
+    if (process.env.GITHUB_ACTIONS) {
+      expect(
+        process.env.PROJECT_CONTROL_TEST_ADMIN_URL,
+        "PROJECT_CONTROL_TEST_ADMIN_URL must be set in CI or optimistic locking is never proven"
+      ).toBeTruthy();
+      expect(OPTIONAL, "PROJECT_CONTROL_DB_TESTS=optional must never be used in CI").toBe(false);
+      expect(reachable, `the Project Control database must be reachable in CI: ${bootError}`).toBe(true);
+    }
+  });
+});
+
 function clients(): { a: pg.Client; b: pg.Client } {
   if (!reachable) {
     if (OPTIONAL) throw new Error(`SKIPPED-BY-CONFIG: ${bootError}`);
