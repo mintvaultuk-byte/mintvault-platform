@@ -47,6 +47,15 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     // clean + apply schema under a REALISTIC non-superuser owner model (DB-F1): tables owned by
     // pn_migrator (non-superuser), the pre-auth SECURITY DEFINER functions owned by partner_definer
     // (BYPASSRLS). This proves partner auth works WITHOUT superuser-owned functions.
+    // Start from a genuinely empty schema. These three suites share one PARTNER_RT_ADMIN database,
+    // and each applies a DIFFERENT migration list as pn_migrator. Without a reset the second suite
+    // re-runs an earlier migration's `CREATE OR REPLACE FUNCTION` over a definer function a later
+    // migration has already redefined, and PostgreSQL rejects it with "cannot change return type of
+    // existing function". `DROP OWNED BY partner_runtime` does not help — the functions and tables
+    // are owned by pn_migrator. The database is disposable by contract, so dropping the schema is
+    // safe and is what "disposable DB" already implies.
+    await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
+    await admin.query("CREATE SCHEMA public");
     await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
     await admin.query("DROP OWNED BY partner_connector_runtime").catch(() => {});
     await provisionRealisticRoles(admin);
