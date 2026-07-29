@@ -5,7 +5,7 @@ import { Client } from "pg";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 
 const migrationSql = fs.readFileSync(
-  path.resolve(import.meta.dirname, "../migrations/0019_grading_optimistic_concurrency.sql"),
+  path.resolve(import.meta.dirname, "../migrations/0025_grading_optimistic_concurrency.sql"),
   "utf8"
 );
 

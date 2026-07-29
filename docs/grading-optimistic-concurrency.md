@@ -65,8 +65,8 @@ the token and give a reload instruction on conflict.
 ## Migration and rollout
 
 1. Take the normal backup/checkpoint and rehearse on a disposable PostgreSQL
-   database. Run `npm run db:lint-sql migrations/0019_grading_optimistic_concurrency.sql`.
-2. Apply `0019_grading_optimistic_concurrency.sql`. It is additive and
+   database. Run `npm run db:lint-sql migrations/0025_grading_optimistic_concurrency.sql`.
+2. Apply `0025_grading_optimistic_concurrency.sql`. It is additive and
    idempotent: existing rows receive `grading_version = 1` through the
    non-null default.
 3. Before deploying the server, temporarily set

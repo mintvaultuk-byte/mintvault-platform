@@ -722,7 +722,7 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     // Reach the evidence guard exactly as a correct reverse-order rollback would: later
     // migrations are no longer journalled, while G6B's immutable lifecycle evidence remains intact.
     await admin.query(
-      "DELETE FROM schema_migrations WHERE filename IN ('0018_correction_audit_index.sql', '0019_grading_optimistic_concurrency.sql')"
+      "DELETE FROM schema_migrations WHERE filename IN ('0018_correction_audit_index.sql', '0025_grading_optimistic_concurrency.sql')"
     );
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/

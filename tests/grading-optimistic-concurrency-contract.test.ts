@@ -8,7 +8,7 @@ const read = (relative: string) => fs.readFileSync(path.join(root, relative), "u
 describe("grading optimistic-concurrency contract", () => {
   it("adds a non-null integer token with an additive migration and manual rollback guidance", () => {
     const schema = read("shared/schema.ts");
-    const migration = read("migrations/0019_grading_optimistic_concurrency.sql");
+    const migration = read("migrations/0025_grading_optimistic_concurrency.sql");
     const rollback = read("migrations/rollback-grading-optimistic-concurrency.sql");
 
     expect(schema).toContain('gradingVersion: integer("grading_version").notNull().default(1)');

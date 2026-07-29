@@ -895,7 +895,7 @@ describe("Partner Network G6C Super Admin credit adjustments on PostgreSQL 17.10
         "0016_partner_wallet_ledger.sql",
         "0017_partner_credit_reservations.sql",
         "0018_correction_audit_index.sql",
-        "0019_grading_optimistic_concurrency.sql",
+        "0025_grading_optimistic_concurrency.sql",
       ])
     );
     expect(new Set(numbers).size).toBe(numbers.length);
