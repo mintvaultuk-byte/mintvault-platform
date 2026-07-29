@@ -127,7 +127,7 @@ and refuse a broken configuration.
 
 ## Partner Network — G6D deployment-owner migration (0019)
 
-`0019_partner_submission_credit_lifecycle.sql` has a stricter, intentional migration-time
+`0027_partner_submission_credit_lifecycle.sql` has a stricter, intentional migration-time
 requirement than ordinary Partner migrations. It provisions and transfers ownership of five
 `SECURITY DEFINER` functions to the no-login `partner_credit_lifecycle_definer` role, which has
 `BYPASSRLS` only because the narrow connector release path must cross `FORCE ROW LEVEL SECURITY`

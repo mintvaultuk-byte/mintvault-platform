@@ -84,8 +84,8 @@ async function main(): Promise<void> {
     }
 
     const g6d = migration(
-      "0019_partner_submission_credit_lifecycle.sql",
-      resolve("migrations/0019_partner_submission_credit_lifecycle.sql")
+      "0027_partner_submission_credit_lifecycle.sql",
+      resolve("migrations/0027_partner_submission_credit_lifecycle.sql")
     );
     const projectControl = migration(
       "0020_project_control_dashboard.sql",

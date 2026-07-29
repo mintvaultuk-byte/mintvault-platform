@@ -1,4 +1,4 @@
--- Rollback for 0019_partner_submission_credit_lifecycle.sql. NOT a numbered migration.
+-- Rollback for 0027_partner_submission_credit_lifecycle.sql. NOT a numbered migration.
 --
 -- Owner-controlled recovery only. Do not use this to repair an edited applied
 -- migration checksum: first obtain owner approval, preserve evidence, execute
@@ -115,7 +115,7 @@ END$$;
 DO $$
 BEGIN
   IF to_regclass('public.schema_migrations') IS NOT NULL THEN
-    DELETE FROM schema_migrations WHERE filename = '0019_partner_submission_credit_lifecycle.sql';
+    DELETE FROM schema_migrations WHERE filename = '0027_partner_submission_credit_lifecycle.sql';
   END IF;
 END$$;
 

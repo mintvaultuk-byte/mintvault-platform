@@ -12,7 +12,7 @@ the database-migration runbook, and isolated verification/handover material.
 | `scripts/audit/run-g6d-project-control-owner-verification.ts` | New isolated PG17 chain proof for 0001–0018 → 0019 → frozen 0020, including journal, grants, ownership, and append-only checks.                                                       |
 | `docs/runbooks/db-migration-safety.md`                        | Adds the governed 0019 deployment-owner runbook.                                                                                                                                      |
 
-The following were deliberately not changed: `migrations/0019_partner_submission_credit_lifecycle.sql`,
+The following were deliberately not changed: `migrations/0027_partner_submission_credit_lifecycle.sql`,
 the frozen Project Control candidate, migration 0020, application role grants, feature flags, and
 production/staging configuration.
 

@@ -1,4 +1,4 @@
--- 0019_partner_submission_credit_lifecycle.sql
+-- 0027_partner_submission_credit_lifecycle.sql
 -- Partner Network G6D: submission-credit lifecycle integration.
 --
 -- Prerequisites: connector imports plus the complete 0016/0017 accounting
@@ -31,7 +31,7 @@ BEGIN
      OR to_regclass('public.partner_connector_imports') IS NULL
      OR to_regclass('public.partner_submissions') IS NULL
      OR to_regclass('public.submissions') IS NULL THEN
-    RAISE EXCEPTION '0019_partner_submission_credit_lifecycle requires the complete connector-import and 0016/0017 credit migration set';
+    RAISE EXCEPTION '0027_partner_submission_credit_lifecycle requires the complete connector-import and 0016/0017 credit migration set';
   END IF;
 END$$;
 

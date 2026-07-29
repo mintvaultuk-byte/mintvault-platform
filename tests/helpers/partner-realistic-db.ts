@@ -81,7 +81,7 @@ export const PARTNER_MIGRATIONS_WITH_G6B = [
 export const PARTNER_MIGRATIONS_WITH_G6D = [
   ...PARTNER_MIGRATIONS_WITH_G6B,
   "0018_correction_audit_index",
-  "0019_partner_submission_credit_lifecycle",
+  "0027_partner_submission_credit_lifecycle",
 ] as const;
 
 export const MIGRATOR_ROLE = "pn_migrator";
@@ -92,7 +92,7 @@ export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposab
  * deployment owner. PostgreSQL 16+ tracks membership grantors, so a restricted migration login
  * cannot safely grant and revoke membership in a BYPASSRLS definer that it does not administer.
  */
-export const DEPLOYMENT_OWNER_MIGRATIONS = new Set(["0019_partner_submission_credit_lifecycle"]);
+export const DEPLOYMENT_OWNER_MIGRATIONS = new Set(["0027_partner_submission_credit_lifecycle"]);
 
 export interface RealisticMigrationExecution {
   restrictedMigrator: string[];
@@ -155,7 +155,7 @@ export async function applyMigrationsRealistic(
     deploymentOwner: [],
   };
   await provisionRealisticRoles(admin);
-  if (migrations.includes("0019_partner_submission_credit_lifecycle")) {
+  if (migrations.includes("0027_partner_submission_credit_lifecycle")) {
     // Provision the dedicated G6D definer as an elevated one-time operation,
     // then let the migration login grant and revoke its own temporary
     // membership. The post-migration assertion proves no SET ROLE path remains.
@@ -189,7 +189,7 @@ export async function applyMigrationsRealistic(
     await admin.query(migrationSql(name));
     execution.deploymentOwner.push(name);
   }
-  if (migrations.includes("0019_partner_submission_credit_lifecycle")) {
+  if (migrations.includes("0027_partner_submission_credit_lifecycle")) {
     const membership = await admin.query<{ count: string }>(
       `SELECT count(*)::text AS count
          FROM pg_auth_members m
