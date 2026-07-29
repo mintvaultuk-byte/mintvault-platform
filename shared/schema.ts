@@ -321,6 +321,69 @@ export const cards = pgTable("cards", {
   notes: text("notes"),
 });
 
+/**
+ * Second-stage crop-integrity diagnostics stored inside the `crop_geometry`
+ * jsonb column (see certificates.cropGeometry). Structural mirror of
+ * server/image-processing.ts CropIntegrityReport — declared here rather than
+ * imported so `shared/` keeps no dependency on `server/`. Type-only: adding
+ * these keys needs no migration.
+ */
+export interface CropIntegrityDiagnostics {
+  side?: "front" | "back";
+  pre: { w: number; h: number; aspect: number } | null;
+  proposed: { w: number; h: number; aspect: number } | null;
+  accepted: { w: number; h: number; aspect: number } | null;
+  decision: "accepted" | "rejected" | "detect_failed" | "error";
+  reasons: string[];
+  edgeTrimPx: { top: number; bottom: number; left: number; right: number } | null;
+  trimFraction: { horizontal: number; vertical: number } | null;
+  discardedBandContentFraction: { top: number; bottom: number; left: number; right: number } | null;
+  fallback: "none" | "untightened_input" | "uniform_inset" | "input_on_error";
+  whitewash: {
+    applied: boolean;
+    paintedFraction: number;
+    reason?: string;
+    matSat?: number;
+    borderSat?: number;
+    satStop?: number;
+  } | null;
+  cropConfidence: "high" | "low";
+}
+
+/**
+ * First-stage physical-card isolation forensics, stored inside `crop_geometry`.
+ * Structural mirror of server/image-processing.ts CardIsolationOutcome —
+ * declared here so `shared/` keeps no dependency on `server/`. Type-only:
+ * `crop_geometry` is jsonb, so adding these keys needs no migration.
+ */
+export interface CardIsolationDiagnostics {
+  method: "physical_card_rect" | "legacy_bbox" | "fail_closed";
+  trusted: boolean;
+  /** True when no trustworthy card rectangle existed — face needs review. */
+  requiresRecapture: boolean;
+  rect: {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+    w: number;
+    h: number;
+    aspect: number;
+    pxPerMm: number;
+    signalCount: number;
+    confidence: "high" | "low";
+    trusted: boolean;
+    reasons: string[];
+  } | null;
+  margin: {
+    requestedMm: number;
+    appliedPx: { top: number; bottom: number; left: number; right: number };
+    appliedMm: { top: number; bottom: number; left: number; right: number };
+    degraded: boolean;
+  } | null;
+  reasons: string[];
+}
+
 export const certificates = pgTable("certificates", {
   id: serial("id").primaryKey(),
   cardId: integer("card_id"),
@@ -442,6 +505,32 @@ export const certificates = pgTable("certificates", {
       pre_padding_px: { top: number; bottom: number; left: number; right: number };
       post_asymmetry_px: { horizontal: number; vertical: number };
       extended: boolean;
+    } | null;
+    // First-stage physical-card isolation. Records WHY the scanner
+    // intermediate is card-relative (or why it could not be made so). Added
+    // with the sleeved-card isolation fix: MV642 shipped a 1441×1967 "cropped"
+    // image that was really the whole 1474×2000 scan, bed and jig included,
+    // and nothing in the old forensics said so.
+    isolation?: {
+      front?: CardIsolationDiagnostics | null;
+      back?: CardIsolationDiagnostics | null;
+      requires_recapture?: boolean;
+    } | null;
+    // Second-stage (tightenForDisplay) crop-integrity forensics. Added with the
+    // front-crop content-loss fix: the first-pass fields above cannot show a
+    // destructive second-stage crop (MV602 recorded extended:false on both
+    // faces while the front lost 17.3% of its height). jsonb column — this is a
+    // TYPE-ONLY extension, no migration required. Older rows simply lack the key.
+    tighten?: {
+      front?: CropIntegrityDiagnostics | null;
+      back?: CropIntegrityDiagnostics | null;
+      cross_face?: {
+        consistent: boolean;
+        aspect_delta: number;
+        trim_delta: { horizontal: number; vertical: number };
+        reasons: string[];
+        rolled_back: "front" | "back" | null;
+      } | null;
     } | null;
     pipeline_version?: string;
     recorded_at?: string;
@@ -1346,7 +1435,7 @@ export const cardIdentificationCorrections = pgTable(
     idxField: index("idx_card_id_corrections_field").on(t.field),
     idxCreated: index("idx_card_id_corrections_created").on(t.createdAt),
     idxRequest: index("idx_card_id_corrections_request").on(t.requestId),
-  }),
+  })
 );
 
 export const cardIdentificationRequests = pgTable(
@@ -1365,7 +1454,7 @@ export const cardIdentificationRequests = pgTable(
   (t) => ({
     uqKey: uniqueIndex("uq_card_id_requests_key").on(t.idempotencyKey),
     idxCreated: index("idx_card_id_requests_created").on(t.createdAt),
-  }),
+  })
 );
 
 export type CardIdentificationCorrection = typeof cardIdentificationCorrections.$inferSelect;

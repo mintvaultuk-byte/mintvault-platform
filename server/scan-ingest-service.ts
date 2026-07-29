@@ -20,6 +20,7 @@ import {
   type AiGrading,
 } from "./ai-grading-service";
 import { runScanJob } from "./lib/scan-job-queue";
+import type { CardIsolationOutcome, CropIntegrityReport, CropIntegrityReasonCode } from "./image-processing";
 
 /**
  * Build a server-log suffix exposing the Postgres SQLSTATE + detail behind a
@@ -402,9 +403,7 @@ export async function processScanInBackground(
     // Two-scanner safety: the other scanner may have deleted this cert between
     // ingest and this background job. Skip the whole pipeline — the UPDATE
     // guards downstream would no-op anyway, this just avoids the wasted work.
-    const live = await db.execute(
-      sql`SELECT 1 FROM certificates WHERE id = ${certInfo.id} AND deleted_at IS NULL`
-    );
+    const live = await db.execute(sql`SELECT 1 FROM certificates WHERE id = ${certInfo.id} AND deleted_at IS NULL`);
     if (live.rows.length === 0) {
       console.log(`[process-scan] cert=${certInfo.certId} soft-deleted mid-ingest — skipping pipeline`);
       return;
@@ -413,9 +412,7 @@ export async function processScanInBackground(
     // staleness marker. Bumping it when the job actually STARTS means
     // "stale processing" measures started-but-died pipelines, not certs
     // that merely sat in a busy queue behind 3-4 scanners' worth of cards.
-    await db.execute(
-      sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${certInfo.id} AND deleted_at IS NULL`
-    );
+    await db.execute(sql`UPDATE certificates SET updated_at = NOW() WHERE id = ${certInfo.id} AND deleted_at IS NULL`);
     const { frontVariants, backVariants, timing } = await uploadImagesToCert(certInfo.id, frontBuf, backBuf);
     console.log(`[process-scan] images processed cert=${certInfo.certId}`);
 
@@ -525,7 +522,8 @@ async function uploadImagesToCertUnlocked(
   backBuffer: Buffer | null
 ): Promise<{ frontVariants: any; backVariants: any | null; timing: { sharpMs: number; r2Ms: number } }> {
   const tImg = process.hrtime.bigint();
-  const { maskRoundedCorners, tightenForDisplay } = await import("./image-processing");
+  const { maskRoundedCorners, tightenForDisplay, emptyCropIntegrityReport, evaluateCrossFaceConsistency } =
+    await import("./image-processing");
   const sharp = (await import("sharp")).default;
 
   // Resolve cert number for display-key path (images/{CERT}/…). The stored
@@ -620,16 +618,126 @@ async function uploadImagesToCertUnlocked(
       .toBuffer();
   }
 
+  // Each side carries a crop-integrity report; the gate inside tightenForDisplay
+  // fails closed on its own, and the cross-face check below catches the case
+  // where BOTH sides pass individually but disagree with each other.
+  const frontReport = emptyCropIntegrityReport("front");
+  const backReport = emptyCropIntegrityReport("back");
+
+  // Mat margin the first pass deliberately retained around the card. After
+  // re-centring the opposing margins are equalised, so the expected mat depth
+  // per edge is the mean of each opposing pair. This is what lets the gate and
+  // the whitewash reason PHYSICALLY about where the card starts, instead of
+  // guessing from colour (which is what failed on pale borders).
+  const matMarginFrom = (v: any): { top: number; bottom: number; left: number; right: number } | null => {
+    const p = v?.cropGeometry?.pre_padding_px;
+    if (!p) return null;
+    const x = Math.max(0, Math.round(((p.left ?? 0) + (p.right ?? 0)) / 2));
+    const y = Math.max(0, Math.round(((p.top ?? 0) + (p.bottom ?? 0)) / 2));
+    return { top: y, bottom: y, left: x, right: x };
+  };
+  const frontMatMargin = matMarginFrom(frontVariants);
+  const backMatMargin = backVariants ? matMarginFrom(backVariants) : null;
+
+  // First-stage physical-card isolation outcome. When isolation failed closed
+  // the buffer is the whole scanner frame, so the 16 px uniform inset is
+  // suppressed (inset 0): a frame we could not isolate must not be shipped
+  // looking like a crop. The face is marked for review instead — MV642 was
+  // emitted as a 1441×1967 "cropped" image that was really the entire scan,
+  // scanner bed and lower jig included.
+  const frontIsolation: CardIsolationOutcome | null = frontVariants.cardIsolation ?? null;
+  const backIsolation: CardIsolationOutcome | null = backVariants?.cardIsolation ?? null;
+  const insetFor = (iso: CardIsolationOutcome | null) => (iso?.requiresRecapture ? 0 : undefined);
+
+  const stampIsolationFailure = (report: CropIntegrityReport, iso: CardIsolationOutcome | null) => {
+    if (!iso?.requiresRecapture) return;
+    report.cardDetectionState = "failed";
+    report.outputSafeButDegraded = true;
+    report.cropConfidence = "low";
+    report.usedFallback = true;
+    report.fallback = "untightened_input";
+    for (const r of iso.reasons) {
+      if (!report.reasons.includes(r as CropIntegrityReasonCode)) report.reasons.push(r as CropIntegrityReasonCode);
+    }
+  };
+
   const frontUnpadded = (frontVariants as any).centredUnpadded as Buffer | undefined;
-  const frontTight = await tightenForDisplay(frontUnpadded ?? frontVariants.cropped, certNumber, undefined, "front");
+  const frontSafeSource = frontUnpadded ?? frontVariants.cropped;
+  let frontTight = await tightenForDisplay(
+    frontSafeSource,
+    certNumber,
+    insetFor(frontIsolation),
+    "front",
+    frontReport,
+    frontMatMargin
+  );
+  stampIsolationFailure(frontReport, frontIsolation);
+
+  const backUnpadded = backVariants ? ((backVariants as any).centredUnpadded as Buffer | undefined) : undefined;
+  const backSafeSource = backVariants ? (backUnpadded ?? backVariants.cropped) : null;
+  let backTight = backSafeSource
+    ? await tightenForDisplay(backSafeSource, certNumber, insetFor(backIsolation), "back", backReport, backMatMargin)
+    : null;
+  if (backSafeSource) stampIsolationFailure(backReport, backIsolation);
+
+  if (frontIsolation?.requiresRecapture || backIsolation?.requiresRecapture) {
+    console.warn(
+      `[scan-ingest] cert=${certId} physical-card isolation FAILED CLOSED` +
+        ` front=${frontIsolation?.requiresRecapture ? frontIsolation.reasons.join(",") : "ok"}` +
+        ` back=${backIsolation?.requiresRecapture ? backIsolation.reasons.join(",") : "ok"}` +
+        ` — derivative marked for review/recapture, no misleading inset applied`
+    );
+  }
+
+  // ── CROSS-FACE CONSISTENCY ────────────────────────────────────────────────
+  // Two faces of one physical card must agree. Roll back ONLY the offending
+  // face (the one further from the physical card aspect) to its untightened
+  // source — a correct face is never sacrificed for a bad one. Dimensional
+  // equality alone is deliberately NOT treated as proof of correctness: MV609
+  // was symmetric to within 0.0007 while its white border was being destroyed.
+  const crossFace = evaluateCrossFaceConsistency(
+    frontReport.accepted && frontReport.emittedTrimFraction
+      ? {
+          aspect: frontReport.accepted.aspect,
+          trimFraction: frontReport.emittedTrimFraction,
+          usedFallback: frontReport.usedFallback,
+        }
+      : null,
+    backSafeSource && backReport.accepted && backReport.emittedTrimFraction
+      ? {
+          aspect: backReport.accepted.aspect,
+          trimFraction: backReport.emittedTrimFraction,
+          usedFallback: backReport.usedFallback,
+        }
+      : null
+  );
+  if (!crossFace.consistent && crossFace.rollback) {
+    console.warn(
+      `[scan-ingest] cert=${certId} cross-face crop inconsistency` +
+        ` aspectDelta=${crossFace.aspectDelta.toFixed(4)}` +
+        ` reasons=${crossFace.reasons.join(",")} — rolling back ${crossFace.rollback} to untightened source`
+    );
+    if (crossFace.rollback === "front") {
+      frontTight = frontSafeSource;
+      frontReport.decision = "rejected";
+      frontReport.reasons = [...frontReport.reasons, ...crossFace.reasons];
+      frontReport.fallback = "untightened_input";
+      frontReport.cropConfidence = "low";
+      frontReport.accepted = frontReport.pre;
+    } else if (backSafeSource) {
+      backTight = backSafeSource;
+      backReport.decision = "rejected";
+      backReport.reasons = [...backReport.reasons, ...crossFace.reasons];
+      backReport.fallback = "untightened_input";
+      backReport.cropConfidence = "low";
+      backReport.accepted = backReport.pre;
+    }
+  }
+
   const frontMaskedPng = await maskRoundedCorners(frontTight);
   const frontDisplayPng = await toDisplayPng(frontMaskedPng);
   const frontDisplayJpeg = await toDisplayJpeg(frontMaskedPng);
 
-  const backUnpadded = backVariants ? ((backVariants as any).centredUnpadded as Buffer | undefined) : undefined;
-  const backTight = backVariants
-    ? await tightenForDisplay(backUnpadded ?? backVariants.cropped, certNumber, undefined, "back")
-    : null;
   const backMaskedPng = backTight ? await maskRoundedCorners(backTight) : null;
   const backDisplayPng = backMaskedPng ? await toDisplayPng(backMaskedPng) : null;
   const backDisplayJpeg = backMaskedPng ? await toDisplayJpeg(backMaskedPng) : null;
@@ -716,10 +824,35 @@ async function uploadImagesToCertUnlocked(
   console.log(`[scan-ingest] cert=${certId}: uploaded ${uploads.length} image artefacts to R2 (incl. display PNG)`);
 
   // Persist R2 keys + crop_geometry forensics
+  // pipeline_version bumped: the record now also carries SECOND-stage
+  // (tightenForDisplay) geometry. Previously only the first pass was stored,
+  // so MV602's 17.3% content loss was invisible in forensics — the field said
+  // extended:false for both faces while the front was being destroyed.
   const cropGeometry = {
     front: (frontVariants as any).cropGeometry ?? null,
     back: backVariants ? ((backVariants as any).cropGeometry ?? null) : null,
-    pipeline_version: "converged_v1",
+    isolation: {
+      front: frontIsolation,
+      back: backIsolation,
+      requires_recapture: Boolean(frontIsolation?.requiresRecapture || backIsolation?.requiresRecapture),
+    },
+    tighten: {
+      front: frontReport,
+      back: backSafeSource ? backReport : null,
+      cross_face: {
+        consistent: crossFace.consistent,
+        aspect_delta: +crossFace.aspectDelta.toFixed(4),
+        trim_delta: {
+          horizontal: +crossFace.trimDelta.horizontal.toFixed(4),
+          vertical: +crossFace.trimDelta.vertical.toFixed(4),
+        },
+        reasons: crossFace.reasons,
+        rolled_back: crossFace.rollback,
+        skipped: crossFace.skipped,
+        mat_margin_px: { front: frontMatMargin, back: backMatMargin },
+      },
+    },
+    pipeline_version: "card_isolation_v1",
     recorded_at: new Date().toISOString(),
   };
 
@@ -1132,9 +1265,8 @@ export async function ensureAiDraft(certId: number, opts: { timeoutMs?: number }
  */
 export async function repairEmptyIdentityFromSnapshot(certId: number): Promise<boolean> {
   try {
-    const row = (
-      await db.execute(sql`SELECT card_name, set_name, ai_analysis FROM certificates WHERE id = ${certId}`)
-    ).rows[0] as any;
+    const row = (await db.execute(sql`SELECT card_name, set_name, ai_analysis FROM certificates WHERE id = ${certId}`))
+      .rows[0] as any;
     if (!row) return false;
     const nameEmpty = row.card_name == null || String(row.card_name).trim() === "";
     if (!nameEmpty) return false; // only repair a genuinely missing name

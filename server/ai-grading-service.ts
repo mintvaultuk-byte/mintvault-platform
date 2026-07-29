@@ -212,6 +212,7 @@ export async function generateImageVariants(
       extended: boolean;
     };
     matRgb?: { r: number; g: number; b: number };
+    cardIsolation?: import("./image-processing").CardIsolationOutcome | null;
   }
 > {
   const { deskewCard, cropToYellowBorder, autoCrop, reCentreBitmap, padWithMat } = await import("./image-processing");
@@ -225,6 +226,18 @@ export async function generateImageVariants(
   const yellowResult = await cropToYellowBorder(deskewed, certId);
   let rectCropped: Buffer;
   let matRgb: { r: number; g: number; b: number };
+  // First-stage isolation outcome.
+  //
+  // When cropToYellowBorder fails CLOSED it still returns a result, with the
+  // buffer UNCROPPED on purpose, so autoCrop does not run — a blind trim of a
+  // frame we could not isolate produces exactly the misleading "cropped"
+  // scanner-bed image the guard exists to prevent.
+  //
+  // When it returns NULL, detection failed outright and the pre-existing
+  // autoCrop path is kept (sharp.trim, conservative, unchanged behaviour). The
+  // face is still marked requiresRecapture so downstream suppresses the
+  // misleading uniform inset and flags it for review.
+  let cardIsolation = yellowResult?.isolation ?? null;
   if (yellowResult) {
     rectCropped = yellowResult.buffer;
     matRgb = yellowResult.matRgb;
@@ -232,6 +245,15 @@ export async function generateImageVariants(
     const ac = await autoCrop(deskewed);
     rectCropped = ac.buffer;
     matRgb = ac.matRgb;
+    cardIsolation = {
+      method: "fail_closed",
+      trusted: false,
+      requiresRecapture: true,
+      rect: null,
+      margin: null,
+      nearFullFrame: null,
+      reasons: ["no_contiguous_card_run"],
+    };
   }
 
   // Step 3: deterministic re-centre — measure actual card edges vs mat colour
@@ -298,6 +320,7 @@ export async function generateImageVariants(
     inverted,
     cropGeometry: { pre_padding_px, post_asymmetry_px, extended },
     matRgb,
+    cardIsolation,
   };
 }
 
