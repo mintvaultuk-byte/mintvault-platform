@@ -21,7 +21,7 @@ import bcrypt from "bcryptjs";
 import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
-  PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT,
+  PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_RT_ADMIN;
@@ -62,7 +62,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     await admin.query("ALTER TABLE users OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
-    await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT);
+    await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT);
     // synthetic LOGIN role that inherits the restricted partner_runtime role
     await admin.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
     await admin.query("CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic'");
@@ -406,9 +406,30 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     ).toBe(200);
     expect(
       (await post(`/api/partner/users/${userId}/status`, { status: "SUSPENDED", reason: "left shift" }, cookie)).status
+    ).toBe(400);
+    expect(
+      (
+        await post(
+          "/api/partner/users/11111111-0000-0000-0000-0000000000a7/status",
+          {
+            status: "SUSPENDED",
+            reason: "left shift",
+          },
+          cookie
+        )
+      ).status
     ).toBe(200);
     expect(
-      (await post(`/api/partner/users/${userId}/status`, { status: "ACTIVE", reason: "returned" }, cookie)).status
+      (
+        await post(
+          "/api/partner/users/11111111-0000-0000-0000-0000000000a7/status",
+          {
+            status: "ACTIVE",
+            reason: "returned",
+          },
+          cookie
+        )
+      ).status
     ).toBe(200);
     const live = await login("new-user@a.com");
     expect(live.res.status).toBe(401);
@@ -453,6 +474,29 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
         )
       ).status
     ).toBe(200);
+  });
+
+  it("team management: prototype-key role payloads are rejected and preserve existing roles", async () => {
+    const { cookie } = await login("owner@a.com");
+    for (const role of ["constructor", "toString", "__proto__", "valueOf", "hasOwnProperty"]) {
+      const before = await admin.query<{ codes: string[] }>(
+        `SELECT array_agg(r.code ORDER BY r.code) AS codes
+           FROM partner_user_roles ur JOIN partner_roles r ON r.id=ur.role_id
+          WHERE ur.user_id='11111111-0000-0000-0000-0000000000a6'`
+      );
+      const res = await post(
+        "/api/partner/users/11111111-0000-0000-0000-0000000000a6/role",
+        { role, reason: "bad role" },
+        cookie
+      );
+      expect(res.status).toBe(400);
+      const after = await admin.query<{ codes: string[] }>(
+        `SELECT array_agg(r.code ORDER BY r.code) AS codes
+           FROM partner_user_roles ur JOIN partner_roles r ON r.id=ur.role_id
+          WHERE ur.user_id='11111111-0000-0000-0000-0000000000a6'`
+      );
+      expect(after.rows[0].codes).toEqual(before.rows[0].codes);
+    }
   });
 
   it("team management: GRADER and STAFF routes are denied", async () => {

@@ -81,6 +81,12 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT = [
   "0031_partner_user_management",
 ] as const;
 
+/** Partner user management plus the DB-level final-owner invariant. */
+export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT = [
+  ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT,
+  "0032_partner_final_owner_invariant",
+] as const;
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 

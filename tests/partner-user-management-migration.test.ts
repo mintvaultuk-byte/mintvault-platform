@@ -105,6 +105,27 @@ function sql(name: string): string {
     await admin.query(
       "INSERT INTO partner_invitations (tenant_id, user_id, email, role_code, token_hash, expires_at) SELECT tenant_id, id, email, 'PARTNER_OWNER', encode(sha256(email::bytea),'hex'), now() + interval '1 day' FROM partner_users"
     );
+    await admin.query(
+      `INSERT INTO partner_management_audit
+         (tenant_id, action_type, actor_user_id, actor_email, request_id, entity_type, entity_id, after_state, reason, result)
+       SELECT tenant_id, action_type, id, 'audit@example.test', 'rollback-audit-' || action_type, 'partner_user', id::text, '{}'::jsonb, 'rollback coverage', 'succeeded'
+         FROM partner_users
+         CROSS JOIN (VALUES
+           ('partner_user_invited'),
+           ('partner_invitation_resent'),
+           ('partner_invitation_revoked'),
+           ('partner_invitation_accepted'),
+           ('partner_user_role_changed'),
+           ('partner_user_suspended'),
+           ('partner_user_reactivated'),
+           ('partner_user_sessions_revoked'),
+           ('partner_user_membership_removed')
+         ) AS actions(action_type)
+        LIMIT 9`
+    );
+    await admin.query(
+      "UPDATE partner_invitations SET status='CONSUMED', consumed_at=now() WHERE email='a@example.test'"
+    );
     await admin.query("SET ROLE partner_runtime");
     try {
       expect((await admin.query("SELECT count(*)::int n FROM partner_invitations")).rows[0].n).toBe(0);
@@ -115,9 +136,6 @@ function sql(name: string): string {
       await admin.query("RESET ROLE");
     }
 
-    await admin.query("DELETE FROM partner_invitations");
-    await admin.query("DELETE FROM partner_users");
-    await admin.query("DELETE FROM partner_organisations");
     await admin.query(rollback);
     expect((await admin.query("SELECT to_regclass('public.partner_invitations') AS reg")).rows[0].reg).toBeNull();
     expect(
@@ -127,6 +145,20 @@ function sql(name: string): string {
         )
       ).rows[0].n
     ).toBe(0);
+    expect(
+      (
+        await admin.query(
+          "SELECT convalidated FROM pg_constraint WHERE conrelid='partner_management_audit'::regclass AND conname='chk_partner_management_audit_action'"
+        )
+      ).rows[0].convalidated
+    ).toBe(true);
+    expect(
+      (
+        await admin.query(
+          "SELECT count(*)::int n FROM partner_management_audit WHERE action_type LIKE 'partner_user_%' OR action_type LIKE 'partner_invitation_%'"
+        )
+      ).rows[0].n
+    ).toBeGreaterThan(0);
 
     await admin.query(forward);
     expect((await admin.query("SELECT to_regclass('public.partner_invitations') AS reg")).rows[0].reg).toBe(

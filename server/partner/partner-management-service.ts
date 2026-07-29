@@ -11,7 +11,7 @@
  */
 import { partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import { G5RequestError, canTransitionStatus, isPartnerStatus, type PartnerStatus } from "./partner-management-errors";
-import { hashPassword } from "./auth";
+import { hashPassword, MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
 import { APP_BASE_URL } from "../app-url";
 import crypto from "node:crypto";
@@ -528,6 +528,23 @@ const PARTNER_ROLE_TO_ADMIN_ROLE: Record<string, AdminPartnerRole> = {
   MVGS_ASSESSMENT_TECHNICIAN: "GRADER",
   PARTNER_RECEPTION: "STAFF",
 };
+const ADMIN_ROLE_PRECEDENCE = [
+  "PARTNER_OWNER",
+  "PARTNER_MANAGER",
+  "MVGS_ASSESSMENT_TECHNICIAN",
+  "PARTNER_RECEPTION",
+] as const;
+
+export function isAdminPartnerRole(raw: unknown): raw is AdminPartnerRole {
+  return typeof raw === "string" && Object.prototype.hasOwnProperty.call(ADMIN_ROLE_TO_PARTNER_ROLE, raw);
+}
+
+function displayAdminRole(roleCodes: string[]): AdminPartnerRole | string {
+  for (const code of ADMIN_ROLE_PRECEDENCE) {
+    if (roleCodes.includes(code)) return PARTNER_ROLE_TO_ADMIN_ROLE[code];
+  }
+  return roleCodes[0] ?? "UNASSIGNED";
+}
 
 const INVITE_HOURS = 72;
 
@@ -713,7 +730,7 @@ export async function listPartnerUsers(partnerId: string) {
   return {
     users: rows.map((u: any) => ({
       ...u,
-      role: PARTNER_ROLE_TO_ADMIN_ROLE[u.role_codes?.[0]] ?? u.role_codes?.[0] ?? "STAFF",
+      role: displayAdminRole(u.role_codes ?? []),
       role_codes: undefined,
     })),
   };
@@ -731,13 +748,8 @@ export async function resendPartnerInvitation(actor: ActorContext, partnerId: st
     [org.id, userId]
   );
   if (rows.length !== 1) throw new G5RequestError("PARTNER_USER_NOT_FOUND", "Partner user not found.");
-  if (
-    org.status === "SUSPENDED" ||
-    org.status === "REVOKED" ||
-    rows[0].status === "SUSPENDED" ||
-    rows[0].status === "REVOKED"
-  ) {
-    throw new G5RequestError("PARTNER_UNAVAILABLE", "Invitation cannot be sent for a suspended or revoked account.");
+  if (org.status === "SUSPENDED" || org.status === "REVOKED" || rows[0].status !== "INVITED") {
+    throw new G5RequestError("PARTNER_UNAVAILABLE", "Setup invitations are only available for invited accounts.");
   }
   await recordAttempt(actor, org.id, "partner_invitation_resent", "partner_user", userId, { email: rows[0].email });
   const invite = await createInvitationRecord(
@@ -784,28 +796,59 @@ export async function changePartnerUserRole(
 ) {
   const org = await loadPartner(partnerId);
   const roleCode = ADMIN_ROLE_TO_PARTNER_ROLE[role];
-  if (roleCode !== "PARTNER_OWNER") await ensureCanRemoveOwner(org.id, userId);
-  return withAudit(actor, org.id, "partner_user_role_changed", reason, { userId, roleCode }, async () => {
-    const exists = await partnerAdminQuery("SELECT 1 FROM partner_users WHERE tenant_id=$1 AND id=$2", [
+  return withPartnerAdminTransaction(async (client) => {
+    const exists = await client.query("SELECT 1 FROM partner_users WHERE tenant_id=$1 AND id=$2 FOR UPDATE", [
       org.id,
       userId,
     ]);
     if (exists.rows.length !== 1) throw new G5RequestError("PARTNER_USER_NOT_FOUND", "Partner user not found.");
-    await partnerAdminQuery("DELETE FROM partner_user_roles WHERE tenant_id=$1 AND user_id=$2", [org.id, userId]);
-    await partnerAdminQuery("INSERT INTO partner_user_roles (tenant_id, user_id, role_id) VALUES ($1,$2,$3)", [
+    if (roleCode !== "PARTNER_OWNER") {
+      const ownerCheck = await client.query<{ blocked: boolean }>(
+        `SELECT (
+           u.status='ACTIVE'
+           AND EXISTS (
+             SELECT 1 FROM partner_user_roles ur JOIN partner_roles r ON r.id = ur.role_id
+              WHERE ur.user_id = u.id AND r.code = 'PARTNER_OWNER'
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM partner_users other
+              JOIN partner_user_roles our ON our.user_id = other.id
+              JOIN partner_roles rr ON rr.id = our.role_id
+             WHERE other.tenant_id=$1 AND other.id<>$2 AND other.status='ACTIVE' AND rr.code='PARTNER_OWNER'
+           )
+         ) AS blocked
+          FROM partner_users u WHERE u.tenant_id=$1 AND u.id=$2`,
+        [org.id, userId]
+      );
+      if (ownerCheck.rows[0]?.blocked) {
+        throw new G5RequestError("FINAL_OWNER_REQUIRED", "A partner must keep at least one active owner.");
+      }
+    }
+    const roleRow = await client.query<{ id: string }>("SELECT id FROM partner_roles WHERE code=$1", [roleCode]);
+    if (roleRow.rows.length !== 1) {
+      throw new G5RequestError("PARTNER_ROLE_NOT_CONFIGURED", "Partner role is not configured.");
+    }
+    await client.query("DELETE FROM partner_user_roles WHERE tenant_id=$1 AND user_id=$2", [org.id, userId]);
+    await client.query("INSERT INTO partner_user_roles (tenant_id, user_id, role_id) VALUES ($1,$2,$3)", [
       org.id,
       userId,
-      await roleIdFor(roleCode),
+      roleRow.rows[0].id,
     ]);
-    await partnerAdminQuery(
+    await client.query(
       "UPDATE partner_users SET credential_version=credential_version+1, updated_at=now() WHERE id=$1",
       [userId]
     );
-    await partnerAdminQuery(
+    await client.query(
       "UPDATE partner_sessions SET revoked_at=now() WHERE tenant_id=$1 AND user_id=$2 AND revoked_at IS NULL",
       [org.id, userId]
     );
-    return { result: { ok: true }, entityType: "partner_user", entityId: userId, afterState: { roleCode } };
+    await client.query(
+      `INSERT INTO partner_management_audit
+         (tenant_id, action_type, actor_user_id, actor_email, request_id, entity_type, entity_id, after_state, reason, result)
+       VALUES ($1,'partner_user_role_changed',$2,$3,$4,'partner_user',$5,$6,$7,'succeeded')`,
+      [org.id, actor.actorUserId, actor.actorEmail, actor.requestId, userId, JSON.stringify({ roleCode }), reason]
+    );
+    return { result: { ok: true }, alreadyCompleted: false };
   });
 }
 
@@ -817,6 +860,20 @@ export async function setPartnerUserStatus(
   reason: string
 ) {
   const org = await loadPartner(partnerId);
+  const current = await partnerAdminQuery<{ status: string }>(
+    "SELECT status FROM partner_users WHERE tenant_id=$1 AND id=$2",
+    [org.id, userId]
+  );
+  if (current.rows.length !== 1) throw new G5RequestError("PARTNER_USER_NOT_FOUND", "Partner user not found.");
+  const from = current.rows[0].status;
+  const allowed =
+    from === status ||
+    (from === "INVITED" && status === "REVOKED") ||
+    (from === "ACTIVE" && (status === "SUSPENDED" || status === "REVOKED")) ||
+    (from === "SUSPENDED" && (status === "ACTIVE" || status === "REVOKED"));
+  if (!allowed || from === "REVOKED") {
+    throw new G5RequestError("INVALID_STATUS_TRANSITION", "Team member status transition is not allowed.");
+  }
   if (status !== "ACTIVE") await ensureCanRemoveOwner(org.id, userId);
   const action: AuditAction =
     status === "ACTIVE"
@@ -867,7 +924,13 @@ export async function revokePartnerUserSessions(
 }
 
 export async function acceptPartnerInvitation(token: string, password: string) {
-  if (typeof token !== "string" || token.length < 20 || typeof password !== "string" || password.length < 10) {
+  if (
+    typeof token !== "string" ||
+    token.length < 20 ||
+    typeof password !== "string" ||
+    password.length < MIN_PASSWORD_LEN ||
+    password.length > MAX_PASSWORD_LEN
+  ) {
     return { ok: false as const, reason: "invalid" as const };
   }
   const tokenHash = sha256(token);
@@ -897,8 +960,7 @@ export async function acceptPartnerInvitation(token: string, password: string) {
     const inv = rows[0];
     if (
       !["PENDING", "SENT", "DELIVERY_FAILED"].includes(inv.status) ||
-      inv.user_status === "SUSPENDED" ||
-      inv.user_status === "REVOKED" ||
+      inv.user_status !== "INVITED" ||
       inv.org_status === "SUSPENDED" ||
       inv.org_status === "REVOKED" ||
       new Date(inv.expires_at).getTime() <= Date.now()
@@ -910,9 +972,16 @@ export async function acceptPartnerInvitation(token: string, password: string) {
     }
     await client.query(
       `UPDATE partner_users
-          SET password_hash=$2, status='ACTIVE', credential_version=credential_version+1, updated_at=now()
+          SET password_hash=$2, status='ACTIVE', failed_login_count=0, locked_until=NULL,
+              credential_version=credential_version+1, updated_at=now()
         WHERE id=$1 AND tenant_id=$3`,
       [inv.user_id, pwHash, inv.tenant_id]
+    );
+    await client.query(
+      `UPDATE partner_invitations
+          SET status='REVOKED', revoked_at=now(), updated_at=now()
+        WHERE tenant_id=$1 AND user_id=$2 AND id<>$3 AND status IN ('PENDING','SENT','DELIVERY_FAILED')`,
+      [inv.tenant_id, inv.user_id, inv.id]
     );
     await client.query(
       "UPDATE partner_invitations SET status='CONSUMED', consumed_at=now(), updated_at=now() WHERE id=$1",

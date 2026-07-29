@@ -10,7 +10,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import { usePartnerSession } from "@/hooks/use-partner-session";
-import { partnerErrorMessage, partnerTeam, type PartnerTeamMember, type PartnerTeamRole } from "@/lib/partner-api";
+import {
+  partnerErrorMessage,
+  partnerTeam,
+  type PartnerTeamDisplayRole,
+  type PartnerTeamMember,
+  type PartnerTeamRole,
+} from "@/lib/partner-api";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
 
 const ROLES: Array<{ value: PartnerTeamRole; label: string }> = [
@@ -42,6 +48,10 @@ function badgeVariant(status: string): "default" | "secondary" | "destructive" |
   if (status === "SUSPENDED" || status === "DELIVERY_FAILED") return "destructive";
   if (status === "REVOKED") return "secondary";
   return "outline";
+}
+
+function isEditableRole(role: PartnerTeamDisplayRole): role is PartnerTeamRole {
+  return role === "OWNER" || role === "ADMIN" || role === "GRADER" || role === "STAFF";
 }
 
 export default function PartnerUsersPage() {
@@ -153,7 +163,7 @@ export default function PartnerUsersPage() {
               {users.map((u) => {
                 const isSelf = u.id === session?.userId;
                 const isTargetOwner = u.role === "OWNER";
-                const canModify = canManage && (isOwner || !isTargetOwner);
+                const canModify = canManage && isEditableRole(u.role) && (isOwner || !isTargetOwner);
                 const pendingInvite = ["PENDING", "SENT", "DELIVERY_FAILED"].includes(u.invitationStatus ?? "");
                 return (
                   <TableRow key={u.id} data-testid={`team-row-${u.email}`}>

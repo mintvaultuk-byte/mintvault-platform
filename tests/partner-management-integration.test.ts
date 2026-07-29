@@ -16,7 +16,7 @@ import { Client } from "pg";
 import {
   provisionRealisticRoles,
   applyMigrationsRealistic,
-  PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT,
+  PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN_DB = process.env.PARTNER_MANAGEMENT_RT_ADMIN;
@@ -73,7 +73,7 @@ const PM = "/api/super-admin/partner-management";
     await admin.query("ALTER TABLE users OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
-    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT);
+    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT);
     const { seedPartnerRbac } = await import("../server/partner/permissions");
     await seedPartnerRbac();
 

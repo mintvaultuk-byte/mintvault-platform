@@ -737,6 +737,7 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     // Partner User Management is also a later migration in this branch; remove its
     // journal row to keep this test focused on G6B's immutable evidence guard.
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0031_partner_user_management.sql'");
+    await admin.query("DELETE FROM schema_migrations WHERE filename = '0032_partner_final_owner_invariant.sql'");
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );

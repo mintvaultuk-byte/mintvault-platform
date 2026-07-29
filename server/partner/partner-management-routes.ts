@@ -69,10 +69,10 @@ function mutationResponse(res: Response, requestId: string, r: { result: unknown
 }
 
 function requirePartnerUserRole(raw: unknown): svc.AdminPartnerRole {
-  if (typeof raw !== "string" || !(raw in svc.ADMIN_ROLE_TO_PARTNER_ROLE)) {
+  if (!svc.isAdminPartnerRole(raw)) {
     throw new G5RequestError("VALIDATION_ERROR", "Unknown partner user role.");
   }
-  return raw as svc.AdminPartnerRole;
+  return raw;
 }
 
 export function partnerManagementRouter(): Router {

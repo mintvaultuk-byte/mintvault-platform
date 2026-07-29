@@ -70,10 +70,39 @@ export function partnerRateLimit(opts: LimiterOpts) {
 // account identifier and the IP, so credential-stuffing across accounts from rotating IPs and
 // shared-NAT budget exhaustion are both bounded.
 const acct = (req: Request): string => `${(req.body?.email ?? "").toString().toLowerCase()}|${req.ip}`;
-export const partnerLoginLimiter = partnerRateLimit({ name: "partner_login", windowMs: 15 * 60_000, max: 10, failClosed: true, keyFn: acct });
-export const partnerMfaLimiter = partnerRateLimit({ name: "partner_mfa", windowMs: 15 * 60_000, max: 20, failClosed: true });
-export const partnerResetLimiter = partnerRateLimit({ name: "partner_reset", windowMs: 15 * 60_000, max: 5, failClosed: true, keyFn: acct });
-export const partnerLocationSwitchLimiter = partnerRateLimit({ name: "partner_locswitch", windowMs: 60_000, max: 30, failClosed: true });
+export const partnerLoginLimiter = partnerRateLimit({
+  name: "partner_login",
+  windowMs: 15 * 60_000,
+  max: 10,
+  failClosed: true,
+  keyFn: acct,
+});
+export const partnerMfaLimiter = partnerRateLimit({
+  name: "partner_mfa",
+  windowMs: 15 * 60_000,
+  max: 20,
+  failClosed: true,
+});
+export const partnerResetLimiter = partnerRateLimit({
+  name: "partner_reset",
+  windowMs: 15 * 60_000,
+  max: 5,
+  failClosed: true,
+  keyFn: acct,
+});
+export const partnerLocationSwitchLimiter = partnerRateLimit({
+  name: "partner_locswitch",
+  windowMs: 60_000,
+  max: 30,
+  failClosed: true,
+});
+export const partnerInviteLimiter = partnerRateLimit({
+  name: "partner_invite",
+  windowMs: 15 * 60_000,
+  max: 20,
+  failClosed: true,
+  keyFn: acct,
+});
 
 // Phase 2: submission-mutation limiter. Runs AFTER requirePartnerAuth (so req.partner is set) —
 // keys per authenticated user, not per-IP, so it bounds one account's write volume regardless of

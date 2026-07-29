@@ -25,6 +25,7 @@ import {
   partnerMfaLimiter,
   partnerResetLimiter,
   partnerLocationSwitchLimiter,
+  partnerInviteLimiter,
 } from "./rate-limit";
 import { withTenant, partnerRuntimeQuery } from "./db";
 import { recoveryHash, mfaEncryptionConfigured } from "./mfa";
@@ -34,6 +35,7 @@ import { acceptPartnerInvitation } from "./partner-management-service";
 import { toG5Error, g5StatusFor, requireReason, optionalReason, G5RequestError } from "./partner-management-errors";
 import {
   changeTeamMemberRole,
+  deliverTeamInvitationAfterCommit,
   inviteTeamMember,
   listTeamMembers,
   requirePortalTeamRole,
@@ -222,6 +224,7 @@ export function partnerApiRouter(): Router {
 
   r.post(
     "/users",
+    partnerInviteLimiter,
     requirePartnerCapability("partner.users.manage"),
     requireNotViewOnly,
     requireNotSensitiveFrozen,
@@ -231,7 +234,9 @@ export function partnerApiRouter(): Router {
         const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
           inviteTeamMember(c, req.partner!, req.body, reason)
         );
-        res.json({ ok: true, result });
+        await deliverTeamInvitationAfterCommit(req.partner!.tenantId, result.invitationId, result.delivery);
+        const { delivery: _delivery, ...safeResult } = result;
+        res.json({ ok: true, result: safeResult });
       } catch (err) {
         sendPartnerTeamError(res, err);
       }
@@ -249,7 +254,9 @@ export function partnerApiRouter(): Router {
         const result = await withTenant({ tenantId: req.partner!.tenantId }, (c) =>
           resendTeamInvitation(c, req.partner!, String(req.params.id), reason)
         );
-        res.json({ ok: true, result });
+        await deliverTeamInvitationAfterCommit(req.partner!.tenantId, result.invitationId, result.delivery);
+        const { delivery: _delivery, ...safeResult } = result;
+        res.json({ ok: true, result: safeResult });
       } catch (err) {
         sendPartnerTeamError(res, err);
       }

@@ -90,6 +90,7 @@ export const partnerLocations = {
 
 // ---- team ----
 export type PartnerTeamRole = "OWNER" | "ADMIN" | "GRADER" | "STAFF";
+export type PartnerTeamDisplayRole = PartnerTeamRole | "FINANCE_VIEWER" | "TRAINEE" | "UNASSIGNED";
 export type PartnerTeamStatus = "INVITED" | "ACTIVE" | "SUSPENDED" | "REVOKED";
 
 export interface PartnerTeamMember {
@@ -97,7 +98,7 @@ export interface PartnerTeamMember {
   firstName: string;
   lastName: string;
   email: string;
-  role: PartnerTeamRole;
+  role: PartnerTeamDisplayRole;
   status: PartnerTeamStatus;
   invitationStatus: string | null;
   invitationExpiresAt: string | null;

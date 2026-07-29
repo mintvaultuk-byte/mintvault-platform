@@ -4,6 +4,7 @@ import { writePartnerAudit } from "./audit";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
 import { G5RequestError } from "./partner-management-errors";
 import type { PartnerPrincipal } from "./session";
+import { withTenant } from "./db";
 
 export const PORTAL_ROLE_TO_PARTNER_ROLE = {
   OWNER: "PARTNER_OWNER",
@@ -20,6 +21,17 @@ const PARTNER_ROLE_TO_PORTAL_ROLE: Record<string, PortalTeamRole> = {
   MVGS_ASSESSMENT_TECHNICIAN: "GRADER",
   PARTNER_RECEPTION: "STAFF",
 };
+const PORTAL_ROLE_PRECEDENCE = [
+  "PARTNER_OWNER",
+  "PARTNER_MANAGER",
+  "MVGS_ASSESSMENT_TECHNICIAN",
+  "PARTNER_RECEPTION",
+] as const;
+
+const UNSUPPORTED_ROLE_LABELS: Record<string, string> = {
+  PARTNER_FINANCE_VIEWER: "FINANCE_VIEWER",
+  PARTNER_TRAINEE: "TRAINEE",
+};
 
 const INVITE_HOURS = 72;
 const ACTIVE_INVITE_STATUSES = ["PENDING", "SENT", "DELIVERY_FAILED"];
@@ -33,10 +45,20 @@ function normaliseEmail(raw: string): string {
 }
 
 export function requirePortalTeamRole(raw: unknown): PortalTeamRole {
-  if (typeof raw !== "string" || !(raw in PORTAL_ROLE_TO_PARTNER_ROLE)) {
+  if (typeof raw !== "string" || !Object.prototype.hasOwnProperty.call(PORTAL_ROLE_TO_PARTNER_ROLE, raw)) {
     throw new G5RequestError("VALIDATION_ERROR", "Unknown team role.");
   }
   return raw as PortalTeamRole;
+}
+
+function displayPortalRole(roleCodes: string[]): string {
+  for (const code of PORTAL_ROLE_PRECEDENCE) {
+    if (roleCodes.includes(code)) return PARTNER_ROLE_TO_PORTAL_ROLE[code];
+  }
+  for (const code of roleCodes) {
+    if (UNSUPPORTED_ROLE_LABELS[code]) return UNSUPPORTED_ROLE_LABELS[code];
+  }
+  return "UNASSIGNED";
 }
 
 function forbidForeignPartnerIds(input: unknown, tenantId: string): void {
@@ -134,6 +156,14 @@ async function assertActorMayManageTarget(
   if (opts.status && opts.status !== "ACTIVE") await ensureCanRemoveOwner(c, targetId);
 }
 
+interface PendingInvitationDelivery {
+  email: string;
+  token: string;
+  partnerName: string;
+  roleCode: string;
+  expiresAt: Date;
+}
+
 async function createInvitationRecord(
   c: PoolClient,
   actor: PartnerPrincipal,
@@ -142,7 +172,11 @@ async function createInvitationRecord(
   roleCode: string,
   action: string,
   reason: string
-) {
+): Promise<{
+  invitationId: string;
+  deliveryStatus: string;
+  delivery: PendingInvitationDelivery | null;
+}> {
   const token = crypto.randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + INVITE_HOURS * 60 * 60 * 1000);
   const previous = await c.query<{ id: string }>(
@@ -170,29 +204,7 @@ async function createInvitationRecord(
       previous.rows.map((r) => r.id),
     ]);
   }
-  let deliveryStatus = "DELIVERY_NOT_CONFIGURED";
-  if (invitationDeliveryConfigured()) {
-    try {
-      await deliverInvitationToken({
-        email,
-        token,
-        partnerName: inserted.rows[0].partner_name,
-        roleCode,
-        expiresAt,
-      });
-      await c.query(
-        "UPDATE partner_invitations SET status='SENT', delivered_at=now(), delivery_error=NULL, updated_at=now() WHERE id=$1",
-        [inserted.rows[0].id]
-      );
-      deliveryStatus = "SENT";
-    } catch (err) {
-      await c.query(
-        "UPDATE partner_invitations SET status='DELIVERY_FAILED', delivery_error=$2, updated_at=now() WHERE id=$1",
-        [inserted.rows[0].id, (err as Error).message.slice(0, 500)]
-      );
-      deliveryStatus = "DELIVERY_FAILED";
-    }
-  }
+  const deliveryStatus = invitationDeliveryConfigured() ? "PENDING_DELIVERY" : "DELIVERY_NOT_CONFIGURED";
   await writePartnerAudit(c, {
     tenantId: actor.tenantId,
     actorUserId: actor.userId,
@@ -206,7 +218,34 @@ async function createInvitationRecord(
   return {
     invitationId: inserted.rows[0].id,
     deliveryStatus,
+    delivery: invitationDeliveryConfigured()
+      ? { email, token, partnerName: inserted.rows[0].partner_name, roleCode, expiresAt }
+      : null,
   };
+}
+
+export async function deliverTeamInvitationAfterCommit(
+  tenantId: string,
+  invitationId: string,
+  delivery: PendingInvitationDelivery | null
+): Promise<void> {
+  if (!delivery) return;
+  try {
+    await deliverInvitationToken(delivery);
+    await withTenant({ tenantId }, (c) =>
+      c.query(
+        "UPDATE partner_invitations SET status='SENT', delivered_at=now(), delivery_error=NULL, updated_at=now() WHERE id=$1",
+        [invitationId]
+      )
+    );
+  } catch (err) {
+    await withTenant({ tenantId }, (c) =>
+      c.query(
+        "UPDATE partner_invitations SET status='DELIVERY_FAILED', delivery_error=$2, updated_at=now() WHERE id=$1",
+        [invitationId, (err as Error).message.slice(0, 500)]
+      )
+    );
+  }
 }
 
 export async function listTeamMembers(c: PoolClient) {
@@ -244,7 +283,7 @@ export async function listTeamMembers(c: PoolClient) {
     lastName: u.last_name ?? "",
     email: u.email,
     status: u.status,
-    role: PARTNER_ROLE_TO_PORTAL_ROLE[u.role_codes?.[0]] ?? "STAFF",
+    role: displayPortalRole(u.role_codes ?? []),
     invitationStatus: u.invitation_status,
     invitationExpiresAt: u.invitation_expires_at,
     invitationDeliveredAt: u.invitation_delivered_at,
@@ -264,8 +303,17 @@ export async function inviteTeamMember(c: PoolClient, actor: PartnerPrincipal, i
   const email = typeof body.email === "string" ? normaliseEmail(body.email) : "";
   if (!firstName || !lastName || !email) throw new G5RequestError("VALIDATION_ERROR", "Name and email are required.");
   const exists = await c.query("SELECT 1 FROM partner_users WHERE lower(email)=lower($1) LIMIT 1", [email]);
-  if ((exists.rowCount ?? 0) > 0)
-    throw new G5RequestError("DUPLICATE_PARTNER_USER", "A team member already uses this email.");
+  if ((exists.rowCount ?? 0) > 0) {
+    await writePartnerAudit(c, {
+      tenantId: actor.tenantId,
+      actorUserId: actor.userId,
+      sessionId: actor.sessionId,
+      action: "partner_user_invite_denied",
+      recordType: "partner_user",
+      reason: "ineligible email",
+    });
+    throw new G5RequestError("DUPLICATE_PARTNER_USER", "That team member cannot be invited.");
+  }
   await writePartnerAudit(c, {
     tenantId: actor.tenantId,
     actorUserId: actor.userId,
@@ -305,10 +353,13 @@ async function assertActorMayManageTargetForInvite(c: PoolClient, actor: Partner
 export async function resendTeamInvitation(c: PoolClient, actor: PartnerPrincipal, userId: string, reason: string) {
   await assertActorMayManageTarget(c, actor, userId);
   const target = await loadTarget(c, userId);
-  if (target.status === "SUSPENDED" || target.status === "REVOKED") {
-    throw new G5RequestError("PARTNER_UNAVAILABLE", "Invitation cannot be sent for this account.");
+  if (target.status !== "INVITED") {
+    throw new G5RequestError("PARTNER_UNAVAILABLE", "Setup invitations are only available for invited accounts.");
   }
-  const roleCode = target.role_codes[0] ?? "PARTNER_RECEPTION";
+  const roleCode =
+    PORTAL_ROLE_PRECEDENCE.find((code) => target.role_codes.includes(code)) ??
+    target.role_codes[0] ??
+    "PARTNER_RECEPTION";
   return createInvitationRecord(c, actor, target.id, target.email, roleCode, "partner_invitation_resent", reason);
 }
 
@@ -373,6 +424,15 @@ export async function setTeamMemberStatus(
   status: "ACTIVE" | "SUSPENDED" | "REVOKED",
   reason: string
 ) {
+  const target = await loadTarget(c, userId);
+  const allowed =
+    target.status === status ||
+    (target.status === "INVITED" && status === "REVOKED") ||
+    (target.status === "ACTIVE" && (status === "SUSPENDED" || status === "REVOKED")) ||
+    (target.status === "SUSPENDED" && (status === "ACTIVE" || status === "REVOKED"));
+  if (!allowed || target.status === "REVOKED") {
+    throw new G5RequestError("INVALID_STATUS_TRANSITION", "Team member status transition is not allowed.");
+  }
   await assertActorMayManageTarget(c, actor, userId, { status });
   const r = await c.query(
     `UPDATE partner_users
