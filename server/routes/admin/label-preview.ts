@@ -15,6 +15,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import rateLimit from "express-rate-limit";
 import { generateLabelPNG } from "../../labels";
+import { checkPrintableGrade, UnprintableGradeError } from "@shared/printable-grade";
 import type { CertificateRecord } from "@shared/schema";
 import { buildPreviewFields } from "@shared/label-preview-fields";
 import { canReadCatalogue } from "@shared/catalogue-access";
@@ -101,16 +102,39 @@ export function registerLabelPreviewRoutes(app: Express): void {
           body,
           cert as unknown as Record<string, unknown>,
           await getCatalogueSnapshot(),
-          (cert as unknown as { structuredVariantVersion?: number | null }).structuredVariantVersion,
+          (cert as unknown as { structuredVariantVersion?: number | null }).structuredVariantVersion
         );
       } catch {
         /* preview stays on the legacy variant line if structured derivation throws */
+      }
+      // SAME rule as every print path, so the preview can never show something print
+      // would refuse (and vice versa). A card that has not been graded yet gets an
+      // explicit, honest 422 — the panel shows "not graded yet" instead of the invented
+      // 0 / POOR panel the renderer used to produce.
+      const verdict = checkPrintableGrade({
+        gradeType: (cert as { gradeType?: string | null }).gradeType,
+        gradeOverall: (cert as { gradeOverall?: string | number | null }).gradeOverall,
+      });
+      if (!verdict.printable) {
+        return res.status(422).json({
+          // Concise wording for the small preview panel (the client renders body.error
+          // verbatim). The print paths use the fuller explanation.
+          error:
+            verdict.reason === "missing_numeric_grade"
+              ? "Not graded yet — the preview appears once a grade is set."
+              : (verdict.message ?? "This certificate's grade cannot be previewed yet."),
+          code: "UNPRINTABLE_GRADE",
+          reason: verdict.reason,
+        });
       }
       const png = await generateLabelPNG(cert, "front");
       res.setHeader("Content-Type", "image/png");
       res.setHeader("Cache-Control", "no-store");
       res.send(png);
     } catch (err) {
+      if (err instanceof UnprintableGradeError) {
+        return res.status(422).json({ error: err.message, code: "UNPRINTABLE_GRADE", reason: err.reason });
+      }
       console.error("[label-preview] render failed:", err instanceof Error ? err.message : String(err));
       res.status(500).json({ error: "Failed to render preview." });
     }

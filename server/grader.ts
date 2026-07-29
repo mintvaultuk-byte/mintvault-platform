@@ -13,6 +13,14 @@
  * by any /api/grader/* endpoint).
  */
 import type { Request, Response, NextFunction } from "express";
+import {
+  normaliseGradeType,
+  kindOfGradeType,
+  kindOfOverallGrade,
+  rejectKindChange,
+  gradeTypeToPersist,
+} from "./lib/grade-kind";
+import { checkPrintableGrade } from "@shared/printable-grade";
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 import { storage } from "./storage";
@@ -605,15 +613,58 @@ const keepStr = (a: any, b: any) =>
  * the incoming payload over the cert's current values so an omitted field is
  * never wiped.
  */
+/** Thrown when a draft save is refused for a business-rule reason (not a race). Carries an
+ *  HTTP status so routes can surface the operator message instead of a generic 500. */
+export class GradeDraftRejected extends Error {
+  readonly status: number;
+  constructor(message: string, status = 400) {
+    super(message);
+    this.name = "GradeDraftRejected";
+    this.status = status;
+  }
+}
+
 export async function applyCertGradeDraft(certId: number, body: any): Promise<boolean> {
   const cert = (await storage.getCertificate(certId)) as any;
   if (!cert) throw new Error("Certificate not found");
   const { nextLanguage, nextRarityCode, nextFinishVariant, nextPromoType } = validateGradeDraftIdentityAndVariant(cert, body);
 
   const overall = body.overall_grade;
-  const gradeType = pick(body.grade_type, cert.gradeType) || "numeric";
-  const isNonNum =
-    overall === "AA" || overall === "NO" || gradeType === "authentic_altered" || gradeType === "not_original";
+  // grade_type used to be written VERBATIM from the request body, and the column is plain
+  // `text` with no CHECK constraint — so an arbitrary value ("banana") could be persisted
+  // and would then be treated as numeric everywhere while leaking into the public
+  // population labels, which emit the raw column. Normalise, and derive the kind through
+  // the SAME shared decision the approval routes use so the paths cannot diverge.
+  const storedGradeType = normaliseGradeType(cert.gradeType);
+  const requestedGradeTypeRaw = pick(body.grade_type, cert.gradeType) || "numeric";
+  // Malformed grade_type is refused rather than silently coerced, so a typo can never
+  // reclassify a certificate.
+  if (
+    body.grade_type != null &&
+    String(body.grade_type).trim() !== "" &&
+    normaliseGradeType(body.grade_type) !== String(body.grade_type).trim()
+  ) {
+    throw new GradeDraftRejected("Unrecognised grade type.");
+  }
+  // Kind follows either signal: an explicit NO/AA overall_grade, or a non-numeric
+  // grade_type. (The previous condition omitted the SHORT NO/AA forms from the grade_type
+  // side, so {"overall_grade":"NO"} nulled the grade while grade_type stayed 'numeric'.)
+  const requestedKind =
+    kindOfOverallGrade(overall) !== "numeric" ? kindOfOverallGrade(overall) : kindOfGradeType(requestedGradeTypeRaw);
+  // A draft may set the kind on a never-approved certificate (ordinary grading work) but
+  // may never convert a PUBLISHED one — that is Super Admin Correction Mode's job. This
+  // helper's own UPDATE is scoped `grade_approved_at IS NULL`, so a published row cannot
+  // be reached anyway; the check makes the intent explicit and fails closed if that
+  // scoping is ever relaxed.
+  const kindRejection = rejectKindChange({
+    storedGradeType,
+    requestedKind,
+    isApproved: (cert as { gradeApprovedAt?: unknown }).gradeApprovedAt != null,
+    allowChangeWhenUnapproved: true,
+  });
+  if (kindRejection) throw new GradeDraftRejected(kindRejection);
+  const gradeType = gradeTypeToPersist(storedGradeType, requestedKind);
+  const isNonNum = requestedKind !== "numeric";
   const parsed = parseFloat(overall);
   const gradeNum = isNonNum ? null : Number.isNaN(parsed) ? pick(undefined, cert.gradeOverall) : parsed;
 
@@ -927,6 +978,27 @@ export async function approveGraderCert(certId: number, adminUser: string) {
       status: 409,
       error:
         "Cannot publish a numeric grade without all four sub-grades (centering, corners, edges, surface). Re-run the MVGS workstation so the sub-grades populate, then approve.",
+    };
+  }
+  // The gate above is scoped `grade IS NOT NULL`, so a NUMERIC row carrying NO grade at
+  // all skipped it entirely and published live with a blank grade — gradeLabelFull
+  // ('numeric', null) renders "". That is the MV205 defect class on this path. Validate
+  // the stored grade against the SAME printability rule the renderer uses, so a
+  // certificate can never be published in a state it could not legitimately print.
+  // Runs BEFORE any approval write: no timestamps, no approver, no print_state change.
+  const gradeRow = await db.execute(sql`
+    SELECT grade_type, grade::text AS grade FROM certificates WHERE id = ${certId}
+  `);
+  const gr = gradeRow.rows[0] as { grade_type: string | null; grade: string | null } | undefined;
+  const verdict = checkPrintableGrade({ gradeType: gr?.grade_type ?? null, gradeOverall: gr?.grade ?? null });
+  if (!verdict.printable) {
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        verdict.reason === "missing_numeric_grade"
+          ? "Cannot publish a numeric certificate with no grade. Re-run the MVGS workstation so the grade and sub-grades populate, then approve."
+          : (verdict.message ?? "This certificate's grade is not valid, so it cannot be published."),
     };
   }
   // Phase 2 — the publish is an atomic CAS (pending_review→active); if it matched

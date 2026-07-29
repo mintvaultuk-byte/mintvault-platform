@@ -13,6 +13,34 @@ jobs:
     env:
       TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_vq_phase10_local
       MINTVAULT_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:55432/mintvault_vq_phase10_local
+      # Partner Master Dashboard real-PostgreSQL suite (tests/partner-dashboard-integration.test.ts).
+      # Without this the whole file is `describe.skip` and 31 tests — RLS fail-closed behaviour,
+      # SQL-level risk filtering before pagination, deterministic audit ordering, consumed-credit
+      # counting and repeated-scalar-parameter rejection — silently do not run. It needs its OWN
+      # database because the realistic-roles helper reassigns `public` schema ownership to
+      # pn_migrator, which must not happen to the shared test database.
+      PARTNER_MANAGEMENT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55432/mintvault_partner_rt
+      # Super Admin Project Control real-PostgreSQL suites
+      # (tests/project-control-migration.integration.test.ts and
+      #  tests/project-control-concurrency.integration.test.ts).
+      #
+      # Without this the suites fell back to their local-developer default of 127.0.0.1:5432,
+      # where nothing listens in CI, and 12 tests — migration 0030's table/index/constraint
+      # shape, its idempotency, its rollback, the append-only audit ledger and the optimistic-
+      # locking concurrency proofs — failed with ECONNREFUSED. They fail CLOSED rather than
+      # skipping, which is why this surfaced as a red build instead of silent absence.
+      #
+      # A SEPARATE PostgreSQL 17 SERVER (port 55433), not the shared pg16 service, because:
+      #   • migration 0030 is verified against PostgreSQL 17;
+      #   • each suite CREATEs and DROPs its own per-PID database (pc_migration_test_<pid>,
+      #     pc_concurrency_test_<pid>), so it needs CREATEDB on the admin connection;
+      #   • keeping it off the shared server means it can never collide with the Vault Quest
+      #     test database or with either Partner suite's database.
+      #
+      # The path MUST stay `/postgres`: both suites derive their disposable database URL with
+      # `ADMIN_URL.replace(/\/postgres$/, '/<db>')`, so any other path would silently leave them
+      # connected to the admin database.
+      PROJECT_CONTROL_TEST_ADMIN_URL: postgres://postgres:postgres@127.0.0.1:55433/postgres
     services:
       postgres:
         # pgvector-enabled Postgres 16 (official pgvector image, same server as
@@ -29,6 +57,23 @@ jobs:
           - 55432:5432
         options: >-
           --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U postgres -d mintvault_vq_phase10_local"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      # Dedicated PostgreSQL 17 for the Project Control suites (see
+      # PROJECT_CONTROL_TEST_ADMIN_URL above). Deliberately a different SERVER and a different
+      # port from the pg16 service, so the suites' CREATE/DROP DATABASE cycle is isolated from
+      # the shared test database and from both Partner databases.
+      postgres17:
+        image: postgres:17
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 55433:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -p 5432 -U postgres -d postgres"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -62,6 +107,17 @@ jobs:
             throw new Error("CI database URLs must point to the disposable local Vault Quest test database");
           }
           console.log(`[ci-db] disposable database host=${testUrl.hostname}:${testUrl.port} db=${testUrl.pathname.slice(1)}`);
+          // Project Control admin URL — same loopback discipline. It is an ADMIN connection that
+          // creates and drops databases, so it is checked explicitly rather than trusted. The
+          // `/postgres` path is load-bearing: both suites build their disposable database URL by
+          // replacing that exact suffix.
+          const pcUrl = new URL(process.env.PROJECT_CONTROL_TEST_ADMIN_URL || "");
+          const pcSafe =
+            pcUrl.hostname === "127.0.0.1" && pcUrl.port === "55433" && pcUrl.pathname === "/postgres";
+          if (!pcSafe) {
+            throw new Error("PROJECT_CONTROL_TEST_ADMIN_URL must be the disposable loopback PostgreSQL 17 admin URL");
+          }
+          console.log(`[ci-db] project-control admin host=${pcUrl.hostname}:${pcUrl.port} db=${pcUrl.pathname.slice(1)}`);
           NODE
           if ! command -v psql >/dev/null 2>&1; then
             sudo apt-get update
@@ -71,6 +127,24 @@ jobs:
           # shared/schema.ts `vector(1536)` embedding column. Idempotent; the
           # pgvector/pgvector image ships the extension files.
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          # Dedicated database for the Partner PostgreSQL suites (Partner Master Dashboard and
+          # Partner Management). Separate from the shared test DB because those suites hand
+          # `public` schema ownership to a non-superuser migrator role and apply the partner
+          # migrations as that role.
+          #
+          # `\gexec` is a psql META-COMMAND and is NOT parsed when passed via `-c`: the previous
+          # form failed with `syntax error at or near "\"` and never created the database.
+          # CREATE DATABASE also has no IF NOT EXISTS, so existence is queried first and the
+          # create is issued only when needed — idempotent on a re-run.
+          #
+          # No pipes, no grep/sed: the query result is captured by command substitution, whose
+          # exit status IS the assignment's exit status, so an unreachable server or bad
+          # credentials aborts the step under `set -e` instead of being silently swallowed.
+          partner_db_present="$(psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
+            "SELECT 1 FROM pg_database WHERE datname = 'mintvault_partner_rt'")"
+          if [ "$partner_db_present" != "1" ]; then
+            psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE mintvault_partner_rt"
+          fi
           npx drizzle-kit push --force
           for migration in migrations-vq/*.sql; do
             echo "[ci-db] applying ${migration}"
@@ -78,6 +152,16 @@ jobs:
           done
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'" | grep -q "gen_action_pose"
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'vq_feature_flags_feature_check'" | grep -q "auto_paid_retry"
+          # Project Control server must be reachable AND be PostgreSQL 17, and the admin role
+          # must be able to CREATE DATABASE — otherwise the suites would fail deep inside
+          # beforeAll with a less obvious message.
+          psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc "SELECT version()"
+          pc_major="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc "SHOW server_version_num")"
+          if [ "$pc_major" -lt 170000 ]; then
+            echo "Project Control tests require PostgreSQL 17, got server_version_num=$pc_major" >&2
+            exit 1
+          fi
+          psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc "SELECT rolcreatedb FROM pg_roles WHERE rolname = current_user" | grep -q "t"
 
       - name: Lint
         run: npm run lint

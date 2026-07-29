@@ -67,9 +67,11 @@ import { registerAdminConfigRoutes } from "./routes/admin-config";
 import { registerSuperAdminPartnerRoutes } from "./partner/admin-routes";
 import { registerConnectorOpsRoutes } from "./partner/connector-admin-routes";
 import { registerPartnerManagementRoutes } from "./partner/partner-management-routes";
+import { registerPartnerDashboardRoutes } from "./partner/dashboard-routes";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
 import { registerCatalogueRoutes } from "./routes/admin/catalogue";
+import { registerProjectControlRoutes } from "./routes/admin/project-control";
 import { registerLabelPreviewRoutes } from "./routes/admin/label-preview";
 import { registerCardIdentificationRoutes } from "./routes/card-identification";
 import { registerTransferRoutes } from "./routes/transfers";
@@ -165,6 +167,7 @@ import {
   FAILED_LOGIN_DELAY_MS,
 } from "./auth";
 import { generateLabelPNG, generateLabelPDF, applyLabelOverrides } from "./labels";
+import { checkPrintableGrade, UnprintableGradeError } from "@shared/printable-grade";
 import { fileTypeFromBuffer } from "file-type";
 import path from "path";
 import fs from "fs";
@@ -2027,7 +2030,17 @@ export async function handleCertificateCreate(req: any, res: any): Promise<void>
           if (uploadErr) return res.status(400).json({ error: uploadErr });
         }
 
-        const gradeType = req.body.gradeType || "numeric";
+        // Normalise on the way IN. `certificates.grade_type` is plain text with no CHECK
+        // constraint, and the renderer decides the kind by EXACT string membership
+        // (isNonNumericGrade). So a padded or junk value — " NO ", "no", "banana" — is
+        // treated as NUMERIC by the renderer while looking non-numeric to a human. That is
+        // precisely how a row could be created that claims to need no grade and then prints
+        // 0 / POOR. The PUT paths already normalise (handleCertificateGradeUpdate does);
+        // this create path did not.
+        //
+        // Re-applied here rather than in the inline handler PR #254 originally patched: main
+        // has since refactored that route body into this named handler.
+        const gradeType = normaliseGradeType(req.body.gradeType);
         const isNonNum = isNonNumericGrade(gradeType);
 
         if (!isNonNum && req.body.gradeOverall) {
@@ -2784,9 +2797,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerSuperAdminPartnerRoutes(app); // Phase 1 partner-network super-admin control shell (requireAdmin-gated)
   registerConnectorOpsRoutes(app); // G4 partner-connector operations (requireAdmin-gated, internal)
   registerPartnerManagementRoutes(app); // G5 partner management (requireAdmin-gated, internal)
+  registerPartnerDashboardRoutes(app); // Partner Master Dashboard (requireSuperAdmin-gated, read-only)
   registerRarityMappingRoutes(app);
   registerPokemonKnowledgeRoutes(app);
   registerCatalogueRoutes(app);
+  registerProjectControlRoutes(app); // Super Admin Project Control dashboard (super-admin-gated, internal)
   registerLabelPreviewRoutes(app);
   registerCardIdentificationRoutes(app);
   registerTransferRoutes(app);
@@ -3808,7 +3823,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
             String((cert as { certId?: string }).certId ?? id),
             "approval_kind_change_rejected",
             (req.session as { adminEmail?: string })?.adminEmail || "admin",
-            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve-grade" },
+            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve-grade" }
           );
         } catch (auditErr) {
           console.warn("[approve-grade] kind-rejection audit failed:", (auditErr as Error).message);
@@ -5354,6 +5369,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.send(pdf);
     } catch (error: any) {
       console.error("Label generation error:", error.message);
+      // A refused grade is an operator-fixable condition, not a server fault.
+      if (error instanceof UnprintableGradeError) {
+        return res
+          .status(422)
+          .json({ error: error.message, code: "UNPRINTABLE_GRADE", blockedCertIds: [error.certId] });
+      }
       res.status(500).json({ error: "Failed to generate label" });
     }
   });
@@ -5452,6 +5473,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // boundary kept intact — admins can still reprint claimed certs via
       // /api/admin/print-batch/reprint with a recorded reason).
       const allCerts = await storage.listCertificates();
+      // ── Grade printability PRE-PASS (fail closed) ────────────────────────────
+      // Runs BEFORE the loop below, because that loop MINTS claim codes as a side
+      // effect (getOrGenerateClaimCode) — so a rejected batch must never reach it.
+      // This is the exact endpoint that, on 2026-07-02, rendered 22 ungraded
+      // production certificates onto a real label sheet showing 0 / POOR: it had no
+      // grade or approval gate at all. All-or-nothing: no partial sheet.
+      const unprintable: { certId: string; code: string; message: string }[] = [];
+      for (const id of ids) {
+        const c = allCerts.find((x: any) => x.certId === id);
+        if (!c) continue; // handled as `missing` below
+        const verdict = checkPrintableGrade({ gradeType: (c as any).gradeType, gradeOverall: (c as any).gradeOverall });
+        if (!verdict.printable) {
+          unprintable.push({
+            certId: id,
+            code: verdict.reason ?? "unprintable_grade",
+            message: `${id}: ${verdict.message}`,
+          });
+        }
+      }
+      if (unprintable.length) {
+        return res.status(422).json({
+          error: `Cannot print — ${unprintable.length === 1 ? "this certificate is" : "these certificates are"} not ready: ${unprintable.map((u) => u.message).join(" ")}`,
+          code: "UNPRINTABLE_GRADE",
+          blockedCertIds: unprintable.map((u) => u.certId),
+          blocked: unprintable,
+        });
+      }
       const items: { cert: any; claimCode: string }[] = [];
       const missing: string[] = [];
       const claimed: string[] = [];
@@ -5755,6 +5803,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       // point of this endpoint. Still reject not-found / soft-deleted /
       // missing-grade so the layout doesn't draw garbage.
       const allCerts = await storage.listCertificates();
+      // Reprint enforces the SAME grade printability rule as a fresh batch. There is no
+      // separate immutable-historical-artefact render path in this codebase, so none is
+      // invented here: a reprint re-renders from the CURRENT certificate row, which means
+      // an invalid grade would print an invented panel exactly as a fresh batch would.
+      // Pre-pass, before the claim-code minting below.
+      const unprintableRe: { certId: string; code: string; message: string }[] = [];
+      for (const id of ids) {
+        const c = allCerts.find((x: any) => x.certId === id);
+        if (!c) continue;
+        const verdict = checkPrintableGrade({ gradeType: (c as any).gradeType, gradeOverall: (c as any).gradeOverall });
+        if (!verdict.printable) {
+          unprintableRe.push({
+            certId: id,
+            code: verdict.reason ?? "unprintable_grade",
+            message: `${id}: ${verdict.message}`,
+          });
+        }
+      }
+      if (unprintableRe.length) {
+        return res.status(422).json({
+          error: `Cannot reprint — ${unprintableRe.length === 1 ? "this certificate is" : "these certificates are"} not ready: ${unprintableRe.map((u) => u.message).join(" ")}`,
+          code: "UNPRINTABLE_GRADE",
+          blockedCertIds: unprintableRe.map((u) => u.certId),
+          blocked: unprintableRe,
+        });
+      }
       const items: { cert: any; claimCode: string }[] = [];
       const missing: string[] = [];
       const mintedFor: string[] = [];
@@ -5893,8 +5967,85 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // PDF: inline by default (so the print-window flow can navigate to it and
   // trigger window.print()), attachment when ?download=1 is set.
   // PNG: always attachment (Cricut Design Space needs the file on disk).
+
+  /**
+   * Cached print artefacts (PDF/PNG/cut-SVG) are streamed straight out of R2 with no
+   * re-render, so a sheet produced BEFORE the grade gate existed — including the
+   * 2026-07-02 sheet whose panels read 0 / POOR — remained downloadable and printable by
+   * batch id. Re-validate the batch's certificates against the same rule before serving.
+   *
+   * Cert membership is resolved from `print_batches.cert_ids` when the row exists, and
+   * otherwise from `label_prints.sheet_ref` (which is how pre-0022 legacy sheets are
+   * recorded). If membership cannot be resolved at all we FAIL CLOSED rather than serve an
+   * artefact we cannot vouch for.
+   */
+  async function assertBatchArtefactPrintable(
+    batchId: string
+  ): Promise<{ ok: true } | { ok: false; blocked: string[]; message: string }> {
+    let certIds: string[] = [];
+    try {
+      const b = await db.execute(sql`SELECT cert_ids FROM print_batches WHERE batch_id = ${batchId}`);
+      const row = b.rows[0] as { cert_ids?: string[] } | undefined;
+      if (row?.cert_ids?.length) certIds = row.cert_ids;
+    } catch {
+      /* print_batches may not exist yet (pre-0022) — fall through to label_prints */
+    }
+    if (certIds.length === 0) {
+      const lp = await db.execute(
+        sql`SELECT cert_id FROM label_prints WHERE sheet_ref = ${`print_batch_${batchId}`} OR sheet_ref = ${batchId}`
+      );
+      certIds = (lp.rows as unknown as { cert_id: string }[]).map((r) => r.cert_id).filter(Boolean);
+    }
+    if (certIds.length === 0) {
+      return {
+        ok: false,
+        blocked: [],
+        message:
+          "This print sheet's certificates cannot be identified, so it cannot be verified as safe to print. " +
+          "Create a fresh batch instead.",
+      };
+    }
+    const rows = await db.execute(
+      sql`SELECT certificate_number, grade_type, grade::text AS grade FROM certificates
+           WHERE certificate_number IN (${sql.join(
+             certIds.map((c) => sql`${c}`),
+             sql`, `
+           )})`
+    );
+    const byId = new Map(
+      (rows.rows as unknown as { certificate_number: string; grade_type: string | null; grade: string | null }[]).map(
+        (r) => [r.certificate_number, r]
+      )
+    );
+    const blocked: string[] = [];
+    for (const id of certIds) {
+      const r = byId.get(id);
+      // A cert missing from the result fails CLOSED.
+      const v = checkPrintableGrade({ gradeType: r?.grade_type ?? null, gradeOverall: r?.grade ?? null });
+      if (!v.printable) blocked.push(id);
+    }
+    if (blocked.length) {
+      return {
+        ok: false,
+        blocked,
+        message:
+          `This print sheet contains ${blocked.length === 1 ? "a certificate" : "certificates"} without a valid grade ` +
+          `(${blocked.join(", ")}), so it cannot be downloaded or printed. Grade ${blocked.length === 1 ? "it" : "them"} and create a fresh batch.`,
+      };
+    }
+    return { ok: true };
+  }
+
   app.get("/api/admin/print-batch/:batchId/pdf", requireAdmin, async (req, res) => {
     try {
+      {
+        const guard = await assertBatchArtefactPrintable(String(req.params.batchId));
+        if (!guard.ok) {
+          return res
+            .status(422)
+            .json({ error: guard.message, code: "UNPRINTABLE_GRADE", blockedCertIds: guard.blocked });
+        }
+      }
       const batchId = String(req.params.batchId);
       const download = req.query.download === "1";
       const { r2KeyForPrintBatch } = await import("./print-batch");
@@ -5922,6 +6073,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/admin/print-batch/:batchId/png", requireAdmin, async (req, res) => {
     try {
+      {
+        const guard = await assertBatchArtefactPrintable(String(req.params.batchId));
+        if (!guard.ok) {
+          return res
+            .status(422)
+            .json({ error: guard.message, code: "UNPRINTABLE_GRADE", blockedCertIds: guard.blocked });
+        }
+      }
       const batchId = String(req.params.batchId);
       const { r2KeyForPrintBatch } = await import("./print-batch");
       const key = r2KeyForPrintBatch(batchId, "png");
@@ -5949,6 +6108,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // 400-DPI print PNG — same R2-stream pattern as /png, distinct -print.png key.
   app.get("/api/admin/print-batch/:batchId/print-png", requireAdmin, async (req, res) => {
     try {
+      {
+        const guard = await assertBatchArtefactPrintable(String(req.params.batchId));
+        if (!guard.ok) {
+          return res
+            .status(422)
+            .json({ error: guard.message, code: "UNPRINTABLE_GRADE", blockedCertIds: guard.blocked });
+        }
+      }
       const batchId = String(req.params.batchId);
       const { r2KeyForPrintBatch } = await import("./print-batch");
       const key = r2KeyForPrintBatch(batchId, "print-png");
@@ -5976,6 +6143,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Cricut cut-guide SVG (matches the PNG layout) — same R2-stream pattern as /png.
   app.get("/api/admin/print-batch/:batchId/cricut-cut.svg", requireAdmin, async (req, res) => {
     try {
+      {
+        const guard = await assertBatchArtefactPrintable(String(req.params.batchId));
+        if (!guard.ok) {
+          return res
+            .status(422)
+            .json({ error: guard.message, code: "UNPRINTABLE_GRADE", blockedCertIds: guard.blocked });
+        }
+      }
       const batchId = String(req.params.batchId);
       const { r2KeyForCricutSvg } = await import("./print-batch");
       const key = r2KeyForCricutSvg(batchId);
@@ -6028,6 +6203,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       res.setHeader("Content-Disposition", `attachment; filename="${cert.certId}-${side}.pdf"`);
       res.send(pdf);
     } catch (err: any) {
+      // A refused grade is operator-fixable, not a server fault. This route feeds the
+      // Printing-console thumbnails, so every ungraded row previously produced an opaque
+      // 500 plus a server-error log line with no actionable message.
+      if (err instanceof UnprintableGradeError) {
+        return res.status(422).json({ error: err.message, code: "UNPRINTABLE_GRADE", blockedCertIds: [err.certId] });
+      }
       sendServerError(res, err);
     }
   });
@@ -8045,7 +8226,7 @@ Defects (admin-confirmed): ${defectLines}`;
             String((cert as { certId?: string }).certId ?? id),
             "approval_kind_change_rejected",
             (req.session as { adminEmail?: string })?.adminEmail || "admin",
-            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve" },
+            { stored_grade_type: storedGradeType, requested_kind: requestedKind, route: "approve" }
           );
         } catch (auditErr) {
           console.warn("[approve] kind-rejection audit failed:", (auditErr as Error).message);

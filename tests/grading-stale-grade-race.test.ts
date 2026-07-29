@@ -848,8 +848,29 @@ describe("18/19. MV900007 + MV900010 staging regressions are structurally imposs
 
 describe("PR A scope guard", () => {
   it("does not change the Pristine gate, the MVGS formula or label rendering", () => {
+    // BOTH assertions in this guard are pinned to PR A's OWN commit range. This describe block
+    // is named "PR A scope guard" and its failure messages say "must not change in PR A": it is
+    // a statement about what PR A did, and PR A is merged, so the range is closed and the
+    // assertion is permanently true.
+    //
+    // It previously ran `d59311b9...HEAD`. An earlier pass pinned only the migration half and
+    // argued the open-ended file half was a useful bonus standing protection. That was wrong,
+    // and it broke immediately: `server/labels.ts` is on the forbidden list, and PR #254's
+    // founder-authorised print-safety change (2026-07-25 approval — assertPrintableGrade at the
+    // renderer entry, removing the two zero coercions that printed 0 / POOR) legitimately
+    // touches it. A PR-scoped assertion left open-ended becomes a repo-wide prohibition that
+    // every authorised change has to fight, which creates pressure to weaken it — exactly what
+    // happened with the migration half.
+    //
+    // The standing protection for the renderer is NOT dropped; it is moved somewhere it can
+    // distinguish an authorised change from a regression. See
+    // tests/printable-grade-safety.test.ts, "THE PROTECTED LABEL DESIGN", which pins 26 golden
+    // render hashes. That is behavioural: it permits a guard-only change (PR #254 is proven
+    // byte-identical against origin/main across all 26) and fails on any design drift, which a
+    // filename check could never tell apart.
+    const PR_A_RANGE = "d59311b9feb20342d9bd9938d743e7777eba6315...0f71152d";
     const { execSync } = require("node:child_process");
-    const changed = execSync("git diff --name-only d59311b9feb20342d9bd9938d743e7777eba6315...HEAD", {
+    const changed = execSync(`git diff --name-only ${PR_A_RANGE}`, {
       encoding: "utf8",
     })
       .split("\n")
@@ -865,7 +886,10 @@ describe("PR A scope guard", () => {
     ]) {
       expect(changed, `${forbidden} must not change in PR A`).not.toContain(forbidden);
     }
-    // and no migration is introduced here
+    // …and PR A introduced no migration. Same closed range, for the same reason: left open-ended
+    // this read as "no migration may ever be added to this repository again" and fired on every
+    // pending branch — 0020 and 0021 (partner auth/RBAC), 0025 (grading optimistic concurrency),
+    // 0027 (g6d submission credits) and 0030 (Project Control) — none related to PR A.
     expect(changed.filter((f) => f.startsWith("migrations/"))).toEqual([]);
   });
 

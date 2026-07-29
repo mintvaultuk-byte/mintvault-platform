@@ -49,6 +49,22 @@ const PM = "/api/super-admin/partner-management";
 
     admin = new Client({ connectionString: ADMIN_DB });
     await admin.connect();
+    /**
+     * PRISTINE SCHEMA FIRST (hostile-review F4 follow-on).
+     *
+     * This file and tests/partner-dashboard-integration.test.ts share PARTNER_MANAGEMENT_RT_ADMIN.
+     * The dashboard suite applies PARTNER_MIGRATIONS_WITH_G6B; this one applies the shorter
+     * _WITH_G5 set. `DROP OWNED BY` alone does not remove functions the other suite created, so
+     * whichever ran second hit `cannot change return type of existing function` while replaying
+     * a migration onto the other's leftovers.
+     *
+     * That was latent for as long as the suites were skipped; enabling them in CI surfaced it.
+     * The dashboard suite already drops and recreates `public` for exactly this reason — doing
+     * the same here makes both self-contained and order-independent. The database is disposable
+     * (loopback-gated above), so this is safe by construction.
+     */
+    await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
+    await admin.query("CREATE SCHEMA public");
     await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
     await admin.query("DROP OWNED BY partner_connector_runtime").catch(() => {});
     await provisionRealisticRoles(admin);
