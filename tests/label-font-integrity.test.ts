@@ -13,8 +13,11 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { BUNDLED_FONT_MANIFEST } from "../server/labels";
 
-const FONT_DIR = join(process.cwd(), "public", "brand", "fonts");
+const BRAND_DIR = join(process.cwd(), "public", "brand");
+const FONT_DIR = join(BRAND_DIR, "fonts");
 const LABELS_SRC = readFileSync(join(process.cwd(), "server", "labels.ts"), "utf8");
+/** Manifest entries may pin their own directory; only the wordmark does (see R2 below). */
+const pathOf = (entry: { file: string; dir?: string }) => join(entry.dir ?? FONT_DIR, entry.file);
 
 describe("N2 — the bundled font manifest", () => {
   it("covers every registered face, with no unlisted file in the directory", () => {
@@ -23,15 +26,47 @@ describe("N2 — the bundled font manifest", () => {
     for (const m of LABELS_SRC.matchAll(/file:\s*"([^"]+\.(?:ttf|otf))"/g)) {
       expect(listed.has(m[1]), `${m[1]} is registered but not in BUNDLED_FONT_MANIFEST`).toBe(true);
     }
-    expect(BUNDLED_FONT_MANIFEST.length).toBe(9);
+    // 9 label faces + the wordmark face (R2).
+    expect(BUNDLED_FONT_MANIFEST.length).toBe(10);
   });
 
   it("matches the bytes actually committed", () => {
     for (const entry of BUNDLED_FONT_MANIFEST) {
-      const file = join(FONT_DIR, entry.file);
+      const file = pathOf(entry);
       expect(statSync(file).size, `${entry.file} size`).toBe(entry.bytes);
       expect(createHash("sha256").update(readFileSync(file)).digest("hex"), `${entry.file} sha256`).toBe(entry.sha256);
     }
+  });
+
+  /**
+   * R2 (final landing review, 2026-07-29). EVERY face that reaches `registerFont` must be in the
+   * manifest. The wordmark face was registered but never verified, so a corrupt or missing
+   * BodoniModa-Black.ttf registered silently — measured — and the "MINTVAULT" lockup fell back
+   * to MV_SERIF. That is the N2 failure mode: a different typeface on a physical product, no
+   * error raised.
+   */
+  it("covers the WORDMARK face too — every registerFont target is verified", () => {
+    const wordmark = BUNDLED_FONT_MANIFEST.find((f) => f.file === "BodoniModa-Black.ttf");
+    expect(wordmark, "BodoniModa-Black.ttf must be in BUNDLED_FONT_MANIFEST").toBeTruthy();
+    expect(wordmark!.dir, "the wordmark lives in public/brand, not public/brand/fonts").toBe(BRAND_DIR);
+    expect(statSync(pathOf(wordmark!)).size).toBe(wordmark!.bytes);
+    expect(
+      createHash("sha256")
+        .update(readFileSync(pathOf(wordmark!)))
+        .digest("hex")
+    ).toBe(wordmark!.sha256);
+
+    // Nothing may be handed to registerFont without a manifest entry backing it. BODONI_PATH is
+    // the one registration that does not come from the BUNDLED_FACES loop, so it is named here
+    // explicitly: if a future edit adds another such call, this list stops matching.
+    const registerTargets = [...LABELS_SRC.matchAll(/registerFont\(\s*([A-Za-z_.]+)/g)].map((m) => m[1]);
+    expect(new Set(registerTargets)).toEqual(new Set(["BODONI_PATH", "path.join"]));
+    expect(LABELS_SRC).toMatch(/const BODONI_PATH = path\.join\(BRAND_DIR, "BodoniModa-Black\.ttf"\)/);
+  });
+
+  it("resolves each entry against its own directory, not a hard-coded fonts/ path", () => {
+    // The wordmark is only protected if verification actually looks where it lives.
+    expect(LABELS_SRC).toMatch(/path\.join\(entry\.dir \?\? FONT_DIR, entry\.file\)/);
   });
 
   it("is an immutable reviewed constant — it CANNOT regenerate itself at runtime", () => {

@@ -13,6 +13,13 @@
  *   `certificate_number` but did not match the guard's identifier regex.
  * N5: tagged-template TEXT was used to satisfy JavaScript implementation signatures, so
  *   `sql`class GradeDraftRejected checkPrintableGrade(`` admitted an arbitrary change.
+ * R1 (final landing review, 2026-07-29): the same bypass survived through a JSDoc block placed
+ *   at the END of the analysed source. Comments were removed by blanking the leading trivia of
+ *   LEAF tokens, but a trailing JSDoc is parsed as a CHILD of EndOfFileToken, so that token was
+ *   not a leaf and its trivia — the comment body — was never blanked. A diff whose added lines
+ *   ended in a JSDoc block naming `class GradeDraftRejected` and `checkPrintableGrade(`
+ *   therefore satisfied a JavaScript signature with nothing but prose. JSDoc nodes are now
+ *   blanked explicitly.
  *
  * ── APPROACH ───────────────────────────────────────────────────────────────────────────────
  * Tokenisation is delegated to the TypeScript compiler (already a devDependency — it is what
@@ -132,6 +139,17 @@ export function analyseSource(source: string, mode: AnalysisMode): string {
     if (kids.length === 0) blank(chars, node.getFullStart(), node.getStart(sf));
 
     switch (node.kind) {
+      // A JSDoc block is parsed into NODES, not left as trivia, so the leaf rule above can miss
+      // it: when the block is the LAST construct in the source it is attached to
+      // EndOfFileToken, which then reports a child and is never treated as a leaf, while the
+      // JSDoc node's own leading trivia is a zero-width range. The comment therefore survived
+      // into BOTH representations, and a trailing `/** class X … fn( */` satisfied a JavaScript
+      // signature with pure prose — the very thing N5/F3 exists to prevent. Blank the whole
+      // block; its tags are comment text too, so there is nothing inside worth walking.
+      case ts.SyntaxKind.JSDoc:
+        blank(chars, node.getStart(sf), node.getEnd());
+        return;
+
       // A regex literal is opaque: it is neither prose nor a database write, and crucially a
       // backtick inside it must NOT start template mode (N1).
       case ts.SyntaxKind.RegularExpressionLiteral:

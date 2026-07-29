@@ -213,6 +213,77 @@ describe("N5 — SQL text can never satisfy a JavaScript signature", () => {
     expect(stripNonCode(src)).toMatch(/certificate_number/);
     expect(stripToJs(src)).not.toMatch(/certificate_number/);
   });
+
+  /**
+   * R1 (final landing review, 2026-07-29).
+   *
+   * A JSDoc block is parsed into AST NODES rather than left as trivia. When it is the LAST
+   * construct in the analysed source it attaches to EndOfFileToken, which therefore has a child
+   * and was never treated as a leaf, so the comment-removal rule never blanked it. A diff whose
+   * added lines simply ENDED in a doc comment could then satisfy a JavaScript signature with
+   * pure prose — the bypass N5/F3 exists to prevent.
+   *
+   * The trailing position is the whole point: a JSDoc followed by any statement was already
+   * removed correctly, which is why this survived the original review.
+   */
+  it("a TRAILING JSDoc block cannot satisfy a signature (R1)", () => {
+    const trailing = [
+      "/** class GradeDraftRejected checkPrintableGrade( */",
+      "/** @see class GradeDraftRejected checkPrintableGrade( */",
+      "const a = 1;\n/** class GradeDraftRejected checkPrintableGrade( */",
+      "function f() {}\n/**\n * class GradeDraftRejected\n * checkPrintableGrade(\n */",
+      "/** class GradeDraftRejected */\nconst a = 1;\n/** checkPrintableGrade( */",
+    ];
+    for (const src of trailing) {
+      expect(sigB(src), `trailing JSDoc satisfied signatureB: ${src}`).toBe(false);
+      expect(stripToJs(src), src).not.toMatch(/GradeDraftRejected|checkPrintableGrade/);
+      expect(stripNonCode(src), src).not.toMatch(/GradeDraftRejected|checkPrintableGrade/);
+    }
+  });
+
+  it("a trailing JSDoc cannot smuggle a protected identifier either (R1)", () => {
+    for (const src of ["/** certificate_number = 1 */", "const a = 1;\n/** SET certificate_number */"]) {
+      expect(stripNonCode(src), src).not.toMatch(/certificate_number/);
+    }
+  });
+
+  it("end-to-end: a comment-only diff to the protected file proves nothing (R1)", () => {
+    // The REAL signatureB predicate from tests/variant-line-consolidation.test.ts, applied to
+    // the REAL guard input: the JavaScript-only view of `git diff origin/main`'s added lines.
+    const signatureB = (addedJs: string) =>
+      /class\s+GradeDraftRejected\b/.test(addedJs) && /\bcheckPrintableGrade\s*\(/.test(addedJs);
+
+    const hostile = [
+      "--- a/server/grader.ts",
+      "+++ b/server/grader.ts",
+      "@@ -100,0 +100,5 @@",
+      "+export function applyCertGradeDraft(cert: Cert, draft: Draft) {",
+      "+  return cert;",
+      "+}",
+      "+/** class GradeDraftRejected — checkPrintableGrade( ) described here only. */",
+    ].join("\n");
+    expect(signatureB(addedJsOf(hostile, "+"))).toBe(false);
+
+    // …while the REAL implementation still satisfies it, so the guard is not merely inverted.
+    const genuine = [
+      "+++ b/server/grader.ts",
+      "+class GradeDraftRejected extends Error {}",
+      "+const verdict = checkPrintableGrade(cert);",
+    ].join("\n");
+    expect(signatureB(addedJsOf(genuine, "+"))).toBe(true);
+  });
+
+  it("still removes JSDoc that PRECEDES code, and keeps the code (R1 regression guard)", () => {
+    const src = "/** class GradeDraftRejected */\nconst kept = 1;";
+    expect(stripToJs(src)).toContain("const kept = 1;");
+    expect(stripToJs(src)).not.toMatch(/GradeDraftRejected/);
+  });
+
+  it("JSDoc blanking preserves line numbers (R1)", () => {
+    const src = ["const a = 1;", "/** doc */", "const c = 3;"].join("\n");
+    expect(stripToJs(src).split("\n").length).toBe(3);
+    expect(stripToJs(src).split("\n")[2]).toContain("const c = 3;");
+  });
 });
 
 describe("scale and shape", () => {

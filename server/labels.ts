@@ -93,8 +93,9 @@ const I_H = I_BOTTOM - I_TOP; // 224
 
 const LOGO_PATH = path.join(process.cwd(), "public", "brand", "logo.png");
 const NFC_ICON_PATH = path.join(process.cwd(), "public", "brand", "nfc-tap-icon.png");
-const BODONI_PATH = path.join(process.cwd(), "public", "brand", "BodoniModa-Black.ttf");
-const FONT_DIR = path.join(process.cwd(), "public", "brand", "fonts");
+const BRAND_DIR = path.join(process.cwd(), "public", "brand");
+const BODONI_PATH = path.join(BRAND_DIR, "BodoniModa-Black.ttf");
+const FONT_DIR = path.join(BRAND_DIR, "fonts");
 
 /**
  * DETERMINISTIC FONT RESOLUTION — the label is a physical product, so its glyphs must not
@@ -215,7 +216,7 @@ const BUNDLED_FACES: ReadonlyArray<{ file: string; family: string; weight: strin
  * table cannot "self-heal" around a tampered asset. `tests/label-font-integrity.test.ts`
  * asserts that property directly.
  */
-export const BUNDLED_FONT_MANIFEST: ReadonlyArray<{ file: string; bytes: number; sha256: string }> = [
+export const BUNDLED_FONT_MANIFEST: ReadonlyArray<{ file: string; bytes: number; sha256: string; dir?: string }> = [
   {
     file: "DejaVuSans-Bold.ttf",
     bytes: 708920,
@@ -257,6 +258,24 @@ export const BUNDLED_FONT_MANIFEST: ReadonlyArray<{ file: string; bytes: number;
     bytes: 82264,
     sha256: "7c25be4d78155523080ab85b10277150657ff7dabbcad7037bdd536c9b6d0d08",
   },
+  /**
+   * The MintVault WORDMARK face, registered by the same block as the faces above and therefore
+   * needing the same protection (gap found in the final landing review, 2026-07-29).
+   *
+   * It was registered but never verified, so a corrupt or missing file registered SILENTLY —
+   * measured — and the "MINTVAULT" lockup on the front label fell back to MV_SERIF (DejaVu
+   * Serif). That is the exact N2 failure mode this manifest exists to stop: a different
+   * typeface on a physical product, with no error raised.
+   *
+   * It lives alongside the other brand assets rather than in the fonts/ directory, so it
+   * carries an explicit `dir`. Nothing about registration or rendering changes.
+   */
+  {
+    file: "BodoniModa-Black.ttf",
+    dir: BRAND_DIR,
+    bytes: 44832,
+    sha256: "2047983e15e97af62ab1907c714a5a6292ea599319f109d1aabd8a9878470ef8",
+  },
 ];
 
 /** Thrown when a bundled font is absent, the wrong size, or does not match its manifest hash. */
@@ -273,7 +292,8 @@ export class BundledFontIntegrityError extends Error {
  */
 function verifyBundledFonts(): void {
   for (const entry of BUNDLED_FONT_MANIFEST) {
-    const file = path.join(FONT_DIR, entry.file);
+    // Most faces live in fonts/; the wordmark sits one level up with the other brand assets.
+    const file = path.join(entry.dir ?? FONT_DIR, entry.file);
     let stat: Stats;
     try {
       stat = statSync(file);
