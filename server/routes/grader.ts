@@ -31,6 +31,7 @@ import {
   buildCertImagesPayload,
   buildCertGradingPayload,
   applyCertGradeDraft,
+  GradeDraftRejected,
   adminReviewSaveDraft,
   approveGraderCert,
   rejectCertGrade,
@@ -419,6 +420,9 @@ export function registerGraderRoutes(app: Express): void {
       }
       return res.json({ ok: true, gradingStatus: auth.gradingStatus });
     } catch (e: any) {
+      // A business-rule refusal (e.g. an attempted numeric <-> authentication-only
+      // conversion, or an unrecognised grade type) is operator-fixable, not a 500.
+      if (e instanceof GradeDraftRejected) return res.status(e.status).json({ error: e.message });
       console.error("[grader] draft save error:", e.message);
       if (e instanceof GradeDraftValidationError) return res.status(e.status).json({ error: e.message });
       return sendServerError(res, e);
@@ -547,6 +551,7 @@ export function registerGraderRoutes(app: Express): void {
       });
       return res.json({ ok: true, gradingStatus: "approved", autoApproved: true });
     } catch (e: any) {
+      if (e instanceof GradeDraftRejected) return res.status(e.status).json({ error: e.message });
       console.error("[grader] submit error:", e.message);
       if (e instanceof GradeDraftValidationError) return res.status(e.status).json({ error: e.message });
       return sendServerError(res, e);
@@ -648,6 +653,7 @@ export function registerGraderRoutes(app: Express): void {
 
         return res.json({ ok: true, gradingStatus: "pending_review", changed: Object.keys(changed) });
       } catch (e: any) {
+        if (e instanceof GradeDraftRejected) return res.status(e.status).json({ error: e.message });
         console.error("[grader] edit-submission error:", e.message);
         if (e instanceof GradeDraftValidationError) return res.status(e.status).json({ error: e.message });
         return sendServerError(res, e);
@@ -1076,6 +1082,7 @@ export function registerGraderRoutes(app: Express): void {
       if (!r.ok) return res.status(r.status).json({ error: r.error });
       return res.json({ ok: true });
     } catch (e: any) {
+      if (e instanceof GradeDraftRejected) return res.status(e.status).json({ error: e.message });
       console.error("[admin grade-review save] error:", e.message);
       return sendServerError(res, e);
     }

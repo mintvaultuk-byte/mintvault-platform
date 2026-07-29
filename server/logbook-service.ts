@@ -3,6 +3,7 @@
  * Builds the full logbook payload from a cert record.
  */
 import { storage } from "./storage";
+import { parseStoredGrade } from "@shared/printable-grade";
 import { getR2SignedUrl } from "./r2";
 import { signLogbook, certToCanonical, verifyLogbook } from "./logbook-signing";
 import { isNonNumericGrade } from "@shared/schema";
@@ -48,7 +49,11 @@ export async function buildLogbookData(certIdInput: string) {
   const certId = normalizeCertId(cert.certId);
   const gradeType = c.gradeType || "numeric";
   const isNonNum = isNonNumericGrade(gradeType);
-  const gradeNum = isNonNum ? 0 : parseFloat(c.gradeOverall || "0");
+  // Same zero-coercion defect as the label renderer: parseFloat(null || "0") = 0, and
+  // mvgsTierName(0) = "Poor", so an approved-but-ungraded certificate published
+  // "POOR 0" in a CUSTOMER-FACING logbook PDF. Keep it null and render a placeholder
+  // instead of inventing a grade. (No grade is computed or changed here.)
+  const gradeNum = isNonNum ? null : parseStoredGrade(c.gradeOverall);
   const isBlack = !isNonNum && (await certIsPristine(c));
 
   // Images
@@ -138,12 +143,16 @@ export async function buildLogbookData(certIdInput: string) {
               // the gate said no. Cap it to the Gem Mint tier so the strength band
               // can never override the gate — matching PDF/cert/vault (mvgsTierName).
               mvgsGradeLabel(c.gradeStrengthScore).toUpperCase() === "PRISTINE 10P"
-              ? `${mvgsTierName(gradeNum)} ${gradeNum}`.toUpperCase()
+              ? gradeNum == null
+                ? "NOT GRADED"
+                : `${mvgsTierName(gradeNum)} ${gradeNum}`.toUpperCase()
               : mvgsGradeLabel(c.gradeStrengthScore).toUpperCase()
             : // Legacy certs (no MVGS score): use the MVGS tier table, not the
               // rounding gradeLabelFull, so the name agrees with the exact
               // half-grade number and with the slab (8.5 → "NM-MINT+ 8.5").
-              `${mvgsTierName(gradeNum)} ${gradeNum}`.toUpperCase(),
+              gradeNum == null
+              ? "NOT GRADED"
+              : `${mvgsTierName(gradeNum)} ${gradeNum}`.toUpperCase(),
       centering: c.gradeCentering ? parseFloat(c.gradeCentering) : null,
       corners: c.gradeCorners ? parseFloat(c.gradeCorners) : null,
       edges: c.gradeEdges ? parseFloat(c.gradeEdges) : null,
