@@ -865,8 +865,24 @@ describe("PR A scope guard", () => {
     ]) {
       expect(changed, `${forbidden} must not change in PR A`).not.toContain(forbidden);
     }
-    // and no migration is introduced here
-    expect(changed.filter((f) => f.startsWith("migrations/"))).toEqual([]);
+    // …and PR A introduced no migration.
+    //
+    // Pinned to PR A's OWN commit range, not to a moving HEAD. The forbidden-file check above
+    // deliberately still runs against HEAD, because "nobody may quietly edit the Pristine gate,
+    // the MVGS formula or label rendering" is a standing protection worth keeping open-ended.
+    // The migration assertion is different: it was only ever a statement about PR A's scope.
+    // Left open-ended it becomes "no migration may ever be added to this repository again", and
+    // it fired on every pending branch — 0020 and 0021 (partner auth/RBAC), 0025 (grading
+    // optimistic concurrency), 0027 (g6d submission credits) and 0030 (Project Control) — none
+    // of which have anything to do with PR A. Bounding the upper end to PR A's merge commit
+    // keeps the original assertion true forever and stops it blocking unrelated work.
+    const prAChanged: string[] = execSync(
+      "git diff --name-only d59311b9feb20342d9bd9938d743e7777eba6315...0f71152d",
+      { encoding: "utf8" }
+    )
+      .split("\n")
+      .filter(Boolean);
+    expect(prAChanged.filter((f) => f.startsWith("migrations/"))).toEqual([]);
   });
 
   it("records the tracked Pristine finding without hiding it", () => {
