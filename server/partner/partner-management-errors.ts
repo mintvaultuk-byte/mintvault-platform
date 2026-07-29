@@ -58,6 +58,18 @@ export function toG5Error(err: unknown): G5ErrorShape {
         message: "An active primary contact already exists for this partner.",
       };
     }
+    // partner_users.email is unique GLOBALLY (0003), but the portal's pre-check runs under RLS and
+    // therefore only sees the caller's own tenant. Without this branch a foreign-tenant collision
+    // fell through to IDEMPOTENCY_CONFLICT while a same-tenant one returned DUPLICATE_PARTNER_USER —
+    // a cross-tenant "does this person work for another partner?" oracle. Both must be identical.
+    if (pg.constraint === "uq_partner_users_email_lower") {
+      return { code: "DUPLICATE_PARTNER_USER", message: "That team member cannot be invited." };
+    }
+    // Same reasoning for the one-live-invitation-per-user index: a concurrent resend must not be
+    // distinguishable from any other conflict.
+    if (pg.constraint === "uq_partner_invitations_one_live_per_user") {
+      return { code: "DUPLICATE_PARTNER_USER", message: "That team member cannot be invited." };
+    }
     return { code: "IDEMPOTENCY_CONFLICT", message: "A conflicting record already exists." };
   }
   // Postgres check-violation (e.g. an out-of-allow-list enum value that slipped past validation) → 400.
