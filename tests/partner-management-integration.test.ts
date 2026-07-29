@@ -117,6 +117,7 @@ const PM = "/api/super-admin/partner-management";
     const express = (await import("express")).default;
     const session = (await import("express-session")).default;
     const { registerPartnerManagementRoutes } = await import("../server/partner/partner-management-routes");
+    const { registerSuperAdminPartnerRoutes } = await import("../server/partner/admin-routes");
     const app = express();
     app.use(express.json());
     app.use(
@@ -138,6 +139,7 @@ const PM = "/api/super-admin/partner-management";
       req.session.save(() => res.json({ ok: true }));
     });
     registerPartnerManagementRoutes(app);
+    registerSuperAdminPartnerRoutes(app);
     server = http.createServer(app);
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -506,6 +508,13 @@ const PM = "/api/super-admin/partner-management";
     );
     expect(suspend.status).toBe(409);
     expect((await suspend.json()).error.code).toBe("FINAL_OWNER_REQUIRED");
+    const legacySuspend = await post(
+      `/api/super-admin/grading-partners/${A}/users/${userId}/suspend`,
+      { reason: "legacy route final owner guard" },
+      c
+    );
+    expect(legacySuspend.status).toBe(409);
+    expect((await legacySuspend.json()).code).toBe("FINAL_OWNER_REQUIRED");
     const demote = await post(
       `${PM}/partners/${A}/users/${userId}/role`,
       { role: "STAFF", reason: "test final owner guard" },
