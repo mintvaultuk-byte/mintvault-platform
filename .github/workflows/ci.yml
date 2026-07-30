@@ -78,6 +78,15 @@ jobs:
       # and the only coverage of the super-admin GLOBAL flag surface. It fails closed in CI (see the
       # "is not silently skipped in CI" guard in the file) rather than skipping, so deleting either
       # variable turns the build red instead of silently deleting the evidence.
+      #
+      # SHARED-VARIABLE EXCEPTION (verified, not an oversight): two other suites gate on variables
+      # already listed here — tests/partner-integration-seams.test.ts on PARTNER_MOUNT_RT_* and
+      # tests/partner-reset-delivery-integration.test.ts on PARTNER_PUBLIC_RT_*. That does NOT
+      # violate the one-database-per-suite rule above: both read these URLs purely as a SERVER
+      # COORDINATE (host/port/credentials), then rewrite `pathname` to a database name of their own
+      # and CREATE it during setup. Neither ever connects to mintvault_partner_mount or
+      # mintvault_partner_public, so no `public`-schema ownership reassignment can collide. Nothing
+      # to add to the database-creation loop below — they provision themselves.
       PARTNER_MOUNT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_mount
       PARTNER_MOUNT_RT_RUNTIME: postgres://partner_app_test:synthetic@127.0.0.1:55433/mintvault_partner_mount
 
@@ -94,6 +103,64 @@ jobs:
       # here, and every credential below is synthetic and local to the CI container.
       PARTNER_CONNECTOR_RUNTIME_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_runtime
       PARTNER_CONNECTOR_RUNTIME_URL: postgres://partner_connector_rt_test:synthetic@127.0.0.1:55433/mintvault_connector_runtime
+
+      # ---- Trusted Intake Connector — the REST of the connector evidence (WP-1.5 P3) ----
+      # PARTNER_CONNECTOR_RUNTIME_* above was, until now, the ONLY connector pair CI set. Every
+      # other connector suite gates on its OWN pair and is `describe.skip` without it, so ~250
+      # tests — every exactly-once proof, every fault-injection/crash-recovery proof, the
+      # concurrency and scale proofs, the tenant-isolation proofs, the emergency-stop and
+      # flag-flip proofs and the whole G4 Super-Admin HTTP surface — reported GREEN in CI while
+      # never executing a single assertion. The pairs below are what actually runs them, and the
+      # "Assert connector suites executed" step after the tests turns a silent skip back into a
+      # red build.
+      #
+      # Same rules as the Partner blocks above: PostgreSQL 17 (port 55433), ONE DATABASE PER
+      # SUITE (the realistic-roles helper reassigns `public` schema ownership to the non-superuser
+      # pn_migrator and applies migrations as that role, so two suites can never share a database),
+      # and every credential here is synthetic and local to the CI container.
+      #
+      # ROLE NAMES ARE CLUSTER-WIDE, not per-database. tests/partner-connector-service.test.ts and
+      # tests/partner-connector-validation-service.test.ts both used to create the SAME two login
+      # roles (partner_connector_app_test / partner_app_test_conn); whichever ran second hit
+      # `DROP ROLE` failing on privileges still held in the first suite's database, then `CREATE
+      # ROLE` failing as a duplicate — the role-collision flake. The validation suite's two roles
+      # are now uniquely named (partner_connector_val_app_test / partner_val_test_conn); every
+      # other connector suite already had unique role names. Nothing about what the suites assert
+      # changed. Note also that vitest.config.ts sets `fileParallelism: !TEST_DATABASE_URL`, so in
+      # CI (where TEST_DATABASE_URL is set) test FILES run sequentially — the per-suite databases
+      # and unique role names are what keep them from damaging each other's state across that
+      # sequence.
+      PARTNER_CONNECTOR_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_service
+      PARTNER_CONNECTOR_RT_URL: postgres://partner_connector_app_test:synthetic@127.0.0.1:55433/mintvault_connector_service
+      PARTNER_CONNECTOR_VALIDATION_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_validation
+      PARTNER_CONNECTOR_VALIDATION_RT_URL: postgres://partner_connector_val_app_test:synthetic@127.0.0.1:55433/mintvault_connector_validation
+      PARTNER_CONNECTOR_IMPORT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_import
+      PARTNER_CONNECTOR_IMPORT_RT_URL: postgres://partner_connector_import_test:synthetic@127.0.0.1:55433/mintvault_connector_import
+      PARTNER_CONNECTOR_RECON_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_recon
+      PARTNER_CONNECTOR_RECON_RT_URL: postgres://partner_connector_recon_test:synthetic@127.0.0.1:55433/mintvault_connector_recon
+      PARTNER_CONNECTOR_RECON_LOAD_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_recon_load
+      PARTNER_CONNECTOR_RECON_LOAD_RT_URL: postgres://partner_connector_load_test:synthetic@127.0.0.1:55433/mintvault_connector_recon_load
+      PARTNER_CONNECTOR_FAULT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_fault
+      PARTNER_CONNECTOR_FAULT_RT_URL: postgres://partner_connector_fault_test:synthetic@127.0.0.1:55433/mintvault_connector_fault
+      PARTNER_CONNECTOR_BLOCKER_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_blocker
+      PARTNER_CONNECTOR_BLOCKER_RT_URL: postgres://partner_connector_blocker_test:synthetic@127.0.0.1:55433/mintvault_connector_blocker
+      PARTNER_CONNECTOR_SCALE_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_scale
+      PARTNER_CONNECTOR_SCALE_RT_URL: postgres://partner_connector_scale_test:synthetic@127.0.0.1:55433/mintvault_connector_scale
+      # G4 Super-Admin connector-ops HTTP suite. Both variables point at the SAME database on
+      # purpose: the suite derives its connector-runtime and partner-runtime connection URLs from
+      # the second one by substituting the login roles it creates itself.
+      PARTNER_CONNECTOR_ADMIN_TEST: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_ops
+      PARTNER_CONNECTOR_ADMIN_TEST_RUNTIME: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_ops
+      # ---- Connector suites that apply the FULL repository migration set ----
+      # These five differ from the ones above: they drive listMigrationFiles(), i.e. EVERY migration
+      # in migrations/, not just the partner subset. That reaches two MintVault-internal tables no
+      # partner migration creates (see the "minimal precondition" step below), which is why they
+      # each need it in addition to their own database.
+      PARTNER_CONNECTOR_PLAN_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_plan
+      PARTNER_CONNECTOR_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_migration
+      PARTNER_CONNECTOR_ADMIN_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_admin_mig
+      PARTNER_CONNECTOR_IMPORT_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_import_mig
+      PARTNER_CONNECTOR_VALIDATION_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_val_mig
     services:
       postgres:
         # pgvector-enabled Postgres 16 (official pgvector image, same server as
@@ -223,7 +290,14 @@ jobs:
           for partner_db in mintvault_partner_capability mintvault_partner_user_mgmt \
                             mintvault_partner_final_owner mintvault_partner_public \
                             mintvault_partner_runtime mintvault_partner_mount \
-                            mintvault_connector_runtime; do
+                            mintvault_connector_runtime \
+                            mintvault_connector_service mintvault_connector_validation \
+                            mintvault_connector_import mintvault_connector_recon \
+                            mintvault_connector_recon_load mintvault_connector_fault \
+                            mintvault_connector_blocker mintvault_connector_scale \
+                            mintvault_connector_ops mintvault_connector_plan \
+                            mintvault_connector_migration mintvault_connector_admin_mig \
+                            mintvault_connector_import_mig mintvault_connector_val_mig; do
             present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
               "SELECT 1 FROM pg_database WHERE datname = '$partner_db'")"
             if [ "$present" != "1" ]; then
@@ -244,6 +318,53 @@ jobs:
             "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
           psql "$PARTNER_CONNECTOR_RUNTIME_ADMIN" -v ON_ERROR_STOP=1 -tAc \
             "SELECT rolbypassrls OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
+          # Every other connector suite creates login roles and drives the connector pool under the
+          # same conditions, so assert CREATEROLE + BYPASSRLS on each of their admin connections
+          # too. A misconfiguration then fails loudly HERE instead of as a silently-empty sweep or
+          # an obscure beforeAll error deep inside the run.
+          for connector_admin in "$PARTNER_CONNECTOR_RT_ADMIN" "$PARTNER_CONNECTOR_VALIDATION_RT_ADMIN" \
+                                 "$PARTNER_CONNECTOR_IMPORT_RT_ADMIN" "$PARTNER_CONNECTOR_RECON_RT_ADMIN" \
+                                 "$PARTNER_CONNECTOR_RECON_LOAD_RT_ADMIN" "$PARTNER_CONNECTOR_FAULT_RT_ADMIN" \
+                                 "$PARTNER_CONNECTOR_BLOCKER_RT_ADMIN" "$PARTNER_CONNECTOR_SCALE_RT_ADMIN" \
+                                 "$PARTNER_CONNECTOR_ADMIN_TEST"; do
+            psql "$connector_admin" -v ON_ERROR_STOP=1 -tAc \
+              "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
+            psql "$connector_admin" -v ON_ERROR_STOP=1 -tAc \
+              "SELECT rolbypassrls OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
+          done
+          # MINIMAL precondition for the five suites that apply the FULL repository migration set
+          # via listMigrationFiles() rather than just the partner subset:
+          #   • 0018_correction_audit_index.sql builds a partial index ON audit_log;
+          #   • 0022_print_workflow_lifecycle.sql runs ALTER TABLE certificates (its data-backfill
+          #     half is already guarded on the real grade columns, so a stub table is exactly what
+          #     it expects — see the comment in that migration).
+          # No partner migration creates either table, and the suites do not seed them, so without
+          # this every one of them dies in beforeAll with `relation "audit_log" does not exist`.
+          #
+          # DELIBERATELY NOT a full `drizzle-kit push` / real schema / pgvector. That was tried and
+          # is actively WRONG here: the real shared/schema.ts `certificates` has no `secret` column,
+          # so a full push breaks the pre-existing-data fixtures these suites build (they insert
+          # cert_id/secret and assert the row survives rollback), and shared/schema.ts also declares
+          # a vector(1536) column the postgres:17 service cannot create. The minimal stub pair is
+          # both sufficient and the only correct option.
+          #
+          # Both tables must be OWNED BY pn_migrator, because the migrations are applied as that
+          # non-superuser role and would otherwise hit "must be owner of table". pn_migrator is
+          # created here with the same name and password tests/helpers/partner-realistic-db.ts
+          # uses, and that helper's own CREATE ROLE is idempotent, so the two cannot conflict.
+          for full_set_admin in "$PARTNER_CONNECTOR_PLAN_ADMIN" "$PARTNER_CONNECTOR_MIGRATION_ADMIN" \
+                                "$PARTNER_CONNECTOR_ADMIN_MIGRATION_ADMIN" \
+                                "$PARTNER_CONNECTOR_IMPORT_MIGRATION_ADMIN" \
+                                "$PARTNER_CONNECTOR_VALIDATION_MIGRATION_ADMIN"; do
+            psql "$full_set_admin" -v ON_ERROR_STOP=1 -c \
+              "DO \$\$ BEGIN CREATE ROLE pn_migrator LOGIN PASSWORD 'realistic-migrator-pw' NOSUPERUSER CREATEROLE NOBYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$;"
+            psql "$full_set_admin" -v ON_ERROR_STOP=1 -c \
+              "CREATE TABLE IF NOT EXISTS audit_log (id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL, admin_user text, details jsonb DEFAULT '{}'::jsonb, created_at timestamp NOT NULL DEFAULT now())"
+            psql "$full_set_admin" -v ON_ERROR_STOP=1 -c "ALTER TABLE audit_log OWNER TO pn_migrator"
+            psql "$full_set_admin" -v ON_ERROR_STOP=1 -c \
+              "CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, secret text)"
+            psql "$full_set_admin" -v ON_ERROR_STOP=1 -c "ALTER TABLE certificates OWNER TO pn_migrator"
+          done
 
       - name: Lint
         run: npm run lint
@@ -251,8 +372,20 @@ jobs:
       - name: Type check
         run: npm run check
 
+      # Same run as `npm test` (which is `vitest run`), with a machine-readable report added so the
+      # next step can prove the connector suites actually EXECUTED rather than silently skipped.
+      # The report is written even when tests fail, so the assertion below still reports which
+      # suites ran.
       - name: Test
-        run: npm test
+        run: npx vitest run --reporter=default --reporter=json --outputFile.json=vitest-report.json
+
+      # A skipped suite and a passing suite look identical in an exit code. This step fails the
+      # build if any expected connector suite is missing from the report or executed 0 tests —
+      # which is exactly how ~250 connector tests reported green for months without running.
+      # `if: always()` so a genuine test failure does not hide a suite that never ran at all.
+      - name: Assert connector suites executed
+        if: always()
+        run: node scripts/ci/assert-connector-suites-executed.mjs vitest-report.json
 
       - name: Build
         run: npm run build

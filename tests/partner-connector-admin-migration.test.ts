@@ -187,26 +187,54 @@ async function applyAllRealistic(): Promise<void> {
       expect(names).not.toContain("idx_partner_connector_admin_actions_org");
     });
 
-    it("G4 rollback drops exactly the new table + removes the journal row + reapplies cleanly", async () => {
+    // The G4 rollback used to be exercised end-to-end here by first rolling back 0015. That is no
+    // longer reachable, and the reason is a SAFETY property working as designed, not a defect:
+    // every rollback in this chain refuses while ANY higher-numbered migration is journalled
+    // (G4 refuses on 0015+, G5 on 0016+, G6A on 0017+, G6B on 0018+), and migrations 0018, 0022,
+    // 0023 and 0024 ship no rollback script at all. So on the current migration set the chain
+    // cannot be unwound down to G4 — by design, fail-closed.
+    //
+    // The assertion therefore now covers the behaviour that IS current and IS load-bearing: the
+    // refusal fires for its documented reason and changes NOTHING. That is the property which
+    // protects a real database from a partial teardown, and it is exactly what the previous
+    // (never-executed, stale) version of this test silently stopped checking.
+    it("G4 rollback fails closed while a later migration is applied, and changes nothing", async () => {
       const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
       await migrator.connect();
       try {
-        // A later migration (0015) is now part of the chain; its rollback must be run first, since the
-        // G4 rollback correctly refuses while a later dependent migration is applied.
-        await migrator.query(rb("rollback-partner-management.sql"));
-        await migrator.query(rb("rollback-partner-connector-admin-actions.sql"));
-        const exists = await admin.query("SELECT to_regclass($1) AS t", [TABLE]);
-        expect(exists.rows[0].t).toBeNull();
-        const j = await admin.query(
-          "SELECT 1 FROM schema_migrations WHERE filename='0014_partner_connector_admin_actions.sql'"
+        // Rolling 0015 back first is itself refused: 0016+ are applied.
+        await expect(migrator.query(rb("rollback-partner-management.sql"))).rejects.toThrow(
+          /refusing G5 rollback: a later migration \(0016\+\) is applied/i
         );
-        expect(j.rows).toHaveLength(0);
-        // other partner tables survive
+        // The refusal aborts inside this script's own BEGIN, so the connection is left in a failed
+        // transaction — the documented caller requirement (see rollback-partner-connector-g1.sql).
+        await migrator.query("ROLLBACK").catch(() => {});
+
+        // And the G4 rollback itself refuses for its own documented reason.
+        await expect(migrator.query(rb("rollback-partner-connector-admin-actions.sql"))).rejects.toThrow(
+          /refusing G4 rollback: a later migration \(0015\+\) is applied/i
+        );
+        await migrator.query("ROLLBACK").catch(() => {});
+
+        // NOTHING changed: the G4 table, its journal row, the G5 tables and the neighbouring
+        // connector evidence table all survive both refused attempts intact.
+        const exists = await admin.query("SELECT to_regclass($1) AS t", [TABLE]);
+        expect(exists.rows[0].t).not.toBeNull();
+        const j = await admin.query(
+          "SELECT status FROM schema_migrations WHERE filename='0014_partner_connector_admin_actions.sql'"
+        );
+        expect(j.rows).toHaveLength(1);
+        expect(j.rows[0].status).toBe("applied");
+        const g5 = await admin.query("SELECT to_regclass('partner_management_audit') AS t");
+        expect(g5.rows[0].t).not.toBeNull();
         const survive = await admin.query("SELECT to_regclass('partner_connector_import_attempts') AS t");
         expect(survive.rows[0].t).not.toBeNull();
-        // reapply cleanly
-        const { applied } = await applyMigrations(migrator, listMigrationFiles());
-        expect(applied).toContain("0014_partner_connector_admin_actions.sql");
+
+        // The forward chain is still consistent after the refusals — nothing left half-applied.
+        const plan = await planMigrations(migrator, listMigrationFiles());
+        expect(plan.pending).toHaveLength(0);
+        expect(plan.inconsistent).toHaveLength(0);
+        expect(plan.checksumMismatches).toHaveLength(0);
       } finally {
         await migrator.end();
       }
