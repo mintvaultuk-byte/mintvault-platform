@@ -69,7 +69,43 @@ export function partnerRateLimit(opts: LimiterOpts) {
 // Canonical Phase 1 limiters (all sensitive → fail closed). L2: sensitive limiters key on BOTH the
 // account identifier and the IP, so credential-stuffing across accounts from rotating IPs and
 // shared-NAT budget exhaustion are both bounded.
+//
+// `acct` mixes a REQUEST-BODY value into the bucket key. That is only ever safe as an ADDITIONAL
+// bucket sitting behind an IP-only one: on its own it hands the caller a fresh budget for every
+// distinct value it submits. See partnerLoginIpLimiter and partnerResetRequestLimiter.
 const acct = (req: Request): string => `${(req.body?.email ?? "").toString().toLowerCase()}|${req.ip}`;
+/**
+ * Login, IP bucket. ALWAYS applied, and mounted IN FRONT of partnerLoginLimiter (see
+ * public-routes.ts) — this is the bucket that actually bounds password spraying.
+ *
+ * The per-account bucket below keys on `acct`, which includes the caller-supplied `email`. On its
+ * own that meant one source IP earned a fresh 10-attempt budget for every distinct address it
+ * submitted, so spraying one password across many accounts from a single host was unbounded — the
+ * exact defect already fixed on the reset paths (partnerResetLimiter / partnerResetRequestLimiter
+ * notes above). Keying on `req.ip` alone removes the escape: nothing in the request body can move
+ * the caller to a different bucket.
+ *
+ * `req.ip` (not a hand-parsed X-Forwarded-For) because server/index.ts sets `trust proxy = 1`, so
+ * Express resolves it through exactly one trusted hop.
+ *
+ * Its OWN namespace (`partner_login_ip`, not `partner_login`) so the two login buckets can never
+ * starve each other, matching the partner_reset_request / partner_reset_request_acct pair.
+ *
+ * 30 per 15 minutes: deliberately ABOVE the 10-per-account budget so a single legitimate user
+ * fumbling their password is still bounded by the per-account bucket first, and a small partner
+ * shop behind one egress IP (a few staff, a few typos each) is not locked out — while a sprayer
+ * gets 30 guesses per quarter hour from a given source instead of an unbounded number.
+ */
+export const partnerLoginIpLimiter = partnerRateLimit({
+  name: "partner_login_ip",
+  windowMs: 15 * 60_000,
+  max: 30,
+  failClosed: true,
+});
+/**
+ * Login, per-account bucket — defence in depth, applied IN ADDITION to the IP bucket above (never
+ * instead of it), so one targeted account cannot be ground down from rotating IPs.
+ */
 export const partnerLoginLimiter = partnerRateLimit({
   name: "partner_login",
   windowMs: 15 * 60_000,
