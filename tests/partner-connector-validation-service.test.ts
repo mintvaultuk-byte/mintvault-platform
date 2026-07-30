@@ -4,7 +4,7 @@
  *
  * Runs ONLY when PARTNER_CONNECTOR_VALIDATION_RT_ADMIN + PARTNER_CONNECTOR_VALIDATION_RT_URL are set:
  *   PARTNER_CONNECTOR_VALIDATION_RT_ADMIN=postgresql://postgres@127.0.0.1:5592/dispo \
- *   PARTNER_CONNECTOR_VALIDATION_RT_URL=postgresql://partner_connector_app_test:synthetic@127.0.0.1:5592/dispo \
+ *   PARTNER_CONNECTOR_VALIDATION_RT_URL=postgresql://partner_connector_val_app_test:synthetic@127.0.0.1:5592/dispo \
  *   npx vitest run tests/partner-connector-validation-service.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -139,16 +139,16 @@ async function claimAndStartValidating(
       await admin.query("DROP OWNED BY partner_connector_runtime").catch(() => {});
       await applyMigrationsRealistic(admin, ADMIN!);
 
-      await admin.query("DROP ROLE IF EXISTS partner_connector_app_test").catch(() => {});
-      await admin.query("CREATE ROLE partner_connector_app_test LOGIN PASSWORD 'synthetic'");
-      await admin.query("GRANT partner_connector_runtime TO partner_connector_app_test");
-      await admin.query("DROP ROLE IF EXISTS partner_app_test_conn").catch(() => {});
-      await admin.query("CREATE ROLE partner_app_test_conn LOGIN PASSWORD 'synthetic'");
-      await admin.query("GRANT partner_runtime TO partner_app_test_conn");
+      await admin.query("DROP ROLE IF EXISTS partner_connector_val_app_test").catch(() => {});
+      await admin.query("CREATE ROLE partner_connector_val_app_test LOGIN PASSWORD 'synthetic'");
+      await admin.query("GRANT partner_connector_runtime TO partner_connector_val_app_test");
+      await admin.query("DROP ROLE IF EXISTS partner_val_test_conn").catch(() => {});
+      await admin.query("CREATE ROLE partner_val_test_conn LOGIN PASSWORD 'synthetic'");
+      await admin.query("GRANT partner_runtime TO partner_val_test_conn");
 
       process.env.PARTNER_CONNECTOR_DATABASE_URL = CONNECTOR_URL;
       const runtimeUrlForFlags = new URL(CONNECTOR_URL!);
-      runtimeUrlForFlags.username = "partner_app_test_conn";
+      runtimeUrlForFlags.username = "partner_val_test_conn";
       runtimeUrlForFlags.password = "synthetic";
       process.env.PARTNER_DATABASE_URL = runtimeUrlForFlags.toString();
 
@@ -752,7 +752,7 @@ async function claimAndStartValidating(
 
       it("partner_runtime (Partner-facing role) cannot read any validation run or finding", async () => {
         const runtimeUrl = new URL(CONNECTOR_URL!);
-        runtimeUrl.username = "partner_app_test_conn";
+        runtimeUrl.username = "partner_val_test_conn";
         runtimeUrl.password = "synthetic";
         const client = new Client({ connectionString: runtimeUrl.toString() });
         await client.connect();
