@@ -602,16 +602,12 @@ async function login(
     });
 
     it("suppresses /api/partner response bodies from the application log (R1 — TOTP seed + PII)", async () => {
-      // server/index.ts owns the request logger, and importing it would boot the whole application,
-      // so the invariant is verified against the SOURCE OF TRUTH: the prefix list itself is read
-      // from index.ts and applied with the same startsWith rule the logger uses. Deleting the
-      // "/api/partner" entry fails this test.
-      const { readFileSync } = await import("node:fs");
-      const indexSrc = readFileSync(new URL("../server/index.ts", import.meta.url), "utf8");
-      const declared = indexSrc.match(/const BODY_LOG_SUPPRESSED_PREFIXES = \[([^\]]*)\]/);
-      expect(declared, "BODY_LOG_SUPPRESSED_PREFIXES must still exist in server/index.ts").toBeTruthy();
-      const prefixes = [...declared![1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
-      const suppressed = (p: string) => prefixes.some((prefix) => p.startsWith(prefix));
+      // BEHAVIOURAL SUCCESSOR: tests/partner-integration-seams.test.ts drives the real logger over
+      // real HTTP and asserts on the log lines it actually emitted. This block now reads the real
+      // exported rule instead of scraping index.ts for the declaration as text.
+      const { BODY_LOG_SUPPRESSED_PREFIXES, isBodyLogSuppressed: suppressed } =
+        await import("../server/lib/request-logger");
+      expect(BODY_LOG_SUPPRESSED_PREFIXES).toContain("/api/partner");
 
       for (const p of [
         "/api/partner/mfa/enrol", // otpauthUri — embeds the raw TOTP seed
