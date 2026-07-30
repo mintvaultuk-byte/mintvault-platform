@@ -5,15 +5,29 @@
  * this hook believes, exactly per Phase 1's design ("Do not duplicate authentication logic in the
  * front end").
  */
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { partnerAuth, type PartnerSessionInfo } from "@/lib/partner-api";
+import { partnerAuth, PartnerApiError, type PartnerSessionInfo } from "@/lib/partner-api";
+
+/**
+ * The three genuinely different answers the session endpoint can give. Collapsing them all to
+ * `null` (as this hook previously did) made "the Portal is switched off" look exactly like "you
+ * are signed out", so a 503 silently bounced the user to a sign-in page that could never work.
+ */
+type SessionResult =
+  | { kind: "session"; session: PartnerSessionInfo }
+  | { kind: "signed-out" }
+  | { kind: "unavailable" };
 
 interface PartnerSessionContextValue {
   session: PartnerSessionInfo | null | undefined;
   isLoading: boolean;
   /** True once the FIRST session check has completed (loading vs. genuinely signed-out). */
   ready: boolean;
+  /** The whole Partner Portal is switched off or frozen (503) — not a sign-in problem. */
+  unavailable: boolean;
+  /** We WERE signed in during this visit and are not any more (mid-session 401). */
+  expired: boolean;
   refresh: () => Promise<void>;
   hasPermission: (perm: string) => boolean;
 }
@@ -23,17 +37,30 @@ const PartnerSessionContext = createContext<PartnerSessionContextValue | null>(n
 export function PartnerSessionProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [ready, setReady] = useState(false);
-  const { data: session, isLoading } = useQuery({
+  const { data: result, isLoading } = useQuery<SessionResult>({
     queryKey: ["/api/partner/session"],
     queryFn: async () => {
       try {
-        return await partnerAuth.session();
-      } catch {
-        return null; // TanStack Query v5 rejects `undefined` from queryFn — signed-out is represented as null
+        return { kind: "session", session: await partnerAuth.session() };
+      } catch (err) {
+        // TanStack Query v5 rejects `undefined` from queryFn, so every outcome is a value.
+        // 503 = the Portal itself is unavailable (feature flag off, emergency stop, backend not
+        // provisioned). Anything else, including the ordinary 401, means "not signed in".
+        if (err instanceof PartnerApiError && err.status === 503) return { kind: "unavailable" };
+        return { kind: "signed-out" };
       }
     },
     staleTime: 30_000,
   });
+
+  const session = result === undefined ? undefined : result.kind === "session" ? result.session : null;
+  const unavailable = result?.kind === "unavailable";
+
+  // "Expired" is only honest if we actually saw an authenticated session earlier in this visit —
+  // a first-load 401 is a plain signed-out visitor, not an expiry.
+  const wasAuthenticated = useRef(false);
+  if (session?.mfaPassed) wasAuthenticated.current = true;
+  const expired = wasAuthenticated.current && !unavailable && result?.kind === "signed-out";
 
   useEffect(() => {
     if (!isLoading) setReady(true);
@@ -46,7 +73,7 @@ export function PartnerSessionProvider({ children }: { children: ReactNode }) {
   const hasPermission = useCallback((perm: string) => !!session?.permissions?.includes(perm), [session]);
 
   return (
-    <PartnerSessionContext.Provider value={{ session, isLoading, ready, refresh, hasPermission }}>
+    <PartnerSessionContext.Provider value={{ session, isLoading, ready, unavailable, expired, refresh, hasPermission }}>
       {children}
     </PartnerSessionContext.Provider>
   );

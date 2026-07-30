@@ -79,8 +79,15 @@ describe("double-submit / duplication safety", () => {
 
 describe("optimistic-concurrency conflict is surfaced, never silently overwritten", () => {
   it("saveField distinguishes stale_version from a generic save error", () => {
-    expect(WIZARD).toContain('err?.code === "stale_version"');
+    // Narrowed through the typed error class rather than `catch (err: any)` + optional chaining —
+    // the project bans `any`, and the old form silently tolerated any shape reaching this branch.
+    expect(WIZARD).toContain('err instanceof PartnerApiError && err.code === "stale_version"');
     expect(WIZARD).toContain('setSaveStatus("conflict")');
+    expect(WIZARD).not.toContain("catch (err: any)");
+  });
+  it("a rejected new-customer save shows the server's reason instead of swallowing it", () => {
+    expect(WIZARD).toContain("setCustomerError(partnerErrorMessage(err))");
+    expect(WIZARD).toContain('data-testid="text-new-customer-error"');
   });
   it("every PATCH-style edit call includes the current submission.version", () => {
     expect(WIZARD).toContain("partnerSubmissions.edit(submission.id, { version: submission.version, ...patch })");

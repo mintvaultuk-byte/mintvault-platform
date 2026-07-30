@@ -62,6 +62,34 @@ export const partnerAuth = {
   revokeAll: () => req<{ ok: boolean; revoked: number }>("POST", "/api/partner/auth/revoke-all"),
 };
 
+/**
+ * Minimum password length the server enforces (server/partner/auth.ts MIN_PASSWORD_LEN). Mirrored
+ * here ONLY to give the user an instant, plain-English hint before they submit — the server remains
+ * the authority and re-checks every time.
+ */
+export const PARTNER_MIN_PASSWORD_LEN = 10;
+
+// ---- MFA enrolment ----
+// Both endpoints are reachable by an mfa-pending session (password accepted, second factor not yet
+// done), which is exactly the state a newly-invited user is in. `secret`/`otpauthUri` and
+// `recoveryCodes` are shown ONCE and never persisted client-side.
+export const partnerMfa = {
+  enrol: (password: string) =>
+    req<{ ok: boolean; secret: string; otpauthUri: string }>("POST", "/api/partner/mfa/enrol", { password }),
+  confirm: (code: string) =>
+    req<{ ok: boolean; recoveryCodes: string[] }>("POST", "/api/partner/mfa/confirm", { code }),
+};
+
+// ---- password reset ----
+// `request` is deliberately always-success: the server never discloses whether an account exists,
+// and the client must not infer it either. The token is delivered out of band (email) and never
+// appears in a response body.
+export const partnerPasswordReset = {
+  request: (email: string) => req<{ ok: boolean }>("POST", "/api/partner/auth/password-reset/request", { email }),
+  consume: (token: string, newPassword: string) =>
+    req<{ ok: boolean }>("POST", "/api/partner/auth/password-reset/consume", { token, newPassword }),
+};
+
 // ---- customers ----
 export interface PartnerCustomer {
   id: string;

@@ -141,6 +141,8 @@ const AdminPartnerDashboardPage = lazy(() => import("@/pages/admin/partner-dashb
 // live environment yet. See INTEGRATION-ORDER.md.
 const PartnerLoginPage = lazy(() => import("@/pages/partner/login"));
 const PartnerInvitePage = lazy(() => import("@/pages/partner/invite"));
+const PartnerPasswordResetRequestPage = lazy(() => import("@/pages/partner/password-reset-request"));
+const PartnerPasswordResetPage = lazy(() => import("@/pages/partner/password-reset"));
 const PartnerDashboardPage = lazy(() => import("@/pages/partner/dashboard"));
 const PartnerSubmissionsPage = lazy(() => import("@/pages/partner/submissions"));
 const PartnerSubmissionWizardPage = lazy(() => import("@/pages/partner/submission-wizard"));
@@ -257,6 +259,14 @@ function PartnerPortalRoutes() {
         </Route>
         <Route path="/partner/invite">
           <PartnerInvitePage />
+        </Route>
+        {/* Both reset pages are PUBLIC by design — a user who cannot sign in must be able to
+            reach them, so they sit outside PartnerRouteGuard alongside login and invite. */}
+        <Route path="/partner/forgot-password">
+          <PartnerPasswordResetRequestPage />
+        </Route>
+        <Route path="/partner/reset">
+          <PartnerPasswordResetPage />
         </Route>
         <Route path="/partner/dashboard">
           <PartnerRouteGuard>

@@ -23,12 +23,3 @@ export function PartnerComingSoon({ title, description }: { title: string; descr
     </div>
   );
 }
-
-export default function PartnerUsersPage() {
-  return (
-    <PartnerComingSoon
-      title="Users"
-      description="Managing your team's Partner Portal access is coming in a future update. Contact MintVault to add or remove a user in the meantime."
-    />
-  );
-}
