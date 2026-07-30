@@ -18,6 +18,9 @@ import {
   partnersQueryString,
   pmKeys,
   PARTNER_STATUSES,
+  PARTNER_PILOT_MUTABLE_FLAGS,
+  PARTNER_PILOT_READONLY_FLAG,
+  isPartnerPilotMutableFlag,
 } from "../client/src/pages/admin/partner-management-helpers";
 
 describe("G5 UI pure helpers", () => {
@@ -66,6 +69,17 @@ describe("G5 UI pure helpers", () => {
     expect(pmKeys.partner("abc")[0]).toBe("/api/super-admin/partner-management/partners/abc");
     expect(pmKeys.notes("abc")[0]).toBe("/api/super-admin/partner-management/partners/abc/notes");
   });
+
+  it("pilot flag helpers expose only onboarding/login as mutable and portal as read-only", () => {
+    expect(PARTNER_PILOT_READONLY_FLAG).toBe("partner_portal_enabled");
+    expect(PARTNER_PILOT_MUTABLE_FLAGS).toEqual(["partner_onboarding_enabled", "partner_login_enabled"]);
+    expect(isPartnerPilotMutableFlag("partner_onboarding_enabled")).toBe(true);
+    expect(isPartnerPilotMutableFlag("partner_login_enabled")).toBe(true);
+    expect(isPartnerPilotMutableFlag("partner_portal_enabled")).toBe(false);
+    expect(isPartnerPilotMutableFlag("partner_connector_enabled")).toBe(false);
+    expect(isPartnerPilotMutableFlag("partner_grading_enabled")).toBe(false);
+    expect(isPartnerPilotMutableFlag("partner_payments_enabled")).toBe(false);
+  });
 });
 
 describe("G5 list page source assertions", () => {
@@ -83,9 +97,20 @@ describe("G5 list page source assertions", () => {
       "pm-table",
       "pm-create-modal",
       "pm-create-confirm",
+      "pm-pilot-flags",
+      "pm-pilot-flag-toggle-",
+      "pm-pilot-portal-readonly",
     ]) {
       expect(src).toContain(id);
     }
+  });
+  it("hardcodes the pilot controls to the canonical flag API and no connector/grading/payment flags", () => {
+    expect(src).toContain("PARTNER_PILOT_FLAG_BASE");
+    expect(src).toContain("window.confirm");
+    expect(src).toContain("Pilot setup:");
+    expect(src).not.toContain("partner_connector_enabled");
+    expect(src).not.toContain("partner_grading_enabled");
+    expect(src).not.toContain("partner_payments_enabled");
   });
 });
 

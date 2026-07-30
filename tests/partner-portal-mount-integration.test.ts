@@ -308,6 +308,14 @@ async function login(
       s.authenticatedAt = Date.now();
       rq.session.save(() => rs.json({ ok: true }));
     });
+    app.post("/__test/non-super-admin-login", (rq, rs) => {
+      const s = rq.session as unknown as Record<string, unknown>;
+      s.isAdmin = true;
+      s.adminEmail = "ordinary-admin@example.test";
+      s.credentialVersion = 1;
+      s.authenticatedAt = Date.now();
+      rq.session.save(() => rs.json({ ok: true }));
+    });
     registerPartnerPublicRoutes(app);
     mountPartnerPortal(app);
     registerPartnerFlagAdminRoutes(app);
@@ -653,6 +661,24 @@ async function login(
       // and it changed nothing
       const { rows } = await admin.query<{ enabled: boolean }>(
         "SELECT enabled FROM partner_feature_flags WHERE flag='partner_portal_enabled' AND tenant_id IS NULL"
+      );
+      expect(rows[0].enabled).toBe(true);
+    });
+
+    it("rejects a signed-in admin who is not a Super Admin before any flag write", async () => {
+      const login = await fetch(`${base}/__test/non-super-admin-login`, { method: "POST" });
+      const nonSuperCookie = (login.headers.get("set-cookie") ?? "").split(";")[0];
+      expect(nonSuperCookie).toContain("mv.sid");
+
+      expect((await req("GET", FLAGS_BASE, { cookie: nonSuperCookie })).status).toBe(403);
+      const w = await req("PUT", `${FLAGS_BASE}/partner_onboarding_enabled`, {
+        cookie: nonSuperCookie,
+        body: { enabled: false, reason: "non-super-admin attempt" },
+      });
+      expect(w.status).toBe(403);
+
+      const { rows } = await admin.query<{ enabled: boolean }>(
+        "SELECT enabled FROM partner_feature_flags WHERE flag='partner_onboarding_enabled' AND tenant_id IS NULL"
       );
       expect(rows[0].enabled).toBe(true);
     });
