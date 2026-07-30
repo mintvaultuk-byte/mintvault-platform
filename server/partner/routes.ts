@@ -21,6 +21,7 @@ import {
   requireNotSensitiveFrozen,
 } from "./session";
 import {
+  partnerLoginIpLimiter,
   partnerLoginLimiter,
   partnerMfaLimiter,
   partnerResetLimiter,
@@ -118,7 +119,13 @@ export function partnerApiRouter(): Router {
   const r = Router();
 
   // ---- auth ----
-  r.post("/auth/login", partnerLoginLimiter, async (req, res) => {
+  // SHADOWED DUPLICATE — the served implementation is server/partner/public-routes.ts, kept ahead of
+  // this router by the registration-order invariant at server/routes.ts:2798. It carries the SAME
+  // limiter pair anyway, in the SAME order, so the protection does not depend on that invariant
+  // holding: partnerLoginIpLimiter (IP-only, always applied) must bind BEFORE partnerLoginLimiter,
+  // whose key includes the caller-supplied `email` and on its own hands one source IP a fresh
+  // budget per address it tries. If this route ever stops being shadowed it is still bounded.
+  r.post("/auth/login", partnerLoginIpLimiter, partnerLoginLimiter, async (req, res) => {
     const { email, password } = req.body ?? {};
     if (typeof email !== "string" || typeof password !== "string") {
       res.status(400).json({ error: "invalid request" });

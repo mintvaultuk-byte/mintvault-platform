@@ -276,4 +276,47 @@ const ACCOUNT_MAX = 10; // partnerLoginLimiter — per (email, IP), 15 min
     }
     expect(last).toBe(429);
   }, 120_000);
+
+  /**
+   * The protection must NOT depend on registration order.
+   *
+   * partnerApiRouter (server/partner/routes.ts) still defines its own /auth/login, kept permanently
+   * shadowed only by the ordering invariant at server/routes.ts:2798 — registerPartnerPublicRoutes
+   * before mountPartnerPortal. That invariant is one line-swap away from being wrong, so this test
+   * mounts partnerApiRouter's login route DIRECTLY, on its own app, bypassing public-routes
+   * entirely, and proves IP rotation is throttled there too. (Behavioural, not structural: mounting
+   * the router in isolation turned out to be practical — that handler reaches partnerLogin without
+   * any auth middleware in front of it.)
+   *
+   * Note it is a genuinely different surface: this duplicate has NO emergency-stop, portal_enabled
+   * or login_enabled gate. That is exactly why it must not also be missing the IP bucket.
+   */
+  it("throttles IP rotation on the SHADOWED duplicate route too, so protection does not rely on mount order", async () => {
+    await clearLockout();
+    const { partnerApiRouter } = await import("../server/partner/routes");
+    const shadow = express();
+    shadow.set("trust proxy", 1); // identical to server/index.ts:45
+    shadow.use(express.json());
+    shadow.use("/api/partner", partnerApiRouter());
+    const shadowServer = http.createServer(shadow);
+    await new Promise<void>((resolve) => shadowServer.listen(0, "127.0.0.1", resolve));
+    const shadowBase = `http://127.0.0.1:${(shadowServer.address() as AddressInfo).port}`;
+
+    const IP = "203.0.113.30"; // a bucket no other test in this file has touched
+    const seen: number[] = [];
+    for (let i = 0; i < IP_MAX + 5; i++) {
+      const res = await fetch(`${shadowBase}/api/partner/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-forwarded-for": IP },
+        body: JSON.stringify({ email: `shadow-spray-${i}@example.test`, password: "wrong-password-1" }),
+      });
+      seen.push(res.status);
+    }
+    await new Promise<void>((resolve) => shadowServer.close(() => resolve()));
+
+    const firstThrottled = seen.indexOf(429);
+    expect(firstThrottled).toBe(IP_MAX);
+    expect(seen.slice(0, firstThrottled).every((s) => s === 401)).toBe(true);
+    expect(seen.slice(firstThrottled).every((s) => s === 429)).toBe(true);
+  }, 120_000);
 });
