@@ -72,10 +72,27 @@ export function noteValid(body: string): boolean {
 /** Human label for an unavailable metric (never rendered as a fake 0). */
 export const UNAVAILABLE_LABEL = "Unavailable — no tenant-linked source yet";
 
+export const PARTNER_PILOT_FLAG_BASE = "/api/super-admin/partner-flags";
+export const PARTNER_PILOT_READONLY_FLAG = "partner_portal_enabled" as const;
+export const PARTNER_PILOT_MUTABLE_FLAGS = ["partner_onboarding_enabled", "partner_login_enabled"] as const;
+export type PartnerPilotMutableFlag = (typeof PARTNER_PILOT_MUTABLE_FLAGS)[number];
+export type PartnerPilotDisplayFlag = PartnerPilotMutableFlag | typeof PARTNER_PILOT_READONLY_FLAG;
+
+export const PARTNER_PILOT_FLAG_LABELS: Record<PartnerPilotDisplayFlag, string> = {
+  partner_portal_enabled: "Partner Portal",
+  partner_onboarding_enabled: "Partner Onboarding",
+  partner_login_enabled: "Partner Login",
+};
+
+export function isPartnerPilotMutableFlag(flag: string): flag is PartnerPilotMutableFlag {
+  return (PARTNER_PILOT_MUTABLE_FLAGS as readonly string[]).includes(flag);
+}
+
 // ---- Query-key builders (literal API paths so prefix-invalidation works) --------------------------
 const BASE = "/api/super-admin/partner-management";
 export const pmKeys = {
   partners: (filters: Record<string, unknown>) => [`${BASE}/partners`, filters] as const,
+  pilotFlags: () => [PARTNER_PILOT_FLAG_BASE] as const,
   partner: (id: string) => [`${BASE}/partners/${id}`] as const,
   users: (id: string) => [`${BASE}/partners/${id}/users`] as const,
   contacts: (id: string) => [`${BASE}/partners/${id}/contacts`] as const,

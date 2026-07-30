@@ -13,7 +13,19 @@ import { useLocation, Link } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminShell, Panel, Badge, AdminButton, Chip, adminButtonClass } from "@/components/admin";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { statusBadgeVariant, PARTNER_STATUSES, pmKeys, partnersQueryString } from "./partner-management-helpers";
+import {
+  statusBadgeVariant,
+  PARTNER_STATUSES,
+  PARTNER_PILOT_FLAG_BASE,
+  PARTNER_PILOT_FLAG_LABELS,
+  PARTNER_PILOT_MUTABLE_FLAGS,
+  PARTNER_PILOT_READONLY_FLAG,
+  isPartnerPilotMutableFlag,
+  pmKeys,
+  partnersQueryString,
+  type PartnerPilotDisplayFlag,
+  type PartnerPilotMutableFlag,
+} from "./partner-management-helpers";
 
 const BASE = "/api/super-admin/partner-management";
 
@@ -33,6 +45,21 @@ interface PartnerRow {
 }
 
 type Filter = { search?: string; status?: string; page: number };
+
+interface PartnerPilotFlagRow {
+  flag: string;
+  enabled: boolean;
+  configured: boolean;
+  updatedAt: string | null;
+}
+
+interface PartnerPilotFlagState {
+  flags: PartnerPilotFlagRow[];
+}
+
+function flagState(data: PartnerPilotFlagState | undefined, flag: PartnerPilotDisplayFlag): PartnerPilotFlagRow | null {
+  return data?.flags.find((row) => row.flag === flag) ?? null;
+}
 
 export default function PartnerManagementPage() {
   const [, navigate] = useLocation();
@@ -63,6 +90,12 @@ export default function PartnerManagementPage() {
     enabled: authed === true,
   });
 
+  const pilotFlags = useQuery<PartnerPilotFlagState>({
+    queryKey: pmKeys.pilotFlags(),
+    queryFn: () => apiRequest("GET", PARTNER_PILOT_FLAG_BASE).then((r) => r.json()),
+    enabled: authed === true,
+  });
+
   const createMutation = useMutation({
     mutationFn: async (name: string) => (await apiRequest("POST", `${BASE}/partners`, { legalName: name })).json(),
     onSuccess: (d) => {
@@ -75,6 +108,33 @@ export default function PartnerManagementPage() {
     onError: (err: unknown) =>
       setBanner((err as { body?: { error?: { message?: string } } })?.body?.error?.message ?? "Create failed."),
   });
+
+  const flagMutation = useMutation({
+    mutationFn: async ({ flag, enabled }: { flag: PartnerPilotMutableFlag; enabled: boolean }) =>
+      (
+        await apiRequest("PUT", `${PARTNER_PILOT_FLAG_BASE}/${flag}`, {
+          enabled,
+          reason: `Pilot setup: ${PARTNER_PILOT_FLAG_LABELS[flag]} ${enabled ? "enabled" : "disabled"}`,
+        })
+      ).json(),
+    onSuccess: (_data, vars) => {
+      setBanner(`${PARTNER_PILOT_FLAG_LABELS[vars.flag]} ${vars.enabled ? "enabled" : "disabled"}.`);
+      queryClient.invalidateQueries({ queryKey: pmKeys.pilotFlags() });
+      pilotFlags.refetch();
+    },
+    onError: (err: unknown, vars) =>
+      setBanner(
+        (err as { body?: { error?: { message?: string } } })?.body?.error?.message ??
+          `${PARTNER_PILOT_FLAG_LABELS[vars.flag]} update failed.`
+      ),
+  });
+
+  const changePilotFlag = (flag: string, enabled: boolean) => {
+    if (!isPartnerPilotMutableFlag(flag)) return;
+    const label = PARTNER_PILOT_FLAG_LABELS[flag];
+    if (!window.confirm(`${enabled ? "Enable" : "Disable"} ${label}?`)) return;
+    flagMutation.mutate({ flag, enabled });
+  };
 
   if (authed === null) {
     return (
@@ -113,6 +173,79 @@ export default function PartnerManagementPage() {
             {banner}
           </div>
         )}
+
+        <Panel title="Partner Pilot Flags" sub="Super Admin pilot controls" className="mb-4">
+          <div data-testid="pm-pilot-flags">
+            {pilotFlags.isLoading ? (
+              <div data-testid="pm-pilot-flags-loading">Loading Partner pilot flags…</div>
+            ) : pilotFlags.isError ? (
+              <div
+                role="alert"
+                data-testid="pm-pilot-flags-error"
+                style={{
+                  border: "1px solid rgba(220,80,80,.45)",
+                  background: "rgba(220,80,80,.08)",
+                  borderRadius: 8,
+                  padding: "10px 12px",
+                }}
+              >
+                Partner pilot flag state is unavailable. Pilot controls are disabled.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {[PARTNER_PILOT_READONLY_FLAG, ...PARTNER_PILOT_MUTABLE_FLAGS].map((flag) => {
+                  const row = flagState(pilotFlags.data, flag);
+                  const enabled = row?.enabled === true;
+                  const known = row !== null;
+                  const mutable = isPartnerPilotMutableFlag(flag);
+                  return (
+                    <div
+                      key={flag}
+                      data-testid={`pm-pilot-flag-${flag}`}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        padding: "8px 10px",
+                        border: "1px solid rgba(255,255,255,.12)",
+                        borderRadius: 8,
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{PARTNER_PILOT_FLAG_LABELS[flag]}</div>
+                        <div style={{ fontSize: 12, opacity: 0.7 }}>{mutable ? flag : "Read-only master switch"}</div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <Badge
+                          variant={known ? (enabled ? "act" : "neu") : "red"}
+                          testId={`pm-pilot-flag-status-${flag}`}
+                        >
+                          {known ? (enabled ? "Enabled" : "Disabled") : "Unavailable"}
+                        </Badge>
+                        {mutable ? (
+                          <AdminButton
+                            size="sm"
+                            variant={enabled ? "ghost" : "gold"}
+                            disabled={!known || flagMutation.isPending}
+                            onClick={() => changePilotFlag(flag, !enabled)}
+                            data-testid={`pm-pilot-flag-toggle-${flag}`}
+                          >
+                            {flagMutation.isPending ? "Saving…" : enabled ? "Disable" : "Enable"}
+                          </AdminButton>
+                        ) : (
+                          <span style={{ fontSize: 12, opacity: 0.7 }} data-testid="pm-pilot-portal-readonly">
+                            Read-only
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </Panel>
 
         <Panel
           title="Partners"
