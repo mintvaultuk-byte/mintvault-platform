@@ -9,7 +9,7 @@ import { withAdvisoryLock } from "./lib/advisory-lock";
 import { trackInterval, trackTimeout, beginJob, endJob, isShuttingDown, runGracefulShutdown } from "./lib/lifecycle";
 import { serveStatic } from "./static";
 import { cleanupStalePreGradeImages } from "./r2";
-import { redactSensitive } from "./lib/auth-security";
+import { createRequestLogger } from "./lib/request-logger";
 import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 import { sendVaultClubGraceExpiredEmail, sendTransferV2Completed } from "./email";
@@ -278,55 +278,11 @@ const adminRateLimit = rateLimit({
 app.use("/api/admin", adminRateLimit);
 
 /**
- * Prefixes whose JSON response BODY must never be written to the application log.
- *
- * `redactSensitive` masks credential-shaped keys (password/token/secret/…) but NOT personal
- * data — `email`, `phone`, `full_name`, `address_*`, `company_number`, `vat_number` all pass
- * through verbatim. That is tolerable for narrow single-record admin endpoints, but the partner
- * dashboard returns MANY partners' details in one response and auto-refreshes, so logging its
- * bodies would continuously write bulk partner PII into the Fly log.
- *
- * The same reasoning applies to the whole /api/partner surface, and one case there is worse than
- * PII: POST /api/partner/mfa/enrol returns `otpauthUri`, which embeds the raw TOTP seed as a query
- * parameter (`?secret=…`). `redactSensitive` keys off the FIELD NAME, so it masks `secret` and
- * misses `otpauthUri` entirely — the seed would be written to the log in full, as would the
- * one-time `recoveryCodes` from /api/partner/mfa/confirm and the customer/team PII on
- * /api/partner/customers and /api/partner/users.
- *
- * Method, path, status and duration are still logged — only the body is suppressed.
+ * API request/response logging. The middleware and the body-suppression prefix list now live in
+ * server/lib/request-logger.ts so they can be driven by a real test; `log` is passed in so the
+ * emitted lines are identical to the previous inline implementation.
  */
-const BODY_LOG_SUPPRESSED_PREFIXES = ["/api/super-admin/partner-dashboard", "/api/partner"];
-
-function isBodyLogSuppressed(reqPath: string): boolean {
-  return BODY_LOG_SUPPRESSED_PREFIXES.some((prefix) => reqPath.startsWith(prefix));
-}
-
-app.use((req, res, next) => {
-  const start = Date.now();
-  const reqPath = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (reqPath.startsWith("/api")) {
-      let logLine = `${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse && !isBodyLogSuppressed(reqPath)) {
-        const safeBody = redactSensitive(capturedJsonResponse);
-        logLine += ` :: ${JSON.stringify(safeBody)}`;
-      }
-
-      log(logLine);
-    }
-  });
-
-  next();
-});
+app.use(createRequestLogger(log));
 
 log(`ADMIN_PASSWORD env var: ${process.env.ADMIN_PASSWORD ? "SET" : "NOT SET"}`, "auth");
 // ADMIN_PIN env-var log removed 2026-05-04 — PIN is now per-user bcrypt on users.pin_hash.
