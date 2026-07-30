@@ -28,17 +28,40 @@ export function setInvitationDeliveryAdapter(a: InvitationDeliveryAdapter | null
 }
 
 export function resetDeliveryConfigured(): boolean {
-  return adapter !== null;
+  return adapter !== null || !!process.env.RESEND_API_KEY;
 }
 
 export function invitationDeliveryConfigured(): boolean {
   return inviteAdapter !== null || !!process.env.RESEND_API_KEY;
 }
 
-/** Deliver a reset token. Throws (fail closed) if no provider is configured. */
+/**
+ * Deliver a reset token. Throws (fail closed) if no provider is configured.
+ *
+ * SECRECY: no thrown message may contain the token, the reset URL, or the recipient address —
+ * the provider error is deliberately discarded and replaced with a constant string so neither the
+ * secret nor partner-account existence can leak into logs or error reporting.
+ */
 export async function deliverResetToken(email: string, token: string): Promise<void> {
-  if (!adapter) throw new Error("no reset delivery provider configured — failing closed");
-  await adapter(email, token);
+  if (adapter) {
+    await adapter(email, token);
+    return;
+  }
+  const { sendPartnerResetEmail } = await import("../email");
+  const { RESET_TOKEN_MINUTES } = await import("./auth");
+  let sent: { id: string } | null;
+  try {
+    sent = await sendPartnerResetEmail({
+      email,
+      resetUrl: `${process.env.APP_URL || "https://mintvaultuk.com"}/partner/reset?token=${encodeURIComponent(
+        token
+      )}`,
+      expiresMinutes: RESET_TOKEN_MINUTES,
+    });
+  } catch {
+    throw new Error("partner reset delivery failed");
+  }
+  if (!sent) throw new Error("no reset delivery provider configured — failing closed");
 }
 
 /** Deliver an invitation token. Throws (fail closed) if no provider is configured. */

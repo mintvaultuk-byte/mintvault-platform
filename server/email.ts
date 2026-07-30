@@ -1602,6 +1602,37 @@ export async function sendVaultClubGraceExpiredEmail(data: {
   }
 }
 
+/**
+ * Partner Portal password-reset email.
+ *
+ * SECRECY: the reset URL embeds a single-use token. Nothing in this function logs, returns, or
+ * embeds the URL in an error message — sendViaResend surfaces only the provider's own error text.
+ */
+export async function sendPartnerResetEmail(data: {
+  email: string;
+  resetUrl: string;
+  expiresMinutes: number;
+}): Promise<{ id: string } | null> {
+  const resend = getResend();
+  if (!resend) return null;
+  const safeUrl = escapeHtmlForEmail(data.resetUrl);
+  const safeMinutes = escapeHtmlForEmail(String(data.expiresMinutes));
+  const body = `
+<p style="margin:0 0 16px 0;">A password reset was requested for your MintVault Partner Portal account.</p>
+<p style="margin:0 0 20px 0;">This secure link can be used <strong style="color:#fff;">once</strong> and expires in <strong style="color:#fff;">${safeMinutes} minutes</strong>.</p>
+<p style="margin:20px 0;">
+<a href="${safeUrl}" style="display:inline-block;padding:12px 24px;background:#D4AF37;color:#111;text-decoration:none;border-radius:4px;font-weight:bold;letter-spacing:1px;">RESET PARTNER PASSWORD</a>
+</p>
+<p style="color:#888;font-size:12px;line-height:1.6;margin:18px 0 0;">If you did not request this, ignore this email. Your password has not been changed.</p>`;
+  return sendViaResend(resend, {
+    from: getFromEmail(),
+    replyTo: REPLY_TO,
+    to: data.email,
+    subject: "MintVault Partner — password reset",
+    html: baseHtml("Partner Portal Password Reset", body),
+  });
+}
+
 export async function sendPartnerInvitationEmail(data: {
   email: string;
   partnerName: string;
