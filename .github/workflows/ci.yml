@@ -66,6 +66,20 @@ jobs:
       PARTNER_PUBLIC_RT_RUNTIME: postgres://partner_app_test:synthetic@127.0.0.1:55433/mintvault_partner_public
       PARTNER_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_runtime
       PARTNER_RT_RUNTIME: postgres://partner_app_test:synthetic@127.0.0.1:55433/mintvault_partner_runtime
+
+      # ---- Partner portal MAIN-APP mount + GLOBAL flag administration (WP-1) ----
+      # tests/partner-portal-mount-integration.test.ts. Same PostgreSQL 17 server and the same
+      # one-database-per-suite rule as the five above: the realistic-roles helper hands `public`
+      # schema ownership to the non-superuser pn_migrator and applies the partner migrations as
+      # that role, so it can never share a database with another suite.
+      #
+      # This suite is the ONLY coverage proving the production composition — the public routes and
+      # the authenticated portal mounted into one app, in that order — keeps every fail-closed gate,
+      # and the only coverage of the super-admin GLOBAL flag surface. It fails closed in CI (see the
+      # "is not silently skipped in CI" guard in the file) rather than skipping, so deleting either
+      # variable turns the build red instead of silently deleting the evidence.
+      PARTNER_MOUNT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_mount
+      PARTNER_MOUNT_RT_RUNTIME: postgres://partner_app_test:synthetic@127.0.0.1:55433/mintvault_partner_mount
     services:
       postgres:
         # pgvector-enabled Postgres 16 (official pgvector image, same server as
@@ -194,7 +208,7 @@ jobs:
           # under set -e, rather than being swallowed by a pipe).
           for partner_db in mintvault_partner_capability mintvault_partner_user_mgmt \
                             mintvault_partner_final_owner mintvault_partner_public \
-                            mintvault_partner_runtime; do
+                            mintvault_partner_runtime mintvault_partner_mount; do
             present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
               "SELECT 1 FROM pg_database WHERE datname = '$partner_db'")"
             if [ "$present" != "1" ]; then
