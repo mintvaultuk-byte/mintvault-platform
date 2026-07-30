@@ -57,19 +57,15 @@ const EXPECTED = [
   { file: "tests/partner-connector-query-plan.test.ts", min: 7 },
   // PARTNER_CONNECTOR_RUNTIME_ADMIN / _RUNTIME_URL (wired before this change; kept asserted)
   { file: "tests/partner-connector-runtime.test.ts", min: 15 },
+  // PARTNER_CONNECTOR_MIGRATION_ADMIN
+  { file: "tests/partner-connector-migration.test.ts", min: 14 },
+  // PARTNER_CONNECTOR_ADMIN_MIGRATION_ADMIN
+  { file: "tests/partner-connector-admin-migration.test.ts", min: 8 },
+  // PARTNER_CONNECTOR_IMPORT_MIGRATION_ADMIN
+  { file: "tests/partner-connector-import-migration.test.ts", min: 10 },
+  // PARTNER_CONNECTOR_VALIDATION_MIGRATION_ADMIN
+  { file: "tests/partner-connector-validation-migration.test.ts", min: 13 },
 ];
-
-/**
- * DELIBERATELY NOT ASSERTED — see the "BLOCKED" note in .github/workflows/ci.yml.
- * These four execute correctly but carry stale migration-chain assertions (hard-coded journal
- * row counts, and rollback ordering that predates migrations 0016+). Wiring them today would
- * make the build red on a defect this change is not authorised to fix. They are recorded here
- * so the omission is explicit rather than forgotten:
- *   tests/partner-connector-migration.test.ts
- *   tests/partner-connector-admin-migration.test.ts
- *   tests/partner-connector-import-migration.test.ts
- *   tests/partner-connector-validation-migration.test.ts
- */
 
 const reportPath = process.argv[2];
 if (!reportPath) {
@@ -116,7 +112,10 @@ for (const { file, min } of EXPECTED) {
   }
   rows.push({ suite: file, ...r, floor: min });
   if (r.executed === 0) {
-    problems.push(`${file}: 0 tests EXECUTED (${r.skipped} skipped) — its env gate was not set, so the suite silently did not run`);
+    problems.push(
+      `${file}: 0 tests EXECUTED (${r.skipped} not run) — either its env-var gate was unset (describe.skip) ` +
+        `or its beforeAll threw; check the suite's output above for which`
+    );
   } else if (r.executed < min) {
     problems.push(`${file}: only ${r.executed} tests executed, expected at least ${min} — coverage was lost`);
   }

@@ -73,6 +73,22 @@ async function seedMintVaultTables(): Promise<void> {
   await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator").catch(() => {});
 }
 
+/**
+ * The partner migration filenames the journal query (`filename LIKE '00%_partner%'`) selects,
+ * derived from the migrations directory instead of hard-coded. SQL LIKE treats `_` as a
+ * single-character wildcard, so the regex below is the equivalent. Sorted to match ORDER BY.
+ */
+function partnerMigrationFilenames(): string[] {
+  return listMigrationFiles()
+    .map((f) => f.filename)
+    .filter((n) => /^00.+partner/.test(n))
+    .sort();
+}
+
+function expectedPartnerJournalCount(): number {
+  return partnerMigrationFilenames().length;
+}
+
 async function applyAllRealistic(): Promise<void> {
   await provisionRealisticRoles(admin);
   await seedMintVaultTables();
@@ -106,11 +122,15 @@ async function applyAllRealistic(): Promise<void> {
       expect(rows[0].status).toBe("applied");
     });
 
-    it("all 13 partner migration journal rows are present and applied", async () => {
+    it("every partner migration journal row is present and applied", async () => {
       const { rows } = await admin.query(
         "SELECT filename, status FROM schema_migrations WHERE filename LIKE '00%_partner%' ORDER BY filename"
       );
-      expect(rows).toHaveLength(13);
+      // Derived from migrations/, NOT hard-coded — see partnerMigrationFilenames() above. This read
+      // `toHaveLength(13)` against a directory that now holds 19; a new magic number would simply
+      // re-arm the same trap for the next partner migration.
+      expect(rows).toHaveLength(expectedPartnerJournalCount());
+      expect(rows.map((r) => r.filename)).toEqual(partnerMigrationFilenames());
       for (const r of rows) expect(r.status).toBe("applied");
     });
 

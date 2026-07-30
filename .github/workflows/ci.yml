@@ -142,28 +142,16 @@ jobs:
       # the second one by substituting the login roles it creates itself.
       PARTNER_CONNECTOR_ADMIN_TEST: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_ops
       PARTNER_CONNECTOR_ADMIN_TEST_RUNTIME: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_ops
-      # Index/query-plan verification. Unlike the suites above it applies the FULL repository
-      # migration set via listMigrationFiles(), so its database needs the two MintVault-internal
-      # tables those migrations touch (see the "minimal precondition" step below).
+      # ---- Connector suites that apply the FULL repository migration set ----
+      # These five differ from the ones above: they drive listMigrationFiles(), i.e. EVERY migration
+      # in migrations/, not just the partner subset. That reaches two MintVault-internal tables no
+      # partner migration creates (see the "minimal precondition" step below), which is why they
+      # each need it in addition to their own database.
       PARTNER_CONNECTOR_PLAN_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_plan
-
-      # ---- DELIBERATELY NOT WIRED (BLOCKED, needs a decision) ----
-      # PARTNER_CONNECTOR_MIGRATION_ADMIN, PARTNER_CONNECTOR_ADMIN_MIGRATION_ADMIN,
-      # PARTNER_CONNECTOR_IMPORT_MIGRATION_ADMIN, PARTNER_CONNECTOR_VALIDATION_MIGRATION_ADMIN.
-      #
-      # Their four suites DO run once the same minimal precondition below is applied — verified
-      # locally: 46 executed, 40 passed, 6 failed, 0 skipped. The 6 failures are STALE ASSERTIONS
-      # inside the suites, not connector defects and not CI defects:
-      #   • three suites assert a hard-coded partner journal row count (13 / 13 / 15) against a
-      #     migrations/ directory that now holds 19;
-      #   • the G4 rollback test rolls back a chain that migrations 0016+ now sit on top of, so
-      #     the rollback correctly REFUSES;
-      #   • the G1 rollback cannot drop partner_connector_runtime because later migrations grant
-      #     to it, which also breaks the reapply-after-rollback test that follows it.
-      # Fixing those means CHANGING WHAT THE TESTS ASSERT, which this change is not authorised to
-      # do. Wiring them as-is would make the build red on a known, unrelated defect. They stay
-      # unwired and are named in scripts/ci/assert-connector-suites-executed.mjs so the gap is
-      # recorded rather than forgotten.
+      PARTNER_CONNECTOR_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_migration
+      PARTNER_CONNECTOR_ADMIN_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_admin_mig
+      PARTNER_CONNECTOR_IMPORT_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_import_mig
+      PARTNER_CONNECTOR_VALIDATION_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_val_mig
     services:
       postgres:
         # pgvector-enabled Postgres 16 (official pgvector image, same server as
@@ -298,7 +286,9 @@ jobs:
                             mintvault_connector_import mintvault_connector_recon \
                             mintvault_connector_recon_load mintvault_connector_fault \
                             mintvault_connector_blocker mintvault_connector_scale \
-                            mintvault_connector_ops mintvault_connector_plan; do
+                            mintvault_connector_ops mintvault_connector_plan \
+                            mintvault_connector_migration mintvault_connector_admin_mig \
+                            mintvault_connector_import_mig mintvault_connector_val_mig; do
             present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
               "SELECT 1 FROM pg_database WHERE datname = '$partner_db'")"
             if [ "$present" != "1" ]; then
@@ -333,27 +323,39 @@ jobs:
             psql "$connector_admin" -v ON_ERROR_STOP=1 -tAc \
               "SELECT rolbypassrls OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
           done
-          # Minimal precondition for the query-plan suite, which applies the FULL repository
-          # migration set via listMigrationFiles() rather than just the partner subset:
+          # MINIMAL precondition for the five suites that apply the FULL repository migration set
+          # via listMigrationFiles() rather than just the partner subset:
           #   • 0018_correction_audit_index.sql builds a partial index ON audit_log;
           #   • 0022_print_workflow_lifecycle.sql runs ALTER TABLE certificates (its data-backfill
-          #     half is already guarded on the real grade columns, so a stub table is what it
-          #     expects — see the comment in that migration).
-          # No partner migration creates either table, and the suite does not seed them. This is
-          # the MINIMAL pair, deliberately NOT a full `drizzle-kit push`: the real shared/schema.ts
-          # `certificates` has no `secret` column, so a full push actively breaks the fixtures
-          # these suites build (it also needs pgvector, which the postgres:17 service lacks).
-          # Both tables must be owned by pn_migrator because the migrations are applied as that
-          # non-superuser role; pn_migrator is created here with the same name and password the
-          # realistic-roles helper uses, and that helper's own CREATE ROLE is idempotent.
-          psql "$PARTNER_CONNECTOR_PLAN_ADMIN" -v ON_ERROR_STOP=1 -c \
-            "DO \$\$ BEGIN CREATE ROLE pn_migrator LOGIN PASSWORD 'realistic-migrator-pw' NOSUPERUSER CREATEROLE NOBYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$;"
-          psql "$PARTNER_CONNECTOR_PLAN_ADMIN" -v ON_ERROR_STOP=1 -c \
-            "CREATE TABLE IF NOT EXISTS audit_log (id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL, admin_user text, details jsonb DEFAULT '{}'::jsonb, created_at timestamp NOT NULL DEFAULT now())"
-          psql "$PARTNER_CONNECTOR_PLAN_ADMIN" -v ON_ERROR_STOP=1 -c "ALTER TABLE audit_log OWNER TO pn_migrator"
-          psql "$PARTNER_CONNECTOR_PLAN_ADMIN" -v ON_ERROR_STOP=1 -c \
-            "CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, secret text)"
-          psql "$PARTNER_CONNECTOR_PLAN_ADMIN" -v ON_ERROR_STOP=1 -c "ALTER TABLE certificates OWNER TO pn_migrator"
+          #     half is already guarded on the real grade columns, so a stub table is exactly what
+          #     it expects — see the comment in that migration).
+          # No partner migration creates either table, and the suites do not seed them, so without
+          # this every one of them dies in beforeAll with `relation "audit_log" does not exist`.
+          #
+          # DELIBERATELY NOT a full `drizzle-kit push` / real schema / pgvector. That was tried and
+          # is actively WRONG here: the real shared/schema.ts `certificates` has no `secret` column,
+          # so a full push breaks the pre-existing-data fixtures these suites build (they insert
+          # cert_id/secret and assert the row survives rollback), and shared/schema.ts also declares
+          # a vector(1536) column the postgres:17 service cannot create. The minimal stub pair is
+          # both sufficient and the only correct option.
+          #
+          # Both tables must be OWNED BY pn_migrator, because the migrations are applied as that
+          # non-superuser role and would otherwise hit "must be owner of table". pn_migrator is
+          # created here with the same name and password tests/helpers/partner-realistic-db.ts
+          # uses, and that helper's own CREATE ROLE is idempotent, so the two cannot conflict.
+          for full_set_admin in "$PARTNER_CONNECTOR_PLAN_ADMIN" "$PARTNER_CONNECTOR_MIGRATION_ADMIN" \
+                                "$PARTNER_CONNECTOR_ADMIN_MIGRATION_ADMIN" \
+                                "$PARTNER_CONNECTOR_IMPORT_MIGRATION_ADMIN" \
+                                "$PARTNER_CONNECTOR_VALIDATION_MIGRATION_ADMIN"; do
+            psql "$full_set_admin" -v ON_ERROR_STOP=1 -c \
+              "DO \$\$ BEGIN CREATE ROLE pn_migrator LOGIN PASSWORD 'realistic-migrator-pw' NOSUPERUSER CREATEROLE NOBYPASSRLS; EXCEPTION WHEN duplicate_object THEN NULL; END\$\$;"
+            psql "$full_set_admin" -v ON_ERROR_STOP=1 -c \
+              "CREATE TABLE IF NOT EXISTS audit_log (id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL, admin_user text, details jsonb DEFAULT '{}'::jsonb, created_at timestamp NOT NULL DEFAULT now())"
+            psql "$full_set_admin" -v ON_ERROR_STOP=1 -c "ALTER TABLE audit_log OWNER TO pn_migrator"
+            psql "$full_set_admin" -v ON_ERROR_STOP=1 -c \
+              "CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, secret text)"
+            psql "$full_set_admin" -v ON_ERROR_STOP=1 -c "ALTER TABLE certificates OWNER TO pn_migrator"
+          done
 
       - name: Lint
         run: npm run lint
