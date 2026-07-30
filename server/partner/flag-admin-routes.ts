@@ -38,7 +38,8 @@ import rateLimit from "express-rate-limit";
 import { requireSuperAdmin } from "../auth";
 import { storage } from "../storage";
 import { partnerAdminQuery, withPartnerAdminTransaction } from "./db";
-import { PARTNER_FLAGS, type PartnerFlag } from "./flags";
+import { getPartnerAdminCapability } from "./admin-capability";
+import { PARTNER_FLAGS, resolveGlobalFlag, type PartnerFlag } from "./flags";
 
 export const PARTNER_GLOBAL_FLAGS_BASE = "/api/super-admin/partner-flags";
 
@@ -61,6 +62,24 @@ const flagAdminRateLimit = rateLimit({
   // header would let any caller mint a fresh bucket per request. See dashboard-routes.ts.
   keyGenerator: (req) => req.ip || req.socket.remoteAddress || "unknown",
 });
+
+/**
+ * Preflight, identical to the one the sibling super-admin partner router uses. The privileged admin
+ * role must be able to see through RLS on the partner tables; without BYPASSRLS every statement here
+ * silently addresses zero rows, and a flag write would report success having changed nothing. A 503
+ * with an explicit code tells the operator this is a deployment problem, not an opaque 500.
+ */
+async function requirePartnerAdminCapability(_req: Request, res: Response, next: () => void): Promise<void> {
+  const capability = await getPartnerAdminCapability();
+  if (!capability.ok) {
+    res.status(503).json({
+      error: "Partner Super Admin management is not ready.",
+      code: "PARTNER_ADMIN_CAPABILITY_UNAVAILABLE",
+    });
+    return;
+  }
+  next();
+}
 
 function isPartnerFlag(value: unknown): value is PartnerFlag {
   return typeof value === "string" && (PARTNER_FLAGS as readonly string[]).includes(value);
@@ -98,10 +117,14 @@ async function readGlobalFlags(): Promise<Map<string, GlobalFlagRow>> {
 export function partnerFlagAdminRouter(): Router {
   const r = Router();
 
-  // Order matters: authenticate first, then throttle, so an unauthenticated flood is rejected by
-  // the cheapest check and never consumes a real admin's rate budget.
-  r.use(requireSuperAdmin);
+  // Order matters. The IP-keyed limiter runs FIRST: `requireSuperAdmin` performs a database-backed
+  // admin lookup, so throttling after it would let an unauthenticated flood drive one DB round trip
+  // per request before being rejected. Limiting on the cheap in-process check first is what keeps
+  // that flood off the database. The capability preflight runs last of the three — it costs a
+  // catalogue query (memoised), so it must sit behind both the rate gate and the auth gate.
   r.use(flagAdminRateLimit);
+  r.use(requireSuperAdmin);
+  r.use(requirePartnerAdminCapability);
 
   /**
    * Current GLOBAL state of every canonical flag. Always returns all nine, including the ones with
@@ -168,6 +191,35 @@ export function partnerFlagAdminRouter(): Router {
         );
       });
 
+      // SPLIT-BRAIN DETECTION. This router writes through the PRIVILEGED admin pool
+      // (PARTNER_ADMIN_DATABASE_URL); every portal gate READS through the restricted runtime pool
+      // (PARTNER_DATABASE_URL) via resolveGlobalFlag. Those are two separate URLs, and nothing
+      // guarantees they address the same database. If they diverge, an operator hitting the
+      // emergency "turn the portal off" control would get a confident 200 while the live gates went
+      // on reading the old value — the portal would stay open through the whole incident.
+      //
+      // So the write is verified through the READ PATH THE GATES ACTUALLY USE before it is reported
+      // as successful. Disagreement is a 409, not a 200: the operator learns immediately that the
+      // control is not connected to the surface it claims to control.
+      const effective = await resolveGlobalFlag(flag);
+      if (effective !== enabled) {
+        console.error(
+          `[partner-flags] SPLIT BRAIN: wrote ${flag}=${enabled} via the admin pool but the runtime pool reads ${effective}. ` +
+            "PARTNER_ADMIN_DATABASE_URL and PARTNER_DATABASE_URL are not addressing the same database."
+        );
+        res.status(409).json({
+          error: {
+            code: "PARTNER_FLAG_NOT_EFFECTIVE",
+            message:
+              "The flag was written but the partner runtime still reads the previous value. The admin and runtime databases are not in sync — do not rely on this control until that is resolved.",
+          },
+          flag,
+          written: enabled,
+          effective,
+        });
+        return;
+      }
+
       // Audit AFTER the write commits, so the ledger never claims a change that rolled back.
       // partner_audit_events and partner_management_audit both require a NOT NULL tenant_id and a
       // global flag has no tenant, so this uses the MintVault audit log — the same path the partner
@@ -203,7 +255,8 @@ export function partnerFlagAdminRouter(): Router {
         );
       }
 
-      res.json({ flag, enabled, scope: "global", audited });
+      // `effective` is the value the live gates now read, not merely the value we asked for.
+      res.json({ flag, enabled, scope: "global", effective, audited });
     } catch (err) {
       sendError(res, err);
     }

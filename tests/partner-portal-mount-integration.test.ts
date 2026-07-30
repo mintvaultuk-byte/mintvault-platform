@@ -77,6 +77,25 @@ describe("Partner portal mount integration coverage is wired up", () => {
 
 const FLAGS_BASE = "/api/super-admin/partner-flags";
 
+/**
+ * Distinctive status + marker for the terminal sentinel handler (see the app assembly below). 599
+ * is deliberately not a status any partner route can produce, so "reached the sentinel" and "the
+ * partner surface answered" can never be confused.
+ */
+const SENTINEL_STATUS = 599;
+const SENTINEL_MARKER = "not-the-partner-surface";
+
+/** The exact body every gate in server/partner/mount.ts returns when it closes. */
+const GATED_BODY = { error: "partner portal unavailable" };
+
+/**
+ * What an UNAUTHENTICATED GET /api/partner/session returns once it has passed all four gates: the
+ * route handler itself answers 401. Distinguishing 401 from 503 is the whole point of the
+ * gate-by-gate block — 503 means a gate closed, 401 means every gate opened and the request
+ * genuinely reached the partner router.
+ */
+const PAST_THE_GATES = 401;
+
 /** Stable synthetic ids. No real partner names, emails or addresses anywhere in this file. */
 const TENANT = "cccc0001-0000-0000-0000-00000000000f";
 const OWNER_ID = "cccc0001-0000-0000-0000-0000000000a1";
@@ -292,6 +311,18 @@ async function login(
     registerPartnerPublicRoutes(app);
     mountPartnerPortal(app);
     registerPartnerFlagAdminRoutes(app);
+
+    // SENTINEL — stands in for "the rest of the real application" (the SPA, the admin routers,
+    // the staff routers), which this composition deliberately does not build.
+    //
+    // Without it, asserting 404 on /api/admin would be tautological: nothing registered those
+    // paths, so of course they 404 — the assertion would pass even if the partner mount were
+    // deleted entirely. Reaching the sentinel instead proves something stronger and specific: the
+    // request travelled PAST the partner surface without being intercepted by it, which is what
+    // "the partner mount does not shadow the rest of the app" actually means.
+    app.use((rq, rs) => {
+      rs.status(SENTINEL_STATUS).json({ sentinel: SENTINEL_MARKER, path: rq.path });
+    });
 
     server = http.createServer(app);
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -545,23 +576,67 @@ async function login(
       await admin.query("UPDATE partner_users SET mfa_required=false WHERE id=$1", [OWNER_ID]);
     }, 120_000);
 
-    it("does not expose admin, staff, grader, scanner, Vault Quest or certificate routes", async () => {
+    it("lets admin, staff, grader, scanner, Vault Quest and certificate paths travel PAST it to the rest of the app", async () => {
       await enableLiveFlags();
       const { FORBIDDEN_PARTNER_PATHS } = await import("../server/partner/app");
       const owner = await login();
       for (const p of FORBIDDEN_PARTNER_PATHS) {
         const r = await req("GET", p, { cookie: owner.cookie });
-        expect(r.status, `${p} must not be served by the partner mount`).toBe(404);
+        // Reaching the sentinel — not merely "not 200" — is the assertion. A bare 404 check would
+        // pass even with the partner mount deleted; this fails if the mount ever intercepts or
+        // answers one of these paths, because then the sentinel is never reached.
+        expect(r.status, `${p} must pass through the partner mount untouched`).toBe(SENTINEL_STATUS);
+        expect(r.body.sentinel).toBe(SENTINEL_MARKER);
       }
     });
 
-    it("does not shadow /partner — the SPA still owns the portal HTML", async () => {
+    it("does not shadow /partner — the request reaches the app behind it, where the SPA lives", async () => {
       await enableLiveFlags();
-      // The mount registers nothing outside /api/partner, so the placeholder shell that lives in
-      // createPartnerApp cannot occupy the SPA's route in the main application.
-      const r = await fetch(`${base}/partner`);
-      expect(r.status).toBe(404);
-      expect(await r.text()).not.toContain("partner-root");
+      // The factory's placeholder shell must NOT be registered by the mount, or it would occupy the
+      // SPA's own route in the main application. Proven by the request reaching the sentinel (i.e.
+      // whatever is mounted after the partner surface), and by the placeholder markup being absent.
+      const r = await req("GET", "/partner");
+      expect(r.status).toBe(SENTINEL_STATUS);
+      expect(r.body.sentinel).toBe(SENTINEL_MARKER);
+      expect(JSON.stringify(r.body)).not.toContain("partner-root");
+    });
+
+    it("suppresses /api/partner response bodies from the application log (R1 — TOTP seed + PII)", async () => {
+      // server/index.ts owns the request logger, and importing it would boot the whole application,
+      // so the invariant is verified against the SOURCE OF TRUTH: the prefix list itself is read
+      // from index.ts and applied with the same startsWith rule the logger uses. Deleting the
+      // "/api/partner" entry fails this test.
+      const { readFileSync } = await import("node:fs");
+      const indexSrc = readFileSync(new URL("../server/index.ts", import.meta.url), "utf8");
+      const declared = indexSrc.match(/const BODY_LOG_SUPPRESSED_PREFIXES = \[([^\]]*)\]/);
+      expect(declared, "BODY_LOG_SUPPRESSED_PREFIXES must still exist in server/index.ts").toBeTruthy();
+      const prefixes = [...declared![1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+      const suppressed = (p: string) => prefixes.some((prefix) => p.startsWith(prefix));
+
+      for (const p of [
+        "/api/partner/mfa/enrol", // otpauthUri — embeds the raw TOTP seed
+        "/api/partner/mfa/confirm", // recoveryCodes — one-time MFA bypass codes
+        "/api/partner/customers", // customer PII
+        "/api/partner/users", // team member PII
+        "/api/partner/submissions",
+        "/api/partner/session",
+      ]) {
+        expect(suppressed(p), `${p} response bodies must never be written to the log`).toBe(true);
+      }
+
+      // And the suppression is load-bearing, not decorative: the enrol response really does carry
+      // the seed in a field name `redactSensitive` does not mask.
+      await enableLiveFlags();
+      await admin.query("DELETE FROM partner_mfa_methods WHERE user_id=$1", [OWNER_ID]);
+      const owner = await login();
+      const enrol = await req("POST", "/api/partner/mfa/enrol", {
+        body: { password: OWNER_PASSWORD },
+        cookie: owner.cookie,
+      });
+      expect(enrol.status).toBe(200);
+      expect(String(enrol.body.otpauthUri)).toContain(`secret=${enrol.body.secret}`);
+      expect(suppressed("/api/partner/mfa/enrol")).toBe(true);
+      await admin.query("DELETE FROM partner_mfa_methods WHERE user_id=$1", [OWNER_ID]);
     });
   });
 
@@ -748,6 +823,185 @@ async function login(
       const { rows } = await admin.query("SELECT details FROM audit_log WHERE entity_type='partner_feature_flag'");
       const blob = JSON.stringify(rows);
       expect(blob).not.toMatch(/\$2[aby]\$|password|token_hash|secret|postgres:\/\//i);
+    });
+
+    // ---- R2: the write is verified through the read path the gates actually use ----
+    it("reports the EFFECTIVE value, read back through the runtime path, not just what was written", async () => {
+      const on = await req("PUT", `${FLAGS_BASE}/partner_evidence_capture_enabled`, {
+        cookie: adminCookie,
+        body: { enabled: true, reason: "effective read-back, enable" },
+      });
+      expect(on.status).toBe(200);
+      expect(on.body.effective).toBe(true);
+
+      const off = await req("PUT", `${FLAGS_BASE}/partner_evidence_capture_enabled`, {
+        cookie: adminCookie,
+        body: { enabled: false, reason: "effective read-back, disable" },
+      });
+      expect(off.status).toBe(200);
+      expect(off.body.effective).toBe(false);
+
+      // `effective` is the runtime pool's answer, so it must agree with resolveGlobalFlag itself.
+      const { resolveGlobalFlag } = await import("../server/partner/flags");
+      expect(await resolveGlobalFlag("partner_evidence_capture_enabled")).toBe(false);
+    });
+
+    // ---- R2: the capability preflight ----
+    it("503s with PARTNER_ADMIN_CAPABILITY_UNAVAILABLE when the admin role cannot see through RLS", async () => {
+      const { resetPartnerAdminCapabilityCache } = await import("../server/partner/admin-capability");
+      const originalAdminUrl = process.env.PARTNER_ADMIN_DATABASE_URL;
+
+      // A synthetic privileged-ish role WITHOUT BYPASSRLS. Under FORCE RLS every statement this
+      // router issues would address zero rows, so a write would report success having changed
+      // nothing — the failure mode the preflight exists to convert into an explicit 503.
+      await admin.query("DROP ROLE IF EXISTS partner_admin_norls").catch(() => {});
+      await admin.query("CREATE ROLE partner_admin_norls LOGIN PASSWORD 'synthetic' NOBYPASSRLS");
+      await admin.query("GRANT ALL ON ALL TABLES IN SCHEMA public TO partner_admin_norls");
+      await admin.query("GRANT USAGE ON SCHEMA public TO partner_admin_norls");
+      try {
+        const noRlsUrl = new URL(ADMIN_DB!);
+        noRlsUrl.username = "partner_admin_norls";
+        noRlsUrl.password = "synthetic";
+        process.env.PARTNER_ADMIN_DATABASE_URL = noRlsUrl.toString();
+        await closePartnerPools(); // drop the pooled admin connection AND the capability cache
+        resetPartnerAdminCapabilityCache();
+
+        const read = await req("GET", FLAGS_BASE, { cookie: adminCookie });
+        expect(read.status).toBe(503);
+        expect((read.body.code as string) ?? (read.body.error as Json)?.code).toBe(
+          "PARTNER_ADMIN_CAPABILITY_UNAVAILABLE"
+        );
+
+        const write = await req("PUT", `${FLAGS_BASE}/partner_portal_enabled`, {
+          cookie: adminCookie,
+          body: { enabled: false, reason: "must never reach the database" },
+        });
+        expect(write.status).toBe(503);
+      } finally {
+        process.env.PARTNER_ADMIN_DATABASE_URL = originalAdminUrl;
+        await closePartnerPools();
+        resetPartnerAdminCapabilityCache();
+        await admin.query("DROP OWNED BY partner_admin_norls").catch(() => {});
+        await admin.query("DROP ROLE IF EXISTS partner_admin_norls").catch(() => {});
+      }
+
+      // the surface recovers once the capable role is restored, and nothing was written meanwhile
+      const recovered = await req("GET", FLAGS_BASE, { cookie: adminCookie });
+      expect(recovered.status).toBe(200);
+      const { resolveGlobalFlag } = await import("../server/partner/flags");
+      expect(await resolveGlobalFlag("partner_portal_enabled")).toBe(true);
+    });
+  });
+
+  // =========================================================================
+  // F. Each gate, individually, on a mount with NOTHING else in front of it.
+  //
+  //    Every test above reaches the mount through the production composition, where the public
+  //    router sits in front. That means a gate could be deleted from mount.ts and those tests
+  //    could still pass, because the public router's own emergency-stop and portal_enabled checks
+  //    would mask its absence. This block removes that shadow: only mountPartnerPortal is
+  //    registered, so each 503 can come from exactly one place. It also asserts the mount's exact
+  //    body, so a gate cannot be replaced with a differently-shaped rejection and stay green.
+  // =========================================================================
+  describe("each mount gate fires individually (mount registered alone)", () => {
+    let soloServer: http.Server;
+    let soloBase = "";
+
+    beforeAll(async () => {
+      const express = (await import("express")).default;
+      const { mountPartnerPortal } = await import("../server/partner/mount");
+      const soloApp = express();
+      soloApp.use(express.json());
+      mountPartnerPortal(soloApp); // NOTHING else — no public router, no session, no SPA
+      soloServer = http.createServer(soloApp);
+      await new Promise<void>((r) => soloServer.listen(0, "127.0.0.1", r));
+      soloBase = `http://127.0.0.1:${(soloServer.address() as AddressInfo).port}`;
+    });
+
+    afterAll(async () => {
+      await new Promise<void>((r) => soloServer?.close(() => r()));
+    });
+
+    /** Probe an authenticated path on the solo mount; returns status + parsed body. */
+    async function probe(): Promise<{ status: number; body: Json }> {
+      const res = await fetch(`${soloBase}/api/partner/session`);
+      return { status: res.status, body: (await res.json().catch(() => ({}))) as Json };
+    }
+
+    it("gate 1a — no PARTNER_DATABASE_URL: 503 with the mount's exact body", async () => {
+      await enableLiveFlags();
+      const original = process.env.PARTNER_DATABASE_URL;
+      try {
+        delete process.env.PARTNER_DATABASE_URL;
+        const r = await probe();
+        expect(r.status).toBe(503);
+        expect(r.body).toEqual(GATED_BODY);
+      } finally {
+        process.env.PARTNER_DATABASE_URL = original;
+      }
+      expect((await probe()).status).toBe(PAST_THE_GATES); // unauthenticated but PAST the gates
+    });
+
+    it("gate 1b — PARTNER_DATABASE_URL set but PARTNER_MFA_ENC_KEY missing: 503 (coherence)", async () => {
+      await enableLiveFlags();
+      const original = process.env.PARTNER_MFA_ENC_KEY;
+      try {
+        delete process.env.PARTNER_MFA_ENC_KEY;
+        const r = await probe();
+        expect(r.status).toBe(503);
+        expect(r.body).toEqual(GATED_BODY);
+      } finally {
+        process.env.PARTNER_MFA_ENC_KEY = original;
+      }
+      expect((await probe()).status).toBe(PAST_THE_GATES);
+    });
+
+    it("gate 2 — broken SECURITY DEFINER ownership model: 503, and it recovers when repaired", async () => {
+      await enableLiveFlags();
+      const { __resetDefinerHealthForTests } = await import("../server/partner/mount");
+      // The guard requires partner_auth_lookup to be owned by the BYPASSRLS partner_definer role.
+      // Reassigning it to the migrator breaks exactly that property and nothing else.
+      const { rows } = await admin.query<{ sig: string }>(
+        `SELECT p.oid::regprocedure::text AS sig FROM pg_proc p
+           JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE p.proname='partner_auth_lookup' AND n.nspname='public'`
+      );
+      const sig = rows[0].sig;
+      try {
+        await admin.query(`ALTER FUNCTION ${sig} OWNER TO pn_migrator`);
+        __resetDefinerHealthForTests(); // health is memoised only when HEALTHY; re-evaluate now
+        const r = await probe();
+        expect(r.status).toBe(503);
+        expect(r.body).toEqual(GATED_BODY);
+      } finally {
+        await admin.query(`ALTER FUNCTION ${sig} OWNER TO partner_definer`);
+        __resetDefinerHealthForTests();
+      }
+      expect((await probe()).status).toBe(PAST_THE_GATES); // a repaired model re-opens the surface
+    });
+
+    it("gate 3 — partner_emergency_stop ON: 503 with the mount's exact body", async () => {
+      await enableLiveFlags();
+      await setGlobalFlag("partner_emergency_stop", true);
+      const r = await probe();
+      expect(r.status).toBe(503);
+      expect(r.body).toEqual(GATED_BODY);
+      await setGlobalFlag("partner_emergency_stop", false);
+      expect((await probe()).status).toBe(PAST_THE_GATES);
+    });
+
+    it("gate 4 — partner_portal_enabled OFF or absent: 503 with the mount's exact body", async () => {
+      await enableLiveFlags();
+      await setGlobalFlag("partner_portal_enabled", false);
+      expect((await probe()).body).toEqual(GATED_BODY);
+      expect((await probe()).status).toBe(503);
+      // absent behaves identically to explicitly false (fail closed on a missing row)
+      await admin.query("DELETE FROM partner_feature_flags WHERE flag='partner_portal_enabled'");
+      const absent = await probe();
+      expect(absent.status).toBe(503);
+      expect(absent.body).toEqual(GATED_BODY);
+      await setGlobalFlag("partner_portal_enabled", true);
+      expect((await probe()).status).toBe(PAST_THE_GATES);
     });
   });
 });

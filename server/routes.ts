@@ -2794,11 +2794,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerCorrectionModeRoutes(app);
   registerStaffRoutes(app);
   registerPrintWorkflowRoutes(app); // Approval → Printing → Printed lifecycle (requireAdmin; staff via can_print proxy)
+  // ORDERING INVARIANT — registerPartnerPublicRoutes MUST precede mountPartnerPortal.
+  // partnerApiRouter (server/partner/routes.ts) still defines its OWN /auth/login,
+  // /auth/password-reset/* and /invitations/accept handlers. Registering the public routes first is
+  // what keeps those duplicates permanently shadowed, so the hardened public implementations — the
+  // ones carrying the emergency-stop and portal_enabled gates and the IP-keyed login limiter — are
+  // the only ones that ever serve. Swapping these two lines silently changes which code handles
+  // partner login. Do not reorder.
   registerPartnerPublicRoutes(app); // Partner public auth/onboarding routes (login, reset, invite accept)
-  // Authenticated Partner portal (session, submissions, customers, team, MFA). MUST follow the
-  // public routes: they own /auth/login, /auth/password-reset/* and /invitations/accept, and
-  // anything they do not match falls through to the portal's fail-closed gates.
-  mountPartnerPortal(app);
+  mountPartnerPortal(app); // Authenticated Partner portal (session, submissions, customers, team, MFA)
   registerSubmissionRoutes(app);
   registerAdminSubmissionRoutes(app);
   registerAdminConfigRoutes(app);
