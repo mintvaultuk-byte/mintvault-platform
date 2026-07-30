@@ -83,8 +83,38 @@ export const partnerMfaLimiter = partnerRateLimit({
   max: 20,
   failClosed: true,
 });
+/**
+ * Password-reset CONSUME. Keyed on IP only (no keyFn). A consume body carries a token, not an
+ * email, so the previous `acct` key collapsed to `partner_reset:|<ip>` for well-formed traffic —
+ * but any caller could ALSO supply an arbitrary `email` field and mint itself a fresh bucket per
+ * value, making the limit unbounded. Dropping the body-derived key removes that escape entirely.
+ * (Same defect class the invitation note at the bottom of this file documents.)
+ */
 export const partnerResetLimiter = partnerRateLimit({
   name: "partner_reset",
+  windowMs: 15 * 60_000,
+  max: 5,
+  failClosed: true,
+});
+/**
+ * Password-reset REQUEST, IP bucket. Its OWN namespace so reset requests and reset consumes cannot
+ * starve each other (see the partnerAcceptLimiter note below for the same reasoning). This bucket
+ * ALWAYS applies, so probing many addresses from one source is bounded no matter what email the
+ * attacker supplies.
+ */
+export const partnerResetRequestLimiter = partnerRateLimit({
+  name: "partner_reset_request",
+  windowMs: 15 * 60_000,
+  max: 10,
+  failClosed: true,
+});
+/**
+ * Password-reset REQUEST, per-account bucket — defence in depth, applied IN ADDITION to the IP
+ * bucket above (never instead of it), so one targeted account cannot be flooded with reset mail
+ * from rotating IPs.
+ */
+export const partnerResetRequestAccountLimiter = partnerRateLimit({
+  name: "partner_reset_request_acct",
   windowMs: 15 * 60_000,
   max: 5,
   failClosed: true,

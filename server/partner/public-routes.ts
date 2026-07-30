@@ -7,7 +7,13 @@ import {
   MAX_PASSWORD_LEN,
 } from "./auth";
 import { setPartnerCookie } from "./session";
-import { partnerLoginLimiter, partnerResetLimiter, partnerAcceptLimiter } from "./rate-limit";
+import {
+  partnerLoginLimiter,
+  partnerResetLimiter,
+  partnerResetRequestLimiter,
+  partnerResetRequestAccountLimiter,
+  partnerAcceptLimiter,
+} from "./rate-limit";
 import { partnerRuntimeQuery } from "./db";
 import { resolveGlobalFlag } from "./flags";
 import { acceptPartnerInvitation } from "./partner-management-service";
@@ -71,35 +77,44 @@ export function partnerPublicRouter(): Router {
     res.json({ ok: true, mfaRequired: !!result.mfaPending });
   });
 
-  r.post("/auth/password-reset/request", partnerResetLimiter, async (req, res) => {
-    if (!(await flagEnabled("partner_login_enabled"))) {
-      res.json({ ok: true });
-      return;
-    }
-    const { email } = req.body ?? {};
-    if (typeof email === "string" && email) {
-      try {
-        const { rows } = await partnerRuntimeQuery<{
-          user_id: string;
-          tenant_id: string;
-          user_status: string;
-          org_status: string;
-        }>("SELECT user_id, tenant_id, user_status, org_status FROM partner_auth_lookup($1)", [email]);
-        if (
-          rows.length === 1 &&
-          rows[0].user_status === "ACTIVE" &&
-          rows[0].org_status === "ACTIVE" &&
-          resetDeliveryConfigured()
-        ) {
-          const token = await createPasswordResetToken(rows[0].tenant_id, rows[0].user_id);
-          await deliverResetToken(email, token);
-        }
-      } catch {
-        /* generic response */
+  r.post(
+    "/auth/password-reset/request",
+    partnerResetRequestLimiter,
+    partnerResetRequestAccountLimiter,
+    async (req, res) => {
+      if (!(await flagEnabled("partner_login_enabled"))) {
+        res.json({ ok: true });
+        return;
       }
+      const { email } = req.body ?? {};
+      if (typeof email === "string" && email) {
+        try {
+          const { rows } = await partnerRuntimeQuery<{
+            user_id: string;
+            tenant_id: string;
+            user_status: string;
+            org_status: string;
+          }>("SELECT user_id, tenant_id, user_status, org_status FROM partner_auth_lookup($1)", [email]);
+          if (
+            rows.length === 1 &&
+            rows[0].user_status === "ACTIVE" &&
+            rows[0].org_status === "ACTIVE" &&
+            resetDeliveryConfigured()
+          ) {
+            const token = await createPasswordResetToken(rows[0].tenant_id, rows[0].user_id);
+            // TIMING: dispatched WITHOUT await. Waiting on an outbound provider round trip only for
+            // known accounts made response latency an account-existence oracle. The catch is
+            // attached synchronously so this can never reject or raise an unhandled rejection;
+            // deliverResetToken has already emitted its own redacted failure signal by then.
+            void deliverResetToken(email, token).catch(() => {});
+          }
+        } catch {
+          /* generic response */
+        }
+      }
+      res.json({ ok: true });
     }
-    res.json({ ok: true });
-  });
+  );
 
   r.post("/auth/password-reset/consume", partnerResetLimiter, async (req, res) => {
     if (!(await flagEnabled("partner_login_enabled"))) {
