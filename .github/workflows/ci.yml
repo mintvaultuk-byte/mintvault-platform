@@ -80,6 +80,20 @@ jobs:
       # variable turns the build red instead of silently deleting the evidence.
       PARTNER_MOUNT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_mount
       PARTNER_MOUNT_RT_RUNTIME: postgres://partner_app_test:synthetic@127.0.0.1:55433/mintvault_partner_mount
+
+      # ---- Trusted Intake Connector production driver (WP-3) ----
+      # tests/partner-connector-runtime.test.ts is `describe.skip` without these two, which would
+      # make the ONLY proof that the connector is no longer runtime-inert report green while never
+      # running. It drives the real sweep -> validate -> import chain against real connections, so
+      # it needs a superuser admin URL (role provisioning + fixtures) and a connector-role URL.
+      #
+      # PostgreSQL 17 (port 55433), and its OWN database: the realistic-roles helper reassigns
+      # `public` schema ownership to pn_migrator and applies the partner migrations as that role, so
+      # it can never share a database with any other suite. The connector login role
+      # (partner_connector_rt_test) is created by the suite itself; only the URL shape is supplied
+      # here, and every credential below is synthetic and local to the CI container.
+      PARTNER_CONNECTOR_RUNTIME_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_runtime
+      PARTNER_CONNECTOR_RUNTIME_URL: postgres://partner_connector_rt_test:synthetic@127.0.0.1:55433/mintvault_connector_runtime
     services:
       postgres:
         # pgvector-enabled Postgres 16 (official pgvector image, same server as
@@ -208,7 +222,8 @@ jobs:
           # under set -e, rather than being swallowed by a pipe).
           for partner_db in mintvault_partner_capability mintvault_partner_user_mgmt \
                             mintvault_partner_final_owner mintvault_partner_public \
-                            mintvault_partner_runtime mintvault_partner_mount; do
+                            mintvault_partner_runtime mintvault_partner_mount \
+                            mintvault_connector_runtime; do
             present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
               "SELECT 1 FROM pg_database WHERE datname = '$partner_db'")"
             if [ "$present" != "1" ]; then
@@ -221,6 +236,14 @@ jobs:
           # inside beforeAll instead of reporting a clear precondition failure here.
           psql "$PARTNER_CAPABILITY_RT_ADMIN" -v ON_ERROR_STOP=1 -tAc \
             "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
+          # The connector-driver suite creates its own login role and drives the cross-tenant
+          # discovery sweep, which only returns rows for a BYPASSRLS connection (the handoff table is
+          # FORCE RLS). Assert both here so a misconfiguration fails loudly at setup instead of
+          # producing a silently-empty sweep — or a silently-skipped suite — deep inside the run.
+          psql "$PARTNER_CONNECTOR_RUNTIME_ADMIN" -v ON_ERROR_STOP=1 -tAc \
+            "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
+          psql "$PARTNER_CONNECTOR_RUNTIME_ADMIN" -v ON_ERROR_STOP=1 -tAc \
+            "SELECT rolbypassrls OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
 
       - name: Lint
         run: npm run lint

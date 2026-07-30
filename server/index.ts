@@ -18,6 +18,7 @@ import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
+import { startConnectorRuntime, stopConnectorRuntime } from "./partner/connector-runtime";
 import pg from "pg";
 import path from "path";
 
@@ -674,6 +675,13 @@ async function runTransferV2Sweep() {
         { unref: true }
       );
       console.log(`[db-keepwarm] interval armed (${KEEP_WARM_INTERVAL_MS / 1000}s)`);
+
+      // Partner Trusted Intake Connector driver. Started only AFTER the server is
+      // listening, and deliberately fire-and-forget: startConnectorRuntime never
+      // throws, never awaits, and parks itself in a visible "stopped" state on any
+      // failure — a connector problem can never crash or delay the main app. With
+      // no PARTNER_CONNECTOR_DATABASE_URL it logs one line and does nothing at all.
+      startConnectorRuntime();
     }
   );
 })();
@@ -688,13 +696,20 @@ function gracefulShutdown(signal: string) {
   log(`${signal} received — draining and shutting down`, "shutdown");
   void runGracefulShutdown({
     deadlineMs: 10_000,
-    closeServer: () =>
-      new Promise<void>((resolve) => {
-        httpServer.close(() => {
-          log("http server closed to new connections", "shutdown");
-          resolve();
-        });
-      }),
+    closeServer: async () => {
+      // Drain the connector runtime alongside the HTTP server: it stops taking NEW
+      // claims and waits for the in-flight cycle, so no lease is leaked. Never
+      // allowed to block or fail the shutdown path.
+      await Promise.all([
+        new Promise<void>((resolve) => {
+          httpServer.close(() => {
+            log("http server closed to new connections", "shutdown");
+            resolve();
+          });
+        }),
+        stopConnectorRuntime().catch(() => undefined),
+      ]);
+    },
     closePools: async () => {
       await Promise.allSettled([pool.end(), sessionPool.end()]);
       log("db pools closed — exiting cleanly", "shutdown");
