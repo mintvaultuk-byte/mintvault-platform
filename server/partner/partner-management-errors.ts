@@ -16,6 +16,7 @@ export const G5_ERROR_CODES = [
   "PARTNER_UNAVAILABLE",
   "PARTNER_ADMIN_CAPABILITY_UNAVAILABLE",
   "PARTNER_INVITATION_NOT_FOUND",
+  "INVITATION_NOT_AMENDABLE",
   "CONTACT_NOT_FOUND",
   "BRANDING_NOT_FOUND",
   "INVALID_PARTNER_STATUS",
@@ -94,11 +95,14 @@ export function g5StatusFor(code: G5ErrorCode): number {
     case "CONTACT_NOT_FOUND":
     case "BRANDING_NOT_FOUND":
       return 404;
+    // 409 group: the request conflicts with current state, not with the caller's input.
+    // (INVITATION_NOT_AMENDABLE = the invitation has already been accepted.)
     case "VERSION_CONFLICT":
     case "DUPLICATE_PRIMARY_CONTACT":
     case "DUPLICATE_PARTNER_USER":
     case "FINAL_OWNER_REQUIRED":
     case "IDEMPOTENCY_CONFLICT":
+    case "INVITATION_NOT_AMENDABLE":
       return 409;
     case "RATE_LIMITED":
       return 429;

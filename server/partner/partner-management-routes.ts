@@ -124,6 +124,34 @@ export function partnerManagementRouter(): Router {
     }
   });
 
+  /**
+   * READ-ONLY pre-creation duplicate scan.
+   *
+   * ROUTE ORDER IS LOAD-BEARING: this literal path MUST be registered before `/partners/:partnerId`,
+   * or Express matches the parameterised route first and "duplicate-check" is treated as a partner id
+   * (a 404 that looks like a broken feature). The test suite asserts the ordering.
+   *
+   * It is a GET with query parameters and no body. The values echoed back are values the caller just
+   * supplied plus the legal names of colliding partners — both already visible to any admin through
+   * the partners list, so this leaks nothing new. It writes nothing and audits nothing.
+   */
+  r.get("/partners/duplicate-check", async (req, res) => {
+    try {
+      const q = req.query as Record<string, unknown>;
+      const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 500) : undefined);
+      const matches = await svc.findDuplicates({
+        legalName: str(q.legalName),
+        tradingName: str(q.tradingName),
+        email: str(q.email),
+        postcode: str(q.postcode),
+        phone: str(q.phone),
+      });
+      res.json({ matches });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
   r.get("/partners/:partnerId", async (req, res) => {
     try {
       res.json(await svc.getPartnerDetail(req.params.partnerId));
@@ -208,6 +236,32 @@ export function partnerManagementRouter(): Router {
         await svc.invitePartnerUser(
           actor,
           req.params.partnerId,
+          {
+            firstName: requireNonEmpty(req.body?.firstName, "firstName"),
+            lastName: requireNonEmpty(req.body?.lastName, "lastName"),
+            email: requireNonEmpty(req.body?.email, "email"),
+            role: requirePartnerUserRole(req.body?.role),
+          },
+          reason
+        )
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /** Correct a PENDING invitation and re-issue it (revokes the outstanding token). Reason required. */
+  r.patch("/partners/:partnerId/users/:userId/invitation", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.amendPendingInvitation(
+          actor,
+          req.params.partnerId,
+          req.params.userId,
           {
             firstName: requireNonEmpty(req.body?.firstName, "firstName"),
             lastName: requireNonEmpty(req.body?.lastName, "lastName"),
@@ -314,6 +368,23 @@ export function partnerManagementRouter(): Router {
         res,
         actor.requestId,
         await svc.updateProfile(actor, req.params.partnerId, fields, version, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /** Rename the organisation. Reason required; optimistic-locked on the shared profile version. */
+  r.patch("/partners/:partnerId/legal-name", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const legalName = requireNonEmpty(req.body?.legalName, "legalName");
+      const version = requireVersion(req.body?.expectedVersion);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.updatePartnerLegalName(actor, req.params.partnerId, legalName, version, reason)
       );
     } catch (err) {
       sendError(res, err);
