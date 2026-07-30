@@ -81,19 +81,29 @@ export async function resolvePartnerSession(token: string): Promise<PartnerPrinc
   return withTenant({ tenantId: s.tenant_id, locationId: s.location_id }, async (c) => {
     const em = await readEmergencyState(c, { tenantId: s.tenant_id, locationId: s.location_id });
     if (isHardStopped(em)) return null; // partner/location frozen → no operation, even with a session
-    // If the session is bound to a location, the user must STILL be assigned to it — removing the
-    // assignment (or the location) invalidates the session on its very next request (fail closed).
-    if (s.location_id) {
-      const assigned = await c.query("SELECT 1 FROM partner_user_locations WHERE user_id=$1 AND location_id=$2", [s.user_id, s.location_id]);
+    const roles = await getUserRoles(c, s.user_id);
+    const orgWide = roles.some((r) => ORG_WIDE_ROLES.has(r));
+    // If a location-scoped session is bound to a location, the user must STILL be assigned to it.
+    // Org-wide roles are validated by tenant + ACTIVE location status instead.
+    if (s.location_id && !orgWide) {
+      const assigned = await c.query("SELECT 1 FROM partner_user_locations WHERE user_id=$1 AND location_id=$2", [
+        s.user_id,
+        s.location_id,
+      ]);
       if (assigned.rowCount !== 1) return null;
     }
     await c.query("UPDATE partner_sessions SET last_seen_at=now() WHERE id=$1", [s.session_id]);
     const permissions = await getUserPermissions(c, s.user_id);
-    const roles = await getUserRoles(c, s.user_id);
     return {
-      sessionId: s.session_id, tenantId: s.tenant_id, userId: s.user_id, locationId: s.location_id,
-      mfaPassed: s.mfa_passed, permissions, viewOnly: em.viewOnly, sensitiveDisabled: em.sensitiveDisabled,
-      orgWide: roles.some((r) => ORG_WIDE_ROLES.has(r)),
+      sessionId: s.session_id,
+      tenantId: s.tenant_id,
+      userId: s.user_id,
+      locationId: s.location_id,
+      mfaPassed: s.mfa_passed,
+      permissions,
+      viewOnly: em.viewOnly,
+      sensitiveDisabled: em.sensitiveDisabled,
+      orgWide,
     } satisfies PartnerPrincipal;
   });
 }
@@ -169,7 +179,7 @@ export function setPartnerCookie(res: Response, token: string): void {
   const secure = process.env.NODE_ENV === "production";
   res.setHeader(
     "Set-Cookie",
-    `${PARTNER_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${12 * 3600}${secure ? "; Secure" : ""}`,
+    `${PARTNER_COOKIE}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${12 * 3600}${secure ? "; Secure" : ""}`
   );
 }
 

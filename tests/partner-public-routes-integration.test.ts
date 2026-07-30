@@ -28,6 +28,8 @@ const OWNER = "aa31aa31-0000-0000-0000-0000000000a1";
     process.env.PARTNER_DATABASE_URL = RUNTIME;
     admin = new Client({ connectionString: ADMIN });
     await admin.connect();
+    await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
+    await admin.query("CREATE SCHEMA public");
     await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
     await admin.query("DROP OWNED BY partner_connector_runtime").catch(() => {});
     await provisionRealisticRoles(admin);

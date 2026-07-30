@@ -64,7 +64,7 @@ export function toG5Error(err: unknown): G5ErrorShape {
     // therefore only sees the caller's own tenant. Without this branch a foreign-tenant collision
     // fell through to IDEMPOTENCY_CONFLICT while a same-tenant one returned DUPLICATE_PARTNER_USER —
     // a cross-tenant "does this person work for another partner?" oracle. Both must be identical.
-    if (pg.constraint === "uq_partner_users_email_lower") {
+    if (pg.constraint === "uq_partner_users_email_lower" || pg.constraint === "partner_users_tenant_id_email_key") {
       return { code: "DUPLICATE_PARTNER_USER", message: "That team member cannot be invited." };
     }
     // Same reasoning for the one-live-invitation-per-user index: a concurrent resend must not be

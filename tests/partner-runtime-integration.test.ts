@@ -130,7 +130,8 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
       "INSERT INTO partner_user_roles (tenant_id, user_id, role_id) VALUES ($1,'11111111-0000-0000-0000-0000000000a4',$2)",
       [A, owner]
     );
-    // locations: L1 + L2 in tenant A; LB in tenant B. owner@a assigned to BOTH A-locations; trainee@a to L1 only.
+    // locations: L1 + L2 in tenant A; LB in tenant B. Owners are org-wide and need no location
+    // assignment; trainee@a is location-scoped to L1 only.
     await admin.query(
       `INSERT INTO partner_locations (id, public_ref, tenant_id, partner_id, name, status) VALUES
        ('10000000-0000-0000-0000-0000000000c1','lc1',$1,$1,'Loc1','ACTIVE'),
@@ -140,8 +141,6 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     );
     await admin.query(
       `INSERT INTO partner_user_locations (tenant_id, user_id, location_id) VALUES
-       ($1,'11111111-0000-0000-0000-0000000000a1','10000000-0000-0000-0000-0000000000c1'),
-       ($1,'11111111-0000-0000-0000-0000000000a1','10000000-0000-0000-0000-0000000000c2'),
        ($1,'11111111-0000-0000-0000-0000000000a2','10000000-0000-0000-0000-0000000000c1')`,
       [A]
     );
@@ -726,11 +725,10 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
   });
 
   // ============ ITEM 2 — multi-location assignment + switching ============
-  it("owner switches between assigned locations; cannot select unassigned/cross-tenant/absent", async () => {
+  it("owner switches between ACTIVE same-tenant locations without assignments; cannot select cross-tenant/absent", async () => {
     const { cookie } = await login("owner@a.com");
     expect((await post("/api/partner/session/location", { locationId: L1 }, cookie)).status).toBe(200);
     expect((await post("/api/partner/session/location", { locationId: L2 }, cookie)).status).toBe(200);
-    // an existing but UNASSIGNED-to-this-user location? owner is assigned to both A-locs; use a made-up A id
     expect(
       (await post("/api/partner/session/location", { locationId: "10000000-0000-0000-0000-0000000000ff" }, cookie))
         .status
@@ -740,16 +738,21 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     // session now bound server-side to L2
     const s = await (await get("/api/partner/session", cookie)).json();
     expect(s.locationId).toBe(L2);
+    const audit = await admin.query<{ n: number }>(
+      "SELECT count(*)::int n FROM partner_audit_events WHERE tenant_id=$1 AND actor_user_id='11111111-0000-0000-0000-0000000000a1' AND action='partner_location_switch'",
+      [A]
+    );
+    expect(audit.rows[0].n).toBeGreaterThanOrEqual(2);
   });
 
-  it("trainee (assigned only to L1) cannot switch to L2 (403 not_assigned); owner has NO implicit access", async () => {
+  it("trainee (assigned only to L1) cannot switch to L2 (403 not_assigned); tenant B owner can switch own location without assignment", async () => {
     const { cookie } = await login("trainee@a.com");
     expect((await post("/api/partner/session/location", { locationId: L1 }, cookie)).status).toBe(200);
     const denied = await post("/api/partner/session/location", { locationId: L2 }, cookie);
     expect(denied.status).toBe(403); // not assigned
-    // owner@b has no assignment to any location → cannot switch even to own-tenant loc
+    // owner@b has no assignment to any location, but OWNER is organisation-wide.
     const b = await login("owner@b.com");
-    expect((await post("/api/partner/session/location", { locationId: LB }, b.cookie)).status).toBe(403);
+    expect((await post("/api/partner/session/location", { locationId: LB }, b.cookie)).status).toBe(200);
   });
 
   it("assignment removal immediately invalidates a session bound to that location", async () => {

@@ -9,7 +9,7 @@
  * Runs only when PARTNER_MANAGEMENT_RT_ADMIN (superuser URL to a DISPOSABLE, SSL-capable loopback
  * Postgres — server/db.ts forces ssl) is set and loopback. Skips otherwise.
  */
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { Client } from "pg";
@@ -185,6 +185,14 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools().catch(() => {});
     await admin?.end().catch(() => {});
+  });
+
+  afterEach(async () => {
+    const svc = await import("../server/partner/partner-management-service");
+    svc.__setCreatePartnerFailurePointForTest(null);
+    svc.__setInvitePartnerFailurePointForTest(null);
+    svc.__setInvitePartnerBarrierForTest(null);
+    svc.__setAcceptPartnerBarrierForTest(null);
   });
 
   async function cookie(): Promise<string> {
@@ -363,19 +371,68 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     expect(s.unavailable).toEqual(expect.arrayContaining(["certificatesCount", "gradedCount"]));
   });
 
-  it("create is idempotent for a repeated key: no duplicate org, second call alreadyCompleted", async () => {
+  it("create atomically creates exactly one ACTIVE Main location and idempotent replay does not duplicate it", async () => {
     const c = await cookie();
     const key = "create-key-1";
     const r1 = await post(`${PM}/partners`, { legalName: "Idem Cards Ltd", idempotencyKey: key }, c);
     expect(r1.status).toBe(200);
+    const firstBody = await r1.json();
     const r2 = await post(`${PM}/partners`, { legalName: "Idem Cards Ltd", idempotencyKey: key }, c);
     expect(r2.status).toBe(200);
     expect((await r2.json()).alreadyCompleted).toBe(true);
     // exactly ONE org was created for this name (the org insert is now behind the idempotency pre-check)
-    const n = await admin.query<{ n: number }>(
-      "SELECT count(*)::int n FROM partner_organisations WHERE legal_name='Idem Cards Ltd'"
+    const n = await admin.query<{ n: number; locations: number }>(
+      `SELECT count(DISTINCT o.id)::int n, count(l.id)::int locations
+         FROM partner_organisations o
+         LEFT JOIN partner_locations l ON l.tenant_id=o.id AND l.partner_id=o.id AND l.name='Main location' AND l.status='ACTIVE'
+        WHERE o.legal_name='Idem Cards Ltd'`
     );
     expect(n.rows[0].n).toBe(1);
+    expect(n.rows[0].locations).toBe(1);
+    expect(firstBody.result.partnerId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("create rolls back the organisation when default-location creation fails mid-transaction", async () => {
+    const svc = await import("../server/partner/partner-management-service");
+    svc.__setCreatePartnerFailurePointForTest("after_default_location_insert");
+    await expect(
+      svc.createPartner(
+        {
+          actorUserId: "00000000-0000-0000-0000-0000000000a5",
+          actorEmail: ADMIN_EMAIL,
+          requestId: "create-rollback-test",
+          idempotencyKey: "create-rollback-key-1",
+        },
+        { legalName: "Rollback Cards Ltd" },
+        "rollback proof"
+      )
+    ).rejects.toThrow("synthetic_create_partner_after_default_location_insert");
+    svc.__setCreatePartnerFailurePointForTest(null);
+    const leaked = await admin.query<{ orgs: number; locations: number }>(
+      `SELECT
+         (SELECT count(*)::int FROM partner_organisations WHERE legal_name='Rollback Cards Ltd') AS orgs,
+         (SELECT count(*)::int FROM partner_locations WHERE name='Main location' AND tenant_id IN
+           (SELECT id FROM partner_organisations WHERE legal_name='Rollback Cards Ltd')) AS locations`
+    );
+    expect(leaked.rows[0]).toEqual({ orgs: 0, locations: 0 });
+    const retry = await svc.createPartner(
+      {
+        actorUserId: "00000000-0000-0000-0000-0000000000a5",
+        actorEmail: ADMIN_EMAIL,
+        requestId: "create-rollback-retry",
+        idempotencyKey: "create-rollback-key-2",
+      },
+      { legalName: "Rollback Cards Ltd" },
+      "retry after rollback"
+    );
+    expect(retry.result?.partnerId).toMatch(/^[0-9a-f-]{36}$/);
+    const after = await admin.query<{ orgs: number; locations: number }>(
+      `SELECT
+         (SELECT count(*)::int FROM partner_organisations WHERE legal_name='Rollback Cards Ltd') AS orgs,
+         (SELECT count(*)::int FROM partner_locations WHERE name='Main location' AND status='ACTIVE' AND tenant_id IN
+           (SELECT id FROM partner_organisations WHERE legal_name='Rollback Cards Ltd')) AS locations`
+    );
+    expect(after.rows[0]).toEqual({ orgs: 1, locations: 1 });
   });
 
   it("Super Admin creates owner invitation; invite is single-use; accepted owner can log in", async () => {
@@ -443,6 +500,95 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     );
     expect(auditBlob).not.toContain(token);
     expect(auditBlob).not.toMatch(/token_hash|owner-secure-password/i);
+  });
+
+  it("invite rolls back mid-transaction failures and the same email can be retried successfully", async () => {
+    const svc = await import("../server/partner/partner-management-service");
+    const points = [
+      "after_user_insert",
+      "after_role_assignment",
+      "before_invitation_insert",
+      "before_invitation_audit",
+    ] as const;
+    for (const point of points) {
+      const email = `rollback-${point.replaceAll("_", "-")}@a.example`;
+      svc.__setInvitePartnerFailurePointForTest(point);
+      await expect(
+        svc.invitePartnerUser(
+          {
+            actorUserId: "00000000-0000-0000-0000-0000000000a5",
+            actorEmail: ADMIN_EMAIL,
+            requestId: `invite-${point}`,
+            idempotencyKey: `invite-${point}`,
+          },
+          A,
+          { firstName: "Rollback", lastName: point, email, role: "STAFF" },
+          "rollback proof"
+        )
+      ).rejects.toThrow(`synthetic_invite_partner_${point}`);
+      svc.__setInvitePartnerFailurePointForTest(null);
+      const leaked = await admin.query<{ users: number; roles: number; invites: number; succeeded_audits: number }>(
+        `SELECT
+           (SELECT count(*)::int FROM partner_users WHERE lower(email)=lower($1)) AS users,
+           (SELECT count(*)::int FROM partner_user_roles ur JOIN partner_users u ON u.id=ur.user_id WHERE lower(u.email)=lower($1)) AS roles,
+           (SELECT count(*)::int FROM partner_invitations WHERE lower(email)=lower($1)) AS invites,
+           (SELECT count(*)::int FROM partner_management_audit WHERE result='succeeded' AND after_state::text ILIKE '%' || $1 || '%') AS succeeded_audits`,
+        [email]
+      );
+      expect(leaked.rows[0]).toEqual({ users: 0, roles: 0, invites: 0, succeeded_audits: 0 });
+      const retry = await svc.invitePartnerUser(
+        {
+          actorUserId: "00000000-0000-0000-0000-0000000000a5",
+          actorEmail: ADMIN_EMAIL,
+          requestId: `invite-${point}-retry`,
+          idempotencyKey: `invite-${point}-retry`,
+        },
+        A,
+        { firstName: "Rollback", lastName: "Retry", email, role: "STAFF" },
+        "retry after rollback"
+      );
+      expect(retry.result?.userId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(JSON.stringify(retry)).not.toMatch(/synthetic_invite|token_hash|password/i);
+    }
+  });
+
+  it("concurrent same-email invitations overlap and yield exactly one complete invitation", async () => {
+    const svc = await import("../server/partner/partner-management-service");
+    const c = await cookie();
+    const email = "race-invite@a.example";
+    svc.__setInvitePartnerBarrierForTest({ point: "after_duplicate_check", parties: 2 });
+    const start = Date.now();
+    const requests = [
+      post(
+        `${PM}/partners/${A}/users`,
+        { firstName: "Race", lastName: "One", email, role: "STAFF", reason: "race one" },
+        c
+      ),
+      post(
+        `${PM}/partners/${A}/users`,
+        { firstName: "Race", lastName: "Two", email, role: "STAFF", reason: "race two" },
+        c
+      ),
+    ];
+    const responses = await Promise.all(requests);
+    const elapsed = Date.now() - start;
+    expect(elapsed).toBeLessThan(10_000);
+    const bodies = await Promise.all(responses.map((r) => r.json()));
+    const statuses = responses.map((r) => r.status).sort((a, b) => a - b);
+    expect(statuses).toEqual([200, 409]);
+    const success = bodies.find((b) => b.ok);
+    const loser = bodies.find((b) => b.error);
+    expect(success?.result?.invitationId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(loser?.error?.code).toBe("DUPLICATE_PARTNER_USER");
+    expect(JSON.stringify(loser)).not.toMatch(/token=|token_hash|race-invite-token/i);
+    const stored = await admin.query<{ users: number; roles: number; invites: number }>(
+      `SELECT
+         (SELECT count(*)::int FROM partner_users WHERE lower(email)=lower($1)) AS users,
+         (SELECT count(*)::int FROM partner_user_roles ur JOIN partner_users u ON u.id=ur.user_id WHERE lower(u.email)=lower($1)) AS roles,
+         (SELECT count(*)::int FROM partner_invitations WHERE lower(email)=lower($1)) AS invites`,
+      [email]
+    );
+    expect(stored.rows[0]).toEqual({ users: 1, roles: 1, invites: 1 });
   });
 
   it("invitation resend supersedes old token; explicit revoke rejects the active token generically", async () => {
