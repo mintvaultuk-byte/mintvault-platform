@@ -9,7 +9,7 @@
  * Runs only when PARTNER_MANAGEMENT_RT_ADMIN (superuser URL to a DISPOSABLE, SSL-capable loopback
  * Postgres — server/db.ts forces ssl) is set and loopback. Skips otherwise.
  */
-import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, afterEach, beforeEach, vi } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { Client } from "pg";
@@ -20,6 +20,23 @@ import {
 } from "./helpers/partner-realistic-db";
 
 const ADMIN_DB = process.env.PARTNER_MANAGEMENT_RT_ADMIN;
+const ORIGINAL_RESEND_API_KEY = process.env.RESEND_API_KEY;
+
+const emailTransport = vi.hoisted(() => ({
+  invitationCalls: [] as unknown[],
+}));
+
+vi.mock("../server/email", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../server/email")>();
+  return {
+    ...actual,
+    sendPartnerInvitationEmail: vi.fn(async (data: unknown) => {
+      emailTransport.invitationCalls.push(data);
+      return { id: "synthetic-resend-mock" };
+    }),
+  };
+});
+
 function isLoopback(u: string | undefined): boolean {
   if (!u) return false;
   try {
@@ -31,6 +48,23 @@ function isLoopback(u: string | undefined): boolean {
 }
 const isLocal = isLoopback(ADMIN_DB);
 
+describe("Partner management integration coverage is wired up", () => {
+  it("is not silently skipped in CI", async () => {
+    if (!isLocal) {
+      console.warn(
+        "[partner-management-integration] skipped locally because PARTNER_MANAGEMENT_RT_ADMIN is not a loopback PostgreSQL URL"
+      );
+    }
+    if (process.env.CI || process.env.GITHUB_ACTIONS) {
+      expect(isLocal, "PARTNER_MANAGEMENT_RT_ADMIN must be set to a disposable loopback PostgreSQL 17 URL in CI").toBe(
+        true
+      );
+      const u = new URL(ADMIN_DB!);
+      expect(u.hostname).toMatch(/^(127\.0\.0\.1|localhost|::1)$/);
+    }
+  });
+});
+
 const A = "aaaa1111-0000-0000-0000-0000000000c5";
 const B = "bbbb2222-0000-0000-0000-0000000000d5";
 
@@ -38,6 +72,16 @@ let admin: Client;
 let server: http.Server;
 let base: string;
 let ADMIN_EMAIL: string;
+let capturedInvites: Array<{
+  email: string;
+  token: string;
+  partnerName: string;
+  roleCode: string;
+  expiresAt: Date;
+}> = [];
+let setInvitationDeliveryAdapter:
+  | ((a: null | ((d: (typeof capturedInvites)[number]) => Promise<void>)) => void)
+  | null = null;
 
 const PM = "/api/super-admin/partner-management";
 
@@ -58,6 +102,10 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
 
     admin = new Client({ connectionString: ADMIN_DB });
     await admin.connect();
+    const version = await admin.query<{ n: string }>("SELECT current_setting('server_version_num') AS n");
+    expect(Number(version.rows[0].n), "Partner management integration requires PostgreSQL 17").toBeGreaterThanOrEqual(
+      170000
+    );
     /**
      * PRISTINE SCHEMA FIRST (hostile-review F4 follow-on).
      *
@@ -180,11 +228,24 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   }, 60_000);
 
+  beforeEach(async () => {
+    capturedInvites = [];
+    emailTransport.invitationCalls = [];
+    process.env.RESEND_API_KEY = "synthetic-resend-key-never-real";
+    const delivery = await import("../server/partner/delivery");
+    setInvitationDeliveryAdapter = delivery.setInvitationDeliveryAdapter as typeof setInvitationDeliveryAdapter;
+    setInvitationDeliveryAdapter(async (data) => {
+      capturedInvites.push({ ...data });
+    });
+  });
+
   afterAll(async () => {
-    await new Promise<void>((r) => server?.close(() => r()));
+    if (server) await new Promise<void>((r) => server.close(() => r()));
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools().catch(() => {});
     await admin?.end().catch(() => {});
+    if (ORIGINAL_RESEND_API_KEY === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = ORIGINAL_RESEND_API_KEY;
   });
 
   afterEach(async () => {
@@ -193,6 +254,11 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     svc.__setInvitePartnerFailurePointForTest(null);
     svc.__setInvitePartnerBarrierForTest(null);
     svc.__setAcceptPartnerBarrierForTest(null);
+    setInvitationDeliveryAdapter?.(null);
+    capturedInvites = [];
+    emailTransport.invitationCalls = [];
+    if (ORIGINAL_RESEND_API_KEY === undefined) delete process.env.RESEND_API_KEY;
+    else process.env.RESEND_API_KEY = ORIGINAL_RESEND_API_KEY;
   });
 
   async function cookie(): Promise<string> {
@@ -591,6 +657,215 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     expect(stored.rows[0]).toEqual({ users: 1, roles: 1, invites: 1 });
   });
 
+  it("capture adapter handles management invitation delivery even when RESEND_API_KEY is present", async () => {
+    const c = await cookie();
+    const create = await post(
+      `${PM}/partners/${A}/users`,
+      {
+        firstName: "Capture",
+        lastName: "Proof",
+        email: "capture-proof@a.example",
+        role: "STAFF",
+        reason: "capture proof",
+      },
+      c
+    );
+    expect(create.status).toBe(200);
+    const body = await create.json();
+    expect(capturedInvites.map((i) => i.email)).toContain("capture-proof@a.example");
+    expect(emailTransport.invitationCalls).toHaveLength(0);
+    const stored = await admin.query<{ status: string }>("SELECT status FROM partner_invitations WHERE id=$1", [
+      body.result.invitationId,
+    ]);
+    expect(stored.rows[0].status).toBe("SENT");
+  });
+
+  it("delivery transport mock is non-vacuous when the capture adapter is removed", async () => {
+    const delivery = await import("../server/partner/delivery");
+    setInvitationDeliveryAdapter?.(null);
+    await delivery.deliverInvitationToken({
+      email: "transport-positive-control@example.test",
+      token: "synthetic-token-not-logged",
+      partnerName: "Transport Control Ltd",
+      roleCode: "PARTNER_RECEPTION",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    expect(emailTransport.invitationCalls).toHaveLength(1);
+  });
+
+  it("successful post-commit delivery cannot resurrect a revoked management invitation", async () => {
+    const c = await cookie();
+    let enteredDelivery!: () => void;
+    let resumeDelivery!: () => void;
+    const deliveryEntered = new Promise<void>((resolve) => {
+      enteredDelivery = resolve;
+    });
+    const resume = new Promise<void>((resolve) => {
+      resumeDelivery = resolve;
+    });
+    const order: string[] = [];
+    setInvitationDeliveryAdapter?.(async (data) => {
+      capturedInvites.push({ ...data });
+      order.push("delivery-entered");
+      enteredDelivery();
+      await resume;
+      order.push("delivery-resumed");
+    });
+
+    const createPromise = post(
+      `${PM}/partners/${A}/users`,
+      {
+        firstName: "Race",
+        lastName: "Success",
+        email: "delivery-race-success@a.example",
+        role: "STAFF",
+        reason: "race success",
+      },
+      c
+    );
+    await deliveryEntered;
+    const row = await admin.query<{ user_id: string; id: string; status: string }>(
+      "SELECT user_id, id, status FROM partner_invitations WHERE email=$1",
+      ["delivery-race-success@a.example"]
+    );
+    expect(row.rows[0].status).toBe("PENDING");
+    order.push("revoke-started");
+    const revoke = await post(
+      `${PM}/partners/${A}/users/${row.rows[0].user_id}/revoke-invitation`,
+      { reason: "concurrent revoke" },
+      c
+    );
+    expect(revoke.status).toBe(200);
+    order.push("revoked");
+    resumeDelivery();
+    const create = await createPromise;
+    expect(create.status).toBe(200);
+    expect(order).toEqual(["delivery-entered", "revoke-started", "revoked", "delivery-resumed"]);
+    const final = await admin.query<{ status: string }>("SELECT status FROM partner_invitations WHERE id=$1", [
+      row.rows[0].id,
+    ]);
+    expect(final.rows[0].status).toBe("REVOKED");
+    const token = capturedInvites[0].token;
+    const { acceptPartnerInvitation } = await import("../server/partner/partner-management-service");
+    expect(await acceptPartnerInvitation(token, "delivery-race-password-1")).toMatchObject({ ok: false });
+    expect(emailTransport.invitationCalls).toHaveLength(0);
+  });
+
+  it("failed post-commit delivery cannot resurrect a revoked management invitation", async () => {
+    const c = await cookie();
+    let enteredDelivery!: () => void;
+    let resumeDelivery!: () => void;
+    const deliveryEntered = new Promise<void>((resolve) => {
+      enteredDelivery = resolve;
+    });
+    const resume = new Promise<void>((resolve) => {
+      resumeDelivery = resolve;
+    });
+    setInvitationDeliveryAdapter?.(async (data) => {
+      capturedInvites.push({ ...data });
+      enteredDelivery();
+      await resume;
+      throw new Error("synthetic-delivery-failure");
+    });
+
+    const createPromise = post(
+      `${PM}/partners/${A}/users`,
+      {
+        firstName: "Race",
+        lastName: "Failure",
+        email: "delivery-race-failure@a.example",
+        role: "STAFF",
+        reason: "race failure",
+      },
+      c
+    );
+    await deliveryEntered;
+    const row = await admin.query<{ user_id: string; id: string; status: string }>(
+      "SELECT user_id, id, status FROM partner_invitations WHERE email=$1",
+      ["delivery-race-failure@a.example"]
+    );
+    expect(row.rows[0].status).toBe("PENDING");
+    const revoke = await post(
+      `${PM}/partners/${A}/users/${row.rows[0].user_id}/revoke-invitation`,
+      { reason: "concurrent failed delivery revoke" },
+      c
+    );
+    expect(revoke.status).toBe(200);
+    resumeDelivery();
+    const create = await createPromise;
+    expect(create.status).toBe(200);
+    const final = await admin.query<{ status: string; delivery_error: string | null }>(
+      "SELECT status, delivery_error FROM partner_invitations WHERE id=$1",
+      [row.rows[0].id]
+    );
+    expect(final.rows[0]).toEqual({ status: "REVOKED", delivery_error: null });
+    const { acceptPartnerInvitation } = await import("../server/partner/partner-management-service");
+    expect(await acceptPartnerInvitation(capturedInvites[0].token, "delivery-race-password-2")).toMatchObject({
+      ok: false,
+    });
+  });
+
+  it("ordinary failed management delivery records DELIVERY_FAILED while still PENDING", async () => {
+    const c = await cookie();
+    setInvitationDeliveryAdapter?.(async (data) => {
+      capturedInvites.push({ ...data });
+      throw new Error("synthetic ordinary failure");
+    });
+    const create = await post(
+      `${PM}/partners/${A}/users`,
+      {
+        firstName: "Failed",
+        lastName: "Delivery",
+        email: "ordinary-failed-delivery@a.example",
+        role: "STAFF",
+        reason: "ordinary delivery failure",
+      },
+      c
+    );
+    expect(create.status).toBe(200);
+    const body = await create.json();
+    expect(body.result.deliveryStatus).toBe("DELIVERY_FAILED");
+    const stored = await admin.query<{ status: string; delivery_error: string | null }>(
+      "SELECT status, delivery_error FROM partner_invitations WHERE id=$1",
+      [body.result.invitationId]
+    );
+    expect(stored.rows[0].status).toBe("DELIVERY_FAILED");
+    expect(stored.rows[0].delivery_error).toContain("synthetic ordinary failure");
+  });
+
+  it("team post-commit delivery bookkeeping treats stale rowCount zero as benign", async () => {
+    const svc = await import("../server/partner/partner-management-service");
+    const { deliverTeamInvitationAfterCommit } = await import("../server/partner/team-service");
+    const invited = await svc.invitePartnerUser(
+      {
+        actorUserId: "00000000-0000-0000-0000-0000000000a5",
+        actorEmail: ADMIN_EMAIL,
+        requestId: "team-stale-delivery",
+        idempotencyKey: "team-stale-delivery",
+      },
+      A,
+      {
+        firstName: "Team",
+        lastName: "Stale",
+        email: "team-stale-delivery@a.example",
+        role: "STAFF",
+      },
+      "team stale bookkeeping proof"
+    );
+    expect(invited.result?.invitationId).toMatch(/^[0-9a-f-]{36}$/);
+    await admin.query("UPDATE partner_invitations SET status='REVOKED', revoked_at=now() WHERE id=$1", [
+      invited.result!.invitationId,
+    ]);
+    await expect(
+      deliverTeamInvitationAfterCommit(A, invited.result!.invitationId, invited.result!.delivery)
+    ).resolves.toBeUndefined();
+    const final = await admin.query<{ status: string }>("SELECT status FROM partner_invitations WHERE id=$1", [
+      invited.result!.invitationId,
+    ]);
+    expect(final.rows[0].status).toBe("REVOKED");
+    expect(emailTransport.invitationCalls).toHaveLength(0);
+  });
+
   it("invitation resend supersedes old token; explicit revoke rejects the active token generically", async () => {
     const c = await cookie();
     const create = await post(
@@ -616,7 +891,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
       "SELECT status FROM partner_invitations WHERE user_id=$1 ORDER BY created_at",
       [userId]
     );
-    expect(states.rows.map((r) => r.status)).toEqual(["REVOKED", "PENDING"]);
+    expect(states.rows.map((r) => r.status)).toEqual(["REVOKED", "SENT"]);
     const { acceptPartnerInvitation } = await import("../server/partner/partner-management-service");
     expect((await acceptPartnerInvitation(token1, "staff-secure-password-1")).ok).toBe(false);
     const revoke = await post(

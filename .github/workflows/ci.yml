@@ -19,7 +19,7 @@ jobs:
       # counting and repeated-scalar-parameter rejection — silently do not run. It needs its OWN
       # database because the realistic-roles helper reassigns `public` schema ownership to
       # pn_migrator, which must not happen to the shared test database.
-      PARTNER_MANAGEMENT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55432/mintvault_partner_rt
+      PARTNER_MANAGEMENT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_rt
       # Super Admin Project Control real-PostgreSQL suites
       # (tests/project-control-migration.integration.test.ts and
       #  tests/project-control-concurrency.integration.test.ts).
@@ -247,24 +247,6 @@ jobs:
           # shared/schema.ts `vector(1536)` embedding column. Idempotent; the
           # pgvector/pgvector image ships the extension files.
           psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
-          # Dedicated database for the Partner PostgreSQL suites (Partner Master Dashboard and
-          # Partner Management). Separate from the shared test DB because those suites hand
-          # `public` schema ownership to a non-superuser migrator role and apply the partner
-          # migrations as that role.
-          #
-          # `\gexec` is a psql META-COMMAND and is NOT parsed when passed via `-c`: the previous
-          # form failed with `syntax error at or near "\"` and never created the database.
-          # CREATE DATABASE also has no IF NOT EXISTS, so existence is queried first and the
-          # create is issued only when needed — idempotent on a re-run.
-          #
-          # No pipes, no grep/sed: the query result is captured by command substitution, whose
-          # exit status IS the assignment's exit status, so an unreachable server or bad
-          # credentials aborts the step under `set -e` instead of being silently swallowed.
-          partner_db_present="$(psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
-            "SELECT 1 FROM pg_database WHERE datname = 'mintvault_partner_rt'")"
-          if [ "$partner_db_present" != "1" ]; then
-            psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE mintvault_partner_rt"
-          fi
           npx drizzle-kit push --force
           for migration in migrations-vq/*.sql; do
             echo "[ci-db] applying ${migration}"
@@ -287,7 +269,8 @@ jobs:
           # IF NOT EXISTS, and \gexec is a psql meta-command that is not parsed under -c, so
           # existence is queried first via command substitution (whose exit status propagates
           # under set -e, rather than being swallowed by a pipe).
-          for partner_db in mintvault_partner_capability mintvault_partner_user_mgmt \
+          for partner_db in mintvault_partner_rt \
+                            mintvault_partner_capability mintvault_partner_user_mgmt \
                             mintvault_partner_final_owner mintvault_partner_public \
                             mintvault_partner_runtime mintvault_partner_mount \
                             mintvault_connector_runtime \
@@ -386,6 +369,10 @@ jobs:
       - name: Assert connector suites executed
         if: always()
         run: node scripts/ci/assert-connector-suites-executed.mjs vitest-report.json
+
+      - name: Assert partner management suite executed
+        if: always()
+        run: node scripts/ci/assert-partner-management-suite-executed.mjs vitest-report.json
 
       - name: Build
         run: npm run build
