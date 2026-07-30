@@ -130,6 +130,8 @@ describe("partner reset delivery adapter", () => {
     }
 
     expect(thrown).toBeInstanceOf(Error);
+    // R3: a redacted operational signal MUST fire — the failure is never silent.
+    expect(logged).toContain(d.RESET_DELIVERY_FAILED_SIGNAL);
     const errText = `${(thrown as Error).message}\n${(thrown as Error).stack ?? ""}`;
     const logText = logged.join("\n");
 

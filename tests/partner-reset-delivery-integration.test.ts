@@ -47,10 +47,17 @@ const NEW_PASSWORD = "rotated-partner-password-1";
   let base = "";
   let delivered: Array<{ email: string; token: string }> = [];
   let setResetDeliveryAdapter: (a: ((e: string, t: string) => Promise<void>) | null) => void;
-  let savedResendKey: string | undefined;
+  // R5: every process.env key this suite overwrites, restored in afterAll.
+  const OVERWRITTEN_ENV = [
+    "RESEND_API_KEY",
+    "MINTVAULT_DATABASE_URL",
+    "PARTNER_ADMIN_DATABASE_URL",
+    "PARTNER_DATABASE_URL",
+  ] as const;
+  let savedEnv: Record<string, string | undefined> = {};
 
   beforeAll(async () => {
-    savedResendKey = process.env.RESEND_API_KEY;
+    savedEnv = Object.fromEntries(OVERWRITTEN_ENV.map((k) => [k, process.env[k]]));
     // Guarantee the Resend-backed default can never fire from this suite.
     delete process.env.RESEND_API_KEY;
 
@@ -139,8 +146,10 @@ const NEW_PASSWORD = "rotated-partner-password-1";
 
   afterAll(async () => {
     setResetDeliveryAdapter?.(null);
-    if (savedResendKey === undefined) delete process.env.RESEND_API_KEY;
-    else process.env.RESEND_API_KEY = savedResendKey;
+    for (const k of OVERWRITTEN_ENV) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k]!;
+    }
     await new Promise<void>((resolve) => server?.close(() => resolve()));
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools();
@@ -154,6 +163,18 @@ const NEW_PASSWORD = "rotated-partner-password-1";
       body: JSON.stringify(body),
     });
 
+  /**
+   * Delivery is dispatched WITHOUT await in the request path (the timing-oracle fix), so the
+   * response can land before the adapter runs. Poll rather than assume ordering.
+   */
+  async function deliveredCount(n: number, timeoutMs = 5_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (delivered.length < n && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(delivered).toHaveLength(n);
+  }
+
   it("delivers a token out of band, resets the password once, and refuses the replay", async () => {
     delivered = [];
     const requested = await post("/auth/password-reset/request", { email: USER_EMAIL });
@@ -161,7 +182,7 @@ const NEW_PASSWORD = "rotated-partner-password-1";
     expect(await requested.json()).toEqual({ ok: true });
 
     // Token reached the delivery seam, and NEVER the HTTP response.
-    expect(delivered).toHaveLength(1);
+    await deliveredCount(1);
     expect(delivered[0].email).toBe(USER_EMAIL);
     const token = delivered[0].token;
     expect(token.length).toBeGreaterThan(20);
@@ -183,7 +204,6 @@ const NEW_PASSWORD = "rotated-partner-password-1";
 
     // Single use: the same token cannot be replayed.
     const replay = await post("/auth/password-reset/consume", {
-      email: "replay-bucket@example.test", // distinct rate-limit bucket only; route ignores this field
       token,
       newPassword: "yet-another-password-1",
     });
@@ -200,7 +220,7 @@ const NEW_PASSWORD = "rotated-partner-password-1";
 
     const requested = await post("/auth/password-reset/request", { email: USER_EMAIL });
     expect(requested.status).toBe(200);
-    expect(delivered).toHaveLength(1);
+    await deliveredCount(1);
     const token = delivered[0].token;
 
     // Age the token past its window.
@@ -212,7 +232,6 @@ const NEW_PASSWORD = "rotated-partner-password-1";
     expect(aged.rowCount).toBe(1);
 
     const consumed = await post("/auth/password-reset/consume", {
-      email: "expiry-bucket@example.test",
       token,
       newPassword: "expired-attempt-password-1",
     });
@@ -239,6 +258,7 @@ const NEW_PASSWORD = "rotated-partner-password-1";
       "SELECT count(*)::text AS n FROM partner_password_reset_tokens"
     );
     expect(Number(after.rows[0].n) - Number(before.rows[0].n)).toBe(1);
+    await deliveredCount(1);
     expect(delivered.map((d) => d.email)).toEqual([USER_EMAIL]);
   }, 60_000);
 
@@ -262,5 +282,34 @@ const NEW_PASSWORD = "rotated-partner-password-1";
     );
     expect(after.rows[0].n).toBe(before.rows[0].n);
     expect(delivered).toHaveLength(0);
+  }, 60_000);
+
+  // --- R2: rate-limit keying. These MUST run last — they deliberately exhaust the IP buckets. ---
+
+  it("bounds reset REQUESTS per IP regardless of the email supplied (no fresh bucket per probe)", async () => {
+    setResetDeliveryAdapter(null); // no delivery side effects while probing
+    let sawThrottle = false;
+    for (let i = 0; i < 20 && !sawThrottle; i++) {
+      // A DIFFERENT address every time — under the old body-derived key each of these minted its
+      // own bucket and this loop could never throttle.
+      const res = await post("/auth/password-reset/request", { email: `probe-${i}@example.test` });
+      if (res.status === 429) sawThrottle = true;
+      else expect(res.status).toBe(200);
+    }
+    expect(sawThrottle).toBe(true);
+  }, 60_000);
+
+  it("bounds reset CONSUMES per IP regardless of any email field in the body", async () => {
+    let sawThrottle = false;
+    for (let i = 0; i < 20 && !sawThrottle; i++) {
+      const res = await post("/auth/password-reset/consume", {
+        email: `bucket-${i}@example.test`, // ignored by the route; must NOT create a new bucket
+        token: `no-such-token-${i}`,
+        newPassword: "irrelevant-password-1",
+      });
+      if (res.status === 429) sawThrottle = true;
+      else expect(res.status).toBe(400);
+    }
+    expect(sawThrottle).toBe(true);
   }, 60_000);
 });
