@@ -40,11 +40,12 @@ const g5MutationRateLimit = rateLimit({
   legacyHeaders: false,
   validate: false,
   message: { error: { code: "RATE_LIMITED", message: "Too many operations, please slow down." } },
-  keyGenerator: (req) => {
-    const fwd = req.headers["x-forwarded-for"];
-    if (fwd) return (Array.isArray(fwd) ? fwd[0] : fwd.split(",")[0]).trim();
-    return req.ip || req.socket.remoteAddress || "unknown";
-  },
+  // `req.ip` — NOT a hand-parsed X-Forwarded-For. The app sets `trust proxy = 1` (server/index.ts),
+  // so Express resolves req.ip one hop in front of Fly's proxy, which APPENDS the real client
+  // address. Reading the raw header took the LEFTMOST value — i.e. whatever the caller wrote — so
+  // any caller could mint itself a fresh bucket per request. Same correction as the partner login
+  // limiter (4c6e8a71 / 33709fe5) and the sibling super-admin routers.
+  keyGenerator: (req) => req.ip ?? req.socket?.remoteAddress ?? "unknown",
 });
 
 function actorOf(req: Request): ActorContext {

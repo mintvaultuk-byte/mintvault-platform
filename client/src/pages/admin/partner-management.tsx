@@ -87,6 +87,9 @@ export default function PartnerManagementPage() {
   const [createTouched, setCreateTouched] = useState(false);
   const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
   const [dupChecking, setDupChecking] = useState(false);
+  // Distinguishes "checked, found nothing" from "could not check". Conflating them let a network
+  // blip render a positive all-clear over a check that never ran.
+  const [dupCheckFailed, setDupCheckFailed] = useState(false);
   const [dupAcknowledged, setDupAcknowledged] = useState(false);
 
   const legalNameErr = validateLegalName(legalName);
@@ -98,6 +101,7 @@ export default function PartnerManagementPage() {
     setLegalName("");
     setDuplicates([]);
     setDupAcknowledged(false);
+    setDupCheckFailed(false);
     setCreateTouched(false);
     setCreateError(null);
     setCreateState("idle");
@@ -115,6 +119,7 @@ export default function PartnerManagementPage() {
     if (legalNameErr) return;
     setDupChecking(true);
     setCreateError(null);
+    setDupCheckFailed(false);
     try {
       const qs = new URLSearchParams({ legalName: legalName.trim() }).toString();
       const res = await apiRequest("GET", `${BASE}/partners/duplicate-check?${qs}`);
@@ -122,7 +127,9 @@ export default function PartnerManagementPage() {
       setDuplicates(Array.isArray(data?.matches) ? (data.matches as DuplicateMatch[]) : []);
     } catch {
       setDuplicates([]);
-      setBanner("Could not check for duplicates. Review the existing partner list before confirming.");
+      // The warning must travel to the step the operator is LOOKING at. The page banner renders
+      // behind the modal's own backdrop, dimmed — it cannot carry a safety message.
+      setDupCheckFailed(true);
     } finally {
       setDupChecking(false);
       setDupAcknowledged(false);
@@ -485,8 +492,11 @@ export default function PartnerManagementPage() {
                     onChange={(e) => setLegalName(e.target.value)}
                     aria-invalid={createTouched && !!legalNameErr}
                     aria-describedby={createTouched && legalNameErr ? "pm-create-name-error" : undefined}
+                    onBlur={() => setCreateTouched(true)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter" && !legalNameErr && !dupChecking) void runDuplicateCheck();
+                      if (e.key !== "Enter" || dupChecking) return;
+                      setCreateTouched(true);
+                      if (!legalNameErr) void runDuplicateCheck();
                     }}
                     style={{
                       width: "100%",
@@ -567,7 +577,17 @@ export default function PartnerManagementPage() {
                     </div>
                   )}
 
-                  {duplicates.length === 0 && (
+                  {dupCheckFailed && (
+                    <div
+                      role="alert"
+                      data-testid="pm-create-dup-failed"
+                      style={{ color: "var(--admin-red, #ff6b6b)", fontSize: 13, marginBottom: 8 }}
+                    >
+                      The duplicate check could not run, so this partner has NOT been checked against
+                      existing ones. Review the partners list before continuing.
+                    </div>
+                  )}
+                  {!dupCheckFailed && duplicates.length === 0 && (
                     <p data-testid="pm-create-no-duplicates" style={{ fontSize: 12, opacity: 0.7 }}>
                       No similar partner found.
                     </p>
@@ -603,7 +623,7 @@ export default function PartnerManagementPage() {
                   <AdminButton
                     size="sm"
                     variant="gold"
-                    disabled={!!legalNameErr || dupChecking}
+                    disabled={dupChecking}
                     onClick={() => void runDuplicateCheck()}
                     data-testid="pm-create-continue"
                   >

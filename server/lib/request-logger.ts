@@ -37,7 +37,15 @@ export type RequestLogSink = (message: string, source?: string) => void;
  *
  * Method, path, status and duration are still logged — only the body is suppressed.
  */
-export const BODY_LOG_SUPPRESSED_PREFIXES = ["/api/super-admin/partner-dashboard", "/api/partner"];
+export const BODY_LOG_SUPPRESSED_PREFIXES = [
+  "/api/super-admin/partner-dashboard",
+  // Same reasoning as the dashboard above: these responses carry partner contact details — email,
+  // telephone, postal address, company/VAT numbers — for one or many partners at a time. The
+  // duplicate-check probe added in the partner-management UX work echoes the same categories back.
+  // redactSensitive only masks credential-SHAPED KEY NAMES, so none of it would be redacted.
+  "/api/super-admin/partner-management",
+  "/api/partner",
+];
 
 export function isBodyLogSuppressed(reqPath: string): boolean {
   return BODY_LOG_SUPPRESSED_PREFIXES.some((prefix) => reqPath.startsWith(prefix));

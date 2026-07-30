@@ -525,18 +525,49 @@ describe("client/server field contract", () => {
     const src = readSrc(SERVER_ROUTES);
     const block = src.slice(src.indexOf("function extractProfileFields"));
     // NOTE: the character class MUST include digits — address_line1 / address_line2 exist.
-    const allowed = block.slice(0, block.indexOf("]")).match(/"([a-z0-9_]+)"/g)?.map((s) => s.replace(/"/g, "")) ?? [];
-    expect(allowed.length).toBeGreaterThan(0);
+    const allowed =
+      block
+        .slice(0, block.indexOf("]"))
+        .match(/"([a-z0-9_]+)"/g)
+        ?.map((s) => s.replace(/"/g, "")) ?? [];
+    expect(allowed.length).toBeGreaterThan(10);
     for (const f of PROFILE_FIELD_DEFS) {
       expect(allowed).toContain(f.key);
     }
   });
 
+  it("the profile PATCH handler actually APPLIES the allow-list (mass-assignment guard)", () => {
+    /*
+     * Verifying the allow-list ARRAY is not enough: deleting the extractProfileFields CALL and
+     * passing req.body straight through leaves the array untouched and every field assertion green,
+     * while the request body flows unfiltered into the profile UPDATE. Pin the call site.
+     */
+    const src = readSrc(SERVER_ROUTES);
+    const start = src.indexOf('r.patch("/partners/:partnerId/profile"');
+    expect(start).toBeGreaterThan(-1);
+    const handler = src.slice(start, src.indexOf("r.post(", start));
+    expect(handler).toMatch(/const fields = extractProfileFields\(req\.body \?\? \{\}\)/);
+    expect(handler).toMatch(/svc\.updateProfile\(actor, req\.params\.partnerId, fields,/);
+  });
+
   it("the server service persists every field the client can edit", () => {
     const src = readSrc(SERVER_SERVICE);
-    const block = src.slice(src.indexOf("const PROFILE_FIELDS"));
+    const start = src.indexOf("const PROFILE_FIELDS");
+    expect(start).toBeGreaterThan(-1);
+    // Anchor on the plain "]" — NOT "] as const". If the `as const` is ever dropped (a routine
+    // refactor) indexOf returns -1, slice(0,-1) swallows the rest of the file, and the match set
+    // silently becomes every quoted token in ~1200 lines — a vacuous pass.
+    const block = src.slice(start);
+    const end = block.indexOf("]");
+    expect(end).toBeGreaterThan(0);
     const persisted =
-      block.slice(0, block.indexOf("] as const")).match(/"([a-z0-9_]+)"/g)?.map((s) => s.replace(/"/g, "")) ?? [];
+      block
+        .slice(0, end)
+        .match(/"([a-z0-9_]+)"/g)
+        ?.map((s) => s.replace(/"/g, "")) ?? [];
+    // Non-vacuity guard: the real list has 15 entries. An empty/over-broad parse fails here.
+    expect(persisted.length).toBeGreaterThan(10);
+    expect(persisted.length).toBeLessThan(40);
     for (const f of PROFILE_FIELD_DEFS) {
       expect(persisted).toContain(f.key);
     }
@@ -631,7 +662,7 @@ describe("detail page — edit partner", () => {
 
   it("exposes an input for every editable profile field", () => {
     expect(src).toContain("PROFILE_FIELD_DEFS");
-    expect(src).toContain('data-testid={`pm-profile-field-${f.key}`}');
+    expect(src).toContain("data-testid={`pm-profile-field-${f.key}`}");
   });
 
   it("requires a reason and shows a before/after summary before saving", () => {
@@ -671,7 +702,9 @@ describe("detail page — invitation management", () => {
     expect(src).toMatch(/const errId = `\$\{testId\}-error`/);
     expect(src).toMatch(/id=\{errId\}\s+role="alert"\s+data-testid=\{errId\}/);
     expect(src).toContain("error={userTouched ? userErrors.email : undefined}");
-    expect(src).toContain("error={inviteErrors.email}");
+    // Both invitation forms gate error DISPLAY on a save attempt, so a freshly-opened dialog is
+    // never pre-reddened (an invited user with no first name used to open straight into red).
+    expect(src).toContain("error={inviteTouched ? inviteErrors.email : undefined}");
   });
 });
 
@@ -711,6 +744,105 @@ describe("list page — create with confirmation and duplicate detection", () =>
   it("prevents double-submit and shows a busy label", () => {
     expect(src).toContain("submitAllowed(");
     expect(src).toContain("submitLabel(");
+  });
+});
+
+describe("hostile-review repairs (regression pins)", () => {
+  const detail = readSrc(DETAIL_PAGE);
+  const list = readSrc(LIST_PAGE);
+  const helpers = readSrc("client/src/pages/admin/partner-management-helpers.ts");
+
+  it("the checklist reads branding from the branding query, not the detail payload", () => {
+    // getPartnerDetail returns {organisation, profile, primaryContact} — no `branding`. Reading
+    // detail.data.branding pinned "Branding configured" to false forever, capping the bar at 83%.
+    const service = readSrc(SERVER_SERVICE);
+    const detailReturn = service.slice(service.indexOf("export async function getPartnerDetail"));
+    expect(detailReturn.slice(0, detailReturn.indexOf("}\n"))).not.toContain("branding");
+    expect(detail).toContain("hasBranding: !!branding.data?.branding");
+    expect(detail).not.toContain("hasBranding: !!detail.data?.branding");
+  });
+
+  it("the branding query is loaded on the Overview tab so the checklist can see it", () => {
+    expect(detail).toMatch(/enabled: on && \(tab === "branding" \|\| tab === "overview"\)/);
+  });
+
+  it("the checklist does not claim a login exists for a merely-invited owner", () => {
+    expect(helpers).toContain('label: "Owner invited"');
+    expect(helpers).not.toContain('label: "Owner login created"');
+  });
+
+  it("a DELIVERY_FAILED invitation does not tick 'Invitation sent'", () => {
+    expect(detail).toContain('u.invitation_status !== "DELIVERY_FAILED"');
+  });
+
+  it("invitation success messages never claim delivery the server did not confirm", () => {
+    expect(detail).toContain("deliveryBanner(");
+    expect(detail).not.toContain('setBanner("Invitation updated and re-sent.');
+  });
+
+  it("a failed duplicate check is never rendered as 'No similar partner found'", () => {
+    expect(list).toContain("dupCheckFailed");
+    expect(list).toContain('data-testid="pm-create-dup-failed"');
+    // the all-clear line must be conditional on the check having actually run
+    expect(list).toContain("{!dupCheckFailed && duplicates.length === 0 && (");
+  });
+
+  it("the partners list cache is invalidated after a detail-page mutation", () => {
+    // staleTime is Infinity, so without this the list shows the old name until a hard reload.
+    expect(detail).toContain("queryKey: [`${BASE}/partners`]");
+  });
+
+  it("Escape closes the new dialogs, and routes the profile editor through the dirty check", () => {
+    expect(detail).toMatch(/\[modal, noteOpen, userOpen, profileOpen, inviteEdit, profileDirty\]/);
+    expect(detail).toMatch(/if \(profileOpen\) \{\s*\n\s*closeProfileEdit\(\);/);
+  });
+
+  it("saved address and internal notes are actually displayed on the profile tab", () => {
+    for (const label of ["Address line 1", "Town / city", "Postcode", "Country", "Internal notes"]) {
+      expect(detail).toContain(`<Field label="${label}"`);
+    }
+  });
+
+  it("only CHANGED fields can block the save (legacy stored values must not lock the editor)", () => {
+    expect(detail).toContain("changedKeys.has(k)");
+    expect(detail).toContain("if (legalNameErr && legalNameChanged) blocking.legal_name = legalNameErr;");
+  });
+
+  it("the partial-save path adopts the saved name and refreshes the cached version", () => {
+    expect(detail).toContain("setLegalNameBaseline(legalNameForm.trim())");
+    expect(detail).not.toContain("PARTIAL SAVE —");
+  });
+
+  it("the mutation limiter keys on req.ip, not a hand-parsed X-Forwarded-For", () => {
+    const routes = readSrc(SERVER_ROUTES);
+    expect(routes).toContain('keyGenerator: (req) => req.ip ?? req.socket?.remoteAddress ?? "unknown"');
+    expect(routes).not.toContain('req.headers["x-forwarded-for"]');
+  });
+
+  it("partner-management response bodies are suppressed from the request log", () => {
+    const logger = readSrc("server/lib/request-logger.ts");
+    expect(logger).toContain('"/api/super-admin/partner-management"');
+  });
+
+  it("the duplicate scan trims as well as collapsing whitespace, matching the client normaliser", () => {
+    const service = readSrc(SERVER_SERVICE);
+    expect(service).toContain("lower(btrim(regexp_replace(legal_name");
+    expect(service).toContain("lower(btrim(regexp_replace(p.trading_name");
+  });
+
+  it("amend writes an audit row that survives a rollback and names both sides of the correction", () => {
+    const service = readSrc(SERVER_SERVICE);
+    const amend = service.slice(service.indexOf("export async function amendPendingInvitation"));
+    const body = amend.slice(0, amend.indexOf("export async function listPartnerUsers"));
+    expect(body).toContain("'attempted'");
+    expect(body).toContain('intent: "amend_pending_invitation"');
+    // written via the pooled helper (separate connection) so a rollback cannot erase it
+    expect(body).toMatch(/await partnerAdminQuery\(\s*\n?\s*`INSERT INTO partner_management_audit/);
+  });
+
+  it("a post-commit delivery failure degrades instead of reporting the amend as failed", () => {
+    const service = readSrc(SERVER_SERVICE);
+    expect(service).toContain("DELIVERY_STATUS_UNKNOWN");
   });
 });
 

@@ -409,7 +409,9 @@ export function duplicateOverrideNote(matches: readonly DuplicateMatch[]): strin
 
 export interface ChecklistInput {
   companyCreated: boolean;
+  /** An OWNER-role user row exists. NOTE: an INVITED owner has no login yet — see the label. */
   hasOwner: boolean;
+  /** An invitation exists AND was not a delivery failure. */
   hasInvitation: boolean;
   locationCount: number;
   hasBranding: boolean;
@@ -428,7 +430,11 @@ export interface ChecklistItemView {
 /**
  * The setup checklist.
  *
- * HONESTY RULE: "Device" and "Credits" have NO data source in the product today — device enrolment is
+ * HONESTY RULE 1: an item ticks only when the thing it names is actually true. "Owner invited" is
+ * not "owner login created" (an INVITED user cannot log in), and "Invitation sent" must not tick for
+ * a DELIVERY_FAILED invitation. The caller is responsible for feeding those distinctions in.
+ *
+ * HONESTY RULE 2: "Device" and "Credits" have NO data source in the product today — device enrolment is
  * unbuilt and the credit ledger is Gate 4, deliberately not wired. The previous UI rendered them as a
  * permanently unticked circle, which reads as "you still have to do this" when in fact it cannot be
  * done. They are reported as `unavailable` instead, and are EXCLUDED from the percentage so the bar
@@ -438,7 +444,7 @@ export function computeChecklist(input: ChecklistInput): ChecklistItemView[] {
   const b = (v: boolean): ChecklistState => (v ? "done" : "todo");
   return [
     { key: "company", label: "Company created", state: b(input.companyCreated) },
-    { key: "owner", label: "Owner login created", state: b(input.hasOwner) },
+    { key: "owner", label: "Owner invited", state: b(input.hasOwner) },
     { key: "invitation", label: "Invitation sent", state: b(input.hasInvitation) },
     { key: "location", label: "Grading location", state: b(input.locationCount > 0) },
     { key: "profile", label: "Company profile completed", state: b(input.hasProfileDetail) },
@@ -548,5 +554,34 @@ function friendlyCode(code: string): string | null {
       return null;
     default:
       return null;
+  }
+}
+
+/**
+ * Turn the server's invitation `deliveryStatus` into a sentence that does not overstate what
+ * happened.
+ *
+ * The amend/invite endpoints answer HTTP 200 even when no email was sent: `DELIVERY_NOT_CONFIGURED`
+ * when no transport is configured, `DELIVERY_FAILED` when the provider threw. Reporting "sent" in
+ * either case is the exact silent-failure class this project keeps being bitten by — the operator
+ * stops chasing an invitation that does not exist.
+ *
+ * The revocation half of an amendment is unconditionally true (it commits inside the transaction),
+ * so it is stated regardless of delivery.
+ */
+export function deliveryBanner(deliveryStatus: string | undefined, createdPrefix?: string): string {
+  const amending = createdPrefix === undefined;
+  const revoked = amending ? " The previous invitation link no longer works." : "";
+  const lead = createdPrefix ?? "Invitation updated.";
+  switch (deliveryStatus) {
+    case "SENT":
+      return amending ? `Invitation updated and re-sent.${revoked}` : `${lead} The email has been sent.`;
+    case "DELIVERY_FAILED":
+      return `${lead} THE EMAIL COULD NOT BE SENT — the recipient has not received a link. Use Resend once the email problem is fixed.${revoked}`;
+    case "DELIVERY_NOT_CONFIGURED":
+      return `${lead} No email was sent because email delivery is not configured on this environment.${revoked}`;
+    default:
+      // Unknown/absent status: say what is certain and nothing more.
+      return `${lead} Delivery status is unconfirmed — check the invitation status in the table below.${revoked}`;
   }
 }

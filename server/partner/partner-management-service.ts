@@ -459,7 +459,8 @@ export async function findDuplicates(candidate: DuplicateCandidate): Promise<Dup
   if (legalName) {
     const { rows } = await partnerAdminQuery<{ id: string; legal_name: string }>(
       `SELECT id, legal_name FROM partner_organisations
-        WHERE lower(regexp_replace(legal_name, '\\s+', ' ', 'g')) = lower(regexp_replace($1, '\\s+', ' ', 'g'))
+        WHERE lower(btrim(regexp_replace(legal_name, '\\s+', ' ', 'g'))) = lower(btrim(regexp_replace($1, '\\s+', ' ', 'g')))
+        ORDER BY legal_name, id
         LIMIT 5`,
       [legalName]
     );
@@ -471,7 +472,8 @@ export async function findDuplicates(candidate: DuplicateCandidate): Promise<Dup
       `SELECT o.id, o.legal_name, p.trading_name
          FROM partner_profiles p JOIN partner_organisations o ON o.id = p.tenant_id
         WHERE p.trading_name IS NOT NULL
-          AND lower(regexp_replace(p.trading_name, '\\s+', ' ', 'g')) = lower(regexp_replace($1, '\\s+', ' ', 'g'))
+          AND lower(btrim(regexp_replace(p.trading_name, '\\s+', ' ', 'g'))) = lower(btrim(regexp_replace($1, '\\s+', ' ', 'g')))
+        ORDER BY o.legal_name, o.id
         LIMIT 5`,
       [tradingName]
     );
@@ -488,6 +490,7 @@ export async function findDuplicates(candidate: DuplicateCandidate): Promise<Dup
        SELECT o.id, o.legal_name, u.email
          FROM partner_users u JOIN partner_organisations o ON o.id = u.tenant_id
         WHERE lower(u.email) = lower($1)
+        ORDER BY 2, 1
         LIMIT 5`,
       [email]
     );
@@ -500,6 +503,7 @@ export async function findDuplicates(candidate: DuplicateCandidate): Promise<Dup
          FROM partner_profiles p JOIN partner_organisations o ON o.id = p.tenant_id
         WHERE p.address_postcode IS NOT NULL
           AND upper(replace(p.address_postcode, ' ', '')) = upper(replace($1, ' ', ''))
+        ORDER BY o.legal_name, o.id
         LIMIT 5`,
       [postcode]
     );
@@ -515,6 +519,7 @@ export async function findDuplicates(candidate: DuplicateCandidate): Promise<Dup
            FROM partner_profiles p JOIN partner_organisations o ON o.id = p.tenant_id
           WHERE p.primary_phone IS NOT NULL
             AND regexp_replace(p.primary_phone, '[^0-9]', '', 'g') = $1
+          ORDER BY o.legal_name, o.id
           LIMIT 5`,
         [digits]
       );
@@ -1048,8 +1053,12 @@ export async function invitePartnerUser(
  *
  * AUDIT ACTION CHOICE: recorded as `partner_user_invited` — an action type the CHECK constraint
  * already permits, and an honest description of what physically happens (a fresh invitation is
- * issued). The before-state carries the previous name/email/role so the ledger shows the correction.
- * A distinct `partner_invitation_amended` action would read better but requires a migration.
+ * issued). A distinct `partner_invitation_amended` action would read better but requires a migration.
+ *
+ * The ledger records BOTH sides of the correction: an `attempted` row carrying the previous
+ * name/email/role as `before_state`, and the terminal `succeeded` row carrying the new address and
+ * role in `after_state`. Without the new-address half, the ledger could say an invitation was
+ * redirected but not where to — which is the one question an audit of this action must answer.
  *
  * Only INVITED users are amendable. Once an invitation is accepted the person exists, and their
  * details are changed through the role/status controls, not by rewriting history.
@@ -1070,6 +1079,43 @@ export async function amendPendingInvitation(
   const lastName = input.lastName.trim();
   if (!firstName || !lastName || !email) throw new G5RequestError("VALIDATION_ERROR", "Name and email are required.");
   const roleCode = ADMIN_ROLE_TO_PARTNER_ROLE[input.role];
+
+  /*
+   * LEDGER: one `attempted` row written on a SEPARATE pooled connection BEFORE the transaction, so
+   * it survives a rollback — this is what makes a REJECTED amend (already accepted, duplicate email,
+   * wrong tenant) visible in the audit trail at all, matching how withAudit behaves for the
+   * mutations that use it. It carries BOTH sides of the correction: the previous identity in
+   * before_state and the intended new identity in after_state, so the ledger answers "redirected
+   * from whom, to whom" without having to parse the reason text.
+   *
+   * The pre-read here is advisory only; the authoritative check is the FOR UPDATE re-read inside the
+   * transaction below.
+   */
+  const prior = await partnerAdminQuery<{ email: string; first_name: string; last_name: string }>(
+    "SELECT email, first_name, last_name FROM partner_users WHERE tenant_id=$1 AND id=$2",
+    [org.id, userId]
+  );
+  await partnerAdminQuery(
+    `INSERT INTO partner_management_audit
+       (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, before_state, after_state, reason, result)
+     VALUES ($1,'partner_user_invited',$2,$3,$4,$5,'partner_user',$6,$7,$8,'__attempt__','attempted')`,
+    [
+      org.id,
+      actor.actorUserId,
+      actor.actorEmail,
+      actor.requestId,
+      actor.idempotencyKey ?? null,
+      userId,
+      prior.rows[0]
+        ? JSON.stringify({
+            email: prior.rows[0].email,
+            firstName: prior.rows[0].first_name,
+            lastName: prior.rows[0].last_name,
+          })
+        : null,
+      JSON.stringify({ intent: "amend_pending_invitation", email, roleCode, firstName, lastName }),
+    ]
+  );
 
   const committed = await withPartnerAdminTransaction(async (client) => {
     const existing = await client.query<{
@@ -1132,7 +1178,21 @@ export async function amendPendingInvitation(
   });
 
   const { delivery, ...invite } = committed.invite;
-  invite.deliveryStatus = await recordInvitationDelivery({ ...invite, delivery });
+  /*
+   * The transaction has COMMITTED. recordInvitationDelivery guards the provider send, but its own
+   * bookkeeping UPDATEs are unguarded, so a pool blip there would throw out of this function and be
+   * reported as a 500 — telling the operator the amendment failed when the old token is already dead
+   * and the new one already exists. Degrade to an explicit unknown status instead of lying.
+   */
+  try {
+    invite.deliveryStatus = await recordInvitationDelivery({ ...invite, delivery });
+  } catch (err) {
+    console.error(
+      "[partner-management] invitation amended and COMMITTED, but delivery bookkeeping failed:",
+      (err as { message?: string })?.message ?? err
+    );
+    invite.deliveryStatus = "DELIVERY_STATUS_UNKNOWN";
+  }
   return { result: { userId, ...invite }, alreadyCompleted: false };
 }
 
