@@ -14,6 +14,7 @@ import { G5RequestError, canTransitionStatus, isPartnerStatus, type PartnerStatu
 import { hashPassword, MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
 import { APP_BASE_URL } from "../app-url";
+import type { PoolClient } from "pg";
 import crypto from "node:crypto";
 
 export interface ActorContext {
@@ -21,6 +22,104 @@ export interface ActorContext {
   actorEmail: string;
   requestId: string;
   idempotencyKey?: string;
+}
+
+type CreatePartnerFailurePoint = "after_org_insert" | "after_default_location_insert";
+type InvitePartnerFailurePoint =
+  | "after_user_insert"
+  | "after_role_assignment"
+  | "before_invitation_insert"
+  | "before_invitation_audit";
+
+interface InviteBarrier {
+  point: "after_duplicate_check";
+  parties: number;
+  arrived: number;
+  waiters: Array<() => void>;
+}
+
+interface AcceptBarrier {
+  point: "before_invitation_lock";
+  parties: number;
+  arrived: number;
+  waiters: Array<() => void>;
+}
+
+let createPartnerFailurePointForTest: CreatePartnerFailurePoint | null = null;
+let invitePartnerFailurePointForTest: InvitePartnerFailurePoint | null = null;
+let inviteBarrierForTest: InviteBarrier | null = null;
+let acceptBarrierForTest: AcceptBarrier | null = null;
+
+function testHooksAllowed(): boolean {
+  return process.env.NODE_ENV === "test" || process.env.VITEST === "true";
+}
+
+function requireTestHooksAllowed(): void {
+  if (!testHooksAllowed()) {
+    throw new Error("partner management test hooks are only available under the test runner.");
+  }
+}
+
+export function __setCreatePartnerFailurePointForTest(point: CreatePartnerFailurePoint | null): void {
+  requireTestHooksAllowed();
+  createPartnerFailurePointForTest = point;
+}
+
+export function __setInvitePartnerFailurePointForTest(point: InvitePartnerFailurePoint | null): void {
+  requireTestHooksAllowed();
+  invitePartnerFailurePointForTest = point;
+}
+
+export function __setInvitePartnerBarrierForTest(
+  barrier: { point: "after_duplicate_check"; parties: number } | null
+): void {
+  requireTestHooksAllowed();
+  inviteBarrierForTest = barrier ? { point: barrier.point, parties: barrier.parties, arrived: 0, waiters: [] } : null;
+}
+
+export function __setAcceptPartnerBarrierForTest(
+  barrier: { point: "before_invitation_lock"; parties: number } | null
+): void {
+  requireTestHooksAllowed();
+  acceptBarrierForTest = barrier ? { point: barrier.point, parties: barrier.parties, arrived: 0, waiters: [] } : null;
+}
+
+function maybeFailCreatePartnerForTest(point: CreatePartnerFailurePoint): void {
+  if (testHooksAllowed() && createPartnerFailurePointForTest === point) {
+    throw new Error(`synthetic_create_partner_${point}`);
+  }
+}
+
+function maybeFailInvitePartnerForTest(point: InvitePartnerFailurePoint): void {
+  if (testHooksAllowed() && invitePartnerFailurePointForTest === point) {
+    throw new Error(`synthetic_invite_partner_${point}`);
+  }
+}
+
+async function maybeWaitInviteBarrierForTest(point: "after_duplicate_check"): Promise<void> {
+  if (!testHooksAllowed() || inviteBarrierForTest?.point !== point) return;
+  const barrier = inviteBarrierForTest;
+  barrier.arrived += 1;
+  if (barrier.arrived >= barrier.parties) {
+    const waiters = barrier.waiters.splice(0);
+    inviteBarrierForTest = null;
+    for (const release of waiters) release();
+    return;
+  }
+  await new Promise<void>((resolve) => barrier.waiters.push(resolve));
+}
+
+async function maybeWaitAcceptBarrierForTest(point: "before_invitation_lock"): Promise<void> {
+  if (!testHooksAllowed() || acceptBarrierForTest?.point !== point) return;
+  const barrier = acceptBarrierForTest;
+  barrier.arrived += 1;
+  if (barrier.arrived >= barrier.parties) {
+    const waiters = barrier.waiters.splice(0);
+    acceptBarrierForTest = null;
+    for (const release of waiters) release();
+    return;
+  }
+  await new Promise<void>((resolve) => barrier.waiters.push(resolve));
 }
 
 type AuditAction =
@@ -208,21 +307,45 @@ export async function createPartner(
   // BEFORE any write, when a prior succeeded action already used this key (create's key namespace is
   // pre-tenant, so this pre-check is global — matching the ledger's global idempotency namespace).
   if (await priorSuccess(actor.idempotencyKey)) return { result: null, alreadyCompleted: true };
-  // create the org (super-admin only) then its 1:1 profile
-  const org = await partnerAdminQuery<{ id: string }>(
-    `INSERT INTO partner_organisations (legal_name, status) VALUES ($1,'PENDING') RETURNING id`,
-    [input.legalName]
-  );
-  const tenantId = org.rows[0].id;
-  return withAudit(actor, tenantId, "partner_created", reason, null, async () => {
-    await partnerAdminQuery(`INSERT INTO partner_profiles (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING`, [
+  return withPartnerAdminTransaction(async (client) => {
+    const org = await client.query<{ id: string }>(
+      `INSERT INTO partner_organisations (legal_name, status) VALUES ($1,'PENDING') RETURNING id`,
+      [input.legalName]
+    );
+    const tenantId = org.rows[0].id;
+    maybeFailCreatePartnerForTest("after_org_insert");
+    await client.query(
+      `INSERT INTO partner_management_audit
+         (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, before_state, reason, result)
+       VALUES ($1::uuid,'partner_created',$2,$3,$4,$5,'partner',$1::text,$6,'__attempt__','attempted')`,
+      [tenantId, actor.actorUserId, actor.actorEmail, actor.requestId, actor.idempotencyKey ?? null, null]
+    );
+    await client.query(`INSERT INTO partner_profiles (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING`, [
       tenantId,
     ]);
+    await client.query(
+      `INSERT INTO partner_locations (tenant_id, partner_id, name, status, created_by)
+       VALUES ($1::uuid,$1::uuid,'Main location','ACTIVE',$2)`,
+      [tenantId, actor.actorUserId]
+    );
+    maybeFailCreatePartnerForTest("after_default_location_insert");
+    await client.query(
+      `INSERT INTO partner_management_audit
+         (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, after_state, reason, result)
+       VALUES ($1::uuid,'partner_created',$2,$3,$4,$5,'partner',$1::text,$6,$7,'succeeded')`,
+      [
+        tenantId,
+        actor.actorUserId,
+        actor.actorEmail,
+        actor.requestId,
+        actor.idempotencyKey ?? null,
+        JSON.stringify({ status: "PENDING", defaultLocation: { name: "Main location", status: "ACTIVE" } }),
+        reason,
+      ]
+    );
     return {
       result: { partnerId: tenantId },
-      entityType: "partner",
-      entityId: tenantId,
-      afterState: { status: "PENDING" },
+      alreadyCompleted: false,
     };
   });
 }
@@ -560,12 +683,6 @@ function inviteLink(token: string): string {
   return `${APP_BASE_URL}/partner/invite?token=${encodeURIComponent(token)}`;
 }
 
-async function roleIdFor(code: string): Promise<string> {
-  const { rows } = await partnerAdminQuery<{ id: string }>("SELECT id FROM partner_roles WHERE code=$1", [code]);
-  if (rows.length !== 1) throw new G5RequestError("PARTNER_ROLE_NOT_CONFIGURED", "Partner role is not configured.");
-  return rows[0].id;
-}
-
 async function activeOwnerCount(tenantId: string, exceptUserId?: string): Promise<number> {
   const { rows } = await partnerAdminQuery<{ n: number }>(
     `SELECT count(*)::int AS n
@@ -597,6 +714,7 @@ async function ensureCanRemoveOwner(tenantId: string, userId: string): Promise<v
 }
 
 async function createInvitationRecord(
+  client: PoolClient,
   actor: ActorContext,
   tenantId: string,
   userId: string,
@@ -604,17 +722,23 @@ async function createInvitationRecord(
   roleCode: string,
   action: AuditAction,
   reason: string
-): Promise<{ invitationId: string; deliveryStatus: string; invitationLink?: string }> {
+): Promise<{
+  invitationId: string;
+  deliveryStatus: string;
+  invitationLink?: string;
+  delivery: { email: string; token: string; partnerName: string; roleCode: string; expiresAt: Date };
+}> {
   const token = crypto.randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + INVITE_HOURS * 60 * 60 * 1000);
-  const previous = await partnerAdminQuery<{ id: string }>(
+  const previous = await client.query<{ id: string }>(
     `UPDATE partner_invitations
         SET status='REVOKED', revoked_at=now(), updated_at=now()
       WHERE tenant_id=$1 AND user_id=$2 AND status IN ('PENDING','SENT','DELIVERY_FAILED')
       RETURNING id`,
     [tenantId, userId]
   );
-  const { rows } = await partnerAdminQuery<{ id: string; partner_name: string }>(
+  maybeFailInvitePartnerForTest("before_invitation_insert");
+  const { rows } = await client.query<{ id: string; partner_name: string }>(
     `WITH ins AS (
        INSERT INTO partner_invitations
          (tenant_id, user_id, email, role_code, token_hash, invited_by_user_id, invited_by_email, expires_at)
@@ -625,43 +749,56 @@ async function createInvitationRecord(
     [tenantId, userId, email, roleCode, sha256(token), actor.actorUserId, actor.actorEmail, expiresAt]
   );
   if (previous.rows.length > 0) {
-    await partnerAdminQuery("UPDATE partner_invitations SET superseded_by=$1 WHERE id = ANY($2::uuid[])", [
+    await client.query("UPDATE partner_invitations SET superseded_by=$1 WHERE id = ANY($2::uuid[])", [
       rows[0].id,
       previous.rows.map((r) => r.id),
     ]);
   }
-  let deliveryStatus = "DELIVERY_NOT_CONFIGURED";
-  if (invitationDeliveryConfigured()) {
-    try {
-      await deliverInvitationToken({ email, token, partnerName: rows[0].partner_name, roleCode, expiresAt });
-      await partnerAdminQuery(
-        "UPDATE partner_invitations SET status='SENT', delivered_at=now(), delivery_error=NULL, updated_at=now() WHERE id=$1",
-        [rows[0].id]
-      );
-      deliveryStatus = "SENT";
-    } catch (err) {
-      await partnerAdminQuery(
-        "UPDATE partner_invitations SET status='DELIVERY_FAILED', delivery_error=$2, updated_at=now() WHERE id=$1",
-        [rows[0].id, (err as Error).message.slice(0, 500)]
-      );
-      deliveryStatus = "DELIVERY_FAILED";
-    }
-  }
-  await recordTerminal(
-    actor,
-    tenantId,
-    action,
-    "partner_user",
-    userId,
-    { invitationId: rows[0].id, roleCode, deliveryStatus },
-    reason,
-    "succeeded"
+  maybeFailInvitePartnerForTest("before_invitation_audit");
+  await client.query(
+    `INSERT INTO partner_management_audit
+       (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, after_state, reason, result)
+     VALUES ($1,$2,$3,$4,$5,$6,'partner_user',$7,$8,$9,'succeeded')`,
+    [
+      tenantId,
+      action,
+      actor.actorUserId,
+      actor.actorEmail,
+      actor.requestId,
+      actor.idempotencyKey ?? null,
+      userId,
+      JSON.stringify({ invitationId: rows[0].id, roleCode, deliveryStatus: "DELIVERY_NOT_CONFIGURED" }),
+      reason,
+    ]
   );
   return {
     invitationId: rows[0].id,
-    deliveryStatus,
+    deliveryStatus: "DELIVERY_NOT_CONFIGURED",
+    delivery: { email, token, partnerName: rows[0].partner_name, roleCode, expiresAt },
     invitationLink: process.env.PARTNER_INVITE_ALLOW_ADMIN_LINK_COPY === "true" ? inviteLink(token) : undefined,
   };
+}
+
+async function recordInvitationDelivery(invite: {
+  invitationId: string;
+  deliveryStatus: string;
+  delivery: { email: string; token: string; partnerName: string; roleCode: string; expiresAt: Date };
+}): Promise<string> {
+  if (!invitationDeliveryConfigured()) return invite.deliveryStatus;
+  try {
+    await deliverInvitationToken(invite.delivery);
+    await partnerAdminQuery(
+      "UPDATE partner_invitations SET status='SENT', delivered_at=now(), delivery_error=NULL, updated_at=now() WHERE id=$1",
+      [invite.invitationId]
+    );
+    return "SENT";
+  } catch (err) {
+    await partnerAdminQuery(
+      "UPDATE partner_invitations SET status='DELIVERY_FAILED', delivery_error=$2, updated_at=now() WHERE id=$1",
+      [invite.invitationId, (err as Error).message.slice(0, 500)]
+    );
+    return "DELIVERY_FAILED";
+  }
 }
 
 export async function invitePartnerUser(
@@ -679,32 +816,55 @@ export async function invitePartnerUser(
   const lastName = input.lastName.trim();
   if (!firstName || !lastName || !email) throw new G5RequestError("VALIDATION_ERROR", "Name and email are required.");
   const roleCode = ADMIN_ROLE_TO_PARTNER_ROLE[input.role];
-  if (
-    (await partnerAdminQuery("SELECT 1 FROM partner_users WHERE lower(email)=lower($1) LIMIT 1", [email])).rows.length
-  ) {
-    throw new G5RequestError("DUPLICATE_PARTNER_USER", "A partner user with this email already exists.");
-  }
-  await recordAttempt(actor, org.id, "partner_user_invited", "partner_user", null, { email, roleCode });
-  const user = await partnerAdminQuery<{ id: string }>(
-    `INSERT INTO partner_users (tenant_id, partner_id, email, first_name, last_name, status, created_by)
-     VALUES ($1,$1,$2,$3,$4,'INVITED',$5) RETURNING id`,
-    [org.id, email, firstName, lastName, actor.actorUserId]
-  );
-  await partnerAdminQuery("INSERT INTO partner_user_roles (tenant_id, user_id, role_id) VALUES ($1,$2,$3)", [
-    org.id,
-    user.rows[0].id,
-    await roleIdFor(roleCode),
-  ]);
-  const invite = await createInvitationRecord(
-    actor,
-    org.id,
-    user.rows[0].id,
-    email,
-    roleCode,
-    "partner_user_invited",
-    reason
-  );
-  return { result: { userId: user.rows[0].id, ...invite }, alreadyCompleted: false };
+  const committed = await withPartnerAdminTransaction(async (client) => {
+    if ((await client.query("SELECT 1 FROM partner_users WHERE lower(email)=lower($1) LIMIT 1", [email])).rows.length) {
+      throw new G5RequestError("DUPLICATE_PARTNER_USER", "A partner user with this email already exists.");
+    }
+    await maybeWaitInviteBarrierForTest("after_duplicate_check");
+    const role = await client.query<{ id: string }>("SELECT id FROM partner_roles WHERE code=$1", [roleCode]);
+    if (role.rows.length !== 1) {
+      throw new G5RequestError("PARTNER_ROLE_NOT_CONFIGURED", "Partner role is not configured.");
+    }
+    await client.query(
+      `INSERT INTO partner_management_audit
+         (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, before_state, reason, result)
+       VALUES ($1,'partner_user_invited',$2,$3,$4,$5,'partner_user',$6,'__attempt__','attempted')`,
+      [
+        org.id,
+        actor.actorUserId,
+        actor.actorEmail,
+        actor.requestId,
+        actor.idempotencyKey ?? null,
+        JSON.stringify({ email, roleCode }),
+      ]
+    );
+    const user = await client.query<{ id: string }>(
+      `INSERT INTO partner_users (tenant_id, partner_id, email, first_name, last_name, status, created_by)
+       VALUES ($1,$1,$2,$3,$4,'INVITED',$5) RETURNING id`,
+      [org.id, email, firstName, lastName, actor.actorUserId]
+    );
+    maybeFailInvitePartnerForTest("after_user_insert");
+    await client.query("INSERT INTO partner_user_roles (tenant_id, user_id, role_id) VALUES ($1,$2,$3)", [
+      org.id,
+      user.rows[0].id,
+      role.rows[0].id,
+    ]);
+    maybeFailInvitePartnerForTest("after_role_assignment");
+    const invite = await createInvitationRecord(
+      client,
+      actor,
+      org.id,
+      user.rows[0].id,
+      email,
+      roleCode,
+      "partner_user_invited",
+      reason
+    );
+    return { userId: user.rows[0].id, invite };
+  });
+  const { delivery, ...invite } = committed.invite;
+  invite.deliveryStatus = await recordInvitationDelivery({ ...invite, delivery });
+  return { result: { userId: committed.userId, ...invite }, alreadyCompleted: false };
 }
 
 export async function listPartnerUsers(partnerId: string) {
@@ -738,30 +898,48 @@ export async function listPartnerUsers(partnerId: string) {
 
 export async function resendPartnerInvitation(actor: ActorContext, partnerId: string, userId: string, reason: string) {
   const org = await loadPartner(partnerId);
-  const { rows } = await partnerAdminQuery<{ email: string; role_code: string; status: string }>(
-    `SELECT u.email, r.code AS role_code, u.status
-       FROM partner_users u
-       JOIN partner_user_roles ur ON ur.user_id = u.id
-       JOIN partner_roles r ON r.id = ur.role_id
-      WHERE u.tenant_id=$1 AND u.id=$2
-      ORDER BY r.code LIMIT 1`,
-    [org.id, userId]
-  );
-  if (rows.length !== 1) throw new G5RequestError("PARTNER_USER_NOT_FOUND", "Partner user not found.");
-  if (org.status === "SUSPENDED" || org.status === "REVOKED" || rows[0].status !== "INVITED") {
-    throw new G5RequestError("PARTNER_UNAVAILABLE", "Setup invitations are only available for invited accounts.");
-  }
-  await recordAttempt(actor, org.id, "partner_invitation_resent", "partner_user", userId, { email: rows[0].email });
-  const invite = await createInvitationRecord(
-    actor,
-    org.id,
-    userId,
-    rows[0].email,
-    rows[0].role_code,
-    "partner_invitation_resent",
-    reason
-  );
-  return { result: invite, alreadyCompleted: false };
+  const invite = await withPartnerAdminTransaction(async (client) => {
+    const { rows } = await client.query<{ email: string; role_code: string; status: string }>(
+      `SELECT u.email, r.code AS role_code, u.status
+         FROM partner_users u
+         JOIN partner_user_roles ur ON ur.user_id = u.id
+         JOIN partner_roles r ON r.id = ur.role_id
+        WHERE u.tenant_id=$1 AND u.id=$2
+        ORDER BY r.code LIMIT 1`,
+      [org.id, userId]
+    );
+    if (rows.length !== 1) throw new G5RequestError("PARTNER_USER_NOT_FOUND", "Partner user not found.");
+    if (org.status === "SUSPENDED" || org.status === "REVOKED" || rows[0].status !== "INVITED") {
+      throw new G5RequestError("PARTNER_UNAVAILABLE", "Setup invitations are only available for invited accounts.");
+    }
+    await client.query(
+      `INSERT INTO partner_management_audit
+         (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, before_state, reason, result)
+       VALUES ($1,'partner_invitation_resent',$2,$3,$4,$5,'partner_user',$6,$7,'__attempt__','attempted')`,
+      [
+        org.id,
+        actor.actorUserId,
+        actor.actorEmail,
+        actor.requestId,
+        actor.idempotencyKey ?? null,
+        userId,
+        JSON.stringify({ email: rows[0].email }),
+      ]
+    );
+    return createInvitationRecord(
+      client,
+      actor,
+      org.id,
+      userId,
+      rows[0].email,
+      rows[0].role_code,
+      "partner_invitation_resent",
+      reason
+    );
+  });
+  const { delivery, ...publicInvite } = invite;
+  publicInvite.deliveryStatus = await recordInvitationDelivery({ ...publicInvite, delivery });
+  return { result: publicInvite, alreadyCompleted: false };
 }
 
 export async function revokePartnerInvitation(actor: ActorContext, partnerId: string, userId: string, reason: string) {
@@ -943,6 +1121,7 @@ export async function acceptPartnerInvitation(token: string, password: string) {
   const tokenHash = sha256(token);
   const pwHash = await hashPassword(password);
   return withPartnerAdminTransaction(async (client) => {
+    await maybeWaitAcceptBarrierForTest("before_invitation_lock");
     const { rows } = await client.query<{
       id: string;
       tenant_id: string;

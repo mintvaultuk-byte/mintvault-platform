@@ -33,8 +33,9 @@
  *   3. A token rejection matrix driven through the REAL public HTTP route.
  *   4. Acceptance correctness stated against what the code actually does (no user is created at
  *      acceptance — the INVITED row is activated — and NO session is issued).
- *   5. Atomicity of a rejected acceptance (byte-identical DB, invitation still usable afterwards).
- *   6. Concurrency (`Promise.all`) over the real HTTP surface.
+ *   5. Validation rejection leaves the DB byte-identical; genuine mid-transaction invitation
+ *      rollback is covered in tests/partner-management-integration.test.ts.
+ *   6. Deterministic concurrency over the real HTTP surface using a test-only transaction barrier.
  *   7. Cross-tenant isolation over the NOBYPASSRLS runtime role, including identifier guessing.
  *   8. The `partner_onboarding_enabled` gate, and that `partner_portal_enabled` alone does not
  *      open onboarding.
@@ -53,7 +54,7 @@
  *   PARTNER_MOUNT_RT_RUNTIME=postgres://partner_app_test:synthetic@127.0.0.1:5599/postgres \
  *   LC_ALL=C LANG=C npx vitest run tests/partner-onboarding-matrix.test.ts
  */
-import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from "vitest";
 import crypto from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -342,12 +343,15 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
   expect(url.pathname.includes(token)).toBe(false);
   expect(url.hash).toBe("");
   expect([...url.searchParams.keys()]).toEqual(["token"]);
-  expect(url.searchParams.get("token")).toBe(token);
+  expect(url.searchParams.get("token") === token, "query token must match captured adapter token").toBe(true);
   // URL-encoded: the serialised query must decode back to the exact token, and the whole URL must
   // be byte-identical to encodeURIComponent's output (base64url tokens are already safe, so this
   // also proves no double-encoding was introduced).
-  expect(decodeURIComponent(url.search.slice("?token=".length))).toBe(token);
-  expect(rawUrl).toBe(`${EXPECTED_APP_URL}/partner/invite?token=${encodeURIComponent(token)}`);
+  expect(decodeURIComponent(url.search.slice("?token=".length)) === token, "query must decode exactly once").toBe(true);
+  expect(
+    rawUrl === `${EXPECTED_APP_URL}/partner/invite?token=${encodeURIComponent(token)}`,
+    "serialised URL must use the expected host, path and encoded query"
+  ).toBe(true);
 }
 
 (isLocal ? describe : describe.skip)("Partner invitation onboarding matrix (disposable PG17, real HTTP)", () => {
@@ -360,6 +364,7 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
         consoleLines.push(args.map((a) => (typeof a === "string" ? a : String(a))).join(" "));
       };
     }
+    console.info("psp-log-capture-positive-control");
 
     // ---- our OWN disposable database on the CI-provisioned PostgreSQL 17 server ----
     const bootstrap = new Client({ connectionString: MOUNT_ADMIN });
@@ -546,7 +551,7 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
   afterAll(async () => {
     for (const level of ["log", "info", "warn", "error", "debug"] as const) console[level] = realConsole[level];
     setInvitationDeliveryAdapter?.(null);
-    await new Promise<void>((r) => server?.close(() => r()));
+    if (server) await new Promise<void>((r) => server.close(() => r()));
     await closePartnerPools?.().catch(() => {});
     await admin?.end().catch(() => {});
     for (const k of ENV_KEYS) {
@@ -559,6 +564,16 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
     // Isolate the IP-keyed partner limiters between tests (every request comes from 127.0.0.1).
     const { setPartnerRateLimitStore, MemoryRateLimitStore } = await import("../server/partner/rate-limit");
     setPartnerRateLimitStore(new MemoryRateLimitStore());
+    const svc = await import("../server/partner/partner-management-service");
+    svc.__setAcceptPartnerBarrierForTest(null);
+  });
+
+  afterEach(async () => {
+    const svc = await import("../server/partner/partner-management-service");
+    svc.__setAcceptPartnerBarrierForTest(null);
+    setInvitationDeliveryAdapter?.(async (data) => {
+      capturedInvites.push(data);
+    });
   });
 
   // =========================================================================
@@ -729,7 +744,7 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
     );
     expect(stored.rows).toHaveLength(1);
     expect(stored.rows[0].token_hash).toMatch(/^[0-9a-f]{64}$/);
-    expect(stored.rows[0].token_hash).not.toBe(invited.token);
+    expect(stored.rows[0].token_hash === invited.token, "stored hash must not equal raw token").toBe(false);
     expect(stored.rows[0].token_hash).toBe(sha256Hex(invited.token));
     expect(stored.rows[0].matches).toBe(true);
 
@@ -916,9 +931,9 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
   });
 
   // =========================================================================
-  // 5. ATOMICITY
+  // 5. VALIDATION REJECTION
   // =========================================================================
-  it("atomicity: a rejected acceptance leaves the database unchanged and the invitation still usable", async () => {
+  it("validation rejection: a rejected acceptance leaves the database unchanged and the invitation still usable", async () => {
     const email = "psp-atomicity@example.test";
     const invited = await superAdminInvite(TENANT_A, email, "STAFF");
     expect(invited.status).toBe(200);
@@ -943,9 +958,9 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
     };
 
     const before = await snapshot();
-    // Controlled failure: passwords outside [MIN_PASSWORD_LEN, MAX_PASSWORD_LEN] are refused by
-    // acceptPartnerInvitation BEFORE the transaction opens, so a partial write here would be a real
-    // ordering defect rather than a contrived one.
+    // Controlled validation failure: passwords outside [MIN_PASSWORD_LEN, MAX_PASSWORD_LEN] are
+    // refused before the accept transaction opens. Mid-transaction invitation rollback is covered by
+    // tests/partner-management-integration.test.ts using the shared service transaction helper.
     const tooShort = "9-chars-".slice(0, 9);
     const tooLong = "x".repeat(201);
     seenPasswords.push(tooShort, tooLong);
@@ -1000,11 +1015,18 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
       ])
     ).rows[0].credential_version;
 
-    // Real HTTP, in parallel, through the deployed public route.
-    const [r1, r2] = await Promise.all([
-      req("POST", ACCEPT, { body: { token: invited.token, password: passwordA } }),
-      req("POST", ACCEPT, { body: { token: invited.token, password: passwordB } }),
-    ]);
+    const svc = await import("../server/partner/partner-management-service");
+    svc.__setAcceptPartnerBarrierForTest({ point: "before_invitation_lock", parties: 2 });
+    let r1: Awaited<ReturnType<typeof req>>;
+    let r2: Awaited<ReturnType<typeof req>>;
+    try {
+      [r1, r2] = await Promise.all([
+        req("POST", ACCEPT, { body: { token: invited.token, password: passwordA } }),
+        req("POST", ACCEPT, { body: { token: invited.token, password: passwordB } }),
+      ]);
+    } finally {
+      svc.__setAcceptPartnerBarrierForTest(null);
+    }
     expect([r1.status, r2.status].filter((s) => s === 200)).toHaveLength(1);
     expect([r1.status, r2.status].filter((s) => s === 400)).toHaveLength(1);
 
@@ -1218,7 +1240,7 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
   // =========================================================================
   it("log redaction: no raw token, password, database URL or session secret was ever logged", () => {
     expect(seenTokens.length).toBeGreaterThan(5);
-    expect(consoleLines.length).toBeGreaterThanOrEqual(0);
+    expect(consoleLines).toContain("psp-log-capture-positive-control");
     const blob = consoleLines.join("\n");
 
     for (const token of seenTokens) {
