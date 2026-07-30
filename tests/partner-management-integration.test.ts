@@ -740,6 +740,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     resumeDelivery();
     const create = await createPromise;
     expect(create.status).toBe(200);
+    expect((await create.clone().json()).result.deliveryStatus).toBe("DELIVERY_NOT_CONFIGURED");
     expect(order).toEqual(["delivery-entered", "revoke-started", "revoked", "delivery-resumed"]);
     const final = await admin.query<{ status: string }>("SELECT status FROM partner_invitations WHERE id=$1", [
       row.rows[0].id,
@@ -794,6 +795,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     resumeDelivery();
     const create = await createPromise;
     expect(create.status).toBe(200);
+    expect((await create.clone().json()).result.deliveryStatus).toBe("DELIVERY_NOT_CONFIGURED");
     const final = await admin.query<{ status: string; delivery_error: string | null }>(
       "SELECT status, delivery_error FROM partner_invitations WHERE id=$1",
       [row.rows[0].id]
