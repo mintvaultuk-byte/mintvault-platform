@@ -51,6 +51,7 @@ let inviteBarrierForTest: InviteBarrier | null = null;
 let acceptBarrierForTest: AcceptBarrier | null = null;
 
 function testHooksAllowed(): boolean {
+  if (process.env.NODE_ENV === "production") return false;
   return process.env.NODE_ENV === "test" || process.env.VITEST === "true";
 }
 
@@ -787,16 +788,18 @@ async function recordInvitationDelivery(invite: {
   if (!invitationDeliveryConfigured()) return invite.deliveryStatus;
   try {
     await deliverInvitationToken(invite.delivery);
-    await partnerAdminQuery(
-      "UPDATE partner_invitations SET status='SENT', delivered_at=now(), delivery_error=NULL, updated_at=now() WHERE id=$1",
+    const delivered = await partnerAdminQuery(
+      "UPDATE partner_invitations SET status='SENT', delivered_at=now(), delivery_error=NULL, updated_at=now() WHERE id=$1 AND status='PENDING'",
       [invite.invitationId]
     );
+    if ((delivered.rowCount ?? 0) === 0) return invite.deliveryStatus;
     return "SENT";
   } catch (err) {
-    await partnerAdminQuery(
-      "UPDATE partner_invitations SET status='DELIVERY_FAILED', delivery_error=$2, updated_at=now() WHERE id=$1",
+    const failed = await partnerAdminQuery(
+      "UPDATE partner_invitations SET status='DELIVERY_FAILED', delivery_error=$2, updated_at=now() WHERE id=$1 AND status='PENDING'",
       [invite.invitationId, (err as Error).message.slice(0, 500)]
     );
+    if ((failed.rowCount ?? 0) === 0) return invite.deliveryStatus;
     return "DELIVERY_FAILED";
   }
 }

@@ -234,14 +234,14 @@ export async function deliverTeamInvitationAfterCommit(
     await deliverInvitationToken(delivery);
     await withTenant({ tenantId }, (c) =>
       c.query(
-        "UPDATE partner_invitations SET status='SENT', delivered_at=now(), delivery_error=NULL, updated_at=now() WHERE id=$1",
+        "UPDATE partner_invitations SET status='SENT', delivered_at=now(), delivery_error=NULL, updated_at=now() WHERE id=$1 AND status='PENDING'",
         [invitationId]
       )
     );
   } catch (err) {
     await withTenant({ tenantId }, (c) =>
       c.query(
-        "UPDATE partner_invitations SET status='DELIVERY_FAILED', delivery_error=$2, updated_at=now() WHERE id=$1",
+        "UPDATE partner_invitations SET status='DELIVERY_FAILED', delivery_error=$2, updated_at=now() WHERE id=$1 AND status='PENDING'",
         [invitationId, (err as Error).message.slice(0, 500)]
       )
     );
