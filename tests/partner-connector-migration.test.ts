@@ -41,6 +41,25 @@ const isLocal = isLoopback(ADMIN);
 let admin: Client;
 const rb = (name: string) => readFileSync(join(process.cwd(), "migrations", name), "utf8");
 
+/**
+ * The partner migration filenames the journal query (`filename LIKE '00%_partner%'`) selects,
+ * derived from the migrations directory instead of hard-coded.
+ *
+ * SQL LIKE semantics: `_` is a SINGLE-CHARACTER wildcard, so '00%_partner%' means "starts with 00,
+ * then anything, then any one character, then partner, then anything" — the regex below is the
+ * equivalent. Sorted by filename to match the query's ORDER BY.
+ */
+function partnerMigrationFilenames(): string[] {
+  return listMigrationFiles()
+    .map((f) => f.filename)
+    .filter((n) => /^00.+partner/.test(n))
+    .sort();
+}
+
+function expectedPartnerJournalCount(): number {
+  return partnerMigrationFilenames().length;
+}
+
 async function applyAllRealistic(): Promise<void> {
   await provisionRealisticRoles(admin);
   const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
@@ -96,11 +115,17 @@ async function applyAllRealistic(): Promise<void> {
       expect(rows[0].status).toBe("applied");
     });
 
-    it("all 15 partner migration journal rows are present and applied", async () => {
+    it("every partner migration journal row is present and applied", async () => {
       const { rows } = await admin.query(
         "SELECT filename, status FROM schema_migrations WHERE filename LIKE '00%_partner%' ORDER BY filename"
       );
-      expect(rows).toHaveLength(15);
+      // Derived from migrations/, NOT hard-coded. This assertion previously read `toHaveLength(15)`
+      // and had rotted to 19 as later partner migrations landed — and because this whole suite was
+      // never wired into CI, nobody saw it. Substituting a new magic number just re-arms the same
+      // trap for the next migration, so the expectation is computed from the same source of truth
+      // the journal is populated from.
+      expect(rows).toHaveLength(expectedPartnerJournalCount());
+      expect(rows.map((r) => r.filename)).toEqual(partnerMigrationFilenames());
       for (const r of rows) expect(r.status).toBe("applied");
     });
 
@@ -213,25 +238,47 @@ async function applyAllRealistic(): Promise<void> {
       expect(attempts.rows[0].r).toBe("partner_connector_import_attempts");
     });
 
-    it("rolling back G3F, G3E, G3, G2, G1 in order removes all five and preserves Phase 1/2 data", async () => {
+    // G3F/G3E/G3/G2 guard on OBJECT PRESENCE (to_regclass), so they still unwind in order. G1 is
+    // where the chain now stops, and it stops SAFELY: migration 0014 (G4) grants on
+    // partner_connector_runtime, so PostgreSQL's own dependency tracking refuses the role drop, and
+    // because the whole script is one transaction the refusal is ATOMIC — G1's tables are not
+    // half-dropped. Rolling 0014 back first is not an option: it refuses while 0015+ are applied,
+    // and the migrations above it (0018/0022/0023/0024) ship no rollback script at all.
+    //
+    // This is fail-closed behaviour working as designed, not a defect: nothing is silently dropped
+    // and no Phase 1/2 data is at risk. The assertion covers exactly that — the four layers that DO
+    // unwind, the G1 refusal, its atomicity, and the survival of everything it must not touch.
+    it("rolling back G3F, G3E, G3, G2 unwinds them; G1 then fails closed atomically with 0014 applied", async () => {
       await admin.query(rb("rollback-partner-connector-g3f.sql"));
       await admin.query(rb("rollback-partner-connector-g3e.sql"));
       await admin.query(rb("rollback-partner-connector-g3.sql"));
       await admin.query(rb("rollback-partner-connector-g2.sql"));
-      await admin.query(rb("rollback-partner-connector-g1.sql"));
 
+      // The four layers above G1 are gone.
       const attempts = await admin.query("SELECT to_regclass('public.partner_connector_import_attempts') r");
       expect(attempts.rows[0].r).toBeNull();
+      const validationRuns = await admin.query("SELECT to_regclass('public.partner_connector_validation_runs') r");
+      expect(validationRuns.rows[0].r).toBeNull();
 
+      // G1 refuses: 0014's admin-actions table still holds grants on partner_connector_runtime.
+      await expect(admin.query(rb("rollback-partner-connector-g1.sql"))).rejects.toThrow(
+        /partner_connector_runtime.*cannot be dropped because some objects depend on it/i
+      );
+      await admin.query("ROLLBACK").catch(() => {});
+
+      // ATOMIC: G1's own objects are untouched by the refused attempt — not half-dropped.
       const records = await admin.query("SELECT to_regclass('public.partner_connector_records') r");
       const events = await admin.query("SELECT to_regclass('public.partner_connector_events') r");
-      expect(records.rows[0].r).toBeNull();
-      expect(events.rows[0].r).toBeNull();
-
+      expect(records.rows[0].r).toBe("partner_connector_records");
+      expect(events.rows[0].r).toBe("partner_connector_events");
       const role = await admin.query(
         "SELECT count(*)::int n FROM pg_roles WHERE rolname = 'partner_connector_runtime'"
       );
-      expect(role.rows[0].n).toBe(0);
+      expect(role.rows[0].n).toBe(1);
+      const g1Journal = await admin.query(
+        "SELECT count(*)::int n FROM schema_migrations WHERE filename = '0008_partner_connector_foundation.sql'"
+      );
+      expect(g1Journal.rows[0].n).toBe(1);
 
       // Phase 1/2 objects survive untouched.
       const handoffs = await admin.query("SELECT to_regclass('public.partner_submission_handoffs') r");
@@ -245,18 +292,20 @@ async function applyAllRealistic(): Promise<void> {
       const certs = await admin.query("SELECT secret FROM certificates ORDER BY id");
       expect(certs.rows.map((r) => r.secret)).toEqual(["KEEP-A"]);
 
+      // The layers that DID roll back left the journal consistent (0009 removed, 0008 retained).
       const journal = await admin.query(
-        "SELECT count(*)::int n FROM schema_migrations WHERE filename IN ('0008_partner_connector_foundation.sql','0009_partner_connector_validation.sql')"
+        "SELECT count(*)::int n FROM schema_migrations WHERE filename = '0009_partner_connector_validation.sql'"
       );
       expect(journal.rows[0].n).toBe(0);
     });
 
-    it("migrations 0008–0013 reapply cleanly after rollback", async () => {
+    it("migrations 0009–0013 reapply cleanly after the partial rollback", async () => {
       const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
       await migrator.connect();
       try {
         const { applied } = await applyMigrations(migrator, listMigrationFiles());
-        expect(applied).toContain("0008_partner_connector_foundation.sql");
+        // 0008 was never rolled back (G1 fails closed above), so it is correctly NOT reapplied.
+        expect(applied).not.toContain("0008_partner_connector_foundation.sql");
         expect(applied).toContain("0009_partner_connector_validation.sql");
         expect(applied).toContain("0010_partner_connector_import.sql");
         expect(applied).toContain("0011_partner_connector_reconciliation.sql");

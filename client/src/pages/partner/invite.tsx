@@ -46,13 +46,16 @@ export default function PartnerInvitePage() {
         <CardContent>
           {done ? (
             <div className="space-y-4" data-testid="partner-invite-done">
-              <p className="text-sm text-muted-foreground">Your password has been set.</p>
+              <p className="text-sm text-muted-foreground">
+                Your password has been set. Next, sign in and set up an authenticator app — MintVault Partner accounts
+                always need a second step to sign in.
+              </p>
               <Button
                 className="w-full"
-                onClick={() => navigate("/partner/login")}
+                onClick={() => navigate("/partner/login?setup=1")}
                 data-testid="button-partner-invite-login"
               >
-                Sign in
+                Sign in and set up two-factor
               </Button>
             </div>
           ) : (

@@ -22,6 +22,7 @@ import {
   partnerCustomers,
   partnerServiceTiers,
   partnerErrorMessage,
+  PartnerApiError,
   newIdempotencyKey,
   formatPence,
   type SubmissionSummary,
@@ -56,6 +57,7 @@ export default function PartnerSubmissionWizardPage() {
   const [newCustomerName, setNewCustomerName] = useState("");
   const [newCustomerEmail, setNewCustomerEmail] = useState("");
   const [newCustomerPhone, setNewCustomerPhone] = useState("");
+  const [customerError, setCustomerError] = useState<string | null>(null);
 
   // Step 2 — service
   const [serviceTierCode, setServiceTierCode] = useState<string | null>(null);
@@ -107,8 +109,8 @@ export default function PartnerSubmissionWizardPage() {
         const updated = await partnerSubmissions.edit(submission.id, { version: submission.version, ...patch });
         setSubmission(updated);
         setSaveStatus("saved");
-      } catch (err: any) {
-        if (err?.code === "stale_version") {
+      } catch (err) {
+        if (err instanceof PartnerApiError && err.code === "stale_version") {
           setSaveStatus("conflict");
         } else {
           setSaveStatus("error");
@@ -138,6 +140,7 @@ export default function PartnerSubmissionWizardPage() {
 
   async function handleCreateCustomer() {
     if (!newCustomerName.trim()) return;
+    setCustomerError(null);
     try {
       const created = await partnerCustomers.create({
         fullName: newCustomerName.trim(),
@@ -149,7 +152,9 @@ export default function PartnerSubmissionWizardPage() {
       setCreatingCustomer(false);
       await saveField({ customerId: created.id });
     } catch (err) {
-      setSaveStatus("error");
+      // The server's validation message (e.g. why an email was rejected) was previously swallowed
+      // into a bare "error" status, leaving the user with a form that silently refused to save.
+      setCustomerError(partnerErrorMessage(err));
     }
   }
 
@@ -268,6 +273,7 @@ export default function PartnerSubmissionWizardPage() {
           newCustomerPhone={newCustomerPhone}
           setNewCustomerPhone={setNewCustomerPhone}
           onCreateCustomer={handleCreateCustomer}
+          customerError={customerError}
         />
       )}
 
@@ -402,6 +408,7 @@ function CustomerStep(props: {
   newCustomerPhone: string;
   setNewCustomerPhone: (v: string) => void;
   onCreateCustomer: () => void;
+  customerError: string | null;
 }) {
   return (
     <Card data-testid="wizard-step-customer">
@@ -488,6 +495,11 @@ function CustomerStep(props: {
                     data-testid="input-new-customer-phone"
                   />
                 </div>
+                {props.customerError && (
+                  <p role="alert" className="text-sm text-destructive" data-testid="text-new-customer-error">
+                    {props.customerError}
+                  </p>
+                )}
                 <Button
                   onClick={props.onCreateCustomer}
                   disabled={!props.newCustomerName.trim()}

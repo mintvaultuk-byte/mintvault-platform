@@ -7,17 +7,25 @@
 import { type ReactNode, useEffect } from "react";
 import { useLocation } from "wouter";
 import { usePartnerSession } from "@/hooks/use-partner-session";
-import { PartnerShell, PartnerLoadingState } from "./partner-shell";
+import {
+  PartnerShell,
+  PartnerLoadingState,
+  PartnerUnavailableState,
+  PartnerSessionExpiredState,
+} from "./partner-shell";
 
 export function PartnerRouteGuard({ children }: { children: ReactNode }) {
-  const { session, ready, isLoading } = usePartnerSession();
+  const { session, ready, isLoading, unavailable, expired } = usePartnerSession();
   const [, navigate] = useLocation();
 
   useEffect(() => {
-    if (ready && !isLoading && (!session || !session.mfaPassed)) {
+    // Only a plain signed-out visitor is bounced to sign-in. A 503 (Portal switched off) and a
+    // mid-session 401 (signed out elsewhere) each get their own honest screen instead — silently
+    // redirecting made an unavailable Portal look like a login problem the user could fix.
+    if (ready && !isLoading && !unavailable && !expired && (!session || !session.mfaPassed)) {
       navigate("/partner/login");
     }
-  }, [ready, isLoading, session, navigate]);
+  }, [ready, isLoading, session, unavailable, expired, navigate]);
 
   if (!ready || isLoading) {
     return (
@@ -25,6 +33,14 @@ export function PartnerRouteGuard({ children }: { children: ReactNode }) {
         <PartnerLoadingState label="Loading your account…" />
       </div>
     );
+  }
+
+  if (unavailable) {
+    return <PartnerUnavailableState />;
+  }
+
+  if (expired) {
+    return <PartnerSessionExpiredState />;
   }
 
   if (!session || !session.mfaPassed) {

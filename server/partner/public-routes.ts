@@ -7,7 +7,14 @@ import {
   MAX_PASSWORD_LEN,
 } from "./auth";
 import { setPartnerCookie } from "./session";
-import { partnerLoginLimiter, partnerResetLimiter, partnerAcceptLimiter } from "./rate-limit";
+import {
+  partnerLoginIpLimiter,
+  partnerLoginLimiter,
+  partnerResetLimiter,
+  partnerResetRequestLimiter,
+  partnerResetRequestAccountLimiter,
+  partnerAcceptLimiter,
+} from "./rate-limit";
 import { partnerRuntimeQuery } from "./db";
 import { resolveGlobalFlag } from "./flags";
 import { acceptPartnerInvitation } from "./partner-management-service";
@@ -38,7 +45,26 @@ export function partnerPublicRouter(): Router {
     next();
   });
 
-  r.post("/auth/login", partnerLoginLimiter, async (req, res) => {
+  // Master switch. `partner_portal_enabled` is the documented flag that turns the WHOLE partner
+  // surface on, and until now it gated only the unmounted app factory — so on the deployed routes
+  // it was dead, and turning the portal "off" left public login, password reset and invitation
+  // acceptance fully live. It is checked here in the same fail-closed shape as the stop flag above:
+  // absent row (or any resolution error) reads as OFF and closes the surface, which is why it can
+  // sit in front of the positive per-route gates rather than beside them.
+  r.use(async (_req, res, next) => {
+    if (!(await resolveGlobalFlag("partner_portal_enabled"))) {
+      res.status(503).json({ error: "partner access temporarily unavailable" });
+      return;
+    }
+    next();
+  });
+
+  // Limiter ORDER IS LOAD-BEARING. partnerLoginIpLimiter (IP-only) must bind FIRST and always:
+  // partnerLoginLimiter keys on the request body's `email`, so on its own a single source IP mints
+  // itself a fresh 10-attempt budget per address it tries. The IP bucket is what bounds password
+  // spraying; the per-account bucket stays as additional defence in depth. Same shape as the
+  // password-reset REQUEST pair below (partnerResetRequestLimiter then ...AccountLimiter).
+  r.post("/auth/login", partnerLoginIpLimiter, partnerLoginLimiter, async (req, res) => {
     if (!(await flagEnabled("partner_login_enabled"))) {
       res.status(503).json({ error: "partner login unavailable" });
       return;
@@ -57,35 +83,44 @@ export function partnerPublicRouter(): Router {
     res.json({ ok: true, mfaRequired: !!result.mfaPending });
   });
 
-  r.post("/auth/password-reset/request", partnerResetLimiter, async (req, res) => {
-    if (!(await flagEnabled("partner_login_enabled"))) {
-      res.json({ ok: true });
-      return;
-    }
-    const { email } = req.body ?? {};
-    if (typeof email === "string" && email) {
-      try {
-        const { rows } = await partnerRuntimeQuery<{
-          user_id: string;
-          tenant_id: string;
-          user_status: string;
-          org_status: string;
-        }>("SELECT user_id, tenant_id, user_status, org_status FROM partner_auth_lookup($1)", [email]);
-        if (
-          rows.length === 1 &&
-          rows[0].user_status === "ACTIVE" &&
-          rows[0].org_status === "ACTIVE" &&
-          resetDeliveryConfigured()
-        ) {
-          const token = await createPasswordResetToken(rows[0].tenant_id, rows[0].user_id);
-          await deliverResetToken(email, token);
-        }
-      } catch {
-        /* generic response */
+  r.post(
+    "/auth/password-reset/request",
+    partnerResetRequestLimiter,
+    partnerResetRequestAccountLimiter,
+    async (req, res) => {
+      if (!(await flagEnabled("partner_login_enabled"))) {
+        res.json({ ok: true });
+        return;
       }
+      const { email } = req.body ?? {};
+      if (typeof email === "string" && email) {
+        try {
+          const { rows } = await partnerRuntimeQuery<{
+            user_id: string;
+            tenant_id: string;
+            user_status: string;
+            org_status: string;
+          }>("SELECT user_id, tenant_id, user_status, org_status FROM partner_auth_lookup($1)", [email]);
+          if (
+            rows.length === 1 &&
+            rows[0].user_status === "ACTIVE" &&
+            rows[0].org_status === "ACTIVE" &&
+            resetDeliveryConfigured()
+          ) {
+            const token = await createPasswordResetToken(rows[0].tenant_id, rows[0].user_id);
+            // TIMING: dispatched WITHOUT await. Waiting on an outbound provider round trip only for
+            // known accounts made response latency an account-existence oracle. The catch is
+            // attached synchronously so this can never reject or raise an unhandled rejection;
+            // deliverResetToken has already emitted its own redacted failure signal by then.
+            void deliverResetToken(email, token).catch(() => {});
+          }
+        } catch {
+          /* generic response */
+        }
+      }
+      res.json({ ok: true });
     }
-    res.json({ ok: true });
-  });
+  );
 
   r.post("/auth/password-reset/consume", partnerResetLimiter, async (req, res) => {
     if (!(await flagEnabled("partner_login_enabled"))) {

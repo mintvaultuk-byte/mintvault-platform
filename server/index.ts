@@ -9,7 +9,7 @@ import { withAdvisoryLock } from "./lib/advisory-lock";
 import { trackInterval, trackTimeout, beginJob, endJob, isShuttingDown, runGracefulShutdown } from "./lib/lifecycle";
 import { serveStatic } from "./static";
 import { cleanupStalePreGradeImages } from "./r2";
-import { redactSensitive } from "./lib/auth-security";
+import { createRequestLogger } from "./lib/request-logger";
 import { db, pool } from "./db";
 import { sql } from "drizzle-orm";
 import { sendVaultClubGraceExpiredEmail, sendTransferV2Completed } from "./email";
@@ -18,6 +18,7 @@ import { WebhookHandlers } from "./webhookHandlers";
 import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
+import { startConnectorRuntime, stopConnectorRuntime } from "./partner/connector-runtime";
 import pg from "pg";
 import path from "path";
 
@@ -277,48 +278,11 @@ const adminRateLimit = rateLimit({
 app.use("/api/admin", adminRateLimit);
 
 /**
- * Prefixes whose JSON response BODY must never be written to the application log.
- *
- * `redactSensitive` masks credential-shaped keys (password/token/secret/…) but NOT personal
- * data — `email`, `phone`, `full_name`, `address_*`, `company_number`, `vat_number` all pass
- * through verbatim. That is tolerable for narrow single-record admin endpoints, but the partner
- * dashboard returns MANY partners' details in one response and auto-refreshes, so logging its
- * bodies would continuously write bulk partner PII into the Fly log.
- *
- * Method, path, status and duration are still logged — only the body is suppressed.
+ * API request/response logging. The middleware and the body-suppression prefix list now live in
+ * server/lib/request-logger.ts so they can be driven by a real test; `log` is passed in so the
+ * emitted lines are identical to the previous inline implementation.
  */
-const BODY_LOG_SUPPRESSED_PREFIXES = ["/api/super-admin/partner-dashboard"];
-
-function isBodyLogSuppressed(reqPath: string): boolean {
-  return BODY_LOG_SUPPRESSED_PREFIXES.some((prefix) => reqPath.startsWith(prefix));
-}
-
-app.use((req, res, next) => {
-  const start = Date.now();
-  const reqPath = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (reqPath.startsWith("/api")) {
-      let logLine = `${req.method} ${reqPath} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse && !isBodyLogSuppressed(reqPath)) {
-        const safeBody = redactSensitive(capturedJsonResponse);
-        logLine += ` :: ${JSON.stringify(safeBody)}`;
-      }
-
-      log(logLine);
-    }
-  });
-
-  next();
-});
+app.use(createRequestLogger(log));
 
 log(`ADMIN_PASSWORD env var: ${process.env.ADMIN_PASSWORD ? "SET" : "NOT SET"}`, "auth");
 // ADMIN_PIN env-var log removed 2026-05-04 — PIN is now per-user bcrypt on users.pin_hash.
@@ -667,6 +631,13 @@ async function runTransferV2Sweep() {
         { unref: true }
       );
       console.log(`[db-keepwarm] interval armed (${KEEP_WARM_INTERVAL_MS / 1000}s)`);
+
+      // Partner Trusted Intake Connector driver. Started only AFTER the server is
+      // listening, and deliberately fire-and-forget: startConnectorRuntime never
+      // throws, never awaits, and parks itself in a visible "stopped" state on any
+      // failure — a connector problem can never crash or delay the main app. With
+      // no PARTNER_CONNECTOR_DATABASE_URL it logs one line and does nothing at all.
+      startConnectorRuntime();
     }
   );
 })();
@@ -681,13 +652,20 @@ function gracefulShutdown(signal: string) {
   log(`${signal} received — draining and shutting down`, "shutdown");
   void runGracefulShutdown({
     deadlineMs: 10_000,
-    closeServer: () =>
-      new Promise<void>((resolve) => {
-        httpServer.close(() => {
-          log("http server closed to new connections", "shutdown");
-          resolve();
-        });
-      }),
+    closeServer: async () => {
+      // Drain the connector runtime alongside the HTTP server: it stops taking NEW
+      // claims and waits for the in-flight cycle, so no lease is leaked. Never
+      // allowed to block or fail the shutdown path.
+      await Promise.all([
+        new Promise<void>((resolve) => {
+          httpServer.close(() => {
+            log("http server closed to new connections", "shutdown");
+            resolve();
+          });
+        }),
+        stopConnectorRuntime().catch(() => undefined),
+      ]);
+    },
     closePools: async () => {
       await Promise.allSettled([pool.end(), sessionPool.end()]);
       log("db pools closed — exiting cleanly", "shutdown");
