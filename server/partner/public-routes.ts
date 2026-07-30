@@ -8,6 +8,7 @@ import {
 } from "./auth";
 import { setPartnerCookie } from "./session";
 import {
+  partnerLoginIpLimiter,
   partnerLoginLimiter,
   partnerResetLimiter,
   partnerResetRequestLimiter,
@@ -58,7 +59,12 @@ export function partnerPublicRouter(): Router {
     next();
   });
 
-  r.post("/auth/login", partnerLoginLimiter, async (req, res) => {
+  // Limiter ORDER IS LOAD-BEARING. partnerLoginIpLimiter (IP-only) must bind FIRST and always:
+  // partnerLoginLimiter keys on the request body's `email`, so on its own a single source IP mints
+  // itself a fresh 10-attempt budget per address it tries. The IP bucket is what bounds password
+  // spraying; the per-account bucket stays as additional defence in depth. Same shape as the
+  // password-reset REQUEST pair below (partnerResetRequestLimiter then ...AccountLimiter).
+  r.post("/auth/login", partnerLoginIpLimiter, partnerLoginLimiter, async (req, res) => {
     if (!(await flagEnabled("partner_login_enabled"))) {
       res.status(503).json({ error: "partner login unavailable" });
       return;
