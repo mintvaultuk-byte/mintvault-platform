@@ -497,6 +497,56 @@ export async function getOperationalHealth() {
   };
 }
 
+/**
+ * WP-3 observability: the connector DRIVER's live state (running / stopped / last-cycle stats) joined
+ * to the backlog it is responsible for draining. Built entirely from the existing tables plus the
+ * runtime's in-process snapshot — no new table, no new column, no mutation.
+ *
+ * `pendingHandoffBacklog` is the sweep's own input predicate (a `pending` handoff with no connector
+ * record yet), so a runtime that is up but not draining is visible as a backlog that does not fall.
+ */
+export async function getConnectorRuntimeStatus() {
+  const { getConnectorRuntimeSnapshot } = await import("./connector-runtime");
+  const backlog = await partnerAdminQuery<{
+    pending_handoffs: number;
+    queued: number;
+    ready_for_import: number;
+    importing: number;
+    expired_claims: number;
+  }>(
+    `SELECT
+       (SELECT count(*) FROM partner_submission_handoffs h
+         WHERE h.status = 'pending'
+           AND NOT EXISTS (SELECT 1 FROM partner_connector_records r WHERE r.handoff_id = h.id)
+       )::int AS pending_handoffs,
+       count(*) FILTER (WHERE r.state = 'queued')::int AS queued,
+       count(*) FILTER (WHERE r.state = 'ready_for_import')::int AS ready_for_import,
+       count(*) FILTER (WHERE r.state = 'importing')::int AS importing,
+       count(*) FILTER (WHERE r.claim_expires_at IS NOT NULL AND r.claim_expires_at <= now())::int AS expired_claims
+     FROM partner_connector_records r`
+  );
+  const flags = await partnerAdminQuery<{ flag: string; enabled: boolean }>(
+    `SELECT flag, enabled FROM partner_feature_flags
+      WHERE tenant_id IS NULL AND location_id IS NULL
+        AND flag IN ('partner_connector_enabled','partner_emergency_stop')`
+  );
+  const flagMap: Record<string, boolean> = {};
+  for (const f of flags.rows) flagMap[f.flag] = f.enabled;
+  const b = backlog.rows[0];
+  return {
+    runtime: getConnectorRuntimeSnapshot(),
+    featureEnabled: flagMap["partner_connector_enabled"] ?? false,
+    emergencyStop: flagMap["partner_emergency_stop"] ?? false,
+    backlog: {
+      pendingHandoffs: b.pending_handoffs,
+      queued: b.queued,
+      readyForImport: b.ready_for_import,
+      importing: b.importing,
+      expiredClaims: b.expired_claims,
+    },
+  };
+}
+
 function projectRecord(rec: RecordRow) {
   return {
     id: rec.id,

@@ -161,6 +161,15 @@ export function connectorOpsRouter(): Router {
     }
   });
 
+  // WP-3: live driver state (running/stopped/last cycle) + the backlog it drains. Read-only.
+  r.get("/worker/runtime", async (_req, res) => {
+    try {
+      res.json(await svc.getConnectorRuntimeStatus());
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
   // ---- MUTATIONS (all reason-required, audited, idempotent) ----
   r.use(g4MutationRateLimit);
 
