@@ -513,6 +513,8 @@ export async function getConnectorRuntimeStatus() {
     ready_for_import: number;
     importing: number;
     expired_claims: number;
+    failed: number;
+    retryable_failed: number;
   }>(
     `SELECT
        (SELECT count(*) FROM partner_submission_handoffs h
@@ -522,7 +524,9 @@ export async function getConnectorRuntimeStatus() {
        count(*) FILTER (WHERE r.state = 'queued')::int AS queued,
        count(*) FILTER (WHERE r.state = 'ready_for_import')::int AS ready_for_import,
        count(*) FILTER (WHERE r.state = 'importing')::int AS importing,
-       count(*) FILTER (WHERE r.claim_expires_at IS NOT NULL AND r.claim_expires_at <= now())::int AS expired_claims
+       count(*) FILTER (WHERE r.claim_expires_at IS NOT NULL AND r.claim_expires_at <= now())::int AS expired_claims,
+       count(*) FILTER (WHERE r.state = 'failed')::int AS failed,
+       count(*) FILTER (WHERE r.state = 'failed' AND r.next_retry_at IS NOT NULL AND r.next_retry_at <= now())::int AS retryable_failed
      FROM partner_connector_records r`
   );
   const flags = await partnerAdminQuery<{ flag: string; enabled: boolean }>(
@@ -543,6 +547,10 @@ export async function getConnectorRuntimeStatus() {
       readyForImport: b.ready_for_import,
       importing: b.importing,
       expiredClaims: b.expired_claims,
+      // `failed` that never falls while `retryableFailed` stays at zero means records are stuck
+      // permanently; `retryableFailed` that never falls means the requeue step is not running.
+      failed: b.failed,
+      retryableFailed: b.retryable_failed,
     },
   };
 }

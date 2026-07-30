@@ -56,18 +56,20 @@
  * mismatched tenant sees zero rows and fails `handoff_not_found`. The database, not this file, is
  * what enforces tenant isolation on the creation path.
  */
-import { partnerAdminQuery } from "./db";
+import os from "node:os";
+import { randomBytes } from "node:crypto";
+import { partnerAdminQuery, partnerRuntimeQuery } from "./db";
 import { getPartnerAdminCapability } from "./admin-capability";
 import { connectorDbConfigured, connectorQuery } from "./connector-db";
-import { resolveGlobalFlag } from "./flags";
 import { ConnectorError } from "./connector-errors";
 import {
   ensureConnectorRecordForHandoff,
   claimNextConnectorRecord,
   transitionConnectorState,
+  listRetryableConnectorRecords,
   type ConnectorState,
 } from "./connector-service";
-import { validateConnectorRecord } from "./connector-validation-service";
+import { validateConnectorRecord, requestConnectorRevalidation } from "./connector-validation-service";
 import { importValidatedConnector } from "./connector-import-service";
 import { runConnectorWorkerPool, type WorkerPoolResult } from "./connector-worker";
 
@@ -89,6 +91,8 @@ export interface ConnectorRuntimeOptions {
   sweepLimit?: number;
   /** Maximum records claimed+validated+imported per processing pass. Default 50. */
   processLimit?: number;
+  /** Maximum `failed` records requeued for revalidation per cycle. Default 50. */
+  requeueLimit?: number;
   /** Worker count for the recovery pass (existing bounded pool). Default 2. */
   workerCount?: number;
   /** Claim lease length in seconds. Default 300 (the connector service default). */
@@ -101,10 +105,16 @@ export interface ConnectorRuntimeOptions {
   maxConsecutiveFailures?: number;
   /** TEST-ONLY: run exactly one cycle instead of arming a repeating timer. */
   singleCycle?: boolean;
+  /**
+   * Override the claimant identity. Production always uses the per-process identity (see
+   * `claimantId`); this exists so a test can run two INDEPENDENT drivers in one process.
+   */
+  claimant?: string;
 }
 
-interface ResolvedOptions extends Required<Omit<ConnectorRuntimeOptions, "singleCycle">> {
+interface ResolvedOptions extends Required<Omit<ConnectorRuntimeOptions, "singleCycle" | "claimant">> {
   singleCycle: boolean;
+  claimant: string | null;
 }
 
 function resolveOptions(opts: ConnectorRuntimeOptions = {}): ResolvedOptions {
@@ -112,12 +122,14 @@ function resolveOptions(opts: ConnectorRuntimeOptions = {}): ResolvedOptions {
     pollIntervalMs: opts.pollIntervalMs ?? intEnv("PARTNER_CONNECTOR_POLL_INTERVAL_MS", 15_000, 10),
     sweepLimit: opts.sweepLimit ?? intEnv("PARTNER_CONNECTOR_SWEEP_LIMIT", 100, 1),
     processLimit: opts.processLimit ?? intEnv("PARTNER_CONNECTOR_PROCESS_LIMIT", 50, 1),
+    requeueLimit: opts.requeueLimit ?? intEnv("PARTNER_CONNECTOR_REQUEUE_LIMIT", 50, 1),
     workerCount: opts.workerCount ?? intEnv("PARTNER_CONNECTOR_WORKERS", 2, 1),
     leaseSeconds: opts.leaseSeconds ?? intEnv("PARTNER_CONNECTOR_LEASE_SECONDS", 300, 1),
     backoffBaseMs: opts.backoffBaseMs ?? intEnv("PARTNER_CONNECTOR_BACKOFF_BASE_MS", 5_000, 1),
     backoffMaxMs: opts.backoffMaxMs ?? intEnv("PARTNER_CONNECTOR_BACKOFF_MAX_MS", 300_000, 1),
     maxConsecutiveFailures: opts.maxConsecutiveFailures ?? intEnv("PARTNER_CONNECTOR_MAX_FAILURES", 10, 1),
     singleCycle: opts.singleCycle ?? false,
+    claimant: opts.claimant ?? null,
   };
 }
 
@@ -130,7 +142,11 @@ export type ConnectorRuntimeStatus = "not_configured" | "running" | "draining" |
 export type ConnectorRuntimeIdleReason =
   | "flag_disabled"
   | "emergency_stop"
+  /** The flag STORE could not be read at all — NOT the same as a flag that is off. */
+  | "flag_store_unreachable"
   | "admin_capability_unavailable"
+  /** PARTNER_ADMIN_DATABASE_URL was not explicitly set, so the admin identity is not pinned. */
+  | "admin_url_not_pinned"
   | "failure_budget_exhausted"
   | "not_started"
   | "shutting_down";
@@ -152,12 +168,24 @@ export interface ProcessStats {
   failed: number;
 }
 
+export interface RequeueStats {
+  /** `failed` records whose next_retry_at has already elapsed. */
+  candidates: number;
+  requeued: number;
+  /** Held by a different live claimant, or no longer in a requeueable state. */
+  skipped: number;
+  failed: number;
+}
+
 export interface CycleStats {
   startedAt: string;
   finishedAt: string;
   durationMs: number;
   gateOpen: boolean;
+  /** Why the gate was closed, when it was. `null` when the cycle actually ran. */
+  idleReason: ConnectorRuntimeIdleReason | null;
   sweep: SweepStats;
+  requeue: RequeueStats;
   process: ProcessStats;
   recovery: Pick<WorkerPoolResult, "claimed" | "imported" | "alreadyCompleted" | "stale"> | null;
 }
@@ -181,6 +209,8 @@ interface RuntimeState {
   startedAt: string | null;
   cyclesCompleted: number;
   consecutiveFailures: number;
+  /** Consecutive cycles whose gate could not be resolved because the flag store was unreachable. */
+  consecutiveFlagStoreFailures: number;
   lastCycle: CycleStats | null;
   lastErrorCode: string | null;
   lastErrorAt: string | null;
@@ -197,6 +227,7 @@ const state: RuntimeState = {
   startedAt: null,
   cyclesCompleted: 0,
   consecutiveFailures: 0,
+  consecutiveFlagStoreFailures: 0,
   lastCycle: null,
   lastErrorCode: null,
   lastErrorAt: null,
@@ -206,9 +237,23 @@ const state: RuntimeState = {
   options: resolveOptions(),
 };
 
-/** The claimant identity this process presents to the connector services. */
+/**
+ * The claimant identity this process presents to the connector services. Computed ONCE and reused,
+ * because a claim, its validation and its import must all present the same claimant.
+ *
+ * It must be unique per running process across the whole fleet: two machines whose claimants collide
+ * could each satisfy the other's `claimed_by === claimant` ownership check. `pid` alone is not
+ * unique across machines (and containers routinely reuse low pids), so the identity is
+ * machine + pid + a random per-process suffix, which also disambiguates a restarted process that
+ * happens to reuse a pid.
+ */
+let cachedClaimant: string | null = null;
 function claimantId(): string {
-  return `runtime:${process.pid}`;
+  if (cachedClaimant == null) {
+    const machine = process.env.FLY_MACHINE_ID ?? os.hostname();
+    cachedClaimant = `runtime:${machine}:${process.pid}:${randomBytes(4).toString("hex")}`;
+  }
+  return cachedClaimant;
 }
 
 function logLine(event: string, detail: Record<string, unknown> = {}): void {
@@ -230,13 +275,44 @@ interface Gate {
   reason: ConnectorRuntimeIdleReason | null;
 }
 
+type FlagRead = { ok: true; enabled: boolean } | { ok: false };
+
+/**
+ * Runtime-LOCAL global-flag read.
+ *
+ * `flags.resolveGlobalFlag` deliberately collapses "the flag row says false", "the flag row is
+ * absent" and "the flag store could not be reached at all" into a single `false` — that fail-closed
+ * collapse is the correct semantics for a request-path gate, and other surfaces depend on it, so it
+ * is NOT changed here. But for a long-running driver the three cases are operationally different:
+ * a false flag means an operator switched the connector off, while an unreachable flag store means
+ * the driver is blind. Reported as `flag_disabled` they are indistinguishable, and a database
+ * outage would look like a deliberate pause for as long as it lasted.
+ *
+ * This wrapper therefore performs the same fail-closed read but keeps the two apart, so the runtime
+ * can surface `flag_store_unreachable` and eventually park instead of sitting quietly forever.
+ */
+async function readGlobalFlagLocal(flag: string): Promise<FlagRead> {
+  try {
+    const { rows } = await partnerRuntimeQuery<{ enabled: boolean }>(
+      "SELECT enabled FROM partner_feature_flags WHERE flag=$1 AND tenant_id IS NULL AND location_id IS NULL ORDER BY updated_at DESC, id DESC LIMIT 1",
+      [flag]
+    );
+    // Row absent => disabled (fail closed), exactly as resolveGlobalFlag treats it.
+    return { ok: true, enabled: rows.length === 1 && rows[0].enabled === true };
+  } catch {
+    return { ok: false };
+  }
+}
+
 async function resolveGate(): Promise<Gate> {
   const [stopped, enabled] = await Promise.all([
-    resolveGlobalFlag("partner_emergency_stop"),
-    resolveGlobalFlag("partner_connector_enabled"),
+    readGlobalFlagLocal("partner_emergency_stop"),
+    readGlobalFlagLocal("partner_connector_enabled"),
   ]);
-  if (stopped) return { open: false, reason: "emergency_stop" };
-  if (!enabled) return { open: false, reason: "flag_disabled" };
+  // Blind => closed, and say so honestly rather than reporting a flag value we never read.
+  if (!stopped.ok || !enabled.ok) return { open: false, reason: "flag_store_unreachable" };
+  if (stopped.enabled) return { open: false, reason: "emergency_stop" };
+  if (!enabled.enabled) return { open: false, reason: "flag_disabled" };
   return { open: true, reason: null };
 }
 
@@ -329,7 +405,81 @@ async function readRecordProjection(connectorId: string): Promise<RecordProjecti
  * `ready_for_import` (a crashed predecessor) WITHOUT downgrading their state — those go straight to
  * the importer, which is exactly the intended G3E recovery path.
  */
-export async function runProcessingPass(limit: number, leaseSeconds: number): Promise<ProcessStats> {
+function isGateError(code: string): boolean {
+  return code === "feature_disabled" || code === "emergency_stop" || code === "import_emergency_stopped";
+}
+
+/**
+ * Drive ONE record — already claimed by `claimant` — as far as it can legally go, and count the
+ * outcome. Shared by the processing pass (fresh claim) and the requeue step (revalidation claim),
+ * so both paths have identical semantics rather than two drifting copies.
+ *
+ * Throws only on a gate error (flag off / emergency stop), which must abort the whole pass; every
+ * other failure is counted and swallowed so one bad record cannot stop the cycle.
+ */
+async function driveClaimedRecord(
+  rec: { id: string; tenantId: string; state: ConnectorState; version: number },
+  claimant: string,
+  stats: ProcessStats
+): Promise<void> {
+  try {
+    let current: RecordProjection = { state: rec.state, version: rec.version };
+
+    if (current.state === "claimed") {
+      const validating = await transitionConnectorState({
+        connectorId: rec.id,
+        claimant,
+        tenantId: rec.tenantId,
+        expectedVersion: current.version,
+        toState: "validating",
+        eventType: "validation_started",
+      });
+      current = { state: "validating", version: validating.version };
+    }
+
+    if (current.state === "validating") {
+      await validateConnectorRecord({
+        connectorId: rec.id,
+        claimant,
+        expectedVersion: current.version,
+        tenantId: rec.tenantId,
+      });
+      const after = await readRecordProjection(rec.id);
+      if (after == null) {
+        stats.failed += 1;
+        return;
+      }
+      current = after;
+      if (current.state === "ready_for_import") stats.validated += 1;
+      else if (current.state === "rejected") stats.rejected += 1;
+    }
+
+    if (current.state !== "ready_for_import") return;
+
+    const outcome = await importValidatedConnector({
+      connectorId: rec.id,
+      claimant,
+      expectedVersion: current.version,
+      tenantId: rec.tenantId,
+    });
+    if (outcome.outcome === "imported") stats.imported += 1;
+    else if (outcome.outcome === "already_completed") stats.alreadyImported += 1;
+  } catch (err) {
+    const code = errorCodeOf(err);
+    if (isGateError(code)) throw err; // fail closed — ends the pass immediately
+    stats.failed += 1;
+    // Record-level failure only: the record keeps its lease (which expires and makes it
+    // reclaimable) or was already moved to a terminal/failed state inside the service's own
+    // transaction. Nothing is force-transitioned from out here.
+    logLine("record_failed", { connectorId: rec.id, code });
+  }
+}
+
+export async function runProcessingPass(
+  limit: number,
+  leaseSeconds: number,
+  claimantOverride?: string | null
+): Promise<ProcessStats> {
   const stats: ProcessStats = {
     claimed: 0,
     validated: 0,
@@ -338,7 +488,7 @@ export async function runProcessingPass(limit: number, leaseSeconds: number): Pr
     alreadyImported: 0,
     failed: 0,
   };
-  const claimant = claimantId();
+  const claimant = claimantOverride ?? claimantId();
 
   for (let i = 0; i < limit; i += 1) {
     if (state.stopRequested) break;
@@ -348,59 +498,72 @@ export async function runProcessingPass(limit: number, leaseSeconds: number): Pr
     const record = await claimNextConnectorRecord(claimant, leaseSeconds);
     if (record == null) break; // no claimable work left
     stats.claimed += 1;
-
-    try {
-      let current: RecordProjection = { state: record.state, version: record.version };
-
-      if (current.state === "claimed") {
-        const validating = await transitionConnectorState({
-          connectorId: record.id,
-          claimant,
-          tenantId: record.tenantId,
-          expectedVersion: current.version,
-          toState: "validating",
-          eventType: "validation_started",
-        });
-        await validateConnectorRecord({
-          connectorId: record.id,
-          claimant,
-          expectedVersion: validating.version,
-          tenantId: record.tenantId,
-        });
-        const after = await readRecordProjection(record.id);
-        if (after == null) {
-          stats.failed += 1;
-          continue;
-        }
-        current = after;
-        if (current.state === "ready_for_import") stats.validated += 1;
-        else if (current.state === "rejected") stats.rejected += 1;
-      }
-
-      if (current.state !== "ready_for_import") continue;
-
-      const outcome = await importValidatedConnector({
-        connectorId: record.id,
-        claimant,
-        expectedVersion: current.version,
-        tenantId: record.tenantId,
-      });
-      if (outcome.outcome === "imported") stats.imported += 1;
-      else if (outcome.outcome === "already_completed") stats.alreadyImported += 1;
-    } catch (err) {
-      const code = errorCodeOf(err);
-      // Fail closed — a disabled flag or emergency stop ends the pass immediately.
-      if (code === "feature_disabled" || code === "emergency_stop" || code === "import_emergency_stopped") {
-        throw err;
-      }
-      stats.failed += 1;
-      // Record-level failure only: the record keeps its lease (which expires and makes it
-      // reclaimable) or was already moved to a terminal/failed state inside the service's own
-      // transaction. Nothing is force-transitioned from out here.
-      logLine("record_failed", { connectorId: record.id, code });
-    }
+    await driveClaimedRecord(
+      { id: record.id, tenantId: record.tenantId, state: record.state, version: record.version },
+      claimant,
+      stats
+    );
   }
   return stats;
+}
+
+/**
+ * Retry step — without it, a record that fails transiently (a DB blip, a lock timeout) is written to
+ * `failed` with a `next_retry_at`, and then NOTHING ever acts on that retry time: `queued` records
+ * and expired leases are claimable, but a `failed` record is neither, so it sits invisibly forever
+ * while the handoff it came from looks processed. `listRetryableConnectorRecords` has existed since
+ * G1 for exactly this purpose and had no caller.
+ *
+ * Bounded like every other step. Each candidate goes through the existing, audited
+ * `requestConnectorRevalidation`, which atomically re-claims the record for this caller and moves it
+ * `failed -> validating` under a version guard — so the record is then driven by the SAME code path
+ * as a freshly-claimed one. Records claimed by a different live processor are skipped, not stolen.
+ */
+export async function runRequeuePass(
+  limit: number,
+  claimantOverride: string | null,
+  stats: ProcessStats
+): Promise<RequeueStats> {
+  const claimant = claimantOverride ?? claimantId();
+  const candidates = await listRetryableConnectorRecords(limit);
+  const requeue: RequeueStats = { candidates: candidates.length, requeued: 0, skipped: 0, failed: 0 };
+
+  for (const candidate of candidates) {
+    if (state.stopRequested) break;
+    try {
+      await requestConnectorRevalidation({
+        connectorId: candidate.id,
+        claimant,
+        expectedVersion: candidate.version,
+        tenantId: candidate.tenantId,
+      });
+      requeue.requeued += 1;
+    } catch (err) {
+      const code = errorCodeOf(err);
+      if (isGateError(code)) throw err;
+      // Held by another live claimant, or it moved on between the read and the guarded update.
+      if (code === "stale_claim" || code === "invalid_state_transition") {
+        requeue.skipped += 1;
+        continue;
+      }
+      requeue.failed += 1;
+      logLine("requeue_failed", { connectorId: candidate.id, code });
+      continue;
+    }
+
+    // requestConnectorRevalidation left the record `validating`, claimed by us, at a new version.
+    const after = await readRecordProjection(candidate.id);
+    if (after == null) {
+      stats.failed += 1;
+      continue;
+    }
+    await driveClaimedRecord(
+      { id: candidate.id, tenantId: candidate.tenantId, state: after.state, version: after.version },
+      claimant,
+      stats
+    );
+  }
+  return requeue;
 }
 
 // ---------------------------------------------------------------------------
@@ -413,13 +576,30 @@ export async function runConnectorCycle(options?: ConnectorRuntimeOptions): Prom
 
   const gate = await resolveGate();
   let sweep: SweepStats = { candidates: 0, created: 0, skipped: 0, failed: 0 };
-  let processed: ProcessStats = { claimed: 0, validated: 0, rejected: 0, imported: 0, alreadyImported: 0, failed: 0 };
+  const processed: ProcessStats = {
+    claimed: 0,
+    validated: 0,
+    rejected: 0,
+    imported: 0,
+    alreadyImported: 0,
+    failed: 0,
+  };
+  let requeue: RequeueStats = { candidates: 0, requeued: 0, skipped: 0, failed: 0 };
   let recovery: CycleStats["recovery"] = null;
 
   if (gate.open) {
     try {
       sweep = await sweepUnprocessedHandoffs(opts.sweepLimit);
-      processed = await runProcessingPass(opts.processLimit, opts.leaseSeconds);
+      const fresh = await runProcessingPass(opts.processLimit, opts.leaseSeconds, opts.claimant);
+      processed.claimed = fresh.claimed;
+      processed.validated = fresh.validated;
+      processed.rejected = fresh.rejected;
+      processed.imported = fresh.imported;
+      processed.alreadyImported = fresh.alreadyImported;
+      processed.failed = fresh.failed;
+      // Retryable `failed` records are picked up AFTER the fresh work, so a backlog of retries can
+      // never starve new handoffs. Their validate/import outcomes land in the same counters.
+      requeue = await runRequeuePass(opts.requeueLimit, opts.claimant, processed);
       if (!state.stopRequested) {
         const pool = await runConnectorWorkerPool({
           workerCount: opts.workerCount,
@@ -437,9 +617,7 @@ export async function runConnectorCycle(options?: ConnectorRuntimeOptions): Prom
       const code = errorCodeOf(err);
       // A mid-cycle flag flip is NOT a runtime failure — it is the connector being switched off,
       // which is exactly the designed fail-closed behaviour. Everything else is a real failure.
-      if (code !== "feature_disabled" && code !== "emergency_stop" && code !== "import_emergency_stopped") {
-        throw err;
-      }
+      if (!isGateError(code)) throw err;
       logLine("cycle_halted_by_flag", { code });
     }
   }
@@ -450,7 +628,9 @@ export async function runConnectorCycle(options?: ConnectorRuntimeOptions): Prom
     finishedAt: finished.toISOString(),
     durationMs: Math.round(performance.now() - t0),
     gateOpen: gate.open,
+    idleReason: gate.reason,
     sweep,
+    requeue,
     process: processed,
     recovery,
   };
@@ -483,7 +663,27 @@ async function tick(): Promise<void> {
       state.lastCycle = cycle;
       state.cyclesCompleted += 1;
       state.consecutiveFailures = 0;
-      state.idleReason = cycle.gateOpen ? null : (await resolveGate()).reason;
+      state.idleReason = cycle.idleReason;
+
+      // An unreachable flag store is not a cycle THROW (the gate simply fails closed), so it would
+      // otherwise never consume the failure budget and the runtime would sit blind forever. Give it
+      // the same bounded budget as a hard failure, and surface it as an error code, not as a
+      // deliberate pause.
+      if (cycle.idleReason === "flag_store_unreachable") {
+        state.consecutiveFlagStoreFailures += 1;
+        state.lastErrorCode = "flag_store_unreachable";
+        state.lastErrorAt = new Date().toISOString();
+        logLine("flag_store_unreachable", { consecutive: state.consecutiveFlagStoreFailures });
+        if (state.consecutiveFlagStoreFailures >= state.options.maxConsecutiveFailures) {
+          state.status = "stopped";
+          state.idleReason = "flag_store_unreachable";
+          logLine("stopped_flag_store_unreachable", { consecutive: state.consecutiveFlagStoreFailures });
+          return;
+        }
+        scheduleNext(backoffFor(state.consecutiveFlagStoreFailures));
+        return;
+      }
+      state.consecutiveFlagStoreFailures = 0;
       scheduleNext(state.options.pollIntervalMs);
     } catch (err) {
       state.consecutiveFailures += 1;
@@ -525,6 +725,7 @@ export function startConnectorRuntime(options: ConnectorRuntimeOptions = {}): vo
   state.options = resolveOptions(options);
   state.stopRequested = false;
   state.consecutiveFailures = 0;
+  state.consecutiveFlagStoreFailures = 0;
   state.lastErrorCode = null;
   state.lastErrorAt = null;
 
@@ -533,6 +734,23 @@ export function startConnectorRuntime(options: ConnectorRuntimeOptions = {}): vo
     state.status = "not_configured";
     state.idleReason = "not_started";
     logLine("not_configured");
+    return;
+  }
+
+  // The discovery sweep runs on the privileged admin pool, and `partnerAdminQuery` falls back to
+  // MINTVAULT_DATABASE_URL when PARTNER_ADMIN_DATABASE_URL is unset. That fallback is fine for the
+  // super-admin request path (a human already authenticated), but a background driver must not
+  // silently inherit whatever identity the main application happens to use — that is how a sweep
+  // ends up reading the wrong database, or reading with more privilege than intended, with nothing
+  // in the logs to say so. Require the admin connection to be PINNED explicitly, and park visibly
+  // if it is not. db.ts's own fallback is deliberately left alone; this is a runtime precondition,
+  // not a change to the shared helper.
+  if (!process.env.PARTNER_ADMIN_DATABASE_URL) {
+    state.status = "stopped";
+    state.idleReason = "admin_url_not_pinned";
+    state.lastErrorCode = "admin_url_not_pinned";
+    state.lastErrorAt = new Date().toISOString();
+    logLine("stopped_admin_url_not_pinned");
     return;
   }
 
@@ -626,6 +844,7 @@ export function __resetConnectorRuntimeForTest(): void {
   state.startedAt = null;
   state.cyclesCompleted = 0;
   state.consecutiveFailures = 0;
+  state.consecutiveFlagStoreFailures = 0;
   state.lastCycle = null;
   state.lastErrorCode = null;
   state.lastErrorAt = null;
@@ -633,4 +852,6 @@ export function __resetConnectorRuntimeForTest(): void {
   state.stopRequested = false;
   state.inFlight = null;
   state.options = resolveOptions();
+  // `cachedClaimant` is deliberately NOT reset: it is the identity of this PROCESS, and a restarted
+  // driver in the same process must keep presenting the same claimant to reclaim its own work.
 }

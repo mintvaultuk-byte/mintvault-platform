@@ -154,6 +154,30 @@ async function seedPendingHandoff(
   return { submissionId: subId, customerId: custId, handoffId: h.rows[0].id, customerEmail: email, cardCount };
 }
 
+/**
+ * Seeds a valid submission + pending handoff, then plants a connector record for it in `failed` —
+ * the shape a transient import/validation error leaves behind. `retryAt` controls whether its
+ * next_retry_at has already elapsed (due for retry) or is still in the future (not yet due).
+ */
+async function seedFailedRecord(
+  tenantId: string,
+  locationId: string,
+  partnerUserId: string,
+  retryAt: "past" | "future"
+): Promise<{ connectorId: string; handoffId: string }> {
+  const seeded = await seedPendingHandoff(tenantId, locationId, partnerUserId, { cardCount: 1 });
+  const interval = retryAt === "past" ? "-1 hour" : "+1 hour";
+  const rec = await admin.query<{ id: string }>(
+    `INSERT INTO partner_connector_records
+       (tenant_id, partner_submission_id, handoff_id, state, version, attempt_count,
+        last_error_category, last_error_code, next_retry_at)
+     VALUES ($1,$2,$3,'failed',1,1,'transient','transient_database_error', now() + $4::interval)
+     RETURNING id`,
+    [tenantId, seeded.submissionId, seeded.handoffId, interval]
+  );
+  return { connectorId: rec.rows[0].id, handoffId: seeded.handoffId };
+}
+
 /** Write the GLOBAL flag row directly — the WRITE path itself is a separate work package. */
 async function setGlobalFlag(flag: string, enabled: boolean): Promise<void> {
   const upd = await admin.query(
@@ -531,11 +555,13 @@ const partnerIntakeSubmissionCount = () =>
 
       // No NON-TERMINAL record is left holding a live lease by this process — a terminal record
       // (imported/rejected/cancelled) keeps its historical claim fields by design and can never be
-      // reclaimed, so it cannot be "leaked".
+      // reclaimed, so it cannot be "leaked". Covers BOTH claimant shapes the driver produces: its
+      // own `runtime:<machine>:<pid>:<rand>` identity and the recovery pool's `g3f-worker-N` ids.
       expect(
         await countRows(
           `SELECT count(*)::int n FROM partner_connector_records
-            WHERE claimed_by LIKE 'runtime:%' AND claim_expires_at > now()
+            WHERE (claimed_by LIKE 'runtime:%' OR claimed_by LIKE 'g3f-worker-%')
+              AND claim_expires_at > now()
               AND state NOT IN ('imported','rejected','cancelled')`
         )
       ).toBe(0);
@@ -567,5 +593,169 @@ const partnerIntakeSubmissionCount = () =>
       // No secret material in the observability payload.
       expect(JSON.stringify(drained)).not.toMatch(/password|secret|token|\$2[aby]\$/i);
     }, 60_000);
+
+    // ---------------------------------------------------------------------
+    // R1 — retryable `failed` records must not stall invisibly
+    // ---------------------------------------------------------------------
+    it("requeue: a failed record whose retry time has elapsed is retried; one still in the future is counted but left alone", async () => {
+      await setGlobalFlag("partner_connector_enabled", true);
+      await setGlobalFlag("partner_emergency_stop", false);
+      const svc = await import("../server/partner/connector-admin-service");
+
+      const due = await seedFailedRecord(A, LA, UA, "past");
+      const notDue = await seedFailedRecord(A, LA, UA, "future");
+
+      // Both are visible as `failed`; only the elapsed one is reported retryable.
+      const before = await svc.getConnectorRuntimeStatus();
+      expect(before.backlog.failed).toBeGreaterThanOrEqual(2);
+      expect(before.backlog.retryableFailed).toBeGreaterThanOrEqual(1);
+      const submissionsBefore = await partnerIntakeSubmissionCount();
+
+      const cycle = await runtime.runConnectorCycle({ singleCycle: true });
+
+      // Only the due record was picked up — the future one was never a candidate.
+      expect(cycle.requeue.candidates).toBe(1);
+      expect(cycle.requeue.requeued).toBe(1);
+      expect(cycle.requeue.failed).toBe(0);
+      expect(cycle.process.imported).toBe(1);
+      expect(await partnerIntakeSubmissionCount()).toBe(submissionsBefore + 1);
+
+      const states = await admin.query<{ id: string; state: string }>(
+        "SELECT id, state FROM partner_connector_records WHERE id = ANY($1::uuid[])",
+        [[due.connectorId, notDue.connectorId]]
+      );
+      const byId = new Map(states.rows.map((r) => [r.id, r.state]));
+      expect(byId.get(due.connectorId)).toBe("imported");
+      expect(byId.get(notDue.connectorId)).toBe("failed");
+
+      // The counters moved the way an operator would need them to.
+      const after = await svc.getConnectorRuntimeStatus();
+      expect(after.backlog.retryableFailed).toBe(before.backlog.retryableFailed - 1);
+      expect(after.backlog.failed).toBe(before.backlog.failed - 1);
+    }, 60_000);
+
+    // ---------------------------------------------------------------------
+    // R2 — the admin identity must be pinned, never inherited by fallback
+    // ---------------------------------------------------------------------
+    it("admin URL not pinned: the runtime parks visibly and never sweeps", async () => {
+      const saved = process.env.PARTNER_ADMIN_DATABASE_URL;
+      delete process.env.PARTNER_ADMIN_DATABASE_URL;
+      try {
+        runtime.startConnectorRuntime({ pollIntervalMs: 10, singleCycle: true });
+        const snap = runtime.getConnectorRuntimeSnapshot();
+        expect(snap.status).toBe("stopped");
+        expect(snap.idleReason).toBe("admin_url_not_pinned");
+        expect(snap.lastErrorCode).toBe("admin_url_not_pinned");
+        // Parked BEFORE any work: no cycle ran, so nothing was swept.
+        expect(snap.cyclesCompleted).toBe(0);
+        expect(snap.lastCycle).toBeNull();
+        await runtime.stopConnectorRuntime();
+      } finally {
+        process.env.PARTNER_ADMIN_DATABASE_URL = saved;
+      }
+    });
+
+    // ---------------------------------------------------------------------
+    // R3 — "flag store down" must not masquerade as "flag switched off"
+    // ---------------------------------------------------------------------
+    it("flag store unreachable: reported distinctly, never as flag_disabled", async () => {
+      await setGlobalFlag("partner_connector_enabled", true);
+      await setGlobalFlag("partner_emergency_stop", false);
+      const { closePartnerPools } = await import("../server/partner/db");
+      const savedFlagUrl = process.env.PARTNER_DATABASE_URL;
+      const submissionsBefore = await partnerIntakeSubmissionCount();
+      await seedPendingHandoff(A, LA, UA, { cardCount: 1 });
+
+      // Point the runtime's flag read at a port nothing listens on.
+      await closePartnerPools();
+      process.env.PARTNER_DATABASE_URL = "postgresql://nobody:nobody@127.0.0.1:1/nope";
+      try {
+        runtime.startConnectorRuntime({ pollIntervalMs: 10, singleCycle: true });
+        const deadline = Date.now() + 30_000;
+        while (runtime.getConnectorRuntimeSnapshot().cyclesCompleted === 0 && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        const snap = runtime.getConnectorRuntimeSnapshot();
+        expect(snap.idleReason).toBe("flag_store_unreachable");
+        expect(snap.idleReason).not.toBe("flag_disabled");
+        expect(snap.lastErrorCode).toBe("flag_store_unreachable");
+        expect(snap.lastCycle?.gateOpen).toBe(false);
+        expect(snap.lastCycle?.idleReason).toBe("flag_store_unreachable");
+        // Blind means idle: nothing was claimed or imported while the store was down.
+        expect(snap.lastCycle?.process.claimed).toBe(0);
+        expect(await partnerIntakeSubmissionCount()).toBe(submissionsBefore);
+        await runtime.stopConnectorRuntime();
+      } finally {
+        await closePartnerPools();
+        process.env.PARTNER_DATABASE_URL = savedFlagUrl;
+      }
+
+      // Sanity: with the store reachable again the SAME handoff proceeds normally, proving the
+      // previous cycle idled because of the outage and not because of anything it changed.
+      runtime.__resetConnectorRuntimeForTest();
+      const recovered = await runtime.runConnectorCycle({ singleCycle: true });
+      expect(recovered.gateOpen).toBe(true);
+      expect(recovered.idleReason).toBeNull();
+      expect(await partnerIntakeSubmissionCount()).toBe(submissionsBefore + 1);
+    }, 90_000);
+
+    // ---------------------------------------------------------------------
+    // R5 — two drivers racing the same backlog
+    // ---------------------------------------------------------------------
+    it("two concurrent drivers over N ready handoffs produce exactly N submissions and N import mappings", async () => {
+      await setGlobalFlag("partner_connector_enabled", true);
+      await setGlobalFlag("partner_emergency_stop", false);
+      const N = 4;
+      // Seeded sequentially: the fixture shares one pg Client, and concurrent queries on a single
+      // client are serialised with a deprecation warning. The CONCURRENCY under test is the two
+      // drivers below, not the seeding.
+      const handoffIds: string[] = [];
+      for (let i = 0; i < N; i += 1) {
+        handoffIds.push((await seedPendingHandoff(A, LA, UA, { cardCount: 1 })).handoffId);
+      }
+      const submissionsBefore = await partnerIntakeSubmissionCount();
+
+      // Two INDEPENDENT drivers with distinct claimant identities, racing the same backlog.
+      await Promise.all([
+        runtime.runConnectorCycle({ singleCycle: true, claimant: "runtime:test-driver-a:1:aaaa" }),
+        runtime.runConnectorCycle({ singleCycle: true, claimant: "runtime:test-driver-b:2:bbbb" }),
+      ]);
+
+      // Exactly one connector record, one completed mapping and one destination submission per
+      // handoff — no double import, no orphan.
+      expect(
+        await countRows("SELECT count(*)::int n FROM partner_connector_records WHERE handoff_id = ANY($1::uuid[])", [
+          handoffIds,
+        ])
+      ).toBe(N);
+      expect(
+        await countRows(
+          `SELECT count(*)::int n FROM partner_connector_records
+            WHERE handoff_id = ANY($1::uuid[]) AND state = 'imported'`,
+          [handoffIds]
+        )
+      ).toBe(N);
+      expect(
+        await countRows(
+          `SELECT count(*)::int n
+             FROM partner_connector_imports m
+             JOIN partner_connector_records r ON r.id = m.connector_record_id
+            WHERE r.handoff_id = ANY($1::uuid[]) AND m.state = 'completed'`,
+          [handoffIds]
+        )
+      ).toBe(N);
+      expect(await partnerIntakeSubmissionCount()).toBe(submissionsBefore + N);
+
+      // Every destination reference is distinct — no two records adopted the same submission.
+      expect(
+        await countRows(
+          `SELECT count(DISTINCT m.destination_submission_id)::int n
+             FROM partner_connector_imports m
+             JOIN partner_connector_records r ON r.id = m.connector_record_id
+            WHERE r.handoff_id = ANY($1::uuid[])`,
+          [handoffIds]
+        )
+      ).toBe(N);
+    }, 90_000);
   }
 );
