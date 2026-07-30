@@ -44,9 +44,16 @@ export function PartnerSessionProvider({ children }: { children: ReactNode }) {
         return { kind: "session", session: await partnerAuth.session() };
       } catch (err) {
         // TanStack Query v5 rejects `undefined` from queryFn, so every outcome is a value.
-        // 503 = the Portal itself is unavailable (feature flag off, emergency stop, backend not
-        // provisioned). Anything else, including the ordinary 401, means "not signed in".
-        if (err instanceof PartnerApiError && err.status === 503) return { kind: "unavailable" };
+        // "Unavailable" covers every way of NOT getting an answer from the Portal: 503 (feature
+        // flag off, emergency stop, backend not provisioned), 502/504 (edge up, backend restarting)
+        // and status 0, which is what req() reports when fetch itself fails — an offline client or
+        // a dropped connection. None of those mean the user was signed out, and treating them as
+        // such wrongly claims "your session has ended" mid-session, or bounces a first load to a
+        // sign-in page that cannot work either. Only a real answer from the server (401) is
+        // signed-out.
+        if (err instanceof PartnerApiError && (err.status === 0 || err.status >= 502)) {
+          return { kind: "unavailable" };
+        }
         return { kind: "signed-out" };
       }
     },

@@ -57,6 +57,12 @@ function fail(status: number, error: unknown) {
   return Promise.reject(err);
 }
 
+/**
+ * A genuine network failure: fetch itself rejects, so the error carries NO status and NO body —
+ * which is exactly how req() ends up reporting status 0 (`e.status ?? 0`).
+ */
+const netFail = () => Promise.reject(new TypeError("Failed to fetch"));
+
 const q = (sel: string) => container.querySelector<HTMLElement>(`[data-testid="${sel}"]`);
 const calls = (method: string, urlPart: string) =>
   apiRequest.mock.calls.filter((c) => c[0] === method && String(c[1]).includes(urlPart));
@@ -372,6 +378,49 @@ describe("Partner route guard — 503 and 401 are told apart (real render)", () 
     expect(container.textContent, "the honest 'switched off' screen").toContain("Partner Portal unavailable");
     expect(navigate, "a disabled Portal is not a login problem, so no redirect").not.toHaveBeenCalled();
     expect(q("protected-content")).toBeNull();
+  });
+
+  it("a network failure (status 0) renders Unavailable, not a sign-in bounce", async () => {
+    apiRequest.mockImplementation(() => netFail());
+    await mountGuard();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(container.textContent, "an offline client is not a signed-out user").toContain("Partner Portal unavailable");
+    expect(container.textContent).not.toContain("Your session has ended");
+    expect(navigate, "no bounce to a sign-in page that cannot work either").not.toHaveBeenCalled();
+    expect(q("protected-content")).toBeNull();
+  });
+
+  it("a network failure mid-session does NOT falsely claim the session ended", async () => {
+    apiRequest.mockImplementation((method: string, url: string) => {
+      if (url.endsWith("/session")) return ok({ userId: "u1", tenantId: "t1", mfaPassed: true, permissions: [] });
+      return ok([]);
+    });
+    const qc = await mountGuard();
+    await waitForTestId("protected-content");
+
+    apiRequest.mockImplementation(() => netFail());
+    await act(async () => {
+      await qc.invalidateQueries({ queryKey: ["/api/partner/session"] });
+      await new Promise((r) => setTimeout(r, 20));
+    });
+
+    expect(container.textContent).toContain("Partner Portal unavailable");
+    expect(container.textContent, "the user was never signed out — the connection dropped").not.toContain(
+      "Your session has ended"
+    );
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("a bad gateway (502) while the backend restarts is unavailability, not sign-out", async () => {
+    apiRequest.mockImplementation(() => fail(502, "bad gateway"));
+    await mountGuard();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(container.textContent).toContain("Partner Portal unavailable");
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it("a first-load 401 is an ordinary signed-out visitor and still redirects to sign in", async () => {
