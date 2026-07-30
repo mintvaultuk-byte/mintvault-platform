@@ -263,6 +263,25 @@ const ROLLBACK_POINTS = [
       // — terminate its backend from within, a genuine mid-transaction connection death.
       __setConnectorHook(async (p, ctx) => {
         if (p === "after_submission_insert" && ctx.client) {
+          // OWN the error this test deliberately causes. Killing the backend makes node-postgres
+          // emit 'error' ("Connection terminated unexpectedly") on this very client. The connector
+          // pool is module-private, so nothing else is listening, and an EventEmitter 'error' with
+          // no listener becomes an UNHANDLED ERROR: vitest then exits 1 even though all 21 tests
+          // pass, turning the whole CI build red. This suite was describe.skip'd for months, so the
+          // latent rejection only became visible once the suite was actually wired into CI.
+          //
+          // Attaching a listener to the dying client absorbs exactly that one expected event, on
+          // exactly the connection this test kills. It changes NOTHING about the fault injection or
+          // any assertion below: the backend is still terminated mid-transaction, the importer still
+          // observes the dead connection, and the rejection/rollback/recovery assertions are
+          // untouched. HookClient is typed with only `query` (it avoids a pg dependency), but the
+          // runtime object is the pg.PoolClient, hence the narrow structural cast.
+          const dyingClient = ctx.client as unknown as {
+            on?: (event: string, listener: (err: unknown) => void) => void;
+          };
+          dyingClient.on?.("error", () => {
+            /* expected: this backend is being terminated by the line below */
+          });
           await ctx.client.query("SELECT pg_terminate_backend(pg_backend_pid())").catch(() => {
             /* the terminate itself may surface as an error — that's the point */
           });

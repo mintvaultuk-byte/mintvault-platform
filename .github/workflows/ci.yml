@@ -78,6 +78,15 @@ jobs:
       # and the only coverage of the super-admin GLOBAL flag surface. It fails closed in CI (see the
       # "is not silently skipped in CI" guard in the file) rather than skipping, so deleting either
       # variable turns the build red instead of silently deleting the evidence.
+      #
+      # SHARED-VARIABLE EXCEPTION (verified, not an oversight): two other suites gate on variables
+      # already listed here — tests/partner-integration-seams.test.ts on PARTNER_MOUNT_RT_* and
+      # tests/partner-reset-delivery-integration.test.ts on PARTNER_PUBLIC_RT_*. That does NOT
+      # violate the one-database-per-suite rule above: both read these URLs purely as a SERVER
+      # COORDINATE (host/port/credentials), then rewrite `pathname` to a database name of their own
+      # and CREATE it during setup. Neither ever connects to mintvault_partner_mount or
+      # mintvault_partner_public, so no `public`-schema ownership reassignment can collide. Nothing
+      # to add to the database-creation loop below — they provision themselves.
       PARTNER_MOUNT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_mount
       PARTNER_MOUNT_RT_RUNTIME: postgres://partner_app_test:synthetic@127.0.0.1:55433/mintvault_partner_mount
 
