@@ -68,6 +68,8 @@ import { registerSuperAdminPartnerRoutes } from "./partner/admin-routes";
 import { registerConnectorOpsRoutes } from "./partner/connector-admin-routes";
 import { registerPartnerManagementRoutes } from "./partner/partner-management-routes";
 import { registerPartnerPublicRoutes } from "./partner/public-routes";
+import { mountPartnerPortal } from "./partner/mount";
+import { registerPartnerFlagAdminRoutes } from "./partner/flag-admin-routes";
 import { registerPartnerDashboardRoutes } from "./partner/dashboard-routes";
 import { registerRarityMappingRoutes } from "./routes/rarity-mapping";
 import { registerPokemonKnowledgeRoutes } from "./routes/pokemon-knowledge";
@@ -2792,7 +2794,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerCorrectionModeRoutes(app);
   registerStaffRoutes(app);
   registerPrintWorkflowRoutes(app); // Approval → Printing → Printed lifecycle (requireAdmin; staff via can_print proxy)
-  registerPartnerPublicRoutes(app); // minimal deployed Partner public auth/onboarding routes only
+  // ORDERING INVARIANT — registerPartnerPublicRoutes MUST precede mountPartnerPortal.
+  // partnerApiRouter (server/partner/routes.ts) still defines its OWN /auth/login,
+  // /auth/password-reset/* and /invitations/accept handlers. Registering the public routes first is
+  // what keeps those duplicates permanently shadowed, so the hardened public implementations — the
+  // ones carrying the emergency-stop and portal_enabled gates and the IP-keyed login limiter — are
+  // the only ones that ever serve. Swapping these two lines silently changes which code handles
+  // partner login. Do not reorder.
+  registerPartnerPublicRoutes(app); // Partner public auth/onboarding routes (login, reset, invite accept)
+  mountPartnerPortal(app); // Authenticated Partner portal (session, submissions, customers, team, MFA)
   registerSubmissionRoutes(app);
   registerAdminSubmissionRoutes(app);
   registerAdminConfigRoutes(app);
@@ -2800,6 +2810,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   registerConnectorOpsRoutes(app); // G4 partner-connector operations (requireAdmin-gated, internal)
   registerPartnerManagementRoutes(app); // G5 partner management (requireAdmin-gated, internal)
   registerPartnerDashboardRoutes(app); // Partner Master Dashboard (requireSuperAdmin-gated, read-only)
+  registerPartnerFlagAdminRoutes(app); // GLOBAL partner feature flags (requireSuperAdmin-gated, audited)
   registerRarityMappingRoutes(app);
   registerPokemonKnowledgeRoutes(app);
   registerCatalogueRoutes(app);

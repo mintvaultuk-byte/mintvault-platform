@@ -285,9 +285,16 @@ app.use("/api/admin", adminRateLimit);
  * dashboard returns MANY partners' details in one response and auto-refreshes, so logging its
  * bodies would continuously write bulk partner PII into the Fly log.
  *
+ * The same reasoning applies to the whole /api/partner surface, and one case there is worse than
+ * PII: POST /api/partner/mfa/enrol returns `otpauthUri`, which embeds the raw TOTP seed as a query
+ * parameter (`?secret=…`). `redactSensitive` keys off the FIELD NAME, so it masks `secret` and
+ * misses `otpauthUri` entirely — the seed would be written to the log in full, as would the
+ * one-time `recoveryCodes` from /api/partner/mfa/confirm and the customer/team PII on
+ * /api/partner/customers and /api/partner/users.
+ *
  * Method, path, status and duration are still logged — only the body is suppressed.
  */
-const BODY_LOG_SUPPRESSED_PREFIXES = ["/api/super-admin/partner-dashboard"];
+const BODY_LOG_SUPPRESSED_PREFIXES = ["/api/super-admin/partner-dashboard", "/api/partner"];
 
 function isBodyLogSuppressed(reqPath: string): boolean {
   return BODY_LOG_SUPPRESSED_PREFIXES.some((prefix) => reqPath.startsWith(prefix));

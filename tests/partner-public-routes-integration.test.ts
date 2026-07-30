@@ -63,7 +63,7 @@ const OWNER = "aa31aa31-0000-0000-0000-0000000000a1";
       [A, OWNER]
     );
     await admin.query(
-      "INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_login_enabled',true),(NULL,'partner_onboarding_enabled',true)"
+      "INSERT INTO partner_feature_flags (tenant_id, flag, enabled) VALUES (NULL,'partner_portal_enabled',true),(NULL,'partner_login_enabled',true),(NULL,'partner_onboarding_enabled',true)"
     );
 
     const token = "public-route-token-abcdefghijklmnopqrstuvwxyz";

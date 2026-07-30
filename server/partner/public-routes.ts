@@ -38,6 +38,20 @@ export function partnerPublicRouter(): Router {
     next();
   });
 
+  // Master switch. `partner_portal_enabled` is the documented flag that turns the WHOLE partner
+  // surface on, and until now it gated only the unmounted app factory — so on the deployed routes
+  // it was dead, and turning the portal "off" left public login, password reset and invitation
+  // acceptance fully live. It is checked here in the same fail-closed shape as the stop flag above:
+  // absent row (or any resolution error) reads as OFF and closes the surface, which is why it can
+  // sit in front of the positive per-route gates rather than beside them.
+  r.use(async (_req, res, next) => {
+    if (!(await resolveGlobalFlag("partner_portal_enabled"))) {
+      res.status(503).json({ error: "partner access temporarily unavailable" });
+      return;
+    }
+    next();
+  });
+
   r.post("/auth/login", partnerLoginLimiter, async (req, res) => {
     if (!(await flagEnabled("partner_login_enabled"))) {
       res.status(503).json({ error: "partner login unavailable" });

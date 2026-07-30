@@ -9,58 +9,37 @@
  *   connection. Feature flag `partner_portal_enabled` gates the whole surface (fail closed).
  */
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
-import { partnerSessionMiddleware } from "./session";
-import { partnerApiRouter } from "./routes";
-import { partnerSubmissionRouter } from "./submission-routes";
-import { partnerCustomerRouter } from "./customer-routes";
 import { partnerDbConfigured, partnerRuntimeQuery } from "./db";
-import { resolveGlobalFlag } from "./flags";
-import { assertDefinerModel, definerModelViolations } from "./definer-guard";
+import { assertDefinerModel } from "./definer-guard";
+import { mountPartnerPortal } from "./mount";
+
+export { __resetDefinerHealthForTests } from "./mount";
 
 /**
- * DB-F1 capability check, for a future mount point to call at boot: throws if the definer ownership
- * model (migration 0006) is not intact, so a supervisor can refuse to bring the partner runtime up.
- * NOTE: in Phase 1 the partner runtime is NOT mounted into the server; the live, always-on
- * enforcement is the memoized fail-closed middleware below (a broken model 503s the whole
- * /api/partner surface), so protection does not depend on anyone remembering to call this.
- * Reads catalogs via the restricted runtime role only.
+ * DB-F1 capability check, for a supervisor to call at boot: throws if the definer ownership model
+ * (migration 0006) is not intact, so it can refuse to bring the partner runtime up.
+ * NOTE: the live, always-on enforcement is the memoized fail-closed gate inside
+ * `mountPartnerPortal` (a broken model 503s the whole /api/partner surface), so protection does not
+ * depend on anyone remembering to call this. Reads catalogs via the restricted runtime role only.
  */
 export async function assertPartnerDbCapability(): Promise<void> {
   await assertDefinerModel((sql, params) => partnerRuntimeQuery(sql, params));
 }
 
-// Definer-model health for the /api/partner surface. We cache ONLY a confirmed-healthy result for
-// the process lifetime (the model can't change without a migration + redeploy). A broken or
-// transient-error result is NOT cached — it fails closed (503) and is re-checked on the next
-// request, so a one-off blip never permanently bricks the surface (SEC-3).
-let definerHealthy = false;
-async function checkDefinerModelOnce(): Promise<boolean> {
-  if (definerHealthy) return true;
-  try {
-    const violations = await definerModelViolations((sql, params) => partnerRuntimeQuery(sql, params));
-    if (violations.length > 0) {
-      // eslint-disable-next-line no-console
-      console.error("[partner] definer ownership model broken (DB-F1):", violations.join("; "));
-      return false; // fail closed; do not cache — re-check next request
-    }
-    definerHealthy = true;
-    return true;
-  } catch {
-    return false; // fail closed on any inspection error; do not cache
-  }
-}
-
-/** Test-only: reset the cached definer-model health (so a test can re-evaluate after changes). */
-export function __resetDefinerHealthForTests(): void {
-  definerHealthy = false;
-}
-
+/**
+ * The standalone factory now COMPOSES `mountPartnerPortal` rather than duplicating its wiring, so
+ * the gates the existing suites exercise here are literally the gates the main application runs.
+ * The only surface unique to this factory is the placeholder /partner shell below — in the main
+ * application the React SPA owns /partner/*, so the mount deliberately does not register it.
+ */
 export function createPartnerApp(): Express {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "1mb" }));
 
-  // fail closed if the restricted runtime DB isn't configured (never fall back to privileged conn)
+  // fail closed if the restricted runtime DB isn't configured (never fall back to privileged conn).
+  // App-wide here, not just /api/partner, because this factory serves nothing else worth serving
+  // without it — the mount re-applies the same check scoped to its own prefix.
   app.use((_req, res, next) => {
     if (!partnerDbConfigured()) {
       res.status(503).json({ error: "partner portal unavailable" });
@@ -69,43 +48,9 @@ export function createPartnerApp(): Express {
     next();
   });
 
-  // H1/M1: portal-wide kill switches. partner_portal_enabled must be ON (fail closed) and
-  // partner_emergency_stop must be OFF, else the ENTIRE surface returns 503. Checked per request
-  // on the /api/partner surface (the /partner shell is a static page, exempt).
-  // DB-F1: fail the whole surface closed if the SECURITY DEFINER ownership model is broken, so a
-  // misprovisioned DB returns an explicit 503 instead of silently rejecting every login. Memoized.
-  app.use("/api/partner", async (_req, res, next) => {
-    try {
-      if (!(await checkDefinerModelOnce())) {
-        res.status(503).json({ error: "partner portal unavailable" });
-        return;
-      }
-      next();
-    } catch {
-      res.status(503).json({ error: "partner portal unavailable" }); // fail closed
-    }
-  });
-
-  app.use("/api/partner", async (_req, res, next) => {
-    try {
-      const [portalOn, emergencyStop] = await Promise.all([
-        resolveGlobalFlag("partner_portal_enabled"),
-        resolveGlobalFlag("partner_emergency_stop"),
-      ]);
-      if (!portalOn || emergencyStop) {
-        res.status(503).json({ error: "partner portal unavailable" });
-        return;
-      }
-      next();
-    } catch {
-      res.status(503).json({ error: "partner portal unavailable" }); // fail closed
-    }
-  });
-
-  app.use(partnerSessionMiddleware);
-  app.use("/api/partner", partnerApiRouter());
-  app.use("/api/partner", partnerSubmissionRouter()); // Phase 2 submission workflow
-  app.use("/api/partner", partnerCustomerRouter()); // Phase 2 customer records
+  // H1/M1/DB-F1: portal-wide kill switches + definer-model health, then session + the three route
+  // families. All of it lives in server/partner/mount.ts (single source of truth for gate order).
+  mountPartnerPortal(app);
 
   // minimal UI shell route (SPA placeholder — no data, no secrets)
   app.get("/partner", (_req: Request, res: Response) => {
