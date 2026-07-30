@@ -125,6 +125,12 @@ export function partnerApiRouter(): Router {
   // holding: partnerLoginIpLimiter (IP-only, always applied) must bind BEFORE partnerLoginLimiter,
   // whose key includes the caller-supplied `email` and on its own hands one source IP a fresh
   // budget per address it tries. If this route ever stops being shadowed it is still bounded.
+  //
+  // GATE DIFFERENCE, stated exactly: this router is NOT ungated. partnerPortalRouter
+  // (server/partner/mount.ts) composes it behind requirePartnerRuntimeConfig, requireDefinerModel,
+  // requireNoEmergencyStop and requirePortalEnabled, so the emergency stop and partner_portal_enabled
+  // both apply here too. The ONE gate this handler lacks is the per-route partner_login_enabled
+  // check that public-routes.ts performs before authenticating.
   r.post("/auth/login", partnerLoginIpLimiter, partnerLoginLimiter, async (req, res) => {
     const { email, password } = req.body ?? {};
     if (typeof email !== "string" || typeof password !== "string") {

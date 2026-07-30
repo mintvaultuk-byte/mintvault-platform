@@ -54,6 +54,73 @@ const PASSWORD = "login-rl-password-1";
 const IP_MAX = 30; // partnerLoginIpLimiter — per IP, 15 min
 const ACCOUNT_MAX = 10; // partnerLoginLimiter — per (email, IP), 15 min
 
+/**
+ * FAIL CLOSED IN CI.
+ *
+ * The DB-backed block below gates on a loopback URL pair so a developer without a local PostgreSQL
+ * still gets a green run. That gate is a LOCAL convenience only: in CI a missing variable must be a
+ * hard failure, because a silently-skipped suite is exactly how the Partner Master Dashboard and
+ * Partner User Management coverage sat dormant while reporting green. Copied deliberately from
+ * tests/partner-portal-mount-integration.test.ts.
+ */
+describe("Partner login rate-limit coverage is wired up", () => {
+  it("is not silently skipped in CI", () => {
+    if (process.env.GITHUB_ACTIONS) {
+      expect(
+        isLocal,
+        "PARTNER_PUBLIC_RT_ADMIN and PARTNER_PUBLIC_RT_RUNTIME must be set to loopback PostgreSQL " +
+          "URLs in CI, or the partner login rate-limit suite does not run at all"
+      ).toBe(true);
+    }
+  });
+});
+
+/**
+ * Pure key-derivation unit checks. Deliberately OUTSIDE the database gate, so they run on every
+ * `npm test` — including a developer machine with no PostgreSQL — and can never be skipped away.
+ */
+describe("partner rate-limit bucket key derivation", () => {
+  it("leaves IPv4 alone and folds IPv4-mapped IPv6 onto the same bucket", async () => {
+    const { normalizePartnerRateLimitIp } = await import("../server/partner/rate-limit");
+    expect(normalizePartnerRateLimitIp("203.0.113.7")).toBe("203.0.113.7");
+    // R2: the same host must not hold two buckets depending on how the socket reported it.
+    expect(normalizePartnerRateLimitIp("::ffff:203.0.113.7")).toBe("203.0.113.7");
+    expect(normalizePartnerRateLimitIp("::FFFF:203.0.113.7")).toBe("203.0.113.7");
+    expect(normalizePartnerRateLimitIp("0:0:0:0:0:ffff:cb00:7107")).toBe("203.0.113.7");
+  });
+
+  it("collapses an IPv6 address to its /56 prefix so a client cannot rotate within its allocation", async () => {
+    const { normalizePartnerRateLimitIp } = await import("../server/partner/rate-limit");
+    const a = normalizePartnerRateLimitIp("2001:db8:abcd:0100::1");
+    // Same /56, different /64s and different hosts — all one bucket.
+    expect(normalizePartnerRateLimitIp("2001:db8:abcd:0100::9999")).toBe(a);
+    expect(normalizePartnerRateLimitIp("2001:0db8:abcd:01ff:dead:beef:cafe:0001")).toBe(a);
+    expect(normalizePartnerRateLimitIp("2001:db8:abcd:0155::42")).toBe(a);
+    // A different /56 is a different bucket — normalisation must not over-aggregate.
+    expect(normalizePartnerRateLimitIp("2001:db8:abcd:0200::1")).not.toBe(a);
+    expect(normalizePartnerRateLimitIp("2001:db8:abce:0100::1")).not.toBe(a);
+    // Zone index is cosmetic, not a second bucket.
+    expect(normalizePartnerRateLimitIp("2001:db8:abcd:0100::1%en0")).toBe(a);
+  });
+
+  it('never derives the literal "undefined" and never merges distinct clients', async () => {
+    const { partnerRateLimitClientKey } = await import("../server/partner/rate-limit");
+    type Stub = Parameters<typeof partnerRateLimitClientKey>[0];
+    const stub = (ip: unknown, remote?: unknown): Stub =>
+      ({ ip, socket: remote === undefined ? undefined : { remoteAddress: remote } }) as unknown as Stub;
+
+    // R2: req.ip absent must NOT stringify to "undefined" and collapse every such request into one
+    // shared bucket. It falls back to the socket, then to an explicit "unknown".
+    expect(partnerRateLimitClientKey(stub(undefined, "198.51.100.4"))).toBe("198.51.100.4");
+    const orphan = partnerRateLimitClientKey(stub(undefined));
+    expect(orphan).toBe("unknown");
+    expect(orphan).not.toBe("undefined");
+    expect(partnerRateLimitClientKey(stub(""))).not.toBe("undefined");
+    // Two real clients never share a key.
+    expect(partnerRateLimitClientKey(stub("198.51.100.4"))).not.toBe(partnerRateLimitClientKey(stub("198.51.100.5")));
+  });
+});
+
 (isLocal ? describe : describe.skip)("Partner login rate-limit keying (production routes, real DB)", () => {
   let admin: Client;
   let server: http.Server;
@@ -288,8 +355,12 @@ const ACCOUNT_MAX = 10; // partnerLoginLimiter — per (email, IP), 15 min
    * the router in isolation turned out to be practical — that handler reaches partnerLogin without
    * any auth middleware in front of it.)
    *
-   * Note it is a genuinely different surface: this duplicate has NO emergency-stop, portal_enabled
-   * or login_enabled gate. That is exactly why it must not also be missing the IP bucket.
+   * Note the gate difference, stated exactly: this router is NOT ungated — partnerPortalRouter
+   * (server/partner/mount.ts) composes it behind requirePartnerRuntimeConfig, requireDefinerModel,
+   * requireNoEmergencyStop and requirePortalEnabled. The ONE gate it lacks is the per-route
+   * partner_login_enabled check that public-routes.ts performs. Mounting partnerApiRouter directly
+   * here therefore bypasses those four mount-level gates deliberately, in order to exercise the
+   * handler and its limiters in isolation.
    */
   it("throttles IP rotation on the SHADOWED duplicate route too, so protection does not rely on mount order", async () => {
     await clearLockout();
@@ -318,5 +389,41 @@ const ACCOUNT_MAX = 10; // partnerLoginLimiter — per (email, IP), 15 min
     expect(firstThrottled).toBe(IP_MAX);
     expect(seen.slice(0, firstThrottled).every((s) => s === 401)).toBe(true);
     expect(seen.slice(firstThrottled).every((s) => s === 429)).toBe(true);
+  }, 120_000);
+
+  /**
+   * R1, end to end over HTTP. Every other simulated client in this file is IPv4, which is exactly
+   * why the original suite could not see this: an IPv6 caller owns its whole prefix, so keying on
+   * the full 128-bit address let it rotate a fresh bucket per request and bypass the limiter
+   * completely. Reverting normalizePartnerRateLimitIp to the identity function fails this test.
+   */
+  it("throttles an IPv6 client rotating addresses inside its own prefix, and keeps two /56s independent", async () => {
+    await clearLockout();
+    const PREFIX = "2001:db8:aaaa:01"; // the /56 under attack
+    const seen: number[] = [];
+    for (let i = 0; i < IP_MAX + 5; i++) {
+      // A DIFFERENT source address every time — a different host, and every other request a
+      // different /64 — all inside one allocation the attacker already controls.
+      const ip = `${PREFIX}${i % 2 ? "55" : "00"}:${(i + 1).toString(16)}::${(i + 1).toString(16)}`;
+      seen.push((await login({ email: `v6-spray-${i}@example.test`, password: "wrong-password-1" }, ip)).status);
+    }
+    const firstThrottled = seen.indexOf(429);
+    expect(firstThrottled).toBe(IP_MAX);
+    expect(seen.slice(0, firstThrottled).every((s) => s === 401)).toBe(true);
+    expect(seen.slice(firstThrottled).every((s) => s === 429)).toBe(true);
+
+    // A genuinely different /56 is a different customer and must be untouched — normalisation must
+    // bound the attacker without aggregating unrelated subscribers into one shared bucket.
+    const otherSlash56 = await login(
+      { email: "v6-neighbour@example.test", password: "wrong-password-1" },
+      "2001:db8:aaaa:0200::1"
+    );
+    expect(otherSlash56.status).toBe(401);
+    // ...and so is a different /48.
+    const otherSlash48 = await login(
+      { email: "v6-stranger@example.test", password: "wrong-password-1" },
+      "2001:db8:abcd:0100::1"
+    );
+    expect(otherSlash48.status).toBe(401);
   }, 120_000);
 });
