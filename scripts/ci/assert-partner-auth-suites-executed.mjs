@@ -9,8 +9,11 @@
  *     DEFAULTs to false, so the first owner of every shop got a fully-authorised password-only
  *     session while the portal told them two-step was mandatory.
  *   • P0-F — a successful password reset must actually clear `failed_login_count`/`locked_until`.
- *     Before the fix the locked branch itself re-armed the lock on every attempt, so any user who
- *     kept retrying extended their own lockout and the documented recovery path did not clear it.
+ *     Before the fix the documented recovery path did not clear either field, so a locked user who
+ *     reset their password was still refused. Separately, the locked branch counted its own
+ *     refusals, which re-armed `locked_until` on every attempt and let an attacker hold an account
+ *     offline indefinitely; that is fixed alongside, by not counting a refusal the password cannot
+ *     influence.
  *
  * Each file carries an in-file "is not silently skipped in CI" guard, but that guard only asserts
  * the ADMIN URL is a loopback URL — it catches a MISSING ENVIRONMENT VARIABLE and nothing else. It

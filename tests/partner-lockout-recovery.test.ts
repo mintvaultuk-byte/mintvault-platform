@@ -211,6 +211,37 @@ describe("P0-F lockout recovery coverage is wired up", () => {
     expect(res.setCookie).toBeNull();
   });
 
+  // Regression for the self-extending lockout found by hostile review (Lane C). The locked branch
+  // counted its OWN refusals, so `locked_until = now() + 15 min` was re-evaluated on every attempt
+  // once the counter was already past the threshold. An unauthenticated attacker could therefore
+  // hold a named partner account offline indefinitely at ~4 requests/hour — inside both login
+  // limiters — and the victim's only exit (password reset) could be immediately undone.
+  it("does NOT extend the lockout when a locked account is probed again", async () => {
+    const before = await admin.query<{ locked_until: string; failed_login_count: number }>(
+      "SELECT locked_until, failed_login_count FROM partner_users WHERE email=$1",
+      [VICTIM_EMAIL]
+    );
+    expect(before.rows[0].locked_until).not.toBeNull();
+
+    await login(VICTIM_EMAIL, "another-wrong-password");
+    await login(VICTIM_EMAIL, OLD_PASSWORD);
+
+    const after = await admin.query<{ locked_until: string; failed_login_count: number }>(
+      "SELECT locked_until, failed_login_count FROM partner_users WHERE email=$1",
+      [VICTIM_EMAIL]
+    );
+    // The clock must not move, and the counter must not climb — the refusal is not password-dependent.
+    expect(String(after.rows[0].locked_until)).toBe(String(before.rows[0].locked_until));
+    expect(Number(after.rows[0].failed_login_count)).toBe(Number(before.rows[0].failed_login_count));
+  });
+
+  it("still audits every probe against a locked account", async () => {
+    const r = await admin.query<{ n: string }>(
+      "SELECT count(*)::text AS n FROM partner_audit_events WHERE action='partner_login_failure' AND reason='locked'"
+    );
+    expect(Number(r.rows[0].n)).toBeGreaterThan(0);
+  });
+
   it("answers a reset request generically and dispatches delivery WITHOUT awaiting it", async () => {
     // Hold delivery open: if the handler awaited it, the HTTP response could not arrive first.
     let release!: () => void;
