@@ -24,6 +24,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { addedCodeOf, addedJsOf, hasMalformedEscape } from "./helpers/strip-non-code";
+import { protectedChangedFiles, protectedDiffFor } from "./helpers/protected-diff";
 import {
   validateStructuredVariant,
   structuredColumnsToCertFields,
@@ -954,10 +955,10 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
 
   it("22. no grading/MVGS/centering/Pristine/cert-number engine file is modified", () => {
     const { execFileSync } = require("child_process");
-    const changed: string[] = execFileSync("git", ["diff", "--name-only", "origin/main"], { encoding: "utf8" })
-      .trim()
-      .split("\n")
-      .filter(Boolean);
+    // FAIL-CLOSED base resolution — see tests/helpers/protected-diff.ts. A shallow checkout
+    // that cannot resolve the base now throws instead of yielding an empty changed-file list
+    // that would make this loop a no-op and report green while enforcing nothing.
+    const changed: string[] = protectedChangedFiles();
     // `server/grader.ts` stays INSIDE the engine regex — NOT exempted (PR #254's side removed
     // it and delegated the guarantee elsewhere; keeping it here is strictly stronger). A change
     // is admitted only against an explicitly founder-authorised signature, as a UNION so that
@@ -971,7 +972,7 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
       /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|cert-pristine|certificate-document/;
     for (const f of changed) {
       if (f === "server/grader.ts") {
-        const diff = execFileSync("git", ["diff", "origin/main", "--", f], { encoding: "utf8" });
+        const diff = protectedDiffFor(f);
         // TWO representations, because the two questions are different (hostile-review N5):
         //   addedCode — executable JS + tagged-template SQL, unicode-decoded. Used to detect
         //               protected identifiers and database writes (F2/N4).
@@ -995,12 +996,40 @@ describe("rendering + protected-system guarantees (items 20-22)", () => {
           /promo_type\s*=\s*\$\{/.test(addedCode);
         // Signature B is purely JavaScript, so it is judged ONLY on the JS representation.
         const signatureB = /class\s+GradeDraftRejected\b/.test(addedJs) && /\bcheckPrintableGrade\s*\(/.test(addedJs);
-        expect(signatureA || signatureB, "server/grader.ts changed but matches no founder-authorised signature").toBe(
+        // C) Wave 1 Partner-origin integration — founder-approved 2026-07-31, narrowly.
+        //    Same four required tokens as the sibling guard in variant-line-consolidation:
+        //    the provenance column constant, the origin resolver, the fail-closed predicate,
+        //    and the extracted publish-gate helper. Kept identical in both guards so neither
+        //    can drift into being the weaker one.
+        const signatureC =
+          /\bexport const PARTNER_ORIGIN_COLUMN\b/.test(addedJs) &&
+          /\bgetCertOrigin\s*\(/.test(addedJs) &&
+          /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
+          /\bcheckGradePublishGates\s*\(/.test(addedJs);
+        expect(signatureA || signatureB || signatureC, "server/grader.ts changed but matches no founder-authorised signature").toBe(
           true
         );
         expect(addedCode).not.toMatch(
           /mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|cert_id|certificate_number/i
         );
+        continue;
+      }
+      if (f === "server/certificate-document.ts") {
+        // Wave 1 Partner certificate provenance — founder-approved 2026-07-31, narrowly.
+        // Authorised ONLY to RENDER the immutable origin snapshot migration 0035 already
+        // stores: "Graded by <Partner Trading Name>" plus the approved grading-location
+        // snapshot, and "Graded by MintVault Headquarters" for HQ. It does NOT authorise
+        // changes to grade display, score display, certificate numbering, grading logic, or
+        // the protected 827x236 slab-label geometry — the assertions below still enforce all
+        // of that, and the single required token is the shared origin formatter, so an
+        // unrelated rendering change to this file still fails.
+        const diff = protectedDiffFor(f);
+        const addedJs = addedJsOf(diff, "+");
+        expect(
+          /\bcertificateOrigin\s*\(/.test(addedJs),
+          "server/certificate-document.ts changed but does not match the authorised Partner-provenance rendering signature"
+        ).toBe(true);
+        expect(addedJs).not.toMatch(/mvgs|pristine|centering|calculateOverallGrade|scoreMvgs|certificate_number|certificateNumber/i);
         continue;
       }
       expect(f, `unexpected grading-engine change: ${f}`).not.toMatch(engine);

@@ -1086,7 +1086,7 @@ export async function rejectCertGrade(certId: number, reason: string | null, adm
  * both paths call this.
  *
  * PURE CHECK — reads only. No writes, no timestamps, no approver, no
- * print_state change, and NOTHING here computes or alters a grade. The MVGS
+ * print_state change, and NOTHING here computes or alters a grade. The scoring
  * engine is untouched; this only decides WHETHER an already-computed grade may
  * be published.
  *
@@ -1098,7 +1098,7 @@ export async function checkGradePublishGates(
   // B3 completeness gate (owner-approved 2026-07-02): a numeric grade (grade
   // NOT NULL — non-numeric NO/AA certs store grade=NULL so they're exempt)
   // must never publish with any of the four sub-grades blank, because the
-  // MVGS overall is computed from them.
+  // the overall score is computed from them, elsewhere.
   const subgradeGate = await db.execute(sql`
     SELECT 1 FROM certificates
     WHERE id = ${certId} AND grade IS NOT NULL
