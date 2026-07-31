@@ -223,6 +223,16 @@ jobs:
       # Partner block above: it calls provisionRealisticRoles() / applyMigrationsRealistic(), which
       # hand `public` schema ownership to the non-superuser pn_migrator.
       PARTNER_UX_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_ux_rt
+
+      # ---- Partner auth P0 proofs (mandatory first-owner MFA + lockout recovery) ----
+      # Both suites gate the WHOLE file on their *_RT_ADMIN/_RUNTIME pair being a loopback URL and
+      # carry an in-file "is not silently skipped in CI" guard, so an unset var REDDENS CI rather
+      # than passing green. They create their own partner_app_test login role from the admin
+      # connection, so the admin URL must carry CREATEROLE (asserted in the prepare step below).
+      PARTNER_MFA_ENROL_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_mfa_enrol
+      PARTNER_MFA_ENROL_RT_RUNTIME: postgres://partner_app_test:synthetic@127.0.0.1:55433/mintvault_partner_mfa_enrol
+      PARTNER_LOCKOUT_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_lockout
+      PARTNER_LOCKOUT_RT_RUNTIME: postgres://partner_app_test:synthetic@127.0.0.1:55433/mintvault_partner_lockout
     services:
       postgres:
         # pgvector-enabled Postgres 16 (official pgvector image, same server as
@@ -389,6 +399,16 @@ jobs:
             psql "$rbac_admin" -v ON_ERROR_STOP=1 -tAc \
               "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
           done
+
+          # Partner auth P0 proof databases (mandatory MFA enrolment + lockout recovery).
+          for auth_db in mintvault_partner_mfa_enrol mintvault_partner_lockout; do
+            psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -c \
+              "SELECT 'CREATE DATABASE $auth_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname='$auth_db')\\gexec"
+          done
+          for auth_admin in "$PARTNER_MFA_ENROL_RT_ADMIN" "$PARTNER_LOCKOUT_RT_ADMIN"; do
+            psql "$auth_admin" -v ON_ERROR_STOP=1 -tAc \
+              "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
+          done
           # MINIMAL precondition for the five suites that apply the FULL repository migration set
           # via listMigrationFiles() rather than just the partner subset:
           #   • 0018_correction_audit_index.sql builds a partial index ON audit_log;
@@ -456,6 +476,10 @@ jobs:
       - name: Assert partner RBAC suites executed
         if: always()
         run: node scripts/ci/assert-partner-rbac-suites-executed.mjs vitest-report.json
+
+      - name: Assert partner auth P0 suites executed
+        if: always()
+        run: node scripts/ci/assert-partner-auth-suites-executed.mjs vitest-report.json
 
       - name: Build
         run: npm run build

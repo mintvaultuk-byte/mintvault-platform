@@ -20,9 +20,11 @@ export default function PartnerLoginPage() {
   const [, navigate] = useLocation();
   const { refresh } = usePartnerSession();
   /**
-   * A user arriving straight from accepting an invitation (/partner/invite sends them here with
-   * ?setup=1) has two-factor REQUIRED but no authenticator registered, so the code step is
-   * impossible for them — send them to enrolment as soon as the password is accepted.
+   * A user with two-factor REQUIRED but no authenticator registered cannot satisfy the "enter your
+   * 6-digit code" step — there is nothing to get a code from. The SERVER now says so directly
+   * (`mfaEnrolmentRequired` on the login response), so enrolment is reached on ANY sign-in in that
+   * state, not only when the user happens to arrive via /partner/invite's ?setup=1 link. The URL
+   * hint is kept purely as a fallback for a cached/older API response; it is never the only signal.
    */
   const setupRequested = useMemo(() => new URLSearchParams(window.location.search).get("setup") === "1", []);
   const [step, setStep] = useState<"credentials" | "mfa" | "enrol">("credentials");
@@ -42,7 +44,18 @@ export default function PartnerLoginPage() {
       const result = await partnerAuth.login(email, password);
       await refresh();
       if (result.mfaRequired) {
-        setStep(setupRequested ? "enrol" : "mfa");
+        // Ask the SERVER which second step is actually possible. A user with two-factor required
+        // but no authenticator registered cannot satisfy a code prompt, so sending them there is a
+        // dead end. GET /session answers this for the session we just established; if that call
+        // fails we fall back to the ?setup=1 hint rather than guessing "code".
+        let enrolmentRequired = setupRequested;
+        try {
+          const s = await partnerAuth.session();
+          enrolmentRequired = s.mfaEnrolmentRequired ?? setupRequested;
+        } catch {
+          /* keep the URL hint */
+        }
+        setStep(enrolmentRequired ? "enrol" : "mfa");
       } else {
         navigate("/partner/dashboard");
       }
