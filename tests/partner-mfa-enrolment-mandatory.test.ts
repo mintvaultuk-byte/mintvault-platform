@@ -26,7 +26,11 @@ import type { AddressInfo } from "node:net";
 import express from "express";
 import { Client } from "pg";
 import crypto from "node:crypto";
-import { applyMigrationsRealistic, provisionRealisticRoles, PARTNER_MIGRATIONS_WITH_RBAC_SEED } from "./helpers/partner-realistic-db";
+import {
+  applyMigrationsRealistic,
+  provisionRealisticRoles,
+  PARTNER_MIGRATIONS_WITH_RBAC_SEED,
+} from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_MFA_ENROL_RT_ADMIN;
 const RUNTIME = process.env.PARTNER_MFA_ENROL_RT_RUNTIME;
@@ -58,7 +62,8 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
     if (process.env.CI || process.env.GITHUB_ACTIONS) {
       expect(isLocal, "PARTNER_MFA_ENROL_RT_ADMIN must be a disposable loopback PostgreSQL 17 URL in CI").toBe(true);
     }
-    if (!isLocal) console.warn("[partner-mfa-enrolment-mandatory] skipped: PARTNER_MFA_ENROL_RT_ADMIN not a loopback URL");
+    if (!isLocal)
+      console.warn("[partner-mfa-enrolment-mandatory] skipped: PARTNER_MFA_ENROL_RT_ADMIN not a loopback URL");
     expect(true).toBe(true);
   });
 });
@@ -215,10 +220,9 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
   it("SERVER-SIDE refuses every normal partner API before enrolment is complete", async () => {
     for (const api of NORMAL_PARTNER_APIS) {
       const res = await call(api.method, api.path, api.body);
-      expect(
-        [401, 403],
-        `${api.method} ${api.path} answered ${res.status} to an un-enrolled session`
-      ).toContain(res.status);
+      expect([401, 403], `${api.method} ${api.path} answered ${res.status} to an un-enrolled session`).toContain(
+        res.status
+      );
     }
   });
 
@@ -346,7 +350,12 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
     await call("POST", "/api/partner/auth/login", { email: OWNER_EMAIL, password: OWNER_PASSWORD });
     await call("POST", "/api/partner/auth/mfa", { code: currentTotp(secret, Date.now() + 30_000) });
 
-    for (const path of ["/api/partner/session", "/api/partner/dashboard", "/api/partner/users", "/api/partner/locations"]) {
+    for (const path of [
+      "/api/partner/session",
+      "/api/partner/dashboard",
+      "/api/partner/users",
+      "/api/partner/locations",
+    ]) {
       const res = await call("GET", path);
       expect(res.text).not.toContain(secret);
     }

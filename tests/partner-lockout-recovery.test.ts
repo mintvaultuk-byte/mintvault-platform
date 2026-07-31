@@ -27,7 +27,11 @@ import express from "express";
 import { Client } from "pg";
 import bcrypt from "bcryptjs";
 import crypto from "node:crypto";
-import { applyMigrationsRealistic, provisionRealisticRoles, PARTNER_MIGRATIONS_WITH_RBAC_SEED } from "./helpers/partner-realistic-db";
+import {
+  applyMigrationsRealistic,
+  provisionRealisticRoles,
+  PARTNER_MIGRATIONS_WITH_RBAC_SEED,
+} from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_LOCKOUT_RT_ADMIN;
 const RUNTIME = process.env.PARTNER_LOCKOUT_RT_RUNTIME;

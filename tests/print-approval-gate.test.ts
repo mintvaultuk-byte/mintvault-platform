@@ -139,17 +139,16 @@ beforeAll(async () => {
   await client.query(ddlFromSchema(schema.users));
   await client.query(ddlFromSchema(schema.auditLog));
   await client.query(ddlFromSchema(schema.labelPrints));
-  await client.query(
-    `CREATE UNIQUE INDEX IF NOT EXISTS ux_certificates_certno ON certificates (certificate_number)`
-  );
+  await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS ux_certificates_certno ON certificates (certificate_number)`);
   // label_prints.cert_id is UNIQUE in production — the batch dual-write upserts on it.
   await client.query(`CREATE UNIQUE INDEX IF NOT EXISTS ux_label_prints_cert ON label_prints (cert_id)`);
 
   const authMod = await import("../server/auth");
   ADMIN_EMAIL = authMod.ADMIN_EMAIL;
-  await client.query(`INSERT INTO users (id, email, role, credential_version) VALUES (gen_random_uuid(),$1,'admin',1)`, [
-    ADMIN_EMAIL.toLowerCase(),
-  ]);
+  await client.query(
+    `INSERT INTO users (id, email, role, credential_version) VALUES (gen_random_uuid(),$1,'admin',1)`,
+    [ADMIN_EMAIL.toLowerCase()]
+  );
 
   // ── Fixtures ──────────────────────────────────────────────────────────────
   await seedCert({ certNumber: "MV9001" }); // fully approved + printable
@@ -200,9 +199,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((r) => (server ? server.close(() => r()) : r()));
   // Drain the app's own pool before stopping the cluster, otherwise pg_ctl waits on it.
-  await import("../server/db")
-    .then((m) => m.pool.end())
-    .catch(() => {});
+  await import("../server/db").then((m) => m.pool.end()).catch(() => {});
   await client?.end().catch(() => {});
   await cluster?.stop();
 }, 120_000);

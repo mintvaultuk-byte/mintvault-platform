@@ -464,7 +464,10 @@ export function partnerApiRouter(): Router {
       password,
       // F3: only consulted when an ACTIVE authenticator already exists (i.e. this is a REPLACEMENT).
       // First-time enrolment is unaffected and still needs the password alone.
-      { code: typeof code === "string" ? code : undefined, recoveryCode: typeof recoveryCode === "string" ? recoveryCode : undefined }
+      {
+        code: typeof code === "string" ? code : undefined,
+        recoveryCode: typeof recoveryCode === "string" ? recoveryCode : undefined,
+      }
     );
     if (!out.ok) {
       const status =

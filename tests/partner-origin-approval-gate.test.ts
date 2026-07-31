@@ -162,10 +162,10 @@ beforeAll(async () => {
   client = new Client({ connectionString: cluster.url });
   await client.connect();
   await client.query(BASE_DDL);
-  await client.query(
-    `INSERT INTO users (id, email, role, can_grade, review_rate) VALUES ($1,$2,'customer',true,0)`,
-    [GRADER_ID, GRADER_EMAIL]
-  );
+  await client.query(`INSERT INTO users (id, email, role, can_grade, review_rate) VALUES ($1,$2,'customer',true,0)`, [
+    GRADER_ID,
+    GRADER_EMAIL,
+  ]);
 
   // server/db.ts reads the URL at import time — set it BEFORE any server module loads.
   process.env.MINTVAULT_DATABASE_URL = cluster.url;
@@ -248,10 +248,7 @@ describe("P0-C partner-origin mandatory review (post-0035 column present)", () =
     // whole point of the post-integration regression: the gate must key off the
     // canonical `origin_type` vocabulary that ships, including its CHECK constraints
     // and set-once immutability trigger.
-    const sql035 = readFileSync(
-      resolve(__dirname, "../migrations/0035_partner_certificate_origin.sql"),
-      "utf8"
-    );
+    const sql035 = readFileSync(resolve(__dirname, "../migrations/0035_partner_certificate_origin.sql"), "utf8");
     await client.query(sql035);
     resetPartnerOriginSchemaCache();
   });
