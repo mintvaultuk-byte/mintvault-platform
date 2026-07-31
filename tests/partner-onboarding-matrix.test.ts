@@ -51,7 +51,7 @@
  *
  * Reproduce (host must be loopback; the database is created and dropped by this file):
  *   PARTNER_MOUNT_RT_ADMIN=postgres://postgres@127.0.0.1:5599/postgres \
- *   PARTNER_MOUNT_RT_RUNTIME=postgres://partner_app_test:synthetic@127.0.0.1:5599/postgres \
+ *   PARTNER_MOUNT_RT_RUNTIME=postgres://partner_app_test_mount:synthetic@127.0.0.1:5599/postgres \
  *   LC_ALL=C LANG=C npx vitest run tests/partner-onboarding-matrix.test.ts
  */
 import { describe, it, expect, beforeAll, beforeEach, afterEach, afterAll, vi } from "vitest";
@@ -420,8 +420,9 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
 
     await applyMigrationsRealistic(admin, adminDbUrl, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT);
 
-    // Cluster-unique login roles. Deliberately NOT `partner_app_test` (shared by four other partner
-    // suites on this same PostgreSQL 17 server): a suite that dropped it mid-run would break us.
+    // Cluster-unique login roles. Deliberately NOT a name shared with other partner suites on this
+    // same PostgreSQL 17 server: roles are cluster-wide, so a suite that dropped or altered a shared
+    // role mid-run would break our live pool.
     await admin.query(
       `DO $$ BEGIN
          CREATE ROLE ${RUNTIME_ROLE} LOGIN PASSWORD '${RUNTIME_ROLE_PASSWORD}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;

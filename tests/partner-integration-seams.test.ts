@@ -35,7 +35,7 @@
  * suite creates and uses its OWN database (mintvault_partner_seams) derived from the admin URL, so
  * it never contends with tests/partner-portal-mount-integration.test.ts on mintvault_partner_mount:
  *   PARTNER_MOUNT_RT_ADMIN=postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_mount \
- *   PARTNER_MOUNT_RT_RUNTIME=postgres://partner_app_test:synthetic@127.0.0.1:55433/mintvault_partner_mount \
+ *   PARTNER_MOUNT_RT_RUNTIME=postgres://partner_app_test_mount:synthetic@127.0.0.1:55433/mintvault_partner_mount \
  *   LC_ALL=C LANG=C npx vitest run tests/partner-integration-seams.test.ts
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
@@ -213,7 +213,7 @@ async function login(): Promise<{ status: number; cookie: string; body: Json }> 
     seamsAdminUrl.pathname = `/${SEAMS_DB}`;
     const SEAMS_ADMIN = seamsAdminUrl.toString();
 
-    // Distinct login-role names (NOT the mount suite's partner_app_test): roles are cluster-wide,
+    // Distinct login-role names (NOT the mount suite's partner_app_test_mount): roles are cluster-wide,
     // and that suite DROPs its role in afterAll. Sharing one would couple two suites through the
     // role catalogue for no benefit.
     const rtUrl = new URL(SEAMS_ADMIN);

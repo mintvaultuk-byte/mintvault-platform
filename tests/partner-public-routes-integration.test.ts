@@ -46,9 +46,9 @@ const OWNER = "aa31aa31-0000-0000-0000-0000000000a1";
     await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
     await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT);
-    await admin.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
-    await admin.query("CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic'");
-    await admin.query("GRANT partner_runtime TO partner_app_test");
+    await admin.query("DROP ROLE IF EXISTS partner_app_test_public").catch(() => {});
+    await admin.query("CREATE ROLE partner_app_test_public LOGIN PASSWORD 'synthetic'");
+    await admin.query("GRANT partner_runtime TO partner_app_test_public");
     const { seedPartnerRbac } = await import("../server/partner/permissions");
     await seedPartnerRbac();
 
