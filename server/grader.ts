@@ -39,6 +39,135 @@ export const GRADER_AUTO_PUBLISH = false;
 
 export type GradingStatus = "unassigned" | "assigned" | "pending_review" | "approved";
 
+/* ════════════════════════════════════════════════════════════════════════════
+ * PARTNER-ORIGIN DETECTION SEAM  (P0-C)
+ * ════════════════════════════════════════════════════════════════════════════
+ * WHY: a partner-originated card must NEVER auto-publish. HQ cards may still be
+ * sampled (review_rate), but a card that arrived through the partner pilot has
+ * to be seen by a human before it goes live — no percentage bypass, ever.
+ *
+ * THE SEAM: the column that marks partner origin on `certificates` is being
+ * added by a SEPARATE migration (0035) that does not exist in this branch. So
+ * origin detection is isolated behind this one helper, and the physical column
+ * name is this ONE constant. At integration, if 0035 names the column something
+ * else, change PARTNER_ORIGIN_COLUMN and nothing else.
+ *
+ * CONTRACT
+ *   getCertOrigin(certId) → "hq" | "partner" | "unknown"
+ *     "partner" — the marker column exists AND is non-NULL for this cert.
+ *     "hq"      — the marker column exists AND is NULL for this cert.
+ *     "unknown" — the marker column does not exist (pre-0035 / name drift), the
+ *                 cert row is missing, or the probe errored.
+ *
+ *   isPartnerOriginatedCert(certId) → boolean
+ *     TRUE for BOTH "partner" and "unknown". This is deliberate: it FAILS
+ *     CLOSED. If we cannot prove a card is HQ-originated, it is treated as
+ *     partner-originated and mandatory review applies.
+ *
+ * CONSEQUENCE UNTIL 0035 LANDS (read this before wondering why sampling stopped)
+ *   With no marker column present, every cert resolves to "unknown" → every
+ *   submit requires review and NOTHING auto-approves. That is the safe
+ *   direction (more human review, never less) and it self-resolves the moment
+ *   the column exists. A one-time warning is logged so the state is observable
+ *   rather than silent. The alternative — treating "column absent" as HQ —
+ *   would mean a single column-name mismatch at integration silently restores
+ *   partner auto-publish, i.e. exactly the defect this gate exists to stop.
+ *
+ * WIRED TO MIGRATION 0035. The canonical field is `certificates.origin_type`, a
+ * nullable closed vocabulary: 'PARTNER' | 'HQ' | NULL.
+ *
+ *   'PARTNER' → partner-originated  → mandatory Super Admin review, no sampling
+ *   'HQ'      → HQ-originated       → normal HQ sampling policy
+ *   NULL      → LEGACY (row predates 0035's capture) → treated as HQ for review
+ *               policy, because these are historical HQ certificates and every
+ *               pre-0035 row is NULL. Treating them as partner would silently
+ *               put the entire back catalogue into mandatory review.
+ *
+ * The two "NULL" cases are deliberately NOT the same thing:
+ *   • column ABSENT (0035 not applied) = SCHEMA ambiguity  → "unknown" → FAIL CLOSED
+ *   • column PRESENT but NULL          = known legacy row  → "legacy"  → HQ policy
+ *
+ * Defence in depth: 0035's CHECK constraints already forbid partner snapshot
+ * values on a non-PARTNER row, but if that invariant were ever violated we treat
+ * a populated `origin_partner_id` as partner-originated regardless of origin_type.
+ * ════════════════════════════════════════════════════════════════════════════ */
+export const PARTNER_ORIGIN_COLUMN = "origin_type";
+
+export type CertOrigin = "hq" | "partner" | "legacy" | "unknown";
+
+/** Cached result of the information_schema probe (null = not probed yet). */
+let partnerOriginColumnPresent: boolean | null = null;
+let partnerOriginAbsenceWarned = false;
+
+/** Test/integration hook — forget the cached schema probe. */
+export function resetPartnerOriginSchemaCache(): void {
+  partnerOriginColumnPresent = null;
+  partnerOriginAbsenceWarned = false;
+}
+
+async function partnerOriginColumnExists(): Promise<boolean> {
+  if (partnerOriginColumnPresent !== null) return partnerOriginColumnPresent;
+  try {
+    const r = await db.execute(sql`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'certificates' AND column_name = ${PARTNER_ORIGIN_COLUMN}
+      LIMIT 1
+    `);
+    partnerOriginColumnPresent = r.rows.length > 0;
+  } catch (e: any) {
+    // Probe failure is NOT treated as "column absent forever" — leave the cache
+    // unset so a transient DB error retries, and fail closed for this call.
+    console.error("[grader] partner-origin schema probe failed:", e?.message || e);
+    return false;
+  }
+  if (!partnerOriginColumnPresent && !partnerOriginAbsenceWarned) {
+    partnerOriginAbsenceWarned = true;
+    console.warn(
+      `[grader] certificates.${PARTNER_ORIGIN_COLUMN} is ABSENT — partner origin cannot be determined. ` +
+        `FAILING CLOSED: every submit requires human review and nothing auto-approves until the column exists.`
+    );
+  }
+  return partnerOriginColumnPresent;
+}
+
+/** Resolve a certificate's submission origin. See the seam contract above. */
+export async function getCertOrigin(certId: number): Promise<CertOrigin> {
+  if (!(await partnerOriginColumnExists())) return "unknown";
+  try {
+    // Column name is a module constant (never user input) and is emitted as a
+    // quoted identifier by drizzle's sql.identifier — not string-concatenated.
+    const r = await db.execute(
+      sql`SELECT ${sql.identifier(PARTNER_ORIGIN_COLUMN)} AS origin_type,
+                 (origin_partner_id IS NOT NULL) AS has_partner_snapshot
+          FROM certificates WHERE id = ${certId}`
+    );
+    const row = r.rows[0] as { origin_type: string | null; has_partner_snapshot: boolean } | undefined;
+    if (!row) return "unknown";
+    // Defence in depth: a partner snapshot present on a row that does not declare
+    // itself PARTNER violates 0035's CHECK constraints. Treat it as partner.
+    if (row.has_partner_snapshot) return "partner";
+    if (row.origin_type === "PARTNER") return "partner";
+    if (row.origin_type === "HQ") return "hq";
+    if (row.origin_type == null) return "legacy";
+    // Unrecognised value — outside the closed vocabulary. Fail closed.
+    return "unknown";
+  } catch (e: any) {
+    console.error("[grader] partner-origin lookup failed:", e?.message || e);
+    return "unknown";
+  }
+}
+
+/**
+ * TRUE when a cert must be treated as partner-originated (mandatory review).
+ * FAILS CLOSED — "unknown" (schema absent / probe failed / unrecognised value)
+ * counts as partner. "legacy" (0035 applied, row predates capture) is a KNOWN
+ * historical HQ row and follows HQ policy, so it does not force review.
+ */
+export async function isPartnerOriginatedCert(certId: number): Promise<boolean> {
+  const origin = await getCertOrigin(certId);
+  return origin === "partner" || origin === "unknown";
+}
+
 /**
  * Keys that must NEVER reach a grader. The delegation proxy reuses unchanged
  * admin handlers, some of which return the full certificate (incl. owner/claim
@@ -950,6 +1079,66 @@ export async function rejectCertGrade(certId: number, reason: string | null, adm
 }
 
 /**
+ * PRE-PUBLISH GATES — the single definition of "this grade is in a state that
+ * may legitimately go live". Extracted verbatim from approveGraderCert so the
+ * AUTO-approve path in server/routes/grader.ts enforces exactly the same two
+ * rules a human approver has to satisfy. There is no second implementation:
+ * both paths call this.
+ *
+ * PURE CHECK — reads only. No writes, no timestamps, no approver, no
+ * print_state change, and NOTHING here computes or alters a grade. The scoring
+ * engine is untouched; this only decides WHETHER an already-computed grade may
+ * be published.
+ *
+ * Returns { ok: true } or a 409 refusal with an operator-fixable message.
+ */
+export async function checkGradePublishGates(
+  certId: number
+): Promise<{ ok: true } | { ok: false; status: number; error: string; code: "incomplete_subgrades" | string }> {
+  // B3 completeness gate (owner-approved 2026-07-02): a numeric grade (grade
+  // NOT NULL — non-numeric NO/AA certs store grade=NULL so they're exempt)
+  // must never publish with any of the four sub-grades blank, because the
+  // the overall score is computed from them, elsewhere.
+  const subgradeGate = await db.execute(sql`
+    SELECT 1 FROM certificates
+    WHERE id = ${certId} AND grade IS NOT NULL
+      AND (centering_score IS NULL OR corners_score IS NULL
+        OR edges_score IS NULL OR surface_score IS NULL)
+  `);
+  if (subgradeGate.rows.length > 0) {
+    return {
+      ok: false as const,
+      status: 409,
+      code: "incomplete_subgrades",
+      error:
+        "Cannot publish a numeric grade without all four sub-grades (centering, corners, edges, surface). Re-run the MVGS workstation so the sub-grades populate, then approve.",
+    };
+  }
+  // The gate above is scoped `grade IS NOT NULL`, so a NUMERIC row carrying NO grade at
+  // all skipped it entirely and published live with a blank grade — gradeLabelFull
+  // ('numeric', null) renders "". That is the MV205 defect class on this path. Validate
+  // the stored grade against the SAME printability rule the renderer uses, so a
+  // certificate can never be published in a state it could not legitimately print.
+  const gradeRow = await db.execute(sql`
+    SELECT grade_type, grade::text AS grade FROM certificates WHERE id = ${certId}
+  `);
+  const gr = gradeRow.rows[0] as { grade_type: string | null; grade: string | null } | undefined;
+  const verdict = checkPrintableGrade({ gradeType: gr?.grade_type ?? null, gradeOverall: gr?.grade ?? null });
+  if (!verdict.printable) {
+    return {
+      ok: false as const,
+      status: 409,
+      code: verdict.reason ?? "unprintable_grade",
+      error:
+        verdict.reason === "missing_numeric_grade"
+          ? "Cannot publish a numeric certificate with no grade. Re-run the MVGS workstation so the grade and sub-grades populate, then approve."
+          : (verdict.message ?? "This certificate's grade is not valid, so it cannot be published."),
+    };
+  }
+  return { ok: true as const };
+}
+
+/**
  * Approve a grader-submitted cert (EXEMPT from the grade-write lock; allowed
  * ONLY from 'pending_review'). Publishes ONLY this cert (grade_approved_at +
  * status='active') and marks it 'approved' + graded_at — never touches sibling
@@ -961,45 +1150,11 @@ export async function approveGraderCert(certId: number, adminUser: string) {
   if (a.gradingStatus !== "pending_review") {
     return { ok: false as const, status: 409, error: `Card is '${a.gradingStatus}', not pending review` };
   }
-  // B3 completeness gate (owner-approved 2026-07-02): a numeric grade (grade
-  // NOT NULL — non-numeric NO/AA certs store grade=NULL so they're exempt)
-  // must never publish with any of the four sub-grades blank, because the
-  // MVGS overall is computed from them. Pure pre-publish check — the atomic
-  // CAS publish below and all scoring logic are untouched.
-  const subgradeGate = await db.execute(sql`
-    SELECT 1 FROM certificates
-    WHERE id = ${certId} AND grade IS NOT NULL
-      AND (centering_score IS NULL OR corners_score IS NULL
-        OR edges_score IS NULL OR surface_score IS NULL)
-  `);
-  if (subgradeGate.rows.length > 0) {
-    return {
-      ok: false as const,
-      status: 409,
-      error:
-        "Cannot publish a numeric grade without all four sub-grades (centering, corners, edges, surface). Re-run the MVGS workstation so the sub-grades populate, then approve.",
-    };
-  }
-  // The gate above is scoped `grade IS NOT NULL`, so a NUMERIC row carrying NO grade at
-  // all skipped it entirely and published live with a blank grade — gradeLabelFull
-  // ('numeric', null) renders "". That is the MV205 defect class on this path. Validate
-  // the stored grade against the SAME printability rule the renderer uses, so a
-  // certificate can never be published in a state it could not legitimately print.
-  // Runs BEFORE any approval write: no timestamps, no approver, no print_state change.
-  const gradeRow = await db.execute(sql`
-    SELECT grade_type, grade::text AS grade FROM certificates WHERE id = ${certId}
-  `);
-  const gr = gradeRow.rows[0] as { grade_type: string | null; grade: string | null } | undefined;
-  const verdict = checkPrintableGrade({ gradeType: gr?.grade_type ?? null, gradeOverall: gr?.grade ?? null });
-  if (!verdict.printable) {
-    return {
-      ok: false as const,
-      status: 409,
-      error:
-        verdict.reason === "missing_numeric_grade"
-          ? "Cannot publish a numeric certificate with no grade. Re-run the MVGS workstation so the grade and sub-grades populate, then approve."
-          : (verdict.message ?? "This certificate's grade is not valid, so it cannot be published."),
-    };
+  // Both pre-publish gates (B3 sub-grade completeness + printable-grade), shared
+  // verbatim with the auto-approve path. Runs BEFORE any approval write.
+  const gates = await checkGradePublishGates(certId);
+  if (!gates.ok) {
+    return { ok: false as const, status: gates.status, error: gates.error };
   }
   // Phase 2 — the publish is an atomic CAS (pending_review→active); if it matched
   // 0 rows the state changed under us (e.g. a racing reject), so bail with 409

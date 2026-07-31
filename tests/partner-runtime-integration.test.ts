@@ -10,7 +10,7 @@
  *
  * Reproduce (host must be 127.0.0.1):
  *   PARTNER_RT_ADMIN=postgresql://postgres@127.0.0.1:5544/dispo \
- *   PARTNER_RT_RUNTIME=postgresql://partner_app_test:synthetic@127.0.0.1:5544/dispo \
+ *   PARTNER_RT_RUNTIME=postgresql://partner_app_test_rt:synthetic@127.0.0.1:5544/dispo \
  *   npx vitest run tests/partner-runtime-integration.test.ts
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
@@ -73,9 +73,9 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
     await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT);
     // synthetic LOGIN role that inherits the restricted partner_runtime role
-    await admin.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
-    await admin.query("CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic'");
-    await admin.query("GRANT partner_runtime TO partner_app_test");
+    await admin.query("DROP ROLE IF EXISTS partner_app_test_rt").catch(() => {});
+    await admin.query("CREATE ROLE partner_app_test_rt LOGIN PASSWORD 'synthetic'");
+    await admin.query("GRANT partner_runtime TO partner_app_test_rt");
     // env for the runtime BEFORE importing app modules (pools are lazy)
     process.env.PARTNER_DATABASE_URL = RUNTIME;
     process.env.PARTNER_ADMIN_DATABASE_URL = ADMIN;
@@ -168,7 +168,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     await new Promise<void>((r) => server?.close(() => r()));
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools();
-    await admin?.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
+    await admin?.query("DROP ROLE IF EXISTS partner_app_test_rt").catch(() => {});
     await admin?.end().catch(() => {});
   });
 
@@ -195,7 +195,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     const who = await c.query<{ u: string; su: boolean }>(
       "SELECT current_user u, (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) su"
     );
-    expect(who.rows[0].u).toBe("partner_app_test");
+    expect(who.rows[0].u).toBe("partner_app_test_rt");
     expect(who.rows[0].su).toBe(false);
     await c.end();
   });

@@ -97,9 +97,9 @@ let ADMIN_EMAIL: string;
     // records into partner_management_audit (migration 0015) using an action type added by 0033.
     // The previous default set stopped at 0009, so those tables/values did not exist here.
     await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION);
-    await admin.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
-    await admin.query("CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic'");
-    await admin.query("GRANT partner_runtime TO partner_app_test");
+    await admin.query("DROP ROLE IF EXISTS partner_app_test_shell").catch(() => {});
+    await admin.query("CREATE ROLE partner_app_test_shell LOGIN PASSWORD 'synthetic'");
+    await admin.query("GRANT partner_runtime TO partner_app_test_shell");
 
     const authMod = await import("../server/auth");
     ADMIN_EMAIL = authMod.ADMIN_EMAIL;
@@ -182,7 +182,7 @@ let ADMIN_EMAIL: string;
     await new Promise<void>((r) => partnerServer?.close(() => r()));
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools();
-    await admin?.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
+    await admin?.query("DROP ROLE IF EXISTS partner_app_test_shell").catch(() => {});
     await admin?.end().catch(() => {});
   });
 

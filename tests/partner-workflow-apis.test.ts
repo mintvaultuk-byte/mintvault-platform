@@ -12,7 +12,7 @@
  * Runs ONLY when PARTNER_RT_ADMIN + PARTNER_RT_RUNTIME are set (superuser + runtime URLs to a
  * DISPOSABLE local Postgres):
  *   PARTNER_RT_ADMIN=postgresql://postgres@127.0.0.1:5544/dispo \
- *   PARTNER_RT_RUNTIME=postgresql://partner_app_test:synthetic@127.0.0.1:5544/dispo \
+ *   PARTNER_RT_RUNTIME=postgresql://partner_app_test_rt:synthetic@127.0.0.1:5544/dispo \
  *   npx vitest run tests/partner-workflow-apis.test.ts
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
@@ -58,9 +58,9 @@ let admin: Client;
       await admin.query("CREATE SCHEMA public");
       await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
       await applyMigrationsRealistic(admin, ADMIN!);
-      await admin.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
-      await admin.query("CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic'");
-      await admin.query("GRANT partner_runtime TO partner_app_test");
+      await admin.query("DROP ROLE IF EXISTS partner_app_test_rt").catch(() => {});
+      await admin.query("CREATE ROLE partner_app_test_rt LOGIN PASSWORD 'synthetic'");
+      await admin.query("GRANT partner_runtime TO partner_app_test_rt");
       process.env.PARTNER_DATABASE_URL = RUNTIME;
       process.env.PARTNER_ADMIN_DATABASE_URL = ADMIN;
       process.env.PARTNER_MFA_ENC_KEY = "0".repeat(64);
@@ -134,7 +134,7 @@ let admin: Client;
       await new Promise<void>((r) => server?.close(() => r()));
       const { closePartnerPools } = await import("../server/partner/db");
       await closePartnerPools();
-      await admin?.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
+      await admin?.query("DROP ROLE IF EXISTS partner_app_test_rt").catch(() => {});
       await admin?.end().catch(() => {});
     });
 

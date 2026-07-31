@@ -26,7 +26,7 @@
  *
  * Reproduce (host must be loopback; the database is DISPOSABLE and is dropped/recreated):
  *   PARTNER_MOUNT_RT_ADMIN=postgres://postgres:postgres@127.0.0.1:5561/mintvault_partner_mount \
- *   PARTNER_MOUNT_RT_RUNTIME=postgres://partner_app_test:synthetic@127.0.0.1:5561/mintvault_partner_mount \
+ *   PARTNER_MOUNT_RT_RUNTIME=postgres://partner_app_test_mount:synthetic@127.0.0.1:5561/mintvault_partner_mount \
  *   LC_ALL=C LANG=C npx vitest run tests/partner-portal-mount-integration.test.ts
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
@@ -225,9 +225,9 @@ async function login(
 
     // Synthetic LOGIN role inheriting the restricted partner_runtime role — the runtime must never
     // be a superuser, which the first test below proves rather than assumes.
-    await admin.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
-    await admin.query("CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic'");
-    await admin.query("GRANT partner_runtime TO partner_app_test");
+    await admin.query("DROP ROLE IF EXISTS partner_app_test_mount").catch(() => {});
+    await admin.query("CREATE ROLE partner_app_test_mount LOGIN PASSWORD 'synthetic'");
+    await admin.query("GRANT partner_runtime TO partner_app_test_mount");
 
     const { seedPartnerRbac } = await import("../server/partner/permissions");
     await seedPartnerRbac();
@@ -344,7 +344,7 @@ async function login(
   afterAll(async () => {
     await new Promise<void>((r) => server?.close(() => r()));
     await closePartnerPools?.();
-    await admin?.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
+    await admin?.query("DROP ROLE IF EXISTS partner_app_test_mount").catch(() => {});
     await admin?.end().catch(() => {});
   });
 
@@ -363,7 +363,7 @@ async function login(
     const who = await c.query<{ u: string; su: boolean }>(
       "SELECT current_user u, (SELECT rolsuper FROM pg_roles WHERE rolname=current_user) su"
     );
-    expect(who.rows[0].u).toBe("partner_app_test");
+    expect(who.rows[0].u).toBe("partner_app_test_mount");
     expect(who.rows[0].su).toBe(false);
     await c.end();
   });

@@ -29,6 +29,8 @@ function enrolStartMessage(err: unknown): string {
     return "Two-factor setup is temporarily unavailable. Please try again shortly, or contact MintVault.";
   if (reason === "requires_current_factor")
     return "You already have an authenticator app set up for this account. Enter a code from it, or use a recovery code.";
+  if (reason === "second_factor_required")
+    return "That code from your current authenticator app was not right. Go back and try again, or use a recovery code.";
   if (reason === "unauthorised") return "We could not confirm your password. Please sign in again.";
   return "We could not start two-factor setup. Please try again, or contact MintVault if this continues.";
 }
@@ -107,11 +109,18 @@ function OtpauthQr({ uri }: { uri: string }) {
 
 export function PartnerMfaEnrolment({
   password,
+  secondFactor,
   onComplete,
   onUseExistingAuthenticator,
 }: {
   /** The password the user just entered — required by the server as elevated verification. */
   password: string;
+  /**
+   * A code from the CURRENT authenticator (or a recovery code), collected only when this flow is
+   * REPLACING an authenticator that is already set up. The server requires it in that case and
+   * ignores it otherwise (F3). Held only for the single /mfa/enrol call, never stored.
+   */
+  secondFactor?: { code?: string; recoveryCode?: string };
   /** Called once the user has confirmed a code AND acknowledged their recovery codes. */
   onComplete: () => void | Promise<void>;
   /** Back to the "enter a code" step, for a user who already has an authenticator. */
@@ -133,7 +142,7 @@ export function PartnerMfaEnrolment({
     setError(null);
     setPhase("starting");
     try {
-      const out = await partnerMfa.enrol(password);
+      const out = await partnerMfa.enrol(password, secondFactor);
       setSecret(out.secret);
       setOtpauthUri(out.otpauthUri);
       setPhase("scan");
@@ -141,7 +150,7 @@ export function PartnerMfaEnrolment({
       setError(enrolStartMessage(err));
       setPhase("blocked");
     }
-  }, [password]);
+  }, [password, secondFactor]);
 
   useEffect(() => {
     if (started.current) return;

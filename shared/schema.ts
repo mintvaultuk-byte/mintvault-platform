@@ -13,6 +13,7 @@ import {
   index,
   jsonb,
   bigint,
+  uuid,
   customType,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
@@ -780,6 +781,41 @@ export const certificates = pgTable("certificates", {
   embeddedAt: timestamp("embedded_at", { withTimezone: true }),
   // TCGdex canonical card ID (e.g. "SV5K-075"). Populated by card-lookup.
   externalCardId: text("external_card_id"),
+  // ── IMMUTABLE GRADING-ORIGIN SNAPSHOT (migration 0035) ─────────────────────
+  // Who graded this card, and where, AS IT WAS AT THE MOMENT OF GRADING.
+  //
+  // These are SNAPSHOT VALUES, not a lookup. They are deliberately NOT resolved
+  // through partner_organisations / partner_profiles at read time: a certificate
+  // is a permanent public record, so renaming, relocating, suspending, revoking
+  // or deleting a partner must NEVER retro-edit what an already-issued
+  // certificate claims. The *_id columns exist for joins and analytics only and
+  // carry NO foreign key — partner offboarding must never cascade into, nor be
+  // blocked by, a certificate row.
+  //
+  // ALL NULLABLE, NO DEFAULT, NEVER BACKFILLED. origin_type NULL = LEGACY: the
+  // row predates origin capture. Legacy renders identically to HQ, while the
+  // NULL preserves the audit distinction between "recorded as HQ" and "we never
+  // captured this". Use certificateOrigin() in server/labels.ts to read these —
+  // never hand-roll the precedence.
+  //
+  // IMMUTABILITY IS ENFORCED IN THE DATABASE (trigger
+  // trg_certificates_origin_immutable, migration 0035): once origin_type is set,
+  // no origin_* column may change value. This matters because
+  // storage.updateCertificate() spreads a whole record into UPDATE ... SET and
+  // the cert edit form posts full state — application-level care alone would not
+  // hold. Re-sending identical values is allowed, so existing writers are
+  // unaffected.
+  originType: text("origin_type").$type<"HQ" | "PARTNER" | null>(),
+  originPartnerId: uuid("origin_partner_id"),
+  originPartnerPublicRef: text("origin_partner_public_ref"),
+  originPartnerLegalName: text("origin_partner_legal_name"),
+  originPartnerTradingName: text("origin_partner_trading_name"),
+  originLocationId: uuid("origin_location_id"),
+  originLocationPublicRef: text("origin_location_public_ref"),
+  originLocationName: text("origin_location_name"),
+  originLocationAddress: text("origin_location_address"),
+  originCapturedAt: timestamp("origin_captured_at", { withTimezone: true }),
+  originSnapshotVersion: integer("origin_snapshot_version"),
 });
 
 export const certificateImages = pgTable("certificate_images", {
@@ -1043,7 +1079,49 @@ export const insertCertificateSchema = createInsertSchema(certificates).omit({
   claimCodeHash: true,
   claimCodeCreatedAt: true,
   claimCodeUsedAt: true,
+  // Grading origin is SERVER-DERIVED, never client-supplied. If these stayed in the insert
+  // schema, any caller that reaches a createCertificate route could forge provenance —
+  // "Graded by <someone else's shop>" — on a permanent public record. They are passed to
+  // storage.createCertificate() as a separate, explicitly-typed CertificateOriginInput
+  // argument instead, so the only way to set them is from a resolved partner context.
+  originType: true,
+  originPartnerId: true,
+  originPartnerPublicRef: true,
+  originPartnerLegalName: true,
+  originPartnerTradingName: true,
+  originLocationId: true,
+  originLocationPublicRef: true,
+  originLocationName: true,
+  originLocationAddress: true,
+  originCapturedAt: true,
+  originSnapshotVersion: true,
 });
+
+/**
+ * Origin snapshot supplied to storage.createCertificate(). Absent = HQ.
+ *
+ * Values are captured by the CALLER from the partner context at grading time and copied in
+ * verbatim; storage never re-resolves them. `capturedAt` defaults to insert time.
+ * `snapshotVersion` is fixed at CERTIFICATE_ORIGIN_SNAPSHOT_VERSION for shape v1.
+ */
+export const CERTIFICATE_ORIGIN_SNAPSHOT_VERSION = 1;
+
+export type CertificateOriginInput =
+  | { kind: "HQ" }
+  | {
+      kind: "PARTNER";
+      partnerId: string;
+      partnerPublicRef?: string | null;
+      /** partner_organisations.legal_name at grading time. Render fallback + legal entity. */
+      partnerLegalName?: string | null;
+      /** partner_profiles.trading_name at grading time. THE customer-facing "Graded by <X>". */
+      partnerTradingName?: string | null;
+      locationId?: string | null;
+      locationPublicRef?: string | null;
+      locationName?: string | null;
+      locationAddress?: string | null;
+      capturedAt?: Date;
+    };
 
 export const insertCertificateImageSchema = createInsertSchema(certificateImages).omit({
   id: true,

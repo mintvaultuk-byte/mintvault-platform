@@ -752,6 +752,11 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     // on partner credits — cleared purely so the later-migration guard stops tripping before the
     // evidence guard this test is actually about can be reached.
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0034_partner_rbac_seed.sql'");
+    // Immutable Partner certificate origin (0035) is likewise a later, unrelated additive
+    // migration — it adds nullable snapshot columns to `certificates` and has no bearing
+    // whatsoever on partner credits. Cleared for the same reason as the rows above: so the
+    // later-migration guard stops tripping before the evidence guard this test is about.
+    await admin.query("DELETE FROM schema_migrations WHERE filename = '0035_partner_certificate_origin.sql'");
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );

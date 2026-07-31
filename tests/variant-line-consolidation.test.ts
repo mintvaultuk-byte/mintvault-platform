@@ -10,6 +10,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
+import { protectedChangedFiles, protectedDiffFor } from "./helpers/protected-diff";
 import { execFileSync } from "child_process";
 import { join } from "path";
 import { addedCodeOf, addedJsOf, hasMalformedEscape, stripNonCode } from "./helpers/strip-non-code";
@@ -230,10 +231,10 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
     // covering the print-batch grade gate, approveGraderCert and applyCertGradeDraft.
     // The genuine CALCULATION engine is still hard-blocked: scoring tables, the centering
     // maths, the Pristine gate, the MVGS input builder and the grading prompt.
-    const changed = execFileSync("git", ["diff", "--name-only", "origin/main"], { encoding: "utf8" })
-      .trim()
-      .split("\n")
-      .filter(Boolean);
+    // Base resolution is FAIL-CLOSED (tests/helpers/protected-diff.ts): under a shallow
+    // checkout an unresolvable base throws rather than yielding an empty changed-file list
+    // that would make this loop a no-op and report green while enforcing nothing.
+    const changed = protectedChangedFiles();
     // `server/grader.ts` stays INSIDE calcEngine — it is NOT exempted. A change to it is
     // permitted only if the added lines match one of the explicitly founder-authorised
     // signatures below AND contain no calculation logic. Anything else fails.
@@ -249,7 +250,7 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
       /mvgs-scoring|shared\/pristine|shared\/centering|mvgs-input-builder|server\/grader|grading-prompt|shared\/mvgs-scoring/;
     for (const f of changed) {
       if (f === "server/grader.ts") {
-        const diff = execFileSync("git", ["diff", "origin/main", "--", f], { encoding: "utf8" });
+        const diff = protectedDiffFor(f);
         // Two representations — see tests/helpers/strip-non-code.ts. `addedCode` keeps tagged
         // SQL (for identifier/write detection, F2/N4); `addedJs` drops ALL template text so
         // SQL can never satisfy a JavaScript signature (N5). Tokenised by the TypeScript
@@ -263,10 +264,41 @@ describe("MVGS / grading calculations are not touched (item 14)", () => {
           /finish_variant\s*=\s*\$\{/.test(addedCode) &&
           /promo_type\s*=\s*\$\{/.test(addedCode);
         const signatureB = /class\s+GradeDraftRejected\b/.test(addedJs) && /\bcheckPrintableGrade\s*\(/.test(addedJs);
-        expect(signatureA || signatureB, "server/grader.ts changed but matches no founder-authorised signature").toBe(
-          true
+        // C) Wave 1 Partner-origin integration — founder-approved 2026-07-31, narrowly, for
+        //    the reviewed integration ONLY. It recognises the immutable Partner provenance
+        //    added by migration 0035, distinguishes PARTNER / HQ / legacy safely, fails closed
+        //    on unknown provenance, and forces mandatory Super Admin review for Partner-
+        //    originated grading (no review-rate sampling bypass), reusing the EXISTING B3 and
+        //    printability rules rather than restating them.
+        //
+        //    ALL FOUR tokens are required, so this cannot be satisfied by an incidental edit:
+        //    the provenance column constant, the origin resolver, the fail-closed predicate,
+        //    and the extracted publish-gate helper. No calculation identifier appears in any
+        //    of them, and the calculation-token assertion below still applies unchanged — so
+        //    a weighting, threshold, defect-scoring, centering or B1/B2/B3 change still fails
+        //    even if it were bundled alongside this signature.
+        const signatureC =
+          /\bexport const PARTNER_ORIGIN_COLUMN\b/.test(addedJs) &&
+          /\bgetCertOrigin\s*\(/.test(addedJs) &&
+          /\bisPartnerOriginatedCert\s*\(/.test(addedJs) &&
+          /\bcheckGradePublishGates\s*\(/.test(addedJs);
+        expect(
+          signatureA || signatureB || signatureC,
+          "server/grader.ts changed but matches no founder-authorised signature"
+        ).toBe(true);
+        // The B3 sub-grade COMPLETENESS check that signature C extracts verbatim from
+        // approveGraderCert references the four sub-grade COLUMNS by name, one of which is
+        // `centering_score`. Those are column identifiers in a NULL-completeness predicate,
+        // not centering MATHS — the centering calculation lives in shared/centering.ts, which
+        // remains byte-identical and is still hard-blocked by `calcEngine` above.
+        //
+        // So the four column names are removed before the calculation-token test, and ONLY
+        // those exact identifiers. Bare `centering`, `mvgs`, `pristine`, `gradeNum`,
+        // `calculateOverallGrade` and `scoreMvgs` all still fail, in this file and every other.
+        const b3Columns = /\b(centering_score|corners_score|edges_score|surface_score)\b/g;
+        expect(addedCode.replace(b3Columns, "")).not.toMatch(
+          /mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i
         );
-        expect(addedCode).not.toMatch(/mvgs|pristine|centering|gradeNum|calculateOverallGrade|scoreMvgs/i);
         continue;
       }
       expect(f, `unexpected change to grading engine: ${f}`).not.toMatch(calcEngine);

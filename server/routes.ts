@@ -5432,6 +5432,79 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // which emits PDF + SVG + PNG in one call with the correct
   // front + claim-insert layout. label-sheet.ts is deleted.
 
+  /* ══════════════════════════════════════════════════════════════════════════
+   * P0-D — PRINT APPROVAL GATE (server-side, both print endpoints).
+   * ══════════════════════════════════════════════════════════════════════════
+   * The live print console posts straight to /api/admin/print-batch. That
+   * endpoint had a grade PRINTABILITY pre-pass (added after the 2026-07-02
+   * incident) but NO approval or review-state gate at all — a certificate that
+   * was still being graded, still awaiting review, or bounced back to the
+   * grader for correction could be batched onto a real label sheet by a direct
+   * API call. The approval gate that does exist lives in the parallel
+   * print-workflow system (shared/print-lifecycle.ts) which this legacy console
+   * never calls.
+   *
+   * This closes it AT THE HANDLER, not in the UI. Three refusals, all fail
+   * closed on unknown/missing state:
+   *
+   *   grade_review_incomplete — grader_status is 'assigned' or 'pending_review'.
+   *       'pending_review' = review not done. 'assigned' is ALSO a blocking
+   *       correction state: rejectCertGrade bounces a card back to 'assigned'
+   *       WITHOUT clearing grade_approved_at, so a previously-approved card
+   *       that a reviewer sent back for correction would otherwise sail
+   *       through the approval check below on a stale timestamp.
+   *       'unassigned' is allowed — pre-grader-v2 certs approved by an admin
+   *       legitimately sit there, and they are still held by the next check.
+   *
+   *   not_approved — grade_approved_at IS NULL. This is the same signal
+   *       shared/print-lifecycle.ts's effectivePrintState() uses to decide
+   *       approved vs awaiting_approval, so both systems agree on the meaning
+   *       of "approved" rather than inventing a second definition.
+   *
+   *   cert_not_active — status is voided (listCertificates excludes soft-
+   *       deleted rows but NOT voided ones).
+   *
+   * The pre-existing grade printability pre-pass is UNCHANGED and still runs —
+   * that was a deliberate fix for a real production incident. Both passes are
+   * ALL-OR-NOTHING: one blocked cert refuses the whole batch, before the
+   * claim-code minting loop, so no partial sheet and no side effects.
+   *
+   * Deliberately NOT gated here: print_state. Advancing print_state is owned by
+   * the parallel print-workflow service; the legacy console never writes it, so
+   * gating on it would block certs on state this endpoint cannot produce.
+   *
+   * WHY THE HANDLER AND NOT storage.getAllCertificatesForPrinting():
+   *   that function is a READ used to populate the console's queue view. A gate
+   *   is an authorisation decision on a WRITE-effecting action (claim-code
+   *   minting + artefact generation + audit), so it belongs at the action
+   *   boundary. Filtering the list instead would (a) leave the endpoint itself
+   *   open to a direct API call — the exact hole being closed, (b) silently
+   *   vanish certs from the operator's queue with no reason shown, and (c)
+   *   change behaviour for every other caller of that read. The handler gate
+   *   refuses loudly, per cert, with a machine-readable code.
+   */
+  type PrintApprovalBlock = { certId: string; code: string; message: string };
+  const checkPrintApproval = (id: string, c: Record<string, unknown>): PrintApprovalBlock | null => {
+    const graderStatus = String(c.graderStatus ?? "");
+    if (graderStatus === "pending_review" || graderStatus === "assigned") {
+      return {
+        certId: id,
+        code: "grade_review_incomplete",
+        message:
+          graderStatus === "pending_review"
+            ? `${id}: grading review is not complete (awaiting approval).`
+            : `${id}: this card is back with the grader for correction.`,
+      };
+    }
+    if (!c.gradeApprovedAt) {
+      return { certId: id, code: "not_approved", message: `${id}: grade has not been approved.` };
+    }
+    if (String(c.status ?? "") !== "active") {
+      return { certId: id, code: "cert_not_active", message: `${id}: certificate is not active (voided).` };
+    }
+    return null;
+  };
+
   // v525 — single-sheet print-and-cut batch. Up to 4 cards per A4 sheet,
   // front label + claim insert per row. Returns THREE files in one call:
   //
@@ -5511,6 +5584,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           code: "UNPRINTABLE_GRADE",
           blockedCertIds: unprintable.map((u) => u.certId),
           blocked: unprintable,
+        });
+      }
+      // ── Approval / review-state PRE-PASS (fail closed) ───────────────────────
+      // See the P0-D block above this handler. Same all-or-nothing contract as
+      // the printability pre-pass, and likewise BEFORE the claim-code minting
+      // loop, so a refused batch has zero side effects.
+      const unapproved: { certId: string; code: string; message: string }[] = [];
+      for (const id of ids) {
+        const c = allCerts.find((x: any) => x.certId === id);
+        if (!c) continue; // handled as `missing` below
+        const block = checkPrintApproval(id, c as unknown as Record<string, unknown>);
+        if (block) unapproved.push(block);
+      }
+      if (unapproved.length) {
+        return res.status(422).json({
+          error: `Cannot print — ${unapproved.length === 1 ? "this certificate is" : "these certificates are"} not approved for printing: ${unapproved.map((u) => u.message).join(" ")}`,
+          code: "NOT_APPROVED_FOR_PRINT",
+          blockedCertIds: unapproved.map((u) => u.certId),
+          blocked: unapproved,
         });
       }
       const items: { cert: any; claimCode: string }[] = [];
@@ -5840,6 +5932,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           code: "UNPRINTABLE_GRADE",
           blockedCertIds: unprintableRe.map((u) => u.certId),
           blocked: unprintableRe,
+        });
+      }
+      // Reprint enforces the SAME approval / review-state gate as a fresh batch,
+      // for the same reason the printability rule is shared: a reprint re-renders
+      // from the CURRENT certificate row, so a card that is mid-correction or
+      // unapproved would emit a physical label exactly as a fresh batch would.
+      const unapprovedRe: { certId: string; code: string; message: string }[] = [];
+      for (const id of ids) {
+        const c = allCerts.find((x: any) => x.certId === id);
+        if (!c) continue;
+        const block = checkPrintApproval(id, c as unknown as Record<string, unknown>);
+        if (block) unapprovedRe.push(block);
+      }
+      if (unapprovedRe.length) {
+        return res.status(422).json({
+          error: `Cannot reprint — ${unapprovedRe.length === 1 ? "this certificate is" : "these certificates are"} not approved for printing: ${unapprovedRe.map((u) => u.message).join(" ")}`,
+          code: "NOT_APPROVED_FOR_PRINT",
+          blockedCertIds: unapprovedRe.map((u) => u.certId),
+          blocked: unapprovedRe,
         });
       }
       const items: { cert: any; claimCode: string }[] = [];

@@ -67,13 +67,77 @@ export async function partnerLogin(email: string, password: string, ip?: string 
   const good = u.password_hash ? await bcrypt.compare(password, u.password_hash) : false;
 
   if (u.org_status !== "ACTIVE" || u.user_status !== "ACTIVE") {
-    await recordFailure(u, ip, "suspended");
+    // P0-F: a suspended/invited/revoked account is refused REGARDLESS of the password, so counting
+    // these attempts towards the lockout threshold protects nothing — it only accumulates a counter
+    // that has no reset path while suspended, so the account is locked the instant it is
+    // reactivated. Record the attempt (audit) but do not arm the lockout. The failure is still
+    // generic to the caller.
+    //
+    // TIMING, stated honestly: this branch DOES do measurably less work than the active-account
+    // failure path (it skips the lockout-arming UPDATE), and the bcrypt compare above does NOT mask
+    // that — bcrypt is paid on BOTH arms, so it cancels out of the difference and hides nothing. An
+    // earlier version of this comment claimed otherwise; that reasoning was wrong.
+    //
+    // What actually makes the residual signal unexploitable is that an attacker cannot collect
+    // enough samples to lift a sub-millisecond difference out of network noise: partner login is
+    // rate limited FAIL-CLOSED on two independent buckets — 30 attempts per IP per 15 minutes
+    // (rate-limit.ts partnerLoginIpLimiter) and 10 per account per 15 minutes
+    // (partnerLoginLimiter). Ten samples per account per quarter-hour is orders of magnitude short
+    // of what distinguishing one skipped UPDATE would need. If either bucket is ever widened or
+    // removed, this branch needs re-examining on its own merits.
+    await recordFailure(u, ip, "suspended", { countTowardsLockout: false });
     return { ok: false, reason: "suspended" };
   }
   if (u.locked_until && new Date(u.locked_until).getTime() > Date.now()) {
-    await recordFailure(u, ip, "locked");
+    // countTowardsLockout:false for the SAME reason as the suspended branch above. A locked
+    // account is refused regardless of the password, so counting the attempt protects nothing —
+    // but counting it re-evaluates `locked_until = now() + 15 minutes` on EVERY attempt, because
+    // failed_login_count is already >= the threshold. That let an unauthenticated attacker hold a
+    // named partner account offline indefinitely at ~4 requests/hour, well inside both login
+    // limiters. The attempt is still audited below; only the clock stops extending.
+    await recordFailure(u, ip, "locked", { countTowardsLockout: false });
     return { ok: false, reason: "locked" };
   }
+
+  // The lockout INTERVAL has elapsed (we only reach here when locked_until is absent or past).
+  // Retire the spent counter BEFORE this attempt is judged.
+  //
+  // Without this, failed_login_count stays at the threshold indefinitely — it is cleared only by a
+  // successful login, a completed password reset, or invitation acceptance — so recordFailure's
+  // arming expression `failed_login_count + 1 >= threshold` is satisfied by the FIRST failure after
+  // every expiry. One unauthenticated request per interval then holds a named partner account
+  // offline forever, comfortably inside both login limiters. The countTowardsLockout:false fix
+  // above stopped a LIVE lock being extended; it did not stop a SPENT lock being instantly re-armed,
+  // which is the other half of the same denial-of-service. Proven end-to-end in
+  // tests/partner-lockout-decay.test.ts.
+  //
+  // Brute-force protection is unchanged: after a lock is served, re-locking costs a full fresh
+  // THRESHOLD of failures again (asserted by that suite) rather than one. Stated precisely, because
+  // the distinction matters to the next reader: this retires the counter when a LOCK EXPIRES; it is
+  // not a general time-decay. An account sitting below the threshold with no lock still carries its
+  // accumulated count indefinitely — unchanged, pre-existing behaviour, and deliberately so, since
+  // decaying that would hand an attacker a slow-drip path under the threshold.
+  //
+  // This is the same expiry-retires-the-counter model server/staff.ts already uses for staff
+  // accounts — the existing architecture, not a second, parallel lockout system.
+  //
+  // CLOCK NOTE (accepted residual): the expiry test above uses the app clock and this UPDATE uses
+  // the database clock. If the app clock ran AHEAD of the database's, this reset would match no row
+  // and the next failure would re-arm — but in that state the lock has genuinely not expired
+  // database-side, so the outcome is a still-locked account, not a weakened one.
+  //
+  // `locked_until <= now()` is re-checked inside the UPDATE so a concurrent request that has just
+  // armed a fresh lock cannot have it cleared by this reset.
+  if (u.locked_until) {
+    await withTenant({ tenantId: u.tenant_id }, (c) =>
+      c.query(
+        `UPDATE partner_users SET failed_login_count = 0, locked_until = NULL
+          WHERE id = $1 AND locked_until IS NOT NULL AND locked_until <= now()`,
+        [u.user_id],
+      ),
+    );
+  }
+
   if (!good) {
     await recordFailure(u, ip, "invalid");
     return { ok: false, reason: "invalid" };
@@ -109,21 +173,29 @@ export async function partnerLogin(email: string, password: string, ip?: string 
   return { ok: true, sessionToken: token, userId: u.user_id, tenantId: u.tenant_id, partnerId: u.partner_id, mfaPending };
 }
 
-async function recordFailure(u: AuthRow, ip: string | null | undefined, kind: string): Promise<void> {
+async function recordFailure(
+  u: AuthRow,
+  ip: string | null | undefined,
+  kind: string,
+  opts: { countTowardsLockout?: boolean } = {},
+): Promise<void> {
+  const countTowardsLockout = opts.countTowardsLockout !== false; // default UNCHANGED: count it
   await withTenant({ tenantId: u.tenant_id }, async (c) => {
-    // M3: increment ATOMICALLY in SQL (failed_login_count + 1) so concurrent failed logins can't
-    // lost-update the counter and evade lockout. Lock is set in the same statement at the threshold.
-    const { rows } = await c.query<{ failed_login_count: number; locked: boolean }>(
-      `UPDATE partner_users
-          SET failed_login_count = failed_login_count + 1,
-              locked_until = CASE WHEN failed_login_count + 1 >= $2
-                                  THEN now() + ($3 || ' minutes')::interval ELSE locked_until END
-        WHERE id = $1
-        RETURNING failed_login_count, (failed_login_count >= $2) AS locked`,
-      [u.user_id, LOCKOUT_THRESHOLD, String(LOCKOUT_MINUTES)],
-    );
-    if (rows[0]?.locked) {
-      await writePartnerSecurity(c, { tenantId: u.tenant_id, severity: "medium", kind: "partner_account_locked", detail: { userId: u.user_id } });
+    if (countTowardsLockout) {
+      // M3: increment ATOMICALLY in SQL (failed_login_count + 1) so concurrent failed logins can't
+      // lost-update the counter and evade lockout. Lock is set in the same statement at the threshold.
+      const { rows } = await c.query<{ failed_login_count: number; locked: boolean }>(
+        `UPDATE partner_users
+            SET failed_login_count = failed_login_count + 1,
+                locked_until = CASE WHEN failed_login_count + 1 >= $2
+                                    THEN now() + ($3 || ' minutes')::interval ELSE locked_until END
+          WHERE id = $1
+          RETURNING failed_login_count, (failed_login_count >= $2) AS locked`,
+        [u.user_id, LOCKOUT_THRESHOLD, String(LOCKOUT_MINUTES)],
+      );
+      if (rows[0]?.locked) {
+        await writePartnerSecurity(c, { tenantId: u.tenant_id, severity: "medium", kind: "partner_account_locked", detail: { userId: u.user_id } });
+      }
     }
     await writePartnerAudit(c, { tenantId: u.tenant_id, actorUserId: u.user_id, action: "partner_login_failure", ip: ip ?? null, reason: kind });
   });
@@ -197,7 +269,19 @@ export async function consumePasswordResetToken(token: string, newPassword: stri
     if (rows.length !== 1) return false;
     const { id, user_id } = rows[0];
     await c.query("UPDATE partner_password_reset_tokens SET used_at=now() WHERE id=$1", [id]);
-    await c.query("UPDATE partner_users SET password_hash=$2, credential_version=credential_version+1 WHERE id=$1", [user_id, newHash]);
+    // P0-F: a successful reset must also END the lockout. `locked_until` / `failed_login_count`
+    // were previously cleared ONLY on a successful login (auth.ts, unreachable while locked) and on
+    // invitation acceptance (single-use, already spent), so a user locked out by five failed
+    // attempts stayed locked even after proving control of their mailbox and setting a new
+    // password. This is the recovery path; nothing else weakens. Note the ORDER of guarantees:
+    // credential_version still increments and every live session is still revoked below.
+    await c.query(
+      `UPDATE partner_users
+          SET password_hash=$2, credential_version=credential_version+1,
+              failed_login_count=0, locked_until=NULL
+        WHERE id=$1`,
+      [user_id, newHash],
+    );
     await c.query("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [user_id]);
     await writePartnerAudit(c, { tenantId, actorUserId: user_id, action: "partner_password_reset_completed" });
     return true;

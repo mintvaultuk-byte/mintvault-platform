@@ -169,7 +169,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     await admin.query("INSERT INTO users (email, role, credential_version) VALUES ('mintvaultuk@gmail.com','admin',1)");
     await admin.query("DROP OWNED BY partner_admin_bypass_test").catch(() => {});
     await admin.query("DROP OWNED BY partner_admin_plain_test").catch(() => {});
-    await admin.query("DROP OWNED BY partner_app_test").catch(() => {});
+    await admin.query("DROP OWNED BY partner_app_test_cap").catch(() => {});
     await admin.query(
       `DO $$ BEGIN
          CREATE ROLE partner_admin_bypass_test LOGIN PASSWORD 'synthetic-admin' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
@@ -186,9 +186,9 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     );
     await admin.query(
       `DO $$ BEGIN
-         CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+         CREATE ROLE partner_app_test_cap LOGIN PASSWORD 'synthetic' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
        EXCEPTION WHEN duplicate_object THEN
-         ALTER ROLE partner_app_test WITH LOGIN PASSWORD 'synthetic' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+         ALTER ROLE partner_app_test_cap WITH LOGIN PASSWORD 'synthetic' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
        END$$;`
     );
     await admin.query("GRANT USAGE ON SCHEMA public TO partner_admin_bypass_test, partner_admin_plain_test");
@@ -198,7 +198,7 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
 
     process.env.MINTVAULT_DATABASE_URL = dbUrlAsRole(ADMIN!, "partner_admin_plain_test", "synthetic-plain");
     process.env.PARTNER_ADMIN_DATABASE_URL = dbUrlAsRole(ADMIN!, "partner_admin_plain_test", "synthetic-plain");
-    process.env.PARTNER_DATABASE_URL = dbUrlAsRole(ADMIN!, "partner_app_test", "synthetic");
+    process.env.PARTNER_DATABASE_URL = dbUrlAsRole(ADMIN!, "partner_app_test_cap", "synthetic");
     process.env.SESSION_SECRET = "synthetic-test-session-secret-not-committed";
     resetPartnerAdminCapabilityCache();
     const { closePartnerPools } = await import("../server/partner/db");
