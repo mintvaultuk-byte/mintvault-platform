@@ -89,7 +89,13 @@ export async function partnerLogin(email: string, password: string, ip?: string 
     return { ok: false, reason: "suspended" };
   }
   if (u.locked_until && new Date(u.locked_until).getTime() > Date.now()) {
-    await recordFailure(u, ip, "locked");
+    // countTowardsLockout:false for the SAME reason as the suspended branch above. A locked
+    // account is refused regardless of the password, so counting the attempt protects nothing —
+    // but counting it re-evaluates `locked_until = now() + 15 minutes` on EVERY attempt, because
+    // failed_login_count is already >= the threshold. That let an unauthenticated attacker hold a
+    // named partner account offline indefinitely at ~4 requests/hour, well inside both login
+    // limiters. The attempt is still audited below; only the clock stops extending.
+    await recordFailure(u, ip, "locked", { countTowardsLockout: false });
     return { ok: false, reason: "locked" };
   }
   if (!good) {

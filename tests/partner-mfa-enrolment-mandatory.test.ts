@@ -110,6 +110,27 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
     await admin.connect();
     await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
     await admin.query("CREATE SCHEMA public");
+    // CONCURRENCY-SAFE cluster-role bootstrap. migration 0001 creates the CLUSTER-WIDE role
+    // `partner_runtime` behind `IF NOT EXISTS`, which is a TOCTOU: two suites applying
+    // migrations to DIFFERENT databases on the SAME cluster both observe "not exists" and both
+    // issue CREATE ROLE, and the loser dies on pg_authid_rolname_index. That is the real cause
+    // of the parallel-execution failure — not a shared fixture, tenant, schema or timing
+    // assumption. Roles are cluster-scoped; databases are not.
+    //
+    // 0001 is applied to staging and production, so it cannot be edited without breaking
+    // checksum pinning. Instead the harness pre-creates the role with an exception-safe DO
+    // block, after which 0001's IF NOT EXISTS finds it and no-ops. Doing this BEFORE any
+    // migration runs means the race window is closed for every suite on the cluster.
+    await admin.query(`DO $$
+      BEGIN
+        CREATE ROLE partner_runtime NOLOGIN;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END$$;`);
+    await admin.query(`DO $$
+      BEGIN
+        CREATE ROLE partner_connector_runtime NOLOGIN;
+      EXCEPTION WHEN duplicate_object THEN NULL;
+      END$$;`);
     await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
     await admin.query("DROP OWNED BY partner_connector_runtime").catch(() => {});
     await provisionRealisticRoles(admin);
