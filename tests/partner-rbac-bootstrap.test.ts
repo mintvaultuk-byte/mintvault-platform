@@ -170,48 +170,56 @@ describe.skipIf(!isLocal)("First-owner invitation blocker + migration 0033 (Post
     expect(assigned.rows.map((r) => r.code)).toEqual(["PARTNER_OWNER"]);
   });
 
-  it("the PRODUCTION entrypoint (bootstrapPartnerRbac) seeds — not just the test-only helper", async () => {
+  it("the PRODUCTION startup path VALIDATES read-only and never seeds", async () => {
     /*
-     * MUTATION GAP CLOSED: the other tests called seedPartnerRbac() directly, so deleting the
-     * production call site left the suite green — the very shape of the original defect, where a
-     * test-only seed masked missing startup wiring. This drives the REAL production entrypoint.
+     * ARCHITECTURE CHANGED (owner decision, 2026-07-31 — the hybrid): the catalogue is seeded by
+     * migration 0034, and startup only validates. The mutation this pins is therefore the inverse of
+     * the original one: if anyone re-wires a write into the boot path, an empty catalogue would
+     * silently become populated here and this test fails.
      */
     await clearRbac();
     expect((await admin.query("SELECT count(*)::int n FROM partner_roles")).rows[0].n).toBe(0);
 
-    perms.bootstrapPartnerRbac(); // fire-and-forget, exactly as server/index.ts calls it
-    // poll rather than sleep — the bootstrap is intentionally not awaited in production
-    let ok = false;
-    for (let i = 0; i < 60 && !ok; i++) {
-      const r = await admin.query<{ n: number }>(
-        "SELECT count(*)::int n FROM partner_roles WHERE code='PARTNER_OWNER'"
-      );
-      ok = r.rows[0].n === 1;
-      if (!ok) await new Promise((res) => setTimeout(res, 50));
+    perms.validatePartnerRbacAtBoot(); // fire-and-forget, exactly as server/index.ts calls it
+    // Give the fire-and-forget validation ample time to complete, then prove it wrote NOTHING.
+    for (let i = 0; i < 20; i++) {
+      if (perms.getPartnerRbacStatus().state !== "pending") break;
+      await new Promise((res) => setTimeout(res, 50));
     }
-    expect(ok, "bootstrapPartnerRbac must seed PARTNER_ROLE_CODES without any test helper").toBe(true);
+    const after = (await admin.query("SELECT count(*)::int n FROM partner_roles")).rows[0].n;
+    expect(after, "boot-time validation must NEVER seed the Partner security catalogue").toBe(0);
 
-    const id = await newPartner("Prod Entrypoint Ltd");
-    await expect(
-      svc.invitePartnerUser(
-        actor({ requestId: "prod-entry" }),
-        id,
-        { firstName: "P", lastName: "E", email: "prod@example.test", role: "OWNER" },
-        "first owner via production bootstrap"
-      )
-    ).resolves.toBeTruthy();
+    const status = perms.getPartnerRbacStatus();
+    expect(status.state, "an empty catalogue must be reported incomplete").toBe("incomplete");
+    expect(status.failureCode).toBe("PARTNER_RBAC_NOT_SEEDED");
   });
 
-  it("server/index.ts actually CALLS the bootstrap on the startup path", () => {
-    // Source assertion, because deleting the call site is otherwise invisible to a DB test that
-    // invokes the function directly. Pins both the import and the call.
+  it("server/index.ts CALLS the read-only validator on the startup path — and no seeder", () => {
+    // Source assertion, because swapping the call site is otherwise invisible to a DB test that
+    // invokes the function directly. Pins the import, the call, and the ABSENCE of any write path.
     const src = readFileSync(join(__dirname, "..", "server", "index.ts"), "utf8");
-    expect(src).toMatch(/import \{ bootstrapPartnerRbac \} from "\.\/partner\/permissions"/);
-    expect(src).toMatch(/^\s*bootstrapPartnerRbac\(\);\s*$/m);
+    expect(src).toMatch(/import \{ validatePartnerRbacAtBoot \} from "\.\/partner\/permissions"/);
+    expect(src).toMatch(/^\s*validatePartnerRbacAtBoot\(\);\s*$/m);
+    expect(src, "no RBAC write may be wired into boot").not.toMatch(/bootstrapPartnerRbac|seedPartnerRbac/);
     // and it must sit on the listen path, next to the connector runtime
-    const idx = src.indexOf("bootstrapPartnerRbac();");
+    const idx = src.indexOf("validatePartnerRbacAtBoot();");
     const listenIdx = src.indexOf("httpServer.listen");
     expect(idx).toBeGreaterThan(listenIdx);
+  });
+
+  it("seedPartnerRbac() refuses to run outside a test runner", async () => {
+    // The guard is what stops a future change quietly reintroducing a production seed call.
+    const prevVitest = process.env.VITEST;
+    const prevNodeEnv = process.env.NODE_ENV;
+    try {
+      delete process.env.VITEST;
+      process.env.NODE_ENV = "production";
+      await expect(perms.seedPartnerRbac()).rejects.toThrow(/test-only/);
+    } finally {
+      if (prevVitest === undefined) delete process.env.VITEST;
+      else process.env.VITEST = prevVitest;
+      process.env.NODE_ENV = prevNodeEnv;
+    }
   });
 
   it("bootstrap is idempotent — running it repeatedly never duplicates a role", async () => {
@@ -336,16 +344,42 @@ describe.skipIf(!isLocal)("First-owner invitation blocker + migration 0033 (Post
     ).rejects.toBeTruthy();
   });
 
-  it("readiness reports RBAC state — the fail-soft bootstrap is OBSERVABLE, not silent", async () => {
+  it("readiness reports RBAC state — an unusable catalogue is OBSERVABLE, not silent", async () => {
     await clearRbac();
-    const bad = await perms.refreshPartnerRbacStatus();
-    expect(bad.state, "unseeded RBAC must be reported as failed").toBe("failed");
-    expect(bad.error).toMatch(/PARTNER_OWNER/);
+    const bad = await perms.validatePartnerRbac();
+    expect(bad.state, "unseeded RBAC must be reported incomplete").toBe("incomplete");
+    expect(bad.failureCode).toBe("PARTNER_RBAC_NOT_SEEDED");
+    expect(bad.remedy, "operator must be told the remedy").toMatch(/0034/);
+    expect(bad.missing?.roles).toBeGreaterThan(0);
 
     await perms.seedPartnerRbac();
-    const good = await perms.refreshPartnerRbacStatus();
+    const good = await perms.validatePartnerRbac();
     expect(good.state).toBe("ready");
-    expect(good.error).toBeNull();
+    expect(good.failureCode).toBeNull();
+    expect(good.missing).toEqual({ roles: 0, permissions: 0, mappings: 0 });
+  });
+
+  it("validation detects a catalogue that has the role but is MISSING a mapping", async () => {
+    /*
+     * The harder failure to notice: PARTNER_OWNER resolves, so the first invitation SUCCEEDS, while
+     * permission checks silently under-grant. Checking only PARTNER_OWNER's existence — as the
+     * previous implementation did — reported this state as fully ready.
+     */
+    await clearRbac();
+    await perms.seedPartnerRbac();
+    expect((await perms.validatePartnerRbac()).state).toBe("ready");
+
+    await admin.query(
+      `DELETE FROM partner_role_permissions rp
+        USING partner_roles r, partner_permissions p
+        WHERE rp.role_id = r.id AND rp.permission_id = p.id
+          AND r.code = 'PARTNER_OWNER' AND p.code = 'partner.orders.create'`
+    );
+
+    const degraded = await perms.validatePartnerRbac();
+    expect(degraded.state, "one missing mapping must not read as ready").toBe("incomplete");
+    expect(degraded.missing).toEqual({ roles: 0, permissions: 0, mappings: 1 });
+    expect(degraded.failureCode).toBe("PARTNER_RBAC_NOT_SEEDED");
   });
 
   // ---- SECURITY ACTIONS -----------------------------------------------------------------------

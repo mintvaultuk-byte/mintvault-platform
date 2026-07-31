@@ -747,6 +747,11 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     // Audit-action precision (0033) is likewise a later, unrelated additive migration — it only
     // widens a CHECK constraint on the management ledger and has no bearing on partner credits.
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0033_partner_audit_action_precision.sql'");
+    // The Partner RBAC seed (0034) is also a later migration. It only inserts reference rows into
+    // partner_roles / partner_permissions / partner_role_permissions and has no bearing whatsoever
+    // on partner credits — cleared purely so the later-migration guard stops tripping before the
+    // evidence guard this test is actually about can be reached.
+    await admin.query("DELETE FROM schema_migrations WHERE filename = '0034_partner_rbac_seed.sql'");
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );
