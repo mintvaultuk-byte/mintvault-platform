@@ -22,6 +22,27 @@ import {
   pmKeys,
   CONTACT_TYPES,
   UNAVAILABLE_LABEL,
+  PROFILE_FIELD_DEFS,
+  profileFormFromRow,
+  validateProfileForm,
+  validateLegalName,
+  validateInvitationForm,
+  reasonError,
+  canSubmit,
+  diffProfile,
+  isDirty,
+  displayValue,
+  computeChecklist,
+  checklistPercent,
+  profileHasDetail,
+  invitationActions,
+  submitAllowed,
+  submitLabel,
+  serverErrorMessage,
+  deliveryBanner,
+  type ProfileValues,
+  type SubmitState,
+  type FieldErrors,
 } from "./partner-management-helpers";
 
 const BASE = "/api/super-admin/partner-management";
@@ -78,15 +99,44 @@ export default function PartnerManagementDetailPage() {
     title: string;
     highRisk?: boolean;
     body?: ReactNode;
-    run: (reason: string) => Promise<unknown>;
+    /**
+     * Optional single text field rendered inside the modal. This replaced `window.prompt`, which
+     * could not be validated, was not keyboard-trappable, dropped the typed value on cancel and is
+     * invisible to screen readers.
+     */
+    input?: { label: string; initial: string; testId: string; required?: boolean };
+    run: (reason: string, value: string) => Promise<unknown>;
   } | null>(null);
   const [reason, setReason] = useState("");
   const [typed, setTyped] = useState("");
+  const [modalValue, setModalValue] = useState("");
   // note modal
   const [noteBody, setNoteBody] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [userForm, setUserForm] = useState({ firstName: "", lastName: "", email: "", role: "OWNER" });
+  // Company-profile editor. `profileBaseline` is the last-saved state; comparing the live form
+  // against it is what drives both the before/after summary and the unsaved-changes warning.
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileForm, setProfileForm] = useState<ProfileValues>(() => profileFormFromRow(null));
+  const [profileBaseline, setProfileBaseline] = useState<ProfileValues>(() => profileFormFromRow(null));
+  const [legalNameForm, setLegalNameForm] = useState("");
+  const [legalNameBaseline, setLegalNameBaseline] = useState("");
+  const [profileReason, setProfileReason] = useState("");
+  const [profileState, setProfileState] = useState<SubmitState>("idle");
+  const [profileError, setProfileError] = useState<string | null>(null);
+  // Invitation editor: which user is being amended (null = closed).
+  const [inviteEdit, setInviteEdit] = useState<PartnerUserRow | null>(null);
+  const [inviteForm, setInviteForm] = useState({ firstName: "", lastName: "", email: "", role: "OWNER" });
+  const [inviteReason, setInviteReason] = useState("");
+  const [inviteState, setInviteState] = useState<SubmitState>("idle");
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteTouched, setInviteTouched] = useState(false);
+  const [userState, setUserState] = useState<SubmitState>("idle");
+  const [userError, setUserError] = useState<string | null>(null);
+  // Errors are computed continuously but only SHOWN once the admin has tried to submit — a form that
+  // turns red before it has been filled in reads as broken rather than helpful.
+  const [userTouched, setUserTouched] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -116,7 +166,10 @@ export default function PartnerManagementDetailPage() {
   const branding = useQuery({
     queryKey: pmKeys.branding(partnerId),
     queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/branding`).then((r) => r.json()),
-    enabled: on && tab === "branding",
+    // Also loaded on Overview: the setup checklist needs it. The detail payload does NOT carry
+    // branding (getPartnerDetail returns organisation/profile/primaryContact only), so reading it
+    // from `detail` silently pinned the checklist below 100% forever.
+    enabled: on && (tab === "branding" || tab === "overview"),
   });
   const notes = useQuery({
     queryKey: pmKeys.notes(partnerId),
@@ -156,13 +209,14 @@ export default function PartnerManagementDetailPage() {
   const version = profile?.version ?? 1;
 
   const mutation = useMutation({
-    mutationFn: async (run: (reason: string) => Promise<unknown>) => run(reason),
+    mutationFn: async (run: (reason: string, value: string) => Promise<unknown>) => run(reason, modalValue),
     onSuccess: () => {
       setBanner("Action completed.");
       closeModal();
       queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.audit(partnerId) });
+      queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`] });
     },
     onError: (err: unknown) =>
       setBanner((err as { body?: { error?: { message?: string } } })?.body?.error?.message ?? "Action failed."),
@@ -190,35 +244,236 @@ export default function PartnerManagementDetailPage() {
         })
       ).json(),
     onSuccess: (d) => {
-      const copy = d?.result?.invitationLink ? " Invitation link copied to the response for staging." : "";
-      setBanner(`Invitation created.${copy}`);
+      setUserState("success");
+      setUserError(null);
+      setBanner(deliveryBanner(d?.result?.deliveryStatus, "Invitation created."));
       setUserOpen(false);
       setUserForm({ firstName: "", lastName: "", email: "", role: "OWNER" });
       setUserReason("");
+      setUserTouched(false);
+      setUserState("idle");
       queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
     },
-    onError: (err: unknown) =>
-      setBanner((err as { body?: { error?: { message?: string } } })?.body?.error?.message ?? "Invitation failed."),
+    onError: (err: unknown) => {
+      setUserState("error");
+      const msg = serverErrorMessage((err as { body?: unknown })?.body, "Invitation failed. Nothing was created.");
+      setUserError(msg);
+      setBanner(msg);
+    },
   });
+
+  const userRows = useMemo(() => (users.data?.users ?? []) as PartnerUserRow[], [users.data]);
+  const checklist = useMemo(
+    () =>
+      computeChecklist({
+        companyCreated: !!org,
+        // "Owner invited" — deliberately NOT "owner login created": an INVITED user has no login
+        // until they accept. Ticking on the mere existence of the row claimed something untrue.
+        hasOwner: userRows.some((u) => u.role === "OWNER"),
+        // An invitation that FAILED to send has not been sent. `invitation_status` being non-null
+        // includes DELIVERY_FAILED, which would have ticked "Invitation sent" for an email that
+        // demonstrably never left the building.
+        hasInvitation: userRows.some(
+          (u) => !!u.invitation_status && u.invitation_status !== "DELIVERY_FAILED"
+        ),
+        locationCount: statistics.data?.locationCount ?? 0,
+        hasBranding: !!branding.data?.branding,
+        hasProfileDetail: profileHasDetail(profile),
+      }),
+    [org, userRows, statistics.data, branding.data, profile]
+  );
+
+  const [profileTouched, setProfileTouched] = useState(false);
+  const profileErrors: FieldErrors = useMemo(() => validateProfileForm(profileForm), [profileForm]);
+  const legalNameErr = useMemo(() => validateLegalName(legalNameForm), [legalNameForm]);
+  const profileChanges = useMemo(
+    () => diffProfile(profileBaseline, profileForm),
+    [profileBaseline, profileForm]
+  );
+  const legalNameChanged = legalNameForm.trim() !== legalNameBaseline.trim();
+  const profileDirty = isDirty(profileBaseline, profileForm) || legalNameChanged;
+  /*
+   * SUBMIT-BLOCKING errors are scoped to the fields actually being SAVED.
+   *
+   * The editor is seeded straight from the stored row, and these validators are stricter than
+   * whatever wrote it — a website stored as "acme.co.uk", or a phone with "ext 21", is invalid here.
+   * Blocking on those locked an admin out of fixing an unrelated typo, even though saveProfile only
+   * ever sends CHANGED keys, so the offending value would never have been transmitted. Only changed
+   * fields can block the save; untouched legacy values still show their message as guidance.
+   */
+  const changedKeys = useMemo(() => new Set(profileChanges.map((c) => c.key)), [profileChanges]);
+  const profileFieldErrors: FieldErrors = useMemo(() => {
+    const blocking: FieldErrors = {};
+    for (const [k, v] of Object.entries(profileErrors)) if (changedKeys.has(k)) blocking[k] = v;
+    if (legalNameErr && legalNameChanged) blocking.legal_name = legalNameErr;
+    return blocking;
+  }, [profileErrors, changedKeys, legalNameErr, legalNameChanged]);
+
+  /** Load the editor from the server row whenever the form is opened. */
+  function openProfileEdit() {
+    const base = profileFormFromRow(profile);
+    setProfileForm(base);
+    setProfileBaseline(base);
+    setLegalNameForm(org?.legal_name ?? "");
+    setLegalNameBaseline(org?.legal_name ?? "");
+    setProfileReason("");
+    setProfileError(null);
+    setProfileState("idle");
+    setProfileTouched(false);
+    setProfileOpen(true);
+  }
+
+  function closeProfileEdit(force = false) {
+    if (!force && profileDirty && !window.confirm("Discard your unsaved changes?")) return;
+    setProfileOpen(false);
+    setProfileState("idle");
+    setProfileError(null);
+  }
+
+  /**
+   * Save the editor.
+   *
+   * The legal name lives on partner_organisations and the rest on partner_profiles, so a change to
+   * both is two audited requests. They share ONE optimistic-lock counter (partner_profiles.version),
+   * and each successful write bumps it by one — hence `version + 1` for the second call. Order is
+   * name-then-profile, and a failure of the second is reported explicitly as a PARTIAL save rather
+   * than a flat "failed", because the first change is already committed and the admin needs to know
+   * that before they retry.
+   */
+  async function saveProfile() {
+    setProfileTouched(true);
+    if (!submitAllowed(profileState)) return;
+    if (Object.keys(profileFieldErrors).length > 0 || reasonError(profileReason) !== null) return;
+    if (!profileDirty) {
+      setProfileError("Nothing has changed.");
+      return;
+    }
+    setProfileState("submitting");
+    setProfileError(null);
+    let nameSaved = false;
+    try {
+      let v = version;
+      if (legalNameChanged) {
+        await apiRequest("PATCH", `${BASE}/partners/${partnerId}/legal-name`, {
+          legalName: legalNameForm.trim(),
+          expectedVersion: v,
+          reason: profileReason,
+        });
+        nameSaved = true;
+        v = v + 1;
+      }
+      if (profileChanges.length > 0) {
+        const body: Record<string, unknown> = { expectedVersion: v, reason: profileReason };
+        for (const c of profileChanges) body[c.key] = profileForm[c.key].trim();
+        await apiRequest("PATCH", `${BASE}/partners/${partnerId}/profile`, body);
+      }
+      setProfileState("success");
+      setBanner("Company details saved.");
+      setProfileOpen(false);
+      queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
+      queryClient.invalidateQueries({ queryKey: pmKeys.audit(partnerId) });
+      queryClient.invalidateQueries({ queryKey: pmKeys.activity(partnerId) });
+      // The list is cached with staleTime: Infinity, so without this the partners table keeps
+      // showing the old legal/trading name until a hard reload.
+      queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`] });
+    } catch (err) {
+      setProfileState("error");
+      const msg = serverErrorMessage((err as { body?: unknown })?.body, "Could not save. Nothing was changed.");
+      if (nameSaved) {
+        /*
+         * The rename COMMITTED and the shared version counter moved; only the profile half failed.
+         * Leaving the old baseline in place made the diff table keep listing an already-saved change
+         * and made the next Save re-issue the rename with a stale expectedVersion — a guaranteed
+         * VERSION_CONFLICT whose message ("someone else changed this") blamed a third party for our
+         * own half-write. So: adopt the saved name as the new baseline and refetch the authoritative
+         * version before the admin can retry.
+         */
+        setLegalNameBaseline(legalNameForm.trim());
+        queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
+        queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`] });
+        setProfileError(
+          `Only part of your change was saved. The company name was updated; the remaining details were not: ${msg}`
+        );
+      } else {
+        setProfileError(msg);
+      }
+    }
+  }
+
+  const inviteErrors = useMemo(() => validateInvitationForm(inviteForm), [inviteForm]);
+  const userErrors = useMemo(() => validateInvitationForm(userForm), [userForm]);
+
+  function openInviteEdit(u: PartnerUserRow) {
+    setInviteEdit(u);
+    setInviteForm({
+      firstName: u.first_name ?? "",
+      lastName: u.last_name ?? "",
+      email: u.email,
+      role: u.role,
+    });
+    setInviteReason("");
+    setInviteError(null);
+    setInviteState("idle");
+    setInviteTouched(false);
+  }
+
+  async function saveInvitation() {
+    setInviteTouched(true);
+    if (!inviteEdit || !submitAllowed(inviteState)) return;
+    if (Object.keys(inviteErrors).length > 0 || reasonError(inviteReason) !== null) return;
+    setInviteState("submitting");
+    setInviteError(null);
+    try {
+      const res = await apiRequest("PATCH", `${BASE}/partners/${partnerId}/users/${inviteEdit.id}/invitation`, {
+        ...inviteForm,
+        reason: inviteReason,
+      });
+      const body = (await res.json().catch(() => null)) as { result?: { deliveryStatus?: string } } | null;
+      setInviteState("success");
+      // NEVER claim delivery that was not confirmed. The server reports DELIVERY_NOT_CONFIGURED when
+      // no transport is set up and DELIVERY_FAILED when the send threw — both return HTTP 200. Telling
+      // the admin "re-sent" in those cases is the worst possible lie here: they stop chasing an
+      // invitation that does not exist. The revocation half is unconditionally true and is stated as
+      // such, because it happens inside the committed transaction.
+      setBanner(deliveryBanner(body?.result?.deliveryStatus));
+      setInviteEdit(null);
+      queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
+      queryClient.invalidateQueries({ queryKey: pmKeys.audit(partnerId) });
+    } catch (err) {
+      setInviteState("error");
+      setInviteError(serverErrorMessage((err as { body?: unknown })?.body, "Could not update the invitation."));
+    }
+  }
 
   function closeModal() {
     setModal(null);
     setReason("");
     setTyped("");
+    setModalValue("");
   }
   useEffect(() => {
-    if (!modal && !noteOpen && !userOpen) return;
+    if (!modal && !noteOpen && !userOpen && !profileOpen && !inviteEdit) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        closeModal();
-        setNoteOpen(false);
-        setUserOpen(false);
+      if (e.key !== "Escape") return;
+      // The profile editor routes through closeProfileEdit so Escape cannot become a silent
+      // data-loss path around the unsaved-changes check.
+      if (profileOpen) {
+        closeProfileEdit();
+        return;
       }
+      if (inviteEdit) {
+        setInviteEdit(null);
+        return;
+      }
+      closeModal();
+      setNoteOpen(false);
+      setUserOpen(false);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [modal, noteOpen, userOpen]);
+    // profileDirty is listed so the Escape handler always closes over the current dirty state.
+  }, [modal, noteOpen, userOpen, profileOpen, inviteEdit, profileDirty]);
 
   const nextStatuses = useMemo(() => (org ? allowedNextStatuses(org.status) : []), [org]);
 
@@ -329,21 +584,42 @@ export default function PartnerManagementDetailPage() {
               <div>Health: {org.health}</div>
               <div>Created: {new Date(org.created_at).toLocaleString()}</div>
               <div style={{ marginTop: 12 }} data-testid="pm-setup-checklist">
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>Setup checklist</div>
-                <ChecklistItem done label="Company created" />
-                <ChecklistItem
-                  done={(users.data?.users ?? []).some((u: any) => u.role === "OWNER")}
-                  label="Create owner login"
-                />
-                <ChecklistItem
-                  done={!!profile?.trading_name || !!profile?.primary_email}
-                  label="Complete company profile"
-                />
-                <ChecklistItem done={!!detail.data?.primaryContact} label="Add contact details" />
-                <ChecklistItem done={(statistics.data?.locationCount ?? 0) > 0} label="Add grading location" />
-                <ChecklistItem done={!!detail.data?.branding} label="Configure branding" />
-                <ChecklistItem done={false} label="Configure device" />
-                <ChecklistItem done={false} label="Configure credits" />
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <div style={{ fontWeight: 600 }}>Setup checklist</div>
+                  <span data-testid="pm-checklist-percent" style={{ fontSize: 12, opacity: 0.85 }}>
+                    {checklistPercent(checklist)}% complete
+                  </span>
+                </div>
+                {/*
+                  Progress is exposed via role="progressbar" + aria-valuenow, not colour alone, so a
+                  screen-reader user gets the same number a sighted user sees.
+                */}
+                <div
+                  role="progressbar"
+                  aria-valuenow={checklistPercent(checklist)}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="Partner setup completion"
+                  data-testid="pm-checklist-bar"
+                  style={{
+                    height: 6,
+                    borderRadius: 999,
+                    background: "var(--admin-bg, #0d0d0d)",
+                    overflow: "hidden",
+                    marginBottom: 8,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: `${checklistPercent(checklist)}%`,
+                      height: "100%",
+                      background: "var(--admin-gold, #D4AF37)",
+                    }}
+                  />
+                </div>
+                {checklist.map((item) => (
+                  <ChecklistItem key={item.key} state={item.state} label={item.label} hint={item.hint} />
+                ))}
               </div>
               {!(users.data?.users ?? []).some((u: any) => u.role === "OWNER") && (
                 <div style={{ marginTop: 8 }}>
@@ -408,6 +684,7 @@ export default function PartnerManagementDetailPage() {
                             openModal={setModal}
                             partnerId={partnerId}
                             activeOwnerCount={activeOwnerCount}
+                            onEditInvitation={openInviteEdit}
                           />
                         </td>
                       </tr>
@@ -441,6 +718,12 @@ export default function PartnerManagementDetailPage() {
               <Field label="Website" v={profile?.website} />
               <Field label="Primary email" v={profile?.primary_email} />
               <Field label="Primary phone" v={profile?.primary_phone} />
+              <Field label="Address line 1" v={profile?.address_line1} />
+              <Field label="Address line 2" v={profile?.address_line2} />
+              <Field label="Town / city" v={profile?.address_city} />
+              <Field label="Postcode" v={profile?.address_postcode} />
+              <Field label="Country" v={profile?.address_country} />
+              <Field label="Internal notes" v={profile?.health_note} />
               <Field label="Onboarding date" v={profile?.onboarding_date} />
               <Field label="Internal tier" v={profile?.internal_tier} />
             </div>
@@ -698,6 +981,35 @@ export default function PartnerManagementDetailPage() {
                   This is a business-status label only. No accounts, devices, sessions or feature flags are changed.
                 </p>
               )}
+              {modal.input && (
+                <div style={{ marginBottom: 10 }}>
+                  <label
+                    htmlFor="pm-modal-input"
+                    style={{ display: "block", fontSize: 12, opacity: 0.8, marginBottom: 4 }}
+                  >
+                    {modal.input.label}
+                  </label>
+                  <input
+                    id="pm-modal-input"
+                    data-testid={modal.input.testId}
+                    autoFocus
+                    value={modalValue}
+                    onChange={(e) => setModalValue(e.target.value)}
+                    style={{
+                      width: "100%",
+                      background: "var(--admin-bg, #0d0d0d)",
+                      color: "#fff",
+                      borderRadius: 8,
+                      padding: 8,
+                    }}
+                  />
+                  {modal.input.required && modalValue.trim() === "" && (
+                    <div role="alert" style={{ color: "var(--admin-red, #ff6b6b)", fontSize: 12, marginTop: 4 }}>
+                      {modal.input.label} is required.
+                    </div>
+                  )}
+                </div>
+              )}
               <label htmlFor="pm-reason" style={{ display: "block", fontSize: 12, opacity: 0.8, marginBottom: 4 }}>
                 Reason
               </label>
@@ -752,12 +1064,318 @@ export default function PartnerManagementDetailPage() {
                   size="sm"
                   variant="gold"
                   disabled={
-                    !reasonValid(reason) || (modal.highRisk && typed.trim() !== TYPED_CONFIRM) || mutation.isPending
+                    !reasonValid(reason) ||
+                    (modal.highRisk && typed.trim() !== TYPED_CONFIRM) ||
+                    (!!modal.input?.required && modalValue.trim() === "") ||
+                    mutation.isPending
                   }
                   onClick={() => mutation.mutate(modal.run)}
                   data-testid="pm-modal-confirm"
                 >
                   {mutation.isPending ? "Working…" : "Confirm"}
+                </AdminButton>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ---- Company profile editor ------------------------------------------------------- */}
+        {profileOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pm-profile-title"
+            data-testid="pm-profile-modal"
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,.6)",
+              display: "grid",
+              placeItems: "center",
+              zIndex: 50,
+              padding: 16,
+            }}
+          >
+            <div
+              data-testid="pm-profile-form"
+              style={{
+                background: "var(--admin-panel, #141414)",
+                padding: 20,
+                borderRadius: 12,
+                width: "min(720px,100%)",
+                maxHeight: "90vh",
+                overflowY: "auto",
+              }}
+            >
+              <h3 id="pm-profile-title" style={{ marginBottom: 4 }}>
+                Edit company details
+              </h3>
+              <p style={{ fontSize: 12, opacity: 0.75, marginBottom: 12 }}>
+                Every change is recorded in the audit trail with the reason you give below.
+              </p>
+
+              {profileDirty && (
+                <div
+                  data-testid="pm-unsaved-warning"
+                  style={{ fontSize: 12, marginBottom: 10, color: "var(--admin-gold, #D4AF37)" }}
+                >
+                  You have unsaved changes.
+                </div>
+              )}
+
+              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))" }}>
+                <label style={{ display: "grid", gap: 4, fontSize: 12, opacity: 0.9 }}>
+                  Legal company name
+                  <input
+                    data-testid="pm-profile-field-legal_name"
+                    value={legalNameForm}
+                    onChange={(e) => setLegalNameForm(e.target.value)}
+                    aria-invalid={profileTouched && !!legalNameErr}
+                    style={{
+                      background: "var(--admin-bg, #0d0d0d)",
+                      color: "#fff",
+                      borderRadius: 8,
+                      padding: 8,
+                    }}
+                  />
+                  {profileTouched && legalNameErr && (
+                    <span role="alert" data-testid="pm-profile-error-legal_name" style={{ color: "var(--admin-red, #ff6b6b)" }}>
+                      {legalNameErr}
+                    </span>
+                  )}
+                </label>
+
+                {PROFILE_FIELD_DEFS.map((f) => (
+                  <label
+                    key={f.key}
+                    style={{
+                      display: "grid",
+                      gap: 4,
+                      fontSize: 12,
+                      opacity: 0.9,
+                      gridColumn: f.type === "textarea" ? "1 / -1" : undefined,
+                    }}
+                  >
+                    {f.label}
+                    {f.type === "textarea" ? (
+                      <textarea
+                        data-testid={`pm-profile-field-${f.key}`}
+                        value={profileForm[f.key] ?? ""}
+                        rows={3}
+                        onChange={(e) => setProfileForm((p) => ({ ...p, [f.key]: e.target.value }))}
+                        aria-invalid={profileTouched && !!profileErrors[f.key]}
+                        style={{ background: "var(--admin-bg, #0d0d0d)", color: "#fff", borderRadius: 8, padding: 8 }}
+                      />
+                    ) : (
+                      <input
+                        data-testid={`pm-profile-field-${f.key}`}
+                        type={f.type}
+                        value={profileForm[f.key] ?? ""}
+                        onChange={(e) => setProfileForm((p) => ({ ...p, [f.key]: e.target.value }))}
+                        aria-invalid={profileTouched && !!profileErrors[f.key]}
+                        style={{ background: "var(--admin-bg, #0d0d0d)", color: "#fff", borderRadius: 8, padding: 8 }}
+                      />
+                    )}
+                    {f.hint && <span style={{ opacity: 0.6 }}>{f.hint}</span>}
+                    {profileTouched && profileErrors[f.key] && (
+                      <span
+                        role="alert"
+                        data-testid={`pm-profile-error-${f.key}`}
+                        style={{ color: "var(--admin-red, #ff6b6b)" }}
+                      >
+                        {profileErrors[f.key]}
+                      </span>
+                    )}
+                  </label>
+                ))}
+              </div>
+
+              {/* Before/after summary — the admin confirms what they are changing, not just that they clicked save. */}
+              {(profileChanges.length > 0 || legalNameChanged) && (
+                <div style={{ marginTop: 14 }} data-testid="pm-profile-diff">
+                  <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>What will change</div>
+                  <table className="min-w-full text-left text-sm">
+                    <thead>
+                      <tr>
+                        <th style={{ opacity: 0.6 }}>Field</th>
+                        <th style={{ opacity: 0.6 }}>Before</th>
+                        <th style={{ opacity: 0.6 }}>After</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {legalNameChanged && (
+                        <tr data-testid="pm-profile-diff-legal_name">
+                          <td>Legal company name</td>
+                          <td style={{ opacity: 0.7 }}>{displayValue(legalNameBaseline)}</td>
+                          <td>{displayValue(legalNameForm)}</td>
+                        </tr>
+                      )}
+                      {profileChanges.map((c) => (
+                        <tr key={c.key} data-testid={`pm-profile-diff-${c.key}`}>
+                          <td>{c.label}</td>
+                          <td style={{ opacity: 0.7 }}>{displayValue(c.before)}</td>
+                          <td>{displayValue(c.after)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <label style={{ display: "grid", gap: 4, fontSize: 12, opacity: 0.9, marginTop: 14 }}>
+                Reason (recorded in the audit trail)
+                <textarea
+                  data-testid="pm-profile-reason"
+                  value={profileReason}
+                  rows={2}
+                  onChange={(e) => setProfileReason(e.target.value)}
+                  style={{ background: "var(--admin-bg, #0d0d0d)", color: "#fff", borderRadius: 8, padding: 8 }}
+                />
+                {profileReason.length > 0 && reasonError(profileReason) && (
+                  <span role="alert" style={{ color: "var(--admin-red, #ff6b6b)" }}>
+                    {reasonError(profileReason)}
+                  </span>
+                )}
+              </label>
+
+              {profileError && (
+                <div
+                  role="alert"
+                  data-testid="pm-profile-server-error"
+                  style={{ marginTop: 10, color: "var(--admin-red, #ff6b6b)", fontSize: 13 }}
+                >
+                  {profileError}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+                <AdminButton size="sm" variant="ghost" onClick={() => closeProfileEdit()} data-testid="pm-profile-cancel">
+                  Cancel
+                </AdminButton>
+                <AdminButton
+                  size="sm"
+                  variant="gold"
+                  disabled={
+                    !canSubmit(profileFieldErrors, profileReason, profileState === "submitting") || !profileDirty
+                  }
+                  onClick={() => void saveProfile()}
+                  data-testid="pm-profile-save"
+                >
+                  {submitLabel(profileState, "Save changes", "Saving…")}
+                </AdminButton>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ---- Invitation editor ------------------------------------------------------------- */}
+        {inviteEdit && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="pm-invite-edit-title"
+            data-testid="pm-invitation-edit-modal"
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(0,0,0,.6)",
+              display: "grid",
+              placeItems: "center",
+              zIndex: 50,
+              padding: 16,
+            }}
+          >
+            <div
+              data-testid="pm-invitation-edit-form"
+              style={{
+                background: "var(--admin-panel, #141414)",
+                padding: 20,
+                borderRadius: 12,
+                width: "min(560px,100%)",
+              }}
+            >
+              <h3 id="pm-invite-edit-title" style={{ marginBottom: 4 }}>
+                Correct this invitation
+              </h3>
+              <p style={{ fontSize: 12, opacity: 0.8, marginBottom: 12 }}>
+                Saving cancels the invitation link already sent and emails a fresh one to the address below. The old
+                link stops working immediately.
+              </p>
+              <div style={{ display: "grid", gap: 10 }}>
+                <UserInput
+                  label="First name"
+                  value={inviteForm.firstName}
+                  onChange={(firstName) => setInviteForm((f) => ({ ...f, firstName }))}
+                  testId="pm-invite-edit-first-name"
+                  error={inviteTouched ? inviteErrors.firstName : undefined}
+                />
+                <UserInput
+                  label="Last name"
+                  value={inviteForm.lastName}
+                  onChange={(lastName) => setInviteForm((f) => ({ ...f, lastName }))}
+                  testId="pm-invite-edit-last-name"
+                  error={inviteTouched ? inviteErrors.lastName : undefined}
+                />
+                <UserInput
+                  label="Email"
+                  type="email"
+                  value={inviteForm.email}
+                  onChange={(email) => setInviteForm((f) => ({ ...f, email }))}
+                  testId="pm-invite-edit-email"
+                  error={inviteTouched ? inviteErrors.email : undefined}
+                />
+                <label style={{ display: "grid", gap: 4, fontSize: 12, opacity: 0.9 }}>
+                  Role
+                  <select
+                    value={inviteForm.role}
+                    onChange={(e) => setInviteForm((f) => ({ ...f, role: e.target.value }))}
+                    data-testid="pm-invite-edit-role"
+                    style={{ background: "var(--admin-bg, #0d0d0d)", color: "#fff", borderRadius: 8, padding: 8 }}
+                  >
+                    {USER_ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ display: "grid", gap: 4, fontSize: 12, opacity: 0.9 }}>
+                  Reason (recorded in the audit trail)
+                  <textarea
+                    value={inviteReason}
+                    rows={2}
+                    onChange={(e) => setInviteReason(e.target.value)}
+                    data-testid="pm-invite-edit-reason"
+                    style={{ background: "var(--admin-bg, #0d0d0d)", color: "#fff", borderRadius: 8, padding: 8 }}
+                  />
+                </label>
+              </div>
+              {inviteError && (
+                <div
+                  role="alert"
+                  data-testid="pm-invite-edit-server-error"
+                  style={{ marginTop: 10, color: "var(--admin-red, #ff6b6b)", fontSize: 13 }}
+                >
+                  {inviteError}
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+                <AdminButton
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setInviteEdit(null)}
+                  data-testid="pm-invite-edit-cancel"
+                >
+                  Cancel
+                </AdminButton>
+                <AdminButton
+                  size="sm"
+                  variant="gold"
+                  disabled={!canSubmit(inviteErrors, inviteReason, inviteState === "submitting")}
+                  onClick={() => void saveInvitation()}
+                  data-testid="pm-invite-edit-save"
+                >
+                  {submitLabel(inviteState, "Save and re-send", "Saving…")}
                 </AdminButton>
               </div>
             </div>
@@ -859,12 +1477,14 @@ export default function PartnerManagementDetailPage() {
                   value={userForm.firstName}
                   onChange={(firstName) => setUserForm((f) => ({ ...f, firstName }))}
                   testId="pm-user-first-name"
+                  error={userTouched ? userErrors.firstName : undefined}
                 />
                 <UserInput
                   label="Last name"
                   value={userForm.lastName}
                   onChange={(lastName) => setUserForm((f) => ({ ...f, lastName }))}
                   testId="pm-user-last-name"
+                  error={userTouched ? userErrors.lastName : undefined}
                 />
                 <UserInput
                   label="Email"
@@ -872,6 +1492,7 @@ export default function PartnerManagementDetailPage() {
                   onChange={(email) => setUserForm((f) => ({ ...f, email }))}
                   testId="pm-user-email"
                   type="email"
+                  error={userTouched ? userErrors.email : undefined}
                 />
                 <label style={{ display: "grid", gap: 4, fontSize: 12, opacity: 0.9 }}>
                   Role
@@ -899,6 +1520,15 @@ export default function PartnerManagementDetailPage() {
                   />
                 </label>
               </div>
+              {userError && (
+                <div
+                  role="alert"
+                  data-testid="pm-user-server-error"
+                  style={{ marginTop: 10, color: "var(--admin-red, #ff6b6b)", fontSize: 13 }}
+                >
+                  {userError}
+                </div>
+              )}
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
                 <AdminButton
                   size="sm"
@@ -906,6 +1536,9 @@ export default function PartnerManagementDetailPage() {
                   onClick={() => {
                     setUserOpen(false);
                     setUserReason("");
+                    setUserTouched(false);
+                    setUserError(null);
+                    setUserState("idle");
                   }}
                   data-testid="pm-user-cancel"
                 >
@@ -914,17 +1547,17 @@ export default function PartnerManagementDetailPage() {
                 <AdminButton
                   size="sm"
                   variant="gold"
-                  disabled={
-                    !userForm.firstName.trim() ||
-                    !userForm.lastName.trim() ||
-                    !userForm.email.trim() ||
-                    !reasonValid(userReason) ||
-                    userMutation.isPending
-                  }
-                  onClick={() => userMutation.mutate()}
+                  disabled={!canSubmit(userErrors, userReason, userMutation.isPending)}
+                  onClick={() => {
+                    setUserTouched(true);
+                    if (!submitAllowed(userState)) return;
+                    if (Object.keys(userErrors).length > 0 || reasonError(userReason) !== null) return;
+                    setUserState("submitting");
+                    userMutation.mutate();
+                  }}
                   data-testid="pm-user-confirm"
                 >
-                  {userMutation.isPending ? "Creating…" : "Create invitation"}
+                  {submitLabel(userState, "Create invitation", "Creating…")}
                 </AdminButton>
               </div>
             </div>
@@ -934,33 +1567,17 @@ export default function PartnerManagementDetailPage() {
     </AdminShell>
   );
 
-  // ---- edit-modal openers (simple field prompts reusing the reason modal for audit reason) ----
-  function openProfileEdit() {
-    const trading = window.prompt("Trading name", profile?.trading_name ?? "");
-    if (trading === null) return;
-    setModal({
-      kind: "profile-edit",
-      title: "Edit profile",
-      run: async (r) =>
-        (
-          await apiRequest("PATCH", `${BASE}/partners/${partnerId}/profile`, {
-            trading_name: trading,
-            expectedVersion: version,
-            reason: r,
-          })
-        ).json(),
-    });
-  }
+  // ---- edit-modal openers (the company profile now uses a real form; see saveProfile above) ----
   function openContactAdd() {
-    const name = window.prompt("Contact full name");
-    if (!name) return;
+    setModalValue("");
     setModal({
       kind: "contact-add",
       title: "Add contact",
-      run: async (r) =>
+      input: { label: "Contact full name", initial: "", testId: "pm-contact-name-input", required: true },
+      run: async (r, value) =>
         (
           await apiRequest("POST", `${BASE}/partners/${partnerId}/contacts`, {
-            fullName: name,
+            fullName: value,
             contactType: CONTACT_TYPES[0],
             reason: r,
           })
@@ -968,15 +1585,16 @@ export default function PartnerManagementDetailPage() {
     });
   }
   function openBrandingEdit() {
-    const display = window.prompt("Display name", branding.data?.branding?.display_name ?? "");
-    if (display === null) return;
+    const initial = branding.data?.branding?.display_name ?? "";
+    setModalValue(initial);
     setModal({
       kind: "branding-edit",
       title: "Edit branding",
-      run: async (r) =>
+      input: { label: "Display name", initial, testId: "pm-branding-name-input", required: true },
+      run: async (r, value) =>
         (
           await apiRequest("PUT", `${BASE}/partners/${partnerId}/branding`, {
-            display_name: display,
+            display_name: value,
             expectedVersion: branding.data?.branding?.version,
             reason: r,
           })
@@ -994,11 +1612,32 @@ function Field({ label, v }: { label: string; v?: string | null }) {
   );
 }
 
-function ChecklistItem({ done, label }: { done: boolean; label: string }) {
+/**
+ * One checklist row. `unavailable` is a third state, not a synonym for "not done": device enrolment
+ * and credits cannot be configured at all yet, and rendering them as an empty circle told admins to
+ * go and do something impossible. The state is also written out in text, never signalled by the
+ * symbol alone.
+ */
+function ChecklistItem({
+  state,
+  label,
+  hint,
+}: {
+  state: "done" | "todo" | "unavailable";
+  label: string;
+  hint?: string;
+}) {
+  const symbol = state === "done" ? "✓" : state === "todo" ? "○" : "–";
+  const stateLabel = state === "done" ? "Done" : state === "todo" ? "To do" : "Not available yet";
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "2px 0" }}>
-      <span aria-hidden="true">{done ? "✓" : "○"}</span>
-      <span style={{ opacity: done ? 0.85 : 0.65 }}>{label}</span>
+    <div
+      style={{ display: "flex", gap: 8, alignItems: "center", padding: "2px 0", opacity: state === "unavailable" ? 0.6 : 1 }}
+      data-testid={`pm-checklist-${label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
+    >
+      <span aria-hidden="true">{symbol}</span>
+      <span className="sr-only">{stateLabel}:</span>
+      <span style={{ opacity: state === "done" ? 0.85 : 0.65 }}>{label}</span>
+      {hint && <span style={{ fontSize: 12, opacity: 0.55 }}>— {hint}</span>}
     </div>
   );
 }
@@ -1009,13 +1648,17 @@ function UserInput({
   onChange,
   testId,
   type = "text",
+  error,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   testId: string;
   type?: string;
+  /** Inline validation message. Rendered in an alert region and linked via aria-describedby. */
+  error?: string;
 }) {
+  const errId = `${testId}-error`;
   return (
     <label style={{ display: "grid", gap: 4, fontSize: 12, opacity: 0.9 }}>
       {label}
@@ -1024,8 +1667,15 @@ function UserInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         data-testid={testId}
+        aria-invalid={!!error}
+        aria-describedby={error ? errId : undefined}
         style={{ background: "var(--admin-bg, #0d0d0d)", color: "#fff", borderRadius: 8, padding: 8 }}
       />
+      {error && (
+        <span id={errId} role="alert" data-testid={errId} style={{ color: "var(--admin-red, #ff6b6b)" }}>
+          {error}
+        </span>
+      )}
     </label>
   );
 }
@@ -1048,6 +1698,7 @@ function UserActions({
   openModal,
   partnerId,
   activeOwnerCount,
+  onEditInvitation,
 }: {
   user: PartnerUserRow;
   busy: boolean;
@@ -1060,6 +1711,7 @@ function UserActions({
   }) => void;
   partnerId: string;
   activeOwnerCount: number;
+  onEditInvitation: (u: PartnerUserRow) => void;
 }) {
   const post = (path: string, body: Record<string, unknown>) => (reason: string) =>
     apiRequest("POST", `${BASE}${path}`, { ...body, reason }).then((r) => r.json());
@@ -1068,7 +1720,10 @@ function UserActions({
     (USER_ROLES as readonly string[]).includes(user.role) ? (user.role as (typeof USER_ROLES)[number]) : "STAFF"
   );
 
-  const pendingInvite = ["PENDING", "SENT", "DELIVERY_FAILED"].includes(user.invitation_status ?? "");
+  // Availability comes from the shared helper (unit-tested), not from an inline status list, so the
+  // UI and the documented lifecycle rules cannot drift apart.
+  const inviteAvailability = invitationActions(user.status, user.invitation_status);
+  const pendingInvite = inviteAvailability.canResend;
   // Only warn when the action would actually take the tenant to zero active owners.
   const isLastActiveOwner = user.role === "OWNER" && user.status === "ACTIVE" && activeOwnerCount <= 1;
   const lastOwnerWarning = isLastActiveOwner ? (
@@ -1084,6 +1739,17 @@ function UserActions({
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
       {/* Setup invitations only exist for accounts that have not completed setup. */}
+      {inviteAvailability.canEdit && (
+        <AdminButton
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() => onEditInvitation(user)}
+          data-testid={`pm-user-edit-invite-${user.id}`}
+        >
+          Edit invitation
+        </AdminButton>
+      )}
       {user.status === "INVITED" && pendingInvite && (
         <AdminButton
           size="sm"

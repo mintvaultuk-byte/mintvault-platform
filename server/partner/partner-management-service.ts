@@ -369,6 +369,176 @@ const PROFILE_FIELDS = [
   "health_note",
 ] as const;
 
+/**
+ * Rename the organisation (the one identity field that lives on partner_organisations, not on the
+ * profile).
+ *
+ * AUDIT ACTION CHOICE: this records `profile_updated`, an action type the database CHECK constraint
+ * `chk_partner_management_audit_action` already permits. A dedicated `legal_name_changed` action
+ * would be more precise but would violate that constraint at runtime, and adding it is a migration —
+ * deliberately out of scope. The before/after states name `legal_name` explicitly, so the ledger is
+ * unambiguous about what changed despite the shared action label.
+ *
+ * The profile version is used as the optimistic lock for the whole partner aggregate (the same lock
+ * updateProfile and changeStatus use), so a rename cannot silently overwrite a concurrent edit.
+ */
+export async function updatePartnerLegalName(
+  actor: ActorContext,
+  partnerId: string,
+  legalName: string,
+  expectedVersion: number,
+  reason: string
+) {
+  const org = await loadPartner(partnerId);
+  if (org.status === "REVOKED") {
+    throw new G5RequestError("PARTNER_UNAVAILABLE", "A revoked partner cannot be edited.");
+  }
+  await loadOrInitProfileVersion(org.id);
+  return withAudit(actor, org.id, "profile_updated", reason, { legal_name: org.legal_name }, async () => {
+    // Bump the aggregate version and rename in ONE data-modifying-CTE statement so the two writes are
+    // atomic — no window where the version moved but the name did not. Mirrors changeStatus.
+    const r = await partnerAdminQuery(
+      `WITH bumped AS (
+         UPDATE partner_profiles SET version = version + 1, updated_at = now()
+          WHERE tenant_id = $1 AND version = $2
+          RETURNING tenant_id
+       )
+       UPDATE partner_organisations o
+          SET legal_name = $3, updated_at = now()
+         FROM bumped
+        WHERE o.id = bumped.tenant_id`,
+      [org.id, expectedVersion, legalName]
+    );
+    if (r.rowCount === 0) {
+      throw new G5RequestError("VERSION_CONFLICT", "The partner was modified by someone else; reload and retry.");
+    }
+    return {
+      result: { legalName },
+      entityType: "partner",
+      entityId: org.id,
+      afterState: { legal_name: legalName },
+    };
+  });
+}
+
+export interface DuplicateCandidate {
+  legalName?: string;
+  tradingName?: string;
+  email?: string;
+  postcode?: string;
+  phone?: string;
+}
+
+export interface DuplicateMatchRow {
+  kind: "email" | "legal_name" | "trading_name" | "postcode" | "phone";
+  partnerId: string;
+  partnerName: string;
+  value: string;
+}
+
+/**
+ * READ-ONLY pre-creation duplicate scan. Writes nothing and audits nothing — it is a lookup the admin
+ * performs before deciding, and an audit row for "I typed a name into a box" would be noise.
+ *
+ * Matching is normalised in SQL (lower/trim for names, digits-only for phone, spaces stripped for
+ * postcode) so "ME2 2AA" and "me22aa" collide, which is the whole point. The `email` probe covers BOTH
+ * the profile contact address and partner_users, because a user-email collision is the one the invite
+ * transaction will actually reject — surfacing it here turns a confusing late failure into an early,
+ * explainable one.
+ */
+export async function findDuplicates(candidate: DuplicateCandidate): Promise<DuplicateMatchRow[]> {
+  const out: DuplicateMatchRow[] = [];
+  const norm = (s?: string) => (s ?? "").trim();
+
+  const legalName = norm(candidate.legalName);
+  const tradingName = norm(candidate.tradingName);
+  const email = norm(candidate.email);
+  const postcode = norm(candidate.postcode);
+  const phone = norm(candidate.phone);
+
+  if (legalName) {
+    const { rows } = await partnerAdminQuery<{ id: string; legal_name: string }>(
+      `SELECT id, legal_name FROM partner_organisations
+        WHERE lower(btrim(regexp_replace(legal_name, '\\s+', ' ', 'g'))) = lower(btrim(regexp_replace($1, '\\s+', ' ', 'g')))
+        ORDER BY legal_name, id
+        LIMIT 5`,
+      [legalName]
+    );
+    for (const r of rows) out.push({ kind: "legal_name", partnerId: r.id, partnerName: r.legal_name, value: r.legal_name });
+  }
+
+  if (tradingName) {
+    const { rows } = await partnerAdminQuery<{ id: string; legal_name: string; trading_name: string }>(
+      `SELECT o.id, o.legal_name, p.trading_name
+         FROM partner_profiles p JOIN partner_organisations o ON o.id = p.tenant_id
+        WHERE p.trading_name IS NOT NULL
+          AND lower(btrim(regexp_replace(p.trading_name, '\\s+', ' ', 'g'))) = lower(btrim(regexp_replace($1, '\\s+', ' ', 'g')))
+        ORDER BY o.legal_name, o.id
+        LIMIT 5`,
+      [tradingName]
+    );
+    for (const r of rows)
+      out.push({ kind: "trading_name", partnerId: r.id, partnerName: r.legal_name, value: r.trading_name });
+  }
+
+  if (email) {
+    const { rows } = await partnerAdminQuery<{ id: string; legal_name: string; email: string }>(
+      `SELECT o.id, o.legal_name, p.primary_email AS email
+         FROM partner_profiles p JOIN partner_organisations o ON o.id = p.tenant_id
+        WHERE p.primary_email IS NOT NULL AND lower(p.primary_email) = lower($1)
+       UNION
+       SELECT o.id, o.legal_name, u.email
+         FROM partner_users u JOIN partner_organisations o ON o.id = u.tenant_id
+        WHERE lower(u.email) = lower($1)
+        ORDER BY 2, 1
+        LIMIT 5`,
+      [email]
+    );
+    for (const r of rows) out.push({ kind: "email", partnerId: r.id, partnerName: r.legal_name, value: r.email });
+  }
+
+  if (postcode) {
+    const { rows } = await partnerAdminQuery<{ id: string; legal_name: string; address_postcode: string }>(
+      `SELECT o.id, o.legal_name, p.address_postcode
+         FROM partner_profiles p JOIN partner_organisations o ON o.id = p.tenant_id
+        WHERE p.address_postcode IS NOT NULL
+          AND upper(replace(p.address_postcode, ' ', '')) = upper(replace($1, ' ', ''))
+        ORDER BY o.legal_name, o.id
+        LIMIT 5`,
+      [postcode]
+    );
+    for (const r of rows)
+      out.push({ kind: "postcode", partnerId: r.id, partnerName: r.legal_name, value: r.address_postcode });
+  }
+
+  if (phone) {
+    const digits = phone.replace(/[^0-9]/g, "");
+    if (digits.length >= 7) {
+      const { rows } = await partnerAdminQuery<{ id: string; legal_name: string; primary_phone: string }>(
+        `SELECT o.id, o.legal_name, p.primary_phone
+           FROM partner_profiles p JOIN partner_organisations o ON o.id = p.tenant_id
+          WHERE p.primary_phone IS NOT NULL
+            AND regexp_replace(p.primary_phone, '[^0-9]', '', 'g') = $1
+          ORDER BY o.legal_name, o.id
+          LIMIT 5`,
+        [digits]
+      );
+      for (const r of rows)
+        out.push({ kind: "phone", partnerId: r.id, partnerName: r.legal_name, value: r.primary_phone });
+    }
+  }
+
+  // De-duplicate: the same partner matching the same way twice (e.g. two users sharing an address)
+  // should be reported once.
+  const seen = new Set<string>();
+  return out.filter((m) => {
+    const k = `${m.kind}:${m.partnerId}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
 export async function updateProfile(
   actor: ActorContext,
   partnerId: string,
@@ -868,6 +1038,162 @@ export async function invitePartnerUser(
   const { delivery, ...invite } = committed.invite;
   invite.deliveryStatus = await recordInvitationDelivery({ ...invite, delivery });
   return { result: { userId: committed.userId, ...invite }, alreadyCompleted: false };
+}
+
+/**
+ * Amend a PENDING invitation: correct the name, the email address, or the role, and re-issue it.
+ *
+ * DESIGN NOTE — why this is "amend and re-issue" rather than "edit in place". An invitation that has
+ * already left the building is not a draft: a token addressed to the old inbox is live until it is
+ * revoked. Silently changing the recipient column while leaving that token valid would mean a typo'd
+ * address keeps a working key to the account — a real security hole dressed up as a convenience
+ * feature. So changing the details always revokes the outstanding token and mints a new one for the
+ * corrected address. `createInvitationRecord` performs the revoke-then-insert in the same transaction
+ * and stamps `superseded_by`, so the chain of who-replaced-what is preserved.
+ *
+ * AUDIT ACTION CHOICE: recorded as `partner_user_invited` — an action type the CHECK constraint
+ * already permits, and an honest description of what physically happens (a fresh invitation is
+ * issued). A distinct `partner_invitation_amended` action would read better but requires a migration.
+ *
+ * The ledger records BOTH sides of the correction: an `attempted` row carrying the previous
+ * name/email/role as `before_state`, and the terminal `succeeded` row carrying the new address and
+ * role in `after_state`. Without the new-address half, the ledger could say an invitation was
+ * redirected but not where to — which is the one question an audit of this action must answer.
+ *
+ * Only INVITED users are amendable. Once an invitation is accepted the person exists, and their
+ * details are changed through the role/status controls, not by rewriting history.
+ */
+export async function amendPendingInvitation(
+  actor: ActorContext,
+  partnerId: string,
+  userId: string,
+  input: { firstName: string; lastName: string; email: string; role: AdminPartnerRole },
+  reason: string
+) {
+  const org = await loadPartner(partnerId);
+  if (org.status === "SUSPENDED" || org.status === "REVOKED") {
+    throw new G5RequestError("PARTNER_UNAVAILABLE", "Partner is not available for invitations.");
+  }
+  const email = normaliseEmail(input.email);
+  const firstName = input.firstName.trim();
+  const lastName = input.lastName.trim();
+  if (!firstName || !lastName || !email) throw new G5RequestError("VALIDATION_ERROR", "Name and email are required.");
+  const roleCode = ADMIN_ROLE_TO_PARTNER_ROLE[input.role];
+
+  /*
+   * LEDGER: one `attempted` row written on a SEPARATE pooled connection BEFORE the transaction, so
+   * it survives a rollback — this is what makes a REJECTED amend (already accepted, duplicate email,
+   * wrong tenant) visible in the audit trail at all, matching how withAudit behaves for the
+   * mutations that use it. It carries BOTH sides of the correction: the previous identity in
+   * before_state and the intended new identity in after_state, so the ledger answers "redirected
+   * from whom, to whom" without having to parse the reason text.
+   *
+   * The pre-read here is advisory only; the authoritative check is the FOR UPDATE re-read inside the
+   * transaction below.
+   */
+  const prior = await partnerAdminQuery<{ email: string; first_name: string; last_name: string }>(
+    "SELECT email, first_name, last_name FROM partner_users WHERE tenant_id=$1 AND id=$2",
+    [org.id, userId]
+  );
+  await partnerAdminQuery(
+    `INSERT INTO partner_management_audit
+       (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, before_state, after_state, reason, result)
+     VALUES ($1,'partner_user_invited',$2,$3,$4,$5,'partner_user',$6,$7,$8,'__attempt__','attempted')`,
+    [
+      org.id,
+      actor.actorUserId,
+      actor.actorEmail,
+      actor.requestId,
+      actor.idempotencyKey ?? null,
+      userId,
+      prior.rows[0]
+        ? JSON.stringify({
+            email: prior.rows[0].email,
+            firstName: prior.rows[0].first_name,
+            lastName: prior.rows[0].last_name,
+          })
+        : null,
+      JSON.stringify({ intent: "amend_pending_invitation", email, roleCode, firstName, lastName }),
+    ]
+  );
+
+  const committed = await withPartnerAdminTransaction(async (client) => {
+    const existing = await client.query<{
+      id: string;
+      email: string;
+      first_name: string;
+      last_name: string;
+      status: string;
+    }>("SELECT id, email, first_name, last_name, status FROM partner_users WHERE tenant_id=$1 AND id=$2 FOR UPDATE", [
+      org.id,
+      userId,
+    ]);
+    if (existing.rows.length !== 1) throw new G5RequestError("PARTNER_USER_NOT_FOUND", "Partner user not found.");
+    const before = existing.rows[0];
+    if (before.status !== "INVITED") {
+      throw new G5RequestError(
+        "INVITATION_NOT_AMENDABLE",
+        "This invitation has already been accepted. Change the person's role or status instead."
+      );
+    }
+
+    // Same duplicate rule the original invite enforces, but scoped to OTHER users — re-saving the
+    // form without changing the address must not report the invitation as a duplicate of itself.
+    const clash = await client.query("SELECT 1 FROM partner_users WHERE lower(email)=lower($1) AND id<>$2 LIMIT 1", [
+      email,
+      userId,
+    ]);
+    if (clash.rows.length) {
+      throw new G5RequestError("DUPLICATE_PARTNER_USER", "A partner user with this email already exists.");
+    }
+
+    const roleRow = await client.query<{ id: string }>("SELECT id FROM partner_roles WHERE code=$1", [roleCode]);
+    if (roleRow.rows.length !== 1) {
+      throw new G5RequestError("PARTNER_ROLE_NOT_CONFIGURED", "Partner role is not configured.");
+    }
+
+    await client.query(
+      "UPDATE partner_users SET email=$1, first_name=$2, last_name=$3, updated_at=now() WHERE id=$4",
+      [email, firstName, lastName, userId]
+    );
+    await client.query("DELETE FROM partner_user_roles WHERE tenant_id=$1 AND user_id=$2", [org.id, userId]);
+    await client.query("INSERT INTO partner_user_roles (tenant_id, user_id, role_id) VALUES ($1,$2,$3)", [
+      org.id,
+      userId,
+      roleRow.rows[0].id,
+    ]);
+
+    // Revokes the outstanding token and issues a replacement, stamping superseded_by.
+    const invite = await createInvitationRecord(
+      client,
+      actor,
+      org.id,
+      userId,
+      email,
+      roleCode,
+      "partner_user_invited",
+      `${reason} [amended from ${before.first_name} ${before.last_name} <${before.email}>]`
+    );
+    return { invite };
+  });
+
+  const { delivery, ...invite } = committed.invite;
+  /*
+   * The transaction has COMMITTED. recordInvitationDelivery guards the provider send, but its own
+   * bookkeeping UPDATEs are unguarded, so a pool blip there would throw out of this function and be
+   * reported as a 500 — telling the operator the amendment failed when the old token is already dead
+   * and the new one already exists. Degrade to an explicit unknown status instead of lying.
+   */
+  try {
+    invite.deliveryStatus = await recordInvitationDelivery({ ...invite, delivery });
+  } catch (err) {
+    console.error(
+      "[partner-management] invitation amended and COMMITTED, but delivery bookkeeping failed:",
+      (err as { message?: string })?.message ?? err
+    );
+    invite.deliveryStatus = "DELIVERY_STATUS_UNKNOWN";
+  }
+  return { result: { userId, ...invite }, alreadyCompleted: false };
 }
 
 export async function listPartnerUsers(partnerId: string) {

@@ -173,7 +173,10 @@ describe("G5 detail page source assertions", () => {
     expect(src).toContain("expectedVersion: version");
     expect(src).toContain("typed.trim() !== TYPED_CONFIRM");
     expect(src).toContain('aria-labelledby="pm-modal-title"');
-    expect(src).toContain('e.key === "Escape"');
+    // Escape handling is asserted by BEHAVIOUR-shape, not by one literal spelling: the handler was
+    // refactored to an early-return (`e.key !== "Escape"`) when the profile and invitation editors
+    // were added to it, which is equivalent and covers strictly more dialogs.
+    expect(src).toMatch(/e\.key (===|!==) "Escape"/);
   });
   it("status change carries the business-label-only note and no side-effect language", () => {
     expect(src).toContain("business-status label only");

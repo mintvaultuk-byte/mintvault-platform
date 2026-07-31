@@ -23,8 +23,19 @@ import {
   isPartnerPilotMutableFlag,
   pmKeys,
   partnersQueryString,
+  validateLegalName,
+  canCreateDespiteDuplicates,
+  duplicateOverrideNote,
+  duplicateSummary,
+  blockingDuplicates,
+  overridableDuplicates,
+  submitAllowed,
+  submitLabel,
+  serverErrorMessage,
   type PartnerPilotDisplayFlag,
   type PartnerPilotMutableFlag,
+  type DuplicateMatch,
+  type SubmitState,
 } from "./partner-management-helpers";
 
 const BASE = "/api/super-admin/partner-management";
@@ -69,6 +80,62 @@ export default function PartnerManagementPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [legalName, setLegalName] = useState("");
   const [banner, setBanner] = useState<string | null>(null);
+  // Create flow: form → duplicate scan → confirmation summary → create.
+  const [createStep, setCreateStep] = useState<"form" | "confirm">("form");
+  const [createState, setCreateState] = useState<SubmitState>("idle");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createTouched, setCreateTouched] = useState(false);
+  const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
+  const [dupChecking, setDupChecking] = useState(false);
+  // Distinguishes "checked, found nothing" from "could not check". Conflating them let a network
+  // blip render a positive all-clear over a check that never ran.
+  const [dupCheckFailed, setDupCheckFailed] = useState(false);
+  const [dupAcknowledged, setDupAcknowledged] = useState(false);
+
+  const legalNameErr = validateLegalName(legalName);
+  const dupDecision = canCreateDespiteDuplicates(duplicates, dupAcknowledged);
+
+  function closeCreate() {
+    setCreateOpen(false);
+    setCreateStep("form");
+    setLegalName("");
+    setDuplicates([]);
+    setDupAcknowledged(false);
+    setDupCheckFailed(false);
+    setCreateTouched(false);
+    setCreateError(null);
+    setCreateState("idle");
+  }
+
+  /**
+   * Scan for existing partners that look like this one, then show the confirmation summary.
+   *
+   * A failed scan does NOT block creation: duplicate detection is an assistive check, and refusing to
+   * create a partner because a advisory lookup errored would be a worse failure than the duplicate it
+   * was trying to prevent. The step advances either way; the banner says the check could not run.
+   */
+  async function runDuplicateCheck() {
+    setCreateTouched(true);
+    if (legalNameErr) return;
+    setDupChecking(true);
+    setCreateError(null);
+    setDupCheckFailed(false);
+    try {
+      const qs = new URLSearchParams({ legalName: legalName.trim() }).toString();
+      const res = await apiRequest("GET", `${BASE}/partners/duplicate-check?${qs}`);
+      const data = await res.json();
+      setDuplicates(Array.isArray(data?.matches) ? (data.matches as DuplicateMatch[]) : []);
+    } catch {
+      setDuplicates([]);
+      // The warning must travel to the step the operator is LOOKING at. The page banner renders
+      // behind the modal's own backdrop, dimmed — it cannot carry a safety message.
+      setDupCheckFailed(true);
+    } finally {
+      setDupChecking(false);
+      setDupAcknowledged(false);
+      setCreateStep("confirm");
+    }
+  }
 
   useEffect(() => {
     let live = true;
@@ -97,16 +164,29 @@ export default function PartnerManagementPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (name: string) => (await apiRequest("POST", `${BASE}/partners`, { legalName: name })).json(),
+    mutationFn: async (name: string) =>
+      (
+        await apiRequest("POST", `${BASE}/partners`, {
+          legalName: name,
+          // The override acknowledgement rides on the audited create reason, so a soft-duplicate
+          // override is permanently visible in partner_management_audit rather than only in the UI.
+          reason: `Partner created${duplicateOverrideNote(duplicates)}`,
+        })
+      ).json(),
     onSuccess: (d) => {
+      setCreateState("idle");
+      setCreateError(null);
       setBanner("Partner created.");
-      setCreateOpen(false);
-      setLegalName("");
+      closeCreate();
       queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`] });
       if (d?.result?.partnerId) navigate(`/admin/partner-network/partners/${d.result.partnerId}`);
     },
-    onError: (err: unknown) =>
-      setBanner((err as { body?: { error?: { message?: string } } })?.body?.error?.message ?? "Create failed."),
+    onError: (err: unknown) => {
+      setCreateState("error");
+      const msg = serverErrorMessage((err as { body?: unknown })?.body, "Create failed. Nothing was created.");
+      setCreateError(msg);
+      setBanner(msg);
+    },
   });
 
   const flagMutation = useMutation({
@@ -393,48 +473,192 @@ export default function PartnerManagementPage() {
               }}
             >
               <h3 id="pm-create-title" style={{ marginBottom: 8 }}>
-                Create partner
+                {createStep === "form" ? "Create partner" : "Confirm the new partner"}
               </h3>
-              <label htmlFor="pm-create-name" style={{ display: "block", fontSize: 12, opacity: 0.8, marginBottom: 4 }}>
-                Legal company name
-              </label>
-              <input
-                id="pm-create-name"
-                data-testid="pm-create-name"
-                autoFocus
-                value={legalName}
-                onChange={(e) => setLegalName(e.target.value)}
-                style={{
-                  width: "100%",
-                  background: "var(--admin-bg, #0d0d0d)",
-                  color: "#fff",
-                  borderRadius: 8,
-                  padding: 8,
-                }}
-              />
+
+              {createStep === "form" && (
+                <>
+                  <label
+                    htmlFor="pm-create-name"
+                    style={{ display: "block", fontSize: 12, opacity: 0.8, marginBottom: 4 }}
+                  >
+                    Legal company name
+                  </label>
+                  <input
+                    id="pm-create-name"
+                    data-testid="pm-create-name"
+                    autoFocus
+                    value={legalName}
+                    onChange={(e) => setLegalName(e.target.value)}
+                    aria-invalid={createTouched && !!legalNameErr}
+                    aria-describedby={createTouched && legalNameErr ? "pm-create-name-error" : undefined}
+                    onBlur={() => setCreateTouched(true)}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" || dupChecking) return;
+                      setCreateTouched(true);
+                      if (!legalNameErr) void runDuplicateCheck();
+                    }}
+                    style={{
+                      width: "100%",
+                      background: "var(--admin-bg, #0d0d0d)",
+                      color: "#fff",
+                      borderRadius: 8,
+                      padding: 8,
+                    }}
+                  />
+                  {createTouched && legalNameErr && (
+                    <div
+                      id="pm-create-name-error"
+                      role="alert"
+                      data-testid="pm-create-error-legal-name"
+                      style={{ color: "var(--admin-red, #ff6b6b)", fontSize: 12, marginTop: 4 }}
+                    >
+                      {legalNameErr}
+                    </div>
+                  )}
+                  <p style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>
+                    Creating a partner also creates its Main location automatically. You can add the trading name,
+                    address and contact details straight afterwards.
+                  </p>
+                </>
+              )}
+
+              {createStep === "confirm" && (
+                <div>
+                  {/* What is about to be created — shown before the irreversible action, not after. */}
+                  <div data-testid="pm-create-confirm-summary" style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>About to create:</div>
+                    <SummaryRow label="Company" value={legalName.trim()} />
+                    <SummaryRow label="Status" value="PENDING" />
+                    <SummaryRow label="Location" value="Main location (ACTIVE)" />
+                    <SummaryRow label="Owner" value="None yet — invite them on the next screen" />
+                    <SummaryRow label="Credits" value="None" />
+                  </div>
+
+                  {duplicates.length > 0 && (
+                    <div data-testid="pm-create-duplicates" style={{ marginBottom: 12 }}>
+                      <div
+                        role="alert"
+                        style={{ color: "var(--admin-gold, #D4AF37)", fontSize: 13, marginBottom: 6 }}
+                      >
+                        {blockingDuplicates(duplicates).length > 0
+                          ? "This conflicts with an existing partner."
+                          : "This looks similar to a partner you already have."}
+                      </div>
+                      <ul style={{ fontSize: 12, opacity: 0.85, paddingLeft: 18, listStyle: "disc" }}>
+                        {duplicates.map((m, i) => (
+                          <li key={`${m.kind}-${m.partnerId}-${i}`} data-testid={`pm-create-dup-${m.kind}`}>
+                            {duplicateSummary(m)}
+                          </li>
+                        ))}
+                      </ul>
+                      {blockingDuplicates(duplicates).length > 0 ? (
+                        <p style={{ fontSize: 12, marginTop: 6, color: "var(--admin-red, #ff6b6b)" }}>
+                          This cannot be overridden — the email address is already in use by a partner user.
+                        </p>
+                      ) : (
+                        overridableDuplicates(duplicates).length > 0 && (
+                          <label
+                            style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12, marginTop: 8 }}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={dupAcknowledged}
+                              onChange={(e) => setDupAcknowledged(e.target.checked)}
+                              data-testid="pm-create-dup-ack"
+                            />
+                            <span>
+                              I have checked these and this is genuinely a different partner. This acknowledgement is
+                              recorded in the audit trail.
+                            </span>
+                          </label>
+                        )
+                      )}
+                    </div>
+                  )}
+
+                  {dupCheckFailed && (
+                    <div
+                      role="alert"
+                      data-testid="pm-create-dup-failed"
+                      style={{ color: "var(--admin-red, #ff6b6b)", fontSize: 13, marginBottom: 8 }}
+                    >
+                      The duplicate check could not run, so this partner has NOT been checked against
+                      existing ones. Review the partners list before continuing.
+                    </div>
+                  )}
+                  {!dupCheckFailed && duplicates.length === 0 && (
+                    <p data-testid="pm-create-no-duplicates" style={{ fontSize: 12, opacity: 0.7 }}>
+                      No similar partner found.
+                    </p>
+                  )}
+
+                  {createError && (
+                    <div
+                      role="alert"
+                      data-testid="pm-create-server-error"
+                      style={{ marginTop: 10, color: "var(--admin-red, #ff6b6b)", fontSize: 13 }}
+                    >
+                      {createError}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
-                <AdminButton
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setCreateOpen(false)}
-                  data-testid="pm-create-cancel"
-                >
+                <AdminButton size="sm" variant="ghost" onClick={closeCreate} data-testid="pm-create-cancel">
                   Cancel
                 </AdminButton>
-                <AdminButton
-                  size="sm"
-                  variant="gold"
-                  disabled={!legalName.trim() || createMutation.isPending}
-                  onClick={() => createMutation.mutate(legalName.trim())}
-                  data-testid="pm-create-confirm"
-                >
-                  {createMutation.isPending ? "Creating…" : "Create"}
-                </AdminButton>
+                {createStep === "confirm" && (
+                  <AdminButton
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setCreateStep("form")}
+                    data-testid="pm-create-back"
+                  >
+                    Back
+                  </AdminButton>
+                )}
+                {createStep === "form" ? (
+                  <AdminButton
+                    size="sm"
+                    variant="gold"
+                    disabled={dupChecking}
+                    onClick={() => void runDuplicateCheck()}
+                    data-testid="pm-create-continue"
+                  >
+                    {dupChecking ? "Checking…" : "Continue"}
+                  </AdminButton>
+                ) : (
+                  <AdminButton
+                    size="sm"
+                    variant="gold"
+                    disabled={!dupDecision.allowed || !submitAllowed(createState) || createMutation.isPending}
+                    onClick={() => {
+                      if (!submitAllowed(createState) || !dupDecision.allowed) return;
+                      setCreateState("submitting");
+                      createMutation.mutate(legalName.trim());
+                    }}
+                    data-testid="pm-create-confirm"
+                  >
+                    {submitLabel(createState, "Create partner", "Creating…")}
+                  </AdminButton>
+                )}
               </div>
             </div>
           </div>
         )}
       </div>
     </AdminShell>
+  );
+}
+
+/** One label/value line in the pre-creation confirmation summary. */
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", gap: 8, padding: "2px 0", fontSize: 13 }}>
+      <span style={{ opacity: 0.6, minWidth: 90 }}>{label}</span>
+      <span>{value}</span>
+    </div>
   );
 }
