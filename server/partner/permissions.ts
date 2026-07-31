@@ -39,29 +39,64 @@ export type PartnerPermission = (typeof PARTNER_PERMISSIONS)[number];
 export const ROLE_PERMISSIONS: Record<PartnerRoleCode, PartnerPermission[]> = {
   PARTNER_OWNER: [...PARTNER_PERMISSIONS],
   PARTNER_MANAGER: [
-    "partner.dashboard.view", "partner.organisation.view", "partner.location.view",
-    "partner.users.view", "partner.users.manage", "partner.sessions.revoke", "partner.documents.view",
-    "partner.training.view", "partner.credits.view", "partner.orders.view", "partner.orders.create",
-    "partner.orders.edit", "partner.orders.submit", "partner.orders.cancel",
-    "partner.cards.view", "partner.cards.receive", "partner.cards.scan", "partner.cards.assess",
-    "partner.support.view", "partner.support.create",
+    "partner.dashboard.view",
+    "partner.organisation.view",
+    "partner.location.view",
+    "partner.users.view",
+    "partner.users.manage",
+    "partner.sessions.revoke",
+    "partner.documents.view",
+    "partner.training.view",
+    "partner.credits.view",
+    "partner.orders.view",
+    "partner.orders.create",
+    "partner.orders.edit",
+    "partner.orders.submit",
+    "partner.orders.cancel",
+    "partner.cards.view",
+    "partner.cards.receive",
+    "partner.cards.scan",
+    "partner.cards.assess",
+    "partner.support.view",
+    "partner.support.create",
   ],
   MVGS_ASSESSMENT_TECHNICIAN: [
-    "partner.dashboard.view", "partner.location.view", "partner.documents.view", "partner.training.view",
-    "partner.cards.view", "partner.cards.receive", "partner.cards.scan", "partner.cards.assess",
-    "partner.support.view", "partner.support.create",
+    "partner.dashboard.view",
+    "partner.location.view",
+    "partner.documents.view",
+    "partner.training.view",
+    "partner.cards.view",
+    "partner.cards.receive",
+    "partner.cards.scan",
+    "partner.cards.assess",
+    "partner.support.view",
+    "partner.support.create",
   ],
   PARTNER_RECEPTION: [
-    "partner.dashboard.view", "partner.location.view", "partner.orders.view", "partner.orders.create",
-    "partner.orders.edit", "partner.orders.submit",
-    "partner.cards.view", "partner.cards.receive", "partner.support.view", "partner.support.create",
+    "partner.dashboard.view",
+    "partner.location.view",
+    "partner.orders.view",
+    "partner.orders.create",
+    "partner.orders.edit",
+    "partner.orders.submit",
+    "partner.cards.view",
+    "partner.cards.receive",
+    "partner.support.view",
+    "partner.support.create",
   ],
   PARTNER_FINANCE_VIEWER: [
-    "partner.dashboard.view", "partner.organisation.view", "partner.credits.view", "partner.orders.view",
+    "partner.dashboard.view",
+    "partner.organisation.view",
+    "partner.credits.view",
+    "partner.orders.view",
   ],
   PARTNER_TRAINEE: [
-    "partner.dashboard.view", "partner.location.view", "partner.training.view", "partner.cards.view",
-    "partner.documents.view", "partner.support.view",
+    "partner.dashboard.view",
+    "partner.location.view",
+    "partner.training.view",
+    "partner.cards.view",
+    "partner.documents.view",
+    "partner.support.view",
   ],
 };
 
@@ -83,14 +118,14 @@ export async function seedPartnerRbac(): Promise<void> {
     await partnerAdminQuery(
       `INSERT INTO partner_roles (code, label) VALUES ($1,$2)
        ON CONFLICT (code) DO NOTHING`,
-      [code, ROLE_LABELS[code]],
+      [code, ROLE_LABELS[code]]
     );
   }
   for (const perm of PARTNER_PERMISSIONS) {
     await partnerAdminQuery(
       `INSERT INTO partner_permissions (code, label) VALUES ($1,$1)
        ON CONFLICT (code) DO NOTHING`,
-      [perm],
+      [perm]
     );
   }
   for (const code of PARTNER_ROLE_CODES) {
@@ -100,7 +135,7 @@ export async function seedPartnerRbac(): Promise<void> {
          SELECT r.id, p.id FROM partner_roles r, partner_permissions p
          WHERE r.code=$1 AND p.code=$2
          ON CONFLICT DO NOTHING`,
-        [code, perm],
+        [code, perm]
       );
     }
   }
@@ -114,7 +149,7 @@ export async function getUserPermissions(client: PoolClient, userId: string): Pr
        JOIN partner_role_permissions rp ON rp.role_id = ur.role_id
        JOIN partner_permissions p ON p.id = rp.permission_id
       WHERE ur.user_id = $1`,
-    [userId],
+    [userId]
   );
   return new Set(rows.map((r) => r.code));
 }
@@ -123,7 +158,7 @@ export async function getUserPermissions(client: PoolClient, userId: string): Pr
 export async function getUserRoles(client: PoolClient, userId: string): Promise<string[]> {
   const { rows } = await client.query<{ code: string }>(
     `SELECT r.code FROM partner_user_roles ur JOIN partner_roles r ON r.id = ur.role_id WHERE ur.user_id=$1`,
-    [userId],
+    [userId]
   );
   return rows.map((r) => r.code);
 }
@@ -152,19 +187,85 @@ export async function getUserRoles(client: PoolClient, userId: string): Promise<
  * logs one line and does nothing; on any error it logs loudly and returns. A reference-data problem
  * must never crash or delay the main MintVault app.
  */
+/**
+ * Last observed RBAC bootstrap outcome, for the partner readiness endpoint.
+ *
+ * `state` semantics:
+ *   not_configured — no partner admin URL; the partner surface is deliberately off
+ *   pending        — boot ran, bootstrap has not finished yet
+ *   ready          — reference data present and usable
+ *   failed         — bootstrap threw; partner invitations WILL fail until fixed
+ */
+export type PartnerRbacState = "not_configured" | "pending" | "ready" | "failed";
+let rbacState: { state: PartnerRbacState; roleCount: number | null; checkedAt: string | null; error: string | null } = {
+  state: "pending",
+  roleCount: null,
+  checkedAt: null,
+  error: null,
+};
+
+/** Read-only snapshot for the readiness endpoint. Never throws. */
+export function getPartnerRbacStatus() {
+  return { ...rbacState };
+}
+
+/**
+ * Re-read RBAC state on demand (used by the readiness probe so an operator sees the CURRENT truth,
+ * not a boot-time snapshot that may be hours stale). Never throws.
+ */
+export async function refreshPartnerRbacStatus(): Promise<ReturnType<typeof getPartnerRbacStatus>> {
+  if (!process.env.PARTNER_ADMIN_DATABASE_URL) {
+    rbacState = { state: "not_configured", roleCount: null, checkedAt: new Date().toISOString(), error: null };
+    return getPartnerRbacStatus();
+  }
+  try {
+    const { rows } = await partnerAdminQuery<{ n: string }>(
+      "SELECT count(*)::text AS n FROM partner_roles WHERE code = 'PARTNER_OWNER'"
+    );
+    // PARTNER_OWNER specifically: it is the role the FIRST invitation needs, so its absence is the
+    // exact condition that produced PARTNER_ROLE_NOT_CONFIGURED on staging.
+    const ok = Number(rows[0]?.n ?? "0") === 1;
+    rbacState = {
+      state: ok ? "ready" : "failed",
+      roleCount: Number(rows[0]?.n ?? "0"),
+      checkedAt: new Date().toISOString(),
+      error: ok ? null : "PARTNER_OWNER role is missing — partner invitations will fail",
+    };
+  } catch (err) {
+    rbacState = {
+      state: "failed",
+      roleCount: null,
+      checkedAt: new Date().toISOString(),
+      error: (err as { message?: string })?.message ?? "rbac status check failed",
+    };
+  }
+  return getPartnerRbacStatus();
+}
+
 export function bootstrapPartnerRbac(): void {
   if (!process.env.PARTNER_ADMIN_DATABASE_URL) {
     console.log("[partner-rbac] no PARTNER_ADMIN_DATABASE_URL — skipping RBAC bootstrap (partner surface is off)");
+    rbacState = { state: "not_configured", roleCount: null, checkedAt: new Date().toISOString(), error: null };
     return;
   }
   void (async () => {
     try {
       await seedPartnerRbac();
-      const { rows } = await partnerAdminQuery<{ n: string }>("SELECT count(*)::text AS n FROM partner_roles");
-      console.log(`[partner-rbac] reference data ready (${rows[0]?.n ?? "?"} roles)`);
+      const status = await refreshPartnerRbacStatus();
+      if (status.state === "ready") {
+        console.log("[partner-rbac] reference data ready");
+      } else {
+        console.error("[partner-rbac] seed completed but PARTNER_OWNER is still missing:", status.error);
+      }
     } catch (err) {
       // Loud, but non-fatal. The symptom if this ever fails is a clear
       // PARTNER_ROLE_NOT_CONFIGURED on invitation, not a broken application.
+      rbacState = {
+        state: "failed",
+        roleCount: null,
+        checkedAt: new Date().toISOString(),
+        error: (err as { message?: string })?.message ?? "bootstrap failed",
+      };
       console.error(
         "[partner-rbac] BOOTSTRAP FAILED — partner invitations will report PARTNER_ROLE_NOT_CONFIGURED until this is fixed:",
         (err as { message?: string })?.message ?? err

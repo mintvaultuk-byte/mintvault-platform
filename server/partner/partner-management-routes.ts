@@ -32,6 +32,7 @@ import {
 import * as svc from "./partner-management-service";
 import type { ActorContext } from "./partner-management-service";
 import { getLastPartnerAdminCapability, getPartnerAdminCapability } from "./admin-capability";
+import { refreshPartnerRbacStatus } from "./permissions";
 
 const g5MutationRateLimit = rateLimit({
   windowMs: 60 * 1000,
@@ -95,15 +96,35 @@ export function partnerManagementRouter(): Router {
   const r = Router();
   r.use(requireAdmin);
 
+  /**
+   * Partner-management readiness.
+   *
+   * Reports BOTH preconditions the surface actually needs:
+   *   1. the admin pool can see through RLS (BYPASSRLS capability), and
+   *   2. the RBAC reference data exists.
+   *
+   * (2) was added after the first-owner-invitation incident. The RBAC bootstrap is deliberately
+   * fail-soft — a missing partner role must never take down grading or certificates — but fail-soft
+   * without visibility is precisely what let the original defect hide: the app reported healthy on
+   * every probe while partner invitations were impossible. This endpoint is the partner-specific
+   * readiness surface, it already 503s for partner-specific problems, and it is where an operator
+   * looks; so an unusable RBAC state now shows up here rather than nowhere. The core /ready probe is
+   * deliberately NOT changed — a partner reference-data fault must not pull the app out of service.
+   */
   r.get("/readiness", async (_req, res) => {
     const last = getLastPartnerAdminCapability();
     const current = last?.ok ? last : await getPartnerAdminCapability();
-    res.status(current.ok ? 200 : 503).json({
+    const rbac = await refreshPartnerRbacStatus();
+    // "not_configured" means the partner surface is intentionally off — that is not a fault.
+    const rbacOk = rbac.state === "ready" || rbac.state === "not_configured";
+    const ready = current.ok && rbacOk;
+    res.status(ready ? 200 : 503).json({
       checked: true,
-      ready: current.ok,
+      ready,
       capability: current.capability,
       checkedAt: current.checkedAt,
-      failureCode: current.ok ? null : current.code,
+      failureCode: current.ok ? (rbacOk ? null : "PARTNER_RBAC_NOT_SEEDED") : current.code,
+      rbac: { state: rbac.state, checkedAt: rbac.checkedAt, error: rbac.error },
     });
   });
 
