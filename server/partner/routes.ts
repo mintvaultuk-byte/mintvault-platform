@@ -509,17 +509,33 @@ export function partnerApiRouter(): Router {
   });
 
   r.post("/mfa/recovery-codes/regenerate", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
-    const { password } = req.body ?? {};
+    const { password, code, recoveryCode } = req.body ?? {};
     if (typeof password !== "string") {
       res.status(400).json({ error: "elevated verification required" });
       return;
     }
-    const out = await mfaRegenerateRecovery({ tenantId: req.partner!.tenantId, userId: req.partner!.userId }, password);
+    const out = await mfaRegenerateRecovery(
+      {
+        tenantId: req.partner!.tenantId,
+        userId: req.partner!.userId,
+        sessionMfaPassed: req.partner!.mfaPassed,
+      },
+      password,
+      // C: only consulted when an ACTIVE authenticator already exists. Minting a fresh recovery set
+      // for an enrolled user is a credential-class change and now demands the same current-factor
+      // proof as replacing the authenticator. Bootstrap (no active method) is unaffected.
+      {
+        code: typeof code === "string" ? code : undefined,
+        recoveryCode: typeof recoveryCode === "string" ? recoveryCode : undefined,
+      }
+    );
     if (!out.ok) {
-      res.status(401).json({ error: out.reason });
+      res
+        .status(out.reason === "requires_current_factor" || out.reason === "second_factor_required" ? 403 : 401)
+        .json({ error: out.reason });
       return;
     }
-    res.json({ ok: true, recoveryCodes: out.recoveryCodes });
+    res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once; never logged
   });
 
   r.post("/mfa/disable", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {

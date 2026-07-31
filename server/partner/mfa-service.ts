@@ -242,18 +242,58 @@ export async function mfaEnrolConfirm(
   });
 }
 
-export type RegenResult = { ok: true; recoveryCodes: string[] } | { ok: false; reason: "unauthorised" };
+export type RegenResult =
+  | { ok: true; recoveryCodes: string[] }
+  | { ok: false; reason: "unauthorised" | "requires_current_factor" | "second_factor_required" };
 
-/** Regenerate recovery codes (elevated verify) — invalidates all previous unused codes. */
-export async function mfaRegenerateRecovery(ctx: { tenantId: string; userId: string }, password: string): Promise<RegenResult> {
+/**
+ * Regenerate recovery codes — invalidates all previous unused codes.
+ *
+ * C: this used to accept the PASSWORD ALONE. Recovery codes ARE a second factor (`verifySecondFactor`
+ * accepts one in place of a TOTP, and `POST /auth/mfa` completes a sign-in with one), so minting a
+ * fresh set of ten is equivalent to issuing oneself a brand-new authenticator. Password-only was
+ * therefore strictly weaker than BOTH `mfaDisable` and enrolment-REPLACEMENT, which have demanded
+ * password PLUS a current factor since F3 — for operations of the same class. A stolen session plus a
+ * phished/reused password yielded ten single-use factors, and the legitimate holder saw nothing.
+ *
+ * Now, for an ALREADY-ENROLLED user, this demands exactly what replacement demands, via exactly the
+ * same helper (`verifySecondFactor` — one mechanism, not a second implementation):
+ * `sessionMfaPassed` AND a live replay-protected TOTP or a single-use recovery code.
+ *
+ * BOOTSTRAP is deliberately untouched, for the same reason `mfaEnrolStart` leaves it untouched: when
+ * NO active method exists there is no factor to present, so requiring one would strand the user.
+ * First-time enrolment issues its initial codes from `mfaEnrolConfirm`, which this function does not
+ * gate and which is unchanged.
+ *
+ * The prior codes are destroyed before the new ones are written, so a regeneration cannot leave an
+ * older set live. Existing codes are never read back or returned — only the new plaintext, once.
+ */
+export async function mfaRegenerateRecovery(
+  ctx: { tenantId: string; userId: string; sessionMfaPassed?: boolean },
+  password: string,
+  secondFactor: SecondFactorInput = {},
+): Promise<RegenResult> {
   return withTenant({ tenantId: ctx.tenantId }, async (c): Promise<RegenResult> => {
     if (!(await verifyPassword(c, ctx.userId, password))) return { ok: false, reason: "unauthorised" };
+    if (await hasActiveMethod(c, ctx.userId)) {
+      // Mirrors mfaEnrolStart's REPLACEMENT gate exactly — same order, same reasons, same helper.
+      if (!ctx.sessionMfaPassed) return { ok: false, reason: "requires_current_factor" };
+      if (!(await verifySecondFactor(c, ctx.userId, secondFactor))) return { ok: false, reason: "second_factor_required" };
+    }
     await c.query("DELETE FROM partner_recovery_codes WHERE user_id=$1", [ctx.userId]);
     const { plaintext, hashes } = generateRecoveryCodes(10);
     for (const h of hashes) {
       await c.query("INSERT INTO partner_recovery_codes (tenant_id, user_id, code_hash) VALUES ($1,$2,$3)", [ctx.tenantId, ctx.userId, h]);
     }
     await writePartnerAudit(c, { tenantId: ctx.tenantId, actorUserId: ctx.userId, action: "partner_mfa_recovery_regenerated" });
+    // Partner-VISIBLE evidence: replacing the recovery set is a credential-class change, so it is
+    // surfaced at the same severity as partner_mfa_disabled / partner_mfa_replaced rather than being
+    // recorded only in the internal audit ledger the account holder never sees.
+    await writePartnerSecurity(c, {
+      tenantId: ctx.tenantId,
+      severity: "medium",
+      kind: "partner_mfa_recovery_regenerated",
+    });
     return { ok: true, recoveryCodes: plaintext };
   });
 }

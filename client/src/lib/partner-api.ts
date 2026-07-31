@@ -92,9 +92,17 @@ export const partnerMfa = {
     }),
   confirm: (code: string) =>
     req<{ ok: boolean; recoveryCodes: string[] }>("POST", "/api/partner/mfa/confirm", { code }),
-  /** Replaces every unused recovery code. Requires the account password (elevated verification). */
-  regenerateRecoveryCodes: (password: string) =>
-    req<{ ok: boolean; recoveryCodes: string[] }>("POST", "/api/partner/mfa/recovery-codes/regenerate", { password }),
+  /**
+   * Replaces every unused recovery code. Requires the account password AND, once an authenticator is
+   * enrolled, a current factor (C) — the same proof the server demands to replace the authenticator
+   * itself, because a fresh recovery set is a fresh set of second factors. Never persisted.
+   */
+  regenerateRecoveryCodes: (password: string, secondFactor?: { code?: string; recoveryCode?: string }) =>
+    req<{ ok: boolean; recoveryCodes: string[] }>("POST", "/api/partner/mfa/recovery-codes/regenerate", {
+      password,
+      ...(secondFactor?.code ? { code: secondFactor.code } : {}),
+      ...(secondFactor?.recoveryCode ? { recoveryCode: secondFactor.recoveryCode } : {}),
+    }),
 };
 
 // ---- password reset ----

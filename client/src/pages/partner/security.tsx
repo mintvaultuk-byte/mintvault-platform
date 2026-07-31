@@ -82,9 +82,16 @@ export default function PartnerSecurityPage() {
     }
     setPanel("regenerating");
     try {
-      const out = await partnerMfa.regenerateRecoveryCodes(password);
+      // Same factor parsing as the enrolment panel: six digits is a TOTP, anything else a recovery
+      // code. Only sent when one is actually required (enrolled); bootstrap still takes the password.
+      const factor = currentCode.trim();
+      const out = await partnerMfa.regenerateRecoveryCodes(
+        password,
+        enrolled && factor ? (/^[0-9]{6}$/.test(factor) ? { code: factor } : { recoveryCode: factor }) : undefined
+      );
       setNewCodes(out.recoveryCodes ?? []);
       setPassword(""); // no longer needed
+      setCurrentCode(""); // the factor has been consumed server-side; do not keep it in state
       setPanel("codes");
       await refresh();
     } catch (err) {
@@ -177,7 +184,7 @@ export default function PartnerSecurityPage() {
                   data-testid="input-mfa-password"
                 />
               </div>
-              {intent === "enrol" && enrolled && (
+              {enrolled && (
                 <div className="space-y-2">
                   <Label htmlFor="partner-security-current-code">Code from your current authenticator app</Label>
                   <Input
