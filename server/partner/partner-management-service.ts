@@ -26,10 +26,7 @@ export interface ActorContext {
 
 type CreatePartnerFailurePoint = "after_org_insert" | "after_default_location_insert";
 type InvitePartnerFailurePoint =
-  | "after_user_insert"
-  | "after_role_assignment"
-  | "before_invitation_insert"
-  | "before_invitation_audit";
+  "after_user_insert" | "after_role_assignment" | "before_invitation_insert" | "before_invitation_audit";
 
 interface InviteBarrier {
   point: "after_duplicate_check";
@@ -468,7 +465,8 @@ export async function findDuplicates(candidate: DuplicateCandidate): Promise<Dup
         LIMIT 5`,
       [legalName]
     );
-    for (const r of rows) out.push({ kind: "legal_name", partnerId: r.id, partnerName: r.legal_name, value: r.legal_name });
+    for (const r of rows)
+      out.push({ kind: "legal_name", partnerId: r.id, partnerName: r.legal_name, value: r.legal_name });
   }
 
   if (tradingName) {
@@ -1157,10 +1155,12 @@ export async function amendPendingInvitation(
       throw new G5RequestError("PARTNER_ROLE_NOT_CONFIGURED", "Partner role is not configured.");
     }
 
-    await client.query(
-      "UPDATE partner_users SET email=$1, first_name=$2, last_name=$3, updated_at=now() WHERE id=$4",
-      [email, firstName, lastName, userId]
-    );
+    await client.query("UPDATE partner_users SET email=$1, first_name=$2, last_name=$3, updated_at=now() WHERE id=$4", [
+      email,
+      firstName,
+      lastName,
+      userId,
+    ]);
     await client.query("DELETE FROM partner_user_roles WHERE tenant_id=$1 AND user_id=$2", [org.id, userId]);
     await client.query("INSERT INTO partner_user_roles (tenant_id, user_id, role_id) VALUES ($1,$2,$3)", [
       org.id,
@@ -1506,6 +1506,43 @@ export async function resetPartnerUserMfa(actor: ActorContext, partnerId: string
       await client.query(
         "UPDATE partner_sessions SET revoked_at=now() WHERE tenant_id=$1 AND user_id=$2 AND revoked_at IS NULL",
         [org.id, userId]
+      );
+      /*
+       * PARTNER-VISIBLE TIMELINE entry. Preserves the exact contract the legacy route wrote via
+       * adminAudit — action `partner_mfa_admin_reset`, record_type `partner_user`, record_id = the
+       * user, reason, and `after_value.by` = the acting admin. Consolidating the two implementations
+       * must NOT quietly drop an evidence surface the partner can already see: without this row the
+       * partner's own audit timeline would lose a record it has today.
+       *
+       * `partner_audit_events.action` is unconstrained text, so this needs no migration and no new
+       * audit-action value.
+       */
+      await client.query(
+        `INSERT INTO partner_audit_events (tenant_id, action, reason, record_type, record_id, after_value)
+         VALUES ($1,'partner_mfa_admin_reset',$2,'partner_user',$3,$4::jsonb)`,
+        [org.id, reason, userId, JSON.stringify({ by: actor.actorEmail })]
+      );
+      /*
+       * PARTNER-VISIBLE evidence, written in the SAME transaction so it can never disagree with the
+       * reset itself. partner_management_audit is the internal admin ledger the partner cannot read;
+       * without this row a MintVault admin could clear a partner owner's second factor and the
+       * partner's own security timeline would show nothing. Severity 'high' matches the pre-existing
+       * legacy behaviour this consolidates.
+       *
+       * `detail` carries the affected user and counts ONLY — never a TOTP secret, recovery code,
+       * session token or invitation token. `secret_ref` is not selected anywhere in this function.
+       */
+      await client.query(
+        "INSERT INTO partner_security_events (tenant_id, severity, kind, detail) VALUES ($1,'high','partner_mfa_admin_reset',$2::jsonb)",
+        [
+          org.id,
+          JSON.stringify({
+            userId,
+            methodsDisabled: methods.rowCount ?? 0,
+            recoveryCodesBurned: codes.rowCount ?? 0,
+            actorEmail: actor.actorEmail,
+          }),
+        ]
       );
       return {
         result: {

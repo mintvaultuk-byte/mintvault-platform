@@ -482,6 +482,202 @@ describe.skipIf(!isLocal)("First-owner invitation blocker + migration 0033 (Post
     expect(j).not.toContain("hash-1");
   });
 
+  it("MFA reset writes EXACTLY ONE partner-visible high-severity security event, with no secrets", async () => {
+    await perms.seedPartnerRbac();
+    const id = await newPartner("Sec Event Ltd");
+    const created = await svc.invitePartnerUser(
+      actor({ requestId: "i" }),
+      id,
+      { firstName: "S", lastName: "E", email: "sec@example.test", role: "OWNER" },
+      "invite"
+    );
+    const userId = (created.result as { userId: string }).userId;
+    await svc.acceptPartnerInvitation(captured.invitations[0].token as string, "an-adequately-long-password-1");
+    await admin.query(
+      "INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status) VALUES ($1,$2,'totp','enc:TOP-SECRET-REF','ACTIVE')",
+      [id, userId]
+    );
+    await admin.query(
+      "INSERT INTO partner_recovery_codes (tenant_id, user_id, code_hash) VALUES ($1,$2,'RECOVERY-HASH')",
+      [id, userId]
+    );
+
+    await svc.resetPartnerUserMfa(actor({ requestId: "sec" }), id, userId, "device lost");
+
+    const ev = await admin.query<{ severity: string; kind: string; detail: unknown; tenant_id: string }>(
+      "SELECT severity, kind, detail, tenant_id FROM partner_security_events WHERE tenant_id=$1",
+      [id]
+    );
+    expect(ev.rows, "exactly one security event").toHaveLength(1);
+    expect(ev.rows[0]).toMatchObject({ severity: "high", kind: "partner_mfa_admin_reset", tenant_id: id });
+    const j = JSON.stringify(ev.rows[0].detail);
+    expect(j).not.toContain("TOP-SECRET-REF");
+    expect(j).not.toContain("RECOVERY-HASH");
+
+    // the internal management audit record ALSO exists — both records, not one instead of the other
+    const audit = await admin.query(
+      "SELECT 1 FROM partner_management_audit WHERE request_id='sec' AND action_type='partner_user_mfa_reset' AND result='succeeded'"
+    );
+    expect(audit.rows).toHaveLength(1);
+
+    // THIRD evidence surface: the partner-visible timeline the legacy route used to write. Exactly
+    // one row, preserving the legacy contract, with no secret material.
+    const pae = await admin.query<{ action: string; record_id: string; reason: string; after_value: unknown }>(
+      "SELECT action, record_id, reason, after_value FROM partner_audit_events WHERE tenant_id=$1 AND action='partner_mfa_admin_reset'",
+      [id]
+    );
+    expect(pae.rows).toHaveLength(1);
+    expect(pae.rows[0]).toMatchObject({ record_id: userId, reason: "device lost" });
+    const pj = JSON.stringify(pae.rows[0]);
+    expect(pj).not.toContain("TOP-SECRET-REF");
+    expect(pj).not.toContain("RECOVERY-HASH");
+
+    // recovery codes preserved as evidence but unusable
+    const rc = await admin.query<{ n: number }>(
+      "SELECT count(*)::int n FROM partner_recovery_codes WHERE user_id=$1 AND used_at IS NULL",
+      [userId]
+    );
+    expect(rc.rows[0].n).toBe(0);
+    expect(
+      (await admin.query("SELECT count(*)::int n FROM partner_recovery_codes WHERE user_id=$1", [userId])).rows[0].n
+    ).toBe(1);
+  });
+
+  it("a FAILED MFA reset creates neither success record (atomic rollback)", async () => {
+    await perms.seedPartnerRbac();
+    const id = await newPartner("Atomic Ltd");
+    // A user id that does not exist in this tenant → the transaction throws before any write commits.
+    await expect(
+      svc.resetPartnerUserMfa(
+        actor({ requestId: "atomic" }),
+        id,
+        "00000000-0000-0000-0000-0000000000ff",
+        "should roll back"
+      )
+    ).rejects.toMatchObject({ code: "PARTNER_USER_NOT_FOUND" });
+
+    expect((await admin.query("SELECT 1 FROM partner_security_events WHERE tenant_id=$1", [id])).rows).toHaveLength(0);
+    expect(
+      (
+        await admin.query(
+          "SELECT 1 FROM partner_audit_events WHERE tenant_id=$1 AND action='partner_mfa_admin_reset'",
+          [id]
+        )
+      ).rows
+    ).toHaveLength(0);
+    const ok = await admin.query(
+      "SELECT 1 FROM partner_management_audit WHERE request_id='atomic' AND result='succeeded'"
+    );
+    expect(ok.rows, "no succeeded audit row for a failed reset").toHaveLength(0);
+  });
+
+  it("the LEGACY route and the NEW route produce IDENTICAL secure state", async () => {
+    await perms.seedPartnerRbac();
+    const mk = async (name: string, email: string) => {
+      const id = await newPartner(name);
+      const c = await svc.invitePartnerUser(
+        actor({ requestId: `i-${name}` }),
+        id,
+        { firstName: "A", lastName: "B", email, role: "OWNER" },
+        "invite"
+      );
+      const uid = (c.result as { userId: string }).userId;
+      await svc.acceptPartnerInvitation(captured.invitations.at(-1)!.token as string, "an-adequately-long-password-1");
+      await admin.query(
+        "INSERT INTO partner_mfa_methods (tenant_id, user_id, method, secret_ref, status) VALUES ($1,$2,'totp','enc:x','ACTIVE')",
+        [id, uid]
+      );
+      await admin.query("INSERT INTO partner_recovery_codes (tenant_id, user_id, code_hash) VALUES ($1,$2,'h')", [
+        id,
+        uid,
+      ]);
+      await admin.query(
+        `INSERT INTO partner_sessions (tenant_id, user_id, token_hash, credential_version, absolute_expires_at)
+         VALUES ($1,$2,$3,1, now() + interval '12 hours')`,
+        [id, uid, `sess-${uid}`]
+      );
+      await admin.query("UPDATE partner_users SET mfa_enabled=true WHERE id=$1", [uid]);
+      return { id, uid };
+    };
+    const shape = async (id: string, uid: string) => {
+      const u = await admin.query("SELECT mfa_enabled, mfa_required FROM partner_users WHERE id=$1", [uid]);
+      const m = await admin.query("SELECT status FROM partner_mfa_methods WHERE user_id=$1 ORDER BY status", [uid]);
+      const rc = await admin.query("SELECT (used_at IS NOT NULL) burned FROM partner_recovery_codes WHERE user_id=$1", [
+        uid,
+      ]);
+      const se = await admin.query("SELECT (revoked_at IS NOT NULL) revoked FROM partner_sessions WHERE user_id=$1", [
+        uid,
+      ]);
+      const ev = await admin.query("SELECT severity, kind FROM partner_security_events WHERE tenant_id=$1", [id]);
+      return JSON.stringify({ u: u.rows, m: m.rows, rc: rc.rows, se: se.rows, ev: ev.rows });
+    };
+
+    const A = await mk("Route Parity New Ltd", "parity-new@example.test");
+    const B = await mk("Route Parity Legacy Ltd", "parity-legacy@example.test");
+
+    // The NEW route's service, and the SAME service the legacy route now delegates to.
+    await svc.resetPartnerUserMfa(actor({ requestId: "p-new" }), A.id, A.uid, "new route");
+    await svc.resetPartnerUserMfa(actor({ requestId: "p-legacy" }), B.id, B.uid, "legacy route");
+
+    expect(await shape(A.id, A.uid)).toBe(await shape(B.id, B.uid));
+    // and the critical invariant the legacy implementation used to violate
+    const both = await admin.query<{ mfa_required: boolean }>(
+      "SELECT mfa_required FROM partner_users WHERE id = ANY($1::uuid[])",
+      [[A.uid, B.uid]]
+    );
+    expect(both.rows.every((r) => r.mfa_required === true)).toBe(true);
+  });
+
+  it("session revocation is TENANT-SCOPED — another tenant's sessions are untouched", async () => {
+    /*
+     * MUTATION GAP CLOSED: dropping the `tenant_id = $1` predicate from the session revoke survived
+     * the suite. The legacy implementation this consolidates had exactly that defect (it keyed on
+     * user_id alone), so the predicate must be pinned, not assumed.
+     */
+    await perms.seedPartnerRbac();
+    const mk = async (name: string, email: string) => {
+      const id = await newPartner(name);
+      const c = await svc.invitePartnerUser(
+        actor({ requestId: `i-${name}` }),
+        id,
+        { firstName: "A", lastName: "B", email, role: "OWNER" },
+        "invite"
+      );
+      const uid = (c.result as { userId: string }).userId;
+      await admin.query(
+        `INSERT INTO partner_sessions (tenant_id, user_id, token_hash, credential_version, absolute_expires_at)
+         VALUES ($1,$2,$3,1, now() + interval '12 hours')`,
+        [id, uid, `tok-${uid}`]
+      );
+      return { id, uid };
+    };
+    const target = await mk("Scope Target Ltd", "scope-a@example.test");
+    const other = await mk("Scope Other Ltd", "scope-b@example.test");
+
+    await svc.resetPartnerUserMfa(actor({ requestId: "scope" }), target.id, target.uid, "scoped reset");
+
+    const t = await admin.query<{ revoked_at: string | null }>(
+      "SELECT revoked_at FROM partner_sessions WHERE user_id=$1",
+      [target.uid]
+    );
+    expect(
+      t.rows.every((r) => r.revoked_at !== null),
+      "target sessions revoked"
+    ).toBe(true);
+    const o = await admin.query<{ revoked_at: string | null }>(
+      "SELECT revoked_at FROM partner_sessions WHERE user_id=$1",
+      [other.uid]
+    );
+    expect(
+      o.rows.every((r) => r.revoked_at === null),
+      "another tenant's sessions must be untouched"
+    ).toBe(true);
+    // and no evidence rows leaked into the other tenant
+    expect(
+      (await admin.query("SELECT 1 FROM partner_security_events WHERE tenant_id=$1", [other.id])).rows
+    ).toHaveLength(0);
+  });
+
   it("MFA reset is tenant-scoped", async () => {
     await perms.seedPartnerRbac();
     const a = await newPartner("MFA Tenant A Ltd");

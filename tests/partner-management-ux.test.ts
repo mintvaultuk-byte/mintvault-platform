@@ -574,6 +574,56 @@ describe("client/server field contract", () => {
   });
 });
 
+describe("canonical MFA-reset inventory (prevents a second divergent implementation)", () => {
+  const ADMIN_ROUTES = "server/partner/admin-routes.ts";
+
+  it("exactly ONE admin MFA-reset implementation exists — the legacy route delegates", () => {
+    const legacy = readSrc(ADMIN_ROUTES);
+    // The legacy URL is retained for compatibility but must own no implementation of its own.
+    expect(legacy).toContain("resetPartnerUserMfa(actorOf(req)");
+    expect(legacy).not.toContain("partner_mfa_methods");
+    expect(legacy).not.toContain("partner_recovery_codes");
+    // Must never re-introduce the defect that made it divergent. Match an SQL SET, not the word —
+    // the file explains the old behaviour in prose and that explanation must stay readable.
+    expect(legacy).not.toMatch(/SET[^;]*mfa_required\s*=\s*false/);
+  });
+
+  it("no server file outside the canonical service performs an ADMIN mfa teardown", () => {
+    const dir = join(ROOT, "server", "partner");
+    const offenders: string[] = [];
+    for (const f of readdirSync(dir).filter((f) => f.endsWith(".ts"))) {
+      // mfa-service.ts owns the USER's own self-service flows (enrol supersede, self-disable with
+      // password) — different operations, deliberately excluded.
+      if (f === "partner-management-service.ts" || f === "mfa-service.ts") continue;
+      const src = readFileSync(join(dir, f), "utf8");
+      if (/UPDATE partner_mfa_methods SET status='DISABLED'/.test(src)) offenders.push(f);
+      if (/DELETE FROM partner_recovery_codes/.test(src)) offenders.push(f);
+    }
+    expect(offenders, "a second admin MFA-reset implementation has appeared").toEqual([]);
+  });
+
+  it("both MFA-reset routes are rate limited", () => {
+    const legacy = readSrc(ADMIN_ROUTES);
+    expect(legacy).toContain("legacyMutationRateLimit");
+    expect(legacy).toMatch(/r\.post\("\/:partnerId\/users\/:userId\/mfa-reset", legacyMutationRateLimit/);
+    // the new route sits after the router-level mutation limiter
+    const routes = readSrc(SERVER_ROUTES);
+    const limiterIdx = routes.indexOf("r.use(g5MutationRateLimit)");
+    const resetIdx = routes.indexOf('r.post("/partners/:partnerId/users/:userId/reset-mfa"');
+    expect(limiterIdx).toBeGreaterThan(-1);
+    expect(resetIdx).toBeGreaterThan(limiterIdx);
+  });
+
+  it("the canonical service writes exactly ONE partner-visible security event", () => {
+    const svc = readSrc(SERVER_SERVICE);
+    const amend = svc.slice(svc.indexOf("export async function resetPartnerUserMfa"));
+    const body = amend.slice(0, amend.indexOf("export async function", 10));
+    const inserts = body.match(/INSERT INTO partner_security_events/g) ?? [];
+    expect(inserts).toHaveLength(1);
+    expect(body).toContain("'high','partner_mfa_admin_reset'");
+  });
+});
+
 describe("route-ordering contract", () => {
   /**
    * Express matches routes in registration order. `/partners/duplicate-check` is a LITERAL path that
