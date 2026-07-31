@@ -223,6 +223,43 @@ jobs:
       # Partner block above: it calls provisionRealisticRoles() / applyMigrationsRealistic(), which
       # hand `public` schema ownership to the non-superuser pn_migrator.
       PARTNER_UX_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_ux_rt
+
+      # ---- Partner RLS TENANT ISOLATION — the single most important proof in the partner stack ----
+      # tests/partner-rls-isolation.test.ts gates the WHOLE file on PARTNER_RLS_DB via
+      # `(isLocal ? describe : describe.skip)`. This variable appeared ZERO times in this workflow,
+      # so the file has been `describe.skip` in CI since it was written: every tenant-isolation
+      # assertion in the partner stack reported green while never executing. It also had no
+      # "is not silently skipped in CI" guard, so nothing made that visible. Both are now fixed —
+      # the file carries the guard, and "Assert partner RLS suite executed" below asserts EXECUTION
+      # so hard-skipping the gate cannot delete the evidence either.
+      #
+      # WHY THE ROLE SHAPE MATTERS. On staging the partner RUNTIME role is partner_app_staging with
+      # rolbypassrls = FALSE, while the ADMIN role is neondb_owner with rolbypassrls = TRUE
+      # (verified read-only against staging, 2026-07-31). RLS therefore genuinely binds in
+      # production shape. The suite mirrors that: it connects as the superuser admin to apply
+      # migrations and seed fixtures, then runs EVERY attack under `SET ROLE partner_runtime` —
+      # the NOLOGIN/NOSUPERUSER/NOBYPASSRLS role that migration 0001 creates. It does not need a
+      # separate *_RUNTIME login URL, because SET ROLE changes the effective user that Postgres
+      # evaluates RLS and BYPASSRLS against, and every partner table is FORCE ROW LEVEL SECURITY so
+      # table ownership grants no exemption either. The suite's first assertion proves the role is
+      # genuinely restricted (current_user = partner_runtime, rolbypassrls false, is_superuser off,
+      # row_security on), so it can never silently degrade into a superuser no-op; the precondition
+      # below catches the same misconfiguration one step earlier, at setup.
+      #
+      # PostgreSQL 17 (port 55433) and its OWN database, same one-database-per-suite rule as every
+      # Partner block above: the suite runs `DROP OWNED BY partner_runtime`, applies the partner
+      # migration chain, and TRUNCATEs the whole partner estate in beforeAll, so it can never share
+      # a database with another suite. Unlike the blocks above it does NOT use the realistic-roles
+      # helper — it applies the migrations as the superuser and attacks through SET ROLE — so no
+      # `public`-schema ownership reassignment is involved.
+      #
+      # SCOPE NOTE: the suite applies 0001 + 0007 + 0016 + 0017, i.e. the chain that creates the
+      # tables the pilot ACTUALLY uses (partner_customers, partner_submissions,
+      # partner_submission_cards, partner_submission_events, partner_wallets, partner_credit_ledger,
+      # partner_credit_reservations, partner_credit_reservation_events). It previously applied 0001
+      # alone, which covers only the org/user/session layer — so even had it run, the pilot's real
+      # data surface had zero tenant-isolation coverage.
+      PARTNER_RLS_DB: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_rls
     services:
       postgres:
         # pgvector-enabled Postgres 16 (official pgvector image, same server as
@@ -344,7 +381,7 @@ jobs:
                             mintvault_connector_migration mintvault_connector_admin_mig \
                             mintvault_connector_import_mig mintvault_connector_val_mig \
                             mintvault_partner_rbac_mig mintvault_partner_rbac_rt \
-                            mintvault_partner_ux_rt; do
+                            mintvault_partner_ux_rt mintvault_partner_rls; do
             present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
               "SELECT 1 FROM pg_database WHERE datname = '$partner_db'")"
             if [ "$present" != "1" ]; then
@@ -389,6 +426,27 @@ jobs:
             psql "$rbac_admin" -v ON_ERROR_STOP=1 -tAc \
               "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
           done
+          # Partner RLS tenant-isolation preconditions. This suite's entire value depends on the
+          # role it attacks under being genuinely restricted, so both halves are asserted HERE
+          # rather than discovered as a silently-passing no-op deep inside the run:
+          #   1. the admin connection must be superuser/CREATEROLE — it applies the partner
+          #      migration chain (which CREATEs partner_runtime) and seeds fixtures under BYPASSRLS;
+          #   2. IF partner_runtime already exists in this cluster, it MUST be NOBYPASSRLS. Role
+          #      names are cluster-wide, so another suite's helper creating it with BYPASSRLS would
+          #      leave every "tenant A cannot see tenant B" assertion passing vacuously while
+          #      proving nothing. Migration 0001 creates it NOLOGIN (hence NOBYPASSRLS by default)
+          #      and does not ALTER an existing role, so this is the only place that can catch it.
+          #      This mirrors staging, where the runtime role partner_app_staging has
+          #      rolbypassrls = FALSE and only the admin role neondb_owner has it TRUE.
+          psql "$PARTNER_RLS_DB" -v ON_ERROR_STOP=1 -tAc \
+            "SELECT rolsuper OR rolcreaterole FROM pg_roles WHERE rolname = current_user" | grep -q "t"
+          rls_bypass="$(psql "$PARTNER_RLS_DB" -v ON_ERROR_STOP=1 -tAc \
+            "SELECT coalesce((SELECT rolbypassrls FROM pg_roles WHERE rolname = 'partner_runtime'), false)")"
+          if [ "$rls_bypass" != "f" ]; then
+            echo "partner_runtime must be NOBYPASSRLS for tests/partner-rls-isolation.test.ts to prove anything (got rolbypassrls=$rls_bypass)" >&2
+            exit 1
+          fi
+          echo "[ci-db] partner RLS role model ok: partner_runtime is NOBYPASSRLS (or not yet created)"
           # MINIMAL precondition for the five suites that apply the FULL repository migration set
           # via listMigrationFiles() rather than just the partner subset:
           #   • 0018_correction_audit_index.sql builds a partial index ON audit_log;
@@ -456,6 +514,15 @@ jobs:
       - name: Assert partner RBAC suites executed
         if: always()
         run: node scripts/ci/assert-partner-rbac-suites-executed.mjs vitest-report.json
+
+      # The tenant boundary is the one thing in the partner stack that must never regress silently.
+      # This step asserts tests/partner-rls-isolation.test.ts actually EXECUTED its isolation
+      # assertions — present in the report, above its floor, and ZERO skipped. Configuration alone
+      # is not enough: with PARTNER_RLS_DB correctly set, editing the file's gate to `describe.skip`
+      # would report the file as passed and keep the build green with every cross-tenant proof gone.
+      - name: Assert partner RLS suite executed
+        if: always()
+        run: node scripts/ci/assert-partner-rls-suite-executed.mjs vitest-report.json
 
       - name: Build
         run: npm run build
