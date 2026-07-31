@@ -53,10 +53,12 @@ BEGIN
   -- Refuse on PARTNER PROVENANCE, not merely on "any origin_type is set".
   --
   -- Two reasons this predicate is what it is:
-  --   1) DATA LOSS. A row can carry a full partner snapshot while origin_type is NULL
-  --      (that shape was reachable before the 2c constraint was corrected). Keying only
-  --      on origin_type would let the rollback drop real partner provenance and silently
-  --      re-attribute those certificates to MintVault Headquarters.
+  --   1) DATA LOSS. A row can carry a full partner snapshot while origin_type is NULL.
+  --      That shape is no longer creatable — constraint 2c is now NULL-safe — but this guard
+  --      must still catch it, because it is the shape a pre-fix estate could already contain
+  --      and because a guard that trusts a sibling constraint to have always held is not a
+  --      guard. Keying only on origin_type would let the rollback drop real partner
+  --      provenance and silently re-attribute those certificates to MintVault Headquarters.
   --   2) USABILITY. Every certificate created after 0035 gets a well-formed HQ snapshot,
   --      so keying on `origin_type IS NOT NULL` made the rollback unusable the moment the
   --      first certificate was graded. An HQ snapshot records only "graded at HQ, at T,
@@ -64,7 +66,7 @@ BEGIN
   --      stays rollback-able, and anything carrying partner evidence is refused.
   EXECUTE $q$
     SELECT count(*) FROM certificates
-     WHERE origin_type = 'PARTNER'
+     WHERE origin_type IS NOT DISTINCT FROM 'PARTNER'
         OR origin_partner_id IS NOT NULL
         OR origin_partner_public_ref IS NOT NULL
         OR origin_partner_legal_name IS NOT NULL

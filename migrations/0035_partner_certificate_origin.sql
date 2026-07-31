@@ -150,15 +150,43 @@ BEGIN
   END IF;
 
   -- 2b) A PARTNER origin must actually identify a partner AND be renderable AND be dated.
-  --     coalesce(trading, legal) is the render expression, so requiring it non-null here is
-  --     exactly the guarantee the renderer needs.
+  --
+  --     NON-BLANK, not merely NOT NULL. This previously read
+  --     `coalesce(trading, legal) IS NOT NULL`, which accepts '' and '   ' — both non-NULL and
+  --     both useless. The renderer (server/labels.ts certificateOrigin) does
+  --     `(trading ?? "").trim() || (legal ?? "").trim() || UNNAMED_PARTNER_ORIGIN_NAME`, i.e. it
+  --     treats whitespace-only as ABSENT and falls through to the unnamed fallback. So the old
+  --     constraint's own comment ("exactly the guarantee the renderer needs") was false: the
+  --     database and the renderer disagreed about what "named" means, and a certificate could be
+  --     frozen forever as blank historical evidence of who graded it.
+  --
+  --     The test is "is not blank after trimming", applied to each candidate SEPARATELY —
+  --     mirroring the renderer's per-field trim-then-fallback, which a coalesce() over the raw
+  --     columns does NOT reproduce (coalesce would pick a blank trading name and never consider a
+  --     perfectly good legal name).
+  --
+  --     THE TRIM SET IS SPELLED OUT, and is not `[[:space:]]`. Character classes are LOCALE
+  --     dependent (they follow pg_database.datctype), and staging runs C.UTF-8, where NBSP,
+  --     U+2007, U+202F and U+3000 are NOT classified as space. Under `[[:space:]]` such a name
+  --     would therefore be certified "named" by the database while `certificateOrigin()` — which
+  --     uses JS `.trim()`, a fixed Unicode set — trimmed it to empty and rendered
+  --     UNNAMED_PARTNER_ORIGIN_NAME. The immutability trigger would then freeze that disagreement
+  --     permanently. The explicit list below is exactly ECMAScript's `String.prototype.trim` set
+  --     (WhiteSpace + LineTerminator + U+FEFF), so the constraint and the renderer agree on every
+  --     input, in every locale.
+  --
+  --     Deliberately NOT an allowlist of permitted characters: anything carrying a real glyph
+  --     passes, so legitimate Unicode and punctuation-bearing business names are unaffected.
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_certificates_origin_partner_complete') THEN
     ALTER TABLE certificates ADD CONSTRAINT chk_certificates_origin_partner_complete
       CHECK (
         origin_type IS DISTINCT FROM 'PARTNER'
         OR (
           origin_partner_id IS NOT NULL
-          AND coalesce(origin_partner_trading_name, origin_partner_legal_name) IS NOT NULL
+          AND (
+            btrim(coalesce(origin_partner_trading_name, ''), E'\u0009\u000A\u000B\u000C\u000D\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF') <> ''
+            OR btrim(coalesce(origin_partner_legal_name, ''), E'\u0009\u000A\u000B\u000C\u000D\u0020\u00A0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF') <> ''
+          )
           AND origin_captured_at IS NOT NULL
           AND origin_snapshot_version IS NOT NULL
         )
@@ -168,10 +196,19 @@ BEGIN
   -- 2c) A non-PARTNER origin (HQ, or legacy NULL) must carry NO partner snapshot at all.
   --     Without this, a stale full-row UPDATE could leave partner values stranded on a row
   --     whose origin_type had been flipped to HQ, and the renderer would face two truths.
+  --
+  --     NULL-SAFE BY CONSTRUCTION. This previously read `origin_type = 'PARTNER'`, which is the
+  --     classic three-valued-logic hole: on a LEGACY row origin_type is NULL, so that operand is
+  --     NULL rather than FALSE, `NULL OR FALSE` is NULL, and a CHECK PASSES when its expression
+  --     evaluates to NULL. The legacy half of this rule therefore enforced nothing, and a fully
+  --     fabricated partner snapshot could be inserted on an origin_type IS NULL row — which the
+  --     immutability trigger below would then freeze as permanent, uncorrectable provenance.
+  --     `IS NOT DISTINCT FROM` cannot yield NULL, so every row now takes one branch or the other.
+  --     (Sibling 2b was already immune; it uses IS DISTINCT FROM.)
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_certificates_origin_non_partner_clean') THEN
     ALTER TABLE certificates ADD CONSTRAINT chk_certificates_origin_non_partner_clean
       CHECK (
-        origin_type = 'PARTNER'
+        origin_type IS NOT DISTINCT FROM 'PARTNER'
         OR (
           origin_partner_id IS NULL
           AND origin_partner_public_ref IS NULL
@@ -256,6 +293,20 @@ CREATE TRIGGER trg_certificates_origin_immutable
   FOR EACH ROW
   EXECUTE FUNCTION certificates_origin_is_immutable();
 
+-- ENABLE ALWAYS, not the default ENABLE (pg_trigger.tgenabled = 'A', not 'O').
+--
+-- A default-created trigger fires only when session_replication_role is 'origin' or 'local'. Any
+-- session able to SET it to 'replica' therefore turns provenance immutability off wholesale and
+-- can rewrite a stamped snapshot silently — which is the one thing this facility exists to make
+-- impossible. 'A' keeps it firing in replica mode too.
+--
+-- HONEST LIMIT, stated so it is not over-sold: this closes the replication-role path, NOT a
+-- deliberate `ALTER TABLE ... DISABLE TRIGGER` by the table owner. The threat model here is an
+-- accidental full-row rewrite (server/storage.ts updateCertificate spreads a whole record) and a
+-- privileged-but-careless bulk/restore session — both of which this does stop. It is not, and
+-- cannot be, a defence against an intentional owner-level actor.
+ALTER TABLE certificates ENABLE ALWAYS TRIGGER trg_certificates_origin_immutable;
+
 -- ---------------------------------------------------------------------------
 -- 4) Index for the real query path only: "all certificates originated by this partner"
 --    (per-partner certificate counts on the partner dashboard). Partial, because the
@@ -325,6 +376,16 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_certificates_origin_immutable'
                    AND tgrelid = 'public.certificates'::regclass) THEN
     RAISE EXCEPTION '0035 completeness assertion failed: immutability trigger was not created.';
+  END IF;
+  -- …and that it is ENABLE ALWAYS. Asserting mere EXISTENCE is what previously let a trigger that
+  -- any replica-role session could bypass pass as "installed" — the check has to look at the mode,
+  -- or it certifies a guarantee the database is not actually giving.
+  IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_certificates_origin_immutable'
+                   AND tgrelid = 'public.certificates'::regclass AND tgenabled = 'A') THEN
+    RAISE EXCEPTION
+      '0035 completeness assertion failed: immutability trigger is not ENABLE ALWAYS (tgenabled=%), so session_replication_role=replica would bypass it.',
+      (SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_certificates_origin_immutable'
+         AND tgrelid = 'public.certificates'::regclass);
   END IF;
   IF to_regclass('public.idx_certificates_origin_partner') IS NULL THEN
     RAISE EXCEPTION '0035 completeness assertion failed: idx_certificates_origin_partner was not created.';

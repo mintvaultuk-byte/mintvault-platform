@@ -474,8 +474,15 @@ describe.skipIf(!isLocal)("migration 0035 on real PostgreSQL 17", () => {
     // NOT VALID constraints would silently permit bad legacy data.
     for (const r of cons.rows) expect(r.convalidated, `${r.conname} must be validated`).toBe(true);
 
-    const trg = await db.query(`SELECT 1 FROM pg_trigger WHERE tgname = 'trg_certificates_origin_immutable'`);
+    // Mode, not mere existence. Asserting only `SELECT 1 FROM pg_trigger` is precisely what let a
+    // trigger that any replica-role session could switch off pass CI as "installed" — the claimed
+    // ENABLE ALWAYS was absent from the migration for its entire life and nothing noticed.
+    const trg = await db.query<{ tgenabled: string }>(
+      `SELECT tgenabled FROM pg_trigger WHERE tgname = 'trg_certificates_origin_immutable'
+         AND tgrelid = 'public.certificates'::regclass`
+    );
     expect(trg.rowCount).toBe(1);
+    expect(trg.rows[0].tgenabled, "immutability trigger must be ENABLE ALWAYS ('A'), not origin ('O')").toBe("A");
     const idx = await db.query(`SELECT 1 FROM pg_class WHERE relname = 'idx_certificates_origin_partner'`);
     expect(idx.rowCount).toBe(1);
   });
@@ -552,6 +559,62 @@ describe.skipIf(!isLocal)("migration 0035 on real PostgreSQL 17", () => {
           "'PARTNER', gen_random_uuid(), '   ', '', now(), 1"
         )
       ).rejects.toThrow(/chk_certificates_origin_partner_complete/);
+    });
+
+    // Every blank shape the renderer would treat as absent must be refused at rest, and every
+    // shape it would happily render must survive — the DB and server/labels.ts certificateOrigin
+    // have to agree on what "named" means, or a certificate can be frozen as blank evidence.
+    /*
+     * Includes the UNICODE whitespace JS `.trim()` removes but a `[[:space:]]` character class does
+     * not, in a C/C.UTF-8 database. Staging runs C.UTF-8, so this is not hypothetical: under a
+     * locale-dependent class, a single NBSP would be stored as a "named" partner, rendered as
+     * UNNAMED_PARTNER_ORIGIN_NAME, and then frozen permanently by the immutability trigger.
+     */
+    it("rejects every whitespace-only name shape, including unicode blanks", async () => {
+      const blanks = [
+        "'', ''",
+        "' ', ''",
+        "'    ', '   '",
+        "E'\\t', E'\\n'",
+        "NULL, '  '",
+        "'  ', NULL",
+        "chr(160), NULL", // U+00A0 NBSP
+        "chr(8199), NULL", // U+2007 figure space
+        "chr(8239), NULL", // U+202F narrow NBSP
+        "chr(12288), NULL", // U+3000 ideographic space
+        "chr(65279), NULL", // U+FEFF BOM / ZWNBSP
+        "chr(8232), chr(8233)", // U+2028 / U+2029 line + paragraph separator
+      ];
+      for (const pair of blanks) {
+        await expect(
+          insert(
+            "origin_type, origin_partner_id, origin_partner_trading_name, origin_partner_legal_name, origin_captured_at, origin_snapshot_version",
+            `'PARTNER', gen_random_uuid(), ${pair}, now(), 1`
+          ),
+          `blank pair ${pair} must be rejected`
+        ).rejects.toThrow(/chk_certificates_origin_partner_complete/);
+      }
+    });
+
+    it("still accepts real names, including a blank trading name rescued by a real legal name", async () => {
+      // Per-field trim-then-fallback, exactly as certificateOrigin() resolves the displayed name.
+      // A coalesce() over the raw columns would pick the blank trading name and wrongly reject this.
+      // Distinct certificate_numbers: the shared `insert` helper pins 'MV-TEST', which is unique.
+      await expect(
+        db.query(
+          `INSERT INTO certificates (certificate_number, origin_type, origin_partner_id,
+             origin_partner_trading_name, origin_partner_legal_name, origin_captured_at, origin_snapshot_version)
+           VALUES ('MV-LEGALNAME', 'PARTNER', gen_random_uuid(), '   ', 'Kent Cards Ltd', now(), 1)`
+        )
+      ).resolves.toBeTruthy();
+      // Unicode / accented / non-Latin business names must not be over-constrained.
+      await expect(
+        db.query(
+          `INSERT INTO certificates (certificate_number, origin_type, origin_partner_id,
+             origin_partner_trading_name, origin_captured_at, origin_snapshot_version)
+           VALUES ('MV-UNICODE', 'PARTNER', gen_random_uuid(), 'Café Münz & Söhne — 東京', now(), 1)`
+        )
+      ).resolves.toBeTruthy();
     });
 
     it("rejects an unknown origin_type", async () => {
@@ -638,6 +701,35 @@ describe.skipIf(!isLocal)("migration 0035 on real PostgreSQL 17", () => {
           `UPDATE certificates SET origin_partner_trading_name = 'Renamed Ltd' WHERE certificate_number='MV-STAMPED'`
         )
       ).rejects.toThrow(/immutable grading origin/);
+    });
+
+    /*
+     * The replication-role bypass. A default-created trigger (tgenabled='O') fires only while
+     * session_replication_role is 'origin'/'local', so a session able to set 'replica' — a bulk
+     * load, a pg_restore --disable-triggers, a migration script — silently switched provenance
+     * immutability OFF wholesale. The migration claimed ENABLE ALWAYS for its whole life and never
+     * had it, and no test looked, so the gap was invisible. This is that test.
+     */
+    it("still refuses under session_replication_role='replica' (ENABLE ALWAYS)", async () => {
+      await db.query("SET session_replication_role = 'replica'");
+      try {
+        await expect(
+          db.query(
+            `UPDATE certificates SET origin_partner_trading_name = 'REWRITTEN VIA REPLICA',
+                    origin_partner_legal_name = 'Fabricated Holdings Ltd'
+              WHERE certificate_number='MV-STAMPED'`
+          )
+        ).rejects.toThrow(/immutable grading origin/);
+      } finally {
+        await db.query("RESET session_replication_role");
+      }
+      // …and the snapshot really is untouched, not merely error-raising.
+      const { rows } = await db.query<{ origin_partner_trading_name: string; origin_partner_legal_name: string }>(
+        `SELECT origin_partner_trading_name, origin_partner_legal_name
+           FROM certificates WHERE certificate_number='MV-STAMPED'`
+      );
+      expect(rows[0].origin_partner_trading_name).toBe("Kent Card Emporium");
+      expect(rows[0].origin_partner_legal_name).toBe("KCE Collectibles Ltd");
     });
 
     it("refuses to change the location, the partner id, or the origin type", async () => {
@@ -808,6 +900,27 @@ describe.skipIf(!isLocal)("migration 0035 on real PostgreSQL 17", () => {
         `SELECT origin_partner_trading_name FROM certificates WHERE certificate_number='MV-KEEP'`
       );
       expect(rows[0].origin_partner_trading_name).toBe("Kent Card Emporium");
+    });
+
+    /*
+     * The rollback guard must not trust constraint 2c to have always held. A pre-fix estate could
+     * contain a row carrying partner NAMES with origin_type NULL and no origin_partner_id — the
+     * hardest variant, because the grader's own partner probe keys on origin_partner_id and would
+     * miss it. Keying the guard on origin_type alone would drop that provenance and silently
+     * re-attribute the card to HQ. 2c is dropped here to recreate that estate on purpose.
+     */
+    it("REFUSES on fabricated partner evidence smuggled onto a legacy row (pre-fix estate)", async () => {
+      await db.query(`ALTER TABLE certificates DROP CONSTRAINT chk_certificates_origin_non_partner_clean`);
+      await db.query(
+        `INSERT INTO certificates (certificate_number, origin_type, origin_partner_legal_name, origin_location_name)
+         VALUES ('MV-SMUGGLED', NULL, 'Fake Holdings Ltd', 'Dover Store')`
+      );
+      await expect(db.query(rollbackSql)).rejects.toThrow(/refuses to run/);
+      await db.query("ROLLBACK").catch(() => {});
+      const { rows } = await db.query<{ origin_partner_legal_name: string }>(
+        `SELECT origin_partner_legal_name FROM certificates WHERE certificate_number='MV-SMUGGLED'`
+      );
+      expect(rows[0].origin_partner_legal_name).toBe("Fake Holdings Ltd");
     });
 
     it("removes columns, constraints, trigger, index and journal row when nothing is stamped", async () => {
