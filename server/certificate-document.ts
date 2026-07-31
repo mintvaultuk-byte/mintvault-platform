@@ -7,6 +7,7 @@ import { mvgsTierName } from "@shared/mvgs-scoring";
 import { APP_BASE_URL } from "./app-url";
 import { certIsPristine } from "./lib/cert-pristine";
 import { normalizeCertId } from "./lib/cert-id";
+import { certificateOrigin } from "./labels";
 
 // ── Page geometry ────────────────────────────────────────────────────────────
 const PAGE_W = 595.28;
@@ -359,6 +360,13 @@ export async function generateCertificateDocument(cert: CertificateRecord, owner
         .fillColor(GOLD_DARK)
         .text("OWNERSHIP & REGISTRY", ownerX, y, { characterSpacing: 1 });
 
+      // ── Grading origin (migration 0035) ───────────────────────────────────
+      // Read ONLY from the certificate's immutable snapshot columns. Never re-resolved from
+      // partner_organisations / partner_profiles, so a partner renaming, moving, being
+      // suspended or being revoked cannot retro-edit what an issued certificate claims.
+      // HQ and legacy (origin_type NULL) both render "Graded by MintVault Headquarters".
+      const origin = certificateOrigin(cert);
+
       const ownerRows: [string, string][] = [
         ["Owner", isClaimed ? displayName || "Claimed (name not provided)" : "Unregistered"],
         ...(isClaimed && cert.ownerEmail ? [["Email", cert.ownerEmail] as [string, string]] : []),
@@ -374,6 +382,20 @@ export async function generateCertificateDocument(cert: CertificateRecord, owner
             : "—",
         ],
         ["Card Status", cert.status === "active" ? "Active" : cert.status],
+        // GEOMETRY NOTE — why adding these rows is layout-safe.
+        // This block already flows: the block height is
+        //   max(qrSize + 18, 28 + 17 * rows) = max(158, 28 + 17 * rows),
+        // and the "Email" row above is already conditional, so `rows` is not a constant today.
+        // With rows <= 7 the QR (158pt) still dominates and NOTHING below moves by a single
+        // point. Every HQ/legacy certificate — i.e. every certificate that exists — has at most
+        // 6 rows before this addition, so at 7 it is byte-for-byte unmoved. Only a partner
+        // certificate that is ALSO claimed with an email reaches 8 rows and grows the block by
+        // 6pt; those certificates have no prior printed appearance to preserve, the footer is
+        // absolutely anchored at PAGE_H - MARGIN - 14 and does not move, and the document's
+        // total height already varies by ~100pt with the card-details row count. No font, size,
+        // colour, column position or page dimension is changed.
+        ["Graded By", origin.name],
+        ...(origin.location ? ([["Graded At", origin.location]] as [string, string][]) : []),
       ];
 
       let ownerY = y + 20;
