@@ -21,11 +21,14 @@
 -- ADD CONSTRAINT, and a superset cannot reject a row the subset already accepted. The DROP/ADD pair
 -- is the same shape migration 0031 used to extend this identical constraint.
 --
+-- TRANSACTION: this file deliberately contains NO BEGIN/COMMIT. scripts/db/migrate.ts wraps every
+-- transaction-safe migration in one transaction together with its schema_migrations row; a nested
+-- COMMIT here would commit the runner's transaction early and split the DDL from its journal entry.
+-- All 26 sibling migrations follow the same convention.
+--
 -- REVERSIBLE: migrations/rollback-0033-partner-audit-action-precision.sql restores the 18-value
 -- version. That rollback is only safe while no row uses one of the four new values; the rollback
 -- script checks for exactly that and refuses rather than silently failing.
-
-BEGIN;
 
 DO $$
 BEGIN
@@ -53,5 +56,3 @@ ALTER TABLE partner_management_audit ADD CONSTRAINT chk_partner_management_audit
   'partner_legal_name_changed',  -- organisation renamed (previously recorded as profile_updated)
   'partner_duplicate_override'   -- admin acknowledged a soft duplicate warning and proceeded
 ));
-
-COMMIT;

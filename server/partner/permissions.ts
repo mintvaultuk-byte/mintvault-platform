@@ -7,7 +7,7 @@
  * effective permissions are the union over its assigned roles (partner_user_roles).
  */
 import type { PoolClient } from "pg";
-import { partnerAdminQuery } from "./db";
+import { partnerAdminQuery, partnerAdminDbConfigured } from "./db";
 import { PARTNER_ROLE_CODES, type PartnerRoleCode } from "../../shared/partner-schema";
 
 /** Minimum Phase 1 permission set. Later phases extend this. */
@@ -214,7 +214,10 @@ export function getPartnerRbacStatus() {
  * not a boot-time snapshot that may be hours stale). Never throws.
  */
 export async function refreshPartnerRbacStatus(): Promise<ReturnType<typeof getPartnerRbacStatus>> {
-  if (!process.env.PARTNER_ADMIN_DATABASE_URL) {
+  // MUST match partnerAdminQuery's own resolution (PARTNER_ADMIN_DATABASE_URL || MINTVAULT_DATABASE_URL).
+  // Gating on the pinned URL alone reported "not configured" — i.e. healthy — for a documented,
+  // working configuration in which invitations run but RBAC was never seeded.
+  if (!partnerAdminDbConfigured()) {
     rbacState = { state: "not_configured", roleCount: null, checkedAt: new Date().toISOString(), error: null };
     return getPartnerRbacStatus();
   }
@@ -243,8 +246,10 @@ export async function refreshPartnerRbacStatus(): Promise<ReturnType<typeof getP
 }
 
 export function bootstrapPartnerRbac(): void {
-  if (!process.env.PARTNER_ADMIN_DATABASE_URL) {
-    console.log("[partner-rbac] no PARTNER_ADMIN_DATABASE_URL — skipping RBAC bootstrap (partner surface is off)");
+  if (!partnerAdminDbConfigured()) {
+    console.log(
+      "[partner-rbac] no partner admin database configured — skipping RBAC bootstrap (partner surface is off)"
+    );
     rbacState = { state: "not_configured", roleCount: null, checkedAt: new Date().toISOString(), error: null };
     return;
   }

@@ -110,7 +110,13 @@ export async function partnerAdminQuery<T extends pg.QueryResultRow = pg.QueryRe
 ): Promise<pg.QueryResult<T>> {
   const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
   if (!url) throw new Error("No admin DB URL configured for partner control shell.");
-  if (!adminPool) adminPool = new pg.Pool({ connectionString: url, max: 4 });
+  if (!adminPool) {
+    adminPool = new pg.Pool({ connectionString: url, max: 4 });
+    // Idle pooled clients emit errors on the POOL, not on any query promise. Without a listener
+    // Node treats that as an uncaught exception and exits — a boot-loop on Fly now that the RBAC
+    // bootstrap creates this pool on every machine. Matches server/db.ts and the session pool.
+    adminPool.on("error", (err) => console.error("[partner-admin-pool] idle client error (evicted):", err.message));
+  }
   return adminPool.query<T>(sql, params);
 }
 
@@ -118,7 +124,13 @@ export async function partnerAdminQuery<T extends pg.QueryResultRow = pg.QueryRe
 export async function withPartnerAdminTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
   const url = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
   if (!url) throw new Error("No admin DB URL configured for partner control shell.");
-  if (!adminPool) adminPool = new pg.Pool({ connectionString: url, max: 4 });
+  if (!adminPool) {
+    adminPool = new pg.Pool({ connectionString: url, max: 4 });
+    // Idle pooled clients emit errors on the POOL, not on any query promise. Without a listener
+    // Node treats that as an uncaught exception and exits — a boot-loop on Fly now that the RBAC
+    // bootstrap creates this pool on every machine. Matches server/db.ts and the session pool.
+    adminPool.on("error", (err) => console.error("[partner-admin-pool] idle client error (evicted):", err.message));
+  }
   const client = await adminPool.connect();
   try {
     await client.query("BEGIN");

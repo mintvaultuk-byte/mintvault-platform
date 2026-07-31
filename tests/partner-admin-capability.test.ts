@@ -102,6 +102,17 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     await admin.query(
       "CREATE TABLE partner_management_audit (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), result text NOT NULL)"
     );
+    // The readiness endpoint now also reports RBAC reference-data state (added after the
+    // first-owner-invitation incident, where the app reported healthy while invitations were
+    // impossible). This fixture's minimal schema had no partner_roles at all, so readiness correctly
+    // answered 503. Create and seed it so this suite keeps testing the CAPABILITY gate specifically,
+    // rather than tripping over an unrelated RBAC signal.
+    await admin.query(
+      "CREATE TABLE IF NOT EXISTS partner_roles (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), code text NOT NULL UNIQUE, label text NOT NULL)"
+    );
+    await admin.query(
+      "INSERT INTO partner_roles (code, label) VALUES ('PARTNER_OWNER','Partner Owner') ON CONFLICT (code) DO NOTHING"
+    );
     await admin.query(`CREATE TABLE users (
       id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
       email varchar UNIQUE,
