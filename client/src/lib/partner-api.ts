@@ -48,6 +48,12 @@ export interface PartnerSessionInfo {
   locationId?: string | null;
   viewOnly?: boolean;
   permissions?: string[];
+  /** An ACTIVE authenticator is registered on this account. */
+  mfaEnrolled?: boolean;
+  /** Two-step is required but no authenticator exists yet — enrolment is the only way forward. */
+  mfaEnrolmentRequired?: boolean;
+  /** Unused recovery codes left (count only — the codes themselves are shown once, at issue). */
+  recoveryCodesRemaining?: number;
 }
 
 export const partnerAuth = {
@@ -74,10 +80,21 @@ export const PARTNER_MIN_PASSWORD_LEN = 10;
 // done), which is exactly the state a newly-invited user is in. `secret`/`otpauthUri` and
 // `recoveryCodes` are shown ONCE and never persisted client-side.
 export const partnerMfa = {
-  enrol: (password: string) =>
-    req<{ ok: boolean; secret: string; otpauthUri: string }>("POST", "/api/partner/mfa/enrol", { password }),
+  /**
+   * Start enrolment. `secondFactor` is only required when REPLACING an authenticator that is already
+   * set up (server-enforced — F3); first-time setup takes the password alone. Never persisted.
+   */
+  enrol: (password: string, secondFactor?: { code?: string; recoveryCode?: string }) =>
+    req<{ ok: boolean; secret: string; otpauthUri: string }>("POST", "/api/partner/mfa/enrol", {
+      password,
+      ...(secondFactor?.code ? { code: secondFactor.code } : {}),
+      ...(secondFactor?.recoveryCode ? { recoveryCode: secondFactor.recoveryCode } : {}),
+    }),
   confirm: (code: string) =>
     req<{ ok: boolean; recoveryCodes: string[] }>("POST", "/api/partner/mfa/confirm", { code }),
+  /** Replaces every unused recovery code. Requires the account password (elevated verification). */
+  regenerateRecoveryCodes: (password: string) =>
+    req<{ ok: boolean; recoveryCodes: string[] }>("POST", "/api/partner/mfa/recovery-codes/regenerate", { password }),
 };
 
 // ---- password reset ----

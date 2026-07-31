@@ -47,8 +47,9 @@ export default function PartnerInvitePage() {
           {done ? (
             <div className="space-y-4" data-testid="partner-invite-done">
               <p className="text-sm text-muted-foreground">
-                Your password has been set. Next, sign in and set up an authenticator app — MintVault Partner accounts
-                always need a second step to sign in.
+                Your password has been set. Next, sign in and set up an authenticator app. Two-step verification is
+                required on every MintVault Partner account, so you will not be able to use the Portal until it is set
+                up — it only takes a minute, and you will be taken straight there.
               </p>
               <Button
                 className="w-full"
