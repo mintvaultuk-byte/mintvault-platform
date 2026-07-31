@@ -73,12 +73,27 @@ export type GradingStatus = "unassigned" | "assigned" | "pending_review" | "appr
  *   would mean a single column-name mismatch at integration silently restores
  *   partner auto-publish, i.e. exactly the defect this gate exists to stop.
  *
- * The physical column is expected to be nullable, with NON-NULL meaning
- * "originated from this partner tenant" and NULL meaning "originated at HQ".
+ * WIRED TO MIGRATION 0035. The canonical field is `certificates.origin_type`, a
+ * nullable closed vocabulary: 'PARTNER' | 'HQ' | NULL.
+ *
+ *   'PARTNER' → partner-originated  → mandatory Super Admin review, no sampling
+ *   'HQ'      → HQ-originated       → normal HQ sampling policy
+ *   NULL      → LEGACY (row predates 0035's capture) → treated as HQ for review
+ *               policy, because these are historical HQ certificates and every
+ *               pre-0035 row is NULL. Treating them as partner would silently
+ *               put the entire back catalogue into mandatory review.
+ *
+ * The two "NULL" cases are deliberately NOT the same thing:
+ *   • column ABSENT (0035 not applied) = SCHEMA ambiguity  → "unknown" → FAIL CLOSED
+ *   • column PRESENT but NULL          = known legacy row  → "legacy"  → HQ policy
+ *
+ * Defence in depth: 0035's CHECK constraints already forbid partner snapshot
+ * values on a non-PARTNER row, but if that invariant were ever violated we treat
+ * a populated `origin_partner_id` as partner-originated regardless of origin_type.
  * ════════════════════════════════════════════════════════════════════════════ */
-export const PARTNER_ORIGIN_COLUMN = "partner_tenant_id";
+export const PARTNER_ORIGIN_COLUMN = "origin_type";
 
-export type CertOrigin = "hq" | "partner" | "unknown";
+export type CertOrigin = "hq" | "partner" | "legacy" | "unknown";
 
 /** Cached result of the information_schema probe (null = not probed yet). */
 let partnerOriginColumnPresent: boolean | null = null;
@@ -122,12 +137,20 @@ export async function getCertOrigin(certId: number): Promise<CertOrigin> {
     // Column name is a module constant (never user input) and is emitted as a
     // quoted identifier by drizzle's sql.identifier — not string-concatenated.
     const r = await db.execute(
-      sql`SELECT (${sql.identifier(PARTNER_ORIGIN_COLUMN)} IS NOT NULL) AS is_partner
+      sql`SELECT ${sql.identifier(PARTNER_ORIGIN_COLUMN)} AS origin_type,
+                 (origin_partner_id IS NOT NULL) AS has_partner_snapshot
           FROM certificates WHERE id = ${certId}`
     );
-    const row = r.rows[0] as { is_partner: boolean } | undefined;
+    const row = r.rows[0] as { origin_type: string | null; has_partner_snapshot: boolean } | undefined;
     if (!row) return "unknown";
-    return row.is_partner ? "partner" : "hq";
+    // Defence in depth: a partner snapshot present on a row that does not declare
+    // itself PARTNER violates 0035's CHECK constraints. Treat it as partner.
+    if (row.has_partner_snapshot) return "partner";
+    if (row.origin_type === "PARTNER") return "partner";
+    if (row.origin_type === "HQ") return "hq";
+    if (row.origin_type == null) return "legacy";
+    // Unrecognised value — outside the closed vocabulary. Fail closed.
+    return "unknown";
   } catch (e: any) {
     console.error("[grader] partner-origin lookup failed:", e?.message || e);
     return "unknown";
@@ -136,10 +159,13 @@ export async function getCertOrigin(certId: number): Promise<CertOrigin> {
 
 /**
  * TRUE when a cert must be treated as partner-originated (mandatory review).
- * FAILS CLOSED — "unknown" origin counts as partner.
+ * FAILS CLOSED — "unknown" (schema absent / probe failed / unrecognised value)
+ * counts as partner. "legacy" (0035 applied, row predates capture) is a KNOWN
+ * historical HQ row and follows HQ policy, so it does not force review.
  */
 export async function isPartnerOriginatedCert(certId: number): Promise<boolean> {
-  return (await getCertOrigin(certId)) !== "hq";
+  const origin = await getCertOrigin(certId);
+  return origin === "partner" || origin === "unknown";
 }
 
 /**

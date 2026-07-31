@@ -14,16 +14,30 @@
  * NOTHING in the MVGS engine is exercised or mocked here: these tests seed already-computed
  * grades and assert only on WHO may publish and WHEN.
  *
- * SCHEMA NOTE — the partner-origin marker column (`certificates.partner_tenant_id`) is
- * being added by migration 0035, which does not exist on this branch. This suite therefore
- * ALTERs its own disposable database to simulate the post-0035 world. That ALTER is a test
- * fixture, not a migration, and touches nothing but the throwaway cluster.
+ * SCHEMA NOTE — the partner-origin marker is `certificates.origin_type`, a closed
+ * vocabulary ('PARTNER' | 'HQ' | NULL) introduced by migration 0035, which IS present on
+ * this integrated branch. The post-0035 block applies the REAL migration file to its
+ * throwaway cluster rather than synthesising a fixture column, so the gate is proven
+ * against the schema that actually ships — including 0035's CHECK constraints and its
+ * set-once immutability trigger.
+ *
+ * Three origin states are distinguished, and the distinction is load-bearing:
+ *   • column ABSENT (pre-0035)        -> "unknown" -> FAIL CLOSED, mandatory review
+ *   • origin_type = 'PARTNER'         -> mandatory review, no sampling bypass
+ *   • origin_type = 'HQ'              -> normal HQ sampling
+ *   • origin_type IS NULL (legacy row)-> HQ policy, so the pre-0035 back catalogue is
+ *                                        not dragged into mandatory review
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import pg from "pg";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const { Client } = pg;
 
@@ -230,8 +244,15 @@ describe("origin seam FAILS CLOSED before migration 0035 exists", () => {
 
 describe("P0-C partner-origin mandatory review (post-0035 column present)", () => {
   beforeAll(async () => {
-    // Test fixture simulating migration 0035. NOT a migration.
-    await client.query(`ALTER TABLE certificates ADD COLUMN partner_tenant_id uuid`);
+    // Apply the REAL migration 0035 — not a synthesised fixture column. This is the
+    // whole point of the post-integration regression: the gate must key off the
+    // canonical `origin_type` vocabulary that ships, including its CHECK constraints
+    // and set-once immutability trigger.
+    const sql035 = readFileSync(
+      resolve(__dirname, "../migrations/0035_partner_certificate_origin.sql"),
+      "utf8"
+    );
+    await client.query(sql035);
     resetPartnerOriginSchemaCache();
   });
 
@@ -240,7 +261,22 @@ describe("P0-C partner-origin mandatory review (post-0035 column present)", () =
     expect(Number(rate.rows[0].review_rate)).toBe(0);
 
     const id = await seedCert({ certNumber: "MV-PARTNER-1" });
-    await client.query(`UPDATE certificates SET partner_tenant_id = gen_random_uuid() WHERE id = $1`, [id]);
+    await client.query(
+      `UPDATE certificates
+          SET origin_type = 'PARTNER',
+              origin_partner_id = gen_random_uuid(),
+              origin_partner_public_ref = 'PN-TEST-0001',
+              origin_partner_legal_name = 'Kent Card Emporium Ltd',
+              origin_partner_trading_name = 'Kent Card Emporium',
+              origin_location_id = gen_random_uuid(),
+              origin_location_public_ref = 'PL-TEST-0001',
+              origin_location_name = 'Canterbury Store',
+              origin_location_address = '12 High Street, Canterbury, CT1 2AB',
+              origin_captured_at = now(),
+              origin_snapshot_version = 1
+        WHERE id = $1`,
+      [id]
+    );
 
     const { status, body } = await submit(id);
 
@@ -263,8 +299,35 @@ describe("P0-C partner-origin mandatory review (post-0035 column present)", () =
     expect(Number(audit.details.review_rate)).toBe(0);
   }, 60_000);
 
+  it("a LEGACY row (0035 applied, origin_type NULL) follows HQ policy and still auto-approves", async () => {
+    // Controller decision at integration: the two "no value" cases are NOT the same.
+    //   • column ABSENT  = schema ambiguity        -> "unknown" -> FAIL CLOSED (review)
+    //   • column present but NULL = known legacy   -> "legacy"  -> HQ policy
+    // Every pre-0035 certificate is NULL. Treating those as partner-originated would
+    // silently drag the entire back catalogue into mandatory review, which the owner
+    // explicitly ruled out ("do not change the normal HQ workflow unless necessary").
+    const id = await seedCert({ certNumber: "MV-LEGACY-1" }); // origin_type deliberately left NULL
+
+    const pre = await client.query(`SELECT origin_type FROM certificates WHERE id = $1`, [id]);
+    expect(pre.rows[0].origin_type).toBeNull();
+
+    const { status, body } = await submit(id);
+
+    expect(status).toBe(200);
+    expect(body.gradingStatus).toBe("approved");
+    expect(body.autoApproved).toBe(true);
+
+    const row = await certRow(id);
+    expect(row.grade_approved_by).toBe("auto");
+    expect(row.grader_status).toBe("approved");
+  }, 60_000);
+
   it("an HQ-originated cert with a clean grade still auto-approves (sampling unchanged)", async () => {
-    const id = await seedCert({ certNumber: "MV-HQ-1" }); // partner_tenant_id stays NULL
+    const id = await seedCert({ certNumber: "MV-HQ-1" });
+    await client.query(
+      `UPDATE certificates SET origin_type = 'HQ', origin_captured_at = now(), origin_snapshot_version = 1 WHERE id = $1`,
+      [id]
+    );
 
     const { status, body } = await submit(id);
 
