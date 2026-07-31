@@ -296,6 +296,36 @@ describe("P0-C partner-origin mandatory review (post-0035 column present)", () =
     expect(Number(audit.details.review_rate)).toBe(0);
   }, 60_000);
 
+  it("origin_type='PARTNER' ALONE forces review, independently of the origin_partner_id fallback", async () => {
+    // Found by mutation testing: flipping the origin_type branch to return "hq" did NOT fail any
+    // test, because the defence-in-depth `origin_partner_id IS NOT NULL` check fires first and
+    // masks it for every VALID partner row (0035's CHECK constraints require an id on a PARTNER
+    // row, so the two signals normally travel together). That left the origin_type branch
+    // untested. Here we drop the CHECK on the disposable cluster ONLY, so a PARTNER row can exist
+    // with no partner id, and the origin_type branch is exercised in isolation.
+    await client.query(`ALTER TABLE certificates DROP CONSTRAINT IF EXISTS chk_certificates_origin_partner_complete`);
+    const id = await seedCert({ certNumber: "MV-PARTNER-TYPEONLY" });
+    await client.query(
+      `UPDATE certificates SET origin_type = 'PARTNER', origin_captured_at = now(), origin_snapshot_version = 1 WHERE id = $1`,
+      [id]
+    );
+    const check = await client.query(`SELECT origin_type, origin_partner_id FROM certificates WHERE id = $1`, [id]);
+    expect(check.rows[0].origin_type).toBe("PARTNER");
+    expect(check.rows[0].origin_partner_id).toBeNull(); // the fallback signal is ABSENT
+
+    const { status, body } = await submit(id);
+
+    expect(status).toBe(200);
+    expect(body.gradingStatus).toBe("pending_review");
+    expect(body.reviewRequired).toBe(true);
+    expect(body.autoApproved).toBeUndefined();
+
+    const row = await certRow(id);
+    expect(row.grade_approved_by).toBeNull();
+    expect(row.grader_status).toBe("pending_review");
+    expect((await lastAudit(id)).details.forced).toBe("partner_origin");
+  }, 60_000);
+
   it("a LEGACY row (0035 applied, origin_type NULL) follows HQ policy and still auto-approves", async () => {
     // Controller decision at integration: the two "no value" cases are NOT the same.
     //   • column ABSENT  = schema ambiguity        -> "unknown" -> FAIL CLOSED (review)
