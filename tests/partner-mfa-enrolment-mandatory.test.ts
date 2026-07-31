@@ -17,7 +17,7 @@
  *
  * Reproduce (host must be loopback; the database is dropped and recreated):
  *   PARTNER_MFA_ENROL_RT_ADMIN=postgresql://postgres@127.0.0.1:55444/mv_mfa_enrol \
- *   PARTNER_MFA_ENROL_RT_RUNTIME=postgresql://partner_app_test:synthetic@127.0.0.1:55444/mv_mfa_enrol \
+ *   PARTNER_MFA_ENROL_RT_RUNTIME=postgresql://partner_app_test_mfa_enrol:synthetic@127.0.0.1:55444/mv_mfa_enrol \
  *   LC_ALL=C LANG=C npx vitest run tests/partner-mfa-enrolment-mandatory.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
@@ -126,9 +126,9 @@ describe("P0-E mandatory MFA enrolment coverage is wired up", () => {
     await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
     await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_RBAC_SEED);
-    await admin.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
-    await admin.query("CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic'");
-    await admin.query("GRANT partner_runtime TO partner_app_test");
+    await admin.query("DROP ROLE IF EXISTS partner_app_test_mfa_enrol").catch(() => {});
+    await admin.query("CREATE ROLE partner_app_test_mfa_enrol LOGIN PASSWORD 'synthetic'");
+    await admin.query("GRANT partner_runtime TO partner_app_test_mfa_enrol");
 
     await admin.query(
       "INSERT INTO partner_organisations (id, public_ref, legal_name, status) VALUES ($1,'mfaOrg','Mandatory MFA Ltd','ACTIVE')",
