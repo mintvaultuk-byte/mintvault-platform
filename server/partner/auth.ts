@@ -98,6 +98,46 @@ export async function partnerLogin(email: string, password: string, ip?: string 
     await recordFailure(u, ip, "locked", { countTowardsLockout: false });
     return { ok: false, reason: "locked" };
   }
+
+  // The lockout INTERVAL has elapsed (we only reach here when locked_until is absent or past).
+  // Retire the spent counter BEFORE this attempt is judged.
+  //
+  // Without this, failed_login_count stays at the threshold indefinitely — it is cleared only by a
+  // successful login, a completed password reset, or invitation acceptance — so recordFailure's
+  // arming expression `failed_login_count + 1 >= threshold` is satisfied by the FIRST failure after
+  // every expiry. One unauthenticated request per interval then holds a named partner account
+  // offline forever, comfortably inside both login limiters. The countTowardsLockout:false fix
+  // above stopped a LIVE lock being extended; it did not stop a SPENT lock being instantly re-armed,
+  // which is the other half of the same denial-of-service. Proven end-to-end in
+  // tests/partner-lockout-decay.test.ts.
+  //
+  // Brute-force protection is unchanged: after a lock is served, re-locking costs a full fresh
+  // THRESHOLD of failures again (asserted by that suite) rather than one. Stated precisely, because
+  // the distinction matters to the next reader: this retires the counter when a LOCK EXPIRES; it is
+  // not a general time-decay. An account sitting below the threshold with no lock still carries its
+  // accumulated count indefinitely — unchanged, pre-existing behaviour, and deliberately so, since
+  // decaying that would hand an attacker a slow-drip path under the threshold.
+  //
+  // This is the same expiry-retires-the-counter model server/staff.ts already uses for staff
+  // accounts — the existing architecture, not a second, parallel lockout system.
+  //
+  // CLOCK NOTE (accepted residual): the expiry test above uses the app clock and this UPDATE uses
+  // the database clock. If the app clock ran AHEAD of the database's, this reset would match no row
+  // and the next failure would re-arm — but in that state the lock has genuinely not expired
+  // database-side, so the outcome is a still-locked account, not a weakened one.
+  //
+  // `locked_until <= now()` is re-checked inside the UPDATE so a concurrent request that has just
+  // armed a fresh lock cannot have it cleared by this reset.
+  if (u.locked_until) {
+    await withTenant({ tenantId: u.tenant_id }, (c) =>
+      c.query(
+        `UPDATE partner_users SET failed_login_count = 0, locked_until = NULL
+          WHERE id = $1 AND locked_until IS NOT NULL AND locked_until <= now()`,
+        [u.user_id],
+      ),
+    );
+  }
+
   if (!good) {
     await recordFailure(u, ip, "invalid");
     return { ok: false, reason: "invalid" };
