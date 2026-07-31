@@ -19,6 +19,7 @@ import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
 import { startConnectorRuntime, stopConnectorRuntime } from "./partner/connector-runtime";
+import { bootstrapPartnerRbac } from "./partner/permissions";
 import pg from "pg";
 import path from "path";
 
@@ -638,6 +639,11 @@ async function runTransferV2Sweep() {
       // failure — a connector problem can never crash or delay the main app. With
       // no PARTNER_CONNECTOR_DATABASE_URL it logs one line and does nothing at all.
       startConnectorRuntime();
+
+      // Partner RBAC reference data (roles/permissions). Idempotent, fail-soft, and required before
+      // the FIRST partner invitation can be issued — migration 0001 creates these tables but never
+      // populates them, and nothing in production seeded them until now.
+      bootstrapPartnerRbac();
     }
   );
 })();

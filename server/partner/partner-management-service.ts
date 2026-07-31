@@ -141,7 +141,13 @@ type AuditAction =
   | "partner_user_reactivated"
   | "partner_user_password_reset_initiated"
   | "partner_user_sessions_revoked"
-  | "partner_user_membership_removed";
+  | "partner_user_membership_removed"
+  // Added by migration 0033 so security-relevant actions are labelled honestly rather than
+  // borrowing a neighbouring action type.
+  | "partner_user_mfa_reset"
+  | "partner_invitation_amended"
+  | "partner_legal_name_changed"
+  | "partner_duplicate_override";
 
 // ---------------------------------------------------------------------------
 // Partner + profile lookups (admin pool, explicit tenant scoping).
@@ -373,11 +379,9 @@ const PROFILE_FIELDS = [
  * Rename the organisation (the one identity field that lives on partner_organisations, not on the
  * profile).
  *
- * AUDIT ACTION CHOICE: this records `profile_updated`, an action type the database CHECK constraint
- * `chk_partner_management_audit_action` already permits. A dedicated `legal_name_changed` action
- * would be more precise but would violate that constraint at runtime, and adding it is a migration —
- * deliberately out of scope. The before/after states name `legal_name` explicitly, so the ledger is
- * unambiguous about what changed despite the shared action label.
+ * AUDIT ACTION: `partner_legal_name_changed`, added by migration 0033. This previously borrowed
+ * `profile_updated` because the CHECK constraint permitted nothing better; the ledger is now precise,
+ * and the before/after states still name `legal_name` explicitly.
  *
  * The profile version is used as the optimistic lock for the whole partner aggregate (the same lock
  * updateProfile and changeStatus use), so a rename cannot silently overwrite a concurrent edit.
@@ -394,7 +398,7 @@ export async function updatePartnerLegalName(
     throw new G5RequestError("PARTNER_UNAVAILABLE", "A revoked partner cannot be edited.");
   }
   await loadOrInitProfileVersion(org.id);
-  return withAudit(actor, org.id, "profile_updated", reason, { legal_name: org.legal_name }, async () => {
+  return withAudit(actor, org.id, "partner_legal_name_changed", reason, { legal_name: org.legal_name }, async () => {
     // Bump the aggregate version and rename in ONE data-modifying-CTE statement so the two writes are
     // atomic — no window where the version moved but the name did not. Mirrors changeStatus.
     const r = await partnerAdminQuery(
@@ -1051,9 +1055,10 @@ export async function invitePartnerUser(
  * corrected address. `createInvitationRecord` performs the revoke-then-insert in the same transaction
  * and stamps `superseded_by`, so the chain of who-replaced-what is preserved.
  *
- * AUDIT ACTION CHOICE: recorded as `partner_user_invited` — an action type the CHECK constraint
- * already permits, and an honest description of what physically happens (a fresh invitation is
- * issued). A distinct `partner_invitation_amended` action would read better but requires a migration.
+ * AUDIT ACTION: `partner_invitation_amended`, added by migration 0033. This previously borrowed
+ * `partner_user_invited` because the CHECK constraint permitted nothing better. The distinction
+ * matters to an auditor: "a new invitation was issued" and "an existing invitation was redirected to
+ * a different address" are very different events.
  *
  * The ledger records BOTH sides of the correction: an `attempted` row carrying the previous
  * name/email/role as `before_state`, and the terminal `succeeded` row carrying the new address and
@@ -1098,7 +1103,7 @@ export async function amendPendingInvitation(
   await partnerAdminQuery(
     `INSERT INTO partner_management_audit
        (tenant_id, action_type, actor_user_id, actor_email, request_id, idempotency_key, entity_type, entity_id, before_state, after_state, reason, result)
-     VALUES ($1,'partner_user_invited',$2,$3,$4,$5,'partner_user',$6,$7,$8,'__attempt__','attempted')`,
+     VALUES ($1,'partner_invitation_amended',$2,$3,$4,$5,'partner_user',$6,$7,$8,'__attempt__','attempted')`,
     [
       org.id,
       actor.actorUserId,
@@ -1171,7 +1176,7 @@ export async function amendPendingInvitation(
       userId,
       email,
       roleCode,
-      "partner_user_invited",
+      "partner_invitation_amended",
       `${reason} [amended from ${before.first_name} ${before.last_name} <${before.email}>]`
     );
     return { invite };
@@ -1200,6 +1205,7 @@ export async function listPartnerUsers(partnerId: string) {
   const org = await loadPartner(partnerId);
   const { rows } = await partnerAdminQuery(
     `SELECT u.id, u.first_name, u.last_name, u.email, u.status, u.last_login_at, u.created_at,
+            u.mfa_enabled, u.mfa_required,
             COALESCE(json_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '[]') AS role_codes,
             li.status AS invitation_status, li.expires_at AS invitation_expires_at, li.delivered_at AS invitation_delivered_at
        FROM partner_users u
@@ -1404,6 +1410,113 @@ export async function setPartnerUserStatus(
       [org.id, userId]
     );
     return { result: { ok: true }, entityType: "partner_user", entityId: userId, afterState: { status } };
+  });
+}
+
+/**
+ * Send the partner user a password-reset link.
+ *
+ * SECURITY POSTURE — no password is ever seen, set or stored by an administrator. This composes the
+ * two primitives that already exist for the self-service flow: `createPasswordResetToken` stores only
+ * a SHA-256 hash of a fresh token, and `deliverResetToken` sends the link out-of-band. There is no
+ * temporary password, no plaintext, and the token is never returned in the HTTP response.
+ *
+ * DELIVERY HONESTY: the reset is reported with the delivery status the transport actually produced.
+ * A committed token whose email did not leave the building must not be reported as "sent".
+ */
+export async function sendPartnerUserPasswordReset(
+  actor: ActorContext,
+  partnerId: string,
+  userId: string,
+  reason: string
+) {
+  const org = await loadPartner(partnerId);
+  const u = await partnerAdminQuery<{ email: string; status: string }>(
+    "SELECT email, status FROM partner_users WHERE tenant_id=$1 AND id=$2",
+    [org.id, userId]
+  );
+  if (u.rows.length !== 1) throw new G5RequestError("PARTNER_USER_NOT_FOUND", "Partner user not found.");
+  if (u.rows[0].status !== "ACTIVE") {
+    throw new G5RequestError(
+      "INVALID_STATUS_TRANSITION",
+      "Only an active account can be sent a password reset. Reactivate the account first."
+    );
+  }
+  const email = u.rows[0].email;
+  return withAudit(actor, org.id, "partner_user_password_reset_initiated", reason, { userId }, async () => {
+    const { createPasswordResetToken } = await import("./auth");
+    const token = await createPasswordResetToken(org.id, userId);
+    let deliveryStatus = "SENT";
+    try {
+      const { deliverResetToken } = await import("./delivery");
+      await deliverResetToken(email, token);
+    } catch {
+      // The token is already stored. Report the truth rather than a comforting lie; the operator can
+      // retry once the mail problem is fixed. No token, address or provider detail is surfaced.
+      deliveryStatus = "DELIVERY_FAILED";
+    }
+    return {
+      result: { deliveryStatus },
+      entityType: "partner_user",
+      entityId: userId,
+      // NEVER the token — only the fact that one was issued.
+      afterState: { passwordResetIssued: true, deliveryStatus },
+    };
+  });
+}
+
+/**
+ * Clear a partner user's second factor so they must enrol a fresh authenticator.
+ *
+ * WHAT THIS DOES, precisely: disables every MFA method on the account, burns the unused recovery
+ * codes, flips `mfa_enabled` off and `mfa_required` on, bumps `credential_version` and revokes live
+ * sessions. The user cannot sign in again until they re-enrol — which is the point: an admin
+ * resetting a second factor must not leave the account momentarily protected by nothing.
+ *
+ * NO SECRET IS READ OR RETURNED. The TOTP secret is not decrypted, not logged and not surfaced; it is
+ * marked DISABLED in place. Recovery codes are marked used, never displayed.
+ *
+ * AUDIT ACTION: `partner_user_mfa_reset` (migration 0033). Borrowing `partner_user_sessions_revoked`
+ * would have hidden a second-factor reset inside a routine sign-out entry.
+ */
+export async function resetPartnerUserMfa(actor: ActorContext, partnerId: string, userId: string, reason: string) {
+  const org = await loadPartner(partnerId);
+  return withAudit(actor, org.id, "partner_user_mfa_reset", reason, { userId }, async () => {
+    return withPartnerAdminTransaction(async (client) => {
+      const exists = await client.query("SELECT 1 FROM partner_users WHERE tenant_id=$1 AND id=$2 FOR UPDATE", [
+        org.id,
+        userId,
+      ]);
+      if (exists.rows.length !== 1) throw new G5RequestError("PARTNER_USER_NOT_FOUND", "Partner user not found.");
+
+      const methods = await client.query(
+        "UPDATE partner_mfa_methods SET status='DISABLED' WHERE tenant_id=$1 AND user_id=$2 AND status<>'DISABLED'",
+        [org.id, userId]
+      );
+      const codes = await client.query(
+        "UPDATE partner_recovery_codes SET used_at=now() WHERE tenant_id=$1 AND user_id=$2 AND used_at IS NULL",
+        [org.id, userId]
+      );
+      await client.query(
+        `UPDATE partner_users
+            SET mfa_enabled=false, mfa_required=true, credential_version=credential_version+1, updated_at=now()
+          WHERE tenant_id=$1 AND id=$2`,
+        [org.id, userId]
+      );
+      await client.query(
+        "UPDATE partner_sessions SET revoked_at=now() WHERE tenant_id=$1 AND user_id=$2 AND revoked_at IS NULL",
+        [org.id, userId]
+      );
+      return {
+        result: {
+          methodsDisabled: methods.rowCount ?? 0,
+          recoveryCodesBurned: codes.rowCount ?? 0,
+        },
+        entityType: "partner_user",
+        entityId: userId,
+        afterState: { mfaEnabled: false, mfaRequired: true, sessionsRevoked: true },
+      };
+    });
   });
 }
 

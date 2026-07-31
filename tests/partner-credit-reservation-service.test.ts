@@ -744,6 +744,9 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     // journal row to keep this test focused on G6B's immutable evidence guard.
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0031_partner_user_management.sql'");
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0032_partner_final_owner_invariant.sql'");
+    // Audit-action precision (0033) is likewise a later, unrelated additive migration — it only
+    // widens a CHECK constraint on the management ledger and has no bearing on partner credits.
+    await admin.query("DELETE FROM schema_migrations WHERE filename = '0033_partner_audit_action_precision.sql'");
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );

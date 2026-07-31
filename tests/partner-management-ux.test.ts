@@ -11,7 +11,7 @@
  * constraint would reject. Those are the two ways this feature could silently half-work.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import {
   PROFILE_FIELD_DEFS,
@@ -603,47 +603,82 @@ describe("route-ordering contract", () => {
 
 describe("audit-action contract (database CHECK constraint)", () => {
   /**
-   * partner_management_audit has CHECK chk_partner_management_audit_action restricting action_type to
-   * a fixed list (migrations/0015 + 0031). Writing an action outside that list raises a constraint
-   * violation at runtime — a 500 the admin sees as "something went wrong". This release adds NO new
-   * action type, and this test fails if a future change introduces one without a migration.
+   * Reads the LATEST migration that (re)defines chk_partner_management_audit_action rather than a
+   * hardcoded filename. The previous version pinned 0031; when 0033 legitimately extended the
+   * constraint the test failed against a stale definition — a change-detector, not a contract test.
+   * Discovering the newest definer keeps this a real contract check as the constraint evolves.
    */
-  it("every action type the service can write is permitted by the migration's CHECK constraint", () => {
-    const migration = readSrc("migrations/0031_partner_user_management.sql");
-    const constraintBlock = migration.slice(migration.lastIndexOf("chk_partner_management_audit_action"));
-    const permitted = new Set(
-      (constraintBlock.slice(0, constraintBlock.indexOf("));")).match(/'([a-z_]+)'/g) ?? []).map((s) =>
-        s.replace(/'/g, "")
-      )
-    );
-    expect(permitted.size).toBeGreaterThan(5);
+  function latestPermittedActions(): string[] {
+    const dir = join(ROOT, "migrations");
+    const definers = readdirSync(dir)
+      .filter((f) => /^\d{4}.*\.sql$/.test(f))
+      .filter((f) => readFileSync(join(dir, f), "utf8").includes("ADD CONSTRAINT chk_partner_management_audit_action"))
+      .sort();
+    expect(definers.length, "some migration must define the audit-action constraint").toBeGreaterThan(0);
+    const newest = definers[definers.length - 1];
+    const sql = readFileSync(join(dir, newest), "utf8");
+    const block = sql.slice(sql.lastIndexOf("ADD CONSTRAINT chk_partner_management_audit_action"));
+    return (block.slice(0, block.indexOf("));")).match(/'([a-z_]+)'/g) ?? []).map((s) => s.replace(/'/g, ""));
+  }
 
-    // The service's own AuditAction union is the exhaustive set of values it can pass as action_type.
+  function declaredActions(): string[] {
     const service = readSrc(SERVER_SERVICE);
-    const unionBlock = service.slice(service.indexOf("type AuditAction ="));
-    const declared = (unionBlock.slice(0, unionBlock.indexOf(";")).match(/"([a-z_]+)"/g) ?? []).map((s) =>
-      s.replace(/"/g, "")
-    );
-    expect(declared.length).toBeGreaterThan(5);
+    const block = service.slice(service.indexOf("type AuditAction ="));
+    return (block.slice(0, block.indexOf(";")).match(/"([a-z_]+)"/g) ?? []).map((s) => s.replace(/"/g, ""));
+  }
 
-    const unpermitted = declared.filter((a) => !permitted.has(a));
-    expect(unpermitted).toEqual([]);
+  it("every action type the service can write is permitted by the newest migration's constraint", () => {
+    const permitted = latestPermittedActions();
+    expect(permitted.length).toBeGreaterThan(5);
+    const declared = declaredActions();
+    expect(declared.length).toBeGreaterThan(5);
+    expect(declared.filter((a) => !permitted.includes(a))).toEqual([]);
   });
 
-  it("this release adds no new audit action type (adding one would need a migration)", () => {
+  it("the four owner-approved 0033 actions are BOTH declared in code and permitted by the migration", () => {
+    const permitted = latestPermittedActions();
+    const declared = declaredActions();
+    for (const a of [
+      "partner_user_mfa_reset",
+      "partner_invitation_amended",
+      "partner_legal_name_changed",
+      "partner_duplicate_override",
+    ]) {
+      expect(permitted, `${a} must be permitted by the migration`).toContain(a);
+      expect(declared, `${a} must be declared in the AuditAction union`).toContain(a);
+    }
+  });
+
+  it("0033 is strictly additive — every pre-0033 action survives", () => {
+    const permitted = latestPermittedActions();
+    for (const a of [
+      "partner_created",
+      "profile_updated",
+      "status_changed",
+      "contact_added",
+      "contact_updated",
+      "contact_deactivated",
+      "branding_updated",
+      "note_added",
+      "partner_user_invited",
+      "partner_invitation_resent",
+      "partner_invitation_revoked",
+      "partner_invitation_accepted",
+      "partner_user_role_changed",
+      "partner_user_suspended",
+      "partner_user_reactivated",
+      "partner_user_password_reset_initiated",
+      "partner_user_sessions_revoked",
+      "partner_user_membership_removed",
+    ]) {
+      expect(permitted).toContain(a);
+    }
+  });
+
+  it("a rename and an amendment now use their OWN precise actions, not borrowed neighbours", () => {
     const service = readSrc(SERVER_SERVICE);
-    const unionBlock = service.slice(service.indexOf("type AuditAction ="));
-    const declared = (unionBlock.slice(0, unionBlock.indexOf(";")).match(/"([a-z_]+)"/g) ?? []).map((s) =>
-      s.replace(/"/g, "")
-    );
-    // The new operations deliberately reuse existing action types:
-    //   rename        -> profile_updated
-    //   amend invite  -> partner_user_invited
-    expect(declared).toContain("profile_updated");
-    expect(declared).toContain("partner_user_invited");
-    expect(declared).not.toContain("legal_name_changed");
-    expect(declared).not.toContain("partner_invitation_amended");
-    expect(declared).not.toContain("duplicate_override");
+    expect(service).toContain('withAudit(actor, org.id, "partner_legal_name_changed"');
+    expect(service).toContain("'partner_invitation_amended'");
   });
 });
 

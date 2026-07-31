@@ -87,6 +87,12 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT = [
   "0032_partner_final_owner_invariant",
 ] as const;
 
+/** 0033 — additive audit-action precision (partner_user_mfa_reset et al). */
+export const PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION = [
+  ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
+  "0033_partner_audit_action_precision",
+] as const;
+
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 

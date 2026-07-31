@@ -343,6 +343,36 @@ export function partnerManagementRouter(): Router {
     }
   });
 
+  /** Email the user a password-reset link. No password is ever set, shown or stored by the admin. */
+  r.post("/partners/:partnerId/users/:userId/password-reset", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.sendPartnerUserPasswordReset(actor, req.params.partnerId, req.params.userId, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /** Clear the user's second factor and force re-enrolment. Revokes sessions. */
+  r.post("/partners/:partnerId/users/:userId/reset-mfa", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.resetPartnerUserMfa(actor, req.params.partnerId, req.params.userId, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
   r.post("/partners/:partnerId/users/:userId/revoke-sessions", async (req, res) => {
     try {
       const actor = actorOf(req);

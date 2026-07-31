@@ -127,3 +127,48 @@ export async function getUserRoles(client: PoolClient, userId: string): Promise<
   );
   return rows.map((r) => r.code);
 }
+
+/**
+ * Boot-time RBAC bootstrap. Fire-and-forget; never throws.
+ *
+ * WHY THIS EXISTS — the first-OWNER-invitation blocker.
+ *
+ * `seedPartnerRbac()` populates `partner_roles` / `partner_permissions` /
+ * `partner_role_permissions`. Those are global reference tables that migration 0001 CREATEs but never
+ * POPULATES, and until now `seedPartnerRbac()` was called from **thirteen test files and no
+ * production code path at all**. Every test seeded RBAC in its own `beforeAll`, so the whole partner
+ * suite passed green while the deployed product could never issue its first invitation:
+ * `invitePartnerUser` does `SELECT id FROM partner_roles WHERE code='PARTNER_OWNER'`, got zero rows,
+ * and returned PARTNER_ROLE_NOT_CONFIGURED — "Partner role is not configured."
+ *
+ * Confirmed on staging 2026-07-31: partner_roles = 0 rows, partner_permissions = 0,
+ * partner_role_permissions = 0.
+ *
+ * Seeding at boot (rather than in a migration) keeps ONE source of truth — the constants in this
+ * file — so a future role or permission cannot drift between TypeScript and hand-written SQL. Every
+ * insert is `ON CONFLICT DO NOTHING`, so this is safe on every boot and every machine.
+ *
+ * FAIL-SOFT by deliberate design, mirroring startConnectorRuntime: with no admin pool configured it
+ * logs one line and does nothing; on any error it logs loudly and returns. A reference-data problem
+ * must never crash or delay the main MintVault app.
+ */
+export function bootstrapPartnerRbac(): void {
+  if (!process.env.PARTNER_ADMIN_DATABASE_URL) {
+    console.log("[partner-rbac] no PARTNER_ADMIN_DATABASE_URL — skipping RBAC bootstrap (partner surface is off)");
+    return;
+  }
+  void (async () => {
+    try {
+      await seedPartnerRbac();
+      const { rows } = await partnerAdminQuery<{ n: string }>("SELECT count(*)::text AS n FROM partner_roles");
+      console.log(`[partner-rbac] reference data ready (${rows[0]?.n ?? "?"} roles)`);
+    } catch (err) {
+      // Loud, but non-fatal. The symptom if this ever fails is a clear
+      // PARTNER_ROLE_NOT_CONFIGURED on invitation, not a broken application.
+      console.error(
+        "[partner-rbac] BOOTSTRAP FAILED — partner invitations will report PARTNER_ROLE_NOT_CONFIGURED until this is fixed:",
+        (err as { message?: string })?.message ?? err
+      );
+    }
+  })();
+}

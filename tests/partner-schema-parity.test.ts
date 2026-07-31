@@ -116,6 +116,7 @@ describe("partner schema ↔ migration parity", () => {
       "0030_project_control.sql",
       "0031_partner_user_management.sql",
       "0032_partner_final_owner_invariant.sql",
+      "0033_partner_audit_action_precision.sql",
     ]);
   });
 
