@@ -532,6 +532,28 @@ describe.skipIf(!isLocal)("migration 0035 on real PostgreSQL 17", () => {
     const insert = (cols: string, vals: string) =>
       db.query(`INSERT INTO certificates (certificate_number, ${cols}) VALUES ('MV-TEST', ${vals})`);
 
+    // Regression for the three-valued-logic defect found by hostile review: constraint 2c
+    // used bare `origin_type = 'PARTNER'`, which yields NULL (not FALSE) on a legacy row,
+    // and a CHECK PASSES when its expression is NULL. A full fabricated partner snapshot
+    // could therefore be smuggled onto an origin_type IS NULL certificate.
+    it("rejects a fabricated partner snapshot smuggled onto a LEGACY (origin_type NULL) row", async () => {
+      await expect(
+        insert(
+          "origin_type, origin_partner_id, origin_partner_legal_name, origin_partner_trading_name, origin_location_name, origin_location_address",
+          "NULL, gen_random_uuid(), 'Fake Holdings Ltd', 'Totally Different Cards', 'Dover Store', '99 Seafront, Dover'"
+        )
+      ).rejects.toThrow(/chk_certificates_origin_non_partner_clean/);
+    });
+
+    it("rejects a PARTNER origin whose only name is blank", async () => {
+      await expect(
+        insert(
+          "origin_type, origin_partner_id, origin_partner_trading_name, origin_partner_legal_name, origin_captured_at, origin_snapshot_version",
+          "'PARTNER', gen_random_uuid(), '   ', '', now(), 1"
+        )
+      ).rejects.toThrow(/chk_certificates_origin_partner_complete/);
+    });
+
     it("rejects an unknown origin_type", async () => {
       await expect(
         insert("origin_type, origin_captured_at, origin_snapshot_version", "'SHOP', now(), 1")

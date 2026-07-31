@@ -50,11 +50,34 @@ BEGIN
     RETURN;
   END IF;
 
-  EXECUTE 'SELECT count(*) FROM certificates WHERE origin_type IS NOT NULL' INTO stamped;
+  -- Refuse on PARTNER PROVENANCE, not merely on "any origin_type is set".
+  --
+  -- Two reasons this predicate is what it is:
+  --   1) DATA LOSS. A row can carry a full partner snapshot while origin_type is NULL
+  --      (that shape was reachable before the 2c constraint was corrected). Keying only
+  --      on origin_type would let the rollback drop real partner provenance and silently
+  --      re-attribute those certificates to MintVault Headquarters.
+  --   2) USABILITY. Every certificate created after 0035 gets a well-formed HQ snapshot,
+  --      so keying on `origin_type IS NOT NULL` made the rollback unusable the moment the
+  --      first certificate was graded. An HQ snapshot records only "graded at HQ, at T,
+  --      snapshot v1" and is re-derivable; partner provenance is not. So a pure-HQ estate
+  --      stays rollback-able, and anything carrying partner evidence is refused.
+  EXECUTE $q$
+    SELECT count(*) FROM certificates
+     WHERE origin_type = 'PARTNER'
+        OR origin_partner_id IS NOT NULL
+        OR origin_partner_public_ref IS NOT NULL
+        OR origin_partner_legal_name IS NOT NULL
+        OR origin_partner_trading_name IS NOT NULL
+        OR origin_location_id IS NOT NULL
+        OR origin_location_public_ref IS NOT NULL
+        OR origin_location_name IS NOT NULL
+        OR origin_location_address IS NOT NULL
+  $q$ INTO stamped;
 
   IF stamped > 0 THEN
     RAISE EXCEPTION
-      'rollback-0035 refuses to run: % certificate(s) carry a grading-origin snapshot. '
+      'rollback-0035 refuses to run: % certificate(s) carry PARTNER grading provenance. '
       'Dropping these columns would permanently destroy provenance that exists nowhere else and '
       'would silently re-attribute partner-graded certificates to MintVault Headquarters. '
       'To stop rendering partner origin, revert the application code instead.', stamped;
@@ -64,25 +87,25 @@ END$$;
 DROP TRIGGER IF EXISTS trg_certificates_origin_immutable ON certificates;
 DROP FUNCTION IF EXISTS certificates_origin_is_immutable();
 
-ALTER TABLE certificates DROP CONSTRAINT IF EXISTS chk_certificates_origin_type;
-ALTER TABLE certificates DROP CONSTRAINT IF EXISTS chk_certificates_origin_partner_complete;
-ALTER TABLE certificates DROP CONSTRAINT IF EXISTS chk_certificates_origin_non_partner_clean;
-ALTER TABLE certificates DROP CONSTRAINT IF EXISTS chk_certificates_origin_capture_pairing;
-ALTER TABLE certificates DROP CONSTRAINT IF EXISTS chk_certificates_origin_snapshot_version;
+ALTER TABLE IF EXISTS certificates DROP CONSTRAINT IF EXISTS chk_certificates_origin_type;
+ALTER TABLE IF EXISTS certificates DROP CONSTRAINT IF EXISTS chk_certificates_origin_partner_complete;
+ALTER TABLE IF EXISTS certificates DROP CONSTRAINT IF EXISTS chk_certificates_origin_non_partner_clean;
+ALTER TABLE IF EXISTS certificates DROP CONSTRAINT IF EXISTS chk_certificates_origin_capture_pairing;
+ALTER TABLE IF EXISTS certificates DROP CONSTRAINT IF EXISTS chk_certificates_origin_snapshot_version;
 
 DROP INDEX IF EXISTS idx_certificates_origin_partner;
 
-ALTER TABLE certificates DROP COLUMN IF EXISTS origin_type;
-ALTER TABLE certificates DROP COLUMN IF EXISTS origin_partner_id;
-ALTER TABLE certificates DROP COLUMN IF EXISTS origin_partner_public_ref;
-ALTER TABLE certificates DROP COLUMN IF EXISTS origin_partner_legal_name;
-ALTER TABLE certificates DROP COLUMN IF EXISTS origin_partner_trading_name;
-ALTER TABLE certificates DROP COLUMN IF EXISTS origin_location_id;
-ALTER TABLE certificates DROP COLUMN IF EXISTS origin_location_public_ref;
-ALTER TABLE certificates DROP COLUMN IF EXISTS origin_location_name;
-ALTER TABLE certificates DROP COLUMN IF EXISTS origin_location_address;
-ALTER TABLE certificates DROP COLUMN IF EXISTS origin_captured_at;
-ALTER TABLE certificates DROP COLUMN IF EXISTS origin_snapshot_version;
+ALTER TABLE IF EXISTS certificates DROP COLUMN IF EXISTS origin_type;
+ALTER TABLE IF EXISTS certificates DROP COLUMN IF EXISTS origin_partner_id;
+ALTER TABLE IF EXISTS certificates DROP COLUMN IF EXISTS origin_partner_public_ref;
+ALTER TABLE IF EXISTS certificates DROP COLUMN IF EXISTS origin_partner_legal_name;
+ALTER TABLE IF EXISTS certificates DROP COLUMN IF EXISTS origin_partner_trading_name;
+ALTER TABLE IF EXISTS certificates DROP COLUMN IF EXISTS origin_location_id;
+ALTER TABLE IF EXISTS certificates DROP COLUMN IF EXISTS origin_location_public_ref;
+ALTER TABLE IF EXISTS certificates DROP COLUMN IF EXISTS origin_location_name;
+ALTER TABLE IF EXISTS certificates DROP COLUMN IF EXISTS origin_location_address;
+ALTER TABLE IF EXISTS certificates DROP COLUMN IF EXISTS origin_captured_at;
+ALTER TABLE IF EXISTS certificates DROP COLUMN IF EXISTS origin_snapshot_version;
 
 -- The journal row must go too, otherwise the runner considers 0035 applied and will never
 -- re-apply it. Guarded because the journal does not exist in every disposable fixture.
