@@ -123,6 +123,7 @@ describe("partner schema ↔ migration parity", () => {
       // deliberately named rollback-0034-partner-rbac-seed.sql (non-numbered) so the runner never
       // applies it.
       "0034_partner_rbac_seed.sql",
+      "0035_partner_certificate_origin.sql",
     ]);
   });
 
