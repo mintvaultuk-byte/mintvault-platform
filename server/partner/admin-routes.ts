@@ -6,12 +6,13 @@
  * events. Mounted additively under /api/super-admin/grading-partners.
  */
 import { Router, type Express, type Request, type Response } from "express";
+import rateLimit from "express-rate-limit";
 import { requireAdmin } from "../auth";
 import { partnerAdminQuery } from "./db";
 import { PARTNER_FLAGS } from "./flags";
 import { getPartnerAdminCapability } from "./admin-capability";
 import { g5StatusFor, toG5Error } from "./partner-management-errors";
-import { setPartnerUserStatus, type ActorContext } from "./partner-management-service";
+import { setPartnerUserStatus, resetPartnerUserMfa, type ActorContext } from "./partner-management-service";
 
 async function adminAudit(
   tenantId: string,
@@ -27,6 +28,23 @@ async function adminAudit(
     [tenantId, action, reason, recordType ?? null, recordId ?? null, JSON.stringify({ by: adminEmail })]
   );
 }
+
+/**
+ * Mutation ceiling for this legacy router. /api/super-admin/* sits outside the /api/admin prefix, so
+ * it inherits neither adminIpAllowlist nor adminRateLimit — this router previously had no limiter at
+ * all, which meant the legacy MFA-reset URL was an unthrottled route to a security-relevant action.
+ * Keyed on req.ip (trust proxy = 1), never a hand-parsed X-Forwarded-For, matching the sibling
+ * super-admin routers.
+ */
+const legacyMutationRateLimit = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: false,
+  message: { error: "Too many operations, please slow down.", code: "RATE_LIMITED" },
+  keyGenerator: (req) => req.ip ?? req.socket?.remoteAddress ?? "unknown",
+});
 
 function actorOf(req: Request): ActorContext {
   const session = req.session as { authUserId?: string; adminEmail?: string };
@@ -180,36 +198,40 @@ export function superAdminPartnerRouter(): Router {
     }
   });
 
-  // Trusted Super Admin MFA reset (force-disable a user's MFA). Requires a reason; audited; revokes
-  // sessions + bumps credential_version. Partner users have NO route to reset another user's MFA.
-  r.post("/:partnerId/users/:userId/mfa-reset", async (req, res) => {
+  /**
+   * LEGACY Super Admin MFA reset — RETAINED for URL compatibility, but it no longer has its own
+   * implementation. It DELEGATES to the single canonical service, exactly as the sibling
+   * suspend/reactivate routes above already delegate.
+   *
+   * WHY IT WAS CONSOLIDATED. The old inline implementation diverged from the hardened path in four
+   * security-relevant ways:
+   *   1. it set `mfa_required=false`, so the next login minted a fully-authenticated session with a
+   *      password alone — the account was left protected by nothing, which is precisely what the
+   *      canonical service exists to prevent;
+   *   2. it ran five separate autocommit statements, so a mid-sequence failure could leave MFA
+   *      disabled but sessions still live;
+   *   3. its session revoke was keyed on user_id ALONE, without a tenant predicate;
+   *   4. it sat behind no mutation rate limiter.
+   * Keeping two implementations meant the hardening could be bypassed by using the older URL.
+   *
+   * The route is kept rather than deleted because it is an established admin surface with an
+   * existing integration-test contract; deleting a working URL is a bigger change than making it
+   * correct. Both URLs now produce byte-identical state and exactly one security event.
+   */
+  r.post("/:partnerId/users/:userId/mfa-reset", legacyMutationRateLimit, async (req, res) => {
     const reason = String(req.body?.reason ?? "").trim();
     if (!reason) {
       res.status(400).json({ error: "reason required" });
       return;
     }
-    const email = (req.session as { adminEmail?: string })?.adminEmail ?? "admin";
-    await partnerAdminQuery("UPDATE partner_mfa_methods SET status='DISABLED' WHERE user_id=$1 AND tenant_id=$2", [
-      req.params.userId,
-      req.params.partnerId,
-    ]);
-    await partnerAdminQuery("DELETE FROM partner_recovery_codes WHERE user_id=$1 AND tenant_id=$2", [
-      req.params.userId,
-      req.params.partnerId,
-    ]);
-    await partnerAdminQuery(
-      "UPDATE partner_users SET mfa_enabled=false, mfa_required=false, credential_version=credential_version+1 WHERE id=$1 AND tenant_id=$2",
-      [req.params.userId, req.params.partnerId]
-    );
-    await partnerAdminQuery("UPDATE partner_sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL", [
-      req.params.userId,
-    ]);
-    await partnerAdminQuery(
-      "INSERT INTO partner_security_events (tenant_id, severity, kind) VALUES ($1,'high','partner_mfa_admin_reset')",
-      [req.params.partnerId]
-    );
-    await adminAudit(req.params.partnerId, "partner_mfa_admin_reset", reason, email, "partner_user", req.params.userId);
-    res.json({ ok: true });
+    try {
+      // String() because adding a middleware to the route signature widens Express's inferred
+      // param type to string | string[]; the values are single path segments either way.
+      await resetPartnerUserMfa(actorOf(req), String(req.params.partnerId), String(req.params.userId), reason);
+      res.json({ ok: true });
+    } catch (err) {
+      sendManagementError(res, err);
+    }
   });
 
   r.post("/:partnerId/revoke-sessions", async (req, res) => {

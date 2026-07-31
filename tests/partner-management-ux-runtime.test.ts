@@ -20,7 +20,7 @@ import { Client } from "pg";
 import {
   provisionRealisticRoles,
   applyMigrationsRealistic,
-  PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
+  PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN_DB = process.env.PARTNER_UX_RT_ADMIN;
@@ -100,7 +100,7 @@ describe.skipIf(!isLocal)("Partner Management UX v1 — runtime proofs (PostgreS
     await admin.query("ALTER TABLE users OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
-    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT);
+    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION);
     const { seedPartnerRbac } = await import("../server/partner/permissions");
     await seedPartnerRbac();
 
@@ -442,10 +442,9 @@ describe.skipIf(!isLocal)("Partner Management UX v1 — runtime proofs (PostgreS
     const succeeded = rows.rows.find((r) => r.result === "succeeded");
     expect(attempted, "an 'attempted' row must exist").toBeTruthy();
     expect(succeeded, "a 'succeeded' row must exist").toBeTruthy();
-    expect(attempted!.action_type).toBe("profile_updated");
-    expect(succeeded!.action_type).toBe("profile_updated");
-    // The rename is unambiguous in the ledger despite sharing the generic 'profile_updated' action:
-    // both states name the legal_name field explicitly.
+    // Migration 0033 gave the rename its OWN action; it no longer borrows profile_updated.
+    expect(attempted!.action_type).toBe("partner_legal_name_changed");
+    expect(succeeded!.action_type).toBe("partner_legal_name_changed");
     expect(attempted!.before_state).toMatchObject({ legal_name: "Audit Ltd" });
     expect(succeeded!.after_state).toMatchObject({ legal_name: "Audit Renamed Ltd" });
     expect(succeeded!.reason).toBe("why");

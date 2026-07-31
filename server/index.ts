@@ -19,6 +19,7 @@ import { adminIpAllowlist } from "./auth";
 import { getDatabaseUrl } from "./config";
 import { FEATURE_FLAGS } from "./config/feature-flags";
 import { startConnectorRuntime, stopConnectorRuntime } from "./partner/connector-runtime";
+import { validatePartnerRbacAtBoot } from "./partner/permissions";
 import pg from "pg";
 import path from "path";
 
@@ -638,6 +639,15 @@ async function runTransferV2Sweep() {
       // failure — a connector problem can never crash or delay the main app. With
       // no PARTNER_CONNECTOR_DATABASE_URL it logs one line and does nothing at all.
       startConnectorRuntime();
+
+      // Partner RBAC reference data (roles/permissions/mappings) — READ-ONLY validation.
+      //
+      // The catalogue itself is seeded by migration 0034_partner_rbac_seed.sql, NOT here: a runtime
+      // application identity must not mutate the Partner security catalogue (owner decision,
+      // 2026-07-31). This call only reads, and publishes what it finds to the partner readiness
+      // endpoint so an incomplete catalogue is visible rather than silent. Fail-soft: it never
+      // throws and never delays the listen path.
+      validatePartnerRbacAtBoot();
     }
   );
 })();

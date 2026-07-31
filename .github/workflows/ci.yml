@@ -161,6 +161,51 @@ jobs:
       PARTNER_CONNECTOR_ADMIN_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_admin_mig
       PARTNER_CONNECTOR_IMPORT_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_import_mig
       PARTNER_CONNECTOR_VALIDATION_MIGRATION_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_connector_val_mig
+
+      # ---- Partner RBAC: migration 0034 seed + first-owner bootstrap (this branch) ----
+      # Two DB-gated suites were added with the hybrid Partner RBAC work and CI provisioned neither.
+      # Both use `describe.skipIf(!isLocal)` for their real proofs, so WITHOUT these variables the
+      # following evidence silently does not run:
+      #   • tests/partner-rbac-migration.test.ts (PARTNER_RBAC_MIG_ADMIN) — migration 0034 driven
+      #     through the REAL runner (scripts/db/migrate.ts): the catalogue reaching exactly the
+      #     expected role/permission/mapping counts from the true pre-seed estate, idempotency and
+      #     re-run behaviour, the journal + checksum pin, the runner's own transaction wrapping
+      #     (0034 must not open its own), planMigrations() seeing 0034 pending then applied, and the
+      #     read-only startup validator reporting 503-worthy BEFORE / ready AFTER while performing
+      #     NO writes under a SELECT-only role.
+      #   • tests/partner-rbac-bootstrap.test.ts (PARTNER_RBAC_RT_ADMIN) — the runtime regression
+      #     proofs for the first-owner-invitation blocker (partner_roles empty in a deployed estate
+      #     => PARTNER_ROLE_NOT_CONFIGURED, confirmed on staging 2026-07-31) plus migration 0033's
+      #     audit-action precision. This is the ONLY coverage that reproduces the unseeded state
+      #     instead of hand-seeding RBAC in beforeAll — the exact habit that masked the blocker.
+      # Each file carries an "is not silently skipped in CI" guard that fails the build when the
+      # variable is absent under CI/GITHUB_ACTIONS, so deleting either turns the build red rather
+      # than silently deleting the evidence.
+      #
+      # PostgreSQL 17 (port 55433, the existing service): the bootstrap suite asserts
+      # server_version_num >= 170000 in beforeAll, and 0033/0034 are verified against 17.
+      #
+      # ONE DATABASE PER SUITE, same rule as every Partner block above: both suites call
+      # provisionRealisticRoles() / applyMigrationsRealistic() from tests/helpers/partner-realistic-db.ts,
+      # which reassigns `public` schema ownership to the non-superuser pn_migrator and applies the
+      # migrations as that role — and both DROP and recreate schema `public` wholesale between tests.
+      # They can therefore never share a database with each other or with any other suite.
+      #
+      # NOT added to the "full repository migration set" loop below: neither applies
+      # listMigrationFiles() wholesale. The bootstrap suite applies only
+      # PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION, and the migration suite calls listMigrationFiles()
+      # solely to `.filter()` down to 0034_partner_rbac_seed.sql before handing that single file to
+      # applyMigrations(). Neither 0018 (indexes audit_log) nor 0022 (ALTERs certificates) is ever
+      # executed, so the audit_log/certificates stub pair is not a precondition here.
+      #
+      # ROLE NAMES ARE CLUSTER-WIDE: the only extra login role either suite creates is
+      # mv_rbac_reader (the migration suite's SELECT-only validator role), which no other test file
+      # in tests/ creates — verified — so it cannot repeat the connector role-collision flake. The
+      # shared pn_migrator / partner_definer / partner_runtime roles come from the idempotent
+      # helper, exactly as in the existing partner suites. Every credential here is synthetic and
+      # local to the CI container.
+      PARTNER_RBAC_MIG_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_rbac_mig
+      PARTNER_RBAC_RT_ADMIN: postgres://postgres:postgres@127.0.0.1:55433/mintvault_partner_rbac_rt
     services:
       postgres:
         # pgvector-enabled Postgres 16 (official pgvector image, same server as
@@ -280,7 +325,8 @@ jobs:
                             mintvault_connector_blocker mintvault_connector_scale \
                             mintvault_connector_ops mintvault_connector_plan \
                             mintvault_connector_migration mintvault_connector_admin_mig \
-                            mintvault_connector_import_mig mintvault_connector_val_mig; do
+                            mintvault_connector_import_mig mintvault_connector_val_mig \
+                            mintvault_partner_rbac_mig mintvault_partner_rbac_rt; do
             present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
               "SELECT 1 FROM pg_database WHERE datname = '$partner_db'")"
             if [ "$present" != "1" ]; then
@@ -314,6 +360,16 @@ jobs:
               "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
             psql "$connector_admin" -v ON_ERROR_STOP=1 -tAc \
               "SELECT rolbypassrls OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
+          done
+          # Both Partner RBAC suites provision the realistic role model (pn_migrator /
+          # partner_definer / partner_runtime) and the migration suite additionally CREATEs and
+          # DROPs its own SELECT-only mv_rbac_reader login role, so their admin connections must
+          # carry CREATEROLE. Assert it here so a misconfiguration fails loudly at setup instead of
+          # deep inside beforeAll. The bootstrap suite also asserts PostgreSQL 17 itself, which is
+          # already guaranteed by the pg17 service check above.
+          for rbac_admin in "$PARTNER_RBAC_MIG_ADMIN" "$PARTNER_RBAC_RT_ADMIN"; do
+            psql "$rbac_admin" -v ON_ERROR_STOP=1 -tAc \
+              "SELECT rolcreaterole OR rolsuper FROM pg_roles WHERE rolname = current_user" | grep -q "t"
           done
           # MINIMAL precondition for the five suites that apply the FULL repository migration set
           # via listMigrationFiles() rather than just the partner subset:
@@ -373,6 +429,15 @@ jobs:
       - name: Assert partner management suite executed
         if: always()
         run: node scripts/ci/assert-partner-management-suite-executed.mjs vitest-report.json
+
+      # The two RBAC suites' own "is not silently skipped in CI" guards only catch a MISSING
+      # environment variable. They cannot catch `describe.skipIf(!isLocal)` being edited to
+      # `describe.skip`, which leaves the variables set, reports the file as passed and keeps the
+      # build green with every real proof gone (verified: 6 passed | 15 skipped, exit 0). This step
+      # asserts EXECUTION instead of configuration, exactly as the connector assertion above does.
+      - name: Assert partner RBAC suites executed
+        if: always()
+        run: node scripts/ci/assert-partner-rbac-suites-executed.mjs vitest-report.json
 
       - name: Build
         run: npm run build

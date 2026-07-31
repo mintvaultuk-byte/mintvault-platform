@@ -32,6 +32,15 @@ import {
 import * as svc from "./partner-management-service";
 import type { ActorContext } from "./partner-management-service";
 import { getLastPartnerAdminCapability, getPartnerAdminCapability } from "./admin-capability";
+import { validatePartnerRbac, partnerRbacBlocksReadiness } from "./permissions";
+import { resolveGlobalFlag } from "./flags";
+
+/**
+ * Static operator remedy. Used when RBAC blocks readiness but the validator itself had no remedy to
+ * offer — i.e. state is "not_configured" while the Partner surface is switched ON. Kept as a literal
+ * so nothing derived from database output can ever reach the HTTP response.
+ */
+const REMEDY_APPLY_RBAC_MIGRATION = "Apply the pending Partner RBAC migration (0034_partner_rbac_seed.sql).";
 
 const g5MutationRateLimit = rateLimit({
   windowMs: 60 * 1000,
@@ -95,15 +104,73 @@ export function partnerManagementRouter(): Router {
   const r = Router();
   r.use(requireAdmin);
 
+  /**
+   * Partner-management readiness.
+   *
+   * Reports BOTH preconditions the surface actually needs:
+   *   1. the admin pool can see through RLS (BYPASSRLS capability), and
+   *   2. the RBAC reference data exists.
+   *
+   * (2) was added after the first-owner-invitation incident. The RBAC bootstrap is deliberately
+   * fail-soft — a missing partner role must never take down grading or certificates — but fail-soft
+   * without visibility is precisely what let the original defect hide: the app reported healthy on
+   * every probe while partner invitations were impossible. This endpoint is the partner-specific
+   * readiness surface, it already 503s for partner-specific problems, and it is where an operator
+   * looks; so an unusable RBAC state now shows up here rather than nowhere. The core /ready probe is
+   * deliberately NOT changed — a partner reference-data fault must not pull the app out of service.
+   */
   r.get("/readiness", async (_req, res) => {
     const last = getLastPartnerAdminCapability();
     const current = last?.ok ? last : await getPartnerAdminCapability();
-    res.status(current.ok ? 200 : 503).json({
+    // Re-validated per probe, so an operator sees CURRENT truth rather than a boot-time snapshot.
+    // This call is strictly read-only — it can never seed or repair the catalogue.
+    const rbac = await validatePartnerRbac();
+
+    /*
+     * "not_configured" is healthy ONLY while the Partner surface is entirely off. Once any Partner
+     * flag is enabled, an absent catalogue is a genuine fault — the product would be advertising a
+     * Partner surface it cannot serve. Treating not_configured as unconditionally healthy is exactly
+     * how the original first-invitation blocker stayed invisible.
+     *
+     * Flag resolution is itself fail-closed: if the flag store cannot be read we assume the surface
+     * IS enabled, so an unreadable flag can never downgrade a real RBAC fault into a 200.
+     */
+    let partnerSurfaceEnabled: boolean;
+    try {
+      const [portal, onboarding, login] = await Promise.all([
+        resolveGlobalFlag("partner_portal_enabled"),
+        resolveGlobalFlag("partner_onboarding_enabled"),
+        resolveGlobalFlag("partner_login_enabled"),
+      ]);
+      partnerSurfaceEnabled = portal || onboarding || login;
+    } catch {
+      partnerSurfaceEnabled = true;
+    }
+
+    const rbacBlocks = partnerRbacBlocksReadiness(rbac.state, partnerSurfaceEnabled);
+    const ready = current.ok && !rbacBlocks;
+
+    /*
+     * failureCode is always a FIXED enum and remedy is always a STATIC string. No raw database error
+     * text, schema detail, connection string or row content reaches this response; the detail is
+     * logged server-side only inside validatePartnerRbac().
+     */
+    const rbacFailureCode = rbacBlocks ? (rbac.failureCode ?? "PARTNER_RBAC_NOT_SEEDED") : null;
+
+    res.status(ready ? 200 : 503).json({
       checked: true,
-      ready: current.ok,
+      ready,
       capability: current.capability,
       checkedAt: current.checkedAt,
-      failureCode: current.ok ? null : current.code,
+      failureCode: current.ok ? rbacFailureCode : current.code,
+      rbac: {
+        state: rbac.state,
+        checkedAt: rbac.checkedAt,
+        failureCode: rbacFailureCode,
+        remedy: rbacBlocks ? (rbac.remedy ?? REMEDY_APPLY_RBAC_MIGRATION) : null,
+        missing: rbac.missing,
+        unexpected: rbac.unexpected,
+      },
     });
   });
 
@@ -337,6 +404,36 @@ export function partnerManagementRouter(): Router {
         res,
         actor.requestId,
         await svc.setPartnerUserStatus(actor, req.params.partnerId, req.params.userId, status, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /** Email the user a password-reset link. No password is ever set, shown or stored by the admin. */
+  r.post("/partners/:partnerId/users/:userId/password-reset", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.sendPartnerUserPasswordReset(actor, req.params.partnerId, req.params.userId, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  /** Clear the user's second factor and force re-enrolment. Revokes sessions. */
+  r.post("/partners/:partnerId/users/:userId/reset-mfa", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.resetPartnerUserMfa(actor, req.params.partnerId, req.params.userId, reason)
       );
     } catch (err) {
       sendError(res, err);

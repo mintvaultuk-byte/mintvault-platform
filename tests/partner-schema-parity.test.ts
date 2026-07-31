@@ -116,6 +116,13 @@ describe("partner schema ↔ migration parity", () => {
       "0030_project_control.sql",
       "0031_partner_user_management.sql",
       "0032_partner_final_owner_invariant.sql",
+      "0033_partner_audit_action_precision.sql",
+      // 0034 seeds the Partner RBAC reference catalogue (roles/permissions/mappings). It is the
+      // canonical initial seed under the approved hybrid architecture: the catalogue is created by
+      // migration, and application startup only VALIDATES it read-only. Its rollback is
+      // deliberately named rollback-0034-partner-rbac-seed.sql (non-numbered) so the runner never
+      // applies it.
+      "0034_partner_rbac_seed.sql",
     ]);
   });
 

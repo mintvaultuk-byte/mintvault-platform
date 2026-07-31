@@ -8,6 +8,8 @@ import {
   probePartnerRuntimeCapabilityForTest,
   resetPartnerAdminCapabilityCache,
 } from "../server/partner/admin-capability";
+import { PARTNER_ROLE_CODES } from "../shared/partner-schema";
+import { PARTNER_PERMISSIONS, ROLE_PERMISSIONS, ROLE_LABELS } from "../server/partner/permissions";
 
 describe("Partner admin capability probe", () => {
   it("accepts only BYPASSRLS for the Partner Super Admin pool", async () => {
@@ -102,6 +104,61 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     await admin.query(
       "CREATE TABLE partner_management_audit (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), result text NOT NULL)"
     );
+    // The readiness endpoint now also reports RBAC reference-data state (added after the
+    // first-owner-invitation incident, where the app reported healthy while invitations were
+    // impossible). Startup/readiness validation is READ-ONLY and checks the FULL canonical
+    // catalogue — every role, permission AND role→permission mapping — so a fixture holding only
+    // PARTNER_OWNER reports `incomplete` and readiness answers 503 for an RBAC reason, masking the
+    // CAPABILITY gate this suite exists to test.
+    //
+    // So the fixture seeds the COMPLETE canonical catalogue — but never by hand-writing a second
+    // copy of it. The values below come from the same TypeScript source of truth the validator
+    // reads (PARTNER_ROLE_CODES / PARTNER_PERMISSIONS / ROLE_PERMISSIONS / ROLE_LABELS), so there
+    // remains exactly ONE definition of Partner RBAC; if the canonical catalogue grows, this
+    // fixture grows with it automatically and nothing here has to be edited.
+    //
+    // Seeding is done through this suite's own superuser `admin` client rather than
+    // seedPartnerRbac(), which writes via partnerAdminQuery and would therefore resolve a pool from
+    // PARTNER_ADMIN_DATABASE_URL/MINTVAULT_DATABASE_URL — env vars this beforeAll deliberately
+    // repoints partway through, and pools this suite opens/closes around the BYPASSRLS capability
+    // flip. Keeping the seed on the fixture's own connection keeps it independent of that dance.
+    //
+    // Migrations are deliberately NOT run here: this suite hand-builds a deliberately smaller
+    // schema, and applying 0034 would drag in the whole partner migration chain it exists without.
+    // Column shapes below match migrations/0001_partner_foundation.sql.
+    await admin.query(
+      "CREATE TABLE IF NOT EXISTS partner_roles (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), code text NOT NULL UNIQUE, label text NOT NULL)"
+    );
+    await admin.query(
+      "CREATE TABLE IF NOT EXISTS partner_permissions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), code text NOT NULL UNIQUE, label text NOT NULL)"
+    );
+    await admin.query(`CREATE TABLE IF NOT EXISTS partner_role_permissions (
+      role_id uuid NOT NULL REFERENCES partner_roles(id) ON DELETE CASCADE,
+      permission_id uuid NOT NULL REFERENCES partner_permissions(id) ON DELETE CASCADE,
+      PRIMARY KEY (role_id, permission_id)
+    )`);
+    for (const code of PARTNER_ROLE_CODES) {
+      await admin.query("INSERT INTO partner_roles (code, label) VALUES ($1,$2) ON CONFLICT (code) DO NOTHING", [
+        code,
+        ROLE_LABELS[code],
+      ]);
+    }
+    for (const perm of PARTNER_PERMISSIONS) {
+      await admin.query("INSERT INTO partner_permissions (code, label) VALUES ($1,$1) ON CONFLICT (code) DO NOTHING", [
+        perm,
+      ]);
+    }
+    for (const code of PARTNER_ROLE_CODES) {
+      for (const perm of ROLE_PERMISSIONS[code]) {
+        await admin.query(
+          `INSERT INTO partner_role_permissions (role_id, permission_id)
+           SELECT r.id, p.id FROM partner_roles r, partner_permissions p
+           WHERE r.code=$1 AND p.code=$2
+           ON CONFLICT DO NOTHING`,
+          [code, perm]
+        );
+      }
+    }
     await admin.query(`CREATE TABLE users (
       id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
       email varchar UNIQUE,
