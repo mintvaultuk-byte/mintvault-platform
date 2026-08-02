@@ -17,7 +17,8 @@
  * nesting, in real Chrome, reading `getComputedStyle` and compositing against the true painted
  * background. Contrast is computed per WCAG 2.1 relative luminance.
  *
- * Usage:  node scripts/project-control/contrast-proof.mjs
+ * Usage:  npx tsx scripts/project-control/contrast-proof.ts
+ *         (tsx, not node: it imports the real React components to render the markup under test)
  * Exits non-zero if any sampled pair falls below its WCAG AA threshold.
  */
 import { spawn } from "node:child_process";
@@ -205,10 +206,16 @@ async function run(profile, registerChrome) {
   registerChrome(chrome);
   const wsUrl = await new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("Chrome did not report a DevTools endpoint")), 20000);
-    chrome.on("error", (e) => { clearTimeout(t); reject(e); });
+    chrome.on("error", (e) => {
+      clearTimeout(t);
+      reject(e);
+    });
     chrome.stderr.on("data", (d) => {
       const m = String(d).match(/ws:\/\/[^\s]+/);
-      if (m) { clearTimeout(t); resolve(m[0]); }
+      if (m) {
+        clearTimeout(t);
+        resolve(m[0]);
+      }
     });
   });
 
@@ -219,7 +226,8 @@ async function run(profile, registerChrome) {
     const p = page.pending.get(msg.id);
     if (!p) return;
     page.pending.delete(msg.id);
-    msg.error ? p.reject(new Error(msg.error.message)) : p.resolve(msg.result);
+    if (msg.error) p.reject(new Error(msg.error.message));
+    else p.resolve(msg.result);
   });
   await new Promise((r) => ws.on("open", r));
 
@@ -247,7 +255,11 @@ async function run(profile, registerChrome) {
   let failed = 0;
   console.log("\nProject Control — loading / failure contrast (real Chrome, real admin CSS)\n");
   for (const s of samples) {
-    if (s.error) { console.log(`  ✗ ${s.name}: ${s.error} (${s.selector})`); failed++; continue; }
+    if (s.error) {
+      console.log(`  ✗ ${s.name}: ${s.error} (${s.selector})`);
+      failed++;
+      continue;
+    }
     const ok = s.ratio >= s.required;
     if (!ok) failed++;
     console.log(

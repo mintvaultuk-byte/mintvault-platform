@@ -162,7 +162,8 @@ export async function measure(baseUrl, outDir) {
       if (msg.id && state.pending.has(msg.id)) {
         const { resolve, reject } = state.pending.get(msg.id);
         state.pending.delete(msg.id);
-        msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
+        if (msg.error) reject(new Error(msg.error.message));
+        else resolve(msg.result);
       }
     });
 

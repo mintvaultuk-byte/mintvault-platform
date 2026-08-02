@@ -236,7 +236,7 @@ describe("LOAD3 — a failed refetch keeps the last good programme on screen", (
  *
  * This is a STRUCTURAL guard only. It cannot prove contrast — happy-dom computes no styles and
  * vitest runs with `css: false`, which is exactly why the defect survived. The real measurement is
- * scripts/project-control/contrast-proof.mjs, which reads computed styles out of real Chrome
+ * scripts/project-control/contrast-proof.ts, which reads computed styles out of real Chrome
  * against the real stylesheets. This test exists so a refactor that unwraps these branches turns
  * RED without needing a browser.
  */
