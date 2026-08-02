@@ -23,6 +23,10 @@
  * independent external systems; a transaction spanning them would be a lie about what can be
  * guaranteed. Each source succeeds or fails on its own and says so.
  */
+import {
+  resolveProjectControlEnvironment,
+  type ProjectControlEnvironment,
+} from "@shared/project-control-environment";
 import { probeAllApplications, type AppProbeResult, type ProbeFetch } from "./app-probe";
 import { collectFlagEvidence, type FlagEvidence } from "./flag-evidence";
 import {
@@ -212,8 +216,14 @@ export async function collectFlagEvidenceSnapshots(
  *
  * A Neon host is credential-adjacent, so the host never leaves the server — the same rule
  * `migration-scan.ts` already follows.
+ *
+ * This used to fall through to `NODE_ENV`, which every deployed Fly machine sets to `production`
+ * — so a staging probe recorded its result under the label `production`. It now delegates to the
+ * single strict resolver, which returns `unknown` rather than naming an estate it cannot prove.
+ * Callers must check `mayWriteLabelledEvidence` before persisting under this name.
  */
-export function resolveEnvironmentName(env: NodeJS.ProcessEnv = process.env): string {
-  const named = env.PROJECT_CONTROL_ENV || env.NODE_ENV || "unknown";
-  return String(named).slice(0, 32);
+export function resolveEnvironmentName(
+  env: NodeJS.ProcessEnv = process.env
+): ProjectControlEnvironment {
+  return resolveProjectControlEnvironment(env);
 }

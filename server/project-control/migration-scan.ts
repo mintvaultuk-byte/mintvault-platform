@@ -15,6 +15,10 @@
 import { sql } from "drizzle-orm";
 import { db } from "../db";
 import type { ObservedMigration } from "@shared/project-control-distributed";
+import {
+  resolveProjectControlEnvironment,
+  type ProjectControlEnvironment,
+} from "@shared/project-control-environment";
 import { scanRepository } from "./repo-scan";
 
 /** Cheap enough to re-run, but the dashboard polls, so a short cache still pays. */
@@ -47,13 +51,17 @@ export function invalidateMigrationScanCache(): void {
  *
  * The dashboard must be able to say "applied in staging" — but a Neon host is credential-adjacent
  * and the redaction rules elsewhere in Project Control forbid leaking it. `PROJECT_CONTROL_ENV`
- * (or NODE_ENV) names the environment; the host never leaves the server.
+ * names the environment; the host never leaves the server.
+ *
+ * Delegates to the single strict resolver. This wrapper survives only because the ledger scan and
+ * the routes both read better with the "connected environment" name; the RULE lives in one place.
+ * In particular `NODE_ENV` may no longer name a deployed environment, and an unresolvable identity
+ * is `unknown` rather than a cheerful guess at `local`.
  */
-export function resolveConnectedEnvironment(env: NodeJS.ProcessEnv = process.env): string {
-  const explicit = (env.PROJECT_CONTROL_ENV ?? "").trim().toLowerCase();
-  if (explicit === "production" || explicit === "staging" || explicit === "local") return explicit;
-  if ((env.NODE_ENV ?? "").trim().toLowerCase() === "production") return "production";
-  return "local";
+export function resolveConnectedEnvironment(
+  env: NodeJS.ProcessEnv = process.env
+): ProjectControlEnvironment {
+  return resolveProjectControlEnvironment(env);
 }
 
 /**

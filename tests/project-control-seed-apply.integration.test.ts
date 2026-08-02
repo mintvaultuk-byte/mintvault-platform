@@ -165,7 +165,7 @@ async function snapshot(): Promise<string> {
 
 async function applyFresh(manifest: SeedManifest, actor = "test"): Promise<void> {
   const preview = await dryRunSeed(db(), manifest);
-  await applySeed(db(), manifest, { actor, confirmationToken: preview.confirmationToken, isProduction: false });
+  await applySeed(db(), manifest, { actor, confirmationToken: preview.confirmationToken, environment: "local" });
 }
 
 describe("Project Control seed apply coverage is wired up", () => {
@@ -246,7 +246,7 @@ describe("first seed", () => {
     const result = await applySeed(db(), m, {
       actor: "opus",
       confirmationToken: preview.confirmationToken,
-      isProduction: false,
+      environment: "local",
     });
 
     expect(result.mode).toBe("first_seed");
@@ -288,7 +288,7 @@ describe("first seed", () => {
     const result = await applySeed(db(), baseManifest(), {
       actor: "t",
       confirmationToken: preview.confirmationToken,
-      isProduction: false,
+      environment: "local",
     });
     expect(result.noOp).toBe(true);
     expect(result.counts.packagesInserted).toBe(0);
@@ -490,7 +490,7 @@ describe("atomicity and refusal", () => {
     }
 
     await expect(
-      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, isProduction: false })
+      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "local" })
     ).rejects.toMatchObject({ code: "internal" });
 
     // The packages inserted before the failure must be gone — partial structure is the defect.
@@ -531,7 +531,7 @@ describe("atomicity and refusal", () => {
     } as unknown as pg.Pool;
 
     await expect(
-      applySeed(failing, m, { actor: "t", confirmationToken: preview.confirmationToken, isProduction: false })
+      applySeed(failing, m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "local" })
     ).rejects.toBeInstanceOf(SeedApplyError);
 
     expect((await one("SELECT count(*)::int n FROM pc_work_packages"))!.n).toBe(0);
@@ -552,14 +552,14 @@ describe("atomicity and refusal", () => {
       c.release();
     }
     await expect(
-      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, isProduction: false })
+      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "local" })
     ).rejects.toBeInstanceOf(SeedApplyError);
     expect(Number((await one("SELECT seed_version FROM pc_seed_state WHERE id=1"))!.seed_version)).toBe(1);
   }, 60_000);
 
   it("refuses an apply with no preview at all", async () => {
     await expect(
-      applySeed(db(), baseManifest(), { actor: "t", confirmationToken: "never-issued", isProduction: false })
+      applySeed(db(), baseManifest(), { actor: "t", confirmationToken: "never-issued", environment: "local" })
     ).rejects.toMatchObject({ code: "digest_mismatch" });
     expect((await one("SELECT count(*)::int n FROM pc_work_packages"))!.n).toBe(0);
   }, 60_000);
@@ -569,16 +569,16 @@ describe("atomicity and refusal", () => {
     const preview = await dryRunSeed(db(), m);
     await applyFresh(m); // someone else applies first
     await expect(
-      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, isProduction: false })
+      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "local" })
     ).rejects.toMatchObject({ code: "digest_mismatch" });
   }, 60_000);
 
   it("consumes a confirmation exactly once — a replay is refused", async () => {
     const m = baseManifest();
     const preview = await dryRunSeed(db(), m);
-    await applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, isProduction: false });
+    await applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "local" });
     await expect(
-      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, isProduction: false })
+      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "local" })
     ).rejects.toMatchObject({ code: "digest_mismatch" });
   }, 60_000);
 
@@ -590,7 +590,7 @@ describe("atomicity and refusal", () => {
       applySeed(db(), m, {
         actor: "t",
         confirmationToken: preview.confirmationToken,
-        isProduction: false,
+        environment: "local",
         now: t0 + 11 * 60 * 1000,
       })
     ).rejects.toMatchObject({ code: "digest_mismatch" });
@@ -601,7 +601,7 @@ describe("atomicity and refusal", () => {
     m.packages[0].nodeKey = "nowhere";
     const preview = await dryRunSeed(db(), m);
     await expect(
-      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, isProduction: false })
+      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "local" })
     ).rejects.toMatchObject({ code: "conflicts" });
     expect((await one("SELECT count(*)::int n FROM pc_work_packages"))!.n).toBe(0);
   }, 60_000);
@@ -616,7 +616,7 @@ describe("atomicity and refusal", () => {
       c.release();
     }
     await expect(
-      applySeed(db(), m, { actor: "t", confirmationToken: p1.confirmationToken, isProduction: false })
+      applySeed(db(), m, { actor: "t", confirmationToken: p1.confirmationToken, environment: "local" })
     ).rejects.toBeInstanceOf(SeedApplyError);
 
     const c2 = await db().connect();
@@ -641,7 +641,7 @@ describe("atomicity and refusal", () => {
     const error = await applySeed(db(), m, {
       actor: "t",
       confirmationToken: preview.confirmationToken,
-      isProduction: false,
+      environment: "local",
     }).catch((e) => e as SeedApplyError);
     // A driver error can quote a connection string, a constraint's full contents, or operator text.
     expect(error.message).not.toMatch(/relation|postgres:\/\/|constraint|tmp_reject|syntax|violates/i);
@@ -659,7 +659,7 @@ describe("production blockade", () => {
     const m = baseManifest();
     const preview = await dryRunSeed(db(), m);
     await expect(
-      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, isProduction: true })
+      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "production" })
     ).rejects.toMatchObject({ code: "production_blocked" });
     expect((await one("SELECT count(*)::int n FROM pc_work_packages"))!.n).toBe(0);
   }, 60_000);
@@ -667,7 +667,7 @@ describe("production blockade", () => {
   it("refuses BEFORE taking a connection or a lock — nothing is touched at all", async () => {
     const before = await snapshot();
     await expect(
-      applySeed(db(), baseManifest(), { actor: "t", confirmationToken: "anything", isProduction: true })
+      applySeed(db(), baseManifest(), { actor: "t", confirmationToken: "anything", environment: "production" })
     ).rejects.toMatchObject({ code: "production_blocked" });
     expect(await snapshot()).toBe(before);
   }, 60_000);
@@ -682,8 +682,8 @@ describe("concurrency", () => {
     const p2 = await dryRunSeed(db(), m);
 
     const results = await Promise.allSettled([
-      applySeed(db(), m, { actor: "a", confirmationToken: p1.confirmationToken, isProduction: false }),
-      applySeed(db(), m, { actor: "b", confirmationToken: p2.confirmationToken, isProduction: false }),
+      applySeed(db(), m, { actor: "a", confirmationToken: p1.confirmationToken, environment: "local" }),
+      applySeed(db(), m, { actor: "b", confirmationToken: p2.confirmationToken, environment: "local" }),
     ]);
 
     const fulfilled = results.filter((r) => r.status === "fulfilled");

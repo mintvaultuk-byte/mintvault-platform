@@ -452,7 +452,7 @@ describe("production blockade", () => {
     process.env.PROJECT_CONTROL_ENV = "production";
     try {
       for (const body of [
-        { confirmationToken: String(dry.confirmationToken), isProduction: false },
+        { confirmationToken: String(dry.confirmationToken), environment: "local" },
         { confirmationToken: String(dry.confirmationToken), productionOverride: true },
         { confirmationToken: String(dry.confirmationToken), environment: "local", force: true },
       ]) {

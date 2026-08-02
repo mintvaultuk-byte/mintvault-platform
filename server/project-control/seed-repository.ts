@@ -32,6 +32,10 @@
  */
 import { randomBytes } from "node:crypto";
 import {
+  seedApplyRefusal,
+  type ProjectControlEnvironment,
+} from "@shared/project-control-environment";
+import {
   isNoOp,
   manifestDigest,
   planReconciliation,
@@ -82,6 +86,15 @@ export const SEED_ERROR_CODES = [
   "version_mismatch",
   "already_running",
   "production_blocked",
+  /**
+   * The process cannot identify which environment it is connected to.
+   *
+   * Distinct from `production_blocked` on purpose: "this is production" and "we do not know what
+   * this is" call for different operator action, and collapsing them would hide the fact that a
+   * machine is misconfigured.
+   */
+  "unknown_environment",
+  "plan_changed",
   "internal",
 ] as const;
 export type SeedErrorCode = (typeof SEED_ERROR_CODES)[number];
@@ -294,8 +307,14 @@ export async function dryRunSeed(
 export interface ApplyOptions {
   actor: string;
   confirmationToken: string;
-  /** Server-derived. Never taken from a request body or query string. */
-  isProduction: boolean;
+  /**
+   * Server-derived. Never taken from a request body or query string.
+   *
+   * This replaced a plain `isProduction: boolean`, which could only express "production" and
+   * "not production" — so an environment we could not identify at all fell into "not production"
+   * and was allowed to write. A laptop pointed at the production database is exactly that case.
+   */
+  environment: ProjectControlEnvironment;
   /** Separate, deliberately awkward, owner-controlled. NOT the Project Control enable flag. */
   productionOverride?: boolean;
   now?: number;
@@ -329,7 +348,14 @@ export async function applySeed(pool: SeedDbPool, manifest: SeedManifest, option
   // Server-derived identity only. There is no request field that can flip this, and the Project
   // Control enable flag deliberately does NOT grant it — being able to LOOK at the dashboard is
   // not permission to rewrite production's programme structure.
-  if (options.isProduction && options.productionOverride !== true) {
+  const refusal = seedApplyRefusal(options.environment, options.productionOverride === true);
+  if (refusal === "unknown_environment") {
+    throw new SeedApplyError(
+      "unknown_environment",
+      "Seed apply is blocked because this process cannot identify which environment it is connected to. Set PROJECT_CONTROL_ENV. Refusing is deliberate: without an identity there is no way to tell whether the production blockade applies."
+    );
+  }
+  if (refusal === "production_blocked") {
     throw new SeedApplyError(
       "production_blocked",
       "Seed apply is blocked in production. It requires a separate, explicit owner-controlled authorisation that is not the Project Control feature flag."

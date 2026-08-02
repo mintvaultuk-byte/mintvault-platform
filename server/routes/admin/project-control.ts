@@ -128,6 +128,7 @@ import {
 import { scanRepository } from "../../project-control/repo-scan";
 import { scanAllEvidence } from "../../project-control/evidence-scan";
 import { seedProgrammeTree } from "../../project-control/seed";
+import { seedApplyRefusal } from "@shared/project-control-environment";
 import { isProjectControlEnabled, projectControlDisabledPayload } from "../../project-control/flag";
 import { AttemptIdentityError } from "../../project-control/idempotency";
 
@@ -264,11 +265,14 @@ const seedApplySchema = z.object({ confirmationToken: z.string().min(16).max(200
 function seedFail(res: Response, error: unknown): void {
   if (error instanceof SeedApplyError) {
     const status =
-      error.code === "production_blocked"
+      error.code === "production_blocked" || error.code === "unknown_environment"
         ? 403
         : error.code === "already_running"
           ? 409
-          : error.code === "digest_mismatch" || error.code === "version_mismatch" || error.code === "conflicts"
+          : error.code === "digest_mismatch" ||
+              error.code === "version_mismatch" ||
+              error.code === "conflicts" ||
+              error.code === "plan_changed"
             ? 409
             : error.code === "schema_absent"
               ? 503
@@ -1132,7 +1136,11 @@ export function registerProjectControlRoutes(app: Express): void {
         // Server-derived. Never from the body, never from a query string, and deliberately NOT
         // the Project Control enable flag — being able to read the dashboard is not permission to
         // rewrite production's programme structure.
-        isProduction: resolveConnectedEnvironment() === "production",
+        //
+        // Passed as the environment itself rather than an `isProduction` boolean: a boolean can
+        // only say "production" or "not production", so an environment we cannot identify at all
+        // collapsed into "not production" and was allowed to write. The engine refuses `unknown`.
+        environment: resolveConnectedEnvironment(),
       });
       res.status(200).json(result);
     } catch (error) {
@@ -1161,11 +1169,31 @@ export function registerProjectControlRoutes(app: Express): void {
     }
   });
 
+  /**
+   * The legacy direct seeder.
+   *
+   * It predates the manifest/plan/confirmation machinery and writes the same tables without a
+   * preview, a plan digest or a lock. It is kept because existing tooling calls it, but it must
+   * carry the SAME environment blockade as `/seed/apply` — otherwise the careful guards on the
+   * modern path are decoration, since an operator can reach the identical tables through this
+   * door. Nothing above this line enforced that.
+   */
   app.post(`${BASE}/seed`, ...gated, projectControlWriteLimit, async (req, res) => {
     try {
+      const environment = resolveConnectedEnvironment();
+      const refusal = seedApplyRefusal(environment, false);
+      if (refusal !== null) {
+        throw new SeedApplyError(
+          refusal,
+          refusal === "unknown_environment"
+            ? "Seeding is blocked because this process cannot identify which environment it is connected to. Set PROJECT_CONTROL_ENV."
+            : "Seeding is blocked in production. It requires a separate, explicit owner-controlled authorisation that is not the Project Control feature flag."
+        );
+      }
       res.json(await seedProgrammeTree(actor(req)));
     } catch (error) {
-      fail(res, error);
+      // seedFail, not fail: it is the handler that maps the environment refusal codes to 403.
+      seedFail(res, error);
     }
   });
 }
