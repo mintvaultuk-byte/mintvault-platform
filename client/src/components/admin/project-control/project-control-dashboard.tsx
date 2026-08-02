@@ -3,12 +3,13 @@ import { PartnerShopLaunchProgression } from "./partner-shop-launch-progression"
 import { PriorityBlockerList } from "./priority-blocker-list";
 import { CollapsedWorkflowTree } from "./workflow-tree";
 import { CompactLiveEvidence } from "./compact-live-evidence";
-import type { LiveEvidence, ProjectControlOverview, ShopLaunchView, SyncStatus } from "@/lib/project-control/api";
+import type { ProjectControlOverview, ShopLaunchView, SyncStatus } from "@/lib/project-control/api";
+import type { OverviewDto } from "@shared/project-control-overview";
 
 export function ProjectControlDashboard({
   overview,
   shopLaunch,
-  liveEvidence,
+  evidence,
   evidenceUnavailable,
   sync,
   onOpenPackage,
@@ -17,7 +18,8 @@ export function ProjectControlDashboard({
 }: {
   overview: ProjectControlOverview;
   shopLaunch: ShopLaunchView;
-  liveEvidence: LiveEvidence | undefined;
+  /** Stored composed evidence. Backend-authoritative; nothing here recomputes it. */
+  evidence: OverviewDto | undefined;
   evidenceUnavailable: boolean;
   sync: SyncStatus | null;
   onOpenPackage: (key: string) => void;
@@ -30,9 +32,9 @@ export function ProjectControlDashboard({
       <ProjectControlExecutiveSummary
         overview={overview}
         shopLaunch={shopLaunch}
-        liveEvidence={liveEvidence}
+        evidence={evidence}
         sync={sync}
-        evidenceState={liveEvidence?.github.freshness.freshness ?? (evidenceUnavailable ? "unavailable" : "unknown")}
+        evidenceState={evidence?.repository.meta.freshness ?? (evidenceUnavailable ? "unavailable" : "unknown")}
         onOpenPackage={onOpenPackage}
         onRefresh={onRefresh}
         refreshing={refreshing}
@@ -48,7 +50,7 @@ export function ProjectControlDashboard({
         />
       </div>
       <CompactLiveEvidence
-        evidence={liveEvidence}
+        evidence={evidence}
         evidenceUnavailable={evidenceUnavailable}
         sync={sync}
         onRefresh={onRefresh}

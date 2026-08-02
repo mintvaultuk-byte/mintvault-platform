@@ -41,7 +41,10 @@ export function useGitHubSync() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: projectControlQueryKeys.overview }),
       queryClient.invalidateQueries({ queryKey: projectControlQueryKeys.shopLaunch }),
-      queryClient.invalidateQueries({ queryKey: projectControlQueryKeys.liveEvidence }),
+      // A completed refresh must invalidate the STORED evidence the dashboard reads, plus the
+      // programme queries whose readiness derives from it.
+      queryClient.invalidateQueries({ queryKey: projectControlQueryKeys.composedOverview }),
+      queryClient.invalidateQueries({ queryKey: projectControlQueryKeys.syncLatest }),
       queryClient.invalidateQueries({ queryKey: projectControlQueryKeys.github }),
     ]);
   };

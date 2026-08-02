@@ -87,8 +87,18 @@ describe("Project Control rendered dashboard proof", () => {
     expect(q('[data-testid="pc-evidence-freshness"]')?.textContent).toContain("Unavailable");
     expect(q('[data-testid="pc-live-evidence"]')?.textContent).not.toContain("0%");
 
+    /**
+     * UI6, updated for the cutover. The warning used to be a sentence the BROWSER assembled from
+     * three deployment booleans; it is now the server's stable contradiction code and summary,
+     * plus the binding readiness cap. Asserting the code rather than the prose is also a stronger
+     * check — the copy may change, the code may not.
+     */
     await renderFixture("contradiction");
-    expect(q('[data-testid="pc-contradiction-warning"]')?.textContent).toContain("Contradictory deployment evidence");
+    const warning = q('[data-testid="pc-contradiction-warning"]')?.textContent ?? "";
+    expect(warning).toContain("GITHUB_NEWER_THAN_DEPLOYMENT");
+    expect(warning).toContain("Production is 33 commits behind GitHub main.");
+    // The cap that held readiness down is disclosed alongside the contradiction that caused it.
+    expect(q('[data-testid="pc-readiness-cap"]')?.textContent).toContain("Evidence sources disagree");
 
     await renderFixture("failed-refresh");
     expect(q('[data-testid="pc-live-evidence"]')?.textContent).toContain("FAILED");

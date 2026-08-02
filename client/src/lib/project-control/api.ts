@@ -128,7 +128,16 @@ export async function startGitHubSync(): Promise<Pick<SyncStatus, "syncId" | "st
 export const projectControlQueryKeys = {
   overview: [PROJECT_CONTROL_API, "overview"] as const,
   shopLaunch: [PROJECT_CONTROL_API, "shop-launch"] as const,
-  liveEvidence: [PROJECT_CONTROL_API, "live-evidence"] as const,
+  /**
+   * The stored composed evidence. Replaces `liveEvidence` as the dashboard's evidence source.
+   *
+   * `/live-evidence` is `gatedExpensive` and fans out to the GitHub API and BOTH Fly applications
+   * on every call. Polling it every 120 seconds meant merely leaving the dashboard open spent
+   * GitHub quota and sent live HTTPS probes to production — and because the GitHub snapshot cache
+   * TTL is 60s, a 120s poll missed the cache every single time. `/composed-overview` reads
+   * persisted snapshots only and is registered under the ordinary read gate.
+   */
+  composedOverview: [PROJECT_CONTROL_API, "composed-overview"] as const,
   github: [PROJECT_CONTROL_API, "github"] as const,
   syncLatest: [PROJECT_CONTROL_API, "sync", "latest"] as const,
   sync: (id: string) => [PROJECT_CONTROL_API, "sync", id] as const,

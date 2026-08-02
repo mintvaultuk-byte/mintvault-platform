@@ -1,6 +1,7 @@
 import { AlertTriangle, ArrowRight, Flag, RefreshCw, Rocket, Server, Target } from "lucide-react";
 import { AdminButton, Panel, StatCard } from "@/components/admin";
-import type { LiveEvidence, ProjectControlOverview, ShopLaunchView, SyncStatus } from "@/lib/project-control/api";
+import type { ProjectControlOverview, ShopLaunchView, SyncStatus } from "@/lib/project-control/api";
+import type { OverviewDto } from "@shared/project-control-overview";
 import { displayPercent, describeAction, relativeTime } from "@/pages/admin/project-control-helpers";
 import { EvidenceStateBadge } from "./evidence-state";
 
@@ -20,7 +21,7 @@ function deploymentLabel(
 export function ProjectControlExecutiveSummary({
   overview,
   shopLaunch,
-  liveEvidence,
+  evidence,
   sync,
   evidenceState,
   onOpenPackage,
@@ -29,7 +30,7 @@ export function ProjectControlExecutiveSummary({
 }: {
   overview: ProjectControlOverview;
   shopLaunch: ShopLaunchView;
-  liveEvidence: LiveEvidence | undefined;
+  evidence: OverviewDto | undefined;
   sync: SyncStatus | null;
   evidenceState: string;
   onOpenPackage: (key: string) => void;
@@ -41,15 +42,24 @@ export function ProjectControlExecutiveSummary({
   const blocker = shopLaunch.blockers[0];
   const pilot = shopLaunch.phases.find((item) => item.key === "pn-pilot");
   const pilotReady = Boolean(pilot && pilot.readiness.overall >= 100);
+  /**
+   * Alignment comes from the server's `executive` block now.
+   *
+   * `deploymentAligned` (main vs staging) already existed; `productionAligned` was added because
+   * the DTO previously had no production comparison at all, so this card had nothing truthful to
+   * render. Neither verdict is computed here any more.
+   */
+  const stagingApp = evidence?.applications.find((a) => a.environment === "staging");
+  const productionApp = evidence?.applications.find((a) => a.environment === "production");
   const staging = deploymentLabel(
-    liveEvidence?.deployment?.staging?.commit,
-    liveEvidence?.deployment?.stagingMatchesMain,
-    Boolean(liveEvidence)
+    stagingApp?.commit,
+    evidence?.executive.deploymentAligned,
+    Boolean(evidence)
   );
   const production = deploymentLabel(
-    liveEvidence?.deployment?.production?.commit,
-    liveEvidence?.deployment?.productionMatchesMain,
-    Boolean(liveEvidence)
+    productionApp?.commit,
+    evidence?.executive.productionAligned,
+    Boolean(evidence)
   );
   return (
     <section aria-labelledby="pc-executive-heading" className="pc-section">

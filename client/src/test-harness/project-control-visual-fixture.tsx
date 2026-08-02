@@ -1,10 +1,10 @@
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { ReactNode } from "react";
+import type { OverviewDto } from "@shared/project-control-overview";
 import { ProjectControlDashboard } from "@/components/admin/project-control/project-control-dashboard";
 import { PackageOperationalHeader } from "@/components/admin/project-control/package-operational-header";
 import type {
-  LiveEvidence,
   PackageWithAssessment,
   ProjectControlOverview,
   ShopLaunchView,
@@ -361,110 +361,115 @@ export const projectControlFixtureShopLaunch: ShopLaunchView = {
   nextActions: { highestPriority: nextAction, all: [nextAction] },
 };
 
-function liveEvidence(state: ProjectControlFixtureState): LiveEvidence | undefined {
+/**
+ * Composed evidence, in the shape `/composed-overview` actually returns.
+ *
+ * Replaces the old `LiveEvidence` builder. The dashboard no longer consumes the live fan-out
+ * shape, so a fixture producing it would be exercising a contract the product does not use.
+ */
+function composedEvidence(state: ProjectControlFixtureState): OverviewDto | undefined {
   if (state === "unavailable") return undefined;
   const stale = state === "stale";
   const contradiction = state === "contradiction";
+  const meta = (source: string, freshness: OverviewDto["repository"]["meta"]["freshness"]) => ({
+    observedAt: stale ? VERY_OLD : NOW,
+    freshness,
+    lastKnownGoodAt: stale ? VERY_OLD : NOW,
+    source,
+  });
+
   return {
-    observedAt: NOW,
-    github: {
-      configured: true,
-      snapshot: {
-        fetchedAt: stale ? VERY_OLD : NOW,
-        repository: "mintvault/mintvault-platform",
-        defaultBranch: "main",
-        defaultBranchSha: "74b6be7b1bd1",
-        branches: [
-          {
-            name: "codex/project-control-live-ui",
-            headSha: "74b6be7b1bd1",
-            aheadOfDefault: 33,
-            behindDefault: 0,
-            lastCommitAt: NOW,
-          },
-        ],
-        pullRequests: [
-          {
-            number: 255,
-            title: "Project Control live UI",
-            state: "open",
-            headRef: "codex/project-control-live-ui",
-            baseRef: "main",
-            headSha: "74b6be7b1bd1",
-            mergedAt: null,
-            updatedAt: NOW,
-            changedFiles: [],
-          },
-        ],
-        workflowRuns: [
-          {
-            name: "Project Control UI proof",
-            headSha: "74b6be7b1bd1",
-            headBranch: "codex/project-control-live-ui",
-            conclusion: contradiction ? "failure" : "success",
-            runStartedAt: NOW,
-            url: null,
-          },
-        ],
-        releaseTags: ["pc-ui-gate-3"],
-        warnings: stale ? ["GitHub snapshot is past the freshness window."] : [],
-      },
-      freshness: stale
-        ? {
-            freshness: "stale",
-            reason: "GitHub was last read 1500 minute(s) ago; this view may be out of date.",
-            ageMs: 90_000_000,
-          }
-        : { freshness: "fresh", reason: "GitHub was read 0 second(s) ago.", ageMs: 0 },
+    generatedAt: NOW,
+    repository: {
+      mainSha: "74b6be7b1bd1",
+      branchCount: 12,
+      openPullRequests: 1,
+      totalPullRequests: 41,
+      ciConclusion: contradiction ? "failure" : "success",
+      syncState: "SUCCEEDED",
+      lastSuccessfulSyncAt: stale ? VERY_OLD : NOW,
+      activeSyncId: null,
+      meta: meta("github", stale ? "STALE" : "CURRENT"),
     },
     applications: [
       {
         environment: "staging",
-        state: contradiction ? "contradictory" : "current",
         commit: "74b6be7b1bd1",
         build: "staging-20260802",
-        timestamp: NOW,
-        observedAt: NOW,
-        reason: null,
+        healthy: true,
+        meta: meta("application", stale ? "STALE" : "CURRENT"),
       },
       {
         environment: "production",
-        state: contradiction ? "contradictory" : "current",
         commit: contradiction ? "372a98f39f23" : "74b6be7b1bd1",
         build: "prod-20260802",
-        timestamp: NOW,
-        observedAt: NOW,
-        reason: contradiction ? "Production is behind staging." : null,
+        healthy: true,
+        meta: meta("application", stale ? "STALE" : "CURRENT"),
       },
     ],
-    deployment: {
-      mainSha: "74b6be7b1bd1",
-      staging: {
+    databases: [
+      {
         environment: "staging",
-        state: "current",
-        commit: "74b6be7b1bd1",
-        build: "staging-20260802",
-        timestamp: NOW,
-        observedAt: NOW,
-        reason: null,
+        journalPresent: true,
+        appliedCount: 30,
+        pendingCount: contradiction ? 2 : 0,
+        foreignKeysIntact: true,
+        missingForeignKeys: [],
+        contradictions: [],
+        meta: meta("database", stale ? "STALE" : "CURRENT"),
       },
-      production: {
-        environment: "production",
-        state: contradiction ? "contradictory" : "current",
-        commit: contradiction ? "372a98f39f23" : "74b6be7b1bd1",
-        build: "prod-20260802",
-        timestamp: NOW,
-        observedAt: NOW,
-        reason: null,
+    ],
+    flags: [
+      {
+        key: "SUPER_ADMIN_PROJECT_CONTROL_ENABLED",
+        environment: "staging",
+        state: "enabled",
+        latestState: "enabled",
+        meta: meta("feature_flag", stale ? "STALE" : "CURRENT"),
       },
-      stagingMatchesMain: true,
-      productionMatchesMain: contradiction ? false : true,
-      stagingMatchesProduction: contradiction ? false : true,
-      summary: contradiction
-        ? "Production is 33 commits behind the Project Control UI branch."
-        : "Staging and production match GitHub main.",
+    ],
+    gates: [],
+    readiness: {
+      percent: contradiction ? 69 : 78,
+      cappedBy: contradiction ? ["Evidence sources disagree (1): GITHUB_NEWER_THAN_DEPLOYMENT."] : [],
+      appliedCaps: contradiction
+        ? [
+            {
+              code: "CONTRADICTORY_EVIDENCE" as const,
+              cap: 69,
+              reason: "Evidence sources disagree (1): GITHUB_NEWER_THAN_DEPLOYMENT.",
+              binding: true,
+            },
+          ]
+        : [],
+      satisfiedGates: contradiction ? 6 : 7,
+      totalGates: 10,
     },
-    featureFlags: [{ key: "partner_portal_enabled", enabled: true }],
+    contradictions: contradiction
+      ? [
+          {
+            code: "GITHUB_NEWER_THAN_DEPLOYMENT" as const,
+            summary: "Production is 33 commits behind GitHub main.",
+            evidenceSources: ["github", "application"],
+            severity: "high" as const,
+          },
+        ]
+      : [],
+    executive: {
+      currentGate: "DEPLOYED_STAGING" as const,
+      nextGate: "FEATURE_ENABLED_STAGING" as const,
+      highestBlocker: contradiction ? "Production is 33 commits behind GitHub main." : null,
+      nextRecommendedAction: "Advance the next gate: FEATURE_ENABLED_STAGING.",
+      deploymentAligned: true,
+      productionAligned: contradiction ? false : true,
+      stagingMatchesProduction: contradiction ? false : true,
+    },
+    integrity: {
+      staleSources: stale ? ["github"] : [],
+      unknownSources: [],
+      unavailableSources: [],
+      contradictionCount: contradiction ? 1 : 0,
+    },
   };
 }
 
@@ -513,7 +518,7 @@ export function ProjectControlVisualFixture({ state = "current" }: { state?: Pro
           packages: [],
         }
       : projectControlFixtureOverview;
-  const evidence = liveEvidence(state);
+  const evidence = composedEvidence(state);
 
   if (state === "loading") {
     return (
@@ -524,7 +529,7 @@ export function ProjectControlVisualFixture({ state = "current" }: { state?: Pro
         <ProjectControlDashboard
           overview={projectControlFixtureOverview}
           shopLaunch={projectControlFixtureShopLaunch}
-          liveEvidence={liveEvidence("current")}
+          evidence={composedEvidence("current")}
           evidenceUnavailable={false}
           sync={sync("refreshing")}
           onOpenPackage={setOpened}
@@ -547,7 +552,7 @@ export function ProjectControlVisualFixture({ state = "current" }: { state?: Pro
         <ProjectControlDashboard
           overview={overview}
           shopLaunch={projectControlFixtureShopLaunch}
-          liveEvidence={evidence}
+          evidence={evidence}
           evidenceUnavailable={state === "unavailable"}
           sync={sync(state)}
           onOpenPackage={setOpened}

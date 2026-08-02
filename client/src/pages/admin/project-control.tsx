@@ -13,6 +13,7 @@ import {
 } from "@/lib/project-control/api";
 import { useGitHubSync } from "@/hooks/project-control/use-github-sync";
 import type { DriftReport } from "@shared/project-control";
+import type { OverviewDto } from "@shared/project-control-overview";
 import "@/styles/project-control.css";
 
 export default function ProjectControlPage() {
@@ -27,9 +28,20 @@ export default function ProjectControlPage() {
     queryFn: () => pcGet("/views/shop-launch"),
     refetchInterval: 120_000,
   });
-  const liveEvidence = useQuery<LiveEvidence>({
-    queryKey: projectControlQueryKeys.liveEvidence,
-    queryFn: () => pcGet("/live-evidence"),
+  /**
+   * FIX 5/6 — stored composed evidence, not the live fan-out.
+   *
+   * This was `/live-evidence`, which is `gatedExpensive` and calls the GitHub API AND both Fly
+   * applications' /api/version on every request. At a 120-second poll — longer than the 60-second
+   * GitHub snapshot cache — every single tick missed the cache, so merely leaving the dashboard
+   * open spent GitHub quota and sent live probes to production, per open tab, indefinitely.
+   *
+   * `/composed-overview` reads persisted snapshots only and makes zero external calls. Fresh
+   * evidence now arrives by explicit operator refresh, which is what the Refresh button is for.
+   */
+  const evidence = useQuery<OverviewDto>({
+    queryKey: projectControlQueryKeys.composedOverview,
+    queryFn: () => pcGet("/composed-overview"),
     refetchInterval: 120_000,
   });
   const latestSync = useQuery<SyncStatus | null>({
@@ -57,7 +69,18 @@ export default function ProjectControlPage() {
         Loading Project Control…
       </div>
     );
-  if (overview.isError || shopLaunch.isError || !overview.data || !shopLaunch.data)
+  /**
+   * Fall back to CACHED data before declaring failure.
+   *
+   * This read `overview.isError || shopLaunch.isError || !data` — and in TanStack Query v5 a failed
+   * REFETCH sets status to "error" while `data` stays populated from the last success. With
+   * `retry: false` globally, one transient failure at a 120-second tick was enough to replace a
+   * perfectly good dashboard with a total-failure screen and throw the cached programme away.
+   *
+   * Only a genuine absence of data is a failure now; a failed refresh over good cached data keeps
+   * showing the last known good programme, which is the same discipline the evidence layer applies.
+   */
+  if (!overview.data || !shopLaunch.data)
     return (
       <div className="p-8" data-testid="pc-error" role="status" aria-live="polite">
         <Panel
@@ -100,8 +123,8 @@ export default function ProjectControlPage() {
         <ProjectControlDashboard
           overview={overview.data}
           shopLaunch={shopLaunch.data}
-          liveEvidence={liveEvidence.data}
-          evidenceUnavailable={liveEvidence.isError}
+          evidence={evidence.data}
+          evidenceUnavailable={evidence.isError && !evidence.data}
           sync={sync.status ?? latestSync.data ?? null}
           onOpenPackage={(key) => navigate(`/admin/project-control/package/${key}`)}
           onRefresh={sync.refresh}

@@ -307,7 +307,12 @@ async function persistSnapshot(
       defaultBranch: snapshot.defaultBranch,
       defaultBranchSha: snapshot.defaultBranchSha,
       branchCount: snapshot.branches.length,
+      // ALL states — the scanner fetches `?state=all`, so this is the total, not the open count.
       pullRequestCount: snapshot.pullRequests.length,
+      // The open count, stored separately. `openPullRequests` in the DTO was reading
+      // `pullRequestCount` and labelling it "open", so a repo with 3 open and 120 closed PRs
+      // would have reported 123 open once the UI consumed the composed endpoint.
+      openPullRequestCount: snapshot.pullRequests.filter((pr) => pr.state === "open").length,
       warnings: snapshot.warnings.slice(0, 10),
     },
   });
