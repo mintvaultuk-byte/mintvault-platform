@@ -16,6 +16,7 @@
  *    into a request.
  */
 import { sql } from "drizzle-orm";
+import { verifyForeignKeys } from "./database-evidence";
 import { db } from "../db";
 import { boundEvidenceText, type EvidenceKind, type TestResult } from "@shared/project-control";
 
@@ -113,10 +114,25 @@ export async function scanDatabaseEvidence(): Promise<EvidenceScanReport> {
       WHERE contype = 'f' AND conname LIKE 'fk\\_pc\\_%'
     `)) as unknown as { rows: { conname: string }[] };
 
+    /*
+     * B-2. This was `fks.length >= 7` against a comment claiming "7 expected", while migration
+     * 0030 creates NINE. A database missing two of the nine therefore reported healthy — and
+     * because it counted rather than identified, seven constraints with entirely the wrong names
+     * would also have passed. A referential-integrity check that cannot say WHICH constraint is
+     * missing is not a check.
+     *
+     * Now verified by exact name against the single shared list in database-evidence.ts, so this
+     * finding and the durable snapshot can never disagree about what "intact" means.
+     */
+    const fkVerdict = verifyForeignKeys(fks.map((f) => f.conname));
     findings.push({
       kind: "database_check",
-      supports: fks.length >= 7,
-      summary: boundEvidenceText(`${fks.length} Project Control foreign key constraint(s) present (7 expected).`),
+      supports: fkVerdict.intact,
+      summary: boundEvidenceText(
+        fkVerdict.intact
+          ? `All ${fkVerdict.expected} Project Control foreign key constraints are present.`
+          : `Missing ${fkVerdict.missing.length} of ${fkVerdict.expected} Project Control foreign key constraint(s): ${fkVerdict.missing.join(", ")}.`
+      ),
       sourceRef: "pg_constraint",
       scanner: "database",
     });

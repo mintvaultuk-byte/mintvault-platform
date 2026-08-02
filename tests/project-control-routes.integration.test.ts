@@ -156,6 +156,9 @@ const ALL_ROUTES: [string, string][] = [
   // allowlist, never from the request, so neither can be aimed at an arbitrary host.
   ["POST", `${P}/sync/applications`],
   ["POST", `${P}/sync/flags`],
+  // Migration evidence for the CONNECTED environment only — not parameterised, because a staging
+  // process cannot speak for production and accepting a target would imply it could.
+  ["POST", `${P}/sync/databases`],
   ["GET", `${P}/export`],
   ["POST", `${P}/seed`],
 ];

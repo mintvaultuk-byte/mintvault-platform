@@ -39,6 +39,7 @@
  *   GET    /sync/:syncId                              one durable sync run by id
  *   POST   /sync/applications                         probe + store both application versions
  *   POST   /sync/flags                                store this environment's flag evidence
+ *   POST   /sync/databases                            store this environment's migration evidence
  *   GET    /export                                    bounded JSON snapshot
  *   POST   /seed                                      idempotent programme-tree seed
  */
@@ -58,6 +59,7 @@ import {
   collectApplicationEvidence,
   collectFlagEvidenceSnapshots,
 } from "../../project-control/probe-persistence";
+import { collectAndStoreDatabaseEvidence } from "../../project-control/database-evidence";
 import {
   BLOCKER_KINDS,
   DEPLOYMENT_RESULTS,
@@ -933,6 +935,29 @@ export function registerProjectControlRoutes(app: Express): void {
   app.post(`${BASE}/sync/flags`, ...gated, projectControlWriteLimit, async (req, res) => {
     try {
       const outcome = await collectFlagEvidenceSnapshots(pool, { triggerType: "manual", actor: actor_(req) });
+      return res.status(202).json({
+        syncId: outcome.syncId,
+        state: "RUNNING",
+        accepted: outcome.started,
+        alreadyRunning: !outcome.started,
+        unavailable: false,
+        requestedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Store migration evidence for the environment THIS PROCESS is connected to.
+   *
+   * Deliberately not parameterised by environment: a staging process can only observe staging, and
+   * accepting a target would invite the false belief that it can speak for production. Production
+   * evidence must come from a production process.
+   */
+  app.post(`${BASE}/sync/databases`, ...gated, projectControlWriteLimit, async (req, res) => {
+    try {
+      const outcome = await collectAndStoreDatabaseEvidence(pool, { triggerType: "manual", actor: actor_(req) });
       return res.status(202).json({
         syncId: outcome.syncId,
         state: "RUNNING",
