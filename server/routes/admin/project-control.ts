@@ -33,6 +33,7 @@
  *   GET    /views/scanner                             Scanner view
  *   GET    /views/distributed-shop-launch             live-evidence programme lanes
  *   GET    /github                                    live GitHub evidence + freshness
+ *   GET    /live-evidence                             GitHub + application + flag evidence, one view
  *   GET    /export                                    bounded JSON snapshot
  *   POST   /seed                                      idempotent programme-tree seed
  */
@@ -43,6 +44,8 @@ import { classifyFreshness } from "@shared/project-control-github";
 import { requireSuperAdmin } from "../../auth";
 import { buildDistributedProgrammeView } from "../../project-control/distributed";
 import { isGitHubConfigured, scanGitHub } from "../../project-control/github-scan";
+import { compareDeployment, probeAllApplications } from "../../project-control/app-probe";
+import { collectFlagEvidence } from "../../project-control/flag-evidence";
 import {
   BLOCKER_KINDS,
   DEPLOYMENT_RESULTS,
@@ -721,6 +724,42 @@ export function registerProjectControlRoutes(app: Express): void {
         snapshot,
         freshness: classifyFreshness(snapshot.fetchedAt),
         configured: isGitHubConfigured(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * ONE VIEW, FOUR AUTHORITIES, NO BLENDING.
+   *
+   * The dashboard needs repository truth, application truth and configuration truth on one screen,
+   * and it must never let one stand in for another: a merged PR is not a deployment, a reachable
+   * app is not an applied migration, and an applied migration is not an enabled flag.
+   *
+   * So this route composes the sources and labels each one, rather than reducing them to a single
+   * status. Every sub-probe fails soft on its own — one unreachable environment must not blank the
+   * repository evidence beside it — and a failure is reported as UNAVAILABLE/UNKNOWN, never as a
+   * zero or a success.
+   */
+  app.get(`${BASE}/live-evidence`, ...gatedExpensive, async (req, res) => {
+    try {
+      const [snapshot, probes] = await Promise.all([
+        scanGitHub(req.query.refresh === "true").catch(() => null),
+        probeAllApplications().catch(() => []),
+      ]);
+      const flags = collectFlagEvidence();
+
+      res.json({
+        observedAt: new Date().toISOString(),
+        github: {
+          configured: isGitHubConfigured(),
+          snapshot,
+          freshness: classifyFreshness(snapshot?.fetchedAt ?? null),
+        },
+        applications: probes,
+        deployment: compareDeployment(snapshot?.defaultBranchSha ?? null, probes),
+        featureFlags: flags,
       });
     } catch (error) {
       fail(res, error);

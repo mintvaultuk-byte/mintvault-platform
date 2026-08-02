@@ -142,6 +142,10 @@ const ALL_ROUTES: [string, string][] = [
   // Live GitHub evidence. Expensive (external API) and read-only; the token is server-side
   // only and never appears in the response.
   ["GET", `${P}/github`],
+  // GitHub + application-version + feature-flag evidence composed into one view. Expensive: it
+  // fans out to the GitHub API and to both allowlisted /api/version endpoints. Every sub-probe
+  // fails soft on its own, so one unreachable environment cannot blank the evidence beside it.
+  ["GET", `${P}/live-evidence`],
   ["GET", `${P}/export`],
   ["POST", `${P}/seed`],
 ];
