@@ -68,3 +68,7 @@ export function useGitHubSync() {
 
   return { refresh: () => refresh.mutate(), isRefreshing: refresh.isPending || Boolean(status && !TERMINAL.has(status.state)), status };
 }
+
+export function isGitHubSyncTerminal(state: SyncStatus["state"]): boolean {
+  return TERMINAL.has(state);
+}

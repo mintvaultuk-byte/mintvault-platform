@@ -10,6 +10,7 @@ import { useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AdminShell, Panel, StatCard, Badge, AdminButton, Chip } from "@/components/admin";
+import { PackageOperationalHeader } from "@/components/admin/project-control/package-operational-header";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   BLOCKER_KIND_LABELS,
@@ -46,6 +47,7 @@ import {
   statusBadgeVariant,
   statusLabel,
 } from "./project-control-helpers";
+import "@/styles/project-control.css";
 
 const BASE = "/api/admin/project-control";
 
@@ -172,6 +174,13 @@ export default function ProjectControlPackagePage() {
         <AdminButton variant="ghost" onClick={() => navigate("/admin/project-control")} className="mb-3">
           ← Back to Project Control
         </AdminButton>
+
+        <PackageOperationalHeader
+          pkg={pkg}
+          assessment={a}
+          readiness={detail.data.readiness}
+          nextAction={nextActions[0] ?? null}
+        />
 
         {conflict && (
           <div
