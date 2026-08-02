@@ -14,6 +14,7 @@
  * The DTO carries typed data only — no display strings, no formatting, no HTML. Rendering
  * decisions belong to the UI; this decides what is TRUE.
  */
+import { TRACKED_FLAGS } from "./flag-evidence";
 import {
   getLatestSnapshot,
   getLatestGoodSnapshot,
@@ -81,7 +82,24 @@ export interface DatabaseSection {
 
 export interface FlagSection {
   key: string;
+  /**
+   * Which estate this observation is about.
+   *
+   * Previously absent from the DTO entirely, so a consumer could not tell whether a flag state
+   * came from staging, production or a machine that could not name itself — and the gate below
+   * could not either.
+   */
+  environment: string;
+  /**
+   * The last KNOWN GOOD state: `enabled`, `disabled_explicit`, `absent` or `unknown`.
+   *
+   * `absent` and `disabled_explicit` are deliberately distinct all the way to the gate. "Nobody
+   * has decided" and "somebody decided no" call for different operator action, and collapsing
+   * them to a boolean — which the gate used to do — throws away the only useful part.
+   */
   state: string | null;
+  /** The most recent observation, which may be unusable. Differs from `state` during an outage. */
+  latestState: string | null;
   meta: EvidenceMeta;
 }
 
@@ -220,28 +238,57 @@ export async function buildComposedOverview(db: EvidenceDb, now: Date = new Date
     });
   }
 
-  /* ── Flags ─────────────────────────────────────────────────────────────────────────────── */
-  const flagRows = await db.query(
-    `SELECT DISTINCT ON (entity_id) * FROM pc_evidence_snapshots
-      WHERE source_type=$1 ORDER BY entity_id, observed_at DESC, id DESC`,
-    [FLAG_SOURCE]
-  );
-  const flags: FlagSection[] = (flagRows.rows as Record<string, unknown>[]).map((row) => ({
-    key: row.entity_id as string,
-    state: (row.status as string) ?? null,
-    meta: {
-      observedAt: (row.observed_at as Date)?.toISOString() ?? null,
-      freshness: (row.freshness as EvidenceMeta["freshness"]) ?? null,
-      lastKnownGoodAt: (row.observed_at as Date)?.toISOString() ?? null,
-      source: FLAG_SOURCE,
-    },
-  }));
+  /**
+   * ── Flags ───────────────────────────────────────────────────────────────────────────────
+   *
+   * This read used to be the ONE source of the four that was not environment-keyed:
+   *
+   *   SELECT DISTINCT ON (entity_id) * FROM pc_evidence_snapshots WHERE source_type=$1
+   *
+   * `DISTINCT ON (entity_id)` collapses every environment's row for a flag into one and keeps
+   * whichever is newest — so a production machine's observation satisfied the STAGING gate, and a
+   * row labelled `unknown` satisfied whichever gate asked first. It also hand-built its meta and
+   * skipped `effectiveFreshness`, so `FLAG_VALID_MS` was written and never read and a flag
+   * observation stayed CURRENT forever.
+   *
+   * Now keyed on (environment, flag) exactly as applications and databases are, with the validity
+   * window applied and last-known-good read separately from latest.
+   */
+  const flags: FlagSection[] = [];
+  for (const environment of ENVIRONMENTS) {
+    for (const { name } of TRACKED_FLAGS) {
+      const key = {
+        sourceType: FLAG_SOURCE,
+        environment,
+        entityType: "feature_flag",
+        entityId: name,
+      };
+      const latest = await getLatestSnapshot(db, key);
+      const good = await getLatestGoodSnapshot(db, key);
+      if (!latest && !good) continue; // Nothing has ever been observed for this flag here.
+      flags.push({
+        key: name,
+        environment,
+        // The last KNOWN GOOD state, so an unavailable observation does not blank a real answer.
+        state: (good?.status as string) ?? null,
+        latestState: (latest?.status as string) ?? null,
+        meta: { ...metaFrom(latest, good, FLAG_SOURCE), freshness: effectiveFreshness(latest, now) },
+      });
+    }
+  }
 
   /* ── Gates ─────────────────────────────────────────────────────────────────────────────── */
   const stagingApp = applications.find((a) => a.environment === "staging") ?? null;
   const productionApp = applications.find((a) => a.environment === "production") ?? null;
   const stagingDb = databases.find((d) => d.environment === "staging") ?? null;
-  const pcFlag = flags.find((f) => f.key === "SUPER_ADMIN_PROJECT_CONTROL_ENABLED") ?? null;
+  /**
+   * The staging flag SPECIFICALLY — `FEATURE_ENABLED_STAGING` is a question about staging.
+   *
+   * This used to be `flags.find(f => f.key === ...)` over an unscoped list, so whichever
+   * environment happened to be observed most recently answered it.
+   */
+  const pcFlag =
+    flags.find((f) => f.key === "SUPER_ADMIN_PROJECT_CONTROL_ENABLED" && f.environment === "staging") ?? null;
 
   const observation = (
     source: string,
@@ -304,7 +351,20 @@ export async function buildComposedOverview(db: EvidenceDb, now: Date = new Date
     resolveGate("DEPLOYED_STAGING", observation(APPLICATION_SOURCE, Boolean(stagingApp?.commit), stagingApp?.meta ?? null)),
     resolveGate(
       "FEATURE_ENABLED_STAGING",
-      observation(FLAG_SOURCE, pcFlag?.state === "enabled", pcFlag?.meta ?? null, `Flag state: ${pcFlag?.state ?? "unknown"}.`)
+      observation(
+        FLAG_SOURCE,
+        pcFlag?.state === "enabled",
+        pcFlag?.meta ?? null,
+        // `absent` and `disabled_explicit` reach the operator intact rather than collapsing into
+        // one indistinguishable "not satisfied". The remedies differ: set it, versus revisit the
+        // decision to turn it off.
+        pcFlag
+          ? `Flag state in staging: ${pcFlag.state ?? "unknown"}.` +
+            (pcFlag.latestState && pcFlag.latestState !== pcFlag.state
+              ? ` Latest observation was ${pcFlag.latestState}; showing last known good.`
+              : "")
+          : "No flag evidence has been recorded for staging."
+      )
     ),
     // Human verification has no machine evidence source. It is UNKNOWN until somebody records it,
     // and no amount of green machine evidence may satisfy it.
@@ -325,6 +385,7 @@ export async function buildComposedOverview(db: EvidenceDb, now: Date = new Date
     productionKnown: Boolean(productionApp?.meta.observedAt),
     migrationsPending: stagingDb?.pendingCount ?? null,
     databaseKnown: Boolean(stagingDb?.meta.observedAt),
+    // Tri-state: null means "we have no staging flag evidence", which is not the same as "off".
     projectControlFlagEnabled: pcFlag ? pcFlag.state === "enabled" : null,
     flagsKnown: flags.length > 0,
   });

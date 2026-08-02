@@ -520,3 +520,126 @@ describe("the DTO carries typed data only", () => {
     expect(none).toEqual([]);
   });
 });
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+ * FIX 3 — flag evidence must carry an environment and obey its validity window.
+ *
+ * The flag read was the only one of the four sources that was not environment-keyed:
+ *
+ *   SELECT DISTINCT ON (entity_id) * FROM pc_evidence_snapshots WHERE source_type=$1
+ *
+ * `DISTINCT ON (entity_id)` collapsed every environment's row for a flag into one and kept
+ * whichever was newest, so a production observation satisfied the STAGING gate. The meta was also
+ * hand-built and skipped `effectiveFreshness`, so FLAG_VALID_MS was written and never read — a
+ * flag observation stayed CURRENT forever.
+ * ══════════════════════════════════════════════════════════════════════════════════════════ */
+describe("FIX 3 — flag evidence freshness and environment", () => {
+  const FLAG = "SUPER_ADMIN_PROJECT_CONTROL_ENABLED";
+
+  const flagRow = (o: {
+    environment: string;
+    status: string;
+    ageMinutes?: number;
+    validUntil?: string | null;
+    freshness?: string;
+  }) =>
+    snapshot({
+      source: FLAG_SOURCE,
+      environment: o.environment,
+      entityType: "feature_flag",
+      entityId: FLAG,
+      status: o.status,
+      freshness: o.freshness ?? "CURRENT",
+      ageMinutes: o.ageMinutes ?? 0,
+      validUntil: o.validUntil === undefined ? new Date(Date.now() + 30 * 60_000).toISOString() : o.validUntil,
+    });
+
+  /** FLAG2 — staging evidence must never answer a question asked about production. */
+  it("FLAG2: a PRODUCTION flag observation does not satisfy the staging gate", async () => {
+    // Only production has ever been observed, and it says enabled.
+    await flagRow({ environment: "production", status: "enabled" });
+
+    const dto = await buildComposedOverview(db);
+    const gate = dto.gates.find((g) => g.gate === "FEATURE_ENABLED_STAGING")!;
+
+    expect(isSatisfied(gate.state)).toBe(false);
+    expect(gate.state).toBe("UNKNOWN");
+    // And the DTO discloses which estate the row it does have belongs to.
+    expect(dto.flags.map((f) => f.environment)).toEqual(["production"]);
+  });
+
+  it("FLAG2: staging evidence satisfies only the staging gate, and carries its environment", async () => {
+    await flagRow({ environment: "staging", status: "enabled" });
+
+    const dto = await buildComposedOverview(db);
+    expect(isSatisfied(dto.gates.find((g) => g.gate === "FEATURE_ENABLED_STAGING")!.state)).toBe(true);
+    const staging = dto.flags.find((f) => f.environment === "staging")!;
+    expect(staging.key).toBe(FLAG);
+    expect(staging.state).toBe("enabled");
+  });
+
+  /** FLAG1 — a flag observation past its validity window is STALE, and STALE never satisfies. */
+  it("FLAG1: a stale flag observation cannot satisfy the gate", async () => {
+    await flagRow({
+      environment: "staging",
+      status: "enabled",
+      ageMinutes: 120,
+      validUntil: new Date(Date.now() - 60 * 60_000).toISOString(),
+    });
+
+    const dto = await buildComposedOverview(db);
+    const gate = dto.gates.find((g) => g.gate === "FEATURE_ENABLED_STAGING")!;
+
+    expect(dto.flags.find((f) => f.environment === "staging")!.meta.freshness).toBe("STALE");
+    expect(gate.state).toBe("STALE");
+    expect(isSatisfied(gate.state)).toBe(false);
+  });
+
+  it("an unknown-environment observation satisfies neither estate's gate", async () => {
+    // The label a process writes when PROJECT_CONTROL_ENV is unset — the state of both Fly apps.
+    await flagRow({ environment: "unknown", status: "enabled" });
+
+    const dto = await buildComposedOverview(db);
+    expect(isSatisfied(dto.gates.find((g) => g.gate === "FEATURE_ENABLED_STAGING")!.state)).toBe(false);
+    // It is not surfaced as either environment's evidence at all.
+    expect(dto.flags.filter((f) => f.environment === "staging" || f.environment === "production")).toEqual([]);
+  });
+
+  it("keeps explicitly-disabled distinct from absent all the way to the gate detail", async () => {
+    await flagRow({ environment: "staging", status: "disabled_explicit" });
+    const disabled = await buildComposedOverview(db);
+    const disabledGate = disabled.gates.find((g) => g.gate === "FEATURE_ENABLED_STAGING")!;
+    expect(disabledGate.reason ?? "").toContain("disabled_explicit");
+
+    await db.query("TRUNCATE pc_evidence_snapshots");
+    await flagRow({ environment: "staging", status: "absent" });
+    const absent = await buildComposedOverview(db);
+    const absentGate = absent.gates.find((g) => g.gate === "FEATURE_ENABLED_STAGING")!;
+    expect(absentGate.reason ?? "").toContain("absent");
+
+    // Both are NOT_SATISFIED, but an operator can tell which remedy applies.
+    expect(absentGate.reason).not.toBe(disabledGate.reason);
+  });
+
+  it("retains last-known-good when the newest flag observation is unusable", async () => {
+    await flagRow({ environment: "staging", status: "enabled", ageMinutes: 10 });
+    await snapshot({
+      source: FLAG_SOURCE,
+      environment: "staging",
+      entityType: "feature_flag",
+      entityId: FLAG,
+      status: "unknown",
+      freshness: "UNAVAILABLE",
+      ageMinutes: 0,
+    });
+
+    const dto = await buildComposedOverview(db);
+    const staging = dto.flags.find((f) => f.environment === "staging")!;
+
+    // The usable answer survives; the failure is disclosed rather than substituted.
+    expect(staging.state).toBe("enabled");
+    expect(staging.latestState).toBe("unknown");
+    expect(staging.meta.freshness).toBe("UNAVAILABLE");
+    expect(staging.meta.lastKnownGoodAt).not.toBeNull();
+  });
+});

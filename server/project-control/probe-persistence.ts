@@ -24,6 +24,7 @@
  * guaranteed. Each source succeeds or fails on its own and says so.
  */
 import {
+  mayWriteLabelledEvidence,
   resolveProjectControlEnvironment,
   type ProjectControlEnvironment,
 } from "@shared/project-control-environment";
@@ -179,6 +180,24 @@ export async function collectFlagEvidenceSnapshots(
   const begun = await beginProbeRun(db, FLAG_SOURCE, { ...input, target: environment }, env);
   if (!begun.started) return begun;
   const { syncId } = begun;
+
+  /**
+   * FAIL CLOSED when we cannot name the environment.
+   *
+   * `mayWriteLabelledEvidence` existed, was documented as mandatory and was unit-tested, but had
+   * no caller — so with `PROJECT_CONTROL_ENV` unset (its state on both Fly apps today) every flag
+   * observation was written under the label `unknown`. An `unknown`-labelled row is worse than no
+   * row: it is a fact about a real machine filed under an estate that does not exist, and the
+   * environment-scoped read below would either ignore it or, before that read was scoped, hand it
+   * to whichever gate asked first.
+   *
+   * Refusing leaves a recorded, visible failure — a run closed as UNAVAILABLE with a stable code —
+   * instead of silently accumulating mislabelled evidence. The remedy is one environment variable.
+   */
+  if (!mayWriteLabelledEvidence(environment)) {
+    await completeRun(db, syncId, "UNAVAILABLE", { errorCode: "unknown_environment" });
+    return begun;
+  }
 
   const outcome = await withLease(db, FLAG_SOURCE, syncId, async () => {
     await markRunning(db, syncId);

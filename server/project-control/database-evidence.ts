@@ -32,6 +32,7 @@ import {
   type EvidenceDb,
 } from "./evidence-repository";
 import { withLease, workerIdentity, type LeaseDb } from "./sync-lease";
+import { mayWriteLabelledEvidence } from "@shared/project-control-environment";
 import { resolveEnvironmentName } from "./probe-persistence";
 
 export const DATABASE_SOURCE = "database";
@@ -250,6 +251,18 @@ export async function collectAndStoreDatabaseEvidence(
     environment,
     workerIdentity: workerIdentity(env),
   });
+
+  /**
+   * FAIL CLOSED when the environment cannot be named — see the same guard in probe-persistence.ts.
+   *
+   * Database evidence is the most damaging kind to mislabel: "migration 0039 is applied" filed
+   * under the wrong estate is exactly the sentence that would authorise a deploy against a
+   * database that has not been migrated.
+   */
+  if (!mayWriteLabelledEvidence(environment)) {
+    await completeRun(db, syncId, "UNAVAILABLE", { errorCode: "unknown_environment" });
+    return { started: true, syncId };
+  }
 
   const outcome = await withLease(db, DATABASE_SOURCE, syncId, async () => {
     await markRunning(db, syncId);
