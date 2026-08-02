@@ -733,9 +733,7 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0024_set_library_base_tables.sql'");
     // And the catalogue persisted-code uniqueness index (also ≥0018) — index-only
     // and additive, but its journal row still trips the later-migration guard first.
-    await admin.query(
-      "DELETE FROM schema_migrations WHERE filename = '0026_catalogue_abbreviation_unique.sql'"
-    );
+    await admin.query("DELETE FROM schema_migrations WHERE filename = '0026_catalogue_abbreviation_unique.sql'");
     // And the Project Control dashboard migration (also ≥0018). It creates only pc_* tables and
     // has no relationship to partner credits — it is cleared purely so the later-migration guard
     // stops tripping before the evidence guard can be reached.
@@ -763,6 +761,12 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     // above — so the later-migration guard stops tripping before the evidence guard this test is
     // actually about can be reached.
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0039_project_control_live_evidence.sql'");
+    // Project Control seed reconciliation (0040) is the same case once more: two additive pc_*
+    // tables for seed state and reconciliation-run history, plus three nullable supersession
+    // columns on pc_work_packages. It touches no partner table and has no bearing on credits.
+    // Cleared for the identical reason as every row above — the later-migration guard would
+    // otherwise trip before the evidence guard this test is actually about can be reached.
+    await admin.query("DELETE FROM schema_migrations WHERE filename = '0040_project_control_seed_reconciliation.sql'");
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );
