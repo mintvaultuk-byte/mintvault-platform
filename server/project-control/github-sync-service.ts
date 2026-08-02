@@ -234,7 +234,24 @@ export async function runGitHubSync(
   return null;
 }
 
-/** Record a failure as an ADDITIONAL observation. Never a replacement. */
+/**
+ * Record a failure as an ADDITIONAL observation. Never a replacement.
+ *
+ * WHY RATE-LIMITED IS UNAVAILABLE AND NOT STALE
+ *
+ * This function used to write `STALE` on the rate-limit path. `STALE` is in `USABLE_FRESHNESS`,
+ * because it means "a real answer, just old" — so `getLatestGoodSnapshot`, which orders by recency
+ * across usable rows, returned this row in preference to the real observation taken minutes
+ * earlier. And this row carries no `commitSha`, so `repository.mainSha` went NULL.
+ *
+ * The visible consequence was that one throttled refresh made the dashboard report "no repository
+ * evidence has been collected yet" — it had looked, and been told to wait. Every gate reading the
+ * repository lost its input, and an UNKNOWN_REPOSITORY contradiction appeared out of nowhere.
+ *
+ * `UNAVAILABLE` means "no answer": recorded, visible, attributable to a rate limit via
+ * `staleReason`, and never a candidate to replace one. The sibling `persistSnapshot` below already
+ * reasons this out at length for the degraded-scan case; this path simply did not follow it.
+ */
 async function recordUnavailable(
   db: SyncDb,
   syncId: string,
@@ -246,7 +263,7 @@ async function recordUnavailable(
     sourceType: GITHUB_SOURCE,
     entityType: "repository",
     entityId: repository,
-    freshness: reason === "github_rate_limited" ? "STALE" : "UNAVAILABLE",
+    freshness: "UNAVAILABLE",
     syncId,
     staleReason: reason,
     payload: { warnings: warnings.slice(0, 10) },

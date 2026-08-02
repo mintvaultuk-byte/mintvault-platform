@@ -42,15 +42,23 @@ function env(overrides: Record<string, string | undefined> = {}): NodeJS.Process
 }
 
 /** A transport whose behaviour the test controls, recording what it was asked. */
-function transport(reply: (url: string) => { status?: number; body?: unknown; etag?: string }) {
+function transport(
+  reply: (url: string) => { status?: number; body?: unknown; etag?: string; headers?: Record<string, string> }
+) {
   const calls: { url: string; ifNoneMatch: string | null }[] = [];
   const http: GitHubFetch = async (url, init) => {
     calls.push({ url, ifNoneMatch: init.headers["if-none-match"] ?? null });
-    const { status = 200, body = [], etag } = reply(url);
+    const { status = 200, body = [], etag, headers = {} } = reply(url);
+    // Arbitrary response headers are needed because the scanner distinguishes a quota refusal from
+    // an ordinary 403 by `x-ratelimit-remaining`, and a test that cannot set it can never reach the
+    // rate-limit branch.
+    const lower: Record<string, string> = {};
+    for (const [k, v] of Object.entries(headers)) lower[k.toLowerCase()] = v;
+    if (etag) lower.etag = etag;
     return {
       status,
       ok: status >= 200 && status < 300,
-      headers: { get: (k: string) => (k.toLowerCase() === "etag" ? (etag ?? null) : null) },
+      headers: { get: (k: string) => lower[k.toLowerCase()] ?? null },
       json: async () => body,
     };
   };
@@ -232,6 +240,45 @@ describe("PHASE 11 — a failure never destroys the last good answer", () => {
       entityId: REPO,
     });
     expect(stillGood?.commitSha, "a quota failure must not lose the last answer").toBe("sha-good-1");
+  });
+
+  /**
+   * RATE1 — a WHOLLY rate-limited sync, which takes the `recordUnavailable` path rather than the
+   * partial-scan path above.
+   *
+   * That path used to write freshness STALE. STALE is in USABLE_FRESHNESS, so the row — which
+   * carries no commitSha — won `getLatestGoodSnapshot` on recency and blanked the repository head.
+   * One throttled refresh then made the dashboard claim it had never looked at GitHub at all.
+   */
+  it("RATE1: a fully rate-limited sync records the attempt but never replaces the last known good", async () => {
+    const good = transport(healthy);
+    await fullSync(good.http);
+
+    const before = await getLatestGoodSnapshot(db, {
+      sourceType: GITHUB_SOURCE,
+      entityType: "repository",
+      entityId: REPO,
+    });
+    expect(before?.commitSha).toBe("sha-good-1");
+
+    invalidateGitHubCache();
+    // Everything refused for quota.
+    const limited = transport(() => ({
+      status: 403,
+      body: { message: "API rate limit exceeded" },
+      headers: { "x-ratelimit-remaining": "0" },
+    }));
+    await fullSync(limited.http);
+
+    const after = await getLatestGoodSnapshot(db, {
+      sourceType: GITHUB_SOURCE,
+      entityType: "repository",
+      entityId: REPO,
+    });
+
+    // The usable answer is unchanged, and specifically is NOT null.
+    expect(after?.commitSha, "a rate-limited attempt must not blank the head").toBe("sha-good-1");
+    expect(after?.commitSha).not.toBeNull();
   });
 
   it("an absent credential records the attempt and the reason, and never claims a sync", async () => {
