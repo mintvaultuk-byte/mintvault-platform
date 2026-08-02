@@ -284,6 +284,43 @@ export async function getLastSuccessfulRun(db: EvidenceDb, sourceType: string): 
   return res.rows.length ? toRun(res.rows[0] as Record<string, unknown>) : null;
 }
 
+/**
+ * Reap runs abandoned by a dead process.
+ *
+ * A run that is QUEUED or RUNNING blocks every future refresh, because `getActiveRun` treats both
+ * as active. The lease expires on its own after five minutes; the RUN ROW does not. So a process
+ * killed mid-sync — OOM, a Fly machine replacement, a deploy — would leave a row that wedges
+ * refresh permanently, with no remedy short of editing the table by hand.
+ *
+ * This closes any run older than `olderThanMs` that no live lease still covers. The lease check is
+ * the safety catch: a genuinely long-running sync renews nothing but still holds its lease, so it
+ * is never reaped out from under itself.
+ *
+ * Returns the ids it expired, so a caller can log what it cleaned up rather than doing it silently.
+ */
+export async function expireAbandonedRuns(
+  db: EvidenceDb,
+  sourceType: string,
+  olderThanMs = 15 * 60 * 1000
+): Promise<string[]> {
+  const seconds = Math.max(1, Math.floor(olderThanMs / 1000));
+  const res = await db.query(
+    `UPDATE pc_sync_runs r
+        SET state='EXPIRED', completed_at=now(), error_code='abandoned_run_reaped'
+      WHERE r.source_type=$1
+        AND r.state = ANY($2::text[])
+        AND r.requested_at < now() - ($3 || ' seconds')::interval
+        -- Never reap a run whose lease is still live: that sync is genuinely in progress.
+        AND NOT EXISTS (
+          SELECT 1 FROM pc_sync_leases l
+           WHERE l.source_type = r.source_type AND l.sync_id = r.sync_id AND l.expires_at > now()
+        )
+      RETURNING r.sync_id`,
+    [sourceType, OPEN_STATES as unknown as string[], String(seconds)]
+  );
+  return (res.rows as { sync_id: string }[]).map((r) => r.sync_id);
+}
+
 /* ── Checkpoints ──────────────────────────────────────────────────────────────────────────── */
 
 export interface Checkpoint {

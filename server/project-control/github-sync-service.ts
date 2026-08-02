@@ -38,6 +38,7 @@ import type { GitHubSnapshot } from "@shared/project-control-github";
 import { withLease, workerIdentity, type LeaseDb } from "./sync-lease";
 import {
   createRun,
+  expireAbandonedRuns,
   markRunning,
   completeRun,
   getActiveRun,
@@ -74,6 +75,15 @@ export async function beginGitHubSync(
   env: NodeJS.ProcessEnv = process.env
 ): Promise<SyncOutcome> {
   const repository = resolveRepository(env);
+
+  /*
+   * Reap abandoned runs BEFORE checking for an active one.
+   *
+   * Without this, a run left QUEUED or RUNNING by a killed process would be reported as "already
+   * running" forever and refresh would be permanently wedged. Reaping first means the very next
+   * request self-heals, rather than requiring an operator to edit the table.
+   */
+  await expireAbandonedRuns(db, GITHUB_SOURCE);
 
   // A duplicate refresh must SHOW the run already in progress, not start a second scan against a
   // rate-limited API and not fail with a bare 409.

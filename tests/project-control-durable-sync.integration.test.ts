@@ -27,6 +27,7 @@ import {
   loadCheckpoint,
   listSnapshotHistory,
   getActiveRun,
+  expireAbandonedRuns,
   redactPayload,
 } from "../server/project-control/evidence-repository";
 
@@ -374,5 +375,63 @@ describe("persistence and checkpoint advance ATOMICALLY", () => {
       entityId: REPO,
     });
     expect(stillGood).not.toBeNull();
+  });
+});
+
+describe("PHASE 3 — crash recovery: a dead process cannot wedge refresh", () => {
+  it("a run abandoned QUEUED is reaped, and the next refresh proceeds", async () => {
+    // A process died between creating the run and starting the scan.
+    const orphan = await beginGitHubSync(db, { triggerType: "manual" }, env());
+    expect(orphan.started).toBe(true);
+    await db.query(`UPDATE pc_sync_runs SET requested_at = now() - interval '1 hour'`);
+
+    // Before the reaper existed this returned "already_running" forever.
+    const next = await beginGitHubSync(db, { triggerType: "manual" }, env());
+    expect(next.started, "an abandoned run must not wedge refresh permanently").toBe(true);
+
+    const reaped = await getRun(db, orphan.syncId);
+    expect(reaped?.state).toBe("EXPIRED");
+    expect(reaped?.errorCode).toBe("abandoned_run_reaped");
+    expect(reaped?.completedAt).not.toBeNull();
+  });
+
+  it("a run abandoned RUNNING after lease acquisition is reaped once its lease expires", async () => {
+    const orphan = await beginGitHubSync(db, { triggerType: "manual" }, env());
+    await db.query(`UPDATE pc_sync_runs SET state='RUNNING', started_at=now()`);
+    await db.query(
+      `INSERT INTO pc_sync_leases (source_type, owner_token, sync_id, expires_at)
+       VALUES ($1,'dead-token',$2, now() - interval '1 second')`,
+      [GITHUB_SOURCE, orphan.syncId]
+    );
+    await db.query(`UPDATE pc_sync_runs SET requested_at = now() - interval '1 hour'`);
+
+    const ids = await expireAbandonedRuns(db, GITHUB_SOURCE);
+    expect(ids).toContain(orphan.syncId);
+    expect((await getRun(db, orphan.syncId))?.state).toBe("EXPIRED");
+  });
+
+  it("a genuinely long-running sync holding a LIVE lease is never reaped", async () => {
+    const live = await beginGitHubSync(db, { triggerType: "manual" }, env());
+    await db.query(`UPDATE pc_sync_runs SET state='RUNNING', requested_at = now() - interval '1 hour'`);
+    await db.query(
+      `INSERT INTO pc_sync_leases (source_type, owner_token, sync_id, expires_at)
+       VALUES ($1,'live-token',$2, now() + interval '5 minutes')`,
+      [GITHUB_SOURCE, live.syncId]
+    );
+
+    const ids = await expireAbandonedRuns(db, GITHUB_SOURCE);
+    expect(ids, "reaping a live sync out from under itself would be worse than the wedge").not.toContain(
+      live.syncId
+    );
+    expect((await getRun(db, live.syncId))?.state).toBe("RUNNING");
+  });
+
+  it("a recent run is left alone — the reaper is not a duplicate-refresh bypass", async () => {
+    const recent = await beginGitHubSync(db, { triggerType: "manual" }, env());
+    const ids = await expireAbandonedRuns(db, GITHUB_SOURCE);
+    expect(ids).not.toContain(recent.syncId);
+
+    const second = await beginGitHubSync(db, { triggerType: "manual" }, env());
+    expect(second.started, "coalescing must still hold for a live run").toBe(false);
   });
 });
