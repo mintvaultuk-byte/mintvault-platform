@@ -145,6 +145,41 @@ only the present). Export first if that history matters — the rollback file ca
     Expect `unavailable: true` and an `UNAVAILABLE` run — and confirm the PREVIOUS evidence is
     still queryable. A failure must add an observation, never replace one.
 
+16. **Application and flag evidence.**
+    ```
+    POST /api/admin/project-control/sync/applications
+    POST /api/admin/project-control/sync/flags
+    ```
+    Both return 202 with a `syncId`; poll with the same status routes.
+
+    Verify staging and production were probed independently:
+    ```sql
+    SELECT environment, entity_id, commit_sha, freshness, observed_at
+      FROM pc_evidence_snapshots
+     WHERE source_type='application' ORDER BY observed_at DESC LIMIT 10;
+    ```
+    Expect one row per environment with the deployed SHA. **Production's SHA should differ from
+    staging's** — production is behind, and the dashboard must show that as drift, not an error.
+
+17. **Prove last-known-good.** This is the step that distinguishes a durable ledger from a cache.
+    Probe once successfully, then make an environment unreachable and probe again:
+    ```sql
+    -- newest row: records the outage
+    SELECT freshness, commit_sha FROM pc_evidence_snapshots
+     WHERE source_type='application' AND environment='staging'
+     ORDER BY observed_at DESC LIMIT 1;
+    -- newest USABLE row: still the real deployed SHA
+    SELECT freshness, commit_sha FROM pc_evidence_snapshots
+     WHERE source_type='application' AND environment='staging' AND freshness IN ('CURRENT','STALE')
+     ORDER BY observed_at DESC LIMIT 1;
+    ```
+    If the second query returns nothing after a successful probe, **stop** — the last-known-good
+    guarantee is not holding and the dashboard would blank during an outage.
+
+18. **Flag evidence is scoped to this process.** Confirm every row carries the environment the
+    process runs in and no other. A staging process cannot observe production's variables, and a
+    row claiming otherwise means the environment resolution is wrong.
+
 ---
 
 ## Activation
