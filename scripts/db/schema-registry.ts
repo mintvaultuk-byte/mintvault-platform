@@ -448,6 +448,105 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
     futureDisposition: "keep runner-managed",
     evidenceSource: "Phase 0.5 runner (scripts/db/migrate.ts)",
   },
+  {
+    schema: "public",
+    name: "schema_migration_rollbacks",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "Rollback ledger — the only thing that can re-admit a below-watermark migration",
+    active: true,
+    owningSubsystem: "db-migration-runner",
+    reason: "bootstrapped by scripts/db/migrate.ts alongside schema_migrations, never by schema.ts",
+    futureDisposition: "keep runner-managed",
+    evidenceSource: "Phase 0.5 runner (scripts/db/migrate.ts)",
+  },
+
+  // ---- Project Control live-evidence + seed reconciliation (migrations 0039 / 0040) ----
+  // The NINE tables migration 0030 creates (pc_nodes, pc_work_packages, pc_dependencies,
+  // pc_evidence, pc_blockers, pc_deployments, pc_test_runs, pc_prompts, pc_status_events)
+  // are declared in shared/schema.ts and are therefore already MANAGED — they must NOT be
+  // repeated here, or they would be classified twice.
+  //
+  // The six below are deliberately NOT in shared/schema.ts: they are append-only evidence and
+  // seed-ledger tables written exclusively by raw SQL in server/project-control/, so Drizzle
+  // must never diff or push them. Without these entries the preflight classifies all six as
+  // UNKNOWN and fails closed the moment 0039/0040 are applied — blocking the sanctioned
+  // db:preflight -> db:migrate pipeline.
+  //
+  // Registered INDIVIDUALLY and never by a `pc_` prefix predicate: a genuinely unrecognised
+  // pc_* object must still fail closed, which a prefix rule would silently wave through.
+  {
+    schema: "public",
+    name: "pc_sync_runs",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Project Control evidence sync run ledger (state, warnings, error codes)",
+    active: true,
+    owningSubsystem: "project-control/evidence",
+    reason: "migrations/0039_project_control_live_evidence.sql",
+    futureDisposition: "keep numbered-migration-managed; raw-SQL access only",
+    evidenceSource: "migration 0039 (durable live-evidence backbone)",
+  },
+  {
+    schema: "public",
+    name: "pc_sync_leases",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Cross-machine advisory lease so only one machine syncs evidence at a time",
+    active: true,
+    owningSubsystem: "project-control/evidence",
+    reason: "migrations/0039_project_control_live_evidence.sql",
+    futureDisposition: "keep numbered-migration-managed; raw-SQL access only",
+    evidenceSource: "migration 0039 (durable live-evidence backbone)",
+  },
+  {
+    schema: "public",
+    name: "pc_sync_checkpoints",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Resumable checkpoint per evidence source, so a failed sync does not restart cold",
+    active: true,
+    owningSubsystem: "project-control/evidence",
+    reason: "migrations/0039_project_control_live_evidence.sql",
+    futureDisposition: "keep numbered-migration-managed; raw-SQL access only",
+    evidenceSource: "migration 0039 (durable live-evidence backbone)",
+  },
+  {
+    schema: "public",
+    name: "pc_evidence_snapshots",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Append-only environment-scoped evidence observations (GitHub/app/db/flags)",
+    active: true,
+    owningSubsystem: "project-control/evidence",
+    reason: "migrations/0039_project_control_live_evidence.sql",
+    futureDisposition: "keep numbered-migration-managed; append-only trigger enforces immutability",
+    evidenceSource: "migration 0039 (durable live-evidence backbone)",
+  },
+  {
+    schema: "public",
+    name: "pc_seed_state",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Applied Project Control seed version and manifest digest",
+    active: true,
+    owningSubsystem: "project-control/seed",
+    reason: "migrations/0040_project_control_seed_reconciliation.sql",
+    futureDisposition: "keep numbered-migration-managed; raw-SQL access only",
+    evidenceSource: "migration 0040 (seed reconciliation)",
+  },
+  {
+    schema: "public",
+    name: "pc_seed_runs",
+    objectType: "table",
+    class: "numbered_migration",
+    purpose: "Seed reconciliation run ledger (plan digest, counts, outcome)",
+    active: true,
+    owningSubsystem: "project-control/seed",
+    reason: "migrations/0040_project_control_seed_reconciliation.sql",
+    futureDisposition: "keep numbered-migration-managed; raw-SQL access only",
+    evidenceSource: "migration 0040 (seed reconciliation)",
+  },
 ] as const;
 
 /** Non-public schemas known and expected. Any other schema is an unknown that must fail preflight. */

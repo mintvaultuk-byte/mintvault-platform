@@ -50,6 +50,16 @@ BEGIN
   -- the fail-closed tenant-context helper (created by the forward migration)
   DROP FUNCTION IF EXISTS partner_current_tenant();
   -- Remove the migration journal row so the forward migration can be re-applied cleanly.
+    -- ROLLBACK LEDGER — mint the reapply marker before retracting the journal row. Copies the
+    -- checksum FROM the journal (what was genuinely applied here) and pins the current watermark,
+    -- so the marker dies as soon as anything else is applied. See scripts/db/migrate.ts.
+    IF to_regclass('public.schema_migration_rollbacks') IS NOT NULL THEN
+      INSERT INTO schema_migration_rollbacks (filename, checksum, watermark_at_rollback, batch)
+      SELECT m.filename, m.checksum, COALESCE((SELECT MAX((regexp_match(filename,'^([0-9]{4,})_'))[1]::int) FROM schema_migrations),0), 'rollback-0001-partner-foundation.sql'
+        FROM schema_migrations m
+       WHERE filename = '0001_partner_foundation.sql'
+      ON CONFLICT DO NOTHING;
+    END IF;
   DELETE FROM schema_migrations WHERE filename = '0001_partner_foundation.sql';
   -- Revoke + drop the restricted role (after its objects are gone).
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'partner_runtime') THEN

@@ -69,6 +69,38 @@ DROP FUNCTION IF EXISTS partner_auth_lookup(text);
 DROP FUNCTION IF EXISTS partner_current_tenant();
 
 -- migration journal rows for the partner migrations (so they can be re-applied cleanly)
+-- ROLLBACK LEDGER — mint the reapply marker BEFORE retracting the journal row.
+--
+-- The numbered runner refuses a pending migration numbered below the highest applied, because that
+-- is how a stale branch lands a schema change underneath later ones. A deliberate rollback creates
+-- the same shape, so without this the runner cannot tell "the operator just backed this out" from
+-- "a stale branch turned up", and re-applying what was just removed is impossible.
+--
+-- The checksum is copied FROM the journal row — what was genuinely applied to THIS database — never
+-- hashed from disk, so a migration edited at any point after it was applied fails the comparison.
+-- watermark_at_rollback pins the journal as it stands right now: the marker dies the moment any
+-- other migration is applied, which keeps this an "undo, then immediately redo" window rather than
+-- a standing licence.
+--
+-- Guarded on the ledger existing so this script still runs against a database built by an older
+-- runner. A hand-deleted schema_migrations row mints nothing and stays refused.
+DO $ledger$
+BEGIN
+  IF to_regclass('public.schema_migration_rollbacks') IS NOT NULL THEN
+    INSERT INTO schema_migration_rollbacks (filename, checksum, watermark_at_rollback, batch)
+    SELECT m.filename, m.checksum, COALESCE((SELECT MAX((regexp_match(filename,'^([0-9]{4,})_'))[1]::int) FROM schema_migrations),0), 'rollback-partner-network-phase1.sql'
+      FROM schema_migrations m
+     WHERE filename IN (
+  '0001_partner_foundation.sql','0002_partner_auth_support.sql','0003_partner_auth_hardening.sql',
+  '0004_partner_mfa_enrol.sql','0005_partner_mfa_replay_and_grants.sql','0006_partner_definer_role.sql',
+  '0007_partner_submissions.sql','0008_partner_connector_foundation.sql','0009_partner_connector_validation.sql',
+  '0010_partner_connector_import.sql','0011_partner_connector_reconciliation.sql',
+  '0012_partner_connector_import_attempts.sql','0013_partner_connector_claim_index.sql'
+)
+    ON CONFLICT DO NOTHING;
+  END IF;
+END $ledger$;
+
 DELETE FROM schema_migrations WHERE filename IN (
   '0001_partner_foundation.sql','0002_partner_auth_support.sql','0003_partner_auth_hardening.sql',
   '0004_partner_mfa_enrol.sql','0005_partner_mfa_replay_and_grants.sql','0006_partner_definer_role.sql',

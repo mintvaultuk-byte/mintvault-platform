@@ -1,0 +1,52 @@
+# Gitleaks configuration.
+#
+# WHY THIS FILE EXISTS
+#
+# The Project Control test suites drive the real GitHub transport through an injectable seam, and
+# several exist specifically to prove a token is NEVER disclosed — not in a warning, an error
+# message, an evidence payload, or a log line. To assert that, the fixture must carry a string
+# SHAPED like a real Personal Access Token. Gitleaks correctly matches that shape, so the secret
+# scan went red on four synthetic values the moment this branch was pushed.
+#
+# WHAT THIS DOES AND DOES NOT DO
+#
+# `extend.useDefault = true` keeps EVERY default gitleaks rule active. The allowlist below disables
+# no rule, excludes no path, and excludes no file. It allowlists four EXACT literal values, fully
+# anchored.
+#
+# That distinction is the point. A `paths = ['''tests/''']` exclusion — the usual shortcut — would
+# let a genuine credential hide anywhere under tests/ for ever. With exact-value allowlisting, any
+# other token-shaped string, in these same files or anywhere else, still fires. Adding a fixture
+# token requires adding it here deliberately, in a reviewed diff, which is the right amount of
+# friction.
+#
+# Verified by negative control before landing: a new `ghp_…` in a test file, and an AWS key pair,
+# are both still detected with this config active.
+#
+# Every value below is synthetic, was authored as a test fixture, grants access to nothing, and is
+# self-describing ("fake", "mustnotleak", "notinaurl").
+
+title = "MintVault gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic GitHub token fixtures used by the Project Control transport and redaction proofs"
+
+# NOTE: these are the values gitleaks actually CAPTURES, not the source literals.
+# The `github-pat` rule matches `ghp_` plus exactly 36 characters, so the captured secret is the
+# 40-character PREFIX of the literal in the test file. Anchoring on the full source literal matches
+# nothing at all and silently allowlists nothing — which is exactly how the first version of this
+# file failed, while still reporting a valid config.
+regexes = [
+  # tests/project-control-github-transport.test.ts — bare token redaction outside a URL
+  '''^ghp_barefaketokenvaluenotinaurl000000000$''',
+  # tests/project-control-durable-sync.integration.test.ts
+  '''^ghp_faketokenforthedurablesynctests00000$''',
+  # tests/project-control-app-probe.test.ts — proves a probe never echoes its credential
+  '''^ghp_faketokenvaluethatmustnotleak0000000$''',
+  # tests/project-control-github-transport.test.ts, tests/project-control-evidence-truth.test.ts
+  '''^ghp_thisisafaketokenforthetestsuite01234$''',
+]
+regexTarget = "secret"

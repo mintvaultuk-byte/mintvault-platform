@@ -483,9 +483,16 @@ jobs:
           echo "[ci-db] partner RLS role model ok: partner_runtime is NOBYPASSRLS (or not yet created)"
 
           # Partner auth P0 proof databases (mandatory MFA enrolment + lockout recovery).
+          # Same query-then-create pattern as the partner_db loop above, and for the same reason
+          # stated there: \gexec is a psql meta-command that is NOT parsed under -c, so the server
+          # receives the backslash literally and reports `syntax error at or near "\"`.
           for auth_db in mintvault_partner_mfa_enrol mintvault_partner_lockout mintvault_partner_mfa_hardening mintvault_partner_lockout_decay; do
-            psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -c \
-              "SELECT 'CREATE DATABASE $auth_db' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname='$auth_db')\\gexec"
+            present="$(psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -tAc \
+              "SELECT 1 FROM pg_database WHERE datname = '$auth_db'")"
+            if [ "$present" != "1" ]; then
+              psql "$PROJECT_CONTROL_TEST_ADMIN_URL" -v ON_ERROR_STOP=1 -c "CREATE DATABASE $auth_db"
+            fi
+            echo "[ci-db] partner auth suite database ready: $auth_db"
           done
           for auth_admin in "$PARTNER_MFA_ENROL_RT_ADMIN" "$PARTNER_LOCKOUT_RT_ADMIN" "$PARTNER_MFA_HARDENING_RT_ADMIN" "$PARTNER_LOCKOUT_DECAY_RT_ADMIN"; do
             psql "$auth_admin" -v ON_ERROR_STOP=1 -tAc \

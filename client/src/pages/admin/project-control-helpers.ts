@@ -276,3 +276,122 @@ export function layoutDependencyColumns(
 
   return nodes.map((n) => ({ key: n.key, column: resolve(n.key) }));
 }
+
+/* ------------------------------------------------------------------------------------------ */
+/* Load-failure diagnosis (defect F-3)                                                          */
+/* ------------------------------------------------------------------------------------------ */
+
+export interface LoadDiagnosis {
+  kind: "disabled" | "unauthenticated" | "forbidden" | "schema_missing" | "server" | "network" | "unknown";
+  testId: string;
+  headline: string;
+  detail: string;
+  tone: "neutral" | "error";
+  canRetry: boolean;
+}
+
+/**
+ * Turn a failed Project Control read into an HONEST diagnosis.
+ *
+ * DEFECT F-3. Every failure previously fell into one of two branches, decided by sniffing the
+ * error MESSAGE for the substring "not enabled". Everything that did not match — a 401 after a
+ * staff login evicted the shared `mv.sid` admin session, a 403 from a non-super-admin, a 500, a
+ * dropped network — rendered:
+ *
+ *     "The most likely cause is that migration 0030 has not been applied to this environment."
+ *
+ * which is a confident, specific and usually WRONG diagnosis. It sends an operator to look at the
+ * database when the real fix is to log in again.
+ *
+ * The HTTP status is already attached by `throwIfResNotOk` (`err.status`) and was simply unused.
+ * This branches on it instead of on server prose, so a copy edit to a server message can no longer
+ * change which screen the operator sees.
+ *
+ * NOTE ON 401: the shared query function is configured `on401: "returnNull"`, so an evicted
+ * session yields `data === null` with NO error at all. That is why "no error and no data" is
+ * treated as unauthenticated rather than as an unknown fault.
+ */
+export function diagnoseLoadFailure(error: unknown): LoadDiagnosis {
+  const status = (error as { status?: number } | undefined)?.status;
+  const message = String((error as Error | undefined)?.message ?? "");
+
+  if (status === 404) {
+    return {
+      kind: "disabled",
+      testId: "pc-disabled",
+      headline: "Project Control is switched off here.",
+      detail:
+        "It is off by default in every environment and must be switched on deliberately by setting SUPER_ADMIN_PROJECT_CONTROL_ENABLED=true. Nothing is broken.",
+      tone: "neutral",
+      canRetry: false,
+    };
+  }
+
+  if (status === 401 || error === null || error === undefined) {
+    return {
+      kind: "unauthenticated",
+      testId: "pc-unauthenticated",
+      headline: "Your admin session has ended.",
+      detail:
+        "Sign in again at /admin/login. A staff or grader login in the same browser replaces the shared admin session, which is the usual cause.",
+      tone: "neutral",
+      canRetry: true,
+    };
+  }
+
+  if (status === 403) {
+    return {
+      kind: "forbidden",
+      testId: "pc-forbidden",
+      headline: "This account is not a Super Admin.",
+      detail:
+        "Project Control is restricted to Super Admin accounts. Your session is valid; it simply does not carry that privilege.",
+      tone: "neutral",
+      canRetry: false,
+    };
+  }
+
+  // A missing relation is the ONLY case where blaming the migration is correct.
+  if (/relation .*pc_|does not exist|undefined table/i.test(message)) {
+    return {
+      kind: "schema_missing",
+      testId: "pc-schema-missing",
+      headline: "The Project Control tables are missing here.",
+      detail:
+        "Migration 0030 has not been applied to this environment, so the tables do not exist yet. Nothing else in MintVault is affected.",
+      tone: "error",
+      canRetry: true,
+    };
+  }
+
+  if (typeof status === "number" && status >= 500) {
+    return {
+      kind: "server",
+      testId: "pc-server-error",
+      headline: "Project Control failed on the server.",
+      detail: `The server returned ${status}. This is a fault to investigate, not a configuration problem.`,
+      tone: "error",
+      canRetry: true,
+    };
+  }
+
+  if (status === undefined) {
+    return {
+      kind: "network",
+      testId: "pc-network-error",
+      headline: "Could not reach the server.",
+      detail: "The request did not complete. Check your connection and try again.",
+      tone: "error",
+      canRetry: true,
+    };
+  }
+
+  return {
+    kind: "unknown",
+    testId: "pc-error",
+    headline: "Project Control could not load.",
+    detail: `The server returned ${status}. The cause is not one this screen recognises.`,
+    tone: "error",
+    canRetry: true,
+  };
+}

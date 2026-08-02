@@ -18,6 +18,10 @@ import {
   commitsMatch,
   computeNextActions,
   computeReadiness,
+  assessWorkPackage,
+  aggregateReadiness,
+  CAP_CONTRADICTORY_EVIDENCE,
+  CAP_BLOCKED,
   isCommitBound,
   resolveCategories,
   scopePackageEvidence,
@@ -379,5 +383,100 @@ describe("H-2 evidence is scoped to the release commit", () => {
     const a = assessWorkPackage(pkg({ evidence: foreign }), NOW);
     expect(a.evidenceScope.rejected.length).toBe(foreign.length);
     expect(a.warnings.length).toBeGreaterThan(0);
+  });
+});
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+ * FIX 4 (OV2) — the AGGREGATE caps.
+ *
+ * `aggregateReadiness`'s own docstring says "the same caps are re-applied at the aggregate level",
+ * but only three of the five were: CAP_CONTRADICTORY_EVIDENCE and CAP_BLOCKED were missing. Since
+ * this is the engine whose `overall` the dashboard renders, contradictory evidence and open
+ * blockers did not cap the programme number — they diluted it through the mean, so one bad package
+ * in ten moved the headline by a few points instead of pinning it.
+ *
+ * There was no test calling aggregateReadiness at all, which is why the gap survived.
+ * ══════════════════════════════════════════════════════════════════════════════════════════ */
+describe("OV2 — aggregate readiness applies the caps it promises", () => {
+  /** Nine perfect packages and one carrying the named defect. */
+  function programme(bad: WorkPackage) {
+    const good = Array.from({ length: 9 }, (_, i) => pkg({ id: i + 10, key: `ok-${i}`, evidence: VALID_EVIDENCE }));
+    // assessWorkPackage gives the true PER-PACKAGE readiness. computeReadiness([p]) is itself an
+    // aggregate-of-one, so feeding it back in would be circular.
+    return [...good, bad].map((p) => ({ pkg: p, readiness: assessWorkPackage(p, NOW).readiness }));
+  }
+
+  it("a clean programme still reaches its normal ceiling", () => {
+    const clean = Array.from({ length: 10 }, (_, i) =>
+      pkg({ id: i + 1, key: `ok-${i}`, evidence: VALID_EVIDENCE })
+    ).map((p) => ({ pkg: p, readiness: assessWorkPackage(p, NOW).readiness }));
+
+    expect(aggregateReadiness(clean).overall).toBe(100);
+  });
+
+  it("one contradictory package caps the WHOLE programme, it does not merely dilute it", () => {
+    // supports:false on a production_check against the same commit is the contradiction shape.
+    const contradictory = pkg({
+      id: 99,
+      key: "bad",
+      evidence: [
+        ...VALID_EVIDENCE,
+        { id: 6, kind: "production_check", supports: false, capturedAt: daysAgo(1), environment: "production", commitSha: SHA },
+      ],
+    });
+    const result = aggregateReadiness(programme(contradictory));
+
+    expect(result.overall).toBeLessThanOrEqual(CAP_CONTRADICTORY_EVIDENCE);
+    expect(result.appliedCaps.map((c) => c.cap)).toContain(CAP_CONTRADICTORY_EVIDENCE);
+    expect(result.appliedCaps.map((c) => c.reason).join(" ")).toContain("contradictory");
+  });
+
+  it("one blocked package caps the WHOLE programme", () => {
+    const blocked = pkg({
+      id: 98,
+      key: "blocked",
+      evidence: VALID_EVIDENCE,
+      blockers: [
+        {
+          id: 1,
+          packageKey: "blocked",
+          kind: "dependency",
+          severity: "medium",
+          description: "Waiting on the payment refactor.",
+          openedAt: daysAgo(2),
+          resolvedAt: null,
+        },
+      ],
+    });
+    const result = aggregateReadiness(programme(blocked));
+
+    expect(result.overall).toBeLessThanOrEqual(CAP_BLOCKED);
+    expect(result.appliedCaps.map((c) => c.cap)).toContain(CAP_BLOCKED);
+  });
+
+  it("the strictest applicable aggregate cap wins", () => {
+    const both = pkg({
+      id: 97,
+      key: "both",
+      evidence: [
+        ...VALID_EVIDENCE,
+        { id: 6, kind: "production_check", supports: false, capturedAt: daysAgo(1), environment: "production", commitSha: SHA },
+      ],
+      blockers: [
+        {
+          id: 2,
+          packageKey: "both",
+          kind: "dependency",
+          severity: "low",
+          description: "Blocked too.",
+          openedAt: daysAgo(2),
+          resolvedAt: null,
+        },
+      ],
+    });
+    const result = aggregateReadiness(programme(both));
+
+    // Contradiction (69) is stricter than blocked (79); the lower ceiling must win.
+    expect(result.overall).toBeLessThanOrEqual(CAP_CONTRADICTORY_EVIDENCE);
   });
 });

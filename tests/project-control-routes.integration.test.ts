@@ -38,6 +38,15 @@ function stubRequiredConfig(): void {
   for (const [key, value] of Object.entries(placeholders)) {
     if (!process.env[key]) process.env[key] = value;
   }
+  /**
+   * The database URL is overridden UNCONDITIONALLY, unlike the rest.
+   *
+   * The conditional form above means a developer who has sourced .env — which points at STAGING —
+   * would silently run this suite against it. Nothing here should ever open a connection, but the
+   * file's promise is "it never touches a database", and that promise must not depend on the
+   * caller's shell.
+   */
+  process.env.MINTVAULT_DATABASE_URL = placeholders.MINTVAULT_DATABASE_URL;
 }
 
 beforeAll(async () => {
@@ -135,6 +144,40 @@ const ALL_ROUTES: [string, string][] = [
   ["GET", `${P}/audit`],
   ["GET", `${P}/views/shop-launch`],
   ["GET", `${P}/views/scanner`],
+  // The distributed live-evidence programme view. Registered with `gatedExpensive` because it
+  // shells out to git per lane and reads the migration ledger, so it must share /repository's
+  // stricter limiter rather than the ordinary read budget.
+  ["GET", `${P}/views/distributed-shop-launch`],
+  // Live GitHub evidence. Expensive (external API) and read-only; the token is server-side
+  // only and never appears in the response.
+  ["GET", `${P}/github`],
+  // GitHub + application-version + feature-flag evidence composed into one view. Expensive: it
+  // fans out to the GitHub API and to both allowlisted /api/version endpoints. Every sub-probe
+  // fails soft on its own, so one unreachable environment cannot blank the evidence beside it.
+  ["GET", `${P}/live-evidence`],
+  // Durable sync control. POST starts a run and returns 202 immediately — it never holds the
+  // request open for a full GitHub scan. The two GETs poll the durable run; the database run and
+  // lease are authoritative, so a client that disconnects loses nothing.
+  ["POST", `${P}/sync/github`],
+  ["GET", `${P}/sync/latest`],
+  ["GET", `${P}/sync/example-id`],
+  // Probe refresh. Same 202/coalesce contract as the GitHub sync; targets come from a frozen
+  // allowlist, never from the request, so neither can be aimed at an arbitrary host.
+  ["POST", `${P}/sync/applications`],
+  ["POST", `${P}/sync/flags`],
+  // Migration evidence for the CONNECTED environment only — not parameterised, because a staging
+  // process cannot speak for production and accepting a target would imply it could.
+  ["POST", `${P}/sync/databases`],
+  // The composed overview. Ordinary read gate, not gatedExpensive, because it makes ZERO external
+  // calls — looking at the dashboard must never spend GitHub quota.
+  ["GET", `${P}/composed-overview`],
+  // Seed reconciliation execution surface. Read routes use the ordinary budget; dry-run and
+  // apply are `gatedExpensive` because they open a dedicated connection and take an advisory
+  // lock. None accepts a caller-supplied manifest — the desired structure is compiled.
+  ["GET", `${P}/seed/status`],
+  ["POST", `${P}/seed/dry-run`],
+  ["POST", `${P}/seed/apply`],
+  ["POST", `${P}/seed/report/latest`],
   ["GET", `${P}/export`],
   ["POST", `${P}/seed`],
 ];
