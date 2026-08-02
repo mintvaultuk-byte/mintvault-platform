@@ -157,6 +157,31 @@ describe("rerun is a genuine no-op", () => {
     expect(plan.counts.packagesUpdated).toBe(0);
   });
 
+  it("stays a no-op when JSONB has reordered object keys on the way back", () => {
+    /**
+     * REGRESSION. PostgreSQL JSONB does not preserve object key order: a criterion declared
+     * {id, text, met, evidenceRef} is read back as {id, met, text, evidenceRef}. A key-order
+     * sensitive comparison therefore reported a difference on EVERY read, so every rerun proposed
+     * a phantom UPDATE on acceptanceCriteria and requiredTests for every package, forever, and no
+     * reconciliation could ever be a no-op. Found by the route suite; pinned here at the cause.
+     */
+    const m = manifest();
+    m.packages[0].acceptanceCriteria = [{ id: "a", text: "t", met: false, evidenceRef: null }];
+    const state = inSyncState(m);
+    // Exactly what the database hands back — same content, different key order.
+    state.packages[0].acceptanceCriteria = [{ id: "a", met: false, text: "t", evidenceRef: null }];
+    expect(isNoOp(planReconciliation(state, m))).toBe(true);
+  });
+
+  it("still treats a genuine ARRAY reorder as a real change", () => {
+    // Order of criteria is meaningful to a reader, so reordering them IS a change to reconcile.
+    const m = manifest();
+    m.packages[0].acceptanceCriteria = [{ id: "a" }, { id: "b" }];
+    const state = inSyncState(m);
+    state.packages[0].acceptanceCriteria = [{ id: "b" }, { id: "a" }];
+    expect(isNoOp(planReconciliation(state, m))).toBe(false);
+  });
+
   it("stays a no-op when only operator-owned text differs", () => {
     // The operator wrote a note. That is THEIR field; it must not register as drift to fix.
     const state = inSyncState();

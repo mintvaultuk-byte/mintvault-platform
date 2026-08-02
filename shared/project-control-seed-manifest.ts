@@ -229,10 +229,34 @@ const PACKAGE_STRUCTURE_FIELDS = [
 
 const NODE_STRUCTURE_FIELDS = ["parentKey", "name", "description", "sortOrder"] as const;
 
-/** Order-insensitive for arrays; exact for scalars. */
+/**
+ * Structural comparison that survives a round trip through PostgreSQL.
+ *
+ * JSONB does not preserve object key order — it stores keys in its own order, so an acceptance
+ * criterion declared `{id, text, met, evidenceRef}` comes back as `{id, met, text, evidenceRef}`.
+ * A naive `JSON.stringify` comparison therefore reports a difference on every single read, which
+ * meant every rerun proposed a phantom UPDATE on `acceptanceCriteria` and `requiredTests` for
+ * every package, forever — and no reconciliation could ever be a no-op.
+ *
+ * Canonicalising by sorting keys before comparing fixes that. ARRAY order is still significant
+ * and deliberately preserved: the order of acceptance criteria and required tests is meaningful
+ * to a reader, so reordering them IS a real change the seed should reconcile.
+ */
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value !== null && typeof value === "object") {
+    const source = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(source).sort()) out[key] = canonical(source[key]);
+    return out;
+  }
+  return value;
+}
+
 function differs(a: unknown, b: unknown): boolean {
-  if (Array.isArray(a) && Array.isArray(b)) return JSON.stringify(a) !== JSON.stringify(b);
-  if (typeof a === "object" && a !== null) return JSON.stringify(a) !== JSON.stringify(b);
+  if (typeof a === "object" || typeof b === "object") {
+    return JSON.stringify(canonical(a)) !== JSON.stringify(canonical(b));
+  }
   return a !== b;
 }
 
