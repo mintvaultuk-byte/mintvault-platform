@@ -225,8 +225,36 @@ describe("last-known-good and honest absence", () => {
 });
 
 describe("the gates stay independent", () => {
-  it("MERGED does not satisfy DEPLOYED", async () => {
-    // Repository evidence only: merged is known, nothing is deployed.
+  it("AUTHORED does not satisfy DEPLOYED", async () => {
+    // Repository evidence only: code exists, nothing is deployed.
+    await snapshot({
+      source: GITHUB_SOURCE,
+      entityType: "repository",
+      entityId: "org/repo",
+      commit: "abc1234567",
+      payload: { branchCount: 1, pullRequestCount: 0 },
+    });
+
+    const dto = await buildComposedOverview(db);
+    const authored = dto.gates.find((g) => g.gate === "AUTHORED")!;
+    const deployed = dto.gates.find((g) => g.gate === "DEPLOYED_STAGING")!;
+
+    expect(isSatisfied(authored.state)).toBe(true);
+    expect(isSatisfied(deployed.state), "GitHub cannot know what is deployed").toBe(false);
+    expect(deployed.state).toBe("UNKNOWN");
+  });
+
+  /**
+   * GATE1 — this assertion previously read `expect(isSatisfied(merged.state)).toBe(true)` against
+   * a snapshot carrying `pullRequestCount: 0`, which enshrined the defect: MERGED was the
+   * byte-identical observation to AUTHORED (`Boolean(repository.mainSha)`), so any repository with
+   * a default branch satisfied "merged" forever, with no pull request and no branch involved.
+   *
+   * MERGED cannot be answered here at all: `buildComposedOverview` takes no work package and never
+   * reads pc_work_packages, so there is no "this work" whose merge could be asserted. UNKNOWN is
+   * the truthful answer, and it is the answer CI_PASSED and both VERIFIED gates already give.
+   */
+  it("GATE1: MERGED is UNKNOWN — a repository head is not evidence that any work merged", async () => {
     await snapshot({
       source: GITHUB_SOURCE,
       entityType: "repository",
@@ -237,11 +265,43 @@ describe("the gates stay independent", () => {
 
     const dto = await buildComposedOverview(db);
     const merged = dto.gates.find((g) => g.gate === "MERGED")!;
-    const deployed = dto.gates.find((g) => g.gate === "DEPLOYED_STAGING")!;
 
-    expect(isSatisfied(merged.state)).toBe(true);
-    expect(isSatisfied(deployed.state), "GitHub cannot know what is deployed").toBe(false);
-    expect(deployed.state).toBe("UNKNOWN");
+    expect(merged.state).toBe("UNKNOWN");
+    expect(isSatisfied(merged.state)).toBe(false);
+    // And it must not be silently identical to AUTHORED any more.
+    const authored = dto.gates.find((g) => g.gate === "AUTHORED")!;
+    expect(merged.state).not.toBe(authored.state);
+  });
+
+  /**
+   * GATE2 — MIGRATION_AUTHORED had NO test of any kind, and its observation was
+   * `(stagingDb?.appliedCount ?? 0) >= 0` — an expression that cannot be false, answered by the
+   * database ledger when "has a migration been written" is a question about the repository.
+   */
+  it("GATE2: MIGRATION_AUTHORED is UNKNOWN when no package-to-migration mapping exists", async () => {
+    // A perfectly healthy staging ledger. Under the old wiring this alone satisfied the gate.
+    await snapshot({
+      source: DATABASE_SOURCE,
+      environment: "staging",
+      entityType: "migration_ledger",
+      entityId: "staging",
+      payload: {
+        journalPresent: true,
+        appliedCount: 22,
+        pendingFilenames: [],
+        foreignKeys: { intact: true, missing: [] },
+      },
+    });
+
+    const dto = await buildComposedOverview(db);
+    const authoredMigration = dto.gates.find((g) => g.gate === "MIGRATION_AUTHORED")!;
+
+    expect(authoredMigration.state).toBe("UNKNOWN");
+    expect(isSatisfied(authoredMigration.state)).toBe(false);
+
+    // The genuinely-evidenced sibling still works — authored is not applied, and applied is real.
+    const applied = dto.gates.find((g) => g.gate === "MIGRATION_APPLIED_STAGING")!;
+    expect(isSatisfied(applied.state)).toBe(true);
   });
 
   it("DEPLOYED does not satisfy MIGRATED", async () => {

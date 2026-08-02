@@ -465,7 +465,15 @@ export function planReconciliation(current: CurrentState, manifest: SeedManifest
   let packagesUpdated = 0;
   let operatorFieldsPreserved = 0;
   let dependenciesAdded = 0;
-  let dependenciesRemoved = 0;
+  /**
+   * Structurally zero, and deliberately still reported.
+   *
+   * Reconciliation no longer deletes dependency edges at all — ownership cannot be established
+   * without a column `pc_dependencies` does not have. The count stays in the contract so the
+   * report keeps saying "nothing was removed" out loud; dropping the field would make a future
+   * reintroduction of deletion silent.
+   */
+  const dependenciesRemoved = 0;
   let dependenciesPreserved = 0;
 
   for (const p of manifest.packages) {

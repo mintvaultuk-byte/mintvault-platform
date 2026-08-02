@@ -255,14 +255,43 @@ export async function buildComposedOverview(db: EvidenceDb, now: Date = new Date
 
   const gateResults: GateResult[] = [
     resolveGate("AUTHORED", observation(GITHUB_SOURCE, Boolean(repository.mainSha), repository.meta)),
-    resolveGate("MERGED", observation(GITHUB_SOURCE, Boolean(repository.mainSha), repository.meta)),
+    /**
+     * MERGED is UNKNOWN, and that is the honest answer rather than a missing feature.
+     *
+     * It used to be the BYTE-IDENTICAL observation to AUTHORED above — `Boolean(repository.mainSha)`
+     * — so every repository that has a default branch at all satisfied "merged", permanently, with
+     * no pull request, no ancestry and no branch involved.
+     *
+     * The reason it cannot be answered here is structural: `buildComposedOverview(db, now)` takes no
+     * work package and never reads `pc_work_packages`. There is no "this work" whose merge could be
+     * asserted — the gate array is programme-wide. Answering a per-branch question from a repo-wide
+     * fact is precisely the category error this module exists to prevent.
+     *
+     * `isBranchMerged` (shared/project-control-github.ts) is the correct implementation and
+     * deliberately refuses the optimistic reading. Wiring it needs a package-to-branch mapping and
+     * per-package gate evaluation, neither of which exists yet. Until then UNKNOWN, matching the
+     * CI_PASSED precedent below: "we did not establish this", never "it is fine".
+     */
+    resolveGate("MERGED", null),
     // CI evidence is collected but not yet mapped to a package, so this is honestly UNKNOWN
     // rather than optimistically satisfied.
     resolveGate("CI_PASSED", null),
-    resolveGate(
-      "MIGRATION_AUTHORED",
-      observation(DATABASE_SOURCE, (stagingDb?.appliedCount ?? 0) >= 0, stagingDb?.meta ?? null)
-    ),
+    /**
+     * MIGRATION_AUTHORED is UNKNOWN for the same structural reason.
+     *
+     * It used to read `(stagingDb?.appliedCount ?? 0) >= 0` — an expression that is true for every
+     * possible value, since appliedCount is a non-negative integer or null coalescing to 0. The
+     * gate was satisfied by a database with zero migrations applied and zero migration files
+     * authored, and it had no test of any kind.
+     *
+     * It was also answered by the wrong authority: "has a migration been WRITTEN" is a question
+     * about the repository, and it was being answered from the database ledger. `migrationFilesTouched`
+     * (shared/project-control-github.ts) is the function built to answer it properly, and it needs a
+     * package-to-migration mapping that does not exist in the schema, the manifest or the work-package
+     * table. Authored is also not applied — MIGRATION_APPLIED_STAGING below is a separate question
+     * and keeps its own real evidence.
+     */
+    resolveGate("MIGRATION_AUTHORED", null),
     resolveGate(
       "MIGRATION_APPLIED_STAGING",
       observation(
