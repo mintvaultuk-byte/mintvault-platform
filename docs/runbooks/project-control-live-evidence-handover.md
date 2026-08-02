@@ -22,13 +22,22 @@ missing evidence into success. Find a path where it still does.
 
 Project Control suite: **544 passed / 19 files**, TypeScript clean.
 
-**NOT built — do not review as if it exists**
+**Now built (this pass)**
 
-- **No persistence.** Sync runs, checkpoints and evidence snapshots are not stored. Everything is
-  computed per request and held in an in-process cache. **No migration was added**, deliberately —
-  adding one before the storage model is settled would burn a migration number for a schema that
-  will change.
-- **No scheduled refresh.** Manual refresh only. A scheduler must be multi-machine safe (advisory
+| Area | Where | Tests |
+|---|---|---|
+| Migration 0039 + rollback (4 tables, append-only trigger) | `migrations/0039_*.sql` | 11 |
+| Durable cross-machine lease | `server/project-control/sync-lease.ts` | 13 |
+| Evidence repository (runs, checkpoints, snapshots) | `server/project-control/evidence-repository.ts` | — |
+| Checkpointed GitHub orchestration | `server/project-control/github-sync-service.ts` | 13 |
+
+Project Control suite: **584 passed / 22 files**. Wider repo: 3,916 passed, 0 failed, twice.
+
+**NOT built — do not review as if it exists**
+- **No HTTP refresh routes.** `beginGitHubSync`/`runGitHubSync` exist and are proven, but nothing
+  exposes them — there is no `POST /sync/github` and no pollable status endpoint yet.
+- **No scheduled refresh.** The durable lease a scheduler needs is in place and proven; the
+  schedule itself is not written. A scheduler must be multi-machine safe (advisory
   lock or durable lease); production runs two machines, so an in-process timer is not sufficient.
 - **No UI.** The route returns the composed evidence; no page consumes it yet.
 - **No seed reconciliation / supersede mechanism.** Stale seed rows are still stale.
@@ -41,11 +50,21 @@ Project Control suite: **544 passed / 19 files**, TypeScript clean.
 
 ## Where to attack first
 
-1. **The in-process cache is the weakest structural point.** `snapshotCache`, `etagCache` and
-   `inFlight` are module-level. Production runs **two Fly machines**, so two operators can see
-   different evidence and a "refresh" can appear to do nothing. I proved single-flight *within* a
-   process; across processes there is no coordination. This is the same single-machine class that
-   bit the Vault Quest export store.
+1. **Attack the ordering rule.** `scan -> persist -> advance checkpoint -> close run`. The
+   checkpoint must never move on a run that did not store what it claims. DUR1 and DUR6 cover the
+   obvious breaks; look for a path where `persistSnapshot` partially fails yet the checkpoint still
+   advances — the snapshot loop is not wrapped in a transaction, so a mid-loop failure leaves some
+   entities stored and some not, and the run is still closed as SUCCEEDED. **I consider this the
+   most likely real defect in the package.**
+
+2. **`getLatestGoodSnapshot` treats STALE as usable.** That is deliberate — STALE means "a real
+   answer, just old". But it means any writer that mislabels a contentless observation as STALE
+   rather than UNAVAILABLE reintroduces the null-head bug this pass fixed. Audit every freshness
+   assignment for that confusion.
+
+3. **The process caches still exist** as an optimisation in front of the durable layer. They are no
+   longer authoritative, but confirm no read path can serve a process cache in preference to the
+   database after a restart.
 
 2. **`compareDeployment` is tri-state — try to break it.** The rule is that an unknown side yields
    `null`, never `false`. Mutation LIVE13 confirms two tests fail when `null` becomes `false`. Look
