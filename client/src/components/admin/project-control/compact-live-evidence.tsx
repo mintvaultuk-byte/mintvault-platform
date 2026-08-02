@@ -4,7 +4,7 @@ import { AdminButton, Panel } from "@/components/admin";
 import type { SyncStatus } from "@/lib/project-control/api";
 import type { OverviewDto } from "@shared/project-control-overview";
 import { relativeTime } from "@/pages/admin/project-control-helpers";
-import { EvidenceStateBadge, evidenceStateFrom } from "./evidence-state";
+import { EvidenceStateBadge, evidenceStateFrom, ciEvidenceState, flagsEvidenceState } from "./evidence-state";
 
 /**
  * The evidence strip, rendered ENTIRELY from stored backend truth.
@@ -41,11 +41,7 @@ export function CompactLiveEvidence({
   const production = evidence?.applications.find((item) => item.environment === "production");
   const stagingDb = evidence?.databases.find((item) => item.environment === "staging");
 
-  const state = evidence
-    ? evidenceStateFrom(repo?.meta.freshness)
-    : evidenceUnavailable
-      ? "unavailable"
-      : "unknown";
+  const state = evidence ? evidenceStateFrom(repo?.meta.freshness) : evidenceUnavailable ? "unavailable" : "unknown";
 
   /** Stale means "a real answer, just old" — so show WHEN it was last right, not a blank. */
   const lastKnownGoodAt = repo?.meta.lastKnownGoodAt ?? null;
@@ -56,8 +52,7 @@ export function CompactLiveEvidence({
   const caps = evidence?.readiness.appliedCaps ?? [];
 
   /** null is Unknown; it is never rendered as zero or as a dash that reads like "none". */
-  const orUnknown = (value: string | null | undefined) =>
-    value ?? (evidenceUnavailable ? "Unavailable" : "Unknown");
+  const orUnknown = (value: string | null | undefined) => value ?? (evidenceUnavailable ? "Unavailable" : "Unknown");
 
   return (
     <section className="pc-section">
@@ -97,7 +92,10 @@ export function CompactLiveEvidence({
                 ? orUnknown(null)
                 : `${repo.openPullRequests} open PRs`}
             </strong>
-            <EvidenceStateBadge state={repo?.ciConclusion ? evidenceStateFrom(repo.ciConclusion) : "unknown"} />
+            {/* Typed mapping, not the generic string normaliser: the server speaks "success" /
+                "failure" and this component speaks "succeeded" / "failed", so the generic path
+                matched neither and rendered Unknown for a green build and a red one alike. */}
+            <EvidenceStateBadge state={ciEvidenceState(repo?.ciConclusion)} testId="pc-ci-badge" />
           </div>
           <div>
             <small>Staging commit</small>
@@ -113,8 +111,16 @@ export function CompactLiveEvidence({
             <small>Flags</small>
             {/* The server OMITS flags it has never observed, so an empty array means "no evidence",
                 not "we looked and found none". Rendering "0 reported" made those identical. */}
-            <strong>{evidence && evidence.flags.length > 0 ? `${evidence.flags.length} reported` : orUnknown(null)}</strong>
-            <EvidenceStateBadge state={evidence && evidence.flags.length > 0 ? "current" : "unknown"} />
+            <strong>
+              {evidence && evidence.flags.length > 0 ? `${evidence.flags.length} reported` : orUnknown(null)}
+            </strong>
+            {/* Freshness comes from the evidence, not from "are there any rows". This badge was
+                hard-coded to "current" whenever the array was non-empty, so flag evidence past
+                FLAG_VALID_MS rendered Current — the one tile that could never go stale. Every
+                sibling tile derives its badge from meta.freshness; this one now does too, taking
+                the WORST freshness across the reported flags so one stale flag cannot hide behind
+                a fresh one. */}
+            <EvidenceStateBadge state={flagsEvidenceState(evidence?.flags)} />
           </div>
           <div>
             <small>Migration (staging)</small>
@@ -149,15 +155,21 @@ export function CompactLiveEvidence({
         {/* Rendered independently of contradictions. A binding cap from an UNAVAILABLE or UNKNOWN
             source is exactly the case an operator needs explained, and nesting this inside the
             contradiction block meant those two were computed, sent, and never shown. */}
-        {caps.filter((cap) => cap.binding).length > 0 && (
+        {/* Every applied cap, not only the one that happens to BIND.
+            `binding` is set when the cap actually lowered the score, i.e. `before > strictest`.
+            Five of the ten gates are structurally hard-wired UNKNOWN (see overview-service.ts), so
+            the score cannot exceed 50 while the loosest cap is 69 — `binding` is therefore false
+            for every cap, always, and this block could never render. The caps were computed, sent
+            over the wire, and silently dropped at the last step.
+            computeGateReadiness already records a cap "whenever the CONDITION holds, not only when
+            it happens to bite"; showing only the biting ones threw that away. */}
+        {caps.length > 0 && (
           <div className="pc-contradiction" data-testid="pc-readiness-caps">
-            {caps
-              .filter((cap) => cap.binding)
-              .map((cap) => (
-                <p key={cap.code} data-testid="pc-readiness-cap">
-                  {cap.reason}
-                </p>
-              ))}
+            {caps.map((cap) => (
+              <p key={cap.code} data-testid="pc-readiness-cap">
+                {cap.reason}
+              </p>
+            ))}
           </div>
         )}
         <button
@@ -181,9 +193,8 @@ export function CompactLiveEvidence({
             </p>
             {evidence && (
               <p>
-                Integrity: {evidence.integrity.staleSources.length} stale,{" "}
-                {evidence.integrity.unknownSources.length} unknown,{" "}
-                {evidence.integrity.unavailableSources.length} unavailable source(s).
+                Integrity: {evidence.integrity.staleSources.length} stale, {evidence.integrity.unknownSources.length}{" "}
+                unknown, {evidence.integrity.unavailableSources.length} unavailable source(s).
               </p>
             )}
             {sync?.errorCode && (

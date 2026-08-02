@@ -23,6 +23,26 @@ export interface EvidenceMeta {
   source: string;
 }
 
+/**
+ * The CI verdict vocabulary — ONE definition, shared by the server that produces it and the client
+ * that renders it.
+ *
+ * These two sides had drifted. The server returned GitHub's words, `"success"` / `"failure"`; the
+ * client's badge normaliser matched `"succeeded"` / `"failed"` and nothing else, so BOTH fell
+ * through to "unknown". The PR/CI badge read Unknown whether the build was green or red — the
+ * capability the evidence layer exists to provide, silently absent, with `string | null` on the
+ * wire making it invisible to the type-checker.
+ *
+ * Narrowing to a union is what makes the client's mapping exhaustive: `ciEvidenceState` in
+ * client/src/components/admin/project-control/evidence-state.tsx switches over this type with a
+ * `never` fallthrough, so adding a member here is a COMPILE ERROR at the render site rather than a
+ * new way to display Unknown.
+ *
+ * `null` remains meaningful and distinct: no run observed for this commit, or only queued /
+ * in-progress / cancelled runs — a real observation, but not yet a verdict.
+ */
+export type CiConclusion = "success" | "failure";
+
 export interface RepositorySection {
   mainSha: string | null;
   branchCount: number | null;
@@ -30,7 +50,7 @@ export interface RepositorySection {
   openPullRequests: number | null;
   /** Every pull request the scan saw, in any state. */
   totalPullRequests: number | null;
-  ciConclusion: string | null;
+  ciConclusion: CiConclusion | null;
   syncState: string | null;
   lastSuccessfulSyncAt: string | null;
   activeSyncId: string | null;

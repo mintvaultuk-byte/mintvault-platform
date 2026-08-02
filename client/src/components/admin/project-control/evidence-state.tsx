@@ -1,14 +1,40 @@
 import { AlertTriangle, CheckCircle2, Clock3, HelpCircle, LoaderCircle, WifiOff } from "lucide-react";
 import { Badge, type AdminBadgeVariant } from "@/components/admin";
+import type { CiConclusion } from "@shared/project-control-overview";
 
-export type EvidenceState = "current" | "stale" | "unknown" | "unavailable" | "contradictory" | "queued" | "running" | "succeeded" | "partial" | "failed" | "expired" | "rate_limited";
+export type EvidenceState =
+  | "current"
+  | "stale"
+  | "unknown"
+  | "unavailable"
+  | "contradictory"
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "partial"
+  | "failed"
+  | "expired"
+  | "rate_limited";
 
 const presentation: Record<EvidenceState, { label: string; variant: AdminBadgeVariant; Icon: typeof CheckCircle2 }> = {
-  current: { label: "Current", variant: "act", Icon: CheckCircle2 }, stale: { label: "Stale", variant: "gold", Icon: Clock3 }, unknown: { label: "Unknown", variant: "wait", Icon: HelpCircle }, unavailable: { label: "Unavailable", variant: "wait", Icon: WifiOff }, contradictory: { label: "Contradictory", variant: "red", Icon: AlertTriangle }, queued: { label: "Queued", variant: "prog", Icon: LoaderCircle }, running: { label: "Running", variant: "prog", Icon: LoaderCircle }, succeeded: { label: "Succeeded", variant: "act", Icon: CheckCircle2 }, partial: { label: "Partial", variant: "gold", Icon: AlertTriangle }, failed: { label: "Failed", variant: "red", Icon: AlertTriangle }, expired: { label: "Expired", variant: "red", Icon: Clock3 }, rate_limited: { label: "Rate limited", variant: "gold", Icon: Clock3 },
+  current: { label: "Current", variant: "act", Icon: CheckCircle2 },
+  stale: { label: "Stale", variant: "gold", Icon: Clock3 },
+  unknown: { label: "Unknown", variant: "wait", Icon: HelpCircle },
+  unavailable: { label: "Unavailable", variant: "wait", Icon: WifiOff },
+  contradictory: { label: "Contradictory", variant: "red", Icon: AlertTriangle },
+  queued: { label: "Queued", variant: "prog", Icon: LoaderCircle },
+  running: { label: "Running", variant: "prog", Icon: LoaderCircle },
+  succeeded: { label: "Succeeded", variant: "act", Icon: CheckCircle2 },
+  partial: { label: "Partial", variant: "gold", Icon: AlertTriangle },
+  failed: { label: "Failed", variant: "red", Icon: AlertTriangle },
+  expired: { label: "Expired", variant: "red", Icon: Clock3 },
+  rate_limited: { label: "Rate limited", variant: "gold", Icon: Clock3 },
 };
 
 export function evidenceStateFrom(value: string | null | undefined): EvidenceState {
-  const normalized = String(value ?? "unknown").toLowerCase().replace(/\s+/g, "_");
+  const normalized = String(value ?? "unknown")
+    .toLowerCase()
+    .replace(/\s+/g, "_");
   if (normalized === "fresh" || normalized === "current") return "current";
   if (normalized === "stale") return "stale";
   if (normalized === "unavailable") return "unavailable";
@@ -23,8 +49,71 @@ export function evidenceStateFrom(value: string | null | undefined): EvidenceSta
   return "unknown";
 }
 
-export function EvidenceStateBadge({ state, testId }: { state: EvidenceState | string | null | undefined; testId?: string }) {
+/**
+ * Map the server's CI verdict onto a badge state.
+ *
+ * The server speaks GitHub's vocabulary (`"success"` / `"failure"`, see CiConclusion in
+ * shared/project-control-overview.ts); this component's own vocabulary is `"succeeded"` /
+ * `"failed"`. Those are different words, and the generic normaliser above matched only the latter,
+ * so a green build AND a red build both rendered "Unknown".
+ *
+ * This switch is TOTAL over the shared union. The `never` assignment in the default branch means
+ * adding a member to CiConclusion fails compilation here rather than silently producing another
+ * way to show Unknown — the drift is caught by tsc instead of by a founder reading a wrong badge.
+ *
+ * `null` stays Unknown deliberately, and truthfully: no run for this commit, or only queued /
+ * in-progress / cancelled ones. That is genuinely not a verdict.
+ */
+export function ciEvidenceState(conclusion: CiConclusion | null | undefined): EvidenceState {
+  if (conclusion == null) return "unknown";
+  switch (conclusion) {
+    case "success":
+      return "succeeded";
+    case "failure":
+      return "failed";
+    default: {
+      const exhaustive: never = conclusion;
+      return exhaustive;
+    }
+  }
+}
+
+/**
+ * Badge state for the Flags tile — the WORST freshness across the reported flags.
+ *
+ * This tile used to be hard-coded: `flags.length > 0 ? "current" : "unknown"`. It was the only
+ * evidence tile that could never go stale, so flag evidence past FLAG_VALID_MS rendered Current
+ * while every neighbouring tile correctly showed its age.
+ *
+ * Worst-wins rather than first-wins or newest-wins: one stale flag among five fresh ones means the
+ * picture is stale, and hiding it behind a fresh sibling is the kind of averaging that makes a
+ * dashboard confidently wrong.
+ */
+export function flagsEvidenceState(
+  flags: { meta?: { freshness?: string | null } }[] | null | undefined
+): EvidenceState {
+  if (!flags || flags.length === 0) return "unknown";
+  const RANK: EvidenceState[] = ["unavailable", "contradictory", "expired", "stale", "unknown", "current"];
+  let worst: EvidenceState = "current";
+  for (const f of flags) {
+    const s = evidenceStateFrom(f.meta?.freshness);
+    if (RANK.indexOf(s) < RANK.indexOf(worst)) worst = s;
+  }
+  return worst;
+}
+
+export function EvidenceStateBadge({
+  state,
+  testId,
+}: {
+  state: EvidenceState | string | null | undefined;
+  testId?: string;
+}) {
   const item = presentation[evidenceStateFrom(state)];
   const Icon = item.Icon;
-  return <Badge variant={item.variant} testId={testId}><Icon size={12} aria-hidden="true" /> {item.label}</Badge>;
+  return (
+    <Badge variant={item.variant} testId={testId}>
+      <Icon size={12} aria-hidden="true" /> {item.label}
+    </Badge>
+  );
 }

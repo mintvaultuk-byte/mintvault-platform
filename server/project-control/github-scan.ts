@@ -54,7 +54,22 @@ const API = "https://api.github.com";
 /** Bounds. Deliberately small: this is a dashboard poll, not a data export. */
 const PER_PAGE = 100;
 const MAX_PAGES = 5; // <= 500 items per collection
-const MAX_PR_CHANGED_FILES = 300;
+/**
+ * Workflow runs kept per scan.
+ *
+ * Previously this slice used MAX_PR_CHANGED_FILES — a pull-request changed-files bound of 300 —
+ * applied to workflow runs. That constant had no other caller (pull requests are mapped with
+ * `changedFiles: []`), so it is gone rather than left as a decoy.
+ *
+ * Worse, the slice truncated SILENTLY: getAllPages only warns when it hits MAX_PAGES, so a
+ * repository with 101-500 runs paginated cleanly, produced zero warnings, and was then cut to 300
+ * with nothing to show for it. The sync closed SUCCEEDED, and a quarter of the CI history was
+ * missing from a result indistinguishable from a complete one.
+ *
+ * Set to the full page budget so the common case truncates nothing at all, and any truncation that
+ * does happen now emits a warning (see below), which forces the run to PARTIAL.
+ */
+const MAX_WORKFLOW_RUNS = MAX_PAGES * PER_PAGE;
 const REQUEST_TIMEOUT_MS = 15_000;
 
 /** Serve a repeat poll from memory rather than issuing a request at all. */
@@ -236,11 +251,11 @@ async function getAllPages<T>(
   const out: T[] = [];
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const sep = pathBase.includes("?") ? "&" : "?";
-    const { ok, data: raw, warning } = await getJson<unknown>(
-      `${pathBase}${sep}per_page=${PER_PAGE}&page=${page}`,
-      token,
-      http
-    );
+    const {
+      ok,
+      data: raw,
+      warning,
+    } = await getJson<unknown>(`${pathBase}${sep}per_page=${PER_PAGE}&page=${page}`, token, http);
     const data = (
       envelopeKey && raw && typeof raw === "object" && !Array.isArray(raw)
         ? (raw as Record<string, unknown>)[envelopeKey]
@@ -328,9 +343,7 @@ async function doScan(repo: string, token: string, http: GitHubFetch): Promise<G
     run_started_at?: string;
     html_url?: string;
     // `/actions/runs` answers with an envelope, not a bare array — see getAllPages.
-  }>(`/repos/${repo}/actions/runs`, token, warnings, "Workflow run list", http, "workflow_runs").catch(
-    () => []
-  );
+  }>(`/repos/${repo}/actions/runs`, token, warnings, "Workflow run list", http, "workflow_runs").catch(() => []);
 
   const defaultBranchSha = rawBranches.find((b) => b.name === defaultBranch)?.commit?.sha ?? null;
 
@@ -356,28 +369,35 @@ async function doScan(repo: string, token: string, http: GitHubFetch): Promise<G
     changedFiles: [],
   }));
 
-  const workflowRuns: GitHubWorkflowRun[] = (
-    Array.isArray(rawRuns) ? rawRuns : ((rawRuns as unknown as { workflow_runs?: unknown[] })?.workflow_runs ?? [])
-  )
-    .slice(0, MAX_PR_CHANGED_FILES)
-    .map((r) => {
-      const run = r as {
-        name?: string;
-        head_sha?: string;
-        head_branch?: string;
-        conclusion?: unknown;
-        run_started_at?: string;
-        html_url?: string;
-      };
-      return {
-        name: run.name ?? "workflow",
-        headSha: run.head_sha ?? "",
-        headBranch: run.head_branch ?? "",
-        conclusion: mapConclusion(run.conclusion),
-        runStartedAt: run.run_started_at ?? null,
-        url: run.html_url ?? null,
-      };
-    });
+  const allRuns = Array.isArray(rawRuns)
+    ? rawRuns
+    : ((rawRuns as unknown as { workflow_runs?: unknown[] })?.workflow_runs ?? []);
+  // Warn whenever the slice ACTUALLY removes something, rather than only when pagination hit its
+  // page ceiling. A dropped run must never be invisible: this warning is what turns the sync
+  // PARTIAL instead of SUCCEEDED, which is the difference between "incomplete" and a confident lie.
+  if (allRuns.length > MAX_WORKFLOW_RUNS) {
+    warnings.push(
+      `Workflow run history was truncated to ${MAX_WORKFLOW_RUNS} of ${allRuns.length} runs; CI evidence is incomplete.`
+    );
+  }
+  const workflowRuns: GitHubWorkflowRun[] = allRuns.slice(0, MAX_WORKFLOW_RUNS).map((r) => {
+    const run = r as {
+      name?: string;
+      head_sha?: string;
+      head_branch?: string;
+      conclusion?: unknown;
+      run_started_at?: string;
+      html_url?: string;
+    };
+    return {
+      name: run.name ?? "workflow",
+      headSha: run.head_sha ?? "",
+      headBranch: run.head_branch ?? "",
+      conclusion: mapConclusion(run.conclusion),
+      runStartedAt: run.run_started_at ?? null,
+      url: run.html_url ?? null,
+    };
+  });
 
   return {
     fetchedAt: new Date().toISOString(),

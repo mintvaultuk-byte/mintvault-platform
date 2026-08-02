@@ -28,12 +28,7 @@
  * redacted on the way in (`redactPayload`), and stored as data — never interpolated into SQL, and
  * never executed. Rendering remains the caller's responsibility to escape.
  */
-import {
-  scanGitHub,
-  isGitHubConfigured,
-  resolveRepository,
-  type GitHubFetch,
-} from "./github-scan";
+import { scanGitHub, isGitHubConfigured, resolveRepository, type GitHubFetch } from "./github-scan";
 import type { GitHubSnapshot } from "@shared/project-control-github";
 import { withLease, workerIdentity, type LeaseDb } from "./sync-lease";
 import {
@@ -51,6 +46,29 @@ import {
 } from "./evidence-repository";
 
 export const GITHUB_SOURCE = "github";
+
+/**
+ * How long a GitHub observation stays CURRENT.
+ *
+ * Application evidence carries APPLICATION_VALID_MS (10 min), flags FLAG_VALID_MS (30 min) and the
+ * migration ledger DATABASE_VALID_MS (15 min). GitHub carried NONE — every insertSnapshot below
+ * omitted validUntil, and effectiveFreshness() in overview-service.ts reads
+ *
+ *     if (snap.validUntil && snap.validUntil.getTime() < now.getTime()) return "STALE";
+ *
+ * so a null validUntil meant CURRENT for ever. The headline "Evidence freshness" badge read Current
+ * regardless of when the last sync ran, and the AUTHORED gate stayed SATISFIED off arbitrarily old
+ * evidence. A dashboard that cannot go stale cannot be trusted to say it is fresh.
+ *
+ * 20 minutes: comfortably longer than the 120s dashboard poll and the forced-refresh cooldown, so
+ * ordinary use never flickers to STALE, but short enough that an evening without a sync shows as
+ * stale rather than confident.
+ *
+ * This does NOT discard anything. STALE rows remain USABLE_FRESHNESS, so getLatestGoodSnapshot()
+ * still returns them and last-known-good survives — the operator is told the age, not denied the
+ * data.
+ */
+export const GITHUB_VALID_MS = 20 * 60 * 1000;
 /** One checkpoint row per logical collection, so a partial scan can advance only what it stored. */
 export const CHECKPOINT_REPOSITORY = "repository";
 
@@ -186,8 +204,8 @@ export async function runGitHubSync(
       counts = await withTransaction(db, async (tx) => {
         const stored = await persistSnapshot(tx, syncId, snapshot);
 
-      // ONLY NOW may the checkpoint advance, and only to a head we actually resolved. A null
-      // cursor would erase the position and make the next sync behave as if it had never run.
+        // ONLY NOW may the checkpoint advance, and only to a head we actually resolved. A null
+        // cursor would erase the position and make the next sync behave as if it had never run.
         if (snapshot.defaultBranchSha) {
           await storeCheckpoint(tx, {
             sourceType: GITHUB_SOURCE,
@@ -277,6 +295,9 @@ async function persistSnapshot(
   snapshot: GitHubSnapshot
 ): Promise<Record<string, number>> {
   const counts: Record<string, number> = { repository: 0, branch: 0, pull_request: 0, workflow_run: 0 };
+  // One clock for the whole batch, so every row from a single scan expires together rather than
+  // drifting apart by however long the inserts took.
+  const validUntil = new Date(Date.now() + GITHUB_VALID_MS);
 
   /*
    * A DEGRADED SCAN MUST NOT BECOME THE LATEST GOOD ANSWER.
@@ -302,6 +323,9 @@ async function persistSnapshot(
     status: resolvedHead ? "ok" : "degraded",
     freshness: resolvedHead ? "CURRENT" : "UNAVAILABLE",
     staleReason: resolvedHead ? null : "Scan completed without resolving a default-branch head.",
+    // Only a CURRENT row gets a window; an UNAVAILABLE row is already unusable and must not be
+    // handed an expiry that would make it look like it was ever good.
+    validUntil: resolvedHead ? validUntil : null,
     syncId,
     payload: {
       defaultBranch: snapshot.defaultBranch,
@@ -326,6 +350,7 @@ async function persistSnapshot(
       commitSha: branch.headSha,
       status: "ok",
       freshness: "CURRENT",
+      validUntil,
       syncId,
       payload: branch,
     });
@@ -340,6 +365,7 @@ async function persistSnapshot(
       commitSha: pr.headSha ?? null,
       status: pr.state,
       freshness: "CURRENT",
+      validUntil,
       syncId,
       payload: pr,
     });
@@ -354,6 +380,7 @@ async function persistSnapshot(
       commitSha: run.headSha ?? null,
       status: run.conclusion,
       freshness: "CURRENT",
+      validUntil,
       syncId,
       payload: run,
     });

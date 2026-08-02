@@ -81,11 +81,45 @@ export function ProjectControlExecutiveSummary({
         </div>
       </div>
       <div className="pc-summary-grid">
+        {/*
+          TWO NUMBERS, TWO MEANINGS, BOTH LABELLED.
+
+          The headline used to render `overview.readiness.overall` — the aggregate over
+          operator-DECLARED work-package completion — under the caption "Server-authoritative
+          weighted readiness". It was neither server-authoritative about evidence nor capped by it:
+          a package marked done by hand pushed it to 100% with every live evidence source UNKNOWN.
+          Meanwhile `evidence.readiness.percent`, the gate-and-contradiction-capped number that the
+          readiness caps were built to produce, was rendered NOWHERE — only its `appliedCaps` were
+          read, further down the page.
+
+          So the authoritative figure leads, and it is genuinely capped: contradictions, unavailable
+          and stale evidence all pull it down via computeGateReadiness. When the evidence layer has
+          not loaded it shows Unknown rather than silently falling back to the declared number,
+          because a fallback is how the two got conflated in the first place.
+
+          The declared figure keeps its place beside it, named for what it is. It is real
+          information — it is just a statement of intent, not of proof.
+        */}
         <StatCard
           className="pc-summary-readiness"
-          label="Overall readiness"
+          label="Evidence-backed readiness"
+          value={evidence ? displayPercent(evidence.readiness.percent) : "Unknown"}
+          foot={
+            evidence
+              ? evidence.readiness.appliedCaps.length > 0
+                ? `Capped by ${evidence.readiness.appliedCaps.map((c) => c.code).join(", ")}`
+                : `${evidence.readiness.satisfiedGates}/${evidence.readiness.totalGates} gates proven by live evidence`
+              : evidenceUnavailable
+                ? "Live evidence unavailable — not inferred from declared progress"
+                : "Loading live evidence…"
+          }
+          icon={<Target size={15} />}
+          testId="pc-evidence-readiness"
+        />
+        <StatCard
+          label="Declared completion"
           value={displayPercent(overview.readiness.overall)}
-          foot="Server-authoritative weighted readiness"
+          foot="Operator-entered progress — a statement of intent, not evidence"
           icon={<Target size={15} />}
           testId="pc-overall-readiness"
         />

@@ -233,3 +233,65 @@ describe("Project Control rendered dashboard proof", () => {
     expect(namelessButtons).toEqual([]);
   });
 });
+
+/**
+ * Evidence-backed readiness must LEAD, and declared completion must be labelled as such.
+ *
+ * The headline card rendered `overview.readiness.overall` — the aggregate over operator-DECLARED
+ * work-package completion — under the caption "Server-authoritative weighted readiness". It was
+ * neither authoritative about evidence nor capped by it: hand-marking packages done pushed it to
+ * 100% with every live evidence source UNKNOWN. The gate-and-contradiction-capped number that the
+ * readiness caps exist to produce (`evidence.readiness.percent`) was rendered NOWHERE — only its
+ * appliedCaps were read, further down the page.
+ *
+ * These assert the RENDERED cards, because both numbers were computed correctly all along; it was
+ * the surface that misrepresented which one the founder was looking at.
+ */
+describe("readiness headline tells the truth about which number it is", () => {
+  it("renders the evidence-backed figure as its own card", async () => {
+    await renderFixture("current");
+    const card = q('[data-testid="pc-evidence-readiness"]');
+    expect(card, "the evidence-capped readiness must be rendered at all").toBeTruthy();
+    expect(card!.textContent).toContain("Evidence-backed readiness");
+  });
+
+  it("still shows declared completion, named for what it is", async () => {
+    await renderFixture("current");
+    const declared = q('[data-testid="pc-overall-readiness"]');
+    expect(declared).toBeTruthy();
+    expect(declared!.textContent).toContain("Declared completion");
+    // The old caption claimed an authority this number never had.
+    expect(declared!.textContent).not.toContain("Server-authoritative");
+  });
+
+  it("never labels operator-entered progress as server-authoritative anywhere on the page", async () => {
+    await renderFixture("current");
+    expect(container.textContent).not.toContain("Server-authoritative weighted readiness");
+  });
+
+  it("keeps the two figures distinguishable rather than collapsing them into one", async () => {
+    await renderFixture("current");
+    const evidenceCard = q('[data-testid="pc-evidence-readiness"]');
+    const declaredCard = q('[data-testid="pc-overall-readiness"]');
+    expect(evidenceCard).toBeTruthy();
+    expect(declaredCard).toBeTruthy();
+    expect(evidenceCard).not.toBe(declaredCard);
+  });
+
+  it("explains what capped the evidence-backed figure, or how many gates it proved", async () => {
+    await renderFixture("current");
+    const card = q('[data-testid="pc-evidence-readiness"]');
+    // Either a cap list or an N/M gate count — never a bare percentage with no provenance.
+    expect(card!.textContent).toMatch(/Capped by|gates proven by live evidence/);
+  });
+
+  it("shows the CI badge with a real verdict, not Unknown, when the build is green", async () => {
+    await renderFixture("current");
+    const badge = q('[data-testid="pc-ci-badge"]');
+    expect(badge, "the PR/CI badge must be rendered").toBeTruthy();
+    // The fixture's `current` state carries ciConclusion "success". Before the shared-vocabulary
+    // fix this read "Unknown" for a green build and a red one alike.
+    expect(badge!.textContent).toContain("Succeeded");
+    expect(badge!.textContent).not.toContain("Unknown");
+  });
+});

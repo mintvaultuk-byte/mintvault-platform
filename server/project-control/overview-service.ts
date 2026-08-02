@@ -52,16 +52,10 @@ import type {
   DatabaseSection,
   FlagSection,
   OverviewDto,
+  CiConclusion,
 } from "@shared/project-control-overview";
 
-export type {
-  EvidenceMeta,
-  RepositorySection,
-  ApplicationSection,
-  DatabaseSection,
-  FlagSection,
-  OverviewDto,
-};
+export type { EvidenceMeta, RepositorySection, ApplicationSection, DatabaseSection, FlagSection, OverviewDto };
 /** Every environment this dashboard reports on. Fixed, not discovered. */
 const ENVIRONMENTS = ["staging", "production"] as const;
 const APPLICATION_HOSTS: Record<string, string> = {
@@ -146,7 +140,11 @@ export async function buildComposedOverview(db: EvidenceDb, now: Date = new Date
       // real deployed SHA with an honest freshness label instead of blanking.
       commit: good?.commitSha ?? null,
       build: typeof payload.build === "string" ? payload.build : null,
-      healthy: latest ? latest.freshness === "CURRENT" : null,
+      // effectiveFreshness, NOT latest.freshness. Every sibling field on this object applies the
+      // validity window; this one read the raw stored value, so an observation past
+      // APPLICATION_VALID_MS reported healthy: true while meta.freshness on the SAME object
+      // reported STALE. A default-to-optimistic branch is exactly what this layer must not have.
+      healthy: latest ? effectiveFreshness(latest, now) === "CURRENT" : null,
       meta: { ...metaFrom(latest, good, APPLICATION_SOURCE), freshness: effectiveFreshness(latest, now) },
     });
   }
@@ -287,13 +285,16 @@ export async function buildComposedOverview(db: EvidenceDb, now: Date = new Date
       stagingDb?.pendingCount === null || stagingDb?.pendingCount === undefined
         ? null
         : observation(
-        DATABASE_SOURCE,
-        stagingDb?.pendingCount === 0,
-        stagingDb?.meta ?? null,
-        stagingDb?.pendingCount ? `${stagingDb.pendingCount} migration(s) not applied.` : undefined
-      )
+            DATABASE_SOURCE,
+            stagingDb?.pendingCount === 0,
+            stagingDb?.meta ?? null,
+            stagingDb?.pendingCount ? `${stagingDb.pendingCount} migration(s) not applied.` : undefined
+          )
     ),
-    resolveGate("DEPLOYED_STAGING", observation(APPLICATION_SOURCE, Boolean(stagingApp?.commit), stagingApp?.meta ?? null)),
+    resolveGate(
+      "DEPLOYED_STAGING",
+      observation(APPLICATION_SOURCE, Boolean(stagingApp?.commit), stagingApp?.meta ?? null)
+    ),
     resolveGate(
       "FEATURE_ENABLED_STAGING",
       observation(
@@ -305,9 +306,9 @@ export async function buildComposedOverview(db: EvidenceDb, now: Date = new Date
         // decision to turn it off.
         pcFlag
           ? `Flag state in staging: ${pcFlag.state ?? "unknown"}.` +
-            (pcFlag.latestState && pcFlag.latestState !== pcFlag.state
-              ? ` Latest observation was ${pcFlag.latestState}; showing last known good.`
-              : "")
+              (pcFlag.latestState && pcFlag.latestState !== pcFlag.state
+                ? ` Latest observation was ${pcFlag.latestState}; showing last known good.`
+                : "")
           : "No flag evidence has been recorded for staging."
       )
     ),
@@ -387,7 +388,7 @@ export async function buildComposedOverview(db: EvidenceDb, now: Date = new Date
  *
  * A single failure wins over any number of successes — CI is a conjunction, not a vote.
  */
-async function resolveCiConclusion(db: EvidenceDb, headSha: string | null): Promise<string | null> {
+async function resolveCiConclusion(db: EvidenceDb, headSha: string | null): Promise<CiConclusion | null> {
   if (!headSha) return null;
   const res = await db.query(
     `SELECT DISTINCT ON (entity_id) status
