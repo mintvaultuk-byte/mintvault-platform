@@ -176,7 +176,28 @@ only the present). Export first if that history matters — the rollback file ca
     If the second query returns nothing after a successful probe, **stop** — the last-known-good
     guarantee is not holding and the dashboard would blank during an outage.
 
-18. **Flag evidence is scoped to this process.** Confirm every row carries the environment the
+18. **Database evidence.** `POST /api/admin/project-control/sync/databases`, then:
+    ```sql
+    SELECT environment, status, freshness, payload->'foreignKeys'->>'intact' AS fks_intact,
+           payload->>'appliedCount' AS applied, jsonb_array_length(payload->'pendingFilenames') AS pending
+      FROM pc_evidence_snapshots
+     WHERE source_type='database' ORDER BY observed_at DESC LIMIT 3;
+    ```
+    Expect `fks_intact = true` once 0030 is applied. **If it is false, read
+    `payload->'foreignKeys'->'missing'` — it names exactly which of the nine constraints is
+    absent.** All nine are required; the old "at least seven" rule is gone.
+
+    `freshness = CONTRADICTORY` is a real finding, not an outage: Project Control tables present
+    with no journal, or a journal row not in `applied` state. Investigate before activating.
+
+    `freshness = UNAVAILABLE` with an EMPTY pending list means the database could not be read.
+    That is correct — it must never report every migration as pending, because "could not look"
+    is not "outstanding".
+
+    The route is not parameterised by environment: a staging process observes staging only.
+    Production evidence requires a production process.
+
+19. **Flag evidence is scoped to this process.** Confirm every row carries the environment the
     process runs in and no other. A staging process cannot observe production's variables, and a
     row claiming otherwise means the environment resolution is wrong.
 
