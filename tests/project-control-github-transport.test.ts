@@ -102,6 +102,57 @@ describe("GitHub transport — configuration and fail-closed behaviour", () => {
     expect(snap.warnings.join(" ")).toMatch(/REDACTED/);
     expect(snap.fetchedAt, "a failed scan is not a fresh snapshot").toBeNull();
   });
+
+  it("a BARE token in an error string is redacted even when it is not inside a URL", async () => {
+    /*
+     * FOUND BY MUTATION LIVE9. The earlier redaction test put the token inside a userinfo URL, so
+     * the URL rule caught it and the token-shaped rule was never exercised — deleting the token
+     * rule entirely left the suite green. GitHub errors quote header and body fragments, so a bare
+     * token is the realistic shape, and it is the one that was unprotected.
+     */
+    const bare = "ghp_barefaketokenvaluenotinaurl0000000001";
+    const http: GitHubFetch = async () => {
+      throw new Error(`Bad credentials for token ${bare} while reading /repos`);
+    };
+    const snap = await scanGitHub(true, env(), http);
+
+    expect(JSON.stringify(snap), "a bare token must be redacted too").not.toContain(bare);
+    expect(snap.warnings.join(" ")).toMatch(/REDACTED_TOKEN/);
+  });
+
+  it("a fine-grained github_pat_ token is redacted", async () => {
+    const pat = "github_pat_11ABCDEFG0aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789";
+    const http: GitHubFetch = async () => {
+      throw new Error(`401 Unauthorized: ${pat}`);
+    };
+    const snap = await scanGitHub(true, env(), http);
+    expect(JSON.stringify(snap)).not.toContain(pat);
+  });
+
+  it("a FAILED scan does not poison the cache — the next read retries instead of serving the failure", async () => {
+    /*
+     * FOUND BY MUTATION LIVE1. `fetchedAt: null` was asserted, but nothing asserted that an
+     * unavailable snapshot is kept OUT of the cache. Caching it would pin the dashboard to
+     * "unavailable" for the whole TTL even after GitHub recovered — a transient blip becoming a
+     * sticky outage, with no way for the operator to clear it.
+     */
+    let mode: "down" | "up" = "down";
+    const http: GitHubFetch = async (url) => {
+      if (mode === "down") throw new Error("ECONNREFUSED");
+      const { body = [] } = defaultRoute(url);
+      return { status: 200, ok: true, headers: { get: () => null }, json: async () => body };
+    };
+
+    const failed = await scanGitHub(false, env(), http);
+    expect(failed.fetchedAt).toBeNull();
+
+    // GitHub recovers. A NON-forced read must retry rather than serve the cached failure.
+    mode = "up";
+    const recovered = await scanGitHub(false, env(), http);
+
+    expect(recovered.fetchedAt, "an unavailable snapshot must not be cached").not.toBeNull();
+    expect(recovered.branches).toHaveLength(1);
+  });
 });
 
 describe("GitHub transport — conditional requests and rate limits", () => {
