@@ -18,8 +18,19 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import pg from "pg";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
-import { invalidateGitHubCache, GITHUB_REPO_ENV, GITHUB_TOKEN_ENV, type GitHubFetch } from "../server/project-control/github-scan";
-import { beginGitHubSync, runGitHubSync, GITHUB_SOURCE, CHECKPOINT_REPOSITORY } from "../server/project-control/github-sync-service";
+import {
+  invalidateGitHubCache,
+  GITHUB_REPO_ENV,
+  GITHUB_TOKEN_ENV,
+  type GitHubFetch,
+} from "../server/project-control/github-scan";
+import {
+  beginGitHubSync,
+  runGitHubSync,
+  GITHUB_SOURCE,
+  CHECKPOINT_REPOSITORY,
+  GITHUB_VALID_MS,
+} from "../server/project-control/github-sync-service";
 import {
   getRun,
   getLatestSnapshot,
@@ -126,13 +137,22 @@ describe("a successful sync is durably recorded", () => {
   it("records one snapshot per branch", async () => {
     const { http } = transport((url) =>
       url.includes("/branches")
-        ? { body: [{ name: "main", commit: { sha: "s1" } }, { name: "feature", commit: { sha: "s2" } }] }
+        ? {
+            body: [
+              { name: "main", commit: { sha: "s1" } },
+              { name: "feature", commit: { sha: "s2" } },
+            ],
+          }
         : healthy(url)
     );
     await fullSync(http);
 
     const main = await getLatestSnapshot(db, { sourceType: GITHUB_SOURCE, entityType: "branch", entityId: "main" });
-    const feature = await getLatestSnapshot(db, { sourceType: GITHUB_SOURCE, entityType: "branch", entityId: "feature" });
+    const feature = await getLatestSnapshot(db, {
+      sourceType: GITHUB_SOURCE,
+      entityType: "branch",
+      entityId: "feature",
+    });
     expect(main?.commitSha).toBe("s1");
     expect(feature?.commitSha).toBe("s2");
   });
@@ -193,7 +213,11 @@ describe("PHASE 11 — a failure never destroys the last good answer", () => {
     const latest = await getLatestSnapshot(db, { sourceType: GITHUB_SOURCE, entityType: "repository", entityId: REPO });
     expect(latest?.freshness, "the failure is recorded").toBe("UNAVAILABLE");
 
-    const good2 = await getLatestGoodSnapshot(db, { sourceType: GITHUB_SOURCE, entityType: "repository", entityId: REPO });
+    const good2 = await getLatestGoodSnapshot(db, {
+      sourceType: GITHUB_SOURCE,
+      entityType: "repository",
+      entityId: REPO,
+    });
     expect(good2?.commitSha, "the last good answer survives the outage").toBe("sha-good-1");
 
     const history = await listSnapshotHistory(db, {
@@ -214,10 +238,9 @@ describe("PHASE 11 — a failure never destroys the last good answer", () => {
     await fullSync(down.http);
 
     const after = await loadCheckpoint(db, GITHUB_SOURCE, CHECKPOINT_REPOSITORY);
-    expect(
-      after?.observedAt.getTime(),
-      "advancing past unstored evidence would create a silent, permanent hole"
-    ).toBe(before?.observedAt.getTime());
+    expect(after?.observedAt.getTime(), "advancing past unstored evidence would create a silent, permanent hole").toBe(
+      before?.observedAt.getTime()
+    );
     expect(after?.cursorValue).toBe("sha-good-1");
   });
 
@@ -226,9 +249,7 @@ describe("PHASE 11 — a failure never destroys the last good answer", () => {
     await fullSync(good.http);
 
     invalidateGitHubCache();
-    const limited = transport((url) =>
-      url.includes("/branches") ? { status: 403, body: {} } : healthy(url)
-    );
+    const limited = transport((url) => (url.includes("/branches") ? { status: 403, body: {} } : healthy(url)));
     // The scanner reports the quota warning through the snapshot's warnings.
     const id = await fullSync(limited.http);
     const run = await getRun(db, id);
@@ -347,7 +368,15 @@ describe("redaction of stored payloads", () => {
       url.includes("/pulls")
         ? {
             body: [
-              { number: 1, title: nasty, state: "open", merged_at: null, updated_at: "2026-01-01T00:00:00Z", head: { ref: "x", sha: "s" }, base: { ref: "main" } },
+              {
+                number: 1,
+                title: nasty,
+                state: "open",
+                merged_at: null,
+                updated_at: "2026-01-01T00:00:00Z",
+                head: { ref: "x", sha: "s" },
+                base: { ref: "main" },
+              },
             ],
           }
         : healthy(url)
@@ -384,8 +413,16 @@ describe("persistence and checkpoint advance ATOMICALLY", () => {
     // repository snapshot has already been inserted inside the transaction.
     const brokenFanout = transport((url) =>
       url.includes("/branches")
-        ? { body: [{ name: "ok-branch", commit: { sha: "s-new" } }, { name: null, commit: { sha: "s-bad" } }] }
-        : { ...healthy(url), body: url.includes("/repos/") && url.endsWith(`/${REPO}`) ? { default_branch: "main" } : healthy(url).body }
+        ? {
+            body: [
+              { name: "ok-branch", commit: { sha: "s-new" } },
+              { name: null, commit: { sha: "s-bad" } },
+            ],
+          }
+        : {
+            ...healthy(url),
+            body: url.includes("/repos/") && url.endsWith(`/${REPO}`) ? { default_branch: "main" } : healthy(url).body,
+          }
     );
 
     const begun = await beginGitHubSync(db, { triggerType: "manual" }, env());
@@ -402,10 +439,7 @@ describe("persistence and checkpoint advance ATOMICALLY", () => {
     expect(run?.completedAt).not.toBeNull();
 
     // The only new row is the failure observation itself. None of the fan-out survived.
-    expect(
-      countAfter.rows[0].n - countBefore.rows[0].n,
-      "exactly one row added: the record OF the failure"
-    ).toBe(1);
+    expect(countAfter.rows[0].n - countBefore.rows[0].n, "exactly one row added: the record OF the failure").toBe(1);
     const strays = await db.query(
       `SELECT count(*)::int AS n FROM pc_evidence_snapshots WHERE entity_type='branch' AND entity_id='ok-branch'`
     );
@@ -467,9 +501,7 @@ describe("PHASE 3 — crash recovery: a dead process cannot wedge refresh", () =
     );
 
     const ids = await expireAbandonedRuns(db, GITHUB_SOURCE);
-    expect(ids, "reaping a live sync out from under itself would be worse than the wedge").not.toContain(
-      live.syncId
-    );
+    expect(ids, "reaping a live sync out from under itself would be worse than the wedge").not.toContain(live.syncId);
     expect((await getRun(db, live.syncId))?.state).toBe("RUNNING");
   });
 
@@ -481,4 +513,105 @@ describe("PHASE 3 — crash recovery: a dead process cannot wedge refresh", () =
     const second = await beginGitHubSync(db, { triggerType: "manual" }, env());
     expect(second.started, "coalescing must still hold for a live run").toBe(false);
   });
+});
+
+/**
+ * The GitHub validity window must actually reach the DATABASE.
+ *
+ * The defect fixed in 1b8f92f4 was that `insertSnapshot` omitted `validUntil` for every GitHub
+ * write, while application (10m), flag (30m) and database (15m) evidence all carried one. A null
+ * `valid_until` makes `effectiveFreshness` return CURRENT for ever, so the headline freshness badge
+ * could never go stale.
+ *
+ * The first attempt to prove this asserted only the MAGNITUDE of the GITHUB_VALID_MS constant and a
+ * locally re-implemented copy of `effectiveFreshness`. Hostile review showed that deleting the
+ * `validUntil` property from all four insertSnapshot calls — i.e. fully reinstating the defect —
+ * left 958/958 project-control tests and the whole 5,000-test suite green. A constant nobody applies
+ * is not a fix, and a test that reads the constant is not a proof.
+ *
+ * So these assert the persisted COLUMN, after a real sync, against a real PostgreSQL 17.
+ */
+describe("GitHub evidence is written with a bounded validity window", () => {
+  it("stamps valid_until on every CURRENT GitHub row", async () => {
+    const { http } = transport(healthy);
+    const syncId = await fullSync(http);
+
+    const { rows } = await db.query(
+      `SELECT entity_type, freshness, valid_until, observed_at
+         FROM pc_evidence_snapshots WHERE sync_id = $1 AND source_type = $2`,
+      [syncId, GITHUB_SOURCE]
+    );
+    expect(rows.length, "the sync must have written snapshots at all").toBeGreaterThan(0);
+
+    const current = rows.filter((r: { freshness: string }) => r.freshness === "CURRENT");
+    expect(current.length, "a healthy scan must produce CURRENT rows").toBeGreaterThan(0);
+    // THE assertion the previous version was missing: the column is populated, not null.
+    for (const r of current as { entity_type: string; valid_until: Date | null }[]) {
+      expect(r.valid_until, `${r.entity_type} must carry a validity window`).not.toBeNull();
+    }
+  }, 60_000);
+
+  it("covers all four GitHub entity types, not just the repository row", async () => {
+    // `healthy` returns empty PR and run lists, so it can only ever produce repository+branch rows.
+    // A fix applied to just the repository write would pass under it — hence a populated fixture.
+    const populated = (url: string) => {
+      if (url.includes("/repos/") && url.endsWith(`/${REPO}`)) return { body: { default_branch: "main" } };
+      if (url.includes("/branches")) return { body: [{ name: "main", commit: { sha: "sha-good-1" } }] };
+      if (url.includes("/pulls"))
+        return {
+          body: [{ number: 1, title: "t", state: "open", head: { ref: "f", sha: "sha-pr" }, base: { ref: "main" } }],
+        };
+      if (url.includes("/actions/runs"))
+        return { body: { workflow_runs: [{ name: "CI", head_sha: "sha-good-1", conclusion: "success" }] } };
+      return { body: {} };
+    };
+    const { http } = transport(populated);
+    const syncId = await fullSync(http);
+    const { rows } = await db.query(
+      `SELECT DISTINCT entity_type FROM pc_evidence_snapshots
+        WHERE sync_id = $1 AND source_type = $2 AND freshness = 'CURRENT' AND valid_until IS NOT NULL
+        ORDER BY entity_type`,
+      [syncId, GITHUB_SOURCE]
+    );
+    const types = (rows as { entity_type: string }[]).map((r) => r.entity_type);
+    // A fix applied to only the repository write would pass the previous case and fail this one.
+    expect(types).toContain("repository");
+    expect(types).toContain("branch");
+    expect(types).toContain("pull_request");
+    expect(types).toContain("workflow_run");
+  }, 60_000);
+
+  it("sets the window ahead of the observation, by the declared interval", async () => {
+    const { http } = transport(healthy);
+    const syncId = await fullSync(http);
+    const { rows } = await db.query(
+      `SELECT observed_at, valid_until FROM pc_evidence_snapshots
+        WHERE sync_id = $1 AND source_type = $2 AND entity_type = 'repository' AND valid_until IS NOT NULL
+        LIMIT 1`,
+      [syncId, GITHUB_SOURCE]
+    );
+    expect(rows.length).toBe(1);
+    const { observed_at, valid_until } = rows[0] as { observed_at: Date; valid_until: Date };
+    const delta = valid_until.getTime() - observed_at.getTime();
+    // Bounded both ways: a window in the past would expire instantly, and one far in the future
+    // would restore the never-expires behaviour under a different disguise.
+    expect(delta).toBeGreaterThan(0);
+    expect(Math.abs(delta - GITHUB_VALID_MS)).toBeLessThan(60_000);
+  }, 60_000);
+
+  it("leaves valid_until NULL on an UNAVAILABLE row, which was never good", async () => {
+    // An unconfigured server records the attempt without pretending it synced.
+    const noToken = { ...env(), PROJECT_CONTROL_GITHUB_TOKEN: undefined } as NodeJS.ProcessEnv;
+    const { http } = transport(healthy);
+    const syncId = await fullSync(http, noToken);
+    const { rows } = await db.query(`SELECT freshness, valid_until FROM pc_evidence_snapshots WHERE sync_id = $1`, [
+      syncId,
+    ]);
+    for (const r of rows as { freshness: string; valid_until: Date | null }[]) {
+      if (r.freshness !== "CURRENT") {
+        // Handing an expiry to a row that was never usable would imply it once was.
+        expect(r.valid_until, "an unusable row must not carry a validity window").toBeNull();
+      }
+    }
+  }, 60_000);
 });

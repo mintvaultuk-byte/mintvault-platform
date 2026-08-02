@@ -17,9 +17,16 @@
  * trap, reached through the rollback door.
  *
  * So the assertions here are about the DATABASE's state after the fact — which tables survive,
- * which journal rows survive, and whether a refused rollback wrote anything at all — not about
- * whether a statement returned an error. A guard that raised but had already dropped two tables
- * would pass a naive test and fail this one.
+ * which journal rows survive, and whether a refused rollback left anything behind — not about
+ * whether a statement returned an error.
+ *
+ * SCOPE OF THE PROOF, stated precisely. The whole file is wrapped in BEGIN/COMMIT and executed as
+ * one statement, so what these cases prove is that a refused rollback COMMITS NOTHING — the net
+ * effect on the database is zero. They do NOT prove that the guard runs before the first DROP:
+ * a drop placed above the guard would still be rolled back by the transaction and would still pass
+ * here. Guard ORDERING is established by reading the file (the DO block is the first statement
+ * after BEGIN), and the transaction is what makes the ordering safe rather than merely tidy.
+ * These cases would still catch the more dangerous regression: removing the transaction wrapper.
  *
  * Runs against a DISPOSABLE, ISOLATED, LOCAL PostgreSQL 17 database this file creates and drops.
  * It never touches staging or production. It fails loudly rather than skipping.
@@ -152,7 +159,7 @@ describe("WRONG order is refused, and writes nothing", () => {
 
   it("performs ZERO destructive writes — all 15 tables and all 3 journal rows survive", async () => {
     await expect(db.query(R0030)).rejects.toThrow();
-    // The whole point: a guard that raised AFTER dropping would pass the assertion above.
+    // The assertion above only proves an error was raised; these prove nothing was COMMITTED.
     expect(await tablesPresent([...BASE_TABLES, ...T0039, ...T0040])).toHaveLength(15);
     expect(await journalRows()).toEqual([
       "0030_project_control.sql",

@@ -160,16 +160,23 @@ export default function ProjectControlPackagePage() {
   });
 
   if (detail.isLoading) {
+    // Inside `.admin-root`: this branch returns before AdminShell mounts, and the admin ink
+    // tokens live on that class. Rendered bare it lands on `body` (#ffffff / #1a1a1a), where the
+    // gold this used to set inline measures 2.10:1. Same defect and fix as the landing page.
     return (
-      <div className="p-8" style={{ color: "var(--admin-gold, #D4AF37)" }} data-testid="pcp-loading">
-        Loading…
+      <div className="admin-root">
+        <div className="p-8" data-testid="pcp-loading">
+          Loading…
+        </div>
       </div>
     );
   }
   if (detail.isError || !detail.data) {
     return (
-      <div className="p-8" data-testid="pcp-error">
-        Work package not found.
+      <div className="admin-root">
+        <div className="p-8" data-testid="pcp-error">
+          Work package not found.
+        </div>
       </div>
     );
   }

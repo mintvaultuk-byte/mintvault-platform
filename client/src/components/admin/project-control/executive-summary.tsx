@@ -117,6 +117,7 @@ export function ProjectControlExecutiveSummary({
           testId="pc-evidence-readiness"
         />
         <StatCard
+          className="pc-summary-declared"
           label="Declared completion"
           value={displayPercent(overview.readiness.overall)}
           foot="Operator-entered progress — a statement of intent, not evidence"

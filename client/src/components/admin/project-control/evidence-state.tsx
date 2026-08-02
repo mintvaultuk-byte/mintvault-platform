@@ -31,6 +31,33 @@ const presentation: Record<EvidenceState, { label: string; variant: AdminBadgeVa
   rate_limited: { label: "Rate limited", variant: "gold", Icon: Clock3 },
 };
 
+/**
+ * Severity order, lowest = worst. A TOTAL Record over EvidenceState, not an array searched with
+ * indexOf, for two reasons hostile review found in the array version:
+ *
+ *   - it listed only six of the twelve states, and `indexOf` returns -1 for a miss — so any
+ *     unlisted state (failed, rate_limited, expired…) silently outranked even "unavailable";
+ *   - it placed "unknown" as MILDER than "stale", so a flag that had never been observed was
+ *     presented as healthier than one that was merely old. This module's whole doctrine is that
+ *     UNKNOWN and STALE are different problems, and "never looked" is not the better of the two.
+ *
+ * Being a Record keyed by the union, the compiler now refuses a new EvidenceState without a rank.
+ */
+const EVIDENCE_SEVERITY: Record<EvidenceState, number> = {
+  unavailable: 0,
+  failed: 1,
+  contradictory: 2,
+  expired: 3,
+  rate_limited: 4,
+  unknown: 5,
+  stale: 6,
+  partial: 7,
+  queued: 8,
+  running: 9,
+  succeeded: 10,
+  current: 11,
+};
+
 export function evidenceStateFrom(value: string | null | undefined): EvidenceState {
   const normalized = String(value ?? "unknown")
     .toLowerCase()
@@ -93,11 +120,10 @@ export function flagsEvidenceState(
   flags: { meta?: { freshness?: string | null } }[] | null | undefined
 ): EvidenceState {
   if (!flags || flags.length === 0) return "unknown";
-  const RANK: EvidenceState[] = ["unavailable", "contradictory", "expired", "stale", "unknown", "current"];
   let worst: EvidenceState = "current";
   for (const f of flags) {
     const s = evidenceStateFrom(f.meta?.freshness);
-    if (RANK.indexOf(s) < RANK.indexOf(worst)) worst = s;
+    if (EVIDENCE_SEVERITY[s] < EVIDENCE_SEVERITY[worst]) worst = s;
   }
   return worst;
 }

@@ -44,16 +44,23 @@ export default function ProjectControlScannerPage() {
   const view = useQuery<ScannerView>({ queryKey: [`${BASE}/views/scanner`], refetchInterval: 120_000 });
 
   if (view.isLoading) {
+    // Inside `.admin-root`: this branch returns before AdminShell mounts, and the admin ink
+    // tokens live on that class. Rendered bare it lands on `body` (#ffffff / #1a1a1a), where the
+    // gold this used to set inline measures 2.10:1. Same defect and fix as the landing page.
     return (
-      <div className="p-8" style={{ color: "var(--admin-gold, #D4AF37)" }} data-testid="pcsc-loading">
-        Loading…
+      <div className="admin-root">
+        <div className="p-8" data-testid="pcsc-loading">
+          Loading…
+        </div>
       </div>
     );
   }
   if (view.isError || !view.data) {
     return (
-      <div className="p-8" data-testid="pcsc-error">
-        Scanner view could not load.
+      <div className="admin-root">
+        <div className="p-8" data-testid="pcsc-error">
+          Scanner view could not load.
+        </div>
       </div>
     );
   }

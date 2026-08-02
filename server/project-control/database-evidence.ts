@@ -157,7 +157,12 @@ export const PC_TABLES = [
   // migration 0040 — seed reconciliation
   "pc_seed_state",
   "pc_seed_runs",
-];
+  // `as const`, not a bare array: `const` freezes the BINDING, not the contents. Now that this is
+  // exported, an importer could otherwise splice it empty and the presence check below would
+  // silently report "0 Project Control tables present" — a self-disarming integrity check, with
+  // nothing failing. The sibling registry (scripts/db/schema-registry.ts) closes its inventory the
+  // same way.
+] as const;
 
 /**
  * Read the live schema. Read-only throughout: four SELECTs, no DDL, no writes.
@@ -207,7 +212,7 @@ export async function collectDatabaseEvidence(
     const tables = await db.query(
       `SELECT table_name FROM information_schema.tables
         WHERE table_schema='public' AND table_name = ANY($1::text[]) ORDER BY table_name`,
-      [PC_TABLES]
+      [[...PC_TABLES]]
     );
     const projectControlTablesPresent = (tables.rows as { table_name: string }[]).map((r) => r.table_name);
 

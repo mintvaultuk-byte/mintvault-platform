@@ -262,9 +262,11 @@ describe("loading and failure states stay inside the admin token scope", () => {
     installFetch(() => new Response("boom", { status: 500 }));
     await render(makeClient());
     const retry = container.querySelector('[data-testid="pc-retry"]');
-    if (retry) {
-      // It carried no className at all, so it rendered as a raw user-agent button on a dark panel.
-      expect(retry.className, "retry must carry admin button classes").toMatch(/admin-btn/);
-    }
+    // Asserted unconditionally: wrapping this in `if (retry)` meant the case passed with ZERO
+    // assertions executed the moment the control stopped rendering, so it could not tell "styled
+    // correctly" from "absent".
+    expect(retry, "a 500 must offer a retry control").toBeTruthy();
+    // It carried no className at all, so it rendered as a raw user-agent button on a dark panel.
+    expect(retry!.className, "retry must carry admin button classes").toMatch(/admin-btn/);
   });
 });

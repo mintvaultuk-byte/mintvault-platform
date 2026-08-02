@@ -430,7 +430,12 @@ function composedEvidence(state: ProjectControlFixtureState): OverviewDto | unde
     ],
     gates: [],
     readiness: {
-      percent: contradiction ? 69 : 78,
+      // DELIBERATELY different from the declared figure (78) above. When both were 78, the rendered
+      // tests could not tell the two cards apart: swapping the headline back to the operator-declared
+      // number — the exact defect — left every assertion green, because both rendered "78%".
+      // Two numbers that mean different things must LOOK different in the fixture, or no test can
+      // prove the right one is on the right card.
+      percent: contradiction ? 69 : 51,
       cappedBy: contradiction ? ["Evidence sources disagree (1): GITHUB_NEWER_THAN_DEPLOYMENT."] : [],
       appliedCaps: contradiction
         ? [

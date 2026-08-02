@@ -30,11 +30,19 @@
 .pc-summary-grid {
   display: grid;
   gap: 12px;
-  grid-template-areas: "readiness next next next" "phase pilot blocker staging" "production refresh . .";
+  grid-template-areas: "readiness declared next next" "phase pilot blocker staging" "production refresh . .";
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 .pc-summary-readiness {
   grid-area: readiness;
+}
+/* The declared figure sits BESIDE the evidence-backed one at every width. Without an explicit
+   area it was auto-placed into the first free cell: two rows below at >=1280px, beside "Last
+   evidence refresh" at 1024-1279px, and — because the single-column template has no free cell —
+   into a generated ninth row, LAST on the page, at <=767px. The two numbers only mean anything
+   read together. */
+.pc-summary-declared {
+  grid-area: declared;
 }
 .pc-summary-phase {
   grid-area: phase;
@@ -340,7 +348,7 @@
 }
 @media (max-width: 1279px) {
   .pc-summary-grid {
-    grid-template-areas: "next next" "readiness phase" "pilot blocker" "staging production" "refresh .";
+    grid-template-areas: "next next" "readiness declared" "phase pilot" "blocker staging" "production refresh";
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -369,7 +377,7 @@
     flex-direction: column;
   }
   .pc-summary-grid {
-    grid-template-areas: "next" "readiness" "phase" "pilot" "blocker" "staging" "production" "refresh";
+    grid-template-areas: "next" "readiness" "declared" "phase" "pilot" "blocker" "staging" "production" "refresh";
     grid-template-columns: 1fr;
   }
   .pc-gate-toggle {

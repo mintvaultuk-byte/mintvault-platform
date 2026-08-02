@@ -375,6 +375,12 @@ async function doScan(repo: string, token: string, http: GitHubFetch): Promise<G
   // Warn whenever the slice ACTUALLY removes something, rather than only when pagination hit its
   // page ceiling. A dropped run must never be invisible: this warning is what turns the sync
   // PARTIAL instead of SUCCEEDED, which is the difference between "incomplete" and a confident lie.
+  // Reachable only when the server returns MORE than it was asked for: getAllPages stops at
+  // MAX_PAGES and each page is bounded by PER_PAGE, so a conformant GitHub can never exceed
+  // MAX_WORKFLOW_RUNS and this stays quiet. It is kept, and tested, for the two cases that matter —
+  // a non-conformant or proxied API that over-serves a page, and the day someone lowers
+  // MAX_WORKFLOW_RUNS below the page budget. The slice must never again be the thing that discards
+  // data without saying so.
   if (allRuns.length > MAX_WORKFLOW_RUNS) {
     warnings.push(
       `Workflow run history was truncated to ${MAX_WORKFLOW_RUNS} of ${allRuns.length} runs; CI evidence is incomplete.`

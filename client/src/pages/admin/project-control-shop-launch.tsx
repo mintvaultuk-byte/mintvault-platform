@@ -65,16 +65,23 @@ export default function ProjectControlShopLaunchPage() {
   const view = useQuery<ScopedView>({ queryKey: [`${BASE}/views/shop-launch`], refetchInterval: 120_000 });
 
   if (view.isLoading) {
+    // Inside `.admin-root`: this branch returns before AdminShell mounts, and the admin ink
+    // tokens live on that class. Rendered bare it lands on `body` (#ffffff / #1a1a1a), where the
+    // gold this used to set inline measures 2.10:1. Same defect and fix as the landing page.
     return (
-      <div className="p-8" style={{ color: "var(--admin-gold, #D4AF37)" }} data-testid="pcsl-loading">
-        Loading…
+      <div className="admin-root">
+        <div className="p-8" data-testid="pcsl-loading">
+          Loading…
+        </div>
       </div>
     );
   }
   if (view.isError || !view.data) {
     return (
-      <div className="p-8" data-testid="pcsl-error">
-        Shop Launch view could not load.
+      <div className="admin-root">
+        <div className="p-8" data-testid="pcsl-error">
+          Shop Launch view could not load.
+        </div>
       </div>
     );
   }

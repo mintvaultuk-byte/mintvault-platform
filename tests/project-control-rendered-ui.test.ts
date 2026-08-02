@@ -269,13 +269,19 @@ describe("readiness headline tells the truth about which number it is", () => {
     expect(container.textContent).not.toContain("Server-authoritative weighted readiness");
   });
 
-  it("keeps the two figures distinguishable rather than collapsing them into one", async () => {
+  it("puts the EVIDENCE figure on the evidence card and the DECLARED figure on the declared card", async () => {
     await renderFixture("current");
     const evidenceCard = q('[data-testid="pc-evidence-readiness"]');
     const declaredCard = q('[data-testid="pc-overall-readiness"]');
     expect(evidenceCard).toBeTruthy();
     expect(declaredCard).toBeTruthy();
-    expect(evidenceCard).not.toBe(declaredCard);
+    // The fixture's two figures differ (51 vs 78) precisely so this can bite. Comparing the NODES
+    // rather than the values was tautological — two distinct data-testids can never be one node —
+    // and it left the actual defect, the wrong number under the right label, undetectable.
+    expect(evidenceCard!.textContent).toContain("51%");
+    expect(evidenceCard!.textContent).not.toContain("78%");
+    expect(declaredCard!.textContent).toContain("78%");
+    expect(declaredCard!.textContent).not.toContain("51%");
   });
 
   it("explains what capped the evidence-backed figure, or how many gates it proved", async () => {

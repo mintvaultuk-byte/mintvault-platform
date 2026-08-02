@@ -50,7 +50,10 @@ function pcTablesDeclaredInMigrations(): string[] {
   const found = new Set<string>();
   for (const file of readdirSync(MIGRATIONS).filter((f) => /^\d{4,}_.+\.sql$/.test(f))) {
     const sql = readFileSync(join(MIGRATIONS, file), "utf8");
-    for (const m of sql.matchAll(/CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(pc_[a-z0-9_]+)/gi)) {
+    // IF NOT EXISTS and the schema qualifier are both OPTIONAL. Requiring them meant a future
+    // `CREATE TABLE public.pc_x` matched nothing, `declared` stayed at 15, and every assertion
+    // below passed vacuously — the exact silent-coverage-loss this derivation exists to prevent.
+    for (const m of sql.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?"?(pc_[a-z0-9_]+)"?/gi)) {
       found.add(m[1].toLowerCase());
     }
   }

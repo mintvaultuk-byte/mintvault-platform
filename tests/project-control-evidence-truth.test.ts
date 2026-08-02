@@ -129,6 +129,38 @@ describe("FIX 1 — workflow-run truncation is never silent", () => {
     }
   });
 
+  it("warns when a NON-CONFORMANT server over-serves a page and the slice must cut", async () => {
+    // getAllPages bounds a conformant API at MAX_PAGES * PER_PAGE, so the slice guard is quiet in
+    // normal operation. This is the case it exists for: a proxy or a misbehaving API returning more
+    // rows than per_page asked for. Without the guard those extra rows would vanish silently.
+    const overServing: GitHubFetch = async (url) => {
+      const reply = (body: unknown) => ({
+        status: 200,
+        ok: true,
+        headers: { get: () => null },
+        json: async () => body,
+      });
+      if (url.includes("/actions/runs")) {
+        return reply({
+          workflow_runs: Array.from({ length: 200 }, (_, i) => ({
+            name: "CI",
+            head_sha: `s${i}`,
+            conclusion: "success",
+          })),
+        });
+      }
+      if (url.includes("/branches")) return reply([{ name: "main", commit: { sha: "abc123" } }]);
+      if (url.includes("/pulls")) return reply([]);
+      if (url.includes(`/${REPO}`)) return reply({ default_branch: "main" });
+      return reply({});
+    };
+    const snap = await scanGitHub(true, env(), overServing);
+    expect(snap.workflowRuns.length).toBe(500);
+    const w = snap.warnings.find((x) => /Workflow run history was truncated/.test(x));
+    expect(w, "the slice must announce what it removed").toBeTruthy();
+    expect(w).toContain("500");
+  });
+
   it("warns at exactly the page budget, where a full last page is genuinely ambiguous", async () => {
     const snap = await scanGitHub(true, env(), runsTransport(500));
     // Nothing was actually lost — but page 5 came back FULL, so the scanner cannot know whether a
@@ -208,6 +240,16 @@ describe("FIX 3b — the flags tile can go stale like every other tile", () => {
         { meta: { freshness: "CURRENT" } },
       ])
     ).toBe("stale");
+  });
+
+  it("treats a never-observed flag as WORSE than a merely stale one", () => {
+    // The array-based rank had "unknown" milder than "stale", so a flag nobody had ever looked at
+    // hid behind an old one. "We never looked" is not the better of the two problems.
+    expect(flagsEvidenceState([{ meta: { freshness: "STALE" } }, { meta: { freshness: null } }])).toBe("unknown");
+  });
+
+  it("ranks an unrecognised freshness as a problem, never as healthy", () => {
+    expect(flagsEvidenceState([{ meta: { freshness: "CURRENT" } }, { meta: { freshness: "FAILED" } }])).toBe("failed");
   });
 
   it("surfaces UNAVAILABLE ahead of STALE", () => {
