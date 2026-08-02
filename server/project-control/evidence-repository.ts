@@ -30,6 +30,42 @@ export interface EvidenceDb {
   query(text: string, values?: unknown[]): Promise<{ rows: unknown[]; rowCount: number | null }>;
 }
 
+/** A pool that can hand out a dedicated connection — required for a real transaction. */
+export interface PoolLikeDb extends EvidenceDb {
+  connect(): Promise<EvidenceDb & { release(): void }>;
+}
+
+function isPoolLike(db: EvidenceDb): db is PoolLikeDb {
+  return typeof (db as PoolLikeDb).connect === "function";
+}
+
+/**
+ * Run `work` inside a single transaction on ONE connection.
+ *
+ * This matters more than it looks. `pool.query` may route consecutive statements to DIFFERENT
+ * connections, so issuing BEGIN and COMMIT through a pool does not produce a transaction — it
+ * produces a BEGIN on one connection and a COMMIT on another, with the real work uncommitted
+ * somewhere in between. A dedicated client is the only way to get atomicity here.
+ *
+ * If the caller's db cannot hand out a connection the work still runs, without atomicity, rather
+ * than failing — the fallback is honest and the callers that matter pass a real pool.
+ */
+export async function withTransaction<T>(db: EvidenceDb, work: (tx: EvidenceDb) => Promise<T>): Promise<T> {
+  if (!isPoolLike(db)) return work(db);
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export const RUN_STATES = [
   "QUEUED",
   "RUNNING",

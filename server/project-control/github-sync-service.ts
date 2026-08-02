@@ -44,6 +44,7 @@ import {
   insertSnapshot,
   loadCheckpoints,
   storeCheckpoint,
+  withTransaction,
   type EvidenceDb,
   type SyncRun,
 } from "./evidence-repository";
@@ -158,19 +159,52 @@ export async function runGitHubSync(
       return null;
     }
 
-    const counts = await persistSnapshot(db, syncId, snapshot);
+    /*
+     * PERSIST AND ADVANCE ATOMICALLY.
+     *
+     * The snapshot fan-out is many INSERTs. Without a transaction a failure partway through
+     * leaves some entities stored and some not, and — worse — the checkpoint could still advance,
+     * declaring that everything up to this head is recorded when it demonstrably is not. That is
+     * the silent, permanent hole the ordering rule exists to prevent, arriving by a different
+     * door.
+     *
+     * Wrapping both in ONE transaction makes the rule atomic: either every snapshot and the new
+     * checkpoint land together, or neither does and the previous position stands untouched.
+     */
+    let counts: Record<string, number>;
+    try {
+      counts = await withTransaction(db, async (tx) => {
+        const stored = await persistSnapshot(tx, syncId, snapshot);
 
-    // ONLY NOW may the checkpoint advance: every snapshot above is committed.
-    // Only advance to a head we actually resolved. A null cursor would erase the position and
-    // make the next sync behave as if it had never run.
-    if (snapshot.defaultBranchSha) {
-      await storeCheckpoint(db, {
-        sourceType: GITHUB_SOURCE,
-        resourceKey: CHECKPOINT_REPOSITORY,
-        etag: snapshot.defaultBranchSha ?? priorEtag,
-        cursorValue: snapshot.defaultBranchSha,
-        syncId,
+      // ONLY NOW may the checkpoint advance, and only to a head we actually resolved. A null
+      // cursor would erase the position and make the next sync behave as if it had never run.
+        if (snapshot.defaultBranchSha) {
+          await storeCheckpoint(tx, {
+            sourceType: GITHUB_SOURCE,
+            resourceKey: CHECKPOINT_REPOSITORY,
+            etag: snapshot.defaultBranchSha ?? priorEtag,
+            cursorValue: snapshot.defaultBranchSha,
+            syncId,
+          });
+        }
+        return stored;
       });
+    } catch (error) {
+      /*
+       * A PERSISTENCE FAILURE MUST CLOSE THE RUN.
+       *
+       * The transaction above already rolled back, so no partial evidence survives and the
+       * checkpoint still stands — that part was correct. But letting the error escape left the run
+       * in RUNNING forever, and `getActiveRun` treats RUNNING as an active sync: one storage blip
+       * would then block EVERY future refresh until somebody edited the table by hand. The lease
+       * would expire in five minutes; the run row would not.
+       */
+      await recordUnavailable(db, syncId, repository, "evidence_persist_failed");
+      await completeRun(db, syncId, "FAILED", {
+        errorCode: "evidence_persist_failed",
+        warnings: [String((error as Error)?.message ?? "").slice(0, 200)],
+      });
+      return null;
     }
 
     // Warnings without a total failure means some collection was truncated or refused — real
@@ -211,7 +245,7 @@ async function recordUnavailable(
 
 /** Fan the snapshot out into one immutable observation per entity. */
 async function persistSnapshot(
-  db: SyncDb,
+  db: EvidenceDb,
   syncId: string,
   snapshot: GitHubSnapshot
 ): Promise<Record<string, number>> {

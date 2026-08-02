@@ -314,3 +314,65 @@ describe("redaction of stored payloads", () => {
     expect(alive.rows[0].n, "parameterised SQL means hostile text is inert").toBeGreaterThan(0);
   });
 });
+
+describe("persistence and checkpoint advance ATOMICALLY", () => {
+  it("a mid-fanout failure stores nothing and leaves the previous checkpoint standing", async () => {
+    /*
+     * FLAGGED IN THE HANDOVER AS THE LIKELIEST REMAINING DEFECT, then fixed.
+     *
+     * The snapshot fan-out is many INSERTs. Without a transaction, a failure partway through
+     * leaves some entities stored and some not — and the checkpoint could still advance, claiming
+     * everything up to this head is recorded when it demonstrably is not. That is the same silent
+     * permanent hole the ordering rule exists to prevent, arriving by a different door.
+     */
+    const good = transport(healthy);
+    await fullSync(good.http);
+    const before = await loadCheckpoint(db, GITHUB_SOURCE, CHECKPOINT_REPOSITORY);
+    const countBefore = await db.query(`SELECT count(*)::int AS n FROM pc_evidence_snapshots`);
+
+    invalidateGitHubCache();
+
+    // A branch whose name violates NOT NULL on entity_id: the fan-out fails midway, AFTER the
+    // repository snapshot has already been inserted inside the transaction.
+    const brokenFanout = transport((url) =>
+      url.includes("/branches")
+        ? { body: [{ name: "ok-branch", commit: { sha: "s-new" } }, { name: null, commit: { sha: "s-bad" } }] }
+        : { ...healthy(url), body: url.includes("/repos/") && url.endsWith(`/${REPO}`) ? { default_branch: "main" } : healthy(url).body }
+    );
+
+    const begun = await beginGitHubSync(db, { triggerType: "manual" }, env());
+    expect(begun.started).toBe(true);
+    await runGitHubSync(db, begun.syncId, env(), brokenFanout.http);
+
+    const after = await loadCheckpoint(db, GITHUB_SOURCE, CHECKPOINT_REPOSITORY);
+    const countAfter = await db.query(`SELECT count(*)::int AS n FROM pc_evidence_snapshots`);
+
+    // Either the run succeeded wholly, or it stored nothing new — never a half-written fan-out
+    // with an advanced checkpoint.
+    const run = await getRun(db, begun.syncId);
+    expect(run?.state, "a persistence failure must CLOSE the run, not leave it RUNNING forever").toBe("FAILED");
+    expect(run?.completedAt).not.toBeNull();
+
+    // The only new row is the failure observation itself. None of the fan-out survived.
+    expect(
+      countAfter.rows[0].n - countBefore.rows[0].n,
+      "exactly one row added: the record OF the failure"
+    ).toBe(1);
+    const strays = await db.query(
+      `SELECT count(*)::int AS n FROM pc_evidence_snapshots WHERE entity_type='branch' AND entity_id='ok-branch'`
+    );
+    expect(strays.rows[0].n, "the half-written fan-out must have rolled back entirely").toBe(0);
+    expect(after?.cursorValue, "and the previous checkpoint must still stand").toBe(before?.cursorValue);
+
+    // And a later refresh is still possible — a storage blip must not wedge the system.
+    expect(await getActiveRun(db, GITHUB_SOURCE), "no run left dangling as active").toBeNull();
+
+    // Whatever happened, the last good answer is still retrievable.
+    const stillGood = await getLatestGoodSnapshot(db, {
+      sourceType: GITHUB_SOURCE,
+      entityType: "repository",
+      entityId: REPO,
+    });
+    expect(stillGood).not.toBeNull();
+  });
+});
