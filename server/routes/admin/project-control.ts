@@ -7,7 +7,7 @@
  * no route here that pushes, merges, deploys, applies a migration, writes to production, or
  * touches any pre-existing MintVault table.
  *
- * Route inventory — 25 endpoints (kept in step with the router by a test that counts registrations):
+ * Route inventory — 27 endpoints (kept in step with the router by a test that counts registrations):
  *   GET    /overview                                  tree + readiness + queues + drift
  *   GET    /queues                                    the nine approved queues
  *   GET    /drift                                     repository-versus-environment drift
@@ -31,13 +31,37 @@
  *   GET    /audit                                     append-only status history
  *   GET    /views/shop-launch                         Partner Shop Launch view
  *   GET    /views/scanner                             Scanner view
+ *   GET    /views/distributed-shop-launch             live-evidence programme lanes
+ *   GET    /github                                    live GitHub evidence + freshness
+ *   GET    /live-evidence                             GitHub + application + flag evidence, one view
+ *   POST   /sync/github                               start a durable GitHub sync (202)
+ *   GET    /sync/latest                               most recent durable sync run
+ *   GET    /sync/:syncId                              one durable sync run by id
+ *   POST   /sync/applications                         probe + store both application versions
+ *   POST   /sync/flags                                store this environment's flag evidence
+ *   POST   /sync/databases                            store this environment's migration evidence
+ *   GET    /composed-overview                         the composed DTO; stored evidence only
  *   GET    /export                                    bounded JSON snapshot
  *   POST   /seed                                      idempotent programme-tree seed
  */
 import type { Express, NextFunction, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { z, ZodError } from "zod";
+import { classifyFreshness } from "@shared/project-control-github";
 import { requireSuperAdmin } from "../../auth";
+import { buildDistributedProgrammeView } from "../../project-control/distributed";
+import { isGitHubConfigured, scanGitHub } from "../../project-control/github-scan";
+import { compareDeployment, probeAllApplications } from "../../project-control/app-probe";
+import { collectFlagEvidence } from "../../project-control/flag-evidence";
+import { pool } from "../../db";
+import { beginGitHubSync, runGitHubSync, GITHUB_SOURCE } from "../../project-control/github-sync-service";
+import { getLatestRun, getRun, getActiveRun } from "../../project-control/evidence-repository";
+import {
+  collectApplicationEvidence,
+  collectFlagEvidenceSnapshots,
+} from "../../project-control/probe-persistence";
+import { collectAndStoreDatabaseEvidence } from "../../project-control/database-evidence";
+import { buildComposedOverview } from "../../project-control/overview-service";
 import {
   BLOCKER_KINDS,
   DEPLOYMENT_RESULTS,
@@ -154,6 +178,49 @@ const gated = [requireProjectControlEnabled, requireSuperAdmin, projectControlRe
 
 /** Gate for routes that spawn subprocesses or sweep whole tables. */
 const gatedExpensive = [requireProjectControlEnabled, requireSuperAdmin, projectControlExpensiveLimit] as const;
+
+/**
+ * Project a run for the wire.
+ *
+ * Deliberately omits snapshot payloads and anything configuration-shaped. `errorCode` is a short
+ * stable code chosen by the sync service, never a raw exception — a database or fetch error can
+ * carry a DSN or a token, and this response is the one place a Super Admin's browser would see it.
+ */
+function toSyncStatus(
+  run: {
+    syncId: string;
+    sourceType: string;
+    triggerType: string;
+    state: string;
+    requestedAt: Date;
+    startedAt: Date | null;
+    completedAt: Date | null;
+    counts: Record<string, unknown>;
+    warnings: unknown[];
+    errorCode: string | null;
+  },
+  activeSyncId: string | null
+) {
+  return {
+    syncId: run.syncId,
+    source: run.sourceType,
+    trigger: run.triggerType,
+    state: run.state,
+    requestedAt: run.requestedAt,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+    counts: run.counts,
+    warnings: (run.warnings ?? []).slice(0, 20),
+    errorCode: run.errorCode,
+    activeSyncId,
+    anotherRunActive: Boolean(activeSyncId && activeSyncId !== run.syncId),
+  };
+}
+
+/** The Super Admin's email, for the run's audit trail. Never a credential. */
+function actor_(req: { session?: unknown }): string {
+  return ((req.session as { adminEmail?: string } | undefined)?.adminEmail || "super-admin").slice(0, 120);
+}
 
 function actor(req: Request): string {
   return (req.session as { adminEmail?: string } | undefined)?.adminEmail || "admin";
@@ -675,6 +742,250 @@ export function registerProjectControlRoutes(app: Express): void {
   app.get(`${BASE}/views/scanner`, ...gated, async (_req, res) => {
     try {
       res.json(await scopedView(["scanner"], "scanner"));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * The distributed Partner Shop programme.
+   *
+   * `gatedExpensive` rather than `gated`: this view shells out to git for every lane and reads
+   * the migration ledger, so it carries the same cost profile as /repository and must share its
+   * stricter rate limit. It is READ-ONLY — it records nothing and mutates nothing.
+   */
+  app.get(`${BASE}/views/distributed-shop-launch`, ...gatedExpensive, async (_req, res) => {
+    try {
+      res.json(await buildDistributedProgrammeView());
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Live repository evidence from GitHub, plus an explicit freshness verdict.
+   *
+   * `?refresh=true` is the manual "Refresh from GitHub" control. The reader enforces its own
+   * cooldown underneath this, so the button cannot be used to exhaust the API rate limit however
+   * hard it is pressed.
+   *
+   * `gatedExpensive`: this reaches an external API, so it shares /repository's stricter limiter.
+   *
+   * READ-ONLY, and it returns DATA ONLY — the GitHub token is read server-side and never appears
+   * in this response, in a warning, or in an error. When GitHub is unconfigured or unreachable the
+   * payload carries `freshness: "unknown"` rather than an empty-but-successful snapshot, so the
+   * client can never render "nothing wrong" when the truth is "we could not look".
+   */
+  app.get(`${BASE}/github`, ...gatedExpensive, async (req, res) => {
+    try {
+      const snapshot = await scanGitHub(req.query.refresh === "true");
+      res.json({
+        snapshot,
+        freshness: classifyFreshness(snapshot.fetchedAt),
+        configured: isGitHubConfigured(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * ONE VIEW, FOUR AUTHORITIES, NO BLENDING.
+   *
+   * The dashboard needs repository truth, application truth and configuration truth on one screen,
+   * and it must never let one stand in for another: a merged PR is not a deployment, a reachable
+   * app is not an applied migration, and an applied migration is not an enabled flag.
+   *
+   * So this route composes the sources and labels each one, rather than reducing them to a single
+   * status. Every sub-probe fails soft on its own — one unreachable environment must not blank the
+   * repository evidence beside it — and a failure is reported as UNAVAILABLE/UNKNOWN, never as a
+   * zero or a success.
+   */
+  app.get(`${BASE}/live-evidence`, ...gatedExpensive, async (req, res) => {
+    try {
+      const [snapshot, probes] = await Promise.all([
+        scanGitHub(req.query.refresh === "true").catch(() => null),
+        probeAllApplications().catch(() => []),
+      ]);
+      const flags = collectFlagEvidence();
+
+      res.json({
+        observedAt: new Date().toISOString(),
+        github: {
+          configured: isGitHubConfigured(),
+          snapshot,
+          freshness: classifyFreshness(snapshot?.fetchedAt ?? null),
+        },
+        applications: probes,
+        deployment: compareDeployment(snapshot?.defaultBranchSha ?? null, probes),
+        featureFlags: flags,
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * START A DURABLE GITHUB SYNC.
+   *
+   * Returns 202 as soon as the run is RECORDED, then lets the scan continue. The HTTP request is
+   * deliberately not held open for a full GitHub scan: a scan can take tens of seconds, a
+   * disconnected client would abort it midway, and the operator would have no way to learn what
+   * happened. The database run and the lease are authoritative — the in-process promise below is
+   * execution plumbing, not state. If this process dies, the lease expires and the work is
+   * retryable; nothing is lost that the run row did not already record.
+   *
+   * The repository is fixed by environment. There is no owner/repo input, so this cannot be aimed
+   * at an arbitrary repository by a request body.
+   */
+  app.post(`${BASE}/sync/github`, ...gated, projectControlWriteLimit, async (req, res) => {
+    try {
+      const actor = actor_(req);
+      const outcome = await beginGitHubSync(pool, { triggerType: "manual", actor });
+
+      if (outcome.started) {
+        /*
+         * Fire-and-record. The rejection handler exists so an unhandled rejection cannot take the
+         * process down; the run's own error handling has already written the failure to the
+         * database by the time anything lands here.
+         */
+        void runGitHubSync(pool, outcome.syncId).catch(() => undefined);
+        return res.status(202).json({
+          syncId: outcome.syncId,
+          state: "QUEUED",
+          accepted: true,
+          alreadyRunning: false,
+          unavailable: false,
+          requestedAt: new Date().toISOString(),
+        });
+      }
+
+      // Both non-started outcomes are 202 as well: the request was understood and a durable run
+      // exists to poll. Only the flags differ, so the client never has to parse prose.
+      return res.status(202).json({
+        syncId: outcome.syncId,
+        state: outcome.reason === "already_running" ? "RUNNING" : "UNAVAILABLE",
+        accepted: false,
+        alreadyRunning: outcome.reason === "already_running",
+        unavailable: outcome.reason === "unavailable",
+        requestedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /** The most recent durable run, for the dashboard's "last refresh" line. */
+  app.get(`${BASE}/sync/latest`, ...gated, async (_req, res) => {
+    try {
+      const run = await getLatestRun(pool, GITHUB_SOURCE);
+      if (!run) return res.status(404).json({ error: "No sync run has been recorded yet." });
+      const active = await getActiveRun(pool, GITHUB_SOURCE);
+      return res.json(toSyncStatus(run, active?.syncId ?? null));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /** One run by id, for polling after a 202. */
+  app.get(`${BASE}/sync/:syncId`, ...gated, async (req, res) => {
+    try {
+      const syncId = String(req.params.syncId);
+      // A malformed id is a 400, distinct from a well-formed id that does not exist (404) — the
+      // operator needs to tell "you typed it wrong" from "it is gone".
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(syncId)) {
+        return res.status(400).json({ error: "Invalid sync id." });
+      }
+      const run = await getRun(pool, syncId);
+      if (!run) return res.status(404).json({ error: "Sync run not found." });
+      const active = await getActiveRun(pool, GITHUB_SOURCE);
+      return res.json(toSyncStatus(run, active?.syncId ?? null));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Probe both allowlisted applications and store one observation each.
+   *
+   * Same contract as the GitHub refresh: 202 immediately, durable run is authoritative, duplicates
+   * coalesce. There is no environment or URL input — the allowlist in app-probe.ts is the only
+   * source of targets, so this cannot be aimed at an arbitrary host.
+   */
+  app.post(`${BASE}/sync/applications`, ...gated, projectControlWriteLimit, async (req, res) => {
+    try {
+      const outcome = await collectApplicationEvidence(pool, { triggerType: "manual", actor: actor_(req) });
+      return res.status(202).json({
+        syncId: outcome.syncId,
+        state: outcome.started ? "RUNNING" : "RUNNING",
+        accepted: outcome.started,
+        alreadyRunning: !outcome.started,
+        unavailable: false,
+        requestedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Store this environment's feature-flag evidence.
+   *
+   * Records only the allowlisted flag NAMES and their states — never a value, and never an
+   * enumeration of the environment, which would disclose unrelated secret names.
+   */
+  app.post(`${BASE}/sync/flags`, ...gated, projectControlWriteLimit, async (req, res) => {
+    try {
+      const outcome = await collectFlagEvidenceSnapshots(pool, { triggerType: "manual", actor: actor_(req) });
+      return res.status(202).json({
+        syncId: outcome.syncId,
+        state: "RUNNING",
+        accepted: outcome.started,
+        alreadyRunning: !outcome.started,
+        unavailable: false,
+        requestedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Store migration evidence for the environment THIS PROCESS is connected to.
+   *
+   * Deliberately not parameterised by environment: a staging process can only observe staging, and
+   * accepting a target would invite the false belief that it can speak for production. Production
+   * evidence must come from a production process.
+   */
+  app.post(`${BASE}/sync/databases`, ...gated, projectControlWriteLimit, async (req, res) => {
+    try {
+      const outcome = await collectAndStoreDatabaseEvidence(pool, { triggerType: "manual", actor: actor_(req) });
+      return res.status(202).json({
+        syncId: outcome.syncId,
+        state: "RUNNING",
+        accepted: outcome.started,
+        alreadyRunning: !outcome.started,
+        unavailable: false,
+        requestedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * THE composed overview — the only summary the UI consumes.
+   *
+   * Registered with the ORDINARY read gate, not `gatedExpensive`, because it makes zero external
+   * calls: it reads persisted snapshots and nothing else. Refresh is a separate, explicit, audited
+   * action, so looking at the dashboard can never spend GitHub quota or wake a sleeping machine.
+   *
+   * The frontend must never assemble the four sources itself — that would put the
+   * "merged is not deployed" rule in the browser, where it could drift from this one silently.
+   */
+  app.get(`${BASE}/composed-overview`, ...gated, async (_req, res) => {
+    try {
+      res.json(await buildComposedOverview(pool));
     } catch (error) {
       fail(res, error);
     }
