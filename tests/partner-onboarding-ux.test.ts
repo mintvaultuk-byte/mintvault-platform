@@ -91,6 +91,13 @@ async function submitForm(testId: string) {
   });
 }
 
+async function clickTestId(testId: string) {
+  const el = q(testId)!;
+  await act(async () => {
+    el.click();
+  });
+}
+
 async function render(node: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await act(async () => {
@@ -222,6 +229,112 @@ describe("Partner MFA enrolment (real render)", () => {
     const err = await waitForTestId("text-mfa-enrol-error");
     expect(err.textContent).toContain("temporarily unavailable");
     expect(err.textContent).not.toContain("encryption_unavailable");
+  });
+});
+
+describe("Partner invitation password visibility (real render)", () => {
+  async function mountInvite() {
+    window.history.replaceState({}, "", "/partner/invite?token=invite-token");
+    apiRequest.mockImplementation((method: string, url: string) => {
+      if (method === "GET" && String(url).includes("/api/partner/invitations/preview")) {
+        return ok({
+          email: "mintvaultuk@gmail.com",
+          partnerName: "MintVault Pilot Partner One Ltd",
+          roleCode: "PARTNER_OWNER",
+          expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        });
+      }
+      if (method === "POST" && String(url).includes("/api/partner/invitations/accept")) {
+        return ok({ ok: true, organisationStatus: "PENDING" });
+      }
+      return fail(404, "unexpected");
+    });
+    const { default: InvitePage } = await import("../client/src/pages/partner/invite");
+    await render(createElement(InvitePage));
+    await waitForTestId("partner-invite-preview");
+  }
+
+  it("reveals and masks each password field independently without submitting or losing typed values", async () => {
+    await mountInvite();
+    const password = q("input-partner-invite-password") as HTMLInputElement;
+    const confirm = q("input-partner-invite-confirm") as HTMLInputElement;
+    const passwordToggle = q("button-partner-invite-toggle-password") as HTMLButtonElement;
+    const confirmToggle = q("button-partner-invite-toggle-confirm") as HTMLButtonElement;
+
+    expect(password.type, "password starts masked").toBe("password");
+    expect(confirm.type, "confirm password starts masked").toBe("password");
+    expect(passwordToggle.type, "password toggle never submits the form").toBe("button");
+    expect(confirmToggle.type, "confirm toggle never submits the form").toBe("button");
+    expect(passwordToggle.className, "password toggle has a mobile touch target").toContain("min-h-11");
+    expect(confirmToggle.className, "confirm toggle has a mobile touch target").toContain("min-w-11");
+    expect(passwordToggle.className, "password toggle has a visible focus state").toContain("focus-visible:ring-2");
+    expect(confirmToggle.className, "confirm toggle has a visible focus state").toContain("focus-visible:ring-2");
+    expect(passwordToggle.getAttribute("aria-label")).toBe("Show password");
+    expect(confirmToggle.getAttribute("aria-label")).toBe("Show confirm password");
+    expect(passwordToggle.getAttribute("aria-pressed")).toBe("false");
+    expect(confirmToggle.getAttribute("aria-pressed")).toBe("false");
+
+    setValue(password, "owner-secret-123");
+    setValue(confirm, "different-secret-123");
+    await clickTestId("button-partner-invite-toggle-password");
+    expect(password.type, "tapping show reveals password").toBe("text");
+    expect(confirm.type, "confirm remains independently masked").toBe("password");
+    expect(password.value).toBe("owner-secret-123");
+    expect(confirm.value).toBe("different-secret-123");
+    expect(passwordToggle.getAttribute("aria-label")).toBe("Hide password");
+    expect(passwordToggle.getAttribute("aria-pressed")).toBe("true");
+    expect(calls("POST", "/api/partner/invitations/accept"), "toggle did not submit").toHaveLength(0);
+
+    await clickTestId("button-partner-invite-toggle-password");
+    expect(password.type, "tapping hide masks password again").toBe("password");
+    expect(password.value).toBe("owner-secret-123");
+    expect(passwordToggle.getAttribute("aria-label")).toBe("Show password");
+    expect(passwordToggle.getAttribute("aria-pressed")).toBe("false");
+
+    await clickTestId("button-partner-invite-toggle-confirm");
+    expect(confirm.type, "confirm show works independently").toBe("text");
+    expect(password.type).toBe("password");
+    expect(confirm.value).toBe("different-secret-123");
+    expect(confirmToggle.getAttribute("aria-label")).toBe("Hide confirm password");
+    expect(confirmToggle.getAttribute("aria-pressed")).toBe("true");
+    expect(calls("POST", "/api/partner/invitations/accept"), "confirm toggle did not submit").toHaveLength(0);
+  });
+
+  it("updates mismatch validation as values match and never exposes the password in logs or responses", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await mountInvite();
+      const password = q("input-partner-invite-password") as HTMLInputElement;
+      const confirm = q("input-partner-invite-confirm") as HTMLInputElement;
+
+      setValue(password, "owner-secret-123");
+      setValue(confirm, "different-secret-123");
+      await submitForm("form-partner-invite");
+      expect(q("text-partner-invite-error")!.textContent).toContain("Passwords do not match.");
+      expect(calls("POST", "/api/partner/invitations/accept"), "mismatch blocks API submission").toHaveLength(0);
+
+      setValue(confirm, "owner-secret-123");
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 0));
+      });
+      expect(q("text-partner-invite-error"), "mismatch clears when both values match").toBeNull();
+
+      await submitForm("form-partner-invite");
+      await waitForTestId("partner-invite-done");
+      expect(container.textContent).not.toContain("owner-secret-123");
+      expect(JSON.stringify(logSpy.mock.calls)).not.toContain("owner-secret-123");
+      expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("owner-secret-123");
+      expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("owner-secret-123");
+      const acceptRequestBody = await calls("POST", "/api/partner/invitations/accept")[0][2];
+      expect(JSON.stringify({ ok: true, organisationStatus: "PENDING" })).not.toContain("owner-secret-123");
+      expect(acceptRequestBody).toEqual({ token: "invite-token", password: "owner-secret-123" });
+    } finally {
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
   });
 });
 

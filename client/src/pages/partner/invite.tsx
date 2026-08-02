@@ -5,12 +5,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiRequest } from "@/lib/queryClient";
+import { Eye, EyeOff } from "lucide-react";
 
 export default function PartnerInvitePage() {
   const [, navigate] = useLocation();
   const token = useMemo(() => new URLSearchParams(window.location.search).get("token") ?? "", []);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{
     email: string;
@@ -43,6 +46,12 @@ export default function PartnerInvitePage() {
       live = false;
     };
   }, [token]);
+
+  useEffect(() => {
+    if (error === "Passwords do not match." && password === confirm) {
+      setError(null);
+    }
+  }, [confirm, error, password]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -117,27 +126,53 @@ export default function PartnerInvitePage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="partner-invite-password">Password</Label>
-                <Input
-                  id="partner-invite-password"
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  data-testid="input-partner-invite-password"
-                />
+                <div className="relative">
+                  <Input
+                    id="partner-invite-password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="pr-12"
+                    data-testid="input-partner-invite-password"
+                  />
+                  <button
+                    type="button"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    aria-pressed={showPassword}
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute inset-y-0 right-0 flex min-h-11 min-w-11 items-center justify-center rounded-r-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    data-testid="button-partner-invite-toggle-password"
+                  >
+                    {showPassword ? <EyeOff aria-hidden="true" size={20} /> : <Eye aria-hidden="true" size={20} />}
+                  </button>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="partner-invite-confirm">Confirm password</Label>
-                <Input
-                  id="partner-invite-confirm"
-                  type="password"
-                  autoComplete="new-password"
-                  required
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  data-testid="input-partner-invite-confirm"
-                />
+                <div className="relative">
+                  <Input
+                    id="partner-invite-confirm"
+                    type={showConfirm ? "text" : "password"}
+                    autoComplete="new-password"
+                    required
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    className="pr-12"
+                    data-testid="input-partner-invite-confirm"
+                  />
+                  <button
+                    type="button"
+                    aria-label={showConfirm ? "Hide confirm password" : "Show confirm password"}
+                    aria-pressed={showConfirm}
+                    onClick={() => setShowConfirm((v) => !v)}
+                    className="absolute inset-y-0 right-0 flex min-h-11 min-w-11 items-center justify-center rounded-r-md text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    data-testid="button-partner-invite-toggle-confirm"
+                  >
+                    {showConfirm ? <EyeOff aria-hidden="true" size={20} /> : <Eye aria-hidden="true" size={20} />}
+                  </button>
+                </div>
               </div>
               {error && (
                 <p role="alert" className="text-sm text-destructive" data-testid="text-partner-invite-error">
