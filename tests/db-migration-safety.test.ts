@@ -25,6 +25,7 @@ import {
   type LiveObjects,
 } from "../scripts/db/schema-registry";
 import { lintSql, hasBlocking, stripSqlNoise } from "../scripts/db/lint-destructive-sql";
+import { listMigrationFiles } from "../scripts/db/migrate";
 
 const PROD_UNMANAGED_TABLES_29 = [
   "ai_accuracy_log",
@@ -530,9 +531,9 @@ describe("migration runner planning (pure)", () => {
         },
       };
 
-      await expect(
-        applyMigrations(client as never, [mkFile("0038"), mkFile("0040", "0040_seed.sql")])
-      ).rejects.toThrow(/[Oo]ut-of-order/);
+      await expect(applyMigrations(client as never, [mkFile("0038"), mkFile("0040", "0040_seed.sql")])).rejects.toThrow(
+        /[Oo]ut-of-order/
+      );
 
       // And nothing was journalled — the refusal happens before any migration is executed.
       expect(applied).toEqual([]);
@@ -576,5 +577,106 @@ describe("migration runner planning (pure)", () => {
     const plan = await planMigrations(client, files);
     expect(plan.pending).toEqual(["0001_x.sql"]); // missing journal -> all pending
     expect(issued.some((s) => /CREATE TABLE|ALTER TABLE/i.test(s))).toBe(false); // no DDL issued
+  });
+});
+
+/**
+ * MIG2 — `-- migrate:no-transaction` is a DIRECTIVE, not a mention.
+ *
+ * The detector was unanchored (`/--\s*migrate:no-transaction/i`), so it matched the phrase
+ * anywhere in a file, including inside explanatory prose. 0022_print_workflow_lifecycle.sql
+ * says, across a line wrap:
+ *
+ *     -- Runs inside the runner's default transaction (no CONCURRENTLY, no
+ *     -- migrate:no-transaction directive needed).
+ *
+ * The wrap put the literal directive at the start of a comment line, so the runner read a
+ * migration that explicitly disclaims the directive as REQUESTING it, and ran its ALTER TABLE
+ * outside a transaction with the journal row written separately in autocommit — the DDL no longer
+ * atomic with its ledger entry.
+ *
+ * 0022 is used here as the real false-positive regression: it is already applied on both estates,
+ * so nothing needs re-running, but the parser must never do this again.
+ */
+describe("MIG2 — no-transaction directive parsing", () => {
+  const write = (dir: string, name: string, sql: string) => writeFileSync(join(dir, name), sql, "utf8");
+
+  it("treats the real repository's 0022 as TRANSACTIONAL (the false-positive regression)", () => {
+    const files = listMigrationFiles(join(__dirname, "..", "migrations"));
+    const m0022 = files.find((f) => f.filename === "0022_print_workflow_lifecycle.sql");
+    expect(m0022, "0022 must exist for this regression to mean anything").toBeTruthy();
+    // Its prose mentions the directive; it must NOT be honoured as one.
+    expect(m0022!.sql).toMatch(/migrate:no-transaction/);
+    expect(m0022!.noTransaction).toBe(false);
+  });
+
+  it("still honours the genuine directive in the real repository's 0018", () => {
+    const files = listMigrationFiles(join(__dirname, "..", "migrations"));
+    const m0018 = files.find((f) => f.filename === "0018_correction_audit_index.sql");
+    expect(m0018, "0018 is the CONCURRENTLY migration this must not break").toBeTruthy();
+    expect(m0018!.noTransaction).toBe(true);
+  });
+
+  it("0022 and 0018 are the ONLY files whose classification is at stake", () => {
+    const files = listMigrationFiles(join(__dirname, "..", "migrations"));
+    // Pins the blast radius: exactly one migration may run outside a transaction.
+    expect(files.filter((f) => f.noTransaction).map((f) => f.filename)).toEqual(["0018_correction_audit_index.sql"]);
+  });
+
+  it("honours a directive on its own line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mig-notx-"));
+    try {
+      write(dir, "0001_x.sql", "-- migrate:no-transaction\nCREATE INDEX CONCURRENTLY i ON t (c);\n");
+      expect(listMigrationFiles(dir)[0].noTransaction).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("honours it with leading whitespace and odd spacing after the dashes", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mig-notx-"));
+    try {
+      write(dir, "0001_x.sql", "SELECT 1;\n   --   migrate:no-transaction   \nSELECT 2;\n");
+      expect(listMigrationFiles(dir)[0].noTransaction).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("IGNORES it when trailing prose follows on the same line", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mig-notx-"));
+    try {
+      write(dir, "0001_x.sql", "-- migrate:no-transaction directive needed).\nALTER TABLE t ADD COLUMN c INT;\n");
+      expect(listMigrationFiles(dir)[0].noTransaction).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("IGNORES it mid-sentence and inside a wrapped prose comment", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mig-notx-"));
+    try {
+      write(
+        dir,
+        "0001_x.sql",
+        "-- Runs inside the runner's default transaction (no CONCURRENTLY, no\n" +
+          "-- migrate:no-transaction directive needed).\n" +
+          "ALTER TABLE t ADD COLUMN c INT;\n"
+      );
+      // This is 0022's exact shape.
+      expect(listMigrationFiles(dir)[0].noTransaction).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("IGNORES it inside a SQL string literal", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mig-notx-"));
+    try {
+      write(dir, "0001_x.sql", "INSERT INTO notes (body) VALUES ('-- migrate:no-transaction');\n");
+      expect(listMigrationFiles(dir)[0].noTransaction).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

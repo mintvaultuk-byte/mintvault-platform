@@ -182,6 +182,29 @@ interface MigrationFile {
   noTransaction: boolean;
 }
 
+/**
+ * The `-- migrate:no-transaction` DIRECTIVE.
+ *
+ * Anchored to a whole comment line, matching the shape ENSURE_VALID_CONCURRENT_INDEX_RE below
+ * already uses. The previous form was unanchored — `/--\s*migrate:no-transaction/i` — so it matched
+ * the phrase anywhere in the file, including inside explanatory prose.
+ *
+ * That was not hypothetical. 0022_print_workflow_lifecycle.sql line 4-5 reads:
+ *
+ *     -- Runs inside the runner's default transaction (no CONCURRENTLY, no
+ *     -- migrate:no-transaction directive needed).
+ *
+ * The line wrap put the literal directive text at the start of a comment line, so the runner read
+ * a migration that explicitly says it needs no directive as REQUESTING one — and ran its
+ * ALTER TABLE outside a transaction, with the journal row written separately in autocommit. The
+ * DDL was no longer atomic with its ledger entry, which is the same class of defect the nested
+ * BEGIN/COMMIT in 0039 produced.
+ *
+ * A directive is an instruction, not a mention. `\s*$` with the `m` flag means the line must
+ * contain the directive and nothing else, so prose describing it can never enable it.
+ */
+const NO_TRANSACTION_RE = /^\s*--\s*migrate:no-transaction\s*$/im;
+
 const ENSURE_VALID_CONCURRENT_INDEX_RE =
   /^\s*--\s*migrate:ensure-valid-concurrent-index\s+([A-Za-z_][A-Za-z0-9_]*)\.([A-Za-z_][A-Za-z0-9_]*)\s*$/gim;
 
@@ -279,7 +302,7 @@ export function listMigrationFiles(dir: string = MIGRATIONS_DIR): MigrationFile[
         path,
         sql,
         checksum: sha256(sql),
-        noTransaction: /--\s*migrate:no-transaction/i.test(sql),
+        noTransaction: NO_TRANSACTION_RE.test(sql),
       };
     })
     // Deterministic NUMERIC ordering by the integer prefix (not lexical), then filename as a
