@@ -135,6 +135,10 @@ const ALL_ROUTES: [string, string][] = [
   ["GET", `${P}/audit`],
   ["GET", `${P}/views/shop-launch`],
   ["GET", `${P}/views/scanner`],
+  // The distributed live-evidence programme view. Registered with `gatedExpensive` because it
+  // shells out to git per lane and reads the migration ledger, so it must share /repository's
+  // stricter limiter rather than the ordinary read budget.
+  ["GET", `${P}/views/distributed-shop-launch`],
   ["GET", `${P}/export`],
   ["POST", `${P}/seed`],
 ];

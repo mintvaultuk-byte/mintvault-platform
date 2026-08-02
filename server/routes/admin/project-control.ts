@@ -38,6 +38,7 @@ import type { Express, NextFunction, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { z, ZodError } from "zod";
 import { requireSuperAdmin } from "../../auth";
+import { buildDistributedProgrammeView } from "../../project-control/distributed";
 import {
   BLOCKER_KINDS,
   DEPLOYMENT_RESULTS,
@@ -675,6 +676,21 @@ export function registerProjectControlRoutes(app: Express): void {
   app.get(`${BASE}/views/scanner`, ...gated, async (_req, res) => {
     try {
       res.json(await scopedView(["scanner"], "scanner"));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * The distributed Partner Shop programme.
+   *
+   * `gatedExpensive` rather than `gated`: this view shells out to git for every lane and reads
+   * the migration ledger, so it carries the same cost profile as /repository and must share its
+   * stricter rate limit. It is READ-ONLY — it records nothing and mutates nothing.
+   */
+  app.get(`${BASE}/views/distributed-shop-launch`, ...gatedExpensive, async (_req, res) => {
+    try {
+      res.json(await buildDistributedProgrammeView());
     } catch (error) {
       fail(res, error);
     }
