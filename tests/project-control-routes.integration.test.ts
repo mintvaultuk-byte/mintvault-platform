@@ -38,6 +38,15 @@ function stubRequiredConfig(): void {
   for (const [key, value] of Object.entries(placeholders)) {
     if (!process.env[key]) process.env[key] = value;
   }
+  /**
+   * The database URL is overridden UNCONDITIONALLY, unlike the rest.
+   *
+   * The conditional form above means a developer who has sourced .env — which points at STAGING —
+   * would silently run this suite against it. Nothing here should ever open a connection, but the
+   * file's promise is "it never touches a database", and that promise must not depend on the
+   * caller's shell.
+   */
+  process.env.MINTVAULT_DATABASE_URL = placeholders.MINTVAULT_DATABASE_URL;
 }
 
 beforeAll(async () => {
