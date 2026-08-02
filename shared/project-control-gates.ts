@@ -305,10 +305,38 @@ export const CAP_CONTRADICTION = 69;
 export const CAP_UNAVAILABLE_EVIDENCE = 79;
 export const CAP_UNKNOWN_EVIDENCE = 89;
 
+/** Stable machine-readable cap identities. Prose changes; these do not. */
+export const READINESS_CAP_CODES = [
+  "CONTRADICTORY_EVIDENCE",
+  "UNAVAILABLE_EVIDENCE",
+  "UNKNOWN_EVIDENCE",
+] as const;
+export type ReadinessCapCode = (typeof READINESS_CAP_CODES)[number];
+
+export interface AppliedCap {
+  code: ReadinessCapCode;
+  /** The ceiling this condition imposes. */
+  cap: number;
+  /** Operator-facing explanation of why the number cannot go higher. */
+  reason: string;
+  /** True for the cap that actually determined the final number. */
+  binding: boolean;
+}
+
 export interface ReadinessVerdict {
   /** 0–100. Floored, never rounded up — 99 must never present as 100. */
   percent: number;
   cappedBy: string[];
+  /**
+   * EVERY condition that holds, with a stable code — not only the one that happened to bite.
+   *
+   * The previous implementation pushed a reason only inside `if (percent > CAP)`, so once a
+   * contradiction pinned the score to 69 the unavailable and unknown reasons were discarded and
+   * the operator was told one of three reasons their number could not reach 100. The sibling
+   * engine in project-control-readiness.ts documents the opposite rule explicitly — "record the cap
+   * whenever the CONDITION holds, not only when it happens to bite" — and this now matches it.
+   */
+  appliedCaps: AppliedCap[];
   satisfiedGates: number;
   totalGates: number;
 }
@@ -329,26 +357,61 @@ export function computeGateReadiness(results: GateResult[], contradictions: Cont
   const satisfied = results.filter((r) => isSatisfied(r.state)).length;
   let percent = Math.floor((satisfied / total) * 100);
 
-  const cappedBy: string[] = [];
+  /**
+   * Collect every condition that HOLDS, then apply the strictest.
+   *
+   * Two changes from the original, both load-bearing:
+   *
+   *   - The strictest cap is selected with an explicit `Math.min` over the applicable set, rather
+   *     than relying on the caps happening to be written in ascending order. A future cap inserted
+   *     out of order silently produced the wrong answer before.
+   *   - A condition is recorded whenever it holds, not only when it happens to bite, so an
+   *     operator sees all the reasons the number is held down rather than the first one.
+   *
+   * Note what is deliberately NOT here: STALE. Stale evidence is a real answer that is merely old,
+   * and it already cannot satisfy a gate — so it reduces the numerator honestly. Treating it as a
+   * contradiction as well would double-count it, and would make "we have not refreshed recently"
+   * indistinguishable from "our sources disagree".
+   */
+  const applicable: AppliedCap[] = [];
 
   if (contradictions.length > 0) {
-    if (percent > CAP_CONTRADICTION) {
-      percent = CAP_CONTRADICTION;
-      cappedBy.push(`contradictory evidence (${contradictions.length})`);
-    }
+    const codes = contradictions.map((c) => c.code).join(", ");
+    applicable.push({
+      code: "CONTRADICTORY_EVIDENCE",
+      cap: CAP_CONTRADICTION,
+      reason: `Evidence sources disagree (${contradictions.length}): ${codes}. Readiness cannot exceed ${CAP_CONTRADICTION}% while a contradiction is unresolved.`,
+      binding: false,
+    });
   }
   if (results.some((r) => r.state === "UNAVAILABLE")) {
-    if (percent > CAP_UNAVAILABLE_EVIDENCE) {
-      percent = CAP_UNAVAILABLE_EVIDENCE;
-      cappedBy.push("an evidence source is unavailable");
-    }
+    applicable.push({
+      code: "UNAVAILABLE_EVIDENCE",
+      cap: CAP_UNAVAILABLE_EVIDENCE,
+      reason: `An evidence source could not be read. Readiness cannot exceed ${CAP_UNAVAILABLE_EVIDENCE}% while a source is unavailable.`,
+      binding: false,
+    });
   }
   if (results.some((r) => r.state === "UNKNOWN")) {
-    if (percent > CAP_UNKNOWN_EVIDENCE) {
-      percent = CAP_UNKNOWN_EVIDENCE;
-      cappedBy.push("an evidence source is unknown");
-    }
+    applicable.push({
+      code: "UNKNOWN_EVIDENCE",
+      cap: CAP_UNKNOWN_EVIDENCE,
+      reason: `An evidence source has never been observed. Readiness cannot exceed ${CAP_UNKNOWN_EVIDENCE}% while a source is unknown.`,
+      binding: false,
+    });
   }
 
-  return { percent, cappedBy, satisfiedGates: satisfied, totalGates: total };
+  if (applicable.length > 0) {
+    const strictest = Math.min(...applicable.map((c) => c.cap));
+    percent = Math.min(percent, strictest);
+    for (const c of applicable) c.binding = c.cap === strictest;
+  }
+
+  return {
+    percent,
+    cappedBy: applicable.map((c) => c.reason),
+    appliedCaps: applicable,
+    satisfiedGates: satisfied,
+    totalGates: total,
+  };
 }

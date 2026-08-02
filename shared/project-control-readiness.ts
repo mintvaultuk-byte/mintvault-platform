@@ -595,11 +595,21 @@ export function computePackageReadiness(
   let score = raw * multiplier;
 
   const appliedCaps: AppliedCap[] = [];
+  /**
+   * Record the cap whenever the CONDITION holds, not only when it happens to bite.
+   *
+   * The previous form pushed only inside `if (score > limit)`. A package whose score was already
+   * low — a contradictory one, discounted to a tenth by the confidence multiplier — therefore
+   * recorded NO caps at all, even though the contradiction was real and was the reason it could
+   * never recover. That made `appliedCaps` unusable as a signal: it answered "which ceiling did
+   * the arithmetic hit" when the operator is asking "what is wrong with this package".
+   *
+   * `Math.min` still decides the score, so behaviour of the number is unchanged; only the
+   * disclosure is now complete. This matches the rule `aggregateReadiness` already documents.
+   */
   const cap = (limit: number, reason: string) => {
-    if (score > limit) {
-      score = limit;
-      appliedCaps.push({ cap: limit, reason });
-    }
+    score = Math.min(score, limit);
+    appliedCaps.push({ cap: limit, reason });
   };
 
   // Order matters only for reporting; each cap is a ceiling, so the lowest wins regardless.
@@ -724,6 +734,32 @@ export function aggregateReadiness(packages: { pkg: WorkPackage; readiness: Read
     score = Math.min(score, limit);
     appliedCaps.push({ cap: limit, reason });
   };
+
+  /**
+   * The two caps this function's own docstring promised and did not apply.
+   *
+   * It says "the same caps are re-applied at the aggregate level", but only three of the five were
+   * here: CAP_CONTRADICTORY_EVIDENCE and CAP_BLOCKED were missing. Since this is the engine whose
+   * `overall` the dashboard actually renders, contradictory evidence and open blockers did not cap
+   * the programme number at all — they diluted it through the mean. One contradictory package in
+   * ten moved the headline by a few points instead of pinning it, so a programme could read ~96%
+   * while carrying evidence its own sources disagreed about.
+   */
+  // Reuse each package's OWN decision rather than re-deriving the condition here — two
+  // implementations of "is this contradictory?" would eventually disagree.
+  const cappedWith = (limit: number) => live.filter((p) => p.readiness.appliedCaps.some((c) => c.cap === limit));
+
+  const contradictory = cappedWith(CAP_CONTRADICTORY_EVIDENCE);
+  if (contradictory.length > 0) {
+    cap(
+      CAP_CONTRADICTORY_EVIDENCE,
+      `${contradictory.length} work package(s) carry contradictory evidence — sources disagree about what is true.`
+    );
+  }
+  const blocked = cappedWith(CAP_BLOCKED);
+  if (blocked.length > 0) {
+    cap(CAP_BLOCKED, `${blocked.length} work package(s) have an unresolved blocker.`);
+  }
 
   const withHighSecurity = live.filter((p) => hasUnresolvedHighSecurityIssue(p.pkg.blockers));
   if (withHighSecurity.length > 0) {

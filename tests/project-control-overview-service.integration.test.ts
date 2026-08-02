@@ -437,7 +437,80 @@ describe("readiness cannot be inflated by absence", () => {
       { code: "MIGRATION_MISSING", summary: "x", evidenceSources: ["database"], severity: "high" },
     ]);
     expect(capped.percent).toBe(CAP_CONTRADICTION);
-    expect(capped.cappedBy.join(" ")).toMatch(/contradictory/);
+    // Assert the STABLE CODE, not the prose — the reason text is operator-facing and may change.
+    expect(capped.appliedCaps.map((c) => c.code)).toContain("CONTRADICTORY_EVIDENCE");
+    expect(capped.cappedBy.join(" ")).toContain("MIGRATION_MISSING");
+  });
+
+  /* ══════════════════════════════════════════════════════════════════════════════════════
+   * FIX 4 — the strictest cap must win, and every holding condition must be disclosed.
+   * ══════════════════════════════════════════════════════════════════════════════════════ */
+  describe("FIX 4 — readiness caps", () => {
+    const satisfiedGate = (gate: (typeof GATES)[number]) =>
+      resolveGate(gate, { source: "x", satisfied: true, freshness: "CURRENT", observedAt: null });
+
+    it("CONTRA1: a contradiction makes 100% unreachable", () => {
+      const all = GATES.map(satisfiedGate);
+      expect(computeGateReadiness(all, []).percent).toBe(100);
+
+      const withContradiction = computeGateReadiness(all, [
+        { code: "GITHUB_NEWER_THAN_DEPLOYMENT", summary: "x", evidenceSources: ["github"], severity: "high" },
+      ]);
+      expect(withContradiction.percent).toBeLessThan(100);
+      expect(withContradiction.percent).toBe(CAP_CONTRADICTION);
+    });
+
+    it("applies the STRICTEST cap when several conditions hold at once", () => {
+      // Unknown (89) is the loosest, unavailable (79) stricter, contradiction (69) strictest.
+      const mixed = [
+        ...GATES.slice(2).map(satisfiedGate),
+        resolveGate(GATES[0], null), // UNKNOWN
+        resolveGate(GATES[1], { source: "x", satisfied: false, freshness: "UNAVAILABLE", observedAt: null }),
+      ];
+      const verdict = computeGateReadiness(mixed, [
+        { code: "DEPLOYMENT_WITHOUT_MIGRATION", summary: "x", evidenceSources: ["database"], severity: "high" },
+      ]);
+
+      expect(verdict.percent).toBeLessThanOrEqual(CAP_CONTRADICTION);
+      const binding = verdict.appliedCaps.filter((c) => c.binding).map((c) => c.code);
+      expect(binding).toEqual(["CONTRADICTORY_EVIDENCE"]);
+    });
+
+    it("discloses EVERY holding condition, not just the one that bit", () => {
+      const mixed = [
+        ...GATES.slice(2).map(satisfiedGate),
+        resolveGate(GATES[0], null), // UNKNOWN
+        resolveGate(GATES[1], { source: "x", satisfied: false, freshness: "UNAVAILABLE", observedAt: null }),
+      ];
+      const verdict = computeGateReadiness(mixed, [
+        { code: "FLAGS_ENABLED_WITHOUT_DEPLOYMENT", summary: "x", evidenceSources: ["flags"], severity: "high" },
+      ]);
+
+      // The old implementation recorded only the contradiction and silently dropped the other two.
+      expect(verdict.appliedCaps.map((c) => c.code).sort()).toEqual([
+        "CONTRADICTORY_EVIDENCE",
+        "UNAVAILABLE_EVIDENCE",
+        "UNKNOWN_EVIDENCE",
+      ]);
+    });
+
+    it("does NOT treat stale, unknown or unavailable as contradictions", () => {
+      const stale = GATES.map((g) =>
+        resolveGate(g, { source: "x", satisfied: true, freshness: "STALE", observedAt: null })
+      );
+      const verdict = computeGateReadiness(stale, []);
+
+      // Stale reduces the numerator honestly; it must not masquerade as sources disagreeing.
+      expect(verdict.appliedCaps.map((c) => c.code)).not.toContain("CONTRADICTORY_EVIDENCE");
+      expect(verdict.percent).toBeLessThan(100);
+    });
+
+    it("selects the strictest cap by value, not by declaration order", () => {
+      // Only UNKNOWN holds: the ceiling must be 89, not whichever cap is written first.
+      const verdict = computeGateReadiness([resolveGate(GATES[0], null), ...GATES.slice(1).map(satisfiedGate)], []);
+      expect(verdict.appliedCaps.filter((c) => c.binding).map((c) => c.code)).toEqual(["UNKNOWN_EVIDENCE"]);
+      expect(verdict.percent).toBeLessThanOrEqual(89);
+    });
   });
 
   it("STALE evidence does not satisfy a gate", () => {
