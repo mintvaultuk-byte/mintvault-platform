@@ -12,9 +12,33 @@ import {
   type SyncStatus,
 } from "@/lib/project-control/api";
 import { useGitHubSync } from "@/hooks/project-control/use-github-sync";
+import { diagnoseLoadFailure } from "./project-control-helpers";
 import type { DriftReport } from "@shared/project-control";
 import type { OverviewDto } from "@shared/project-control-overview";
 import "@/styles/project-control.css";
+
+/**
+ * ESSENTIAL-QUERY RETRY. Scoped to `/overview` and `/views/shop-launch` only — the two responses
+ * without which there is no dashboard at all.
+ *
+ * WHY: the Query Client is globally `retry: false`, which is right for the rest of the admin. But
+ * a Fly rolling restart takes the machine away for a few seconds, and a single failed first fetch
+ * during that window left the operator on a dead failure card with no cached data and no automatic
+ * recovery. Observed on staging immediately after a `fly secrets set`.
+ *
+ * The global default is deliberately NOT changed. Two retries, bounded backoff, and a hard stop on
+ * every terminal status: a 401, 403 or 404 is an ANSWER, not an outage, and retrying it three
+ * times only delays telling the operator the truth. That is what keeps this from becoming a loop.
+ */
+const TERMINAL_STATUSES = new Set([401, 403, 404]);
+const ESSENTIAL_RETRY = {
+  retry: (failureCount: number, error: unknown) => {
+    const status = (error as { status?: number } | undefined)?.status;
+    if (typeof status === "number" && TERMINAL_STATUSES.has(status)) return false;
+    return failureCount < 2;
+  },
+  retryDelay: (attempt: number) => Math.min(500 * 2 ** attempt, 4_000),
+} as const;
 
 export default function ProjectControlPage() {
   const [, navigate] = useLocation();
@@ -22,11 +46,13 @@ export default function ProjectControlPage() {
     queryKey: projectControlQueryKeys.overview,
     queryFn: () => pcGet("/overview"),
     refetchInterval: 120_000,
+    ...ESSENTIAL_RETRY,
   });
   const shopLaunch = useQuery<ShopLaunchView>({
     queryKey: projectControlQueryKeys.shopLaunch,
     queryFn: () => pcGet("/views/shop-launch"),
     refetchInterval: 120_000,
+    ...ESSENTIAL_RETRY,
   });
   /**
    * FIX 5/6 — stored composed evidence, not the live fan-out.
@@ -80,17 +106,47 @@ export default function ProjectControlPage() {
    * Only a genuine absence of data is a failure now; a failed refresh over good cached data keeps
    * showing the last known good programme, which is the same discipline the evidence layer applies.
    */
-  if (!overview.data || !shopLaunch.data)
+  if (!overview.data || !shopLaunch.data) {
+    /**
+     * Say WHICH failure this is.
+     *
+     * This card used to be one generic sentence for every cause, so "your session expired",
+     * "you are not a Super Admin", "the feature is off here" and "the server is restarting" were
+     * indistinguishable — and three of those four are fixed by the operator in seconds, if only
+     * they are told. `diagnoseLoadFailure` already branched on the HTTP status attached by
+     * `throwIfResNotOk`; it simply was not reached from here.
+     *
+     * `error === null/undefined` is meaningful, not a fallback: the shared query function is
+     * `on401: "returnNull"`, so an evicted session arrives as no-error-and-no-data. The helper
+     * maps that to "your session has ended".
+     */
+    const diagnosis = diagnoseLoadFailure(overview.error ?? shopLaunch.error ?? null);
+    const retrying = overview.isFetching || shopLaunch.isFetching;
     return (
-      <div className="p-8" data-testid="pc-error" role="status" aria-live="polite">
-        <Panel
-          title="Project Control could not load"
-          sub="The programme remains unavailable until its authorised service responds."
-        >
-          <p>Try again shortly. This message does not diagnose a migration or expose a backend error.</p>
+      <div className="p-8" data-testid={diagnosis.testId} role="status" aria-live="polite">
+        <Panel title={diagnosis.headline} sub={diagnosis.detail}>
+          <p>
+            {retrying
+              ? "Retrying automatically…"
+              : "This message does not diagnose a migration and does not expose a backend error."}
+          </p>
+          {diagnosis.canRetry && (
+            <button
+              type="button"
+              data-testid="pc-retry"
+              disabled={retrying}
+              onClick={() => {
+                void overview.refetch();
+                void shopLaunch.refetch();
+              }}
+            >
+              Try again
+            </button>
+          )}
         </Panel>
       </div>
     );
+  }
   if (overview.data.counts.packagesTotal === 0)
     return (
       <AdminShell
