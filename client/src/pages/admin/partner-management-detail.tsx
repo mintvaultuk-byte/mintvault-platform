@@ -274,9 +274,7 @@ export default function PartnerManagementDetailPage() {
         // An invitation that FAILED to send has not been sent. `invitation_status` being non-null
         // includes DELIVERY_FAILED, which would have ticked "Invitation sent" for an email that
         // demonstrably never left the building.
-        hasInvitation: userRows.some(
-          (u) => !!u.invitation_status && u.invitation_status !== "DELIVERY_FAILED"
-        ),
+        hasInvitation: userRows.some((u) => !!u.invitation_status && u.invitation_status !== "DELIVERY_FAILED"),
         locationCount: statistics.data?.locationCount ?? 0,
         hasBranding: !!branding.data?.branding,
         hasProfileDetail: profileHasDetail(profile),
@@ -287,10 +285,7 @@ export default function PartnerManagementDetailPage() {
   const [profileTouched, setProfileTouched] = useState(false);
   const profileErrors: FieldErrors = useMemo(() => validateProfileForm(profileForm), [profileForm]);
   const legalNameErr = useMemo(() => validateLegalName(legalNameForm), [legalNameForm]);
-  const profileChanges = useMemo(
-    () => diffProfile(profileBaseline, profileForm),
-    [profileBaseline, profileForm]
-  );
+  const profileChanges = useMemo(() => diffProfile(profileBaseline, profileForm), [profileBaseline, profileForm]);
   const legalNameChanged = legalNameForm.trim() !== legalNameBaseline.trim();
   const profileDirty = isDirty(profileBaseline, profileForm) || legalNameChanged;
   /*
@@ -533,7 +528,7 @@ export default function PartnerManagementDetailPage() {
             data-testid="pm-detail-banner"
             style={{
               marginBottom: 12,
-              color: "var(--admin-gold-text, #1A1400)",
+              color: "var(--admin-on-gold, #1A1400)",
               background: "var(--admin-gold, #D4AF37)",
               padding: "8px 12px",
               borderRadius: 8,
@@ -1139,7 +1134,11 @@ export default function PartnerManagementDetailPage() {
                     }}
                   />
                   {profileTouched && legalNameErr && (
-                    <span role="alert" data-testid="pm-profile-error-legal_name" style={{ color: "var(--admin-red, #ff6b6b)" }}>
+                    <span
+                      role="alert"
+                      data-testid="pm-profile-error-legal_name"
+                      style={{ color: "var(--admin-red, #ff6b6b)" }}
+                    >
                       {legalNameErr}
                     </span>
                   )}
@@ -1249,7 +1248,12 @@ export default function PartnerManagementDetailPage() {
               )}
 
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
-                <AdminButton size="sm" variant="ghost" onClick={() => closeProfileEdit()} data-testid="pm-profile-cancel">
+                <AdminButton
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => closeProfileEdit()}
+                  data-testid="pm-profile-cancel"
+                >
                   Cancel
                 </AdminButton>
                 <AdminButton
@@ -1631,7 +1635,13 @@ function ChecklistItem({
   const stateLabel = state === "done" ? "Done" : state === "todo" ? "To do" : "Not available yet";
   return (
     <div
-      style={{ display: "flex", gap: 8, alignItems: "center", padding: "2px 0", opacity: state === "unavailable" ? 0.6 : 1 }}
+      style={{
+        display: "flex",
+        gap: 8,
+        alignItems: "center",
+        padding: "2px 0",
+        opacity: state === "unavailable" ? 0.6 : 1,
+      }}
       data-testid={`pm-checklist-${label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
     >
       <span aria-hidden="true">{symbol}</span>

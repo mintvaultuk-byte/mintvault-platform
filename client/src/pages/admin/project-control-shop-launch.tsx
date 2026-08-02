@@ -20,6 +20,12 @@ import {
   type WorkPackage,
 } from "@shared/project-control";
 import {
+  PILOT_GATE_KEY,
+  computePilotReadiness,
+  launchGateNumber,
+  partitionPhases,
+} from "@shared/project-control-launch";
+import {
   confidenceBadgeVariant,
   confidenceLabel,
   describeAction,
@@ -74,11 +80,21 @@ export default function ProjectControlShopLaunchPage() {
   }
 
   const d = view.data;
-  // The pilot cannot start until everything before it is verified in production. That is a
-  // statement about the recorded readiness, not a separate rule invented here.
-  const pilotPhase = d.phases.find((p) => p.key === "pn-pilot");
-  const prePilot = d.phases.filter((p) => p.key !== "pn-pilot" && p.key !== "pn-launch");
-  const pilotReady = prePilot.length > 0 && prePilot.every((p) => p.readiness.overall >= 100);
+  /**
+   * DEFECT UX-1, fixed.
+   *
+   * This previously excluded two keys by hand and required everything else to be complete. The
+   * permanent G7–G20 backlog is also a child of partner-network and is 0% by design, so it sat
+   * inside the gate set and pilot readiness was unconditionally false forever — the card read
+   * "NOT READY — Earlier phases are not finished", which was untrue and unfixable.
+   *
+   * Membership of the launch sequence is an owner decision, so it is declared once in
+   * `@shared/project-control-launch` and both the numbering and the gating read from that single
+   * declaration. This view holds no copy of the roadmap.
+   */
+  const { gates, backlog, unrecognised } = partitionPhases(d.phases);
+  const pilot = computePilotReadiness(d.phases);
+  const pilotPhase = d.phases.find((p) => p.key === PILOT_GATE_KEY);
 
   return (
     <AdminShell
@@ -102,12 +118,11 @@ export default function ProjectControlShopLaunchPage() {
             <StatCard label="Production" value={displayPercent(d.readiness.production)} />
             <StatCard
               label="Pilot readiness"
-              value={pilotReady ? "READY" : "NOT READY"}
-              foot={
-                pilotReady
-                  ? "Everything before the pilot is verified in production."
-                  : "Earlier phases are not finished."
-              }
+              // UNKNOWN is a real answer, not a styling of NOT READY. It means the declared launch
+              // sequence and the actual programme tree have diverged, and a confident verdict
+              // either way would be a guess.
+              value={pilot.state === "ready" ? "READY" : pilot.state === "blocked" ? "NOT READY" : "UNKNOWN"}
+              foot={pilot.reason}
               testId="pcsl-pilot"
             />
             <StatCard label="Next milestone" value={d.nextMilestone?.name ?? "—"} testId="pcsl-next-milestone" />
@@ -128,58 +143,52 @@ export default function ProjectControlShopLaunchPage() {
           </Panel>
         )}
 
-        <Panel title="Phases" sub="In the recorded launch sequence" className="mt-4">
+        <Panel title="Launch sequence" sub="The ten approved gates, in order" className="mt-4">
           <div style={{ display: "grid", gap: 12 }} data-testid="pcsl-phases">
-            {d.phases.map((phase, index) => (
-              <div
+            {gates.map((phase) => (
+              <PhaseCard
                 key={phase.key}
-                style={{ border: "1px solid rgba(212,175,55,0.22)", borderRadius: 10, padding: 12 }}
-                data-testid={`pcsl-phase-${phase.key}`}
-              >
-                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ opacity: 0.5, fontVariantNumeric: "tabular-nums" }}>{index + 1}</span>
-                  <strong>{phase.name}</strong>
-                  <Badge variant={phase.readiness.overall >= 100 ? "act" : "prog"}>
-                    {displayPercent(phase.readiness.overall)}
-                  </Badge>
-                  <Chip>
-                    {phase.packages.length} package{phase.packages.length === 1 ? "" : "s"}
-                  </Chip>
-                </div>
-                <div style={{ fontSize: 13, opacity: 0.75, marginTop: 4 }}>{phase.description}</div>
-
-                {phase.packages.map((pkg) => (
-                  <div
-                    key={pkg.key}
-                    style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/admin/project-control/package/${pkg.key}`)}
-                      style={{
-                        background: "none",
-                        border: 0,
-                        padding: 0,
-                        cursor: "pointer",
-                        color: "inherit",
-                        textAlign: "left",
-                      }}
-                    >
-                      {pkg.title}
-                    </button>
-                    <Badge variant={statusBadgeVariant(pkg.assessment.effectiveStatus)}>
-                      {statusLabel(pkg.assessment.effectiveStatus)}
-                    </Badge>
-                    <Chip>{displayPercent(pkg.assessment.completion)}</Chip>
-                    <Badge variant={confidenceBadgeVariant(pkg.assessment.confidence)}>
-                      {confidenceLabel(pkg.assessment.confidence)}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
+                phase={phase}
+                // Numbered from the DECLARED sequence, never from array position — that is what
+                // let the backlog render as "phase 11".
+                number={launchGateNumber(phase.key)}
+                blocking={pilot.blockedBy.includes(phase.key)}
+                onOpenPackage={(key) => navigate(`/admin/project-control/package/${key}`)}
+              />
             ))}
           </div>
         </Panel>
+
+        {backlog.length > 0 && (
+          <Panel title="Permanent backlog" sub="Approved future scope — does not gate the pilot" className="mt-4">
+            <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>
+              This work is planned and not cancelled. It is shown so programme readiness is measured against the real
+              scope, but it is deliberately outside the launch sequence and never blocks a milestone.
+            </div>
+            <div style={{ display: "grid", gap: 12 }} data-testid="pcsl-backlog">
+              {backlog.map((phase) => (
+                <PhaseCard
+                  key={phase.key}
+                  phase={phase}
+                  number={null}
+                  blocking={false}
+                  onOpenPackage={(key) => navigate(`/admin/project-control/package/${key}`)}
+                />
+              ))}
+            </div>
+          </Panel>
+        )}
+
+        {unrecognised.length > 0 && (
+          <Panel title="Unrecognised phases" className="mt-4">
+            <div data-testid="pcsl-unrecognised" style={{ fontSize: 13 }}>
+              The programme tree contains {unrecognised.length} phase(s) that the declared launch sequence does not know
+              about ({unrecognised.map((p) => p.key).join(", ")}). Pilot readiness is reported as UNKNOWN until they are
+              classified as either a launch gate or permanent backlog — a confident verdict from a tree we do not fully
+              recognise would be a guess.
+            </div>
+          </Panel>
+        )}
 
         <Panel title="Launch blockers" sub={`${d.blockers.length} open`} className="mt-4">
           {d.blockers.length === 0 ? (
@@ -210,13 +219,87 @@ export default function ProjectControlShopLaunchPage() {
         {pilotPhase && (
           <Panel title="Pilot" sub="First live partner shops" className="mt-4">
             <div data-testid="pcsl-pilot-detail">
-              {pilotReady
-                ? "Every phase before the pilot is verified in production. The pilot can be scheduled."
-                : "The pilot cannot start yet. The phases above must reach production-verified first — that is what the readiness figures are measuring."}
+              {pilot.state === "ready" &&
+                "Every gate before the pilot is complete. The pilot can be scheduled. The permanent backlog is future scope and does not gate it."}
+              {pilot.state === "blocked" &&
+                `The pilot cannot start yet — ${pilot.blockedBy.length} gate(s) before it are unfinished: ${pilot.blockedBy.join(", ")}.`}
+              {pilot.state === "unknown" && pilot.reason}
             </div>
           </Panel>
         )}
       </div>
     </AdminShell>
+  );
+}
+
+/**
+ * One phase card. Shared by the launch sequence and the permanent backlog so the two cannot drift
+ * apart visually — the ONLY differences are the number (backlog has none) and the blocking flag.
+ */
+function PhaseCard({
+  phase,
+  number,
+  blocking,
+  onOpenPackage,
+}: {
+  phase: ScopedView["phases"][number];
+  number: number | null;
+  blocking: boolean;
+  onOpenPackage: (key: string) => void;
+}) {
+  return (
+    <div
+      style={{
+        border: blocking ? "1px solid var(--admin-gold)" : "1px solid var(--admin-line-hard, rgba(212,175,55,0.22))",
+        borderRadius: "var(--admin-r-sm, 9px)",
+        padding: 12,
+      }}
+      data-testid={`pcsl-phase-${phase.key}`}
+    >
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        {number === null ? (
+          <Chip>Backlog</Chip>
+        ) : (
+          <span style={{ opacity: 0.5, fontVariantNumeric: "tabular-nums" }}>{number}</span>
+        )}
+        <strong>{phase.name}</strong>
+        <Badge variant={phase.readiness.overall >= 100 ? "act" : "prog"}>
+          {displayPercent(phase.readiness.overall)}
+        </Badge>
+        <Chip>
+          {phase.packages.length} package{phase.packages.length === 1 ? "" : "s"}
+        </Chip>
+        {blocking && <Badge variant="wait">Blocking the pilot</Badge>}
+      </div>
+      <div style={{ fontSize: 13, opacity: 0.75, marginTop: 4 }}>{phase.description}</div>
+
+      {phase.packages.map((pkg) => (
+        <div key={pkg.key} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            onClick={() => onOpenPackage(pkg.key)}
+            style={{
+              background: "none",
+              border: 0,
+              padding: 0,
+              cursor: "pointer",
+              color: "inherit",
+              textAlign: "left",
+              textDecoration: "underline",
+              textUnderlineOffset: 3,
+            }}
+          >
+            {pkg.title}
+          </button>
+          <Badge variant={statusBadgeVariant(pkg.assessment.effectiveStatus)}>
+            {statusLabel(pkg.assessment.effectiveStatus)}
+          </Badge>
+          <Chip>{displayPercent(pkg.assessment.completion)}</Chip>
+          <Badge variant={confidenceBadgeVariant(pkg.assessment.confidence)}>
+            {confidenceLabel(pkg.assessment.confidence)}
+          </Badge>
+        </div>
+      ))}
+    </div>
   );
 }

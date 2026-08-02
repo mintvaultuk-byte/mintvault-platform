@@ -35,6 +35,7 @@ import {
   confidenceBadgeVariant,
   confidenceLabel,
   describeAction,
+  diagnoseLoadFailure,
   displayPercent,
   explainReadiness,
   isFilterActive,
@@ -92,6 +93,17 @@ export default function ProjectControlPage() {
   const overview = useQuery<Overview>({
     queryKey: [`${BASE}/overview${qs}`],
     refetchInterval: 120_000,
+    /**
+     * DEFECT F-1. The filter is part of the query key, so every keystroke in the search box
+     * produced a brand-new key with no cached data. `isLoading` went true, the early return below
+     * replaced the whole page with a loading div, and the `<input>` was unmounted — destroying
+     * focus and the caret on every character typed.
+     *
+     * Keeping the previous result while the new one loads means the page never unmounts, so the
+     * input keeps focus and the operator keeps their place. `isFetching` drives a subtle busy
+     * indicator instead of a full-page swap.
+     */
+    placeholderData: (previous) => previous,
   });
 
   // Idempotent: the seed inserts only rows whose key does not already exist, so pressing this
@@ -101,7 +113,9 @@ export default function ProjectControlPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: [`${BASE}/overview${qs}`] }),
   });
 
-  if (overview.isLoading) {
+  // F-1: only a FIRST load with nothing to show replaces the page. A refetch triggered by typing
+  // keeps the previous result on screen, so the search input is never unmounted.
+  if (overview.isLoading && !overview.data) {
     return (
       <div className="p-8" data-testid="pc-loading" style={{ color: "var(--admin-gold, #D4AF37)" }}>
         Loading Project Control…
@@ -109,30 +123,24 @@ export default function ProjectControlPage() {
     );
   }
 
-  if (overview.isError || !overview.data) {
-    // A 404 means the activation flag is off — a deliberate, understandable state, not a fault.
-    const message = String((overview.error as Error | undefined)?.message ?? "");
-    const disabled = message.includes("404") || message.toLowerCase().includes("not enabled");
+  if (!overview.data) {
+    const diagnosis = diagnoseLoadFailure(overview.error);
     return (
-      <div className="p-8" data-testid={disabled ? "pc-disabled" : "pc-error"}>
-        {disabled ? (
-          <>
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>Project Control is switched off here.</div>
-            <div style={{ opacity: 0.85 }}>
-              It is off by default in every environment and must be switched on deliberately by setting{" "}
-              <code>SUPER_ADMIN_PROJECT_CONTROL_ENABLED=true</code>. Nothing is broken.
-            </div>
-          </>
-        ) : (
-          <>
-            <div style={{ fontWeight: 800, marginBottom: 6, color: "var(--admin-red, #cd8073)" }}>
-              Project Control could not load.
-            </div>
-            <div style={{ opacity: 0.85 }}>
-              The most likely cause is that migration 0030 has not been applied to this environment, so the Project
-              Control tables do not exist yet. Nothing else in MintVault is affected.
-            </div>
-          </>
+      <div className="p-8" data-testid={diagnosis.testId}>
+        <div
+          style={{
+            fontWeight: 800,
+            marginBottom: 6,
+            ...(diagnosis.tone === "error" ? { color: "var(--admin-red, #cd8073)" } : {}),
+          }}
+        >
+          {diagnosis.headline}
+        </div>
+        <div style={{ opacity: 0.85 }}>{diagnosis.detail}</div>
+        {diagnosis.canRetry && (
+          <AdminButton variant="ghost" className="mt-3" onClick={() => void overview.refetch()}>
+            Try again
+          </AdminButton>
         )}
       </div>
     );
@@ -225,7 +233,7 @@ function EmptyState() {
       style={{
         marginBottom: 12,
         background: "var(--admin-gold, #D4AF37)",
-        color: "var(--admin-gold-text, #1A1400)",
+        color: "var(--admin-on-gold, #1A1400)",
         padding: "10px 14px",
         borderRadius: 8,
       }}
@@ -465,13 +473,11 @@ function TreeNode({ node, depth, onOpen }: { node: ProgrammeTreeNode; depth: num
               style={{ marginLeft: 16, padding: "8px 0", fontSize: 12, color: "#B8960C" }}
             >
               {node.children.length} deeper level(s) are not shown — this branch is nested more than{" "}
-              {MAX_RENDERED_TREE_DEPTH} levels, which the roadmap should never be. Check the programme
-              tree for an accidental parent loop.
+              {MAX_RENDERED_TREE_DEPTH} levels, which the roadmap should never be. Check the programme tree for an
+              accidental parent loop.
             </div>
           ) : (
-            node.children.map((child) => (
-              <TreeNode key={child.key} node={child} depth={depth + 1} onOpen={onOpen} />
-            ))
+            node.children.map((child) => <TreeNode key={child.key} node={child} depth={depth + 1} onOpen={onOpen} />)
           )}
         </>
       )}
@@ -615,7 +621,7 @@ function FilterGroup<T extends string>({
               fontSize: 12,
               borderRadius: 999,
               cursor: "pointer",
-              color: selected.includes(o) ? "var(--admin-gold-text, #1A1400)" : "inherit",
+              color: selected.includes(o) ? "var(--admin-on-gold, #1A1400)" : "inherit",
               background: selected.includes(o) ? "var(--admin-gold, #D4AF37)" : "transparent",
               border: "1px solid rgba(212,175,55,0.35)",
             }}
@@ -799,7 +805,7 @@ function DriftBanner({ drift }: { drift: DriftReport }) {
         marginBottom: 12,
         padding: "10px 14px",
         borderRadius: 8,
-        color: critical ? "#fff" : "var(--admin-gold-text, #1A1400)",
+        color: critical ? "#fff" : "var(--admin-on-gold, #1A1400)",
         background: critical ? "var(--admin-red, #cd8073)" : warning ? "var(--admin-gold, #D4AF37)" : "transparent",
         border: critical || warning ? "none" : "1px solid rgba(212,175,55,0.3)",
       }}
@@ -896,7 +902,7 @@ function QueuesPanel({ queues, onOpen }: { queues: QueueResult[]; onOpen: (key: 
               cursor: "pointer",
               border: "1px solid rgba(212,175,55,0.35)",
               background: open === q.key ? "var(--admin-gold, #D4AF37)" : "transparent",
-              color: open === q.key ? "var(--admin-gold-text, #1A1400)" : "inherit",
+              color: open === q.key ? "var(--admin-on-gold, #1A1400)" : "inherit",
               fontWeight: q.entries.length > 0 ? 700 : 400,
               opacity: q.entries.length === 0 ? 0.55 : 1,
             }}
