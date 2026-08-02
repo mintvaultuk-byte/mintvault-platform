@@ -15,10 +15,15 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/project-control/api", () => ({
   pcGet: (...args: unknown[]) => mocks.pcGet(...args),
   startGitHubSync: () => mocks.startGitHubSync(),
+  // The hook now starts ALL FOUR evidence sources; GitHub is still the only durable run it polls.
+  startEvidenceRefresh: () => mocks.startGitHubSync(),
   projectControlQueryKeys: {
     overview: ["/api/admin/project-control", "overview"],
     shopLaunch: ["/api/admin/project-control", "shop-launch"],
-    liveEvidence: ["/api/admin/project-control", "live-evidence"],
+    // Mirrors the real key set, so invalidateQueries is never called with an undefined key —
+    // which in TanStack Query invalidates the ENTIRE cache and would make these tests lie.
+    composedOverview: ["/api/admin/project-control", "composed-overview"],
+    syncLatest: ["/api/admin/project-control", "sync", "latest"],
     github: ["/api/admin/project-control", "github"],
     sync: (id: string) => ["/api/admin/project-control", "sync", id],
   },
