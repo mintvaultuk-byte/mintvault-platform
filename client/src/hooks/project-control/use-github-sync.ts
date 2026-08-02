@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
-import { pcGet, projectControlQueryKeys, startGitHubSync, type SyncStatus } from "@/lib/project-control/api";
+import { pcGet, projectControlQueryKeys, startEvidenceRefresh, type SyncStatus } from "@/lib/project-control/api";
 
 const TERMINAL = new Set<SyncStatus["state"]>([
   "SUCCEEDED",
@@ -88,7 +88,8 @@ export function useGitHubSync() {
   };
 
   const refresh = useMutation({
-    mutationFn: startGitHubSync,
+    // Refreshes all four evidence sources, not just GitHub — see startEvidenceRefresh.
+    mutationFn: startEvidenceRefresh,
     onSuccess: (accepted) => {
       stop();
       const token = ++generation.current;

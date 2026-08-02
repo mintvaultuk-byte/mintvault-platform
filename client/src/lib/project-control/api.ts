@@ -125,6 +125,30 @@ export async function startGitHubSync(): Promise<Pick<SyncStatus, "syncId" | "st
   >;
 }
 
+/**
+ * Refresh EVERY evidence source, not only GitHub.
+ *
+ * The dashboard used to get application, database and flag evidence as a side effect of polling
+ * `/live-evidence`, which probed them inline on every page load. Removing that poll — the whole
+ * point of the cutover — left nothing to populate them: the client could only ever start a GitHub
+ * sync, so `/composed-overview` would have reported applications, databases and flags as UNKNOWN
+ * for ever and the new dashboard would have looked broken on first use.
+ *
+ * GitHub is the only DURABLE, long-running sync with a run id worth polling; the other three are
+ * short server-side probes. They are started alongside and deliberately not awaited for the
+ * caller's progress state — but a failure in one must not abort the others, hence allSettled.
+ * Each records its own run, so a failure is visible in the evidence log rather than silent.
+ */
+export async function startEvidenceRefresh(): Promise<Pick<SyncStatus, "syncId" | "state">> {
+  const github = await startGitHubSync();
+  await Promise.allSettled([
+    apiRequest("POST", `${PROJECT_CONTROL_API}/sync/applications`, {}),
+    apiRequest("POST", `${PROJECT_CONTROL_API}/sync/flags`, {}),
+    apiRequest("POST", `${PROJECT_CONTROL_API}/sync/databases`, {}),
+  ]);
+  return github;
+}
+
 export const projectControlQueryKeys = {
   overview: [PROJECT_CONTROL_API, "overview"] as const,
   shopLaunch: [PROJECT_CONTROL_API, "shop-launch"] as const,

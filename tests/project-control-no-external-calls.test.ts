@@ -136,7 +136,7 @@ describe("explicit refresh is the only path that reaches an external system", ()
   const hook = read("client/src/hooks/project-control/use-github-sync.ts");
 
   it("starts the durable sync and polls stored run status", () => {
-    expect(hook).toContain("startGitHubSync");
+    expect(hook).toContain("startEvidenceRefresh");
     // Polls the persisted run record, not the external system.
     expect(hook).toMatch(/\/sync\//);
   });
@@ -145,6 +145,23 @@ describe("explicit refresh is the only path that reaches an external system", ()
     expect(hook).toContain("projectControlQueryKeys.composedOverview");
     expect(hook).toContain("projectControlQueryKeys.overview");
     expect(hook).toContain("projectControlQueryKeys.shopLaunch");
+  });
+
+  /**
+   * The gap the cutover would otherwise have created.
+   *
+   * Application, database and flag evidence used to arrive as a side effect of polling
+   * /live-evidence. Removing that poll left nothing to populate them, so the composed dashboard
+   * would have shown UNKNOWN for three of its four sources for ever.
+   */
+  it("explicit refresh populates ALL FOUR evidence sources, not only GitHub", () => {
+    const api = read("client/src/lib/project-control/api.ts");
+    expect(api).toContain("/sync/github");
+    expect(api).toContain("/sync/applications");
+    expect(api).toContain("/sync/flags");
+    expect(api).toContain("/sync/databases");
+    // A failure in one probe must not abort the others.
+    expect(api).toContain("allSettled");
   });
 
   it("stops polling on every terminal state", async () => {
