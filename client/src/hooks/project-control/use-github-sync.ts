@@ -3,7 +3,15 @@ import { useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { pcGet, projectControlQueryKeys, startGitHubSync, type SyncStatus } from "@/lib/project-control/api";
 
-const TERMINAL = new Set<SyncStatus["state"]>(["SUCCEEDED", "PARTIAL", "FAILED", "RATE_LIMITED", "UNAVAILABLE", "CANCELLED", "EXPIRED"]);
+const TERMINAL = new Set<SyncStatus["state"]>([
+  "SUCCEEDED",
+  "PARTIAL",
+  "FAILED",
+  "RATE_LIMITED",
+  "UNAVAILABLE",
+  "CANCELLED",
+  "EXPIRED",
+]);
 const POLL_MS = 5_000;
 const TIMEOUT_MS = 90_000;
 
@@ -41,7 +49,8 @@ export function useGitHubSync() {
   const poll = async (syncId: string, token: number) => {
     if (token !== generation.current) return;
     if (Date.now() - started.current >= TIMEOUT_MS) {
-      if (mounted.current) setStatus((previous) => previous ? { ...previous, state: "EXPIRED", errorCode: "CLIENT_TIMEOUT" } : previous);
+      if (mounted.current)
+        setStatus((previous) => (previous ? { ...previous, state: "EXPIRED", errorCode: "CLIENT_TIMEOUT" } : previous));
       stop();
       return;
     }
@@ -62,7 +71,15 @@ export function useGitHubSync() {
     } catch {
       if (token !== generation.current || !mounted.current) return;
       const expired = Date.now() - started.current >= TIMEOUT_MS;
-      setStatus((previous) => previous ? { ...previous, state: expired ? "EXPIRED" : "FAILED", errorCode: expired ? "CLIENT_TIMEOUT" : "SYNC_STATUS_UNAVAILABLE" } : previous);
+      setStatus((previous) =>
+        previous
+          ? {
+              ...previous,
+              state: expired ? "EXPIRED" : "FAILED",
+              errorCode: expired ? "CLIENT_TIMEOUT" : "SYNC_STATUS_UNAVAILABLE",
+            }
+          : previous
+      );
       stop();
     }
   };
@@ -73,13 +90,40 @@ export function useGitHubSync() {
       stop();
       const token = ++generation.current;
       started.current = Date.now();
-      setStatus({ syncId: accepted.syncId, state: accepted.state, requestedAt: new Date().toISOString(), startedAt: null, completedAt: null, errorCode: null, activeSyncId: null, anotherRunActive: false });
+      setStatus({
+        syncId: accepted.syncId,
+        state: accepted.state,
+        requestedAt: new Date().toISOString(),
+        startedAt: null,
+        completedAt: null,
+        errorCode: null,
+        activeSyncId: null,
+        anotherRunActive: false,
+      });
       void poll(accepted.syncId, token);
     },
-    onError: () => setStatus((previous) => previous ? { ...previous, state: "FAILED", errorCode: "REFRESH_REQUEST_FAILED" } : null),
+    onError: () =>
+      setStatus((previous) =>
+        previous
+          ? { ...previous, state: "FAILED", errorCode: "REFRESH_REQUEST_FAILED" }
+          : {
+              syncId: "",
+              state: "FAILED",
+              requestedAt: new Date().toISOString(),
+              startedAt: null,
+              completedAt: null,
+              errorCode: "REFRESH_REQUEST_FAILED",
+              activeSyncId: null,
+              anotherRunActive: false,
+            }
+      ),
   });
 
-  return { refresh: () => refresh.mutate(), isRefreshing: refresh.isPending || Boolean(status && !TERMINAL.has(status.state)), status };
+  return {
+    refresh: () => refresh.mutate(),
+    isRefreshing: refresh.isPending || Boolean(status && !TERMINAL.has(status.state)),
+    status,
+  };
 }
 
 export function isGitHubSyncTerminal(state: SyncStatus["state"]): boolean {

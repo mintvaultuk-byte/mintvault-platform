@@ -1,9 +1,82 @@
 import { AlertTriangle, ArrowRight } from "lucide-react";
 import { Badge, Panel, StatCard } from "@/components/admin";
 import type { NextAction, Readiness, StatusAssessment, WorkPackage } from "@shared/project-control";
-import { confidenceBadgeVariant, confidenceLabel, describeAction, displayPercent, riskBadgeVariant, statusBadgeVariant, statusLabel } from "@/pages/admin/project-control-helpers";
+import {
+  confidenceBadgeVariant,
+  confidenceLabel,
+  describeAction,
+  displayPercent,
+  riskBadgeVariant,
+  statusBadgeVariant,
+  statusLabel,
+} from "@/pages/admin/project-control-helpers";
 
-export function PackageOperationalHeader({ pkg, assessment, readiness, nextAction }: { pkg: WorkPackage; assessment: StatusAssessment; readiness: Readiness; nextAction: NextAction | null }) {
+export function PackageOperationalHeader({
+  pkg,
+  assessment,
+  readiness,
+  nextAction,
+}: {
+  pkg: WorkPackage;
+  assessment: StatusAssessment;
+  readiness: Readiness;
+  nextAction: NextAction | null;
+}) {
   const blocked = pkg.blockers.filter((blocker) => !blocker.resolvedAt);
-  return <><section className="pc-package-header" aria-label="Operational package summary"><Panel title="Operational summary" sub={pkg.summary ?? "No summary recorded."}><div className="pc-package-summary-grid"><StatCard label="Readiness" value={displayPercent(readiness.overall)} testId="pcp-completion" /><StatCard label="Status" value={statusLabel(assessment.effectiveStatus)} testId="pcp-status" /><StatCard label="Evidence confidence" value={confidenceLabel(assessment.confidence)} foot={assessment.confidenceReason} testId="pcp-confidence" /><StatCard label="Risk" value={pkg.risk.toUpperCase()} /></div>{blocked.length > 0 && <div className="pc-contradiction"><AlertTriangle size={17} aria-hidden="true" /> {blocked.length} active blocker{blocked.length === 1 ? "" : "s"}. Resolve the package evidence before promotion.</div>}{assessment.warnings.length > 0 && <div className="pc-contradiction"><AlertTriangle size={17} aria-hidden="true" /> The dashboard disagrees with this package’s declared state: {assessment.warnings.join(" ")}</div>}<div className="pc-package-tags"><Badge variant={statusBadgeVariant(assessment.effectiveStatus)}>{statusLabel(assessment.effectiveStatus)}</Badge><Badge variant={confidenceBadgeVariant(assessment.confidence)}>{confidenceLabel(assessment.confidence)}</Badge><Badge variant={riskBadgeVariant(pkg.risk)}>{pkg.risk.toUpperCase()}</Badge></div></Panel></section><section className="pc-package-next"><Panel title="What to do next" sub="Recommended from server-authoritative package state">{nextAction ? <div className="pc-next-action-inline"><strong>{nextAction.headline}</strong><ArrowRight size={17} aria-hidden="true" /><p>{describeAction(nextAction)}</p></div> : <p>Nothing outstanding is currently recommended for this package.</p>}</Panel></section></>;
+  return (
+    <>
+      <section className="pc-package-header" aria-label="Operational package summary">
+        <Panel title="Operational summary" sub={pkg.summary ?? "No summary recorded."}>
+          <p className="pc-operational-remaining">
+            <strong>Remaining work:</strong> {pkg.remainingWork ?? "No remaining work has been recorded."}
+          </p>
+          <div className="pc-package-summary-grid">
+            <StatCard label="Readiness" value={displayPercent(readiness.overall)} testId="pcp-completion" />
+            <StatCard label="Status" value={statusLabel(assessment.effectiveStatus)} testId="pcp-status" />
+            <StatCard
+              label="Evidence confidence"
+              value={confidenceLabel(assessment.confidence)}
+              foot={assessment.confidenceReason}
+              testId="pcp-confidence"
+            />
+            <StatCard label="Risk" value={pkg.risk.toUpperCase()} />
+          </div>
+          {blocked.length > 0 && (
+            <div className="pc-contradiction">
+              <AlertTriangle size={17} aria-hidden="true" /> {blocked.length} active blocker
+              {blocked.length === 1 ? "" : "s"}. Resolve the package evidence before promotion.
+            </div>
+          )}
+          {assessment.warnings.length > 0 && (
+            <div className="pc-contradiction">
+              <AlertTriangle size={17} aria-hidden="true" /> The dashboard disagrees with this package’s declared state:{" "}
+              {assessment.warnings.join(" ")}
+            </div>
+          )}
+          <div className="pc-package-tags">
+            <Badge variant={statusBadgeVariant(assessment.effectiveStatus)}>
+              {statusLabel(assessment.effectiveStatus)}
+            </Badge>
+            <Badge variant={confidenceBadgeVariant(assessment.confidence)}>
+              {confidenceLabel(assessment.confidence)}
+            </Badge>
+            <Badge variant={riskBadgeVariant(pkg.risk)}>{pkg.risk.toUpperCase()}</Badge>
+          </div>
+        </Panel>
+      </section>
+      <section className="pc-package-next">
+        <Panel title="What to do next" sub="Recommended from server-authoritative package state">
+          {nextAction ? (
+            <div className="pc-next-action-inline">
+              <strong>{nextAction.headline}</strong>
+              <ArrowRight size={17} aria-hidden="true" />
+              <p>{describeAction(nextAction)}</p>
+            </div>
+          ) : (
+            <p>Nothing outstanding is currently recommended for this package.</p>
+          )}
+        </Panel>
+      </section>
+    </>
+  );
 }

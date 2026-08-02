@@ -1,5 +1,13 @@
 import { apiRequest } from "@/lib/queryClient";
-import type { DriftReport, NextAction, ProgrammeTreeNode, QueueResult, Readiness, StatusAssessment, WorkPackage } from "@shared/project-control";
+import type {
+  DriftReport,
+  NextAction,
+  ProgrammeTreeNode,
+  QueueResult,
+  Readiness,
+  StatusAssessment,
+  WorkPackage,
+} from "@shared/project-control";
 import type { GitHubFreshnessVerdict, GitHubSnapshot } from "@shared/project-control-github";
 
 export const PROJECT_CONTROL_API = "/api/admin/project-control";
@@ -22,18 +30,41 @@ export interface ProjectControlOverview {
     all: NextAction[];
   };
   counts: { nodes: number; packages: number; packagesTotal: number; openBlockers: number };
-  deployments: { latest: Record<string, { commitSha: string; releaseVersion?: string | null; deployedAt: string; result: string } | undefined> };
+  deployments: {
+    latest: Record<
+      string,
+      { commitSha: string; releaseVersion?: string | null; deployedAt: string; result: string } | undefined
+    >;
+  };
   queues: QueueResult[];
   drift: DriftReport;
-  treeIntegrity: { orphanedPackages: { key: string; nodeKey: string }[]; orphanedNodes: { key: string; parentKey: string | null; reason: string }[]; nodeCycles: string[][] };
+  treeIntegrity: {
+    orphanedPackages: { key: string; nodeKey: string }[];
+    orphanedNodes: { key: string; parentKey: string | null; reason: string }[];
+    nodeCycles: string[][];
+  };
   pagination: { total: number; returned: number; truncated: boolean; limit: number; offset: number };
 }
 
 export interface ShopLaunchView {
   generatedAt: string;
   readiness: Readiness;
-  phases: { key: string; name: string; description: string; sortOrder: number; packages: PackageWithAssessment[]; readiness: Readiness }[];
-  blockers: { packageKey: string; packageTitle: string; kind: string; description: string; openedAt: string; severity?: string | null }[];
+  phases: {
+    key: string;
+    name: string;
+    description: string;
+    sortOrder: number;
+    packages: PackageWithAssessment[];
+    readiness: Readiness;
+  }[];
+  blockers: {
+    packageKey: string;
+    packageTitle: string;
+    kind: string;
+    description: string;
+    openedAt: string;
+    severity?: string | null;
+  }[];
   nextMilestone: { key: string; name: string } | null;
   nextActions: { highestPriority: NextAction | null; all: NextAction[] };
 }
@@ -52,13 +83,30 @@ export interface LiveEvidence {
   observedAt: string;
   github: { configured: boolean; snapshot: GitHubSnapshot | null; freshness: GitHubFreshnessVerdict };
   applications: AppEvidence[];
-  deployment: { state?: string; reason?: string; staging?: unknown; production?: unknown } | null;
+  deployment: {
+    mainSha: string | null;
+    staging: AppEvidence | null;
+    production: AppEvidence | null;
+    stagingMatchesMain: boolean | null;
+    productionMatchesMain: boolean | null;
+    stagingMatchesProduction: boolean | null;
+    summary: string;
+  } | null;
   featureFlags: unknown[];
 }
 
 export interface SyncStatus {
   syncId: string;
-  state: "QUEUED" | "RUNNING" | "SUCCEEDED" | "PARTIAL" | "FAILED" | "RATE_LIMITED" | "UNAVAILABLE" | "CANCELLED" | "EXPIRED";
+  state:
+    | "QUEUED"
+    | "RUNNING"
+    | "SUCCEEDED"
+    | "PARTIAL"
+    | "FAILED"
+    | "RATE_LIMITED"
+    | "UNAVAILABLE"
+    | "CANCELLED"
+    | "EXPIRED";
   requestedAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -72,7 +120,9 @@ export async function pcGet<T>(path: string): Promise<T> {
 }
 
 export async function startGitHubSync(): Promise<Pick<SyncStatus, "syncId" | "state">> {
-  return (await apiRequest("POST", `${PROJECT_CONTROL_API}/sync/github`, {})).json() as Promise<Pick<SyncStatus, "syncId" | "state">>;
+  return (await apiRequest("POST", `${PROJECT_CONTROL_API}/sync/github`, {})).json() as Promise<
+    Pick<SyncStatus, "syncId" | "state">
+  >;
 }
 
 export const projectControlQueryKeys = {
