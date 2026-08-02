@@ -159,6 +159,9 @@ const ALL_ROUTES: [string, string][] = [
   // Migration evidence for the CONNECTED environment only — not parameterised, because a staging
   // process cannot speak for production and accepting a target would imply it could.
   ["POST", `${P}/sync/databases`],
+  // The composed overview. Ordinary read gate, not gatedExpensive, because it makes ZERO external
+  // calls — looking at the dashboard must never spend GitHub quota.
+  ["GET", `${P}/composed-overview`],
   ["GET", `${P}/export`],
   ["POST", `${P}/seed`],
 ];

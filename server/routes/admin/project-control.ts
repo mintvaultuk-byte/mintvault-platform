@@ -40,6 +40,7 @@
  *   POST   /sync/applications                         probe + store both application versions
  *   POST   /sync/flags                                store this environment's flag evidence
  *   POST   /sync/databases                            store this environment's migration evidence
+ *   GET    /composed-overview                         the composed DTO; stored evidence only
  *   GET    /export                                    bounded JSON snapshot
  *   POST   /seed                                      idempotent programme-tree seed
  */
@@ -60,6 +61,7 @@ import {
   collectFlagEvidenceSnapshots,
 } from "../../project-control/probe-persistence";
 import { collectAndStoreDatabaseEvidence } from "../../project-control/database-evidence";
+import { buildComposedOverview } from "../../project-control/overview-service";
 import {
   BLOCKER_KINDS,
   DEPLOYMENT_RESULTS,
@@ -966,6 +968,24 @@ export function registerProjectControlRoutes(app: Express): void {
         unavailable: false,
         requestedAt: new Date().toISOString(),
       });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * THE composed overview — the only summary the UI consumes.
+   *
+   * Registered with the ORDINARY read gate, not `gatedExpensive`, because it makes zero external
+   * calls: it reads persisted snapshots and nothing else. Refresh is a separate, explicit, audited
+   * action, so looking at the dashboard can never spend GitHub quota or wake a sleeping machine.
+   *
+   * The frontend must never assemble the four sources itself — that would put the
+   * "merged is not deployed" rule in the browser, where it could drift from this one silently.
+   */
+  app.get(`${BASE}/composed-overview`, ...gated, async (_req, res) => {
+    try {
+      res.json(await buildComposedOverview(pool));
     } catch (error) {
       fail(res, error);
     }
