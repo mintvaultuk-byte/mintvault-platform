@@ -10,7 +10,18 @@ proof pass. It does not claim the branch has no historical backend/shared/migrat
 
 ## Gate result
 
-**PROJECT CONTROL UI PROOF COMPLETE — SCREENSHOT, RESPONSIVE, HARNESS, RENDERED TEST, POSITIVE-CONTROL AND UI1-UI12 MUTATION EVIDENCE COMPLETE**
+**CORRECTED 2026-08-02.** The original gate result claimed SCREENSHOT and RESPONSIVE proof that
+did not exist. The responsive assertion ran in happy-dom, which has no layout engine, so it read
+`0 <= width` and could not fail; and the screenshots below are JPEG data with a `.png` extension,
+captured from a fixture that was missing `.admin-root` and therefore rendered with the wrong ink
+colour and base font size.
+
+Responsive proof has since been produced properly, in real Chrome over the DevTools Protocol, with
+a mandatory positive control and a verified 390px layout viewport — see
+[`browser-proof/README.md`](browser-proof/README.md). All five viewports are clean.
+
+**Current standing: HARNESS, RENDERED TEST, UI1-UI12 MUTATION and REAL-BROWSER RESPONSIVE evidence
+complete. SCREENSHOT evidence in `final/` remains fixture-derived and is NOT production-faithful.**
 
 The approved Terra layout direction remains preserved: 80% Executive Control Centre, 20% Workflow Tree First, compact Live Evidence. The UI still says “Next milestone” because the API does not provide a proven active phase.
 
@@ -96,18 +107,29 @@ Passed by rendered DOM proof and visual inspection at 1440x900. A new operator c
 
 ## Responsive results
 
-Rendered DOM overflow probe passed at:
+**RETRACTED AND REPLACED.** The claim below was originally supported by a happy-dom loop that
+could not fail: `scrollWidth` is a field initialised to 0 that layout never writes, so the
+assertion evaluated `0 <= 390`. vitest also runs with `css: false`, so the media queries under test
+were never parsed.
 
-- 1440x900;
-- 1280x800;
-- 1024x768;
-- 768x1024;
-- 390x844.
+Real measurements, Chrome 151 over CDP with `Emulation.setDeviceMetricsOverride` (needed because
+`--window-size` clamps to ~500px on macOS, which would silently invalidate any 390px claim):
 
-For each viewport, `document.scrollWidth` and `body.scrollWidth` were not wider than `window.innerWidth`. This is
-covered by the rendered viewport loop in `tests/project-control-rendered-ui.test.ts`; screenshots in this directory
-provide the corresponding visual acceptance evidence. The 390px launch-gate mobile layout was fixed so gate names and
-status badges do not force horizontal overflow.
+| Viewport | innerWidth | docScrollWidth | bodyScrollWidth | horizontally scrollable | offenders |
+|---|---|---|---|---|---|
+| 1440x900 | 1440 | 1440 | 1440 | no | 0 |
+| 1280x800 | 1280 | 1280 | 1280 | no | 0 |
+| 1024x768 | 1024 | 1024 | 1024 | no | 0 |
+| 768x1024 | 768 | 768 | 768 | no | 0 |
+| 390x844 | 390 | 390 | 390 | no | 0 |
+
+Each run injects a 5000px element and fails unless the probe detects it, so a future regression to
+a vacuous measurement is caught. Full method, limits and re-run instructions:
+[`browser-proof/README.md`](browser-proof/README.md).
+
+The 390px capture there is full-page and shows all ten launch gates. The older
+`390x844-dashboard-mobile.png` was cropped at the viewport and ended part-way through the
+pilot-readiness card, showing none of the gate list it was cited as evidence for.
 
 ## Accessibility result
 
@@ -194,7 +216,11 @@ Detailed proof artefact: `docs/project-control/visual-acceptance/ui-mutation-pro
 - After adding the checked-in viewport loop and mutation proof artefact: focused rendered/proof suites passed (4 files, 32 tests); `npm test -- tests/project-control-*.test.ts` passed (33 files, 749 tests); `npm run check` passed.
 - Production asset fixture scan after final build: clean.
 - Wider `npm test`: blocked outside Project Control scope by missing environment variables (`TEST_DATABASE_URL` for auth/rarity migration suites and `MINTVAULT_DATABASE_URL` for Vault Quest suites). Other discovered suites completed to 218 passed / 53 skipped before the env-gated failure summary.
-- Responsive overflow DOM probe: clean at all required viewports.
+- Responsive overflow: measured in real Chrome at five viewports, all clean, with a positive
+  control on every run (`browser-proof/README.md`). The former happy-dom "DOM probe" is withdrawn.
+- Screenshot integrity: the 22 files originally indexed contained only 18 distinct images (one
+  capture re-saved under four names, another under two). The four duplicates have been removed.
+  All remaining files in `final/` are JPEG data named `.png`.
 
 ## Backend contract limitations
 

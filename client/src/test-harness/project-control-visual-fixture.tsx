@@ -517,7 +517,7 @@ export function ProjectControlVisualFixture({ state = "current" }: { state?: Pro
 
   if (state === "loading") {
     return (
-      <main className="pc-fixture-shell" data-fixture-state={state}>
+      <main className="admin-root pc-fixture-shell" data-fixture-state={state}>
         <div data-testid="pc-loading" role="status" aria-live="polite" className="pc-fixture-loading">
           Loading Project Control with retained evidence from the last successful refresh…
         </div>
@@ -536,7 +536,7 @@ export function ProjectControlVisualFixture({ state = "current" }: { state?: Pro
   }
 
   return (
-    <main className="pc-fixture-shell" data-fixture-state={state}>
+    <main className="admin-root pc-fixture-shell" data-fixture-state={state}>
       <h1>Project Control visual fixture</h1>
       {state === "empty" ? (
         <section className="pc-fixture-empty" data-testid="pc-empty-state">

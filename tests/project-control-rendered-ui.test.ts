@@ -122,7 +122,28 @@ describe("Project Control rendered dashboard proof", () => {
     expect(q('[data-testid="pc-live-evidence"]')?.textContent).toContain("74b6be7b1bd1");
   });
 
-  it("keeps the rendered fixture within the documented viewport widths", async () => {
+  /**
+   * RESP1 — this test used to assert overflow, and could not fail.
+   *
+   * It read:
+   *
+   *   expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
+   *
+   * happy-dom has no layout engine. `scrollWidth` is a field initialised to 0 and never written by
+   * layout, and `getBoundingClientRect()` returns a bare DOMRect. So the assertion evaluated
+   * `0 <= 390` and passed for any content at any viewport — a 99,999px element passed it. vitest
+   * also runs with `css: false` here, so the media queries under test were never even parsed.
+   *
+   * The overflow claim now lives where it can be measured: a real Chrome over the DevTools
+   * Protocol, in `scripts/project-control/responsive-proof.mjs`, with a mandatory positive control
+   * and a verified 390px layout viewport. Results:
+   * docs/project-control/visual-acceptance/browser-proof/README.md
+   *
+   * What remains here is what happy-dom CAN honestly answer: that the components mount and render
+   * their landmark content at every documented viewport. That is a real regression guard for
+   * "the launch gates disappeared", and it is not dressed up as a layout proof.
+   */
+  it("renders the launch gates at every documented viewport (structure only — NOT a layout proof)", async () => {
     const viewports = [
       [1440, 900],
       [1280, 800],
@@ -137,10 +158,29 @@ describe("Project Control rendered dashboard proof", () => {
 
       await renderFixture("current");
 
-      expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width);
-      expect(document.body.scrollWidth).toBeLessThanOrEqual(width);
       expect(q('[data-testid="pc-launch-gates"]')).toBeTruthy();
     }
+  });
+
+  /**
+   * The guard that stops the vacuous assertion coming back.
+   *
+   * If someone reintroduces a scrollWidth-based overflow check in this environment, this test
+   * documents — by demonstration — why it would be meaningless.
+   */
+  it("documents that happy-dom cannot measure layout, so scrollWidth here proves nothing", async () => {
+    await renderFixture("current");
+    const wide = document.createElement("div");
+    wide.style.width = "99999px";
+    wide.style.height = "10px";
+    document.body.appendChild(wide);
+
+    // A 99,999px element. Real layout would report a document far wider than any viewport.
+    expect(document.documentElement.scrollWidth).toBe(0);
+    expect(document.body.scrollWidth).toBe(0);
+    expect(wide.getBoundingClientRect().width).toBe(0);
+
+    wide.remove();
   });
 
   it("renders workflow tree focus, expansion, blockers and integrity warnings", async () => {
