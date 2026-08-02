@@ -41,12 +41,20 @@ export const DATABASE_VALID_MS = 15 * 60 * 1000;
 export type DatabaseDb = EvidenceDb & LeaseDb;
 
 /**
- * THE NINE. Migration 0030 creates exactly these foreign keys.
+ * THE TEN. Every foreign key the Project Control migrations create.
  *
  * Checked by EXACT NAME, not by count. The previous check was `fks.length >= 7` against a comment
  * saying "7 expected" — so a database missing two of the nine reported healthy, and seven
  * constraints with entirely the wrong names would also have passed. A referential-integrity check
  * that cannot tell you WHICH constraint is missing is not a check.
+ *
+ * PROVENANCE — this list must track the migrations, and drifted once already:
+ *   0030 creates the first nine.
+ *   0040 adds `fk_pc_work_packages_superseded_by` (supersession target). It was missing here, so a
+ *        correct, migration-created constraint was reported as `unexpected` on every staging
+ *        refresh after 0040 landed. Nothing broke — `intact` only measures MISSING — but the
+ *        evidence was wrong, and evidence being wrong is the one thing this dashboard exists to
+ *        prevent. Any future migration that adds a pc_* foreign key MUST add its name here.
  */
 export const EXPECTED_PC_FOREIGN_KEYS: readonly string[] = Object.freeze([
   "fk_pc_blockers_package",
@@ -58,6 +66,8 @@ export const EXPECTED_PC_FOREIGN_KEYS: readonly string[] = Object.freeze([
   "fk_pc_prompts_package",
   "fk_pc_test_runs_package",
   "fk_pc_work_packages_node",
+  // 0040 — supersession target; retiring a package must point at a real replacement.
+  "fk_pc_work_packages_superseded_by",
 ]);
 
 export interface ForeignKeyVerdict {

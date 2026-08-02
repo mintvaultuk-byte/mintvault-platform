@@ -61,12 +61,56 @@ beforeEach(async () => {
   await db.query(`TRUNCATE pc_evidence_snapshots`);
 });
 
-describe("B-2 — the nine foreign keys are verified by exact identity", () => {
-  it("expects exactly nine, matching migration 0030", () => {
-    expect(EXPECTED_PC_FOREIGN_KEYS).toHaveLength(9);
-    const sql = readFileSync(join(__dirname, "..", "migrations/0030_project_control.sql"), "utf8");
+/**
+ * The migrations are the authority; this list is a copy, and a copy can drift. It DID drift:
+ * 0040 added `fk_pc_work_packages_superseded_by` and nobody added it here, so staging reported a
+ * legitimate constraint as `unexpected` on every refresh. These tests derive the truth from the
+ * migration SQL in BOTH directions so the same omission cannot recur silently.
+ */
+const PC_FK_MIGRATIONS = ["0030_project_control.sql", "0040_project_control_seed_reconciliation.sql"];
+
+function foreignKeysCreatedByMigrations(): string[] {
+  const names = new Set<string>();
+  for (const file of PC_FK_MIGRATIONS) {
+    const sql = readFileSync(join(__dirname, "..", "migrations", file), "utf8");
+    for (const m of sql.matchAll(/ADD\s+CONSTRAINT\s+(fk_pc_[a-z0-9_]+)|CONSTRAINT\s+(fk_pc_[a-z0-9_]+)\s+FOREIGN\s+KEY/gi)) {
+      names.add((m[1] ?? m[2]).toLowerCase());
+    }
+  }
+  return [...names].sort();
+}
+
+describe("B-2 — the Project Control foreign keys are verified by exact identity", () => {
+  it("expects exactly ten, matching migrations 0030 and 0040", () => {
+    expect(EXPECTED_PC_FOREIGN_KEYS).toHaveLength(10);
+    const sql = PC_FK_MIGRATIONS.map((f) =>
+      readFileSync(join(__dirname, "..", "migrations", f), "utf8")
+    ).join("\n");
     for (const name of EXPECTED_PC_FOREIGN_KEYS) {
-      expect(sql, `${name} is expected but migration 0030 never creates it`).toContain(name);
+      expect(sql, `${name} is expected but no Project Control migration creates it`).toContain(name);
+    }
+  });
+
+  /**
+   * THE REGRESSION GUARD. Removing any migration-created FK from EXPECTED_PC_FOREIGN_KEYS turns
+   * this RED — including `fk_pc_work_packages_superseded_by`, the one that actually drifted.
+   */
+  it("every foreign key the migrations create is declared expected", () => {
+    const created = foreignKeysCreatedByMigrations();
+    expect(created.length, "the migration scan found no pc_* foreign keys — the regex has rotted").toBeGreaterThan(0);
+    expect(created).toContain("fk_pc_work_packages_superseded_by");
+    for (const name of created) {
+      expect(
+        EXPECTED_PC_FOREIGN_KEYS,
+        `${name} is created by a migration but is absent from EXPECTED_PC_FOREIGN_KEYS, so a correct constraint would be reported as unexpected`
+      ).toContain(name);
+    }
+  });
+
+  it("declares no phantom foreign key that no migration creates", () => {
+    const created = foreignKeysCreatedByMigrations();
+    for (const name of EXPECTED_PC_FOREIGN_KEYS) {
+      expect(created, `${name} is expected but no migration creates it`).toContain(name);
     }
   });
 
@@ -74,7 +118,8 @@ describe("B-2 — the nine foreign keys are verified by exact identity", () => {
     const verdict = verifyForeignKeys([...EXPECTED_PC_FOREIGN_KEYS]);
     expect(verdict.intact).toBe(true);
     expect(verdict.missing).toEqual([]);
-    expect(verdict.present).toHaveLength(9);
+    expect(verdict.unexpected, "the real staging schema must report nothing unexpected").toEqual([]);
+    expect(verdict.present).toHaveLength(10);
   });
 
   it("EACH of the nine, removed individually, is detected", () => {
@@ -88,10 +133,10 @@ describe("B-2 — the nine foreign keys are verified by exact identity", () => {
   });
 
   it("SEVEN present is NOT sufficient — the precise old defect", () => {
-    const sevenOfNine = EXPECTED_PC_FOREIGN_KEYS.slice(0, 7);
-    const verdict = verifyForeignKeys([...sevenOfNine]);
-    expect(verdict.intact, "seven of nine used to report healthy").toBe(false);
-    expect(verdict.missing).toHaveLength(2);
+    const sevenOfTen = EXPECTED_PC_FOREIGN_KEYS.slice(0, 7);
+    const verdict = verifyForeignKeys([...sevenOfTen]);
+    expect(verdict.intact, "seven used to report healthy").toBe(false);
+    expect(verdict.missing).toHaveLength(EXPECTED_PC_FOREIGN_KEYS.length - 7);
   });
 
   it("a RENAMED constraint appears as both missing and unexpected", () => {
@@ -103,7 +148,7 @@ describe("B-2 — the nine foreign keys are verified by exact identity", () => {
     ]);
   });
 
-  it("nine present plus an extra is still intact — extras are reported, not fatal", () => {
+  it("all ten present plus an extra is still intact — extras are reported, not fatal", () => {
     const verdict = verifyForeignKeys([...EXPECTED_PC_FOREIGN_KEYS, "fk_pc_future_thing"]);
     expect(verdict.intact).toBe(true);
     expect(verdict.unexpected).toEqual(["fk_pc_future_thing"]);
