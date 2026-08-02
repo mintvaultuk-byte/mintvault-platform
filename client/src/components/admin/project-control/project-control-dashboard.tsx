@@ -33,6 +33,7 @@ export function ProjectControlDashboard({
         overview={overview}
         shopLaunch={shopLaunch}
         evidence={evidence}
+        evidenceUnavailable={evidenceUnavailable}
         sync={sync}
         evidenceState={evidence?.repository.meta.freshness ?? (evidenceUnavailable ? "unavailable" : "unknown")}
         onOpenPackage={onOpenPackage}

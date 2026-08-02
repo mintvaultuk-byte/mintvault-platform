@@ -502,6 +502,50 @@ describe("migration runner planning (pure)", () => {
       expect(plan.outOfOrder).toEqual([]);
     });
 
+    /**
+     * The tests above pin DETECTION. This pins the REFUSAL.
+     *
+     * Without it, deleting the `if (plan.outOfOrder.length > 0) throw` block from applyMigrations
+     * leaves `plan.outOfOrder` correctly populated and completely ignored — every detection test
+     * stays green while out-of-order migrations apply silently. Given this repo's history of
+     * 0019/0020/0022/0023 numbering collisions, that is exactly the failure the guard exists for.
+     */
+    it("MIG1 enforcement: applyMigrations REFUSES to apply an out-of-order migration", async () => {
+      const { applyMigrations } = await import("../scripts/db/migrate");
+      const journal = [{ filename: "0040_seed.sql", checksum: "sum-0040", status: "applied" }];
+      const applied: string[] = [];
+      const client = {
+        async query(sql: string, params?: unknown[]) {
+          if (/to_regclass/i.test(sql)) return { rows: [{ reg: "schema_migrations" }] };
+          if (/SELECT filename, checksum, status FROM schema_migrations/i.test(sql)) return { rows: journal.slice() };
+          if (/pg_backend_pid\(\) AS pid/i.test(sql)) return { rows: [{ pid: 1 }] };
+          if (/pg_try_advisory_lock/i.test(sql)) return { rows: [{ got: true }] };
+          if (/FROM pg_locks/i.test(sql)) return { rows: [{ pid: 1, current_pid: 1 }] };
+          if (/pg_advisory_unlock/i.test(sql)) return { rows: [{ unlocked: true }] };
+          if (/INSERT INTO schema_migrations/i.test(sql)) {
+            applied.push(String((params ?? [])[0]));
+            return { rows: [] };
+          }
+          return { rows: [] };
+        },
+      };
+
+      await expect(
+        applyMigrations(client as never, [mkFile("0038"), mkFile("0040", "0040_seed.sql")])
+      ).rejects.toThrow(/[Oo]ut-of-order/);
+
+      // And nothing was journalled — the refusal happens before any migration is executed.
+      expect(applied).toEqual([]);
+    });
+
+    it("MIG1 enforcement: an in-order migration is NOT refused by the guard", async () => {
+      const { planMigrations } = await import("../scripts/db/migrate");
+      const journal = [{ filename: "0039_live.sql", checksum: "sum-0039", status: "applied" }];
+      const plan = await planMigrations(clientWith(journal), [mkFile("0039", "0039_live.sql"), mkFile("0040")]);
+      // The guard must be silent on the valid case, or it would block every legitimate deploy.
+      expect(plan.outOfOrder).toEqual([]);
+    });
+
     it("appliedWatermark ignores journal rows that are not canonical migrations", async () => {
       const { appliedWatermark } = await import("../scripts/db/migrate");
       expect(appliedWatermark(["0030_a.sql", "0040_b.sql", "rollback-0099-x.sql", "junk"])).toBe(40);

@@ -60,7 +60,16 @@ export const FLAG_VALID_MS = 30 * 60 * 1000;
 
 export type ProbeOutcome =
   | { started: true; syncId: string }
-  | { started: false; reason: "already_running"; syncId: string };
+  | { started: false; reason: "already_running"; syncId: string }
+  /**
+   * The environment could not be named, so nothing was written.
+   *
+   * Distinct from `already_running`: the caller must be able to tell "someone else is doing it"
+   * from "we refused, and here is why". Previously both refusals returned the started shape, so
+   * the route replied 202 accepted for a run it had already closed as UNAVAILABLE — the operator
+   * was told a refresh had begun when nothing would ever be written.
+   */
+  | { started: false; reason: "unknown_environment"; syncId: string };
 
 /** Shared preamble: reap abandoned runs, refuse to duplicate an active one, then record the run. */
 async function beginProbeRun(
@@ -196,7 +205,7 @@ export async function collectFlagEvidenceSnapshots(
    */
   if (!mayWriteLabelledEvidence(environment)) {
     await completeRun(db, syncId, "UNAVAILABLE", { errorCode: "unknown_environment" });
-    return begun;
+    return { started: false, reason: "unknown_environment", syncId };
   }
 
   const outcome = await withLease(db, FLAG_SOURCE, syncId, async () => {

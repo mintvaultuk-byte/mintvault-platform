@@ -228,7 +228,9 @@ export async function collectDatabaseEvidence(
 
 export type DatabaseOutcome =
   | { started: true; syncId: string }
-  | { started: false; reason: "already_running"; syncId: string };
+  | { started: false; reason: "already_running"; syncId: string }
+  /** Environment unnameable, so nothing was written and the run is already closed UNAVAILABLE. */
+  | { started: false; reason: "unknown_environment"; syncId: string };
 
 /** Collect and persist database evidence for the connected environment. */
 export async function collectAndStoreDatabaseEvidence(
@@ -261,7 +263,9 @@ export async function collectAndStoreDatabaseEvidence(
    */
   if (!mayWriteLabelledEvidence(environment)) {
     await completeRun(db, syncId, "UNAVAILABLE", { errorCode: "unknown_environment" });
-    return { started: true, syncId };
+    // NOT `started: true` — the run is already closed. Reporting it as started told the operator
+    // a refresh had begun when nothing would ever be written.
+    return { started: false, reason: "unknown_environment", syncId };
   }
 
   const outcome = await withLease(db, DATABASE_SOURCE, syncId, async () => {

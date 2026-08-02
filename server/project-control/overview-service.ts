@@ -109,6 +109,7 @@ export async function buildComposedOverview(db: EvidenceDb, now: Date = new Date
   const activeRun: SyncRun | null = await getActiveRun(db, GITHUB_SOURCE);
   const lastGoodRun: SyncRun | null = await getLastSuccessfulRun(db, GITHUB_SOURCE);
   const repoPayload = (repoGood?.payload ?? {}) as Record<string, unknown>;
+  const ciConclusion = await resolveCiConclusion(db, repoGood?.commitSha ?? null);
 
   const repository: RepositorySection = {
     mainSha: repoGood?.commitSha ?? null,
@@ -117,7 +118,7 @@ export async function buildComposedOverview(db: EvidenceDb, now: Date = new Date
     // separate open count must read "unknown", never silently report every PR ever opened.
     openPullRequests: numberOrNull(repoPayload.openPullRequestCount),
     totalPullRequests: numberOrNull(repoPayload.pullRequestCount),
-    ciConclusion: null,
+    ciConclusion,
     syncState: latestRun?.state ?? null,
     lastSuccessfulSyncAt: lastGoodRun?.completedAt ? lastGoodRun.completedAt.toISOString() : null,
     activeSyncId: activeRun?.syncId ?? null,
@@ -279,7 +280,13 @@ export async function buildComposedOverview(db: EvidenceDb, now: Date = new Date
     resolveGate("MIGRATION_AUTHORED", null),
     resolveGate(
       "MIGRATION_APPLIED_STAGING",
-      observation(
+      // `pendingCount === null` means "we have not looked". `null === 0` is false, so an
+      // unobserved ledger resolved NOT_SATISFIED — rendering "we have not looked" as "it has not
+      // happened", the exact inversion this module forbids one field above. No observation at all
+      // yields UNKNOWN.
+      stagingDb?.pendingCount === null || stagingDb?.pendingCount === undefined
+        ? null
+        : observation(
         DATABASE_SOURCE,
         stagingDb?.pendingCount === 0,
         stagingDb?.meta ?? null,
@@ -365,6 +372,39 @@ export async function buildComposedOverview(db: EvidenceDb, now: Date = new Date
 }
 
 /** The repository entity id is the configured repo; find whichever one has evidence. */
+/**
+ * The CI verdict for a specific commit.
+ *
+ * `ciConclusion` was hard-coded `null`, so the PR/CI badge read "Unknown" for ever — even though
+ * the sync writes one `workflow_run` snapshot per run with `status: run.conclusion`. The old
+ * `/live-evidence` path derived a verdict from those runs in the browser; the cutover to stored
+ * evidence dropped it and nothing replaced it. That was a capability regression on a dashboard
+ * whose stated purpose includes "CI never proves deployment" — it could not show CI at all.
+ *
+ * Scoped to the head commit ON PURPOSE. "Some workflow somewhere failed" is not a fact about the
+ * code currently on main; a red run against an abandoned branch would otherwise show as a red CI
+ * badge for the repository indefinitely. No head SHA means no question to answer, so: null.
+ *
+ * A single failure wins over any number of successes — CI is a conjunction, not a vote.
+ */
+async function resolveCiConclusion(db: EvidenceDb, headSha: string | null): Promise<string | null> {
+  if (!headSha) return null;
+  const res = await db.query(
+    `SELECT DISTINCT ON (entity_id) status
+       FROM pc_evidence_snapshots
+      WHERE source_type=$1 AND entity_type='workflow_run' AND commit_sha=$2
+      ORDER BY entity_id, observed_at DESC, id DESC`,
+    [GITHUB_SOURCE, headSha]
+  );
+  const rows = res.rows as { status: string | null }[];
+  if (rows.length === 0) return null;
+  const states = rows.map((r) => (r.status ?? "").toLowerCase());
+  if (states.some((s) => s === "failure" || s === "timed_out" || s === "startup_failure")) return "failure";
+  if (states.some((s) => s === "success")) return "success";
+  // Queued, in-progress or cancelled only: a real observation, but not yet a verdict.
+  return null;
+}
+
 async function getLatestSnapshotForAnyRepo(db: EvidenceDb): Promise<StoredSnapshot | null> {
   const res = await db.query(
     `SELECT * FROM pc_evidence_snapshots

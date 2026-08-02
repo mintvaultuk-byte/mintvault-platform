@@ -20,7 +20,7 @@
  * endpoint chosen, not of anything the browser can promise.
  */
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(__dirname, "..");
@@ -53,18 +53,47 @@ describe("POLL1 — ordinary dashboard reads make zero external calls", () => {
     expect(routesRequestedBy(page)).toContain("/composed-overview");
   });
 
-  it("no Project Control page REQUESTS /live-evidence", () => {
+  /**
+   * Every Project Control client file, discovered — not hand-listed.
+   *
+   * The previous version checked six named files. A NEW component polling /live-evidence — the
+   * exact regression these tests exist to prevent — was caught by nothing, because it was not on
+   * the list. A list that must be maintained by the person introducing the regression is not a
+   * guard.
+   */
+  const projectControlClientFiles = (): string[] => {
+    const out: string[] = [];
+    const dirs = [
+      "client/src/pages/admin",
+      "client/src/components/admin/project-control",
+      "client/src/hooks/project-control",
+      "client/src/lib/project-control",
+    ];
+    for (const dir of dirs) {
+      for (const f of readdirSync(join(ROOT, dir))) {
+        if (!/\.(ts|tsx)$/.test(f)) continue;
+        if (dir.endsWith("pages/admin") && !f.startsWith("project-control")) continue;
+        out.push(join(dir, f));
+      }
+    }
+    return out;
+  };
+
+  it("the discovery actually finds the Project Control client surface", () => {
+    const files = projectControlClientFiles();
+    // Guards against a rename silently emptying the set and making every check below vacuous.
+    expect(files.length).toBeGreaterThan(10);
+    expect(files.some((f) => f.endsWith("compact-live-evidence.tsx"))).toBe(true);
+    expect(files.some((f) => f.endsWith("use-github-sync.ts"))).toBe(true);
+  });
+
+  it("no Project Control client file REQUESTS /live-evidence", () => {
     // Matches an actual request, not the string anywhere in the file — a comment explaining why
     // the route was abandoned must not fail the test that proves it was abandoned.
-    const requests = /(?:pcGet(?:<[^>]*>)?\(|apiRequest\([^)]*|queryKey:\s*\[)[^)\]]*live-evidence/;
-    for (const file of [
-      "client/src/pages/admin/project-control.tsx",
-      "client/src/pages/admin/project-control-shop-launch.tsx",
-      "client/src/pages/admin/project-control-scanner.tsx",
-      "client/src/components/admin/project-control/project-control-dashboard.tsx",
-      "client/src/components/admin/project-control/compact-live-evidence.tsx",
-      "client/src/components/admin/project-control/executive-summary.tsx",
-    ]) {
+    // Backtick and identifier forms too — `pcGet(`/live-evidence`)` and `pcGet(ROUTE)` evaded a
+    // double-quote-only regex.
+    const requests = /(?:pcGet(?:<[^>]*>)?\(|apiRequest\(|queryKey:\s*\[)[^)\]]*live-evidence/;
+    for (const file of projectControlClientFiles()) {
       expect(requests.test(read(file)), `${file} still requests /live-evidence`).toBe(false);
     }
   });
@@ -90,12 +119,17 @@ describe("POLL1 — ordinary dashboard reads make zero external calls", () => {
 });
 
 describe("UI-COMP1 — readiness and contradiction truth is never rebuilt in the browser", () => {
-  const clientFiles = [
-    "client/src/components/admin/project-control/compact-live-evidence.tsx",
-    "client/src/components/admin/project-control/executive-summary.tsx",
-    "client/src/components/admin/project-control/project-control-dashboard.tsx",
-    "client/src/pages/admin/project-control.tsx",
-  ];
+  const clientFiles = (): string[] => {
+    const out: string[] = [];
+    for (const dir of ["client/src/pages/admin", "client/src/components/admin/project-control"]) {
+      for (const f of readdirSync(join(ROOT, dir))) {
+        if (!/\.(ts|tsx)$/.test(f)) continue;
+        if (dir.endsWith("pages/admin") && !f.startsWith("project-control")) continue;
+        out.push(join(dir, f));
+      }
+    }
+    return out;
+  };
 
   /**
    * The exact expression the browser used to use to decide whether evidence contradicted itself —
@@ -103,7 +137,7 @@ describe("UI-COMP1 — readiness and contradiction truth is never rebuilt in the
    * and flag contradictions the server engine covers.
    */
   it("no client file re-derives a contradiction from deployment comparisons", () => {
-    for (const file of clientFiles) {
+    for (const file of clientFiles()) {
       const src = read(file);
       expect(src, `${file} recomputes contradictions`).not.toContain("stagingMatchesMain === false");
       expect(src, `${file} recomputes contradictions`).not.toContain("productionMatchesMain === false");
@@ -118,7 +152,7 @@ describe("UI-COMP1 — readiness and contradiction truth is never rebuilt in the
   });
 
   it("no client file counts open pull requests or decides a CI verdict itself", () => {
-    for (const file of clientFiles) {
+    for (const file of clientFiles()) {
       const src = read(file);
       expect(src, `${file} counts PRs in the browser`).not.toMatch(/pullRequests\s*\.filter/);
       expect(src, `${file} decides CI in the browser`).not.toMatch(/workflowRuns\s*\.some/);

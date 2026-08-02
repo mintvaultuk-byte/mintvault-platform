@@ -716,3 +716,53 @@ describe("FIX 3 — flag evidence freshness and environment", () => {
     expect(staging.meta.lastKnownGoodAt).not.toBeNull();
   });
 });
+
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+ * The fail-closed write guard, tested AT THE CALLER — not just as a helper.
+ *
+ * The previous defect in this exact area was that `mayWriteLabelledEvidence` existed, was
+ * documented as mandatory and was unit-tested, and had no caller. Testing only the helper again
+ * would repeat that mistake: what matters is that the WRITER refuses.
+ * ══════════════════════════════════════════════════════════════════════════════════════════ */
+describe("evidence writers refuse to label rows when the environment is unknown", () => {
+  it("writes NO flag snapshot, closes the run UNAVAILABLE, and reports the refusal", async () => {
+    const { collectFlagEvidenceSnapshots } = await import("../server/project-control/probe-persistence");
+    // The exact configuration of both Fly apps today: NODE_ENV=production, PROJECT_CONTROL_ENV unset.
+    const outcome = await collectFlagEvidenceSnapshots(
+      db,
+      { triggerType: "manual" },
+      { NODE_ENV: "production" } as NodeJS.ProcessEnv
+    );
+
+    expect(outcome.started, "a refusal must not report itself as started").toBe(false);
+    expect((outcome as { reason?: string }).reason).toBe("unknown_environment");
+
+    const snapshots = await db.query("SELECT count(*)::int AS n FROM pc_evidence_snapshots WHERE sync_id=$1", [
+      outcome.syncId,
+    ]);
+    expect(snapshots.rows[0].n, "an unknown environment must write no labelled evidence").toBe(0);
+
+    const run = await db.query("SELECT state, error_code FROM pc_sync_runs WHERE sync_id=$1", [outcome.syncId]);
+    expect(run.rows[0].state).toBe("UNAVAILABLE");
+    expect(run.rows[0].error_code).toBe("unknown_environment");
+
+    // Terminal, so it cannot wedge the next refresh, and no lease was taken.
+    const leases = await db.query("SELECT count(*)::int AS n FROM pc_sync_leases");
+    expect(leases.rows[0].n).toBe(0);
+  });
+
+  it("still writes normally when the environment IS named", async () => {
+    const { collectFlagEvidenceSnapshots } = await import("../server/project-control/probe-persistence");
+    const outcome = await collectFlagEvidenceSnapshots(
+      db,
+      { triggerType: "manual" },
+      { PROJECT_CONTROL_ENV: "staging" } as NodeJS.ProcessEnv
+    );
+
+    expect(outcome.started).toBe(true);
+    const snapshots = await db.query("SELECT count(*)::int AS n FROM pc_evidence_snapshots WHERE sync_id=$1", [
+      outcome.syncId,
+    ]);
+    expect(snapshots.rows[0].n, "a named environment must write its flag evidence").toBeGreaterThan(0);
+  });
+});

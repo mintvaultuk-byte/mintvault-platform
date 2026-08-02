@@ -56,6 +56,8 @@ const ABSOLUTE_SESSION_MS = 7 * 24 * 60 * 60 * 1000;
 let cluster: DisposablePostgres17;
 let server: http.Server | undefined;
 let base = "";
+/** The app with the Project Control router attached — the route inventory is read from it. */
+let registeredApp: Express;
 
 /** Must match the real `users` table: storage.getUserByEmail selects every column. */
 const USERS_DDL = `
@@ -100,6 +102,7 @@ beforeAll(async () => {
 
   const { registerProjectControlRoutes } = await import("../server/routes/admin/project-control");
   const app: Express = express();
+  registeredApp = app;
   app.set("trust proxy", true);
   app.use(express.json());
   app.use(session({ secret: process.env.SESSION_SECRET!, resave: false, saveUninitialized: false }));
@@ -278,31 +281,52 @@ describe("every route enforces the same boundary", () => {
    * Derived from the router source rather than hand-listed, so a new route cannot be added without
    * being covered here. The sibling suite compares only COUNTS, which a rename would satisfy.
    */
-  const ROUTES: [string, string][] = (() => {
-    const src = require("node:fs").readFileSync("server/routes/admin/project-control.ts", "utf8") as string;
-    const re = /app\.(get|post|put|delete|patch)\(\s*`\$\{BASE\}([^`]*)`/g;
+  /**
+   * Enumerated from the LIVE Express router stack, not from source text.
+   *
+   * The previous version regex-matched ``app.get(`${BASE}...`)``. A route registered with a plain
+   * string path — `app.get("/api/admin/project-control/export", handler)` — was invisible to it,
+   * AND to the `=== 39` count guard, so an ungated route could ship with a fully green
+   * authorization matrix. Reading the router's own stack means a route cannot exist without being
+   * swept, however it was written.
+   */
+  const routes = (): [string, string][] => {
+    // Express 5 exposes `app.router`; Express 4 used the private `app._router`. Accept either so
+    // an upgrade cannot silently empty the inventory (which would make every sweep vacuous).
+    const holder = registeredApp as unknown as {
+      router?: { stack?: unknown[] };
+      _router?: { stack?: unknown[] };
+    };
+    const stack = holder.router?.stack ?? holder._router?.stack ?? [];
     const out: [string, string][] = [];
-    for (const m of src.matchAll(re)) {
-      const path = m[2]
-        .replace(/:key/g, "example")
-        .replace(/:dependsOn/g, "example-dep")
-        .replace(/:syncId/g, "00000000-0000-4000-8000-000000000000")
-        .replace(/:id/g, "1");
-      out.push([m[1].toUpperCase(), `${P}${path}`]);
+    for (const layer of stack as { route?: { path?: string; methods?: Record<string, boolean> } }[]) {
+      const path = layer.route?.path;
+      if (typeof path !== "string" || !path.startsWith(P)) continue;
+      for (const [method, on] of Object.entries(layer.route?.methods ?? {})) {
+        if (!on) continue;
+        const concrete = path
+          .replace(/:dependsOn/g, "example-dep")
+          .replace(/:syncId/g, "00000000-0000-4000-8000-000000000000")
+          .replace(/:key/g, "example")
+          .replace(/:id/g, "1");
+        out.push([method.toUpperCase(), concrete]);
+      }
     }
     return out;
-  })();
+  };
 
-  it("discovers every registered route from source", () => {
-    expect(ROUTES.length).toBe(39);
+  it("discovers every registered route from the live router", () => {
+    expect(routes().length).toBe(39);
   });
 
   it("refuses an ordinary admin on EVERY route with the role denial, never an expiry", async () => {
     const cookie = await forge("ordinaryadmin");
     const failures: string[] = [];
-    for (const [method, path] of ROUTES) {
-      // Distinct IPs so the expensive limiter (12/min) cannot turn a sweep into 429s.
-      const r = await call(cookie, method, path, `198.51.100.${ROUTES.indexOf([method, path] as never) % 200}`);
+    // Distinct IPs so the expensive limiter (12/min) cannot turn a sweep into 429s. The previous
+    // form used `ROUTES.indexOf([method, path])` — indexOf on a freshly-built array literal is
+    // reference equality, so it was always -1 and every request shared the IP "198.51.100.-1".
+    for (const [i, [method, path]] of routes().entries()) {
+      const r = await call(cookie, method, path, `198.51.100.${i % 200}`);
       if (r.status !== 403 || r.error !== "Forbidden: Super Admin required") {
         failures.push(`${method} ${path} -> ${r.status} ${r.error}`);
       }
@@ -312,7 +336,7 @@ describe("every route enforces the same boundary", () => {
 
   it("refuses an anonymous caller on EVERY route", async () => {
     const failures: string[] = [];
-    for (const [method, path] of ROUTES) {
+    for (const [method, path] of routes()) {
       const r = await call("", method, path);
       if (r.status !== 401) failures.push(`${method} ${path} -> ${r.status} ${r.error}`);
     }

@@ -8,9 +8,13 @@ import { EvidenceStateBadge } from "./evidence-state";
 function deploymentLabel(
   commit: string | null | undefined,
   matchesMain: boolean | null | undefined,
-  available: boolean
+  /** "loaded" = we have a DTO; "loading" = still in flight; "failed" = the request errored. */
+  status: "loaded" | "loading" | "failed"
 ) {
-  if (!available) return { value: "Unavailable", foot: "Evidence service could not be read" };
+  // These were one boolean, so a request still in flight asserted "Evidence service could not be
+  // read" — a false statement, and one the evidence strip below contradicted on the same screen.
+  if (status === "loading") return { value: "Loading", foot: "Reading stored evidence" };
+  if (status === "failed") return { value: "Unavailable", foot: "Evidence service could not be read" };
   if (!commit) return { value: "Unknown", foot: "No commit was returned" };
   return {
     value: matchesMain === false ? "Drift" : matchesMain === true ? "Aligned" : "Unverified",
@@ -22,6 +26,7 @@ export function ProjectControlExecutiveSummary({
   overview,
   shopLaunch,
   evidence,
+  evidenceUnavailable,
   sync,
   evidenceState,
   onOpenPackage,
@@ -31,6 +36,8 @@ export function ProjectControlExecutiveSummary({
   overview: ProjectControlOverview;
   shopLaunch: ShopLaunchView;
   evidence: OverviewDto | undefined;
+  /** True only when the evidence request FAILED — not merely while it is in flight. */
+  evidenceUnavailable: boolean;
   sync: SyncStatus | null;
   evidenceState: string;
   onOpenPackage: (key: string) => void;
@@ -51,16 +58,13 @@ export function ProjectControlExecutiveSummary({
    */
   const stagingApp = evidence?.applications.find((a) => a.environment === "staging");
   const productionApp = evidence?.applications.find((a) => a.environment === "production");
-  const staging = deploymentLabel(
-    stagingApp?.commit,
-    evidence?.executive.deploymentAligned,
-    Boolean(evidence)
-  );
-  const production = deploymentLabel(
-    productionApp?.commit,
-    evidence?.executive.productionAligned,
-    Boolean(evidence)
-  );
+  const evidenceStatus: "loaded" | "loading" | "failed" = evidence
+    ? "loaded"
+    : evidenceUnavailable
+      ? "failed"
+      : "loading";
+  const staging = deploymentLabel(stagingApp?.commit, evidence?.executive.deploymentAligned, evidenceStatus);
+  const production = deploymentLabel(productionApp?.commit, evidence?.executive.productionAligned, evidenceStatus);
   return (
     <section aria-labelledby="pc-executive-heading" className="pc-section">
       <div className="pc-section-heading">

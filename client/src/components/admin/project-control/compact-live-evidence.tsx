@@ -111,7 +111,9 @@ export function CompactLiveEvidence({
           </div>
           <div>
             <small>Flags</small>
-            <strong>{evidence ? `${evidence.flags.length} reported` : orUnknown(null)}</strong>
+            {/* The server OMITS flags it has never observed, so an empty array means "no evidence",
+                not "we looked and found none". Rendering "0 reported" made those identical. */}
+            <strong>{evidence && evidence.flags.length > 0 ? `${evidence.flags.length} reported` : orUnknown(null)}</strong>
             <EvidenceStateBadge state={evidence && evidence.flags.length > 0 ? "current" : "unknown"} />
           </div>
           <div>
@@ -121,7 +123,7 @@ export function CompactLiveEvidence({
             <strong>
               {stagingDb?.appliedCount === null || stagingDb?.appliedCount === undefined
                 ? orUnknown(null)
-                : `${stagingDb.appliedCount} applied · ${stagingDb.pendingCount ?? "?"} pending`}
+                : `${stagingDb.appliedCount} applied · ${stagingDb.pendingCount ?? "unknown"} pending`}
             </strong>
             <EvidenceStateBadge state={evidenceStateFrom(stagingDb?.meta.freshness) ?? "unknown"} />
           </div>
@@ -142,6 +144,13 @@ export function CompactLiveEvidence({
                 <strong>{c.code}</strong> — {c.summary}
               </p>
             ))}
+          </div>
+        )}
+        {/* Rendered independently of contradictions. A binding cap from an UNAVAILABLE or UNKNOWN
+            source is exactly the case an operator needs explained, and nesting this inside the
+            contradiction block meant those two were computed, sent, and never shown. */}
+        {caps.filter((cap) => cap.binding).length > 0 && (
+          <div className="pc-contradiction" data-testid="pc-readiness-caps">
             {caps
               .filter((cap) => cap.binding)
               .map((cap) => (

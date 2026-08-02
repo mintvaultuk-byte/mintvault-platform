@@ -262,6 +262,28 @@ const seedApplySchema = z.object({ confirmationToken: z.string().min(16).max(200
  * on, and anything unrecognised falls through to the generic redacted handler rather than being
  * echoed. No SQL, stack trace, driver error, database name or connection string can leave here.
  */
+/**
+ * Report a probe outcome honestly.
+ *
+ * These routes hard-coded `state: "RUNNING", unavailable: false` and derived `accepted` from
+ * `started`. When the collector REFUSED — because the environment could not be named, so nothing
+ * would ever be written — they still answered 202/accepted for a run already closed as
+ * UNAVAILABLE. The operator was told a refresh had begun. `/sync/github` has had an honest
+ * `unavailable` branch all along; these now match it.
+ */
+function probeOutcomeBody(outcome: { started: boolean; reason?: string; syncId: string }) {
+  const refused = !outcome.started && outcome.reason === "unknown_environment";
+  return {
+    syncId: outcome.syncId,
+    state: refused ? "UNAVAILABLE" : "RUNNING",
+    accepted: outcome.started,
+    alreadyRunning: !outcome.started && outcome.reason === "already_running",
+    unavailable: refused,
+    errorCode: refused ? "unknown_environment" : null,
+    requestedAt: new Date().toISOString(),
+  };
+}
+
 function seedFail(res: Response, error: unknown): void {
   if (error instanceof SeedApplyError) {
     const status =
@@ -967,7 +989,10 @@ export function registerProjectControlRoutes(app: Express): void {
       const outcome = await collectApplicationEvidence(pool, { triggerType: "manual", actor: actor_(req) });
       return res.status(202).json({
         syncId: outcome.syncId,
-        state: outcome.started ? "RUNNING" : "RUNNING",
+        // Both ternary branches were "RUNNING". Application evidence has no unknown-environment
+        // refusal — it labels by the allowlisted probe TARGET, not by this process's env — so the
+        // only non-started case really is already_running.
+        state: "RUNNING",
         accepted: outcome.started,
         alreadyRunning: !outcome.started,
         unavailable: false,
@@ -987,14 +1012,7 @@ export function registerProjectControlRoutes(app: Express): void {
   app.post(`${BASE}/sync/flags`, ...gated, projectControlWriteLimit, async (req, res) => {
     try {
       const outcome = await collectFlagEvidenceSnapshots(pool, { triggerType: "manual", actor: actor_(req) });
-      return res.status(202).json({
-        syncId: outcome.syncId,
-        state: "RUNNING",
-        accepted: outcome.started,
-        alreadyRunning: !outcome.started,
-        unavailable: false,
-        requestedAt: new Date().toISOString(),
-      });
+      return res.status(202).json(probeOutcomeBody(outcome));
     } catch (error) {
       fail(res, error);
     }
@@ -1010,14 +1028,7 @@ export function registerProjectControlRoutes(app: Express): void {
   app.post(`${BASE}/sync/databases`, ...gated, projectControlWriteLimit, async (req, res) => {
     try {
       const outcome = await collectAndStoreDatabaseEvidence(pool, { triggerType: "manual", actor: actor_(req) });
-      return res.status(202).json({
-        syncId: outcome.syncId,
-        state: "RUNNING",
-        accepted: outcome.started,
-        alreadyRunning: !outcome.started,
-        unavailable: false,
-        requestedAt: new Date().toISOString(),
-      });
+      return res.status(202).json(probeOutcomeBody(outcome));
     } catch (error) {
       fail(res, error);
     }

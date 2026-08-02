@@ -1,6 +1,9 @@
 # Project Control — real browser responsive proof
 
-**Produced:** 2026-08-02 · **HEAD:** `5fefee78` (+ fixture `.admin-root` fix)
+**Produced:** 2026-08-02 · **Re-measured at HEAD `312e7d96`** after the FIX 5/FIX 6 evidence-layer
+cutover rewrote `compact-live-evidence.tsx` (144 lines). The table below and the five PNGs are from
+that re-run, not from the original `5fefee78` measurement — a proof pinned to superseded markup is
+not a proof of the current page.
 **Tool:** Google Chrome 151.0.7922.71 (already installed on the build machine) driven over the
 DevTools Protocol by `scripts/project-control/responsive-proof.mjs`, using the `ws` package that
 was already a dependency. **No new npm dependency was added.**

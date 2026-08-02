@@ -384,6 +384,22 @@ export function computeGateReadiness(results: GateResult[], contradictions: Cont
       binding: false,
     });
   }
+  /**
+   * A source that reports its OWN evidence as contradictory.
+   *
+   * `resolveGate` produces the CONTRADICTORY state (a database whose schema drifted, say), but
+   * only the `contradictions` ARRAY was consulted here — so such a gate reduced the numerator by
+   * one and imposed no cap at all, and did not appear in any integrity list. Same condition, same
+   * ceiling, whichever way it arrives.
+   */
+  if (results.some((r) => r.state === "CONTRADICTORY") && !applicable.some((c) => c.code === "CONTRADICTORY_EVIDENCE")) {
+    applicable.push({
+      code: "CONTRADICTORY_EVIDENCE",
+      cap: CAP_CONTRADICTION,
+      reason: `An evidence source reports its own evidence as contradictory. Readiness cannot exceed ${CAP_CONTRADICTION}% while a contradiction is unresolved.`,
+      binding: false,
+    });
+  }
   if (results.some((r) => r.state === "UNAVAILABLE")) {
     applicable.push({
       code: "UNAVAILABLE_EVIDENCE",
@@ -403,8 +419,11 @@ export function computeGateReadiness(results: GateResult[], contradictions: Cont
 
   if (applicable.length > 0) {
     const strictest = Math.min(...applicable.map((c) => c.cap));
+    const before = percent;
     percent = Math.min(percent, strictest);
-    for (const c of applicable) c.binding = c.cap === strictest;
+    // `binding` means "this cap actually determined the number". Marking the strictest cap binding
+    // when the score was already below it told the operator a ceiling was in force that was not.
+    for (const c of applicable) c.binding = c.cap === strictest && before > strictest;
   }
 
   return {
