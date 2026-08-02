@@ -28,6 +28,7 @@ import {
   Library,
   PackageCheck,
   Share2,
+  Radar,
 } from "lucide-react";
 import GrainOverlay from "./grain-overlay";
 import InstallAppButton from "../install-app-button";
@@ -129,7 +130,14 @@ const NAV: NavSection[] = [
   },
   {
     heading: "System",
-    items: [{ href: "/admin/catalogue", label: "Catalogue Manager", icon: Library }],
+    items: [
+      { href: "/admin/catalogue", label: "Catalogue Manager", icon: Library },
+      // Project Control. An href entry, not a tab key: it is a standalone route, and a tab-keyed
+      // entry would land on /admin and drop the destination. Server-side it is Super-Admin-only
+      // and behind the fail-closed activation flag, so a non-super-admin who follows this link
+      // gets an explicit "not authorised" screen rather than data.
+      { href: "/admin/project-control", label: "Project Control", icon: Radar },
+    ],
   },
 ];
 
