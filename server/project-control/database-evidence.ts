@@ -125,7 +125,21 @@ export function repositoryMigrations(dir = join(process.cwd(), "migrations")): s
   }
 }
 
-const PC_TABLES = [
+/**
+ * Every Project Control table the numbered migrations create, in migration order.
+ *
+ * This list was previously hand-copied from 0030 and had drifted in BOTH directions: it named
+ * `pc_audit`, which no migration anywhere creates (so the count could never reach full), and it
+ * omitted `pc_status_events`, which 0030 does create — meaning the real audit ledger was never
+ * checked for presence. `pc_status_events` deliberately carries no foreign key, so the FK check
+ * could not cover it either; nothing would have noticed had it been dropped.
+ *
+ * tests/project-control-database-evidence.integration.test.ts derives the expected set from the
+ * migration SQL in BOTH directions, so a future migration that adds or renames a pc_ table turns
+ * that test RED rather than silently shrinking this check.
+ */
+export const PC_TABLES = [
+  // migration 0030 — programme structure
   "pc_nodes",
   "pc_work_packages",
   "pc_evidence",
@@ -134,7 +148,15 @@ const PC_TABLES = [
   "pc_deployments",
   "pc_test_runs",
   "pc_prompts",
-  "pc_audit",
+  "pc_status_events",
+  // migration 0039 — live evidence backbone
+  "pc_sync_runs",
+  "pc_sync_leases",
+  "pc_sync_checkpoints",
+  "pc_evidence_snapshots",
+  // migration 0040 — seed reconciliation
+  "pc_seed_state",
+  "pc_seed_runs",
 ];
 
 /**
@@ -174,9 +196,7 @@ export async function collectDatabaseEvidence(
     let appliedFilenames: string[] = [];
     let checksumMismatches: string[] = [];
     if (journalPresent) {
-      const applied = await db.query(
-        `SELECT filename, status FROM schema_migrations ORDER BY filename`
-      );
+      const applied = await db.query(`SELECT filename, status FROM schema_migrations ORDER BY filename`);
       const rows = applied.rows as { filename: string; status: string }[];
       appliedFilenames = rows.filter((r) => r.status === "applied").map((r) => r.filename);
       // A row that exists but is not 'applied' is a crashed or half-run migration — a real
