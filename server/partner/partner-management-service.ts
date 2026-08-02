@@ -856,6 +856,15 @@ function inviteLink(token: string): string {
   return `${APP_BASE_URL}/partner/invite?token=${encodeURIComponent(token)}`;
 }
 
+function adminInviteLinkCopyAllowed(): boolean {
+  if (process.env.PARTNER_INVITE_ALLOW_ADMIN_LINK_COPY !== "true") return false;
+  const appUrl = process.env.APP_URL ?? "";
+  const appName = process.env.FLY_APP_NAME ?? "";
+  const staging = appName === "mintvault-v2" || appUrl.includes("mintvault-v2.fly.dev");
+  const local = process.env.NODE_ENV !== "production" || appUrl.includes("localhost") || appUrl.includes("127.0.0.1");
+  return staging || local;
+}
+
 async function activeOwnerCount(tenantId: string, exceptUserId?: string): Promise<number> {
   const { rows } = await partnerAdminQuery<{ n: number }>(
     `SELECT count(*)::int AS n
@@ -948,7 +957,7 @@ async function createInvitationRecord(
     invitationId: rows[0].id,
     deliveryStatus: "DELIVERY_NOT_CONFIGURED",
     delivery: { email, token, partnerName: rows[0].partner_name, roleCode, expiresAt },
-    invitationLink: process.env.PARTNER_INVITE_ALLOW_ADMIN_LINK_COPY === "true" ? inviteLink(token) : undefined,
+    invitationLink: adminInviteLinkCopyAllowed() ? inviteLink(token) : undefined,
   };
 }
 
@@ -1206,18 +1215,24 @@ export async function listPartnerUsers(partnerId: string) {
   const { rows } = await partnerAdminQuery(
     `SELECT u.id, u.first_name, u.last_name, u.email, u.status, u.last_login_at, u.created_at,
             u.mfa_enabled, u.mfa_required,
+            (u.password_hash IS NOT NULL) AS password_configured,
+            (SELECT count(*)::int FROM partner_sessions s
+              WHERE s.tenant_id = u.tenant_id AND s.user_id = u.id AND s.revoked_at IS NULL
+                AND s.absolute_expires_at > now()) AS active_sessions,
             COALESCE(json_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '[]') AS role_codes,
-            li.status AS invitation_status, li.expires_at AS invitation_expires_at, li.delivered_at AS invitation_delivered_at
+            li.status AS invitation_status, li.expires_at AS invitation_expires_at,
+            li.delivered_at AS invitation_delivered_at, li.consumed_at AS invitation_consumed_at,
+            li.created_at AS invitation_created_at
        FROM partner_users u
        LEFT JOIN partner_user_roles ur ON ur.user_id = u.id
        LEFT JOIN partner_roles r ON r.id = ur.role_id
        LEFT JOIN LATERAL (
-         SELECT status, expires_at, delivered_at FROM partner_invitations i
+         SELECT status, expires_at, delivered_at, consumed_at, created_at FROM partner_invitations i
           WHERE i.tenant_id = u.tenant_id AND i.user_id = u.id
           ORDER BY i.created_at DESC LIMIT 1
        ) li ON true
       WHERE u.tenant_id = $1
-      GROUP BY u.id, li.status, li.expires_at, li.delivered_at
+      GROUP BY u.id, li.status, li.expires_at, li.delivered_at, li.consumed_at, li.created_at
       ORDER BY u.created_at DESC, u.email ASC
       LIMIT 500`,
     [org.id]
@@ -1227,6 +1242,112 @@ export async function listPartnerUsers(partnerId: string) {
       ...u,
       role: displayAdminRole(u.role_codes ?? []),
       role_codes: undefined,
+    })),
+  };
+}
+
+export interface PartnerLoginReadiness {
+  organisationActive: boolean;
+  userActive: boolean;
+  invitationValid: boolean;
+  passwordConfigured: boolean;
+  loginEnabled: boolean;
+  portalEnabled: boolean;
+  blockedReasons: string[];
+}
+
+function buildLoginReadiness(
+  row: {
+    org_status: string;
+    user_status: string;
+    password_configured: boolean;
+    invitation_status: string | null;
+    invitation_expires_at: string | null;
+  },
+  portalEnabled: boolean
+): PartnerLoginReadiness {
+  const organisationActive = row.org_status === "ACTIVE";
+  const userActive = row.user_status === "ACTIVE";
+  const passwordConfigured = row.password_configured === true;
+  const invitationValid =
+    !!row.invitation_status &&
+    ["PENDING", "SENT", "DELIVERY_FAILED"].includes(row.invitation_status) &&
+    !!row.invitation_expires_at &&
+    new Date(row.invitation_expires_at).getTime() > Date.now();
+  const blockedReasons: string[] = [];
+  if (!portalEnabled) blockedReasons.push("Partner portal is disabled.");
+  if (!organisationActive) blockedReasons.push(`Organisation is ${row.org_status}.`);
+  if (!userActive) blockedReasons.push(`Partner user is ${row.user_status}.`);
+  if (!passwordConfigured) {
+    blockedReasons.push(
+      invitationValid
+        ? "Partner must accept the current invitation and create a password."
+        : "No valid invitation is available for the partner to create a password."
+    );
+  }
+  return {
+    organisationActive,
+    userActive,
+    invitationValid,
+    passwordConfigured,
+    loginEnabled: portalEnabled && organisationActive && userActive && passwordConfigured,
+    portalEnabled,
+    blockedReasons,
+  };
+}
+
+export async function getPartnerOnboardingReadiness(partnerId: string) {
+  const org = await loadPartner(partnerId);
+  let portalEnabled = false;
+  try {
+    const { resolveGlobalFlag } = await import("./flags");
+    portalEnabled = await resolveGlobalFlag("partner_portal_enabled");
+  } catch {
+    portalEnabled = false;
+  }
+  const { rows } = await partnerAdminQuery(
+    `SELECT u.id, u.first_name, u.last_name, u.email, u.status AS user_status,
+            o.status AS org_status, u.last_login_at, (u.password_hash IS NOT NULL) AS password_configured,
+            COALESCE(json_agg(r.code ORDER BY r.code) FILTER (WHERE r.code IS NOT NULL), '[]') AS role_codes,
+            (SELECT count(*)::int FROM partner_sessions s
+              WHERE s.tenant_id = u.tenant_id AND s.user_id = u.id AND s.revoked_at IS NULL
+                AND s.absolute_expires_at > now()) AS active_sessions,
+            li.status AS invitation_status, li.expires_at AS invitation_expires_at,
+            li.delivered_at AS invitation_delivered_at, li.consumed_at AS invitation_consumed_at,
+            li.created_at AS invitation_created_at
+       FROM partner_users u
+       JOIN partner_organisations o ON o.id = u.tenant_id
+       LEFT JOIN partner_user_roles ur ON ur.user_id = u.id
+       LEFT JOIN partner_roles r ON r.id = ur.role_id
+       LEFT JOIN LATERAL (
+         SELECT status, expires_at, delivered_at, consumed_at, created_at FROM partner_invitations i
+          WHERE i.tenant_id = u.tenant_id AND i.user_id = u.id
+          ORDER BY i.created_at DESC LIMIT 1
+       ) li ON true
+      WHERE u.tenant_id = $1
+      GROUP BY u.id, o.status, li.status, li.expires_at, li.delivered_at, li.consumed_at, li.created_at
+      ORDER BY u.created_at DESC, u.email ASC
+      LIMIT 500`,
+    [org.id]
+  );
+  return {
+    organisation: { id: org.id, legalName: org.legal_name, status: org.status },
+    portalEnabled,
+    users: rows.map((u: any) => ({
+      id: u.id,
+      email: u.email,
+      firstName: u.first_name,
+      lastName: u.last_name,
+      role: displayAdminRole(u.role_codes ?? []),
+      userStatus: u.user_status,
+      invitationStatus: u.invitation_status,
+      invitationSentAt: u.invitation_delivered_at,
+      invitationCreatedAt: u.invitation_created_at,
+      invitationExpiresAt: u.invitation_expires_at,
+      acceptedAt: u.invitation_consumed_at,
+      lastLoginAt: u.last_login_at,
+      activeSessions: u.active_sessions ?? 0,
+      readiness: buildLoginReadiness(u, portalEnabled),
     })),
   };
 }
@@ -1275,6 +1396,22 @@ export async function resendPartnerInvitation(actor: ActorContext, partnerId: st
   const { delivery, ...publicInvite } = invite;
   publicInvite.deliveryStatus = await recordInvitationDelivery({ ...publicInvite, delivery });
   return { result: publicInvite, alreadyCompleted: false };
+}
+
+export async function copyPartnerInvitationLink(
+  actor: ActorContext,
+  partnerId: string,
+  userId: string,
+  reason: string
+) {
+  if (!adminInviteLinkCopyAllowed()) {
+    throw new G5RequestError("FORBIDDEN", "Invitation link copy is not available in this environment.");
+  }
+  const resent = await resendPartnerInvitation(actor, partnerId, userId, `${reason} [admin link copy]`);
+  if (!resent.result?.invitationLink) {
+    throw new G5RequestError("FORBIDDEN", "Invitation link copy is not available in this environment.");
+  }
+  return resent;
 }
 
 export async function revokePartnerInvitation(actor: ActorContext, partnerId: string, userId: string, reason: string) {
@@ -1665,8 +1802,45 @@ export async function acceptPartnerInvitation(token: string, password: string) {
         JSON.stringify({ invitationId: inv.id, roleCode: inv.role_code }),
       ]
     );
-    return { ok: true as const, email: inv.email };
+    return { ok: true as const, email: inv.email, organisationStatus: inv.org_status };
   });
+}
+
+export async function getPartnerInvitationPreview(token: string) {
+  if (typeof token !== "string" || token.length < 20) return { ok: false as const, reason: "invalid" as const };
+  const { rows } = await partnerAdminQuery<{
+    email: string;
+    partner_name: string;
+    role_code: string;
+    status: string;
+    expires_at: string;
+    user_status: string;
+    org_status: string;
+  }>(
+    `SELECT i.email, o.legal_name AS partner_name, i.role_code, i.status, i.expires_at,
+            u.status AS user_status, o.status AS org_status
+       FROM partner_invitations i
+       JOIN partner_users u ON u.id = i.user_id AND u.tenant_id = i.tenant_id
+       JOIN partner_organisations o ON o.id = i.tenant_id
+      WHERE i.token_hash = $1`,
+    [sha256(token)]
+  );
+  if (rows.length !== 1) return { ok: false as const, reason: "invalid" as const };
+  const inv = rows[0];
+  const valid =
+    ["PENDING", "SENT", "DELIVERY_FAILED"].includes(inv.status) &&
+    inv.user_status === "INVITED" &&
+    inv.org_status !== "SUSPENDED" &&
+    inv.org_status !== "REVOKED" &&
+    new Date(inv.expires_at).getTime() > Date.now();
+  if (!valid) return { ok: false as const, reason: "invalid" as const };
+  return {
+    ok: true as const,
+    email: inv.email,
+    partnerName: inv.partner_name,
+    roleCode: inv.role_code,
+    expiresAt: inv.expires_at,
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,8 +12,37 @@ export default function PartnerInvitePage() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{
+    email: string;
+    partnerName: string;
+    roleCode: string;
+    expiresAt: string;
+  } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(true);
   const [done, setDone] = useState(false);
+  const [organisationPending, setOrganisationPending] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    setPreviewLoading(true);
+    apiRequest("GET", `/api/partner/invitations/preview?token=${encodeURIComponent(token)}`)
+      .then((r) => r.json())
+      .then((body) => {
+        if (!live) return;
+        setPreview(body);
+        setError(null);
+      })
+      .catch(() => {
+        if (live) setError("This invitation is invalid or has expired. Ask MintVault to resend it.");
+      })
+      .finally(() => {
+        if (live) setPreviewLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [token]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -28,7 +57,9 @@ export default function PartnerInvitePage() {
     }
     setSubmitting(true);
     try {
-      await apiRequest("POST", "/api/partner/invitations/accept", { token, password });
+      const res = await apiRequest("POST", "/api/partner/invitations/accept", { token, password });
+      const body = (await res.json().catch(() => ({}))) as { organisationStatus?: string };
+      setOrganisationPending(body.organisationStatus === "PENDING");
       setDone(true);
     } catch {
       setError("This invitation could not be accepted. Ask MintVault to resend it.");
@@ -46,6 +77,11 @@ export default function PartnerInvitePage() {
         <CardContent>
           {done ? (
             <div className="space-y-4" data-testid="partner-invite-done">
+              {organisationPending && (
+                <p className="text-sm font-medium text-amber-600" data-testid="text-partner-invite-org-pending">
+                  Your account is ready, but your shop is awaiting activation.
+                </p>
+              )}
               <p className="text-sm text-muted-foreground">
                 Your password has been set. Next, sign in and set up an authenticator app — MintVault Partner accounts
                 always need a second step to sign in.
@@ -60,6 +96,25 @@ export default function PartnerInvitePage() {
             </div>
           ) : (
             <form onSubmit={submit} className="space-y-4" data-testid="form-partner-invite">
+              {previewLoading ? (
+                <p className="text-sm text-muted-foreground" data-testid="text-partner-invite-loading">
+                  Checking invitation...
+                </p>
+              ) : preview ? (
+                <div className="rounded-md border p-3 text-sm" data-testid="partner-invite-preview">
+                  <p>
+                    Shop: <strong>{preview.partnerName}</strong>
+                  </p>
+                  <p>
+                    Email: <strong>{preview.email}</strong>
+                  </p>
+                  <p>Role: {preview.roleCode}</p>
+                  <p>Expires: {new Date(preview.expiresAt).toLocaleString()}</p>
+                </div>
+              ) : null}
+              <div className="text-sm text-muted-foreground" data-testid="text-partner-invite-password-policy">
+                Use at least 10 characters. This password is created by you and is never shown to MintVault admins.
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="partner-invite-password">Password</Label>
                 <Input
@@ -92,7 +147,7 @@ export default function PartnerInvitePage() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={!token || submitting}
+                disabled={!token || submitting || previewLoading || !preview}
                 data-testid="button-partner-invite-submit"
               >
                 {submitting ? "Setting password..." : "Set password"}

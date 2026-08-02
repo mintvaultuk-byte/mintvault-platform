@@ -730,6 +730,116 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
     }
   });
 
+  it("super-admin copy-link endpoint is audited, staging-gated, and production-refused", async () => {
+    const invited = await superAdminInvite(TENANT_A, "psp-copy-link@example.test", "STAFF");
+    expect(invited.status).toBe(200);
+
+    const off = await req("POST", `${PM}/partners/${TENANT_A}/users/${invited.userId}/copy-invitation-link`, {
+      body: { reason: "copy link should be off by default" },
+      cookie: superAdminCookie,
+    });
+    expect(off.status).toBe(403);
+    expect(JSON.stringify(off.body)).not.toContain(invited.token);
+
+    process.env.PARTNER_INVITE_ALLOW_ADMIN_LINK_COPY = "true";
+    try {
+      const before = capturedInvites.length;
+      const copied = await req("POST", `${PM}/partners/${TENANT_A}/users/${invited.userId}/copy-invitation-link`, {
+        body: { reason: "staging copy link for internal demo" },
+        cookie: superAdminCookie,
+      });
+      expect(copied.status).toBe(200);
+      const newToken = capturedInvites[capturedInvites.length - 1].token;
+      seenTokens.push(newToken);
+      expect(capturedInvites.length).toBe(before + 1);
+      assertInvitationUrlContract(String((copied.body.result as Json).invitationLink), newToken);
+      expect(
+        await req("POST", ACCEPT, { body: { token: invited.token, password: "copy-old-token-password-1" } })
+      ).toMatchObject({
+        status: 400,
+      });
+
+      const audit = await admin.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM partner_management_audit
+          WHERE tenant_id=$1 AND action_type='partner_invitation_resent'
+            AND reason LIKE '%admin link copy%'`,
+        [TENANT_A]
+      );
+      expect(audit.rows[0].n).toBeGreaterThan(0);
+
+      const env = { node: process.env.NODE_ENV, app: process.env.APP_URL, fly: process.env.FLY_APP_NAME };
+      try {
+        process.env.NODE_ENV = "production";
+        process.env.APP_URL = "https://mintvaultuk.com";
+        process.env.FLY_APP_NAME = "mintvault";
+        const beforeProd = capturedInvites.length;
+        const prod = await req("POST", `${PM}/partners/${TENANT_A}/users/${invited.userId}/copy-invitation-link`, {
+          body: { reason: "must fail in production" },
+          cookie: superAdminCookie,
+        });
+        expect(prod.status).toBe(403);
+        expect(capturedInvites.length).toBe(beforeProd);
+        expect(JSON.stringify(prod.body)).not.toMatch(/token=|token_hash|copy-link/i);
+      } finally {
+        if (env.node === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = env.node;
+        if (env.app === undefined) delete process.env.APP_URL;
+        else process.env.APP_URL = env.app;
+        if (env.fly === undefined) delete process.env.FLY_APP_NAME;
+        else process.env.FLY_APP_NAME = env.fly;
+      }
+    } finally {
+      delete process.env.PARTNER_INVITE_ALLOW_ADMIN_LINK_COPY;
+    }
+  });
+
+  it("invitation preview and onboarding readiness expose server-authoritative login blockers", async () => {
+    const email = "psp-readiness@example.test";
+    const password = "synthetic-readiness-password-1";
+    seenPasswords.push(password);
+    const invited = await superAdminInvite(TENANT_A, email, "OWNER");
+    expect(invited.status).toBe(200);
+
+    const preview = await req("GET", `/api/partner/invitations/preview?token=${encodeURIComponent(invited.token)}`);
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({
+      ok: true,
+      email,
+      partnerName: "SYNTHETIC STAGING TEST ORG ALPHA",
+      roleCode: "PARTNER_OWNER",
+    });
+    expect(preview.raw).not.toContain("token_hash");
+
+    await admin.query("UPDATE partner_organisations SET status='PENDING' WHERE id=$1", [TENANT_A]);
+    const pending = await req("GET", `${PM}/partners/${TENANT_A}/onboarding-readiness`, { cookie: superAdminCookie });
+    expect(pending.status).toBe(200);
+    const pendingUser = ((pending.body.users as Json[]) ?? []).find((u) => u.email === email) as Json;
+    expect((pendingUser.readiness as Json).loginEnabled).toBe(false);
+    expect((pendingUser.readiness as Json).blockedReasons).toContain("Organisation is PENDING.");
+    expect((pendingUser.readiness as Json).blockedReasons).toContain(
+      "Partner must accept the current invitation and create a password."
+    );
+
+    const accepted = await req("POST", ACCEPT, { body: { token: invited.token, password } });
+    expect(accepted.status).toBe(200);
+    expect(accepted.body.organisationStatus).toBe("PENDING");
+
+    const acceptedReadiness = await req("GET", `${PM}/partners/${TENANT_A}/onboarding-readiness`, {
+      cookie: superAdminCookie,
+    });
+    const acceptedUser = ((acceptedReadiness.body.users as Json[]) ?? []).find((u) => u.email === email) as Json;
+    expect((acceptedUser.readiness as Json).passwordConfigured).toBe(true);
+    expect((acceptedUser.readiness as Json).userActive).toBe(true);
+    expect((acceptedUser.readiness as Json).loginEnabled).toBe(false);
+    expect((acceptedUser.readiness as Json).blockedReasons).toContain("Organisation is PENDING.");
+
+    await admin.query("UPDATE partner_organisations SET status='ACTIVE' WHERE id=$1", [TENANT_A]);
+    const ready = await req("GET", `${PM}/partners/${TENANT_A}/onboarding-readiness`, { cookie: superAdminCookie });
+    const readyUser = ((ready.body.users as Json[]) ?? []).find((u) => u.email === email) as Json;
+    expect((readyUser.readiness as Json).loginEnabled).toBe(true);
+    expect((readyUser.readiness as Json).blockedReasons).toEqual([]);
+  });
+
   // =========================================================================
   // 3. TOKEN SECURITY
   // =========================================================================

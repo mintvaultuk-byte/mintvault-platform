@@ -17,7 +17,7 @@ import {
 } from "./rate-limit";
 import { partnerRuntimeQuery } from "./db";
 import { resolveGlobalFlag } from "./flags";
-import { acceptPartnerInvitation } from "./partner-management-service";
+import { acceptPartnerInvitation, getPartnerInvitationPreview } from "./partner-management-service";
 import { resetDeliveryConfigured, deliverResetToken } from "./delivery";
 
 async function flagEnabled(flag: string): Promise<boolean> {
@@ -141,6 +141,20 @@ export function partnerPublicRouter(): Router {
     res.status(ok ? 200 : 400).json({ ok });
   });
 
+  r.get("/invitations/preview", partnerAcceptLimiter, async (req, res) => {
+    if (!(await flagEnabled("partner_onboarding_enabled"))) {
+      res.status(503).json({ error: "partner onboarding unavailable" });
+      return;
+    }
+    const token = typeof req.query.token === "string" ? req.query.token : "";
+    const result = await getPartnerInvitationPreview(token);
+    if (!result.ok) {
+      res.status(400).json({ error: "invalid invitation" });
+      return;
+    }
+    res.json(result);
+  });
+
   r.post("/invitations/accept", partnerAcceptLimiter, async (req, res) => {
     if (!(await flagEnabled("partner_onboarding_enabled"))) {
       res.status(503).json({ error: "partner onboarding unavailable" });
@@ -156,7 +170,7 @@ export function partnerPublicRouter(): Router {
       res.status(400).json({ error: "invalid invitation" });
       return;
     }
-    res.json({ ok: true });
+    res.json({ ok: true, organisationStatus: result.organisationStatus });
   });
 
   return r;

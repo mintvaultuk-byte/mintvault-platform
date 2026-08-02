@@ -14,12 +14,26 @@ describe("partner login and invitation UI source assertions", () => {
 
   it("partner invitation page sets a user-owned password without exposing tenant/email/role controls", () => {
     const src = read("client/src/pages/partner/invite.tsx");
+    expect(src).toContain("/api/partner/invitations/preview");
     expect(src).toContain("/api/partner/invitations/accept");
     expect(src).toContain('autoComplete="new-password"');
     expect(src).toContain('data-testid="form-partner-invite"');
+    expect(src).toContain("partner-invite-preview");
+    expect(src).toContain("Your account is ready, but your shop is awaiting activation.");
+    expect(src).toContain("This password is created by you and is never shown to MintVault admins.");
     expect(src).not.toContain("partnerId");
     expect(src).not.toContain('name="role"');
     expect(src).not.toContain('name="email"');
+  });
+
+  it("super-admin partner detail renders server readiness and gated invitation copy controls", () => {
+    const src = read("client/src/pages/admin/partner-management-detail.tsx");
+    expect(src).toContain("/onboarding-readiness");
+    expect(src).toContain("pm-onboarding-section");
+    expect(src).toContain("READY TO LOG IN");
+    expect(src).toContain("LOGIN BLOCKED");
+    expect(src).toContain("copy-invitation-link");
+    expect(src).toContain("Staging/internal only.");
   });
 
   it("invite route is mounted before guarded partner routes", () => {

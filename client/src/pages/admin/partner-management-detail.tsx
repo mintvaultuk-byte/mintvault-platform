@@ -82,8 +82,36 @@ interface PartnerUserRow {
   role: string;
   status: string;
   invitation_status: string | null;
+  invitation_created_at?: string | null;
+  invitation_delivered_at?: string | null;
+  invitation_expires_at?: string | null;
+  invitation_consumed_at?: string | null;
   last_login_at: string | null;
+  active_sessions?: number;
   created_at: string;
+}
+
+interface OnboardingUser {
+  id: string;
+  email: string;
+  role: string;
+  userStatus: string;
+  invitationStatus: string | null;
+  invitationCreatedAt: string | null;
+  invitationSentAt: string | null;
+  invitationExpiresAt: string | null;
+  acceptedAt: string | null;
+  lastLoginAt: string | null;
+  activeSessions: number;
+  readiness: {
+    organisationActive: boolean;
+    userActive: boolean;
+    invitationValid: boolean;
+    passwordConfigured: boolean;
+    loginEnabled: boolean;
+    portalEnabled: boolean;
+    blockedReasons: string[];
+  };
 }
 
 export default function PartnerManagementDetailPage() {
@@ -196,6 +224,11 @@ export default function PartnerManagementDetailPage() {
     queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/users`).then((r) => r.json()),
     enabled: on && (tab === "users" || tab === "overview"),
   });
+  const onboarding = useQuery({
+    queryKey: [`${BASE}/partners`, partnerId, "onboarding-readiness"],
+    queryFn: () => apiRequest("GET", `${BASE}/partners/${partnerId}/onboarding-readiness`).then((r) => r.json()),
+    enabled: on && (tab === "users" || tab === "overview"),
+  });
 
   // Only meaningful for the final-owner warning; the server + the 0032 DB trigger are the real guards.
   const activeOwnerCount = useMemo(
@@ -216,6 +249,7 @@ export default function PartnerManagementDetailPage() {
       queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.audit(partnerId) });
+      queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`, partnerId, "onboarding-readiness"] });
       queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`] });
     },
     onError: (err: unknown) =>
@@ -254,6 +288,7 @@ export default function PartnerManagementDetailPage() {
       setUserState("idle");
       queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.partner(partnerId) });
+      queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`, partnerId, "onboarding-readiness"] });
     },
     onError: (err: unknown) => {
       setUserState("error");
@@ -274,9 +309,7 @@ export default function PartnerManagementDetailPage() {
         // An invitation that FAILED to send has not been sent. `invitation_status` being non-null
         // includes DELIVERY_FAILED, which would have ticked "Invitation sent" for an email that
         // demonstrably never left the building.
-        hasInvitation: userRows.some(
-          (u) => !!u.invitation_status && u.invitation_status !== "DELIVERY_FAILED"
-        ),
+        hasInvitation: userRows.some((u) => !!u.invitation_status && u.invitation_status !== "DELIVERY_FAILED"),
         locationCount: statistics.data?.locationCount ?? 0,
         hasBranding: !!branding.data?.branding,
         hasProfileDetail: profileHasDetail(profile),
@@ -287,10 +320,7 @@ export default function PartnerManagementDetailPage() {
   const [profileTouched, setProfileTouched] = useState(false);
   const profileErrors: FieldErrors = useMemo(() => validateProfileForm(profileForm), [profileForm]);
   const legalNameErr = useMemo(() => validateLegalName(legalNameForm), [legalNameForm]);
-  const profileChanges = useMemo(
-    () => diffProfile(profileBaseline, profileForm),
-    [profileBaseline, profileForm]
-  );
+  const profileChanges = useMemo(() => diffProfile(profileBaseline, profileForm), [profileBaseline, profileForm]);
   const legalNameChanged = legalNameForm.trim() !== legalNameBaseline.trim();
   const profileDirty = isDirty(profileBaseline, profileForm) || legalNameChanged;
   /*
@@ -440,6 +470,7 @@ export default function PartnerManagementDetailPage() {
       setInviteEdit(null);
       queryClient.invalidateQueries({ queryKey: pmKeys.users(partnerId) });
       queryClient.invalidateQueries({ queryKey: pmKeys.audit(partnerId) });
+      queryClient.invalidateQueries({ queryKey: [`${BASE}/partners`, partnerId, "onboarding-readiness"] });
     } catch (err) {
       setInviteState("error");
       setInviteError(serverErrorMessage((err as { body?: unknown })?.body, "Could not update the invitation."));
@@ -621,6 +652,7 @@ export default function PartnerManagementDetailPage() {
                   <ChecklistItem key={item.key} state={item.state} label={item.label} hint={item.hint} />
                 ))}
               </div>
+              <OnboardingSection users={(onboarding.data?.users ?? []) as OnboardingUser[]} />
               {!(users.data?.users ?? []).some((u: any) => u.role === "OWNER") && (
                 <div style={{ marginTop: 8 }}>
                   <AdminButton
@@ -651,6 +683,7 @@ export default function PartnerManagementDetailPage() {
             }
           >
             <div data-testid="pm-users">
+              <OnboardingSection users={(onboarding.data?.users ?? []) as OnboardingUser[]} />
               {(users.data?.users ?? []).length === 0 ? (
                 <div data-testid="pm-users-empty">No partner users yet. Create the owner login first.</div>
               ) : (
@@ -1139,7 +1172,11 @@ export default function PartnerManagementDetailPage() {
                     }}
                   />
                   {profileTouched && legalNameErr && (
-                    <span role="alert" data-testid="pm-profile-error-legal_name" style={{ color: "var(--admin-red, #ff6b6b)" }}>
+                    <span
+                      role="alert"
+                      data-testid="pm-profile-error-legal_name"
+                      style={{ color: "var(--admin-red, #ff6b6b)" }}
+                    >
                       {legalNameErr}
                     </span>
                   )}
@@ -1249,7 +1286,12 @@ export default function PartnerManagementDetailPage() {
               )}
 
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
-                <AdminButton size="sm" variant="ghost" onClick={() => closeProfileEdit()} data-testid="pm-profile-cancel">
+                <AdminButton
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => closeProfileEdit()}
+                  data-testid="pm-profile-cancel"
+                >
                   Cancel
                 </AdminButton>
                 <AdminButton
@@ -1631,13 +1673,78 @@ function ChecklistItem({
   const stateLabel = state === "done" ? "Done" : state === "todo" ? "To do" : "Not available yet";
   return (
     <div
-      style={{ display: "flex", gap: 8, alignItems: "center", padding: "2px 0", opacity: state === "unavailable" ? 0.6 : 1 }}
+      style={{
+        display: "flex",
+        gap: 8,
+        alignItems: "center",
+        padding: "2px 0",
+        opacity: state === "unavailable" ? 0.6 : 1,
+      }}
       data-testid={`pm-checklist-${label.toLowerCase().replace(/[^a-z]+/g, "-")}`}
     >
       <span aria-hidden="true">{symbol}</span>
       <span className="sr-only">{stateLabel}:</span>
       <span style={{ opacity: state === "done" ? 0.85 : 0.65 }}>{label}</span>
       {hint && <span style={{ fontSize: 12, opacity: 0.55 }}>— {hint}</span>}
+    </div>
+  );
+}
+
+function OnboardingSection({ users }: { users: OnboardingUser[] }) {
+  const primary = users.find((u) => u.role === "OWNER") ?? users[0] ?? null;
+  if (!primary) {
+    return (
+      <div data-testid="pm-onboarding-section" style={{ marginTop: 14, paddingTop: 12 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 700 }}>Onboarding</h3>
+        <div data-testid="pm-login-readiness-status">LOGIN BLOCKED</div>
+        <div data-testid="pm-login-readiness-reasons">Add a partner user before login can be enabled.</div>
+      </div>
+    );
+  }
+  const ready = primary.readiness.loginEnabled;
+  const invitationStatus = primary.invitationStatus ?? (primary.userStatus === "ACTIVE" ? "ACCEPTED" : "—");
+  return (
+    <div data-testid="pm-onboarding-section" style={{ marginTop: 14, paddingTop: 12 }}>
+      <h3 style={{ fontSize: 15, fontWeight: 700 }}>Onboarding</h3>
+      <div
+        data-testid="pm-login-readiness-status"
+        style={{
+          display: "inline-flex",
+          marginTop: 4,
+          marginBottom: 8,
+          padding: "4px 8px",
+          borderRadius: 8,
+          fontWeight: 700,
+          background: ready ? "rgba(74, 146, 94, .2)" : "rgba(205, 128, 115, .2)",
+          color: ready ? "var(--admin-green, #7fbf7f)" : "var(--admin-red, #cd8073)",
+        }}
+      >
+        {ready ? "READY TO LOG IN" : "LOGIN BLOCKED"}
+      </div>
+      <div style={{ display: "grid", gap: 4, gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))" }}>
+        <Field label="Organisation status" v={primary.readiness.organisationActive ? "ACTIVE" : "Not active"} />
+        <Field label="Partner user status" v={primary.userStatus} />
+        <Field label="Email" v={primary.email} />
+        <Field label="Role" v={primary.role} />
+        <Field label="Invitation status" v={invitationStatus} />
+        <Field label="Invitation sent" v={primary.invitationSentAt} />
+        <Field label="Invitation expiry" v={primary.invitationExpiresAt} />
+        <Field label="Accepted" v={primary.acceptedAt} />
+        <Field label="Last login" v={primary.lastLoginAt} />
+        <Field label="Active sessions" v={String(primary.activeSessions ?? 0)} />
+        <Field label="Portal enabled" v={primary.readiness.portalEnabled ? "yes" : "no"} />
+      </div>
+      <div data-testid="pm-login-readiness-reasons" style={{ marginTop: 8, fontSize: 13 }}>
+        {ready ? (
+          "Login is currently allowed."
+        ) : (
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {primary.readiness.blockedReasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
@@ -1766,6 +1873,42 @@ function UserActions({
           data-testid={`pm-user-resend-${user.id}`}
         >
           Resend
+        </AdminButton>
+      )}
+      {user.status === "INVITED" && pendingInvite && (
+        <AdminButton
+          size="sm"
+          variant="ghost"
+          disabled={busy}
+          onClick={() =>
+            openModal({
+              kind: "user-copy-invite-link",
+              title: `Copy a fresh setup link for ${user.email}?`,
+              body: (
+                <p style={{ fontSize: 12 }}>
+                  Staging/internal only. This cancels any current invitation link, creates a fresh single-use link and
+                  audits the action.
+                </p>
+              ),
+              run: async (reason) => {
+                const res = await apiRequest(
+                  "POST",
+                  `${BASE}/partners/${partnerId}/users/${user.id}/copy-invitation-link`,
+                  {
+                    reason,
+                  }
+                );
+                const body = (await res.json()) as { result?: { invitationLink?: string } };
+                const link = body.result?.invitationLink;
+                if (!link) throw new Error("Invitation link copy is not available in this environment.");
+                await navigator.clipboard?.writeText(link);
+                return body;
+              },
+            })
+          }
+          data-testid={`pm-user-copy-invite-${user.id}`}
+        >
+          Copy invite link
         </AdminButton>
       )}
       <AdminButton
