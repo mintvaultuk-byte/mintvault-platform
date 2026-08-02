@@ -139,6 +139,9 @@ const ALL_ROUTES: [string, string][] = [
   // shells out to git per lane and reads the migration ledger, so it must share /repository's
   // stricter limiter rather than the ordinary read budget.
   ["GET", `${P}/views/distributed-shop-launch`],
+  // Live GitHub evidence. Expensive (external API) and read-only; the token is server-side
+  // only and never appears in the response.
+  ["GET", `${P}/github`],
   ["GET", `${P}/export`],
   ["POST", `${P}/seed`],
 ];

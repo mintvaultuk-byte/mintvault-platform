@@ -7,7 +7,7 @@
  * no route here that pushes, merges, deploys, applies a migration, writes to production, or
  * touches any pre-existing MintVault table.
  *
- * Route inventory — 25 endpoints (kept in step with the router by a test that counts registrations):
+ * Route inventory — 27 endpoints (kept in step with the router by a test that counts registrations):
  *   GET    /overview                                  tree + readiness + queues + drift
  *   GET    /queues                                    the nine approved queues
  *   GET    /drift                                     repository-versus-environment drift
@@ -31,14 +31,18 @@
  *   GET    /audit                                     append-only status history
  *   GET    /views/shop-launch                         Partner Shop Launch view
  *   GET    /views/scanner                             Scanner view
+ *   GET    /views/distributed-shop-launch             live-evidence programme lanes
+ *   GET    /github                                    live GitHub evidence + freshness
  *   GET    /export                                    bounded JSON snapshot
  *   POST   /seed                                      idempotent programme-tree seed
  */
 import type { Express, NextFunction, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { z, ZodError } from "zod";
+import { classifyFreshness } from "@shared/project-control-github";
 import { requireSuperAdmin } from "../../auth";
 import { buildDistributedProgrammeView } from "../../project-control/distributed";
+import { isGitHubConfigured, scanGitHub } from "../../project-control/github-scan";
 import {
   BLOCKER_KINDS,
   DEPLOYMENT_RESULTS,
@@ -691,6 +695,33 @@ export function registerProjectControlRoutes(app: Express): void {
   app.get(`${BASE}/views/distributed-shop-launch`, ...gatedExpensive, async (_req, res) => {
     try {
       res.json(await buildDistributedProgrammeView());
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Live repository evidence from GitHub, plus an explicit freshness verdict.
+   *
+   * `?refresh=true` is the manual "Refresh from GitHub" control. The reader enforces its own
+   * cooldown underneath this, so the button cannot be used to exhaust the API rate limit however
+   * hard it is pressed.
+   *
+   * `gatedExpensive`: this reaches an external API, so it shares /repository's stricter limiter.
+   *
+   * READ-ONLY, and it returns DATA ONLY — the GitHub token is read server-side and never appears
+   * in this response, in a warning, or in an error. When GitHub is unconfigured or unreachable the
+   * payload carries `freshness: "unknown"` rather than an empty-but-successful snapshot, so the
+   * client can never render "nothing wrong" when the truth is "we could not look".
+   */
+  app.get(`${BASE}/github`, ...gatedExpensive, async (req, res) => {
+    try {
+      const snapshot = await scanGitHub(req.query.refresh === "true");
+      res.json({
+        snapshot,
+        freshness: classifyFreshness(snapshot.fetchedAt),
+        configured: isGitHubConfigured(),
+      });
     } catch (error) {
       fail(res, error);
     }
