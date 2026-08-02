@@ -108,7 +108,7 @@ export default function ProjectControlPackagePage() {
       setConflict(
         error.message.includes("409")
           ? "Someone else changed this work package while you were editing it. Reload the page so you do not overwrite their change."
-          : error.message
+          : "This update could not be saved. Your entered values are still available; review them and try again."
       );
     },
   });

@@ -13,13 +13,21 @@ export function useGitHubSync() {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const started = useRef(0);
   const generation = useRef(0);
+  const mounted = useRef(true);
 
   const stop = () => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
   };
 
-  useEffect(() => stop, []);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      generation.current += 1;
+      stop();
+    };
+  }, []);
 
   const invalidateEvidence = async () => {
     await Promise.all([
@@ -33,13 +41,17 @@ export function useGitHubSync() {
   const poll = async (syncId: string, token: number) => {
     if (token !== generation.current) return;
     if (Date.now() - started.current >= TIMEOUT_MS) {
-      setStatus((previous) => previous ? { ...previous, state: "EXPIRED", errorCode: "CLIENT_TIMEOUT" } : previous);
+      if (mounted.current) setStatus((previous) => previous ? { ...previous, state: "EXPIRED", errorCode: "CLIENT_TIMEOUT" } : previous);
       stop();
       return;
     }
     try {
-      const next = await pcGet<SyncStatus>(`/sync/${syncId}`);
-      if (token !== generation.current) return;
+      const remaining = Math.max(1, TIMEOUT_MS - (Date.now() - started.current));
+      const next = await Promise.race<SyncStatus>([
+        pcGet<SyncStatus>(`/sync/${syncId}`),
+        new Promise<SyncStatus>((_resolve, reject) => setTimeout(() => reject(new Error("SYNC_TIMEOUT")), remaining)),
+      ]);
+      if (token !== generation.current || !mounted.current) return;
       setStatus(next);
       if (TERMINAL.has(next.state)) {
         stop();
@@ -48,8 +60,9 @@ export function useGitHubSync() {
       }
       timer.current = setTimeout(() => void poll(syncId, token), POLL_MS);
     } catch {
-      if (token !== generation.current) return;
-      setStatus((previous) => previous ? { ...previous, state: "FAILED", errorCode: "SYNC_STATUS_UNAVAILABLE" } : previous);
+      if (token !== generation.current || !mounted.current) return;
+      const expired = Date.now() - started.current >= TIMEOUT_MS;
+      setStatus((previous) => previous ? { ...previous, state: expired ? "EXPIRED" : "FAILED", errorCode: expired ? "CLIENT_TIMEOUT" : "SYNC_STATUS_UNAVAILABLE" } : previous);
       stop();
     }
   };
