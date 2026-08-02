@@ -163,9 +163,19 @@ async function snapshot(): Promise<string> {
   }
 }
 
-async function applyFresh(manifest: SeedManifest, actor = "test"): Promise<void> {
-  const preview = await dryRunSeed(db(), manifest);
-  await applySeed(db(), manifest, { actor, confirmationToken: preview.confirmationToken, environment: "local" });
+async function applyFresh(manifest: SeedManifest, actor = "test") {
+  const preview = await dryRunSeed(db(), manifest, "local");
+  return applySeed(db(), manifest, { actor, confirmationToken: preview.confirmationToken, environment: "local" });
+}
+
+/** Run a statement for its side effect — used to plant an operator-created row. */
+async function query(sql: string, params: unknown[] = []): Promise<void> {
+  const c = await db().connect();
+  try {
+    await c.query(sql, params);
+  } finally {
+    c.release();
+  }
 }
 
 describe("Project Control seed apply coverage is wired up", () => {
@@ -374,7 +384,25 @@ describe("upgrade preserves everything a human did", () => {
     expect((await one("SELECT count(*)::int n FROM pc_status_events"))!.n).toBeGreaterThanOrEqual(Number(before));
   }, 60_000);
 
-  it("adds and removes dependencies", async () => {
+  it("adds dependencies the manifest declares", async () => {
+    const m = baseManifest();
+    m.version = 2;
+    m.packages[0].dependsOn = ["pkg-b"];
+    await applyFresh(m);
+    expect((await one("SELECT count(*)::int n FROM pc_dependencies WHERE package_key='pkg-a'"))!.n).toBe(1);
+  }, 60_000);
+
+  /**
+   * DEP1 — the previous version of this test asserted the count went back to 0, pinning the
+   * defect as intended behaviour.
+   *
+   * `pc_dependencies` has no ownership column, so an edge absent from the manifest is
+   * indistinguishable from one an operator recorded by hand via
+   * `POST /packages/:key/dependencies`. Deleting on absence destroyed operator records and left
+   * only a count in the audit trail, so the lost edge could not even be identified afterwards.
+   * Reconciliation now preserves it and says so.
+   */
+  it("PRESERVES a dependency the manifest no longer declares, rather than deleting it", async () => {
     const m = baseManifest();
     m.version = 2;
     m.packages[0].dependsOn = ["pkg-b"];
@@ -382,9 +410,33 @@ describe("upgrade preserves everything a human did", () => {
     expect((await one("SELECT count(*)::int n FROM pc_dependencies WHERE package_key='pkg-a'"))!.n).toBe(1);
 
     const m3 = baseManifest();
+    m3.version = 3; // declares no dependsOn for pkg-a at all
+    const result = await applyFresh(m3);
+    expect((await one("SELECT count(*)::int n FROM pc_dependencies WHERE package_key='pkg-a'"))!.n).toBe(1);
+    expect(result.counts.dependenciesRemoved).toBe(0);
+    expect(result.counts.dependenciesPreserved).toBe(1);
+    // The operator must be told, not left to infer it from an unchanged count.
+    expect(result.warnings.join(" ")).toContain("absent from the manifest");
+  }, 60_000);
+
+  it("preserves an edge an operator created directly, which the manifest never mentioned", async () => {
+    const m = baseManifest();
+    m.version = 2;
+    await applyFresh(m);
+    // Exactly what POST /packages/:key/dependencies writes.
+    await query(
+      "INSERT INTO pc_dependencies (package_key, depends_on_key, note) VALUES ('pkg-a','pkg-b','blocked on the payment refactor')"
+    );
+
+    const m3 = baseManifest();
     m3.version = 3;
-    await applyFresh(m3);
-    expect((await one("SELECT count(*)::int n FROM pc_dependencies WHERE package_key='pkg-a'"))!.n).toBe(0);
+    const result = await applyFresh(m3);
+
+    const row = await one<{ note: string }>(
+      "SELECT note FROM pc_dependencies WHERE package_key='pkg-a' AND depends_on_key='pkg-b'"
+    );
+    expect(row?.note).toBe("blocked on the payment refactor");
+    expect(result.counts.dependenciesRemoved).toBe(0);
   }, 60_000);
 });
 
@@ -571,6 +623,86 @@ describe("atomicity and refusal", () => {
     await expect(
       applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "local" })
     ).rejects.toMatchObject({ code: "digest_mismatch" });
+  }, 60_000);
+
+  /**
+   * PLAN1/PLAN2 — the window the old guard left open.
+   *
+   * The previous confirmation bound only the MANIFEST digest (a build-time constant) and
+   * `seedVersionBefore` (which moves only when a full apply lands). The test above is the single
+   * case that catches — a competing apply. Everything an operator or colleague can do in between
+   * left both invariants identical while changing the plan completely, so a dry run reporting
+   * "already in sync" could apply an overwrite and a delete.
+   */
+  it("PLAN2: refuses when an operator edited a package between preview and apply", async () => {
+    const m = baseManifest();
+    await applyFresh(m); // establish state; seed_version now settled
+
+    const preview = await dryRunSeed(db(), m, "local");
+    // Neither the manifest nor pc_seed_state.seed_version moves here — only the plan does.
+    await query("UPDATE pc_work_packages SET title='Operator corrected title' WHERE key='pkg-a'");
+
+    await expect(
+      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "local" })
+    ).rejects.toMatchObject({ code: "plan_changed" });
+
+    // And the operator's edit is still there — the refusal wrote nothing.
+    const row = await one<{ title: string }>("SELECT title FROM pc_work_packages WHERE key='pkg-a'");
+    expect(row?.title).toBe("Operator corrected title");
+  }, 60_000);
+
+  it("PLAN2: refuses when a dependency appeared between preview and apply", async () => {
+    const m = baseManifest();
+    await applyFresh(m);
+
+    const preview = await dryRunSeed(db(), m, "local");
+    await query("INSERT INTO pc_dependencies (package_key, depends_on_key, note) VALUES ('pkg-a','pkg-b','later')");
+
+    await expect(
+      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "local" })
+    ).rejects.toMatchObject({ code: "plan_changed" });
+  }, 60_000);
+
+  it("PLAN1: the confirmation is bound to the plan, not merely to the manifest digest", async () => {
+    const m = baseManifest();
+    await applyFresh(m);
+
+    const preview = await dryRunSeed(db(), m, "local");
+    await query("UPDATE pc_work_packages SET title='Changed' WHERE key='pkg-a'");
+
+    // The manifest digest is UNCHANGED — proving the old guard would have let this through.
+    const c = await db().connect();
+    try {
+      const current = await loadCurrentState(c);
+      expect(manifestDigest(m)).toBe(preview.plan.manifestDigest);
+      expect(current.seedVersion).toBe(preview.plan.seedVersionBefore);
+    } finally {
+      c.release();
+    }
+
+    // The PLAN digest is what differs, and it is what refuses.
+    await expect(
+      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "local" })
+    ).rejects.toMatchObject({ code: "plan_changed" });
+  }, 60_000);
+
+  it("still applies cleanly when nothing moved between preview and apply", async () => {
+    const m = baseManifest();
+    const preview = await dryRunSeed(db(), m, "local");
+    const result = await applySeed(db(), m, {
+      actor: "t",
+      confirmationToken: preview.confirmationToken,
+      environment: "local",
+    });
+    expect(result.seedVersionAfter).toBe(m.version);
+  }, 60_000);
+
+  it("refuses a preview taken against a different environment", async () => {
+    const m = baseManifest();
+    const preview = await dryRunSeed(db(), m, "staging");
+    await expect(
+      applySeed(db(), m, { actor: "t", confirmationToken: preview.confirmationToken, environment: "local" })
+    ).rejects.toMatchObject({ code: "unknown_environment" });
   }, 60_000);
 
   it("consumes a confirmation exactly once — a replay is refused", async () => {

@@ -109,6 +109,52 @@ export function manifestDigest(manifest: SeedManifest): string {
   return createHash("sha256").update(`pc-seed-manifest/v1${canonical}`, "utf8").digest("hex").slice(0, 48);
 }
 
+/**
+ * A deterministic digest of what the plan would DO.
+ *
+ * THE PROBLEM THIS SOLVES
+ *
+ * `manifestDigest` hashes the compiled manifest, which is a build-time constant — for a given
+ * deployment it never changes. Apply used to bind its confirmation to that digest plus
+ * `seedVersionBefore`, and `seedVersionBefore` only moves when a full apply lands. So every OTHER
+ * mutation — an operator retitling a package, an operator adding a dependency, a new package
+ * appearing — left both invariants untouched while changing the plan completely.
+ *
+ * The consequence was concrete: a dry run could report "Already in sync, nothing will change", an
+ * operator could approve exactly that, and the apply could then overwrite their colleague's edit
+ * and delete a dependency row. The old comment claimed recomputation made "apply exactly what I
+ * reviewed" true; it made it true only for the single case where a competing apply had landed.
+ *
+ * This digest covers the ACTION LIST, the conflicts and the counts — everything an operator is
+ * shown and everything the apply loop will execute. Actions are sorted before hashing because
+ * their order is an artefact of iteration, not a decision; two plans that do the same things in a
+ * different order are the same plan.
+ */
+export function planDigest(plan: ReconciliationPlan): string {
+  const encodeAction = (a: ReconciliationAction): string =>
+    JSON.stringify([a.kind, a.targetKey, a.field ?? null, a.from ?? null, a.to ?? null, a.reason ?? null]);
+
+  const actions = plan.actions.map(encodeAction).sort();
+  const conflicts = plan.conflicts.map((c) => JSON.stringify([c.targetKey, c.code, c.reason])).sort();
+  const counts = Object.keys(plan.counts)
+    .sort()
+    .map((k) => `${k}=${(plan.counts as unknown as Record<string, number>)[k]}`);
+
+  const canonical = JSON.stringify({
+    mode: plan.mode,
+    seedVersionBefore: plan.seedVersionBefore,
+    seedVersionAfter: plan.seedVersionAfter,
+    manifestDigest: plan.manifestDigest,
+    expectedFinalCounts: plan.expectedFinalCounts,
+    applicable: plan.applicable,
+    actions,
+    conflicts,
+    counts,
+  });
+
+  return createHash("sha256").update(`pc-seed-plan/v1${canonical}`, "utf8").digest("hex").slice(0, 48);
+}
+
 /* ------------------------------------------------------------------------------------------ */
 /* Current database snapshot                                                                    */
 /* ------------------------------------------------------------------------------------------ */
@@ -167,6 +213,11 @@ export const ACTION_KINDS = [
   "UPDATE_SYSTEM_FIELD",
   "ADD_DEPENDENCY",
   "REMOVE_DEPENDENCY",
+  /**
+   * An edge in the database that the manifest does not declare, and which we therefore refuse to
+   * delete. See the planner for why absence cannot be read as intent for dependencies.
+   */
+  "PRESERVE_UNOWNED_DEPENDENCY",
   "SUPERSEDE",
   "PRESERVE_OPERATOR_FIELD",
   "NO_CHANGE",
@@ -206,6 +257,8 @@ export interface ReconciliationPlan {
     packagesSuperseded: number;
     dependenciesAdded: number;
     dependenciesRemoved: number;
+    /** Edges left alone because ownership could not be established. Never silently zero. */
+    dependenciesPreserved: number;
     operatorFieldsPreserved: number;
   };
   expectedFinalCounts: { nodes: number; packages: number };
@@ -413,6 +466,7 @@ export function planReconciliation(current: CurrentState, manifest: SeedManifest
   let operatorFieldsPreserved = 0;
   let dependenciesAdded = 0;
   let dependenciesRemoved = 0;
+  let dependenciesPreserved = 0;
 
   for (const p of manifest.packages) {
     const existing = currentPackages.get(p.key);
@@ -462,10 +516,38 @@ export function planReconciliation(current: CurrentState, manifest: SeedManifest
         dependenciesAdded += 1;
       }
     }
+    /**
+     * An edge present in the database but absent from the manifest is PRESERVED, not deleted.
+     *
+     * This used to emit REMOVE_DEPENDENCY on a plain set-difference, which is the exact inverse of
+     * the rule applied to packages forty lines below: "reconciliation never retires a package it
+     * was not told about, because it may have been created deliberately." Dependencies can be
+     * created deliberately too — `POST /packages/:key/dependencies` exists precisely so an operator
+     * can record "this is blocked on the payment refactor" — and `pc_dependencies` carries no
+     * ownership column, so the planner CANNOT tell an operator's edge from one a previous manifest
+     * declared. Deleting on absence therefore destroyed operator records, and the audit trail kept
+     * only a count, so the lost edge was not even recoverable from the run report.
+     *
+     * Refusing to delete is the fail-closed choice: the cost is a stale seed-declared edge that
+     * must be removed by hand, against the cost of silently destroying the only record of why a
+     * package was blocked.
+     *
+     * Retiring a seed-owned edge automatically requires an ownership column on `pc_dependencies`
+     * — an additive migration that is owner-gated and deliberately NOT taken here.
+     */
     for (const dep of actualDeps) {
       if (!desiredDeps.has(dep)) {
-        actions.push({ kind: "REMOVE_DEPENDENCY", targetKey: p.key, to: dep });
-        dependenciesRemoved += 1;
+        actions.push({
+          kind: "PRESERVE_UNOWNED_DEPENDENCY",
+          targetKey: p.key,
+          to: dep,
+          reason:
+            "Present in the database, absent from the manifest. Ownership cannot be established, so it is preserved rather than deleted.",
+        });
+        dependenciesPreserved += 1;
+        warnings.push(
+          `Dependency "${p.key}" -> "${dep}" exists here but is absent from the manifest. It is left untouched — reconciliation cannot tell an operator's dependency from a retired seed one, so it never deletes either.`
+        );
       }
     }
   }
@@ -520,6 +602,7 @@ export function planReconciliation(current: CurrentState, manifest: SeedManifest
       packagesSuperseded,
       dependenciesAdded,
       dependenciesRemoved,
+      dependenciesPreserved,
       operatorFieldsPreserved,
     },
     expectedFinalCounts: {
@@ -534,7 +617,13 @@ export function planReconciliation(current: CurrentState, manifest: SeedManifest
 export function isNoOp(plan: ReconciliationPlan): boolean {
   return (
     plan.conflicts.length === 0 &&
-    plan.actions.every((a) => a.kind === "NO_CHANGE" || a.kind === "PRESERVE_OPERATOR_FIELD")
+    plan.actions.every(
+      (a) =>
+        a.kind === "NO_CHANGE" ||
+        a.kind === "PRESERVE_OPERATOR_FIELD" ||
+        // Preserving an edge changes nothing, so a plan that only preserves is still a no-op.
+        a.kind === "PRESERVE_UNOWNED_DEPENDENCY"
+    )
   );
 }
 
@@ -544,7 +633,8 @@ export function summarisePlan(plan: ReconciliationPlan, max = 4000): string {
   const line =
     `mode=${plan.mode} v${plan.seedVersionBefore ?? "none"}->${plan.seedVersionAfter} digest=${plan.manifestDigest} ` +
     `nodes+${c.nodesInserted}/~${c.nodesUpdated} pkgs+${c.packagesInserted}/~${c.packagesUpdated} ` +
-    `superseded=${c.packagesSuperseded} deps+${c.dependenciesAdded}/-${c.dependenciesRemoved} ` +
+    `superseded=${c.packagesSuperseded} deps+${c.dependenciesAdded}/-${c.dependenciesRemoved}` +
+    `/keep${c.dependenciesPreserved} ` +
     `preserved=${c.operatorFieldsPreserved} conflicts=${plan.conflicts.length} warnings=${plan.warnings.length}`;
   return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
 }

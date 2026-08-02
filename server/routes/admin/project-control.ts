@@ -7,7 +7,7 @@
  * no route here that pushes, merges, deploys, applies a migration, writes to production, or
  * touches any pre-existing MintVault table.
  *
- * Route inventory — 35 endpoints (kept in step with the router by a test that counts registrations):
+ * Route inventory — 39 endpoints (kept in step with the router by a test that counts registrations):
  *   GET    /overview                                  tree + readiness + queues + drift
  *   GET    /queues                                    the nine approved queues
  *   GET    /drift                                     repository-versus-environment drift
@@ -1093,9 +1093,12 @@ export function registerProjectControlRoutes(app: Express): void {
    */
   app.post(`${BASE}/seed/dry-run`, ...gatedExpensive, projectControlWriteLimit, async (_req, res) => {
     try {
-      const preview = await dryRunSeed(pool, currentSeedManifest());
+      const preview = await dryRunSeed(pool, currentSeedManifest(), resolveConnectedEnvironment());
       res.json({
         confirmationToken: preview.confirmationToken,
+        // Surfaced so an operator (or a script) can see that the plan they read is the plan that
+        // applied. Apply compares it server-side regardless; this is for human legibility.
+        planDigest: preview.planDigest,
         expiresAt: preview.expiresAt,
         noOp: preview.noOp,
         plan: {

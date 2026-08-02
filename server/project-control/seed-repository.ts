@@ -38,6 +38,7 @@ import {
 import {
   isNoOp,
   manifestDigest,
+  planDigest,
   planReconciliation,
   summarisePlan,
   type CurrentPackage,
@@ -254,6 +255,8 @@ export interface DryRunResult {
    * apply a plan nobody looked at. Bound to the digest and the version it was computed against.
    */
   confirmationToken: string;
+  /** Digest of what this plan would DO. Surfaced so an operator can see the two runs match. */
+  planDigest: string;
   expiresAt: string;
   noOp: boolean;
 }
@@ -262,19 +265,39 @@ export const CONFIRMATION_TTL_MS = 10 * 60 * 1000;
 
 interface ConfirmationRecord {
   digest: string;
+  /**
+   * A digest of what the previewed plan would DO — the sorted action list, the conflicts and the
+   * counts. `digest` above is the MANIFEST digest, which is a build-time constant and therefore
+   * says nothing about database state; binding to it alone let an operator approve "already in
+   * sync" and get an overwrite plus a delete. See `planDigest` for the full account.
+   */
+  planDigest: string;
   seedVersionBefore: number | null;
+  /** The environment the preview was computed against. A staging preview cannot apply elsewhere. */
+  environment: ProjectControlEnvironment;
   expiresAt: number;
 }
 
 const confirmations = new Map<string, ConfirmationRecord>();
 
 /** Issue a confirmation for a previewed plan, and evict anything expired while we are here. */
-function issueConfirmation(plan: ReconciliationPlan, now: number): { token: string; expiresAt: number } {
+function issueConfirmation(
+  plan: ReconciliationPlan,
+  environment: ProjectControlEnvironment,
+  now: number
+): { token: string; expiresAt: number; planDigest: string } {
   for (const [token, record] of confirmations) if (record.expiresAt <= now) confirmations.delete(token);
   const token = randomBytes(24).toString("hex");
   const expiresAt = now + CONFIRMATION_TTL_MS;
-  confirmations.set(token, { digest: plan.manifestDigest, seedVersionBefore: plan.seedVersionBefore, expiresAt });
-  return { token, expiresAt };
+  const digestOfPlan = planDigest(plan);
+  confirmations.set(token, {
+    digest: plan.manifestDigest,
+    planDigest: digestOfPlan,
+    seedVersionBefore: plan.seedVersionBefore,
+    environment,
+    expiresAt,
+  });
+  return { token, expiresAt, planDigest: digestOfPlan };
 }
 
 export function clearConfirmations(): void {
@@ -287,14 +310,21 @@ export function clearConfirmations(): void {
 export async function dryRunSeed(
   pool: SeedDbPool,
   manifest: SeedManifest,
+  environment: ProjectControlEnvironment = "local",
   now: number = Date.now()
 ): Promise<DryRunResult> {
   const client = await pool.connect();
   try {
     const current = await loadCurrentState(client);
     const plan = planReconciliation(current, manifest);
-    const { token, expiresAt } = issueConfirmation(plan, now);
-    return { plan, confirmationToken: token, expiresAt: new Date(expiresAt).toISOString(), noOp: isNoOp(plan) };
+    const { token, expiresAt, planDigest: digestOfPlan } = issueConfirmation(plan, environment, now);
+    return {
+      plan,
+      confirmationToken: token,
+      planDigest: digestOfPlan,
+      expiresAt: new Date(expiresAt).toISOString(),
+      noOp: isNoOp(plan),
+    };
   } finally {
     client.release();
   }
@@ -394,6 +424,35 @@ export async function applySeed(pool: SeedDbPool, manifest: SeedManifest, option
       throw new SeedApplyError(
         "digest_mismatch",
         "The database changed since this plan was previewed, so applying it would execute decisions taken against a different state. Run a fresh dry run and review it."
+      );
+    }
+
+    /**
+     * The check that makes the docstring above true.
+     *
+     * The two comparisons above only catch a competing full apply — they compare a build-time
+     * constant and a version that moves once per apply. Everything else an operator or a colleague
+     * can do between preview and apply (retitle a package, add a dependency, create a package)
+     * changes the PLAN while leaving both of them identical. Comparing the recomputed plan's own
+     * digest is what closes that window.
+     */
+    if (planDigest(plan) !== confirmation.planDigest) {
+      throw new SeedApplyError(
+        "plan_changed",
+        "The plan has changed since it was previewed — the database is no longer in the state the preview was computed against, so applying it would execute decisions you did not review. Run a fresh dry run and read the new plan."
+      );
+    }
+
+    /**
+     * A preview taken against one environment may not be applied against another. The confirmation
+     * lives in this process's memory, so this is belt-and-braces rather than the primary control,
+     * but a process whose identity changed under it (a restart with a corrected
+     * PROJECT_CONTROL_ENV) must not honour a token issued under the old answer.
+     */
+    if (confirmation.environment !== options.environment) {
+      throw new SeedApplyError(
+        "unknown_environment",
+        "This preview was taken against a different environment than the one now connected. Run a fresh dry run."
       );
     }
 

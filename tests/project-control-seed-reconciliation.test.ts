@@ -261,7 +261,19 @@ describe("upgrade updates system structure only", () => {
 
     const plan = planReconciliation(state, m);
     expect(plan.counts.dependenciesAdded).toBe(1);
-    expect(plan.counts.dependenciesRemoved).toBe(1);
+
+    /**
+     * DEP1 — this assertion used to read `dependenciesRemoved).toBe(1)`, pinning the defect.
+     *
+     * `pc_dependencies` carries no ownership column, so an edge absent from the manifest is
+     * indistinguishable from one an operator recorded by hand. Reconciliation preserves it and
+     * reports the preservation, rather than inferring intent from absence — the same rule it
+     * already applied to packages.
+     */
+    expect(plan.counts.dependenciesRemoved).toBe(0);
+    expect(plan.counts.dependenciesPreserved).toBe(1);
+    expect(plan.actions.some((a) => a.kind === "PRESERVE_UNOWNED_DEPENDENCY")).toBe(true);
+    expect(plan.actions.some((a) => a.kind === "REMOVE_DEPENDENCY")).toBe(false);
   });
 });
 
