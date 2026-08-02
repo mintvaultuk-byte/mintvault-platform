@@ -4,6 +4,9 @@
  * Deliberately separated from seed.ts so the founder-facing programme definition can be unit
  * tested without importing a database connection. Nothing in this file performs I/O.
  */
+
+import { LAUNCH_GATE_KEYS } from "@shared/project-control-launch";
+
 import type { AcceptanceCriterion, IssueClass, RequiredTest, RiskLevel, WorkStatus } from "@shared/project-control";
 
 export interface SeedNode {
@@ -732,19 +735,21 @@ export const PACKAGES: SeedPackage[] = [
   },
 ];
 
-/** The approved Shop Launch sequence, exported so a test can assert it never silently changes. */
-export const APPROVED_SHOP_LAUNCH_SEQUENCE = [
-  "pn-g5",
-  "pn-g6a",
-  "pn-g6b",
-  "pn-g6c",
-  "pn-g6d",
-  "pn-auth",
-  "pn-portal",
-  "pn-stripe-credits",
-  "pn-pilot",
-  "pn-launch",
-] as const;
+/**
+ * The approved Shop Launch sequence.
+ *
+ * RECONCILED AT INTEGRATION. Two branches independently declared this same ten-key list — once
+ * here and once in `@shared/project-control-launch` — with nothing tying them together. Two
+ * hardcoded copies of one owner decision is precisely the drift this programme exists to remove:
+ * change one and the other silently disagrees, and the dashboard starts reporting a launch order
+ * that does not match the one it gates on.
+ *
+ * `LAUNCH_GATE_KEYS` is now the single declaration. It lives in shared/ because BOTH the client
+ * (which numbers and gates the phases) and the seed (which orders the nodes) need it, and shared/
+ * is the only place both can reach. This re-export is kept so existing consumers and the
+ * inventory test keep working under the name they already use.
+ */
+export const APPROVED_SHOP_LAUNCH_SEQUENCE = LAUNCH_GATE_KEYS;
 
 export const SEED_NODES = NODES;
 export const SEED_PACKAGES = PACKAGES;
