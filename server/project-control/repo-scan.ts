@@ -30,6 +30,8 @@ const ALLOWED_GIT_SUBCOMMANDS = new Set([
   "for-each-ref",
   "show-ref",
   "merge-base",
+  // Read-only history counting, used to report how far a lane's branch is ahead of main.
+  "rev-list",
 ]);
 
 const REPO_ROOT = process.cwd();
@@ -57,6 +59,19 @@ async function gitSafe(args: string[]): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/**
+ * How many commits `branch` is ahead of `base`.
+ *
+ * READ ONLY (`rev-list --count`). Returns 0 rather than throwing when either ref is missing, so a
+ * lane whose branch does not exist simply reports no work rather than breaking the dashboard.
+ * Refs are passed as separate argv entries via execFile, so a ref name can never become a command.
+ */
+export async function countCommitsAhead(branch: string, base = "main"): Promise<number> {
+  const out = (await gitSafe(["rev-list", "--count", `${base}..${branch}`])).trim();
+  const n = Number.parseInt(out, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
 export interface BranchInfo {

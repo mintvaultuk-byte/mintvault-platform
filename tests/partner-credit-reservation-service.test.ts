@@ -757,6 +757,12 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     // whatsoever on partner credits. Cleared for the same reason as the rows above: so the
     // later-migration guard stops tripping before the evidence guard this test is about.
     await admin.query("DELETE FROM schema_migrations WHERE filename = '0035_partner_certificate_origin.sql'");
+    // Project Control durable live evidence (0039) is the same case again: four additive pc_*
+    // tables for sync runs, leases, checkpoints and append-only evidence snapshots, with no
+    // relationship whatsoever to partner credits. Cleared for the identical reason as every row
+    // above — so the later-migration guard stops tripping before the evidence guard this test is
+    // actually about can be reached.
+    await admin.query("DELETE FROM schema_migrations WHERE filename = '0039_project_control_live_evidence.sql'");
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );
