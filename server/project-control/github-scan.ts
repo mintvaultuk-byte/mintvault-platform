@@ -97,6 +97,22 @@ export function invalidateGitHubCache(): void {
 }
 
 /**
+ * Drop the assembled-snapshot cache while KEEPING the ETag cache.
+ *
+ * This is the ordinary production state, not a test contrivance: the snapshot TTL is 60s and the
+ * forced-refresh cooldown is 10s, so a dashboard left open re-scans long before the ETags it
+ * collected stop being valid. That is precisely the window in which `If-None-Match` earns its
+ * keep — a revalidation costs no rate-limit quota, while a blind re-download costs one call per
+ * collection per refresh.
+ *
+ * Exported so that window can be entered deterministically in a test rather than by sleeping.
+ */
+export function invalidateSnapshotCacheOnly(): void {
+  snapshotCache = null;
+  lastForcedAt = 0;
+}
+
+/**
  * Strip anything credential-shaped out of an error before it becomes a user-visible warning.
  *
  * A fetch failure can carry a URL, and a URL can carry userinfo. This module must never be the
@@ -111,20 +127,47 @@ function safeErrorMessage(error: unknown): string {
     .slice(0, 300);
 }
 
+/**
+ * THE INJECTABLE TRANSPORT SEAM.
+ *
+ * Everything that makes this module worth trusting — conditional requests, bounded pagination,
+ * rate-limit classification, the timeout, and the guarantee that a token never reaches a warning
+ * string — lives in the HTTP layer. None of it could be tested while the layer called the global
+ * `fetch` directly, so the 31 tests that existed covered only the pure helpers and the entire
+ * transport was unverified.
+ *
+ * Threading the transport through as a parameter (defaulting to the real `fetch`) costs nothing in
+ * production and makes every one of those behaviours provable against a fake. It is deliberately
+ * typed as the narrow shape this module actually uses rather than the full DOM `fetch`, so a test
+ * fake does not have to implement things that are never called.
+ */
+export type GitHubFetch = (
+  url: string,
+  init: { method: string; signal: AbortSignal; headers: Record<string, string> }
+) => Promise<{
+  status: number;
+  ok: boolean;
+  headers: { get(name: string): string | null };
+  json(): Promise<unknown>;
+}>;
+
+/** The real transport. Isolated here so the default is stated once. */
+const realFetch: GitHubFetch = (url, init) => fetch(url, init as RequestInit) as unknown as ReturnType<GitHubFetch>;
+
 interface GetResult<T> {
   ok: boolean;
   data: T | null;
   warning: string | null;
 }
 
-async function getJson<T>(path: string, token: string): Promise<GetResult<T>> {
+async function getJson<T>(path: string, token: string, http: GitHubFetch): Promise<GetResult<T>> {
   const url = `${API}${path}`;
   const cached = etagCache.get(url);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const res = await fetch(url, {
+    const res = await http(url, {
       method: "GET",
       signal: controller.signal,
       headers: {
@@ -169,11 +212,21 @@ async function getJson<T>(path: string, token: string): Promise<GetResult<T>> {
 }
 
 /** Paginate within the bounds. Reports truncation instead of hiding it. */
-async function getAllPages<T>(pathBase: string, token: string, warnings: string[], label: string): Promise<T[]> {
+async function getAllPages<T>(
+  pathBase: string,
+  token: string,
+  warnings: string[],
+  label: string,
+  http: GitHubFetch
+): Promise<T[]> {
   const out: T[] = [];
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const sep = pathBase.includes("?") ? "&" : "?";
-    const { ok, data, warning } = await getJson<T[]>(`${pathBase}${sep}per_page=${PER_PAGE}&page=${page}`, token);
+    const { ok, data, warning } = await getJson<T[]>(
+      `${pathBase}${sep}per_page=${PER_PAGE}&page=${page}`,
+      token,
+      http
+    );
     if (!ok || !Array.isArray(data)) {
       if (warning) warnings.push(warning);
       break;
@@ -216,10 +269,10 @@ function mapPullRequestState(raw: { state?: unknown; merged_at?: unknown }): Pul
 /* The scan                                                                                     */
 /* ------------------------------------------------------------------------------------------ */
 
-async function doScan(repo: string, token: string): Promise<GitHubSnapshot> {
+async function doScan(repo: string, token: string, http: GitHubFetch): Promise<GitHubSnapshot> {
   const warnings: string[] = [];
 
-  const repoInfo = await getJson<{ default_branch?: string }>(`/repos/${repo}`, token);
+  const repoInfo = await getJson<{ default_branch?: string }>(`/repos/${repo}`, token, http);
   if (!repoInfo.ok) {
     return unavailableSnapshot(repo, repoInfo.warning ?? "GitHub repository metadata could not be read.");
   }
@@ -229,7 +282,8 @@ async function doScan(repo: string, token: string): Promise<GitHubSnapshot> {
     `/repos/${repo}/branches`,
     token,
     warnings,
-    "Branch list"
+    "Branch list",
+    http
   );
 
   const rawPulls = await getAllPages<{
@@ -240,7 +294,7 @@ async function doScan(repo: string, token: string): Promise<GitHubSnapshot> {
     updated_at: string;
     head?: { ref?: string; sha?: string };
     base?: { ref?: string };
-  }>(`/repos/${repo}/pulls?state=all&sort=updated&direction=desc`, token, warnings, "Pull request list");
+  }>(`/repos/${repo}/pulls?state=all&sort=updated&direction=desc`, token, warnings, "Pull request list", http);
 
   const rawRuns = await getAllPages<{
     name?: string;
@@ -249,7 +303,7 @@ async function doScan(repo: string, token: string): Promise<GitHubSnapshot> {
     conclusion?: unknown;
     run_started_at?: string;
     html_url?: string;
-  }>(`/repos/${repo}/actions/runs`, token, warnings, "Workflow run list").catch(() => []);
+  }>(`/repos/${repo}/actions/runs`, token, warnings, "Workflow run list", http).catch(() => []);
 
   const defaultBranchSha = rawBranches.find((b) => b.name === defaultBranch)?.commit?.sha ?? null;
 
@@ -318,7 +372,11 @@ async function doScan(repo: string, token: string): Promise<GitHubSnapshot> {
  * here rather than by the caller, so a user hammering "Refresh from GitHub" cannot turn the
  * button into a rate-limit exhaustion tool.
  */
-export async function scanGitHub(force = false, env: NodeJS.ProcessEnv = process.env): Promise<GitHubSnapshot> {
+export async function scanGitHub(
+  force = false,
+  env: NodeJS.ProcessEnv = process.env,
+  http: GitHubFetch = realFetch
+): Promise<GitHubSnapshot> {
   const repo = resolveRepository(env);
   const token = resolveToken(env);
 
@@ -336,7 +394,7 @@ export async function scanGitHub(force = false, env: NodeJS.ProcessEnv = process
 
   if (force) lastForcedAt = now;
 
-  inFlight = doScan(repo, token)
+  inFlight = doScan(repo, token, http)
     .then((value) => {
       // Only cache a snapshot that actually succeeded; an unavailable one must be retried.
       if (value.fetchedAt) snapshotCache = { at: Date.now(), value };
