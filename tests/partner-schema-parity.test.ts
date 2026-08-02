@@ -129,6 +129,11 @@ describe("partner schema ↔ migration parity", () => {
       // runner has no monotonicity check — a number below the applied watermark would run after
       // migrations numbered above it. Unapplied everywhere.
       "0039_project_control_live_evidence.sql",
+      // 0040 — seed reconciliation durable state: pc_seed_state (singleton current version +
+      // manifest digest), pc_seed_runs (every reconciliation attempt including dry runs and
+      // refusals), and three additive supersession columns on pc_work_packages so an obsolete
+      // package can be RETIRED rather than deleted. Additive only; 0030 and 0039 are untouched.
+      "0040_project_control_seed_reconciliation.sql",
     ]);
   });
 
