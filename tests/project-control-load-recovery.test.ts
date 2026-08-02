@@ -225,3 +225,46 @@ describe("LOAD3 — a failed refetch keeps the last good programme on screen", (
     expect(container.textContent, "the previously loaded programme is still rendered").toEqual(loaded);
   });
 });
+
+/**
+ * The loading and failure branches must render INSIDE `.admin-root`.
+ *
+ * Both return before AdminShell mounts, and `.admin-root` is applied only inside AdminShell. So
+ * they used to land on `body` (#ffffff / #1a1a1a): the loading line was gold-on-white at 2.10:1 and
+ * the failure card's explanatory paragraph was near-black on the dark panel at 1.06:1 — the single
+ * sentence telling the operator what to do, invisible.
+ *
+ * This is a STRUCTURAL guard only. It cannot prove contrast — happy-dom computes no styles and
+ * vitest runs with `css: false`, which is exactly why the defect survived. The real measurement is
+ * scripts/project-control/contrast-proof.mjs, which reads computed styles out of real Chrome
+ * against the real stylesheets. This test exists so a refactor that unwraps these branches turns
+ * RED without needing a browser.
+ */
+describe("loading and failure states stay inside the admin token scope", () => {
+  it("wraps the loading state in .admin-root", async () => {
+    // Never resolves, so the page stays on its loading branch.
+    installFetch(() => new Promise<Response>(() => {}) as unknown as Response);
+    await render(makeClient());
+    const loading = container.querySelector('[data-testid="pc-loading"]');
+    expect(loading, "the loading state must render").toBeTruthy();
+    expect(loading!.closest(".admin-root"), "loading must inherit --admin-ink, not body's #1a1a1a").toBeTruthy();
+  });
+
+  it("wraps the failure state in .admin-root", async () => {
+    installFetch(() => new Response("forbidden", { status: 403 }));
+    await render(makeClient());
+    const panel = container.querySelector(".admin-panel");
+    expect(panel, "the failure card must render").toBeTruthy();
+    expect(panel!.closest(".admin-root"), "the failure card must inherit the admin ink scope").toBeTruthy();
+  });
+
+  it("gives the retry control the admin button styling rather than a bare UA button", async () => {
+    installFetch(() => new Response("boom", { status: 500 }));
+    await render(makeClient());
+    const retry = container.querySelector('[data-testid="pc-retry"]');
+    if (retry) {
+      // It carried no className at all, so it rendered as a raw user-agent button on a dark panel.
+      expect(retry.className, "retry must carry admin button classes").toMatch(/admin-btn/);
+    }
+  });
+});

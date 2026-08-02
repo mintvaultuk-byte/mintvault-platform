@@ -1,7 +1,7 @@
 /** Executive-first Project Control landing page. Server remains authoritative for readiness. */
 import { useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { AdminShell, Panel } from "@/components/admin";
+import { AdminShell, Panel, adminButtonClass } from "@/components/admin";
 import { ProjectControlDashboard } from "@/components/admin/project-control/project-control-dashboard";
 import {
   pcGet,
@@ -83,16 +83,33 @@ export default function ProjectControlPage() {
   });
   const sync = useGitHubSync();
 
+  /*
+   * BOTH EARLY RETURNS RENDER INSIDE `.admin-root`.
+   *
+   * They did not, and that was the defect. `.admin-root` is applied only inside AdminShell
+   * (admin-shell.tsx), and these two branches return BEFORE the shell mounts — so they landed
+   * directly on `body`, which sets `background: #ffffff` and `color: #1a1a1a` (index.css).
+   *
+   *   - the loading line was `color: var(--admin-gold)` (#d4af37) on white  -> 2.10:1
+   *   - the failure card rendered `.admin-panel` (a #16140f gradient) while its <p> inherited
+   *     #1a1a1a from body                                                    -> 1.06:1
+   *
+   * `.admin-panel__title` and `__sub` declare their own colour, so the headline was readable and
+   * the ONLY sentence explaining what to do about it was not. Both fail WCAG AA badly, and neither
+   * could be caught by the existing tests: happy-dom computes no styles and vitest runs with
+   * `css: false`, and the browser proof renders the fixture, which wraps everything in
+   * `.admin-root` already. This is the same defect 7d7817f5 fixed in the fixture and never checked
+   * in the product.
+   *
+   * Wrapping in `.admin-root` inherits `--admin-ink` (#e8e2d4 on the dark ground) for body copy,
+   * and the loading text now uses `--admin-ink` rather than gold-on-white.
+   */
   if (overview.isLoading || shopLaunch.isLoading)
     return (
-      <div
-        className="p-8"
-        data-testid="pc-loading"
-        role="status"
-        aria-live="polite"
-        style={{ color: "var(--admin-gold)" }}
-      >
-        Loading Project Control…
+      <div className="admin-root">
+        <div className="p-8" data-testid="pc-loading" role="status" aria-live="polite">
+          Loading Project Control…
+        </div>
       </div>
     );
   /**
@@ -123,27 +140,32 @@ export default function ProjectControlPage() {
     const diagnosis = diagnoseLoadFailure(overview.error ?? shopLaunch.error ?? null);
     const retrying = overview.isFetching || shopLaunch.isFetching;
     return (
-      <div className="p-8" data-testid={diagnosis.testId} role="status" aria-live="polite">
-        <Panel title={diagnosis.headline} sub={diagnosis.detail}>
-          <p>
-            {retrying
-              ? "Retrying automatically…"
-              : "This message does not diagnose a migration and does not expose a backend error."}
-          </p>
-          {diagnosis.canRetry && (
-            <button
-              type="button"
-              data-testid="pc-retry"
-              disabled={retrying}
-              onClick={() => {
-                void overview.refetch();
-                void shopLaunch.refetch();
-              }}
-            >
-              Try again
-            </button>
-          )}
-        </Panel>
+      <div className="admin-root">
+        <div className="p-8" data-testid={diagnosis.testId} role="status" aria-live="polite">
+          <Panel title={diagnosis.headline} sub={diagnosis.detail}>
+            <p>
+              {retrying
+                ? "Retrying automatically…"
+                : "This message does not diagnose a migration and does not expose a backend error."}
+            </p>
+            {diagnosis.canRetry && (
+              /* adminButtonClass, not a bare <button>: this carried no className at all, so it
+                 rendered as a raw user-agent button on the dark panel. */
+              <button
+                type="button"
+                className={adminButtonClass({ variant: "gold" })}
+                data-testid="pc-retry"
+                disabled={retrying}
+                onClick={() => {
+                  void overview.refetch();
+                  void shopLaunch.refetch();
+                }}
+              >
+                Try again
+              </button>
+            )}
+          </Panel>
+        </div>
       </div>
     );
   }
