@@ -448,6 +448,18 @@ export const UNMANAGED_INVENTORY: readonly UnmanagedEntry[] = [
     futureDisposition: "keep runner-managed",
     evidenceSource: "Phase 0.5 runner (scripts/db/migrate.ts)",
   },
+  {
+    schema: "public",
+    name: "schema_migration_rollbacks",
+    objectType: "table",
+    class: "intentionally_unmanaged",
+    purpose: "Rollback ledger — the only thing that can re-admit a below-watermark migration",
+    active: true,
+    owningSubsystem: "db-migration-runner",
+    reason: "bootstrapped by scripts/db/migrate.ts alongside schema_migrations, never by schema.ts",
+    futureDisposition: "keep runner-managed",
+    evidenceSource: "Phase 0.5 runner (scripts/db/migrate.ts)",
+  },
 
   // ---- Project Control live-evidence + seed reconciliation (migrations 0039 / 0040) ----
   // The NINE tables migration 0030 creates (pc_nodes, pc_work_packages, pc_dependencies,

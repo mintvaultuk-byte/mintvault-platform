@@ -49,6 +49,16 @@ DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables
               WHERE table_schema = 'public' AND table_name = 'schema_migrations') THEN
+    -- ROLLBACK LEDGER — mint the reapply marker before retracting the journal row. Copies the
+    -- checksum FROM the journal (what was genuinely applied here) and pins the current watermark,
+    -- so the marker dies as soon as anything else is applied. See scripts/db/migrate.ts.
+    IF to_regclass('public.schema_migration_rollbacks') IS NOT NULL THEN
+      INSERT INTO schema_migration_rollbacks (filename, checksum, watermark_at_rollback, batch)
+      SELECT m.filename, m.checksum, COALESCE((SELECT MAX((regexp_match(filename,'^([0-9]{4,})_'))[1]::int) FROM schema_migrations),0), 'rollback-0040-project-control-seed-reconciliation.sql'
+        FROM schema_migrations m
+       WHERE filename = '0040_project_control_seed_reconciliation.sql'
+      ON CONFLICT DO NOTHING;
+    END IF;
     DELETE FROM schema_migrations WHERE filename = '0040_project_control_seed_reconciliation.sql';
   END IF;
 END $$;

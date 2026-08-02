@@ -336,7 +336,51 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT now();
 ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
-ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'applied';`;
+ALTER TABLE schema_migrations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'applied';
+
+/*
+ * ROLLBACK LEDGER — the ONLY thing that can exempt a below-watermark migration.
+ *
+ * The order guard refuses a pending migration numbered below the highest applied, because that is
+ * how a stale branch lands a schema change underneath migrations that already assumed a later
+ * state. That refusal is correct and stays absolute.
+ *
+ * But "pending" means only "absent from the journal by filename", and an approved rollback produces
+ * exactly that by deleting its own row. So a deliberate rollback and a late-arriving branch became
+ * indistinguishable, and the connector's documented back-out-and-restore procedure stopped working.
+ *
+ * This ledger is the missing input. A rollback copies the journal row it is about to delete into
+ * here, and the planner will re-admit that migration ONLY while all of the following hold:
+ *
+ *   - a row exists for that EXACT filename in state 'eligible';
+ *   - its checksum — taken from the journal, i.e. what was genuinely applied to THIS database,
+ *     never hashed from disk — equals the checksum of the forward file on disk today;
+ *   - watermark_at_rollback equals the CURRENT applied watermark.
+ *
+ * That last condition is what stops this from becoming a general bypass. It reduces the exemption
+ * to "put back exactly what you just removed, before anything else changes". Roll back 0038, let
+ * 0039 and 0040 land, then try to reapply 0038: the watermark has moved from 38 to 40, the marker
+ * is dead, and the guard refuses — which is the precise scenario the guard exists for.
+ *
+ * Deleting a schema_migrations row by hand produces NO ledger entry and therefore no eligibility.
+ * That is the intended asymmetry: only the reviewed rollback path can mint one.
+ */
+CREATE TABLE IF NOT EXISTS schema_migration_rollbacks (
+  id SERIAL PRIMARY KEY,
+  filename TEXT NOT NULL,
+  checksum TEXT NOT NULL,
+  watermark_at_rollback INTEGER NOT NULL DEFAULT 0,
+  rolled_back_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  rolled_back_by TEXT NOT NULL DEFAULT current_user,
+  batch TEXT,
+  state TEXT NOT NULL DEFAULT 'eligible',
+  consumed_at TIMESTAMPTZ
+);
+ALTER TABLE schema_migration_rollbacks ADD COLUMN IF NOT EXISTS watermark_at_rollback INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE schema_migration_rollbacks ADD COLUMN IF NOT EXISTS consumed_at TIMESTAMPTZ;
+-- At most ONE open marker per migration, so a rollback re-run cannot stack eligibility.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_schema_migration_rollbacks_eligible
+  ON schema_migration_rollbacks (filename) WHERE state = 'eligible';`;
 
 interface PgClientLike {
   query: (sql: string, args?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>> }>;
@@ -388,6 +432,11 @@ export interface MigratePlan {
    * as a confusing runtime error long after the deploy that caused it.
    */
   outOfOrder: { filename: string; number: number; appliedWatermark: number }[];
+  /**
+   * Below-watermark migrations re-admitted by an eligible rollback-ledger entry.
+   * Reported on the dry-run path too: a silent exemption is worse than the refusal it replaces.
+   */
+  authorisedReapply: { filename: string; number: number; rolledBackAt: string; rolledBackBy: string }[];
 }
 
 /**
@@ -408,6 +457,39 @@ export function appliedWatermark(journalFilenames: Iterable<string>): number {
   return max;
 }
 
+interface RollbackMarker {
+  filename: string;
+  checksum: string;
+  watermarkAtRollback: number;
+  rolledBackAt: string;
+  rolledBackBy: string;
+}
+
+/**
+ * Read the rollback ledger. Tolerates its absence exactly as `journalExists` does for the journal:
+ * the ledger is created by `ensureJournal` on the APPLY path only, so a dry-run against a database
+ * an older runner built must return "no markers" rather than erroring.
+ */
+async function rollbackMarkers(client: PgClientLike): Promise<Map<string, RollbackMarker>> {
+  const m = new Map<string, RollbackMarker>();
+  const reg = await client.query("SELECT to_regclass('public.schema_migration_rollbacks') AS reg");
+  if (!reg.rows?.[0]?.reg) return m;
+  const { rows } = await client.query(
+    `SELECT filename, checksum, watermark_at_rollback, rolled_back_at, rolled_back_by
+       FROM schema_migration_rollbacks WHERE state = 'eligible'`
+  );
+  for (const r of rows) {
+    m.set(String(r.filename), {
+      filename: String(r.filename),
+      checksum: String(r.checksum),
+      watermarkAtRollback: Number(r.watermark_at_rollback ?? 0),
+      rolledBackAt: String(r.rolled_back_at ?? ""),
+      rolledBackBy: String(r.rolled_back_by ?? ""),
+    });
+  }
+  return m;
+}
+
 /** Read-only planning: never mutates the database (does not create the journal table). */
 export async function planMigrations(client: PgClientLike, files: MigrationFile[]): Promise<MigratePlan> {
   const journal = await journalMap(client);
@@ -418,6 +500,7 @@ export async function planMigrations(client: PgClientLike, files: MigrationFile[
     inconsistent: [],
     destructive: [],
     outOfOrder: [],
+    authorisedReapply: [],
   };
   for (const f of files) {
     const row = journal.get(f.filename);
@@ -445,10 +528,44 @@ export async function planMigrations(client: PgClientLike, files: MigrationFile[
    */
   const watermark = appliedWatermark(journal.keys());
   if (watermark > 0) {
+    const markers = await rollbackMarkers(client);
     for (const f of files) {
       if (!plan.pending.includes(f.filename)) continue;
       const n = Number(f.number);
-      if (Number.isFinite(n) && n < watermark) {
+      if (!Number.isFinite(n) || n >= watermark) continue;
+
+      /*
+       * Exemption is decided PER FILE, never for the batch.
+       *
+       * The tempting shape — "if any valid marker exists, allow the run" — would let a legitimate
+       * marker for 0010 carry an unrelated, genuinely late 0038 through in the same run. Every
+       * condition below is evaluated against THIS file's own marker, and a file with no marker of
+       * its own falls through to outOfOrder exactly as before.
+       */
+      const marker = markers.get(f.filename);
+      const eligible =
+        marker !== undefined &&
+        // Checksum recorded by the rollback FROM THE JOURNAL — i.e. what was genuinely applied to
+        // this database — compared against the forward file on disk today. A migration edited at
+        // any point between being applied and being reapplied fails here.
+        marker.checksum === f.checksum &&
+        // THE self-closing condition. The marker is valid only while the journal is exactly where
+        // the rollback left it. Roll back 0038, let 0039/0040 land, and the watermark moves from
+        // 38 to 40 — the marker dies and 0038 is refused, which is the whole point of the guard.
+        marker.watermarkAtRollback === watermark &&
+        // v1 restriction: a non-transactional migration cannot consume its marker atomically with
+        // its journal row (there is no transaction), so it is never exempted. Costs nothing today —
+        // only 0018 carries the directive, and no rollback ledger entry exists for it.
+        !f.noTransaction;
+
+      if (eligible) {
+        plan.authorisedReapply.push({
+          filename: f.filename,
+          number: n,
+          rolledBackAt: marker!.rolledBackAt,
+          rolledBackBy: marker!.rolledBackBy,
+        });
+      } else {
         plan.outOfOrder.push({ filename: f.filename, number: n, appliedWatermark: watermark });
       }
     }
@@ -568,7 +685,9 @@ export async function applyMigrations(
         // Non-transactional migration (e.g. CREATE INDEX CONCURRENTLY): cannot run in a txn.
         // Record intent, run, then mark complete. Must be individually idempotent.
         await client.query(
-          "INSERT INTO schema_migrations (filename, checksum, status) VALUES ($1,$2,'applying') ON CONFLICT (filename) DO UPDATE SET status='applying', started_at=now()",
+          // checksum=EXCLUDED.checksum: the conflict arm previously kept the OLD hash, so a row
+          // surviving a crash could carry a checksum that no longer described the file just run.
+          "INSERT INTO schema_migrations (filename, checksum, status) VALUES ($1,$2,'applying') ON CONFLICT (filename) DO UPDATE SET status='applying', started_at=now(), checksum=EXCLUDED.checksum",
           [f.filename, f.checksum]
         );
         try {
@@ -587,6 +706,21 @@ export async function applyMigrations(
           await client.query(
             "INSERT INTO schema_migrations (filename, checksum, status, completed_at) VALUES ($1,$2,'applied',now())",
             [f.filename, f.checksum]
+          );
+          /*
+           * Consume the rollback marker in the SAME transaction as the DDL and the journal row.
+           *
+           * A marker that outlived its reapply would remain a standing licence to re-admit this
+           * file below the watermark for ever. Closing it here means the exemption is spent by the
+           * commit that used it — and if the migration fails, the ROLLBACK below leaves the marker
+           * untouched and still 'eligible', so the operator can retry without re-running the
+           * rollback. Guarded on the table existing so an older database is unaffected.
+           */
+          await client.query(
+            `UPDATE schema_migration_rollbacks SET state='consumed', consumed_at=now()
+              WHERE filename=$1 AND state='eligible'
+                AND to_regclass('public.schema_migration_rollbacks') IS NOT NULL`,
+            [f.filename]
           );
           await client.query("COMMIT");
         } catch (e) {
@@ -666,6 +800,20 @@ async function main(): Promise<void> {
       `Migrations: ${files.length} total, ${plan.alreadyApplied.length} applied, ${plan.pending.length} pending, ` +
         `${plan.inconsistent.length} inconsistent, ${plan.checksumMismatches.length} checksum-mismatch.`
     );
+    /*
+     * An exemption must never be silent. The out-of-order refusal is printed on the dry-run path
+     * for exactly this reason — so the operator learns before `--apply`, not during it — and a
+     * below-watermark migration being ADMITTED deserves at least as much visibility as one being
+     * refused. Printed on every run, including when the list is empty is not needed, but when it
+     * is non-empty it names who rolled back and when.
+     */
+    if (plan.authorisedReapply.length > 0) {
+      console.warn(
+        `↩️  Authorised reapply (below watermark, admitted by the rollback ledger): ${plan.authorisedReapply
+          .map((r) => `${r.filename} (#${r.number}) rolled back ${r.rolledBackAt} by ${r.rolledBackBy}`)
+          .join(", ")}`
+      );
+    }
     if (plan.inconsistent.length > 0) {
       console.error(`🚫 Journal inconsistent: ${plan.inconsistent.map((i) => `${i.filename}=${i.status}`).join(", ")}`);
       process.exit(1);
