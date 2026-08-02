@@ -34,6 +34,9 @@
  *   GET    /views/distributed-shop-launch             live-evidence programme lanes
  *   GET    /github                                    live GitHub evidence + freshness
  *   GET    /live-evidence                             GitHub + application + flag evidence, one view
+ *   POST   /sync/github                               start a durable GitHub sync (202)
+ *   GET    /sync/latest                               most recent durable sync run
+ *   GET    /sync/:syncId                              one durable sync run by id
  *   GET    /export                                    bounded JSON snapshot
  *   POST   /seed                                      idempotent programme-tree seed
  */
@@ -46,6 +49,9 @@ import { buildDistributedProgrammeView } from "../../project-control/distributed
 import { isGitHubConfigured, scanGitHub } from "../../project-control/github-scan";
 import { compareDeployment, probeAllApplications } from "../../project-control/app-probe";
 import { collectFlagEvidence } from "../../project-control/flag-evidence";
+import { pool } from "../../db";
+import { beginGitHubSync, runGitHubSync, GITHUB_SOURCE } from "../../project-control/github-sync-service";
+import { getLatestRun, getRun, getActiveRun } from "../../project-control/evidence-repository";
 import {
   BLOCKER_KINDS,
   DEPLOYMENT_RESULTS,
@@ -162,6 +168,49 @@ const gated = [requireProjectControlEnabled, requireSuperAdmin, projectControlRe
 
 /** Gate for routes that spawn subprocesses or sweep whole tables. */
 const gatedExpensive = [requireProjectControlEnabled, requireSuperAdmin, projectControlExpensiveLimit] as const;
+
+/**
+ * Project a run for the wire.
+ *
+ * Deliberately omits snapshot payloads and anything configuration-shaped. `errorCode` is a short
+ * stable code chosen by the sync service, never a raw exception — a database or fetch error can
+ * carry a DSN or a token, and this response is the one place a Super Admin's browser would see it.
+ */
+function toSyncStatus(
+  run: {
+    syncId: string;
+    sourceType: string;
+    triggerType: string;
+    state: string;
+    requestedAt: Date;
+    startedAt: Date | null;
+    completedAt: Date | null;
+    counts: Record<string, unknown>;
+    warnings: unknown[];
+    errorCode: string | null;
+  },
+  activeSyncId: string | null
+) {
+  return {
+    syncId: run.syncId,
+    source: run.sourceType,
+    trigger: run.triggerType,
+    state: run.state,
+    requestedAt: run.requestedAt,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+    counts: run.counts,
+    warnings: (run.warnings ?? []).slice(0, 20),
+    errorCode: run.errorCode,
+    activeSyncId,
+    anotherRunActive: Boolean(activeSyncId && activeSyncId !== run.syncId),
+  };
+}
+
+/** The Super Admin's email, for the run's audit trail. Never a credential. */
+function actor_(req: { session?: unknown }): string {
+  return ((req.session as { adminEmail?: string } | undefined)?.adminEmail || "super-admin").slice(0, 120);
+}
 
 function actor(req: Request): string {
   return (req.session as { adminEmail?: string } | undefined)?.adminEmail || "admin";
@@ -761,6 +810,86 @@ export function registerProjectControlRoutes(app: Express): void {
         deployment: compareDeployment(snapshot?.defaultBranchSha ?? null, probes),
         featureFlags: flags,
       });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * START A DURABLE GITHUB SYNC.
+   *
+   * Returns 202 as soon as the run is RECORDED, then lets the scan continue. The HTTP request is
+   * deliberately not held open for a full GitHub scan: a scan can take tens of seconds, a
+   * disconnected client would abort it midway, and the operator would have no way to learn what
+   * happened. The database run and the lease are authoritative — the in-process promise below is
+   * execution plumbing, not state. If this process dies, the lease expires and the work is
+   * retryable; nothing is lost that the run row did not already record.
+   *
+   * The repository is fixed by environment. There is no owner/repo input, so this cannot be aimed
+   * at an arbitrary repository by a request body.
+   */
+  app.post(`${BASE}/sync/github`, ...gated, projectControlWriteLimit, async (req, res) => {
+    try {
+      const actor = actor_(req);
+      const outcome = await beginGitHubSync(pool, { triggerType: "manual", actor });
+
+      if (outcome.started) {
+        /*
+         * Fire-and-record. The rejection handler exists so an unhandled rejection cannot take the
+         * process down; the run's own error handling has already written the failure to the
+         * database by the time anything lands here.
+         */
+        void runGitHubSync(pool, outcome.syncId).catch(() => undefined);
+        return res.status(202).json({
+          syncId: outcome.syncId,
+          state: "QUEUED",
+          accepted: true,
+          alreadyRunning: false,
+          unavailable: false,
+          requestedAt: new Date().toISOString(),
+        });
+      }
+
+      // Both non-started outcomes are 202 as well: the request was understood and a durable run
+      // exists to poll. Only the flags differ, so the client never has to parse prose.
+      return res.status(202).json({
+        syncId: outcome.syncId,
+        state: outcome.reason === "already_running" ? "RUNNING" : "UNAVAILABLE",
+        accepted: false,
+        alreadyRunning: outcome.reason === "already_running",
+        unavailable: outcome.reason === "unavailable",
+        requestedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /** The most recent durable run, for the dashboard's "last refresh" line. */
+  app.get(`${BASE}/sync/latest`, ...gated, async (_req, res) => {
+    try {
+      const run = await getLatestRun(pool, GITHUB_SOURCE);
+      if (!run) return res.status(404).json({ error: "No sync run has been recorded yet." });
+      const active = await getActiveRun(pool, GITHUB_SOURCE);
+      return res.json(toSyncStatus(run, active?.syncId ?? null));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /** One run by id, for polling after a 202. */
+  app.get(`${BASE}/sync/:syncId`, ...gated, async (req, res) => {
+    try {
+      const syncId = String(req.params.syncId);
+      // A malformed id is a 400, distinct from a well-formed id that does not exist (404) — the
+      // operator needs to tell "you typed it wrong" from "it is gone".
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(syncId)) {
+        return res.status(400).json({ error: "Invalid sync id." });
+      }
+      const run = await getRun(pool, syncId);
+      if (!run) return res.status(404).json({ error: "Sync run not found." });
+      const active = await getActiveRun(pool, GITHUB_SOURCE);
+      return res.json(toSyncStatus(run, active?.syncId ?? null));
     } catch (error) {
       fail(res, error);
     }

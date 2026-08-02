@@ -146,6 +146,12 @@ const ALL_ROUTES: [string, string][] = [
   // fans out to the GitHub API and to both allowlisted /api/version endpoints. Every sub-probe
   // fails soft on its own, so one unreachable environment cannot blank the evidence beside it.
   ["GET", `${P}/live-evidence`],
+  // Durable sync control. POST starts a run and returns 202 immediately — it never holds the
+  // request open for a full GitHub scan. The two GETs poll the durable run; the database run and
+  // lease are authoritative, so a client that disconnects loses nothing.
+  ["POST", `${P}/sync/github`],
+  ["GET", `${P}/sync/latest`],
+  ["GET", `${P}/sync/example-id`],
   ["GET", `${P}/export`],
   ["POST", `${P}/seed`],
 ];

@@ -113,10 +113,37 @@ only the present). Export first if that history matters — the rollback file ca
     available to the Fly runtime. Until this is set, repository evidence reads **UNAVAILABLE** and
     the dashboard says so — which is the designed behaviour, not a fault.
 
-12. **Initial sync.** `GET /api/admin/project-control/live-evidence?refresh=true`. Expect a
-    `github.snapshot` with a `defaultBranchSha`, `applications` for both environments, and
-    `featureFlags`. A rate-limit or access failure is reported with a distinct message; they need
-    different fixes.
+12. **Initial durable sync.** `POST /api/admin/project-control/sync/github`. Expect **202** with a
+    `syncId` and `accepted: true`. The request returns immediately — it does not hold open for the
+    scan.
+
+    Poll `GET /api/admin/project-control/sync/{syncId}` until `state` leaves QUEUED/RUNNING.
+
+    | `state` | Meaning |
+    |---|---|
+    | `SUCCEEDED` | full scan stored |
+    | `PARTIAL` | evidence stored, but a collection was truncated or refused — read `warnings` |
+    | `RATE_LIMITED` | quota exhausted; previous evidence retained |
+    | `UNAVAILABLE` | no credential, or GitHub unreachable; previous evidence retained |
+    | `FAILED` | persistence failed; the transaction rolled back and the checkpoint still stands |
+    | `EXPIRED` | abandoned by a dead process and reaped |
+
+13. **Verify the run, checkpoint and snapshots** — this is what proves durability rather than a
+    cache:
+    ```sql
+    SELECT sync_id, state, trigger_type, actor, counts FROM pc_sync_runs ORDER BY requested_at DESC LIMIT 5;
+    SELECT resource_key, cursor_value, observed_at FROM pc_sync_checkpoints;
+    SELECT source_type, entity_type, count(*) FROM pc_evidence_snapshots GROUP BY 1,2 ORDER BY 1,2;
+    ```
+    A `SUCCEEDED` run with **no** checkpoint row would mean the ordering rule was violated — stop
+    and investigate rather than re-running.
+
+14. **Duplicate refresh.** POST twice quickly. The second must return `alreadyRunning: true` with
+    the SAME `syncId`. Two different ids would mean two scans against a rate-limited API.
+
+15. **Unavailable recovery.** Temporarily unset `PROJECT_CONTROL_GITHUB_TOKEN` and POST again.
+    Expect `unavailable: true` and an `UNAVAILABLE` run — and confirm the PREVIOUS evidence is
+    still queryable. A failure must add an observation, never replace one.
 
 ---
 
