@@ -57,4 +57,24 @@ BEGIN
   RAISE NOTICE 'rollback-0039 complete: 4 tables and 1 function removed; migration 0030 intact.';
 END $$;
 
+-- Retract the ledger row LAST.
+--
+-- The runner's identity is the journal row, not the presence of the tables (scripts/db/migrate.ts
+-- reads schema_migrations to decide what is pending). Dropping the objects without retracting the
+-- row leaves the runner permanently convinced 0039 is applied over a schema that no longer exists:
+-- `db:migrate` reports 0 pending, every live-evidence read fails with `relation
+-- "pc_evidence_snapshots" does not exist`, and recovery needs hand-written SQL against a live host
+-- during an incident. This is the identical defect that was fixed in rollback-0030 on this branch;
+-- rollback-0040 already retracts its row. This script was the remaining omission.
+--
+-- Guarded on the journal existing at all, so this script still runs cleanly against a disposable
+-- test database that was never driven by the runner.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables
+              WHERE table_schema = 'public' AND table_name = 'schema_migrations') THEN
+    DELETE FROM schema_migrations WHERE filename = '0039_project_control_live_evidence.sql';
+  END IF;
+END $$;
+
 COMMIT;

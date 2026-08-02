@@ -175,6 +175,39 @@ describe("rollback-0039", () => {
     expect(kept.rows[0].n, "rollback must not touch migration 0030").toBe(2);
   });
 
+  /**
+   * The runner decides what is pending from schema_migrations, not from the tables. A rollback that
+   * drops the objects but leaves its journal row makes `db:migrate` report 0 pending over a schema
+   * that no longer exists — every live-evidence read then fails with `relation
+   * "pc_evidence_snapshots" does not exist`, and recovery needs hand SQL on a live host. Sibling
+   * rollbacks 0030 and 0040 already retract their row; this pins that 0039 does too.
+   */
+  it("retracts its own journal row so the runner sees 0039 as pending again", async () => {
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS schema_migrations (
+         filename TEXT NOT NULL UNIQUE,
+         checksum TEXT NOT NULL DEFAULT '',
+         status TEXT NOT NULL DEFAULT 'applied'
+       )`
+    );
+    await pool.query(
+      `INSERT INTO schema_migrations (filename, checksum)
+         VALUES ('0039_project_control_live_evidence.sql', 'test')
+       ON CONFLICT (filename) DO NOTHING`
+    );
+
+    await applyRollback();
+
+    const row = await pool.query(
+      `SELECT count(*)::int AS n FROM schema_migrations
+        WHERE filename = '0039_project_control_live_evidence.sql'`
+    );
+    expect(row.rows[0].n, "rollback-0039 must retract its own journal row").toBe(0);
+
+    await pool.query(`DROP TABLE IF EXISTS schema_migrations`);
+    await applyForward();
+  });
+
   it("is idempotent, and the migration re-applies cleanly afterwards", async () => {
     await expect(applyRollback()).resolves.not.toThrow();
     await expect(applyForward()).resolves.not.toThrow();
