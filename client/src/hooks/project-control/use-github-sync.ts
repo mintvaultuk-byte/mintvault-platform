@@ -1,0 +1,135 @@
+import { useEffect, useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
+import { pcGet, projectControlQueryKeys, startEvidenceRefresh, type SyncStatus } from "@/lib/project-control/api";
+
+const TERMINAL = new Set<SyncStatus["state"]>([
+  "SUCCEEDED",
+  "PARTIAL",
+  "FAILED",
+  "RATE_LIMITED",
+  "UNAVAILABLE",
+  "CANCELLED",
+  "EXPIRED",
+]);
+const POLL_MS = 5_000;
+const TIMEOUT_MS = 90_000;
+
+/** Durable GitHub refresh; errors intentionally reduce to stable operator copy. */
+export function useGitHubSync() {
+  const [status, setStatus] = useState<SyncStatus | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const started = useRef(0);
+  const generation = useRef(0);
+  const mounted = useRef(true);
+
+  const stop = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      generation.current += 1;
+      stop();
+    };
+  }, []);
+
+  const invalidateEvidence = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: projectControlQueryKeys.overview }),
+      queryClient.invalidateQueries({ queryKey: projectControlQueryKeys.shopLaunch }),
+      // A completed refresh must invalidate the STORED evidence the dashboard reads, plus the
+      // programme queries whose readiness derives from it.
+      queryClient.invalidateQueries({ queryKey: projectControlQueryKeys.composedOverview }),
+      queryClient.invalidateQueries({ queryKey: projectControlQueryKeys.syncLatest }),
+      queryClient.invalidateQueries({ queryKey: projectControlQueryKeys.github }),
+    ]);
+  };
+
+  const poll = async (syncId: string, token: number) => {
+    if (token !== generation.current) return;
+    if (Date.now() - started.current >= TIMEOUT_MS) {
+      if (mounted.current)
+        setStatus((previous) => (previous ? { ...previous, state: "EXPIRED", errorCode: "CLIENT_TIMEOUT" } : previous));
+      stop();
+      return;
+    }
+    try {
+      const remaining = Math.max(1, TIMEOUT_MS - (Date.now() - started.current));
+      const next = await Promise.race<SyncStatus>([
+        pcGet<SyncStatus>(`/sync/${syncId}`),
+        new Promise<SyncStatus>((_resolve, reject) => setTimeout(() => reject(new Error("SYNC_TIMEOUT")), remaining)),
+      ]);
+      if (token !== generation.current || !mounted.current) return;
+      setStatus(next);
+      if (TERMINAL.has(next.state)) {
+        stop();
+        if (next.state === "SUCCEEDED" || next.state === "PARTIAL") await invalidateEvidence();
+        return;
+      }
+      timer.current = setTimeout(() => void poll(syncId, token), POLL_MS);
+    } catch {
+      if (token !== generation.current || !mounted.current) return;
+      const expired = Date.now() - started.current >= TIMEOUT_MS;
+      setStatus((previous) =>
+        previous
+          ? {
+              ...previous,
+              state: expired ? "EXPIRED" : "FAILED",
+              errorCode: expired ? "CLIENT_TIMEOUT" : "SYNC_STATUS_UNAVAILABLE",
+            }
+          : previous
+      );
+      stop();
+    }
+  };
+
+  const refresh = useMutation({
+    // Refreshes all four evidence sources, not just GitHub — see startEvidenceRefresh.
+    mutationFn: startEvidenceRefresh,
+    onSuccess: (accepted) => {
+      stop();
+      const token = ++generation.current;
+      started.current = Date.now();
+      setStatus({
+        syncId: accepted.syncId,
+        state: accepted.state,
+        requestedAt: new Date().toISOString(),
+        startedAt: null,
+        completedAt: null,
+        errorCode: null,
+        activeSyncId: null,
+        anotherRunActive: false,
+      });
+      void poll(accepted.syncId, token);
+    },
+    onError: () =>
+      setStatus((previous) =>
+        previous
+          ? { ...previous, state: "FAILED", errorCode: "REFRESH_REQUEST_FAILED" }
+          : {
+              syncId: "",
+              state: "FAILED",
+              requestedAt: new Date().toISOString(),
+              startedAt: null,
+              completedAt: null,
+              errorCode: "REFRESH_REQUEST_FAILED",
+              activeSyncId: null,
+              anotherRunActive: false,
+            }
+      ),
+  });
+
+  return {
+    refresh: () => refresh.mutate(),
+    isRefreshing: refresh.isPending || Boolean(status && !TERMINAL.has(status.state)),
+    status,
+  };
+}
+
+export function isGitHubSyncTerminal(state: SyncStatus["state"]): boolean {
+  return TERMINAL.has(state);
+}

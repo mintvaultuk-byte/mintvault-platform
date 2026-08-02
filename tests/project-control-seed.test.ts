@@ -15,7 +15,7 @@ import {
   SEED_PACKAGES,
   orderNodesParentFirst,
 } from "../server/project-control/seed-data";
-import { MANDATORY_CATEGORIES, WORK_STATUSES } from "@shared/project-control";
+import { MANDATORY_CATEGORIES } from "@shared/project-control";
 
 describe("approved Shop Launch sequence", () => {
   it("is preserved exactly, in order, 1 to 10", () => {
@@ -58,14 +58,18 @@ describe("G7–G20 backlog", () => {
     }
   });
 
-  it("marks none of them complete, deployed or cancelled", () => {
+  it("claims no progress at all — the seed cannot mark backlog complete, deployed or cancelled", () => {
+    // STRENGTHENED. This previously asserted the seeded values were the harmless ones
+    // (not_started / 0 / not_deployed / not_verified). Those fields are no longer seeded at all,
+    // so the guard is now that they are ABSENT: the seed cannot claim ANY progress, harmless or
+    // otherwise, and the columns take their honest migration defaults instead. Absent is a
+    // stronger guarantee than "set to the value we happened to want".
     for (const p of backlog) {
-      expect(p.status).toBe("not_started");
-      expect(p.declaredCompletion).toBe(0);
-      expect(p.deploymentState).toBe("not_deployed");
-      expect(p.productionVerification).toBe("not_verified");
-      // "superseded" would read as cancelled — the backlog is deferred, not dropped.
-      expect(p.status).not.toBe("superseded");
+      const record = p as unknown as Record<string, unknown>;
+      expect(record.status, `${p.key} must not seed status`).toBeUndefined();
+      expect(record.declaredCompletion, `${p.key} must not seed completion`).toBeUndefined();
+      expect(record.deploymentState, `${p.key} must not seed deployment state`).toBeUndefined();
+      expect(record.productionVerification, `${p.key} must not seed production verification`).toBeUndefined();
     }
   });
 
@@ -107,10 +111,14 @@ describe("seed honesty", () => {
     expect(source).not.toMatch(/\.delete\(/);
   });
 
-  it("uses only valid statuses and unique keys", () => {
+  it("declares no status at all, and uses unique keys", () => {
+    // STRENGTHENED. This previously checked the seeded status was a member of WORK_STATUSES.
+    // The seed no longer declares status — it is derived from live evidence — so the assertion
+    // is now that none is present. A seeded status could be perfectly valid AND completely
+    // false, which is exactly what shipped.
     const keys = new Set<string>();
     for (const p of SEED_PACKAGES) {
-      expect(WORK_STATUSES, p.key).toContain(p.status);
+      expect((p as unknown as Record<string, unknown>).status, `${p.key} must not seed status`).toBeUndefined();
       expect(keys.has(p.key), `duplicate package key ${p.key}`).toBe(false);
       keys.add(p.key);
     }

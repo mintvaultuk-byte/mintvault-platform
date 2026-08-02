@@ -7,7 +7,7 @@
  * no route here that pushes, merges, deploys, applies a migration, writes to production, or
  * touches any pre-existing MintVault table.
  *
- * Route inventory — 25 endpoints (kept in step with the router by a test that counts registrations):
+ * Route inventory — 39 endpoints (kept in step with the router by a test that counts registrations):
  *   GET    /overview                                  tree + readiness + queues + drift
  *   GET    /queues                                    the nine approved queues
  *   GET    /drift                                     repository-versus-environment drift
@@ -31,13 +31,50 @@
  *   GET    /audit                                     append-only status history
  *   GET    /views/shop-launch                         Partner Shop Launch view
  *   GET    /views/scanner                             Scanner view
+ *   GET    /views/distributed-shop-launch             live-evidence programme lanes
+ *   GET    /github                                    live GitHub evidence + freshness
+ *   GET    /live-evidence                             GitHub + application + flag evidence, one view
+ *   POST   /sync/github                               start a durable GitHub sync (202)
+ *   GET    /sync/latest                               most recent durable sync run
+ *   GET    /sync/:syncId                              one durable sync run by id
+ *   POST   /sync/applications                         probe + store both application versions
+ *   POST   /sync/flags                                store this environment's flag evidence
+ *   POST   /sync/databases                            store this environment's migration evidence
+ *   GET    /composed-overview                         the composed DTO; stored evidence only
+ *   GET    /seed/status                               applied seed version + drift
+ *   POST   /seed/dry-run                              preview; writes nothing
+ *   POST   /seed/apply                                execute a previewed plan
+ *   POST   /seed/report/latest                        latest reconciliation run
  *   GET    /export                                    bounded JSON snapshot
  *   POST   /seed                                      idempotent programme-tree seed
  */
 import type { Express, NextFunction, Request, Response } from "express";
 import rateLimit from "express-rate-limit";
 import { z, ZodError } from "zod";
+import { classifyFreshness } from "@shared/project-control-github";
 import { requireSuperAdmin } from "../../auth";
+import { buildDistributedProgrammeView } from "../../project-control/distributed";
+import { isGitHubConfigured, scanGitHub } from "../../project-control/github-scan";
+import { resolveConnectedEnvironment } from "../../project-control/migration-scan";
+import {
+  SeedApplyError,
+  applySeed,
+  dryRunSeed,
+  loadLatestRun,
+  loadSeedStatus,
+} from "../../project-control/seed-repository";
+import { currentSeedManifest, currentSeedManifestDigest } from "../../project-control/seed-manifest-source";
+import { compareDeployment, probeAllApplications } from "../../project-control/app-probe";
+import { collectFlagEvidence } from "../../project-control/flag-evidence";
+import { pool } from "../../db";
+import { beginGitHubSync, runGitHubSync, GITHUB_SOURCE } from "../../project-control/github-sync-service";
+import { getLatestRun, getRun, getActiveRun } from "../../project-control/evidence-repository";
+import {
+  collectApplicationEvidence,
+  collectFlagEvidenceSnapshots,
+} from "../../project-control/probe-persistence";
+import { collectAndStoreDatabaseEvidence } from "../../project-control/database-evidence";
+import { buildComposedOverview } from "../../project-control/overview-service";
 import {
   BLOCKER_KINDS,
   DEPLOYMENT_RESULTS,
@@ -91,6 +128,7 @@ import {
 import { scanRepository } from "../../project-control/repo-scan";
 import { scanAllEvidence } from "../../project-control/evidence-scan";
 import { seedProgrammeTree } from "../../project-control/seed";
+import { seedApplyRefusal } from "@shared/project-control-environment";
 import { isProjectControlEnabled, projectControlDisabledPayload } from "../../project-control/flag";
 import { AttemptIdentityError } from "../../project-control/idempotency";
 
@@ -155,6 +193,49 @@ const gated = [requireProjectControlEnabled, requireSuperAdmin, projectControlRe
 /** Gate for routes that spawn subprocesses or sweep whole tables. */
 const gatedExpensive = [requireProjectControlEnabled, requireSuperAdmin, projectControlExpensiveLimit] as const;
 
+/**
+ * Project a run for the wire.
+ *
+ * Deliberately omits snapshot payloads and anything configuration-shaped. `errorCode` is a short
+ * stable code chosen by the sync service, never a raw exception — a database or fetch error can
+ * carry a DSN or a token, and this response is the one place a Super Admin's browser would see it.
+ */
+function toSyncStatus(
+  run: {
+    syncId: string;
+    sourceType: string;
+    triggerType: string;
+    state: string;
+    requestedAt: Date;
+    startedAt: Date | null;
+    completedAt: Date | null;
+    counts: Record<string, unknown>;
+    warnings: unknown[];
+    errorCode: string | null;
+  },
+  activeSyncId: string | null
+) {
+  return {
+    syncId: run.syncId,
+    source: run.sourceType,
+    trigger: run.triggerType,
+    state: run.state,
+    requestedAt: run.requestedAt,
+    startedAt: run.startedAt,
+    completedAt: run.completedAt,
+    counts: run.counts,
+    warnings: (run.warnings ?? []).slice(0, 20),
+    errorCode: run.errorCode,
+    activeSyncId,
+    anotherRunActive: Boolean(activeSyncId && activeSyncId !== run.syncId),
+  };
+}
+
+/** The Super Admin's email, for the run's audit trail. Never a credential. */
+function actor_(req: { session?: unknown }): string {
+  return ((req.session as { adminEmail?: string } | undefined)?.adminEmail || "super-admin").slice(0, 120);
+}
+
 function actor(req: Request): string {
   return (req.session as { adminEmail?: string } | undefined)?.adminEmail || "admin";
 }
@@ -166,6 +247,64 @@ function actor(req: Request): string {
  * response body stays deliberately generic; the log line is redacted so an operator gets a useful
  * message without a credential ending up in the log store.
  */
+/**
+ * Apply takes exactly one field: the confirmation issued by a dry run. Deliberately `.strict()`,
+ * so a body carrying a manifest, a version, an environment or a force flag is REJECTED rather
+ * than quietly ignored — a silently-dropped override reads to the caller as an accepted one.
+ */
+const seedApplySchema = z.object({ confirmationToken: z.string().min(16).max(200) }).strict();
+
+/**
+ * Project a seed error as a STABLE CODE.
+ *
+ * SeedApplyError already carries an operator-safe message and never wraps raw driver text — the
+ * repository discards that at the boundary. This maps each code to the status an operator can act
+ * on, and anything unrecognised falls through to the generic redacted handler rather than being
+ * echoed. No SQL, stack trace, driver error, database name or connection string can leave here.
+ */
+/**
+ * Report a probe outcome honestly.
+ *
+ * These routes hard-coded `state: "RUNNING", unavailable: false` and derived `accepted` from
+ * `started`. When the collector REFUSED — because the environment could not be named, so nothing
+ * would ever be written — they still answered 202/accepted for a run already closed as
+ * UNAVAILABLE. The operator was told a refresh had begun. `/sync/github` has had an honest
+ * `unavailable` branch all along; these now match it.
+ */
+function probeOutcomeBody(outcome: { started: boolean; reason?: string; syncId: string }) {
+  const refused = !outcome.started && outcome.reason === "unknown_environment";
+  return {
+    syncId: outcome.syncId,
+    state: refused ? "UNAVAILABLE" : "RUNNING",
+    accepted: outcome.started,
+    alreadyRunning: !outcome.started && outcome.reason === "already_running",
+    unavailable: refused,
+    errorCode: refused ? "unknown_environment" : null,
+    requestedAt: new Date().toISOString(),
+  };
+}
+
+function seedFail(res: Response, error: unknown): void {
+  if (error instanceof SeedApplyError) {
+    const status =
+      error.code === "production_blocked" || error.code === "unknown_environment"
+        ? 403
+        : error.code === "already_running"
+          ? 409
+          : error.code === "digest_mismatch" ||
+              error.code === "version_mismatch" ||
+              error.code === "conflicts" ||
+              error.code === "plan_changed"
+            ? 409
+            : error.code === "schema_absent"
+              ? 503
+              : 500;
+    res.status(status).json({ error: error.message, code: error.code });
+    return;
+  }
+  fail(res, error);
+}
+
 function fail(res: Response, error: unknown): void {
   if (error instanceof ZodError) {
     res.status(400).json({ error: "Invalid request", details: error.flatten() });
@@ -680,6 +819,362 @@ export function registerProjectControlRoutes(app: Express): void {
     }
   });
 
+  /**
+   * The distributed Partner Shop programme.
+   *
+   * `gatedExpensive` rather than `gated`: this view shells out to git for every lane and reads
+   * the migration ledger, so it carries the same cost profile as /repository and must share its
+   * stricter rate limit. It is READ-ONLY — it records nothing and mutates nothing.
+   */
+  app.get(`${BASE}/views/distributed-shop-launch`, ...gatedExpensive, async (_req, res) => {
+    try {
+      res.json(await buildDistributedProgrammeView());
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Live repository evidence from GitHub, plus an explicit freshness verdict.
+   *
+   * `?refresh=true` is the manual "Refresh from GitHub" control. The reader enforces its own
+   * cooldown underneath this, so the button cannot be used to exhaust the API rate limit however
+   * hard it is pressed.
+   *
+   * `gatedExpensive`: this reaches an external API, so it shares /repository's stricter limiter.
+   *
+   * READ-ONLY, and it returns DATA ONLY — the GitHub token is read server-side and never appears
+   * in this response, in a warning, or in an error. When GitHub is unconfigured or unreachable the
+   * payload carries `freshness: "unknown"` rather than an empty-but-successful snapshot, so the
+   * client can never render "nothing wrong" when the truth is "we could not look".
+   */
+  app.get(`${BASE}/github`, ...gatedExpensive, async (req, res) => {
+    try {
+      const snapshot = await scanGitHub(req.query.refresh === "true");
+      res.json({
+        snapshot,
+        freshness: classifyFreshness(snapshot.fetchedAt),
+        configured: isGitHubConfigured(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * ONE VIEW, FOUR AUTHORITIES, NO BLENDING.
+   *
+   * The dashboard needs repository truth, application truth and configuration truth on one screen,
+   * and it must never let one stand in for another: a merged PR is not a deployment, a reachable
+   * app is not an applied migration, and an applied migration is not an enabled flag.
+   *
+   * So this route composes the sources and labels each one, rather than reducing them to a single
+   * status. Every sub-probe fails soft on its own — one unreachable environment must not blank the
+   * repository evidence beside it — and a failure is reported as UNAVAILABLE/UNKNOWN, never as a
+   * zero or a success.
+   */
+  app.get(`${BASE}/live-evidence`, ...gatedExpensive, async (req, res) => {
+    try {
+      const [snapshot, probes] = await Promise.all([
+        scanGitHub(req.query.refresh === "true").catch(() => null),
+        probeAllApplications().catch(() => []),
+      ]);
+      const flags = collectFlagEvidence();
+
+      res.json({
+        observedAt: new Date().toISOString(),
+        github: {
+          configured: isGitHubConfigured(),
+          snapshot,
+          freshness: classifyFreshness(snapshot?.fetchedAt ?? null),
+        },
+        applications: probes,
+        deployment: compareDeployment(snapshot?.defaultBranchSha ?? null, probes),
+        featureFlags: flags,
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * START A DURABLE GITHUB SYNC.
+   *
+   * Returns 202 as soon as the run is RECORDED, then lets the scan continue. The HTTP request is
+   * deliberately not held open for a full GitHub scan: a scan can take tens of seconds, a
+   * disconnected client would abort it midway, and the operator would have no way to learn what
+   * happened. The database run and the lease are authoritative — the in-process promise below is
+   * execution plumbing, not state. If this process dies, the lease expires and the work is
+   * retryable; nothing is lost that the run row did not already record.
+   *
+   * The repository is fixed by environment. There is no owner/repo input, so this cannot be aimed
+   * at an arbitrary repository by a request body.
+   */
+  app.post(`${BASE}/sync/github`, ...gated, projectControlWriteLimit, async (req, res) => {
+    try {
+      const actor = actor_(req);
+      const outcome = await beginGitHubSync(pool, { triggerType: "manual", actor });
+
+      if (outcome.started) {
+        /*
+         * Fire-and-record. The rejection handler exists so an unhandled rejection cannot take the
+         * process down; the run's own error handling has already written the failure to the
+         * database by the time anything lands here.
+         */
+        void runGitHubSync(pool, outcome.syncId).catch(() => undefined);
+        return res.status(202).json({
+          syncId: outcome.syncId,
+          state: "QUEUED",
+          accepted: true,
+          alreadyRunning: false,
+          unavailable: false,
+          requestedAt: new Date().toISOString(),
+        });
+      }
+
+      // Both non-started outcomes are 202 as well: the request was understood and a durable run
+      // exists to poll. Only the flags differ, so the client never has to parse prose.
+      return res.status(202).json({
+        syncId: outcome.syncId,
+        state: outcome.reason === "already_running" ? "RUNNING" : "UNAVAILABLE",
+        accepted: false,
+        alreadyRunning: outcome.reason === "already_running",
+        unavailable: outcome.reason === "unavailable",
+        requestedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /** The most recent durable run, for the dashboard's "last refresh" line. */
+  app.get(`${BASE}/sync/latest`, ...gated, async (_req, res) => {
+    try {
+      const run = await getLatestRun(pool, GITHUB_SOURCE);
+      if (!run) return res.status(404).json({ error: "No sync run has been recorded yet." });
+      const active = await getActiveRun(pool, GITHUB_SOURCE);
+      return res.json(toSyncStatus(run, active?.syncId ?? null));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /** One run by id, for polling after a 202. */
+  app.get(`${BASE}/sync/:syncId`, ...gated, async (req, res) => {
+    try {
+      const syncId = String(req.params.syncId);
+      // A malformed id is a 400, distinct from a well-formed id that does not exist (404) — the
+      // operator needs to tell "you typed it wrong" from "it is gone".
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(syncId)) {
+        return res.status(400).json({ error: "Invalid sync id." });
+      }
+      const run = await getRun(pool, syncId);
+      if (!run) return res.status(404).json({ error: "Sync run not found." });
+      const active = await getActiveRun(pool, GITHUB_SOURCE);
+      return res.json(toSyncStatus(run, active?.syncId ?? null));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Probe both allowlisted applications and store one observation each.
+   *
+   * Same contract as the GitHub refresh: 202 immediately, durable run is authoritative, duplicates
+   * coalesce. There is no environment or URL input — the allowlist in app-probe.ts is the only
+   * source of targets, so this cannot be aimed at an arbitrary host.
+   */
+  app.post(`${BASE}/sync/applications`, ...gated, projectControlWriteLimit, async (req, res) => {
+    try {
+      const outcome = await collectApplicationEvidence(pool, { triggerType: "manual", actor: actor_(req) });
+      return res.status(202).json({
+        syncId: outcome.syncId,
+        // Both ternary branches were "RUNNING". Application evidence has no unknown-environment
+        // refusal — it labels by the allowlisted probe TARGET, not by this process's env — so the
+        // only non-started case really is already_running.
+        state: "RUNNING",
+        accepted: outcome.started,
+        alreadyRunning: !outcome.started,
+        unavailable: false,
+        requestedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Store this environment's feature-flag evidence.
+   *
+   * Records only the allowlisted flag NAMES and their states — never a value, and never an
+   * enumeration of the environment, which would disclose unrelated secret names.
+   */
+  app.post(`${BASE}/sync/flags`, ...gated, projectControlWriteLimit, async (req, res) => {
+    try {
+      const outcome = await collectFlagEvidenceSnapshots(pool, { triggerType: "manual", actor: actor_(req) });
+      return res.status(202).json(probeOutcomeBody(outcome));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Store migration evidence for the environment THIS PROCESS is connected to.
+   *
+   * Deliberately not parameterised by environment: a staging process can only observe staging, and
+   * accepting a target would invite the false belief that it can speak for production. Production
+   * evidence must come from a production process.
+   */
+  app.post(`${BASE}/sync/databases`, ...gated, projectControlWriteLimit, async (req, res) => {
+    try {
+      const outcome = await collectAndStoreDatabaseEvidence(pool, { triggerType: "manual", actor: actor_(req) });
+      return res.status(202).json(probeOutcomeBody(outcome));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * THE composed overview — the only summary the UI consumes.
+   *
+   * Registered with the ORDINARY read gate, not `gatedExpensive`, because it makes zero external
+   * calls: it reads persisted snapshots and nothing else. Refresh is a separate, explicit, audited
+   * action, so looking at the dashboard can never spend GitHub quota or wake a sleeping machine.
+   *
+   * The frontend must never assemble the four sources itself — that would put the
+   * "merged is not deployed" rule in the browser, where it could drift from this one silently.
+   */
+  app.get(`${BASE}/composed-overview`, ...gated, async (_req, res) => {
+    try {
+      res.json(await buildComposedOverview(pool));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /* ---------------------------------------------------------------------------------------- */
+  /* Seed reconciliation execution surface                                                      */
+  /*                                                                                            */
+  /* Four routes over the ALREADY-BUILT engine in project-control/seed-repository.ts. They add  */
+  /* no reconciliation logic of their own: the planner decides, the repository executes, and    */
+  /* these merely authorise, marshal and project the result.                                    */
+  /*                                                                                            */
+  /* NO CALLER-SUPPLIED MANIFEST, EVER. The desired structure is compiled, reviewed in a pull   */
+  /* request and versioned. If a body could carry a manifest, one authenticated call could      */
+  /* rewrite the whole programme with no diff and no review, so these routes accept none.       */
+  /* ---------------------------------------------------------------------------------------- */
+
+  /** Where this database stands: applied version, digest, drift against the compiled manifest. */
+  app.get(`${BASE}/seed/status`, ...gated, async (_req, res) => {
+    const client = await pool.connect();
+    try {
+      const status = await loadSeedStatus(client);
+      const manifest = currentSeedManifest();
+      const desiredDigest = currentSeedManifestDigest();
+      const latest = status.schemaPresent ? await loadLatestRun(client) : null;
+      res.json({
+        environment: resolveConnectedEnvironment(),
+        schemaPresent: status.schemaPresent,
+        seedVersion: status.seedVersion,
+        manifestDigest: status.manifestDigest,
+        appliedAt: status.appliedAt,
+        desiredSeedVersion: manifest.version,
+        desiredManifestDigest: desiredDigest,
+        // "pending" is the honest headline: never seeded, or seeded at different content.
+        pending: !status.schemaPresent || status.manifestDigest !== desiredDigest,
+        mode: status.seedVersion === null ? "first_seed" : "upgrade",
+        counts: {
+          nodes: status.nodeCount,
+          packages: status.packageCount,
+          superseded: status.supersededCount,
+        },
+        latestReportId: latest ? Number(latest.id) : null,
+      });
+    } catch (error) {
+      seedFail(res, error);
+    } finally {
+      client.release();
+    }
+  });
+
+  /**
+   * Preview. Reads only — the engine's dry-run path contains no write statement at all, so this
+   * cannot alter a row, an audit entry or a sequence. Returns a short-lived confirmation that
+   * apply requires, so nothing can be applied that nobody previewed.
+   */
+  app.post(`${BASE}/seed/dry-run`, ...gatedExpensive, projectControlWriteLimit, async (_req, res) => {
+    try {
+      const preview = await dryRunSeed(pool, currentSeedManifest(), resolveConnectedEnvironment());
+      res.json({
+        confirmationToken: preview.confirmationToken,
+        // Surfaced so an operator (or a script) can see that the plan they read is the plan that
+        // applied. Apply compares it server-side regardless; this is for human legibility.
+        planDigest: preview.planDigest,
+        expiresAt: preview.expiresAt,
+        noOp: preview.noOp,
+        plan: {
+          mode: preview.plan.mode,
+          seedVersionBefore: preview.plan.seedVersionBefore,
+          seedVersionAfter: preview.plan.seedVersionAfter,
+          manifestDigest: preview.plan.manifestDigest,
+          counts: preview.plan.counts,
+          expectedFinalCounts: preview.plan.expectedFinalCounts,
+          applicable: preview.plan.applicable,
+          conflicts: preview.plan.conflicts,
+          warnings: preview.plan.warnings,
+          // Bounded: a full action list on a large programme is not a useful HTTP payload, and
+          // the counts plus conflicts are what an operator decides on.
+          actions: preview.plan.actions.slice(0, 500),
+          actionsTruncated: preview.plan.actions.length > 500,
+        },
+      });
+    } catch (error) {
+      seedFail(res, error);
+    }
+  });
+
+  /**
+   * Execute a previewed plan.
+   *
+   * Every guard lives in the engine, not here: advisory lock, plan recomputation under that lock,
+   * digest and version match against the confirmation, conflict refusal, single transaction, and
+   * the production blockade. This handler supplies the actor and the SERVER-DERIVED environment
+   * and nothing else — there is no request field that can influence any of it.
+   */
+  app.post(`${BASE}/seed/apply`, ...gatedExpensive, projectControlWriteLimit, async (req, res) => {
+    try {
+      const { confirmationToken } = seedApplySchema.parse(req.body);
+      const result = await applySeed(pool, currentSeedManifest(), {
+        actor: actor(req),
+        confirmationToken,
+        // Server-derived. Never from the body, never from a query string, and deliberately NOT
+        // the Project Control enable flag — being able to read the dashboard is not permission to
+        // rewrite production's programme structure.
+        //
+        // Passed as the environment itself rather than an `isProduction` boolean: a boolean can
+        // only say "production" or "not production", so an environment we cannot identify at all
+        // collapsed into "not production" and was allowed to write. The engine refuses `unknown`.
+        environment: resolveConnectedEnvironment(),
+      });
+      res.status(200).json(result);
+    } catch (error) {
+      seedFail(res, error);
+    }
+  });
+
+  /** The most recent reconciliation run, including refusals and failures. */
+  app.post(`${BASE}/seed/report/latest`, ...gated, async (_req, res) => {
+    const client = await pool.connect();
+    try {
+      const latest = await loadLatestRun(client);
+      res.json({ report: latest });
+    } catch (error) {
+      seedFail(res, error);
+    } finally {
+      client.release();
+    }
+  });
+
   app.get(`${BASE}/export`, ...gatedExpensive, async (_req, res) => {
     try {
       res.json(await exportEverything());
@@ -688,11 +1183,31 @@ export function registerProjectControlRoutes(app: Express): void {
     }
   });
 
+  /**
+   * The legacy direct seeder.
+   *
+   * It predates the manifest/plan/confirmation machinery and writes the same tables without a
+   * preview, a plan digest or a lock. It is kept because existing tooling calls it, but it must
+   * carry the SAME environment blockade as `/seed/apply` — otherwise the careful guards on the
+   * modern path are decoration, since an operator can reach the identical tables through this
+   * door. Nothing above this line enforced that.
+   */
   app.post(`${BASE}/seed`, ...gated, projectControlWriteLimit, async (req, res) => {
     try {
+      const environment = resolveConnectedEnvironment();
+      const refusal = seedApplyRefusal(environment, false);
+      if (refusal !== null) {
+        throw new SeedApplyError(
+          refusal,
+          refusal === "unknown_environment"
+            ? "Seeding is blocked because this process cannot identify which environment it is connected to. Set PROJECT_CONTROL_ENV."
+            : "Seeding is blocked in production. It requires a separate, explicit owner-controlled authorisation that is not the Project Control feature flag."
+        );
+      }
       res.json(await seedProgrammeTree(actor(req)));
     } catch (error) {
-      fail(res, error);
+      // seedFail, not fail: it is the handler that maps the environment refusal codes to 403.
+      seedFail(res, error);
     }
   });
 }

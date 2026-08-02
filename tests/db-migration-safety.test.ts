@@ -404,6 +404,155 @@ describe("migration runner planning (pure)", () => {
     expect((await planMigrations(client, files)).inconsistent.map((i) => i.filename)).toEqual(["0001_x.sql"]);
   });
 
+  /**
+   * MIG1 — the monotonic guard.
+   *
+   * "Pending" means "absent from the journal by filename"; the numeric sort only orders the batch.
+   * So a branch carrying 0038 that merges after 0040 has landed used to be applied silently, out of
+   * order, with no warning on the dry-run either. Migration 0039's own header recorded the absence
+   * of this check as a known hazard.
+   */
+  describe("MIG1 — monotonic migration guard", () => {
+    const mkFile = (number: string, name = `${number}_x.sql`) => ({
+      number,
+      filename: name,
+      path: "",
+      sql: "CREATE TABLE x();",
+      checksum: `sum-${number}`,
+      noTransaction: false,
+    });
+
+    const clientWith = (journal: { filename: string; checksum: string; status: string }[]) => ({
+      async query(sql: string) {
+        if (/to_regclass/i.test(sql)) return { rows: [{ reg: "schema_migrations" }] };
+        if (/SELECT filename, checksum, status FROM schema_migrations/i.test(sql)) return { rows: journal.slice() };
+        return { rows: [] };
+      },
+    });
+
+    it("case 1: applied max 0040 + newly introduced 0038 → flagged out of order", async () => {
+      const { planMigrations } = await import("../scripts/db/migrate");
+      const journal = [{ filename: "0040_seed.sql", checksum: "sum-0040", status: "applied" }];
+      const files = [mkFile("0038"), mkFile("0040", "0040_seed.sql")];
+      const plan = await planMigrations(clientWith(journal), files);
+
+      expect(plan.pending).toEqual(["0038_x.sql"]);
+      expect(plan.outOfOrder.map((o) => o.filename)).toEqual(["0038_x.sql"]);
+      expect(plan.outOfOrder[0].appliedWatermark).toBe(40);
+    });
+
+    it("case 2: applied max 0039 + new 0040 → allowed", async () => {
+      const { planMigrations } = await import("../scripts/db/migrate");
+      const journal = [{ filename: "0039_live.sql", checksum: "sum-0039", status: "applied" }];
+      const files = [mkFile("0039", "0039_live.sql"), mkFile("0040")];
+      const plan = await planMigrations(clientWith(journal), files);
+
+      expect(plan.pending).toEqual(["0040_x.sql"]);
+      expect(plan.outOfOrder).toEqual([]);
+    });
+
+    it("case 3: gaps below the watermark that are ALREADY journalled are allowed", async () => {
+      // 0020/0021/0025/0027-0029 are reserved-but-unmerged by design. Flagging an applied gap
+      // would fail every run for no reason.
+      const { planMigrations } = await import("../scripts/db/migrate");
+      const journal = [
+        { filename: "0030_pc.sql", checksum: "sum-0030", status: "applied" },
+        { filename: "0035_origin.sql", checksum: "sum-0035", status: "applied" },
+      ];
+      const files = [mkFile("0030", "0030_pc.sql"), mkFile("0035", "0035_origin.sql"), mkFile("0039")];
+      const plan = await planMigrations(clientWith(journal), files);
+
+      expect(plan.pending).toEqual(["0039_x.sql"]);
+      expect(plan.outOfOrder).toEqual([]);
+    });
+
+    it("case 4: rollback files are ignored entirely — they never match the runner's pattern", async () => {
+      const { listMigrationFiles } = await import("../scripts/db/migrate");
+      const dir = mkdtempSync(join(tmpdir(), "mig-monotonic-"));
+      writeFileSync(join(dir, "0040_real.sql"), "SELECT 1;");
+      writeFileSync(join(dir, "rollback-0038-thing.sql"), "DROP TABLE x;");
+      writeFileSync(join(dir, "_rollback_old.sql"), "DROP TABLE y;");
+
+      const files = listMigrationFiles(dir);
+      expect(files.map((f) => f.filename)).toEqual(["0040_real.sql"]);
+    });
+
+    it("case 5: a duplicate migration number still fails, independently of the watermark", async () => {
+      const { listMigrationFiles } = await import("../scripts/db/migrate");
+      const dir = mkdtempSync(join(tmpdir(), "mig-dup-"));
+      writeFileSync(join(dir, "0039_a.sql"), "SELECT 1;");
+      writeFileSync(join(dir, "0039_b.sql"), "SELECT 2;");
+
+      expect(() => listMigrationFiles(dir)).toThrow(/Duplicate migration number/);
+    });
+
+    it("case 6: malformed filenames keep their existing behaviour — silently not migrations", async () => {
+      const { listMigrationFiles } = await import("../scripts/db/migrate");
+      const dir = mkdtempSync(join(tmpdir(), "mig-malformed-"));
+      writeFileSync(join(dir, "0041-hyphen.sql"), "SELECT 1;");
+      writeFileSync(join(dir, "add-legacy.sql"), "SELECT 2;");
+      writeFileSync(join(dir, "0042_good.sql"), "SELECT 3;");
+
+      expect(listMigrationFiles(dir).map((f) => f.filename)).toEqual(["0042_good.sql"]);
+    });
+
+    it("an empty journal never reports anything out of order", async () => {
+      const { planMigrations } = await import("../scripts/db/migrate");
+      const plan = await planMigrations(clientWith([]), [mkFile("0038"), mkFile("0040")]);
+      expect(plan.outOfOrder).toEqual([]);
+    });
+
+    /**
+     * The tests above pin DETECTION. This pins the REFUSAL.
+     *
+     * Without it, deleting the `if (plan.outOfOrder.length > 0) throw` block from applyMigrations
+     * leaves `plan.outOfOrder` correctly populated and completely ignored — every detection test
+     * stays green while out-of-order migrations apply silently. Given this repo's history of
+     * 0019/0020/0022/0023 numbering collisions, that is exactly the failure the guard exists for.
+     */
+    it("MIG1 enforcement: applyMigrations REFUSES to apply an out-of-order migration", async () => {
+      const { applyMigrations } = await import("../scripts/db/migrate");
+      const journal = [{ filename: "0040_seed.sql", checksum: "sum-0040", status: "applied" }];
+      const applied: string[] = [];
+      const client = {
+        async query(sql: string, params?: unknown[]) {
+          if (/to_regclass/i.test(sql)) return { rows: [{ reg: "schema_migrations" }] };
+          if (/SELECT filename, checksum, status FROM schema_migrations/i.test(sql)) return { rows: journal.slice() };
+          if (/pg_backend_pid\(\) AS pid/i.test(sql)) return { rows: [{ pid: 1 }] };
+          if (/pg_try_advisory_lock/i.test(sql)) return { rows: [{ got: true }] };
+          if (/FROM pg_locks/i.test(sql)) return { rows: [{ pid: 1, current_pid: 1 }] };
+          if (/pg_advisory_unlock/i.test(sql)) return { rows: [{ unlocked: true }] };
+          if (/INSERT INTO schema_migrations/i.test(sql)) {
+            applied.push(String((params ?? [])[0]));
+            return { rows: [] };
+          }
+          return { rows: [] };
+        },
+      };
+
+      await expect(
+        applyMigrations(client as never, [mkFile("0038"), mkFile("0040", "0040_seed.sql")])
+      ).rejects.toThrow(/[Oo]ut-of-order/);
+
+      // And nothing was journalled — the refusal happens before any migration is executed.
+      expect(applied).toEqual([]);
+    });
+
+    it("MIG1 enforcement: an in-order migration is NOT refused by the guard", async () => {
+      const { planMigrations } = await import("../scripts/db/migrate");
+      const journal = [{ filename: "0039_live.sql", checksum: "sum-0039", status: "applied" }];
+      const plan = await planMigrations(clientWith(journal), [mkFile("0039", "0039_live.sql"), mkFile("0040")]);
+      // The guard must be silent on the valid case, or it would block every legitimate deploy.
+      expect(plan.outOfOrder).toEqual([]);
+    });
+
+    it("appliedWatermark ignores journal rows that are not canonical migrations", async () => {
+      const { appliedWatermark } = await import("../scripts/db/migrate");
+      expect(appliedWatermark(["0030_a.sql", "0040_b.sql", "rollback-0099-x.sql", "junk"])).toBe(40);
+      expect(appliedWatermark([])).toBe(0);
+    });
+  });
+
   it("dry-run planMigrations issues NO mutating DDL (F1 — dry-run mutates nothing)", async () => {
     const { planMigrations } = await import("../scripts/db/migrate");
     const issued: string[] = [];

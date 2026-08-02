@@ -124,6 +124,16 @@ describe("partner schema ↔ migration parity", () => {
       // applies it.
       "0034_partner_rbac_seed.sql",
       "0035_partner_certificate_origin.sql",
+      // Project Control durable live evidence: four additive pc_* tables (sync runs, leases,
+      // checkpoints, append-only evidence snapshots). 0039 rather than a gap number because the
+      // runner has no monotonicity check — a number below the applied watermark would run after
+      // migrations numbered above it. Unapplied everywhere.
+      "0039_project_control_live_evidence.sql",
+      // 0040 — seed reconciliation durable state: pc_seed_state (singleton current version +
+      // manifest digest), pc_seed_runs (every reconciliation attempt including dry runs and
+      // refusals), and three additive supersession columns on pc_work_packages so an obsolete
+      // package can be RETIRED rather than deleted. Additive only; 0030 and 0039 are untouched.
+      "0040_project_control_seed_reconciliation.sql",
     ]);
   });
 

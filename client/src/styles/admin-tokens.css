@@ -52,9 +52,19 @@
   /* Elevation (modals/dropdowns only) */
   --admin-sh: 0 22px 60px -28px rgba(0, 0, 0, 0.85), 0 2px 0 rgba(243, 238, 227, 0.025) inset;
 
-  /* Gold gradients */
+  /* Gold gradients.
+     These are BACKGROUND values. --admin-gold-text is a gradient intended for
+     `background: var(--admin-gold-text); background-clip: text` (see .admin-brand__mark).
+     It is NOT a colour. Assigning it to `color:` produces an invalid declaration that the
+     browser DISCARDS — and the var() fallback does not rescue it, because a fallback only
+     applies when the property is UNSET, not when it is set to something invalid. The text
+     then inherits --admin-ink, which on a gold background is roughly 1.8:1 and fails WCAG AA.
+     For foreground text sitting on gold, use --admin-on-gold below. */
   --admin-gold-grad: linear-gradient(135deg, var(--admin-gold-hi), var(--admin-gold) 55%, var(--admin-gold-deep));
   --admin-gold-text: linear-gradient(135deg, #f8ecbf, var(--admin-gold) 46%, var(--admin-gold-deep));
+
+  /* Foreground ink for text ON a gold surface. ~9.6:1 against --admin-gold. */
+  --admin-on-gold: #1a1400;
 }
 
 /* ── Dark ground — scoped to the admin wrapper only ─────────────────────── */

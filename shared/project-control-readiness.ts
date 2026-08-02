@@ -56,7 +56,26 @@ export const CAP_CONTRADICTORY_EVIDENCE = 69;
 /** Work recorded as blocked cannot read as nearly finished. */
 export const CAP_BLOCKED = 79;
 
+/**
+ * Stable identities for the package/aggregate caps.
+ *
+ * Added because two caps share the value 69 — CAP_REVIEW_FAILED and
+ * CAP_CONTRADICTORY_EVIDENCE — and the aggregate matched conditions by NUMBER. A package that
+ * merely failed review was therefore reported to the founder as "carrying contradictory evidence".
+ * Matching on identity removes a whole class of bug that renumbering would only hide.
+ */
+export const PACKAGE_CAP_CODES = [
+  "UNRESOLVED_HIGH_SECURITY",
+  "REVIEW_FAILED",
+  "CONTRADICTORY_EVIDENCE",
+  "BLOCKED",
+  "NOT_PRODUCTION_VERIFIED",
+] as const;
+export type PackageCapCode = (typeof PACKAGE_CAP_CODES)[number];
+
 export interface AppliedCap {
+  /** Optional for backward compatibility with any stored/serialised cap that predates codes. */
+  code?: PackageCapCode;
   cap: number;
   reason: string;
 }
@@ -595,29 +614,44 @@ export function computePackageReadiness(
   let score = raw * multiplier;
 
   const appliedCaps: AppliedCap[] = [];
-  const cap = (limit: number, reason: string) => {
-    if (score > limit) {
-      score = limit;
-      appliedCaps.push({ cap: limit, reason });
-    }
+  /**
+   * Record the cap whenever the CONDITION holds, not only when it happens to bite.
+   *
+   * The previous form pushed only inside `if (score > limit)`. A package whose score was already
+   * low — a contradictory one, discounted to a tenth by the confidence multiplier — therefore
+   * recorded NO caps at all, even though the contradiction was real and was the reason it could
+   * never recover. That made `appliedCaps` unusable as a signal: it answered "which ceiling did
+   * the arithmetic hit" when the operator is asking "what is wrong with this package".
+   *
+   * `Math.min` still decides the PER-PACKAGE score, so a package's own number is unchanged.
+   *
+   * The AGGREGATE number does change, and an earlier version of this comment wrongly claimed
+   * otherwise. `aggregateReadiness` infers its conditions from these `appliedCaps`, so a package
+   * that previously recorded nothing (because its score was already below the ceiling — exactly
+   * what a contradictory package looks like after the 0.1 confidence multiplier) was invisible to
+   * the aggregate. Recording it unconditionally makes the programme figure stricter and correct.
+   */
+  const cap = (code: PackageCapCode, limit: number, reason: string) => {
+    score = Math.min(score, limit);
+    appliedCaps.push({ code, cap: limit, reason });
   };
 
   // Order matters only for reporting; each cap is a ceiling, so the lowest wins regardless.
   if (hasUnresolvedHighSecurityIssue(pkg.blockers)) {
-    cap(CAP_UNRESOLVED_HIGH_SECURITY, "An unresolved HIGH or CRITICAL security issue is open.");
+    cap("UNRESOLVED_HIGH_SECURITY", CAP_UNRESOLVED_HIGH_SECURITY, "An unresolved HIGH or CRITICAL security issue is open.");
   }
   if (pkg.reviewState === "failed") {
-    cap(CAP_REVIEW_FAILED, "Independent review failed.");
+    cap("REVIEW_FAILED", CAP_REVIEW_FAILED, "Independent review failed.");
   }
   if (confidence === "contradictory") {
-    cap(CAP_CONTRADICTORY_EVIDENCE, "Evidence for this work contradicts itself.");
+    cap("CONTRADICTORY_EVIDENCE", CAP_CONTRADICTORY_EVIDENCE, "Evidence for this work contradicts itself.");
   }
   if (openBlockers(pkg.blockers).length > 0) {
-    cap(CAP_BLOCKED, "Work is blocked.");
+    cap("BLOCKED", CAP_BLOCKED, "Work is blocked.");
   }
   const productionComplete = categories.find((c) => c.category === "production")?.state === "complete";
   if (!productionComplete) {
-    cap(CAP_NOT_PRODUCTION_VERIFIED, "Not verified in production.");
+    cap("NOT_PRODUCTION_VERIFIED", CAP_NOT_PRODUCTION_VERIFIED, "Not verified in production.");
   }
 
   const byCategory = (c: ReadinessCategory) => categories.find((x) => x.category === c)!;
@@ -720,27 +754,63 @@ export function aggregateReadiness(packages: { pkg: WorkPackage; readiness: Read
    * cap may already have pulled the mean below the ceiling; the founder still needs to be told
    * why the programme can never reach 100.
    */
-  const cap = (limit: number, reason: string) => {
+  const cap = (code: PackageCapCode, limit: number, reason: string) => {
     score = Math.min(score, limit);
-    appliedCaps.push({ cap: limit, reason });
+    appliedCaps.push({ code, cap: limit, reason });
   };
+
+  /**
+   * The two caps this function's own docstring promised and did not apply.
+   *
+   * It says "the same caps are re-applied at the aggregate level", but only three of the five were
+   * here: CAP_CONTRADICTORY_EVIDENCE and CAP_BLOCKED were missing. Since this is the engine whose
+   * `overall` the dashboard actually renders, contradictory evidence and open blockers did not cap
+   * the programme number at all — they diluted it through the mean. One contradictory package in
+   * ten moved the headline by a few points instead of pinning it, so a programme could read ~96%
+   * while carrying evidence its own sources disagreed about.
+   */
+  /**
+   * Reuse each package's OWN decision rather than re-deriving the condition here — two
+   * implementations of "is this contradictory?" would eventually disagree.
+   *
+   * Matched by CODE, not by cap value. CAP_REVIEW_FAILED and CAP_CONTRADICTORY_EVIDENCE are both
+   * 69, so value-matching reported a package that merely failed review as "carrying contradictory
+   * evidence". Renumbering one of them would have hidden the bug rather than fixed it: identity is
+   * the thing being asked about, so identity is what must be compared.
+   */
+  const cappedWith = (code: PackageCapCode) =>
+    live.filter((p) => p.readiness.appliedCaps.some((c) => c.code === code));
+
+  const contradictory = cappedWith("CONTRADICTORY_EVIDENCE");
+  if (contradictory.length > 0) {
+    cap(
+      "CONTRADICTORY_EVIDENCE",
+      CAP_CONTRADICTORY_EVIDENCE,
+      `${contradictory.length} work package(s) carry contradictory evidence — sources disagree about what is true.`
+    );
+  }
+  const blocked = cappedWith("BLOCKED");
+  if (blocked.length > 0) {
+    cap("BLOCKED", CAP_BLOCKED, `${blocked.length} work package(s) have an unresolved blocker.`);
+  }
 
   const withHighSecurity = live.filter((p) => hasUnresolvedHighSecurityIssue(p.pkg.blockers));
   if (withHighSecurity.length > 0) {
     cap(
+      "UNRESOLVED_HIGH_SECURITY",
       CAP_UNRESOLVED_HIGH_SECURITY,
       `${withHighSecurity.length} work package(s) have an unresolved HIGH or CRITICAL security issue.`
     );
   }
   const failedReview = live.filter((p) => p.pkg.reviewState === "failed");
   if (failedReview.length > 0) {
-    cap(CAP_REVIEW_FAILED, `${failedReview.length} work package(s) failed review.`);
+    cap("REVIEW_FAILED", CAP_REVIEW_FAILED, `${failedReview.length} work package(s) failed review.`);
   }
   const notProdVerified = live.filter(
     (p) => p.readiness.categories.find((c) => c.category === "production")?.state !== "complete"
   );
   if (notProdVerified.length > 0) {
-    cap(CAP_NOT_PRODUCTION_VERIFIED, `${notProdVerified.length} work package(s) are not verified in production.`);
+    cap("NOT_PRODUCTION_VERIFIED", CAP_NOT_PRODUCTION_VERIFIED, `${notProdVerified.length} work package(s) are not verified in production.`);
   }
 
   const gates: string[] = [];

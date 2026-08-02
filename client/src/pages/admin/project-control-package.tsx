@@ -10,6 +10,7 @@ import { useState } from "react";
 import { useLocation, useRoute } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AdminShell, Panel, StatCard, Badge, AdminButton, Chip } from "@/components/admin";
+import { PackageOperationalHeader } from "@/components/admin/project-control/package-operational-header";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   BLOCKER_KIND_LABELS,
@@ -46,6 +47,7 @@ import {
   statusBadgeVariant,
   statusLabel,
 } from "./project-control-helpers";
+import "@/styles/project-control.css";
 
 const BASE = "/api/admin/project-control";
 
@@ -81,6 +83,25 @@ interface StoredPrompt {
   intact: boolean;
 }
 
+function safePackageMutationError(error: Error & { status?: number; body?: unknown }): string {
+  const body = error.body as { error?: { code?: string; message?: string } | string; code?: string } | null | undefined;
+  const nested = typeof body?.error === "object" && body.error !== null ? body.error : null;
+  const code = nested?.code ?? body?.code;
+  if (error.status === 409 || error.message.includes("409")) {
+    if (code === "illegal_transition") {
+      return "That status change is not allowed from the current package state. Choose a valid next state, or use the explicit override workflow when owner approval exists.";
+    }
+    if (code === "override_required") {
+      return "This update needs an explicit owner-approved override before it can be saved.";
+    }
+    if (code === "version_conflict" || !code) {
+      return "Someone else changed this work package while you were editing it. Reload the page so you do not overwrite their change.";
+    }
+    return "This update conflicts with the current work package state. Your entered values are still available; review the latest package state and try again.";
+  }
+  return "This update could not be saved. Your entered values are still available; review them and try again.";
+}
+
 export default function ProjectControlPackagePage() {
   const [, navigate] = useLocation();
   const [, params] = useRoute("/admin/project-control/package/:key");
@@ -102,12 +123,8 @@ export default function ProjectControlPackagePage() {
       setConflict(null);
       invalidate();
     },
-    onError: (error: Error) => {
-      setConflict(
-        error.message.includes("409")
-          ? "Someone else changed this work package while you were editing it. Reload the page so you do not overwrite their change."
-          : error.message
-      );
+    onError: (error: Error & { status?: number; body?: unknown }) => {
+      setConflict(safePackageMutationError(error));
     },
   });
 
@@ -172,6 +189,13 @@ export default function ProjectControlPackagePage() {
         <AdminButton variant="ghost" onClick={() => navigate("/admin/project-control")} className="mb-3">
           ← Back to Project Control
         </AdminButton>
+
+        <PackageOperationalHeader
+          pkg={pkg}
+          assessment={a}
+          readiness={detail.data.readiness}
+          nextAction={nextActions[0] ?? null}
+        />
 
         {conflict && (
           <div

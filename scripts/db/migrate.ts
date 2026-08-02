@@ -351,6 +351,38 @@ export interface MigratePlan {
   checksumMismatches: { filename: string; storedChecksum: string; currentChecksum: string }[];
   inconsistent: { filename: string; status: string }[]; // rows left in a non-'applied' state
   destructive: { filename: string; findings: ReturnType<typeof lintSql> }[];
+  /**
+   * Pending files numbered BELOW the highest number already journalled.
+   *
+   * "Pending" is defined purely as "absent from the journal by filename", and the numeric sort is
+   * used only to order the batch — never to compare against what is already applied. So a branch
+   * carrying 0038 that merges after 0040 has landed is applied silently, out of order, with no
+   * warning at any stage. Migration 0039's own header records the absence of this check as a known
+   * hazard.
+   *
+   * Out-of-order application is not a stylistic complaint: a migration written against the schema
+   * as it stood at 0037 can encounter a table that 0039 has since altered, and the failure surfaces
+   * as a confusing runtime error long after the deploy that caused it.
+   */
+  outOfOrder: { filename: string; number: number; appliedWatermark: number }[];
+}
+
+/**
+ * The highest migration number recorded in the journal.
+ *
+ * Derived by parsing `filename`, because `schema_migrations` has no ordinal column — `id SERIAL`
+ * is insertion order, which is exactly the thing we cannot trust here. Rows whose filename does
+ * not match the canonical pattern are ignored rather than guessed at.
+ */
+export function appliedWatermark(journalFilenames: Iterable<string>): number {
+  let max = 0;
+  for (const filename of journalFilenames) {
+    const m = filename.match(FILE_RE);
+    if (!m) continue;
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max;
 }
 
 /** Read-only planning: never mutates the database (does not create the journal table). */
@@ -362,6 +394,7 @@ export async function planMigrations(client: PgClientLike, files: MigrationFile[
     checksumMismatches: [],
     inconsistent: [],
     destructive: [],
+    outOfOrder: [],
   };
   for (const f of files) {
     const row = journal.get(f.filename);
@@ -377,6 +410,27 @@ export async function planMigrations(client: PgClientLike, files: MigrationFile[
       plan.alreadyApplied.push(f.filename);
     }
   }
+
+  /**
+   * Monotonicity, computed against the journal rather than the file list.
+   *
+   * Deliberately scoped to `plan.pending` only. A gap BELOW the watermark that is already
+   * journalled is fine and common — 0020, 0021, 0025 and 0027-0029 are reserved-but-unmerged by
+   * design — and flagging those would fail every run for no reason. What is not fine is a file
+   * that has never been applied appearing below the high-water mark, because that is the case
+   * where a branch is about to land its schema change underneath somebody else's.
+   */
+  const watermark = appliedWatermark(journal.keys());
+  if (watermark > 0) {
+    for (const f of files) {
+      if (!plan.pending.includes(f.filename)) continue;
+      const n = Number(f.number);
+      if (Number.isFinite(n) && n < watermark) {
+        plan.outOfOrder.push({ filename: f.filename, number: n, appliedWatermark: watermark });
+      }
+    }
+  }
+
   return plan;
 }
 
@@ -449,6 +503,24 @@ export async function applyMigrations(
         `Checksum mismatch on already-applied migration(s): ${plan.checksumMismatches
           .map((m) => m.filename)
           .join(", ")}. A migration was edited after being applied. Refusing to proceed.`
+      );
+    }
+    /**
+     * Monotonicity. Deliberately has NO override flag.
+     *
+     * The remedy for an out-of-order migration is to renumber it above the watermark, which is
+     * already this project's established practice. An `--allow-out-of-order` escape hatch would be
+     * reached for under exactly the deploy-time pressure that makes it a bad idea, and the damage
+     * it permits — a schema change landing underneath one that already assumed a later state — is
+     * not visible until something else breaks.
+     */
+    if (plan.outOfOrder.length > 0) {
+      throw new Error(
+        `Out-of-order migration(s) detected: ${plan.outOfOrder
+          .map((o) => `${o.filename} (#${o.number})`)
+          .join(", ")} numbered below the highest already applied (#${plan.outOfOrder[0].appliedWatermark}). ` +
+          "Applying them now would run a schema change underneath migrations that already assumed a later state. " +
+          "Renumber above the watermark and re-run. Refusing to proceed."
       );
     }
     if (!opts.allowDestructive) {
@@ -577,6 +649,22 @@ async function main(): Promise<void> {
     }
     if (plan.checksumMismatches.length > 0) {
       console.error(`🚫 Checksum mismatches: ${plan.checksumMismatches.map((m) => m.filename).join(", ")}`);
+      process.exit(1);
+    }
+    /**
+     * Reported on the DRY-RUN path too, and not only on apply.
+     *
+     * Without this the dry-run prints "pending: 0038" and looks entirely healthy — the operator
+     * only discovers the problem at the moment they run with --apply, which is the worst time to
+     * find out.
+     */
+    if (plan.outOfOrder.length > 0) {
+      console.error(
+        `🚫 Out-of-order migration(s): ${plan.outOfOrder
+          .map((o) => `${o.filename} (#${o.number})`)
+          .join(", ")} numbered below the highest already applied (#${plan.outOfOrder[0].appliedWatermark}). ` +
+          "Renumber above the watermark before applying."
+      );
       process.exit(1);
     }
     for (const d of plan.destructive) {
