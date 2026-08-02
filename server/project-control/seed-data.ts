@@ -4,6 +4,9 @@
  * Deliberately separated from seed.ts so the founder-facing programme definition can be unit
  * tested without importing a database connection. Nothing in this file performs I/O.
  */
+
+import { LAUNCH_GATE_KEYS } from "@shared/project-control-launch";
+
 import type { AcceptanceCriterion, IssueClass, RequiredTest, RiskLevel, WorkStatus } from "@shared/project-control";
 
 export interface SeedNode {
@@ -184,17 +187,11 @@ export interface SeedPackage {
   nodeKey: string;
   title: string;
   summary: string;
-  status: WorkStatus;
-  declaredCompletion: number;
   risk: RiskLevel;
   classification: IssueClass;
-  reviewState: "not_required" | "not_started" | "in_review" | "changes_requested" | "passed" | "failed";
-  deploymentState: "not_deployed" | "staging" | "production" | "rolled_back";
-  productionVerification: "not_applicable" | "not_verified" | "verified" | "failed";
   businessValue: number;
   engineeringRisk: number;
   remainingWork: string;
-  branch?: string | null;
   tags?: string[];
   acceptanceCriteria?: AcceptanceCriterion[];
   requiredTests?: RequiredTest[];
@@ -216,13 +213,8 @@ function backlogPackage(key: string, title: string, summary: string, businessVal
     nodeKey: "pn-backlog",
     title,
     summary,
-    status: "not_started",
-    declaredCompletion: 0,
     risk: "moderate",
     classification: "H",
-    reviewState: "not_started",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue,
     engineeringRisk: 3,
     remainingWork:
@@ -239,13 +231,8 @@ export const PACKAGES: SeedPackage[] = [
     title: "MVGS grading engine",
     summary:
       "Scoring, sub-grades, centering, Pristine gate, approve-lock. Protected system — changes need founder approval.",
-    status: "deployed",
-    declaredCompletion: 100,
     risk: "critical",
     classification: "A",
-    reviewState: "passed",
-    deploymentState: "production",
-    productionVerification: "not_verified",
     businessValue: 5,
     engineeringRisk: 5,
     remainingWork:
@@ -259,13 +246,8 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "certificates",
     title: "Certificate lookup and verification",
     summary: "Public cert lookup by ID, QR and NFC verification path.",
-    status: "deployed",
-    declaredCompletion: 100,
     risk: "high",
     classification: "A",
-    reviewState: "passed",
-    deploymentState: "production",
-    productionVerification: "not_verified",
     businessValue: 5,
     engineeringRisk: 3,
     remainingWork: "Record a production check so the production category can be evidenced rather than assumed.",
@@ -276,13 +258,8 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "printing",
     title: "Approval → Printing → Printed lifecycle",
     summary: "Print state machine, print batches, append-only print event ledger. Migration 0022.",
-    status: "deployed",
-    declaredCompletion: 90,
     risk: "high",
     classification: "E",
-    reviewState: "passed",
-    deploymentState: "production",
-    productionVerification: "not_verified",
     businessValue: 4,
     engineeringRisk: 4,
     remainingWork:
@@ -299,13 +276,8 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "set-library",
     title: "Set Library migration ownership",
     summary: "Removed runtime DDL from the Set Library path so schema changes come only from numbered migrations.",
-    status: "deployed",
-    declaredCompletion: 100,
     risk: "high",
     classification: "E",
-    reviewState: "passed",
-    deploymentState: "production",
-    productionVerification: "not_verified",
     businessValue: 3,
     engineeringRisk: 4,
     remainingWork: "Record the production check that proved the Set Library serving correctly after the release.",
@@ -316,17 +288,12 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "catalogue",
     title: "Catalogue Manager",
     summary: "Database-backed classification catalogue replacing hard-coded arrays.",
-    status: "built",
-    declaredCompletion: 70,
     risk: "moderate",
     classification: "E",
-    reviewState: "passed",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 3,
     engineeringRisk: 3,
-    remainingWork: "Founder gate to apply the catalogue migration on staging, then verify and deploy.",
-    branch: "feat/catalogue-manager",
+    remainingWork:
+      "Verify catalogue CRUD, RBAC and archive behaviour against a real environment. Migration and deployment state are read from the live ledger and recorded deployments, not asserted here.",
     requiredTests: STANDARD_TESTS,
   },
   {
@@ -334,13 +301,8 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "scanner",
     title: "Scanner capture pipeline",
     summary: "Multi-scanner ingestion, race hardening, self-update, operations pack.",
-    status: "deployed",
-    declaredCompletion: 85,
     risk: "high",
     classification: "D",
-    reviewState: "passed",
-    deploymentState: "production",
-    productionVerification: "not_verified",
     businessValue: 4,
     engineeringRisk: 4,
     remainingWork: "Manual pull on each scanner Mac, then confirm each station is on the current build.",
@@ -352,17 +314,11 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "scanner",
     title: "Front-crop integrity gate",
     summary: "Guard against a bad front crop reaching the display image and the printed label.",
-    status: "awaiting_review",
-    declaredCompletion: 60,
     risk: "high",
     classification: "C",
-    reviewState: "in_review",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 4,
     engineeringRisk: 4,
     remainingWork: "Complete the review, then prove the gate on staging with real captures before deploying.",
-    branch: "fix/front-crop-integrity-gate",
     tags: ["scanner"],
     requiredTests: STANDARD_TESTS,
     acceptanceCriteria: [
@@ -374,13 +330,8 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "pn-g5",
     title: "Partner management (G5)",
     summary: "Partner organisation records, accreditation, super-admin management surface.",
-    status: "deployed",
-    declaredCompletion: 95,
     risk: "moderate",
     classification: "E",
-    reviewState: "passed",
-    deploymentState: "production",
-    productionVerification: "not_verified",
     businessValue: 4,
     engineeringRisk: 3,
     remainingWork: "Feature flags remain off and the portal is unmounted — verify behind the flag before enabling.",
@@ -392,17 +343,11 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "pn-g6a",
     title: "Partner wallet and immutable ledger (G6A)",
     summary: "The append-only credit ledger every later credit feature depends on.",
-    status: "built",
-    declaredCompletion: 70,
     risk: "high",
     classification: "E",
-    reviewState: "not_started",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 5,
     engineeringRisk: 4,
     remainingWork: "Review, then apply the ledger migration on staging and prove balances reconcile.",
-    branch: "feature/partner-g6a-wallet-ledger",
     tags: ["shop-launch"],
     requiredTests: STANDARD_TESTS,
     acceptanceCriteria: [
@@ -415,17 +360,11 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "pn-g6b",
     title: "Reserve, consume and release credits (G6B)",
     summary: "Reserving credits so a submission cannot spend the same credit twice.",
-    status: "built",
-    declaredCompletion: 65,
     risk: "high",
     classification: "E",
-    reviewState: "not_started",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 5,
     engineeringRisk: 4,
     remainingWork: "Review and prove the reservation cannot double-spend under concurrent submissions.",
-    branch: "codex/partner-g6b-credit-reservations",
     tags: ["shop-launch"],
     requiredTests: STANDARD_TESTS,
     acceptanceCriteria: [criterion("no-double-spend", "Two concurrent submissions cannot consume the same credit.")],
@@ -435,17 +374,11 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "pn-g6c",
     title: "Super Admin credit management (G6C)",
     summary: "Super-admin issuing and adjusting partner credits, with audit.",
-    status: "built",
-    declaredCompletion: 65,
     risk: "moderate",
     classification: "B",
-    reviewState: "not_started",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 4,
     engineeringRisk: 3,
     remainingWork: "Review, then verify every adjustment writes an audit entry.",
-    branch: "codex/partner-g6c-admin-credit-management",
     tags: ["shop-launch"],
     requiredTests: STANDARD_TESTS,
     acceptanceCriteria: [
@@ -457,18 +390,12 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "pn-g6d",
     title: "Submission and grading integration (G6D)",
     summary: "Consuming reserved credits when a partner submission is accepted.",
-    status: "awaiting_review",
-    declaredCompletion: 60,
     risk: "critical",
     classification: "E",
-    reviewState: "in_review",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 5,
     engineeringRisk: 5,
     remainingWork:
       "Resolve the migration numbering collision, complete the review, then prove credit consumption is bound to the credit owner and not to a submission email.",
-    branch: "codex/partner-g6d-submission-credit-integration",
     tags: ["shop-launch", "money"],
     requiredTests: STANDARD_TESTS,
     acceptanceCriteria: [
@@ -480,17 +407,11 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "pn-auth",
     title: "Partner authentication, invitations and RBAC",
     summary: "Partner login, invitation flow, MFA, role-based access control.",
-    status: "built",
-    declaredCompletion: 60,
     risk: "critical",
     classification: "C",
-    reviewState: "not_started",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 5,
     engineeringRisk: 5,
     remainingWork: "Security review, then staging proof that a partner can never reach admin data.",
-    branch: "codex/partner-auth-invitations-rbac",
     tags: ["shop-launch", "security"],
     requiredTests: STANDARD_TESTS,
     acceptanceCriteria: [
@@ -502,16 +423,12 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "pn-portal",
     title: "Basic Partner Portal",
     summary: "The separate partner-facing app with its own session and API namespace.",
-    status: "built",
-    declaredCompletion: 55,
     risk: "high",
     classification: "C",
-    reviewState: "not_started",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 5,
     engineeringRisk: 4,
-    remainingWork: "The portal is currently unmounted. Mount behind the flag on staging and verify isolation.",
+    remainingWork:
+      "Prove tenant isolation on staging: a partner session must never reach another tenant's data or any admin surface. Whether the portal is currently mounted is read from live evidence, not asserted here.",
     tags: ["shop-launch"],
     requiredTests: STANDARD_TESTS,
   },
@@ -520,13 +437,8 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "pn-stripe-credits",
     title: "Stripe credit packages and idempotent fulfilment",
     summary: "Partner credit purchase through Stripe, fulfilled exactly once. Money path — highest care.",
-    status: "planned",
-    declaredCompletion: 0,
     risk: "critical",
     classification: "F",
-    reviewState: "not_started",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 5,
     engineeringRisk: 5,
     remainingWork:
@@ -540,13 +452,8 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "pn-pilot",
     title: "Pilot with one or two shops",
     summary: "A small number of real shops using the system under supervision.",
-    status: "not_started",
-    declaredCompletion: 0,
     risk: "high",
     classification: "G",
-    reviewState: "not_started",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 5,
     engineeringRisk: 3,
     remainingWork: "Cannot start until credits, authentication and the portal are all verified in production.",
@@ -557,13 +464,8 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "pn-launch",
     title: "Pilot fixes and wider opening",
     summary: "Fix what the pilot exposes, then open partner sign-up more widely.",
-    status: "not_started",
-    declaredCompletion: 0,
     risk: "high",
     classification: "G",
-    reviewState: "not_started",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 5,
     engineeringRisk: 4,
     remainingWork: "Depends entirely on a successful pilot.",
@@ -661,13 +563,8 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "vault-quest",
     title: "Vault Quest production studio",
     summary: "Character bible, creature designer, card factory, export pipeline.",
-    status: "deployed",
-    declaredCompletion: 70,
     risk: "moderate",
     classification: "F",
-    reviewState: "passed",
-    deploymentState: "production",
-    productionVerification: "not_verified",
     businessValue: 2,
     engineeringRisk: 3,
     remainingWork: "Infrastructure separation (its own database and storage) is designed but not provisioned.",
@@ -678,18 +575,12 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "core-platform",
     title: "Super Admin Project Control Dashboard",
     summary: "This dashboard: the permanent engineering control centre.",
-    status: "built",
-    declaredCompletion: 60,
     risk: "low",
     classification: "E",
-    reviewState: "not_started",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 4,
     engineeringRisk: 2,
     remainingWork:
       "Second hostile review, then apply migration 0030 on an isolated database, verify, enable the flag on staging, and only then consider production.",
-    branch: "codex/super-admin-project-control-master",
     requiredTests: STANDARD_TESTS,
     acceptanceCriteria: [
       criterion("pc-flag-closed", "The dashboard is unreachable when the activation flag is absent or false."),
@@ -702,13 +593,8 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "technical-debt",
     title: "Payment race conditions",
     summary: "Two known timing races on the payment path (credit double-spend, promotion over-redemption).",
-    status: "planned",
-    declaredCompletion: 0,
     risk: "critical",
     classification: "H",
-    reviewState: "not_started",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 5,
     engineeringRisk: 5,
     remainingWork: "Both are identified and unfixed. Any fix touches payment code and needs explicit founder approval.",
@@ -719,32 +605,29 @@ export const PACKAGES: SeedPackage[] = [
     nodeKey: "technical-debt",
     title: "Read-only setting leaking through the connection pooler",
     summary: "A schema preflight sets a read-only flag and never resets it; the pooler leaks it to later connections.",
-    status: "planned",
-    declaredCompletion: 0,
     risk: "high",
     classification: "D",
-    reviewState: "not_started",
-    deploymentState: "not_deployed",
-    productionVerification: "not_verified",
     businessValue: 3,
     engineeringRisk: 3,
     remainingWork: "Reset the setting before disconnecting, or point the preflight at the direct database endpoint.",
   },
 ];
 
-/** The approved Shop Launch sequence, exported so a test can assert it never silently changes. */
-export const APPROVED_SHOP_LAUNCH_SEQUENCE = [
-  "pn-g5",
-  "pn-g6a",
-  "pn-g6b",
-  "pn-g6c",
-  "pn-g6d",
-  "pn-auth",
-  "pn-portal",
-  "pn-stripe-credits",
-  "pn-pilot",
-  "pn-launch",
-] as const;
+/**
+ * The approved Shop Launch sequence.
+ *
+ * RECONCILED AT INTEGRATION. Two branches independently declared this same ten-key list — once
+ * here and once in `@shared/project-control-launch` — with nothing tying them together. Two
+ * hardcoded copies of one owner decision is precisely the drift this programme exists to remove:
+ * change one and the other silently disagrees, and the dashboard starts reporting a launch order
+ * that does not match the one it gates on.
+ *
+ * `LAUNCH_GATE_KEYS` is now the single declaration. It lives in shared/ because BOTH the client
+ * (which numbers and gates the phases) and the seed (which orders the nodes) need it, and shared/
+ * is the only place both can reach. This re-export is kept so existing consumers and the
+ * inventory test keep working under the name they already use.
+ */
+export const APPROVED_SHOP_LAUNCH_SEQUENCE = LAUNCH_GATE_KEYS;
 
 export const SEED_NODES = NODES;
 export const SEED_PACKAGES = PACKAGES;

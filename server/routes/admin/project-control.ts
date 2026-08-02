@@ -7,7 +7,7 @@
  * no route here that pushes, merges, deploys, applies a migration, writes to production, or
  * touches any pre-existing MintVault table.
  *
- * Route inventory — 27 endpoints (kept in step with the router by a test that counts registrations):
+ * Route inventory — 35 endpoints (kept in step with the router by a test that counts registrations):
  *   GET    /overview                                  tree + readiness + queues + drift
  *   GET    /queues                                    the nine approved queues
  *   GET    /drift                                     repository-versus-environment drift
@@ -41,6 +41,10 @@
  *   POST   /sync/flags                                store this environment's flag evidence
  *   POST   /sync/databases                            store this environment's migration evidence
  *   GET    /composed-overview                         the composed DTO; stored evidence only
+ *   GET    /seed/status                               applied seed version + drift
+ *   POST   /seed/dry-run                              preview; writes nothing
+ *   POST   /seed/apply                                execute a previewed plan
+ *   POST   /seed/report/latest                        latest reconciliation run
  *   GET    /export                                    bounded JSON snapshot
  *   POST   /seed                                      idempotent programme-tree seed
  */
@@ -51,6 +55,15 @@ import { classifyFreshness } from "@shared/project-control-github";
 import { requireSuperAdmin } from "../../auth";
 import { buildDistributedProgrammeView } from "../../project-control/distributed";
 import { isGitHubConfigured, scanGitHub } from "../../project-control/github-scan";
+import { resolveConnectedEnvironment } from "../../project-control/migration-scan";
+import {
+  SeedApplyError,
+  applySeed,
+  dryRunSeed,
+  loadLatestRun,
+  loadSeedStatus,
+} from "../../project-control/seed-repository";
+import { currentSeedManifest, currentSeedManifestDigest } from "../../project-control/seed-manifest-source";
 import { compareDeployment, probeAllApplications } from "../../project-control/app-probe";
 import { collectFlagEvidence } from "../../project-control/flag-evidence";
 import { pool } from "../../db";
@@ -233,6 +246,39 @@ function actor(req: Request): string {
  * response body stays deliberately generic; the log line is redacted so an operator gets a useful
  * message without a credential ending up in the log store.
  */
+/**
+ * Apply takes exactly one field: the confirmation issued by a dry run. Deliberately `.strict()`,
+ * so a body carrying a manifest, a version, an environment or a force flag is REJECTED rather
+ * than quietly ignored — a silently-dropped override reads to the caller as an accepted one.
+ */
+const seedApplySchema = z.object({ confirmationToken: z.string().min(16).max(200) }).strict();
+
+/**
+ * Project a seed error as a STABLE CODE.
+ *
+ * SeedApplyError already carries an operator-safe message and never wraps raw driver text — the
+ * repository discards that at the boundary. This maps each code to the status an operator can act
+ * on, and anything unrecognised falls through to the generic redacted handler rather than being
+ * echoed. No SQL, stack trace, driver error, database name or connection string can leave here.
+ */
+function seedFail(res: Response, error: unknown): void {
+  if (error instanceof SeedApplyError) {
+    const status =
+      error.code === "production_blocked"
+        ? 403
+        : error.code === "already_running"
+          ? 409
+          : error.code === "digest_mismatch" || error.code === "version_mismatch" || error.code === "conflicts"
+            ? 409
+            : error.code === "schema_absent"
+              ? 503
+              : 500;
+    res.status(status).json({ error: error.message, code: error.code });
+    return;
+  }
+  fail(res, error);
+}
+
 function fail(res: Response, error: unknown): void {
   if (error instanceof ZodError) {
     res.status(400).json({ error: "Invalid request", details: error.flatten() });
@@ -988,6 +1034,122 @@ export function registerProjectControlRoutes(app: Express): void {
       res.json(await buildComposedOverview(pool));
     } catch (error) {
       fail(res, error);
+    }
+  });
+
+  /* ---------------------------------------------------------------------------------------- */
+  /* Seed reconciliation execution surface                                                      */
+  /*                                                                                            */
+  /* Four routes over the ALREADY-BUILT engine in project-control/seed-repository.ts. They add  */
+  /* no reconciliation logic of their own: the planner decides, the repository executes, and    */
+  /* these merely authorise, marshal and project the result.                                    */
+  /*                                                                                            */
+  /* NO CALLER-SUPPLIED MANIFEST, EVER. The desired structure is compiled, reviewed in a pull   */
+  /* request and versioned. If a body could carry a manifest, one authenticated call could      */
+  /* rewrite the whole programme with no diff and no review, so these routes accept none.       */
+  /* ---------------------------------------------------------------------------------------- */
+
+  /** Where this database stands: applied version, digest, drift against the compiled manifest. */
+  app.get(`${BASE}/seed/status`, ...gated, async (_req, res) => {
+    const client = await pool.connect();
+    try {
+      const status = await loadSeedStatus(client);
+      const manifest = currentSeedManifest();
+      const desiredDigest = currentSeedManifestDigest();
+      const latest = status.schemaPresent ? await loadLatestRun(client) : null;
+      res.json({
+        environment: resolveConnectedEnvironment(),
+        schemaPresent: status.schemaPresent,
+        seedVersion: status.seedVersion,
+        manifestDigest: status.manifestDigest,
+        appliedAt: status.appliedAt,
+        desiredSeedVersion: manifest.version,
+        desiredManifestDigest: desiredDigest,
+        // "pending" is the honest headline: never seeded, or seeded at different content.
+        pending: !status.schemaPresent || status.manifestDigest !== desiredDigest,
+        mode: status.seedVersion === null ? "first_seed" : "upgrade",
+        counts: {
+          nodes: status.nodeCount,
+          packages: status.packageCount,
+          superseded: status.supersededCount,
+        },
+        latestReportId: latest ? Number(latest.id) : null,
+      });
+    } catch (error) {
+      seedFail(res, error);
+    } finally {
+      client.release();
+    }
+  });
+
+  /**
+   * Preview. Reads only — the engine's dry-run path contains no write statement at all, so this
+   * cannot alter a row, an audit entry or a sequence. Returns a short-lived confirmation that
+   * apply requires, so nothing can be applied that nobody previewed.
+   */
+  app.post(`${BASE}/seed/dry-run`, ...gatedExpensive, projectControlWriteLimit, async (_req, res) => {
+    try {
+      const preview = await dryRunSeed(pool, currentSeedManifest());
+      res.json({
+        confirmationToken: preview.confirmationToken,
+        expiresAt: preview.expiresAt,
+        noOp: preview.noOp,
+        plan: {
+          mode: preview.plan.mode,
+          seedVersionBefore: preview.plan.seedVersionBefore,
+          seedVersionAfter: preview.plan.seedVersionAfter,
+          manifestDigest: preview.plan.manifestDigest,
+          counts: preview.plan.counts,
+          expectedFinalCounts: preview.plan.expectedFinalCounts,
+          applicable: preview.plan.applicable,
+          conflicts: preview.plan.conflicts,
+          warnings: preview.plan.warnings,
+          // Bounded: a full action list on a large programme is not a useful HTTP payload, and
+          // the counts plus conflicts are what an operator decides on.
+          actions: preview.plan.actions.slice(0, 500),
+          actionsTruncated: preview.plan.actions.length > 500,
+        },
+      });
+    } catch (error) {
+      seedFail(res, error);
+    }
+  });
+
+  /**
+   * Execute a previewed plan.
+   *
+   * Every guard lives in the engine, not here: advisory lock, plan recomputation under that lock,
+   * digest and version match against the confirmation, conflict refusal, single transaction, and
+   * the production blockade. This handler supplies the actor and the SERVER-DERIVED environment
+   * and nothing else — there is no request field that can influence any of it.
+   */
+  app.post(`${BASE}/seed/apply`, ...gatedExpensive, projectControlWriteLimit, async (req, res) => {
+    try {
+      const { confirmationToken } = seedApplySchema.parse(req.body);
+      const result = await applySeed(pool, currentSeedManifest(), {
+        actor: actor(req),
+        confirmationToken,
+        // Server-derived. Never from the body, never from a query string, and deliberately NOT
+        // the Project Control enable flag — being able to read the dashboard is not permission to
+        // rewrite production's programme structure.
+        isProduction: resolveConnectedEnvironment() === "production",
+      });
+      res.status(200).json(result);
+    } catch (error) {
+      seedFail(res, error);
+    }
+  });
+
+  /** The most recent reconciliation run, including refusals and failures. */
+  app.post(`${BASE}/seed/report/latest`, ...gated, async (_req, res) => {
+    const client = await pool.connect();
+    try {
+      const latest = await loadLatestRun(client);
+      res.json({ report: latest });
+    } catch (error) {
+      seedFail(res, error);
+    } finally {
+      client.release();
     }
   });
 

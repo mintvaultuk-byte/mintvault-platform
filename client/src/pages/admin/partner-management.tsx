@@ -244,7 +244,7 @@ export default function PartnerManagementPage() {
             data-testid="pm-banner"
             style={{
               marginBottom: 12,
-              color: "var(--admin-gold-text, #1A1400)",
+              color: "var(--admin-on-gold, #1A1400)",
               background: "var(--admin-gold, #D4AF37)",
               padding: "8px 12px",
               borderRadius: 8,
@@ -537,10 +537,7 @@ export default function PartnerManagementPage() {
 
                   {duplicates.length > 0 && (
                     <div data-testid="pm-create-duplicates" style={{ marginBottom: 12 }}>
-                      <div
-                        role="alert"
-                        style={{ color: "var(--admin-gold, #D4AF37)", fontSize: 13, marginBottom: 6 }}
-                      >
+                      <div role="alert" style={{ color: "var(--admin-gold, #D4AF37)", fontSize: 13, marginBottom: 6 }}>
                         {blockingDuplicates(duplicates).length > 0
                           ? "This conflicts with an existing partner."
                           : "This looks similar to a partner you already have."}
@@ -583,8 +580,8 @@ export default function PartnerManagementPage() {
                       data-testid="pm-create-dup-failed"
                       style={{ color: "var(--admin-red, #ff6b6b)", fontSize: 13, marginBottom: 8 }}
                     >
-                      The duplicate check could not run, so this partner has NOT been checked against
-                      existing ones. Review the partners list before continuing.
+                      The duplicate check could not run, so this partner has NOT been checked against existing ones.
+                      Review the partners list before continuing.
                     </div>
                   )}
                   {!dupCheckFailed && duplicates.length === 0 && (

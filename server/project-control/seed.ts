@@ -47,10 +47,23 @@ export async function seedProgrammeTree(actor = "seed"): Promise<SeedResult> {
   const insertedPackages = await db
     .insert(pcWorkPackages)
     .values(
+      /**
+       * NOTE ON WHAT IS DELIBERATELY ABSENT.
+       *
+       * `status`, `declaredCompletion`, `reviewState`, `deploymentState`,
+       * `productionVerification` and `branch` are NOT set here, and are no longer present in the
+       * seed at all. Every one is discoverable from live evidence — git and GitHub for the branch
+       * and its merge state, the schema_migrations ledger for migrations, recorded deployments for
+       * deployment state, probes for the running version and flag state. Seeding them produced a
+       * second, stale answer that competed with the real one and always won on first read.
+       *
+       * Omitting them lets each column take its migration default, which is the honest starting
+       * position: not started, not reviewed, not deployed, not verified — until evidence says
+       * otherwise. The seed's job is to say what EXISTS, not to claim how far along it is.
+       */
       PACKAGES.map((p: (typeof PACKAGES)[number]) => ({
         ...p,
         tags: p.tags ?? [],
-        branch: p.branch ?? null,
         acceptanceCriteria: p.acceptanceCriteria ?? [],
         requiredTests: p.requiredTests ?? [],
         categoryStates: {},
@@ -62,14 +75,16 @@ export async function seedProgrammeTree(actor = "seed"): Promise<SeedResult> {
     .onConflictDoNothing({ target: pcWorkPackages.key })
     .returning({ key: pcWorkPackages.key });
 
-  // Seeded status is recorded as an owner statement = "Reported" confidence, never higher.
+  // Seeded STRUCTURE is recorded as an owner statement = "Reported" confidence, never higher.
+  // It asserts existence, not progress: the seed no longer carries any machine-derivable status.
   if (insertedPackages.length > 0) {
     await db.insert(pcEvidence).values(
       insertedPackages.map((p) => ({
         packageKey: p.key,
         kind: "owner_statement",
         supports: true,
-        summary: "Initial status recorded when the programme tree was seeded. Not independently verified.",
+        summary:
+          "Programme structure recorded when the tree was seeded. This states that the work package EXISTS and what would prove it done — it makes no claim about progress, which comes from live evidence.",
         capturedBy: actor,
       }))
     );

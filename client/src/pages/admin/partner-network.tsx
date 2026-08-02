@@ -220,7 +220,7 @@ export default function PartnerNetworkOpsPage() {
             data-testid="pn-banner"
             style={{
               marginBottom: 12,
-              color: "var(--admin-gold-text, #1A1400)",
+              color: "var(--admin-on-gold, #1A1400)",
               background: "var(--admin-gold, #D4AF37)",
               padding: "8px 12px",
               borderRadius: 8,

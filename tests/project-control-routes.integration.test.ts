@@ -162,6 +162,13 @@ const ALL_ROUTES: [string, string][] = [
   // The composed overview. Ordinary read gate, not gatedExpensive, because it makes ZERO external
   // calls — looking at the dashboard must never spend GitHub quota.
   ["GET", `${P}/composed-overview`],
+  // Seed reconciliation execution surface. Read routes use the ordinary budget; dry-run and
+  // apply are `gatedExpensive` because they open a dedicated connection and take an advisory
+  // lock. None accepts a caller-supplied manifest — the desired structure is compiled.
+  ["GET", `${P}/seed/status`],
+  ["POST", `${P}/seed/dry-run`],
+  ["POST", `${P}/seed/apply`],
+  ["POST", `${P}/seed/report/latest`],
   ["GET", `${P}/export`],
   ["POST", `${P}/seed`],
 ];
