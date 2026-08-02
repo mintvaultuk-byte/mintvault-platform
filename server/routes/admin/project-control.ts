@@ -37,6 +37,8 @@
  *   POST   /sync/github                               start a durable GitHub sync (202)
  *   GET    /sync/latest                               most recent durable sync run
  *   GET    /sync/:syncId                              one durable sync run by id
+ *   POST   /sync/applications                         probe + store both application versions
+ *   POST   /sync/flags                                store this environment's flag evidence
  *   GET    /export                                    bounded JSON snapshot
  *   POST   /seed                                      idempotent programme-tree seed
  */
@@ -52,6 +54,10 @@ import { collectFlagEvidence } from "../../project-control/flag-evidence";
 import { pool } from "../../db";
 import { beginGitHubSync, runGitHubSync, GITHUB_SOURCE } from "../../project-control/github-sync-service";
 import { getLatestRun, getRun, getActiveRun } from "../../project-control/evidence-repository";
+import {
+  collectApplicationEvidence,
+  collectFlagEvidenceSnapshots,
+} from "../../project-control/probe-persistence";
 import {
   BLOCKER_KINDS,
   DEPLOYMENT_RESULTS,
@@ -890,6 +896,51 @@ export function registerProjectControlRoutes(app: Express): void {
       if (!run) return res.status(404).json({ error: "Sync run not found." });
       const active = await getActiveRun(pool, GITHUB_SOURCE);
       return res.json(toSyncStatus(run, active?.syncId ?? null));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Probe both allowlisted applications and store one observation each.
+   *
+   * Same contract as the GitHub refresh: 202 immediately, durable run is authoritative, duplicates
+   * coalesce. There is no environment or URL input — the allowlist in app-probe.ts is the only
+   * source of targets, so this cannot be aimed at an arbitrary host.
+   */
+  app.post(`${BASE}/sync/applications`, ...gated, projectControlWriteLimit, async (req, res) => {
+    try {
+      const outcome = await collectApplicationEvidence(pool, { triggerType: "manual", actor: actor_(req) });
+      return res.status(202).json({
+        syncId: outcome.syncId,
+        state: outcome.started ? "RUNNING" : "RUNNING",
+        accepted: outcome.started,
+        alreadyRunning: !outcome.started,
+        unavailable: false,
+        requestedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Store this environment's feature-flag evidence.
+   *
+   * Records only the allowlisted flag NAMES and their states — never a value, and never an
+   * enumeration of the environment, which would disclose unrelated secret names.
+   */
+  app.post(`${BASE}/sync/flags`, ...gated, projectControlWriteLimit, async (req, res) => {
+    try {
+      const outcome = await collectFlagEvidenceSnapshots(pool, { triggerType: "manual", actor: actor_(req) });
+      return res.status(202).json({
+        syncId: outcome.syncId,
+        state: "RUNNING",
+        accepted: outcome.started,
+        alreadyRunning: !outcome.started,
+        unavailable: false,
+        requestedAt: new Date().toISOString(),
+      });
     } catch (error) {
       fail(res, error);
     }

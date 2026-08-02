@@ -152,6 +152,10 @@ const ALL_ROUTES: [string, string][] = [
   ["POST", `${P}/sync/github`],
   ["GET", `${P}/sync/latest`],
   ["GET", `${P}/sync/example-id`],
+  // Probe refresh. Same 202/coalesce contract as the GitHub sync; targets come from a frozen
+  // allowlist, never from the request, so neither can be aimed at an arbitrary host.
+  ["POST", `${P}/sync/applications`],
+  ["POST", `${P}/sync/flags`],
   ["GET", `${P}/export`],
   ["POST", `${P}/seed`],
 ];
