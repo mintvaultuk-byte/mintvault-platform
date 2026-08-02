@@ -36,8 +36,16 @@
 -- writes a new row recording the failure, it does not overwrite or delete the successful row
 -- before it. "What do we know?" is therefore always "the newest snapshot per (source, environment,
 -- entity)", and a bad sync can only ever add a row saying it went wrong.
-
-BEGIN;
+--
+-- NO EXPLICIT TRANSACTION HERE, DELIBERATELY.
+--
+-- The runner (scripts/db/migrate.ts) already wraps each transaction-safe file in ONE transaction
+-- together with the `schema_migrations` row that records it. A `BEGIN;`/`COMMIT;` inside the file
+-- commits the runner's transaction early, so the journal INSERT then runs in autocommit and the
+-- DDL is no longer atomic with its own ledger entry — a torn apply becomes possible, and the
+-- runner's ROLLBACK becomes a no-op for everything above the stray COMMIT. This is the same
+-- defect found in 0033 during review and pinned against 0034 by
+-- tests/partner-rbac-migration.test.ts.
 
 -- ── pc_sync_runs ────────────────────────────────────────────────────────────────────────────
 -- One row per sync attempt. Never updated except to close out the run it describes.
@@ -182,5 +190,3 @@ BEGIN
 
   RAISE NOTICE '0039 complete: 4 tables, 7 indexes, 1 append-only trigger.';
 END $$;
-
-COMMIT;
