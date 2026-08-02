@@ -61,10 +61,34 @@ typing a value in.
    ```
    Expect nine `pc_*` tables.
 
-**This package adds no new migration.** The live-evidence work so far is read-only: GitHub, the
-application probes and the flag evidence are all computed per request and stored nowhere. A
-migration becomes necessary only when sync runs, checkpoints and evidence snapshots are persisted
-— see the handover.
+### Migration 0039 — durable live evidence
+
+**This package now adds one migration: `0039_project_control_live_evidence.sql`.** Four additive
+`pc_*` tables (sync runs, leases, checkpoints, append-only evidence snapshots), one trigger, seven
+indexes. It touches nothing outside the `pc_` namespace and does not alter 0030.
+
+0039 rather than one of the gaps at 0025/0027–0029: the runner applies present files in numeric
+order and has **no monotonicity check**, so a number below the applied watermark would run *after*
+migrations numbered above it on a database already ahead. 0039 is verified free across every local
+and remote ref.
+
+Apply it the same way as step 7, and verify with the catalogue rather than the journal:
+
+```sql
+SELECT table_name FROM information_schema.tables
+ WHERE table_schema='public'
+   AND table_name IN ('pc_sync_runs','pc_sync_leases','pc_sync_checkpoints','pc_evidence_snapshots')
+ ORDER BY 1;
+SELECT tgname FROM pg_trigger WHERE tgname='trg_pc_evidence_snapshots_append_only';
+```
+
+Expect four tables and one trigger. **If the trigger is absent, stop** — evidence history is
+unprotected and a failed sync could overwrite a good observation.
+
+`rollback-0039-project-control-live-evidence.sql` drops only those four objects and asserts 0030's
+tables survive. It destroys evidence history, which no future sync can recover (a sync observes
+only the present). Export first if that history matters — the rollback file carries the exact
+`\copy` commands.
 
 ---
 
@@ -126,7 +150,9 @@ evidence lists every tracked name with its state.
 25. Pilot readiness excludes permanent backlog.
 26. Manual refresh starts a sync; a second click within the cooldown coalesces rather than
     re-querying GitHub.
-27. Scheduled refresh — **not yet implemented**, see handover.
+27. Scheduled refresh — **not yet implemented**, see handover. Note the durable lease that a
+    scheduler will need is now in place and proven, so the remaining work is the schedule itself,
+    not the coordination.
 28. **Stale handling — the important one.** Temporarily unset `PROJECT_CONTROL_GITHUB_TOKEN` and
     confirm repository evidence reads UNAVAILABLE with the env-var name in the remedy, and that no
     number silently becomes zero or complete.
