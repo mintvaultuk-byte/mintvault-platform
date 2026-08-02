@@ -211,24 +211,48 @@ async function getJson<T>(path: string, token: string, http: GitHubFetch): Promi
   }
 }
 
-/** Paginate within the bounds. Reports truncation instead of hiding it. */
+/**
+ * Paginate within the bounds. Reports truncation instead of hiding it.
+ *
+ * `envelopeKey` exists because the GitHub REST API is NOT uniform: `/branches` and `/pulls`
+ * return a bare JSON array, but `/actions/runs` returns an OBJECT — `{ total_count,
+ * workflow_runs: [...] }`. Without it, the `Array.isArray(data)` guard below is false on the very
+ * first page, the loop breaks, and the caller receives `[]` with NO warning, because `ok` is true
+ * and `warning` is null. That is exactly how staging reported a SUCCEEDED GitHub sync carrying
+ * `workflow_run: 0` while the repository actually held 743 runs: a silent, success-shaped zero.
+ *
+ * The guard is deliberately kept — an unexpected shape must still stop the loop rather than be
+ * coerced. The envelope is unwrapped BEFORE the guard, so a declared envelope that is missing or
+ * is not an array still fails closed and still warns.
+ */
 async function getAllPages<T>(
   pathBase: string,
   token: string,
   warnings: string[],
   label: string,
-  http: GitHubFetch
+  http: GitHubFetch,
+  envelopeKey?: string
 ): Promise<T[]> {
   const out: T[] = [];
   for (let page = 1; page <= MAX_PAGES; page += 1) {
     const sep = pathBase.includes("?") ? "&" : "?";
-    const { ok, data, warning } = await getJson<T[]>(
+    const { ok, data: raw, warning } = await getJson<unknown>(
       `${pathBase}${sep}per_page=${PER_PAGE}&page=${page}`,
       token,
       http
     );
+    const data = (
+      envelopeKey && raw && typeof raw === "object" && !Array.isArray(raw)
+        ? (raw as Record<string, unknown>)[envelopeKey]
+        : raw
+    ) as T[] | null;
     if (!ok || !Array.isArray(data)) {
       if (warning) warnings.push(warning);
+      else if (ok) {
+        // A 200 whose body is not the expected collection is a REAL failure. Staying silent here
+        // is what turned this defect into an invisible one for an entire release.
+        warnings.push(`${label} could not be read: GitHub returned an unexpected response shape.`);
+      }
       break;
     }
     out.push(...data);
@@ -303,7 +327,10 @@ async function doScan(repo: string, token: string, http: GitHubFetch): Promise<G
     conclusion?: unknown;
     run_started_at?: string;
     html_url?: string;
-  }>(`/repos/${repo}/actions/runs`, token, warnings, "Workflow run list", http).catch(() => []);
+    // `/actions/runs` answers with an envelope, not a bare array — see getAllPages.
+  }>(`/repos/${repo}/actions/runs`, token, warnings, "Workflow run list", http, "workflow_runs").catch(
+    () => []
+  );
 
   const defaultBranchSha = rawBranches.find((b) => b.name === defaultBranch)?.commit?.sha ?? null;
 
