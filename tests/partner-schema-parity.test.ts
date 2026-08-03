@@ -126,6 +126,7 @@ describe("partner schema ↔ migration parity", () => {
       // Added 2026-08-03: per-card credit settlement. Replaces 0041's single-reservation
       // connector release function with an N-reservation one. 0041 itself is untouched.
       "0042_partner_per_card_credit_settlement.sql",
+      "0043_partner_credit_hold_per_card.sql",
     ]);
   });
 

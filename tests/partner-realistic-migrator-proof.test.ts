@@ -111,7 +111,10 @@ describe("Realistic non-superuser migrator — G6D role model", () => {
     await admin.query("GRANT partner_credit_lifecycle_definer TO partner_runtime WITH INHERIT TRUE");
     try {
       const violations = await partnerCreditDefinerModelViolations(queryFn(admin));
-      expect(violations.join(" ")).toMatch(/must not be usable by any role other than the database owner/);
+      // The guard is now a TRANSITIVE capability check (pg_has_role), so the message names the
+      // reachable role and how it reaches the definer, rather than the old row-based wording.
+      expect(violations.join(" ")).toMatch(/RUNTIME ROLE partner_runtime can reach partner_credit_lifecycle_definer/);
+      expect(violations.join(" ")).toMatch(/only the database owner may hold maintenance capability/);
       expect(violations.join(" ")).toContain("partner_runtime");
     } finally {
       await admin.query("REVOKE partner_credit_lifecycle_definer FROM partner_runtime");
