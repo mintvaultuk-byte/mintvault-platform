@@ -77,14 +77,29 @@ BEGIN
     RETURN;
   END IF;
 
+  /**
+   * CASCADE is REQUIRED, not defensive.
+   *
+   * On managed PostgreSQL the provider grants the deployment owner ADMIN OPTION on this role, and
+   * the owner-approved 0042 repair (`GRANT partner_credit_lifecycle_definer TO <owner> WITH
+   * INHERIT TRUE`) uses that ADMIN option to add a SECOND membership row whose grantor is the
+   * owner itself. PostgreSQL records a grantor per row, so the owner-granted row DEPENDS on the
+   * provider-granted one. A plain (RESTRICT) revoke of the provider row therefore fails with
+   * `dependent privileges exist`, aborting the whole rollback transaction — on exactly the
+   * database shape this rollback exists to recover.
+   *
+   * DISTINCT because a member can legitimately hold more than one membership row (provider ADMIN
+   * plus the repair's INHERIT); revoking the same member twice would otherwise error on the
+   * second pass after CASCADE already removed it.
+   */
   FOR member_name IN
-    SELECT member.rolname
+    SELECT DISTINCT member.rolname
       FROM pg_auth_members membership
       JOIN pg_roles role ON role.oid=membership.roleid
       JOIN pg_roles member ON member.oid=membership.member
      WHERE role.rolname='partner_credit_lifecycle_definer'
   LOOP
-    EXECUTE format('REVOKE partner_credit_lifecycle_definer FROM %I', member_name);
+    EXECUTE format('REVOKE partner_credit_lifecycle_definer FROM %I CASCADE', member_name);
   END LOOP;
 
   EXECUTE 'REVOKE ALL ON SCHEMA public FROM partner_credit_lifecycle_definer';
