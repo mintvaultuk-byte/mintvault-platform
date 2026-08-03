@@ -118,6 +118,13 @@ export const SUITES = [
     isolate: true,
     note: "Defect 2 transitive role-graph proof; own cluster, must NOT run as superuser.",
   },
+  {
+    file: "tests/partner-wallet-provisioning.test.ts",
+    topology: TOPOLOGY.SELF,
+    critical: true,
+    isolate: true,
+    note: "ensureWallet had no caller in server/, so no ACTIVE org ever got a wallet and every credit path 404'd; own cluster.",
+  },
 
   // ---------------------------------------------------------------- admin-only (migration proofs)
   {
