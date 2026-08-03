@@ -81,9 +81,22 @@ describe("G6D migration 0041 upgrade path", () => {
     ]);
   });
 
-  it("leaves no migration-role path into the lifecycle definer or direct G6D hold mutation", async () => {
+  it("leaves no USABLE migration-role path into the lifecycle definer or direct G6D hold mutation", async () => {
+    /**
+     * REVISED 2026-08-03. This previously asserted `migrator_memberships = 0`, which was only
+     * ever achievable because the harness applied 0041 as a SUPERUSER. On managed PostgreSQL the
+     * provider (Neon's `cloud_admin`) grants the project owner an ADMIN-option membership row,
+     * and because PostgreSQL 16+ records the grantor, 0041's closing `REVOKE ADMIN OPTION FOR`
+     * cannot remove a row it did not grant. The row therefore SURVIVES in production.
+     *
+     * Asserting zero rows hid the real defect: `definer-guard.ts` treated that surviving row as
+     * fatal, so credit settlement returned HTTP 409 on every real deployment while this test was
+     * green. The correct invariant is not "no membership" but "no USABLE membership" — the row
+     * may exist, but it must confer neither SET nor INHERIT.
+     */
     const state = await admin.query<{
-      migrator_memberships: string;
+      usable_memberships: string;
+      admin_only_memberships: string;
       definer_record_update: boolean;
     }>(
       `SELECT
@@ -92,11 +105,23 @@ describe("G6D migration 0041 upgrade path", () => {
             JOIN pg_roles role ON role.oid=membership.roleid
             JOIN pg_roles member ON member.oid=membership.member
            WHERE role.rolname='partner_credit_lifecycle_definer'
-             AND member.rolname='pn_migrator') AS migrator_memberships,
+             AND member.rolname='pn_migrator'
+             AND (membership.set_option OR membership.inherit_option)) AS usable_memberships,
+         (SELECT count(*)::bigint
+            FROM pg_auth_members membership
+            JOIN pg_roles role ON role.oid=membership.roleid
+            JOIN pg_roles member ON member.oid=membership.member
+           WHERE role.rolname='partner_credit_lifecycle_definer'
+             AND member.rolname='pn_migrator'
+             AND membership.admin_option
+             AND NOT membership.set_option
+             AND NOT membership.inherit_option) AS admin_only_memberships,
          has_table_privilege('partner_credit_lifecycle_definer','partner_connector_records','UPDATE')
            AS definer_record_update`
     );
-    expect(state.rows).toEqual([{ migrator_memberships: "0", definer_record_update: false }]);
+    expect(state.rows).toEqual([
+      { usable_memberships: "0", admin_only_memberships: "1", definer_record_update: false },
+    ]);
 
     const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
     await migrator.connect();
@@ -112,12 +137,27 @@ describe("G6D migration 0041 upgrade path", () => {
           "INSERT INTO partner_credit_reservation_events (reservation_id,wallet_id,tenant_id,event_type,amount,idempotency_key,request_fingerprint,source,reason,actor_type) VALUES (gen_random_uuid(),gen_random_uuid(),gen_random_uuid(),'released',1,'forged','forged','system','forged','system')"
         )
       ).rejects.toMatchObject({ code: "42501" });
-      await expect(
-        migrator.query("UPDATE partner_submission_credit_holds SET reason_code='forged' WHERE false")
-      ).rejects.toMatchObject({ code: "42501" });
     } finally {
       await migrator.end();
     }
+
+    /**
+     * `partner_submission_credit_holds` is CREATED BY 0041, so under the realistic harness the
+     * migration owner owns it and can therefore write to it — exactly as `neondb_owner` owns it
+     * on staging (verified against the live catalogue). The previous assertion that the migrator
+     * could NOT update it only held because the superuser harness left the table owned by
+     * `postgres`; it was false comfort about a privilege boundary that does not exist.
+     *
+     * The boundary that IS real, and the one 0041 actually establishes, is that neither partner
+     * RUNTIME role can reach the table at all. That is what is asserted here instead.
+     */
+    const runtimeReach = await admin.query<{ role: string; priv: string; allowed: boolean }>(
+      `SELECT r.rolname AS role, p.priv, has_table_privilege(r.rolname,'partner_submission_credit_holds',p.priv) AS allowed
+         FROM (VALUES ('partner_runtime'),('partner_connector_runtime')) AS r(rolname),
+              (VALUES ('SELECT'),('INSERT'),('UPDATE'),('DELETE')) AS p(priv)
+        ORDER BY r.rolname, p.priv`
+    );
+    expect(runtimeReach.rows.every((row) => row.allowed === false)).toBe(true);
   });
 
   it("registers both G6D definer functions and catches hardened-path drift", async () => {
