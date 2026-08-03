@@ -141,6 +141,20 @@ export const PARTNER_MIGRATIONS_WITH_PER_CARD = [
   // all) and adds the tenant-isolation policy 0041 omitted on partner_submission_credit_holds.
   "0043_partner_credit_hold_per_card",
 ] as const;
+/**
+ * 0044 widens partner_submissions.status past the three states 0007 allowed (draft /
+ * submitted_to_mintvault / cancelled) and adds the immutable location_name_snapshot. Any suite
+ * exercising the post-handover lifecycle — received, grading, graded, awaiting_settlement,
+ * completed — must use this list, or the CHECK constraint rejects every one of those states.
+ */
+export const PARTNER_MIGRATIONS_WITH_LIFECYCLE = [
+  ...PARTNER_MIGRATIONS_WITH_PER_CARD,
+  // 0035 is included because the partner→certificate link lives there
+  // (certificates.origin_partner_id). 0044 deliberately adds no second link, and a suite that
+  // cannot see 0035's columns could not prove that.
+  "0035_partner_certificate_origin",
+  "0044_partner_submission_lifecycle_and_location_snapshot",
+] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 
