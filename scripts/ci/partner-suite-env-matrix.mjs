@@ -230,6 +230,31 @@ export const SUITES = [
     isolate: true,
   },
   {
+    // Registered after it caught a regression the matrix could not: activation began provisioning
+    // a wallet, this suite's migration list had no partner_wallets, and every activation 500'd.
+    // `run-partner-suite.mjs --all` was green throughout, because only the *migration* sibling was
+    // listed here — the HTTP suite that actually drives changeStatus was not. A matrix that omits
+    // the suite exercising a behaviour cannot prove that behaviour.
+    file: "tests/partner-management-integration.test.ts",
+    topology: TOPOLOGY.MANAGEMENT,
+    cluster: "pg17",
+    database: "mintvault_partner_mgmt_rt",
+    adminVars: ["PARTNER_MANAGEMENT_RT_ADMIN"],
+    critical: true,
+    isolate: true,
+    note: "real HTTP against the main-app composition; shares its database with the dashboard suite, so both reset the schema.",
+  },
+  {
+    file: "tests/partner-dashboard-integration.test.ts",
+    topology: TOPOLOGY.MANAGEMENT,
+    cluster: "pg17",
+    database: "mintvault_partner_mgmt_rt",
+    adminVars: ["PARTNER_MANAGEMENT_RT_ADMIN"],
+    critical: true,
+    isolate: true,
+    note: "Super Admin /credits/adjust over real HTTP — the route the pilot funds credits through.",
+  },
+  {
     file: "tests/partner-user-management-migration.test.ts",
     topology: TOPOLOGY.MANAGEMENT,
     cluster: "pg17",
