@@ -655,6 +655,11 @@ GRANT EXECUTE ON FUNCTION partner_connector_release_submission_credit(uuid, uuid
 DO $$
 BEGIN
   EXECUTE format('REVOKE partner_credit_lifecycle_definer FROM %I', current_user);
+  -- PostgreSQL 16+ automatically gives a CREATEROLE role ADMIN OPTION on roles it
+  -- creates. Plain REVOKE removes SET/INHERIT but intentionally leaves that
+  -- administration option behind, so remove it explicitly before asserting
+  -- that the deployment owner has no remaining path back into the definer.
+  EXECUTE format('REVOKE ADMIN OPTION FOR partner_credit_lifecycle_definer FROM %I', current_user);
   IF EXISTS (
     SELECT 1
       FROM pg_auth_members m
