@@ -156,7 +156,8 @@ async function makeSubmission(f: TenantFixture, n: number): Promise<string> {
 async function seedReservations(
   f: TenantFixture,
   submissionId: string,
-  statuses: DesiredStatus[]
+  statuses: DesiredStatus[],
+  options: { skipEvidenceForIndex?: number } = {}
 ): Promise<string[]> {
   const ids: string[] = [];
   for (const [index, status] of statuses.entries()) {
@@ -179,7 +180,7 @@ async function seedReservations(
       [f.walletId, f.tenantId, f.locationId, `card-${index + 1}`, submissionId, status, key]
     );
     ids.push(row.rows[0].id);
-    if (status !== "active") {
+    if (status !== "active" && index !== options.skipEvidenceForIndex) {
       /**
        * chk_..._ledger_link makes a 'consumed' event REQUIRE a ledger entry and forbids one on any
        * other event type. Honouring that is what makes these fixtures the same shape a real
@@ -437,6 +438,74 @@ describe("0042 credit lifecycle state semantics (real PostgreSQL)", () => {
       const result = await callRelease(f, connector, s);
       expect(result.outcome).not.toBe("already_settled");
       expect(result.outcome).toBe("corrupt_linkage");
+    });
+  });
+
+  /**
+   * A uniformly-settled set is only a legitimate replay if its EVIDENCE is intact: every
+   * reservation must carry exactly one terminal event, and that event's type must match the
+   * reservation's own status. Without these cases the "already_settled" branch could be gutted
+   * entirely and every other test here would still pass — mutation DB42-B demonstrated exactly
+   * that, which is why they exist.
+   */
+  describe("replay evidence is verified, not assumed", () => {
+    async function reservationIds(f: TenantFixture, submissionId: string): Promise<string[]> {
+      const r = await admin.query<{ id: string }>(
+        `SELECT id FROM partner_credit_reservations
+          WHERE tenant_id=$1 AND source='portal' AND submission_reference=$2 ORDER BY created_at, id`,
+        [f.tenantId, submissionId]
+      );
+      return r.rows.map((x) => x.id);
+    }
+
+    it("a settled reservation with NO terminal event → corrupt_linkage", async () => {
+      // The one evidence corruption that IS reachable: a status transition written without its
+      // matching event. This is what the "already_settled" branch's per-reservation check catches.
+      const f = await createTenantFixture("evidence-missing");
+      const s = await makeSubmission(f, 3);
+      await seedReservations(f, s, ["released", "released", "released"], { skipEvidenceForIndex: 1 });
+      const connector = await makeConnector(f, s);
+
+      expect((await callRelease(f, connector, s)).outcome).toBe("corrupt_linkage");
+    });
+
+    /**
+     * The other two corruptions the branch defends against are UNREACHABLE by construction, and
+     * that is worth pinning explicitly rather than leaving as an untested assumption. Mutation
+     * DB42-B (gutting the evidence comparison entirely) does not turn this file red for those two
+     * cases — not because coverage is missing, but because the schema makes the states impossible.
+     * These tests prove that claim instead of asserting it.
+     */
+    it("a SECOND terminal event for one reservation is refused by the database", async () => {
+      const f = await createTenantFixture("evidence-duplicate");
+      const s = await makeSubmission(f, 1);
+      await seedReservations(f, s, ["released"]);
+      const ids = await reservationIds(f, s);
+      const dup = `dup-${s}`;
+      await expect(
+        admin.query(
+          `INSERT INTO partner_credit_reservation_events
+             (reservation_id, wallet_id, tenant_id, event_type, amount, idempotency_key,
+              request_fingerprint, source, reason, actor_type)
+           VALUES ($1,$2,$3,'released',1,$4,md5($4)||md5($4||':f'),'system','duplicate evidence','system')`,
+          [ids[0], f.walletId, f.tenantId, dup]
+        )
+      ).rejects.toThrow(/uq_partner_credit_reservation_events_terminal/);
+    });
+
+    it("reservation events are append-only: UPDATE and DELETE are both refused", async () => {
+      const f = await createTenantFixture("evidence-immutable");
+      const s = await makeSubmission(f, 1);
+      await seedReservations(f, s, ["released"]);
+      const ids = await reservationIds(f, s);
+      await expect(
+        admin.query("UPDATE partner_credit_reservation_events SET event_type='expired' WHERE reservation_id=$1", [
+          ids[0],
+        ])
+      ).rejects.toThrow(/append-only/i);
+      await expect(
+        admin.query("DELETE FROM partner_credit_reservation_events WHERE reservation_id=$1", [ids[0]])
+      ).rejects.toThrow(/append-only/i);
     });
   });
 
