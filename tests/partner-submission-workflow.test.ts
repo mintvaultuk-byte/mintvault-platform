@@ -20,6 +20,7 @@ import {
   applyMigrationsRealistic,
   PARTNER_MIGRATIONS_WITH_G6D,
   provisionRealisticRoles,
+  pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_RT_ADMIN;
@@ -83,6 +84,9 @@ async function seedMintVaultTables(): Promise<void> {
     await admin.query("GRANT partner_runtime TO partner_app_test_rt");
     process.env.PARTNER_DATABASE_URL = RUNTIME;
     process.env.PARTNER_ADMIN_DATABASE_URL = ADMIN;
+    // CI pins MINTVAULT_DATABASE_URL globally to a DIFFERENT database; the G6D accounting
+    // topology assertion in server/partner/db.ts then throws. Pin it to this suite's own.
+    pinAccountingTopologyTo(ADMIN);
     process.env.PARTNER_MFA_ENC_KEY = "0".repeat(64);
 
     const { seedPartnerRbac } = await import("../server/partner/permissions");
