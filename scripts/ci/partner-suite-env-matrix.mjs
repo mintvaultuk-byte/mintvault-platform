@@ -187,33 +187,27 @@ export const SUITES = [
     isolate: true,
     note: "the suite that exists to prove the topology rule; all four URLs pinned together.",
   },
+  /**
+   * These three START THEIR OWN disposable PostgreSQL 17 cluster and then assign
+   * MINTVAULT_DATABASE_URL themselves while DELETING PARTNER_ADMIN_DATABASE_URL /
+   * PARTNER_DATABASE_URL. Supplying accounting URLs to them is not merely unnecessary, it is
+   * actively wrong: the inherited values fight the ones the suite sets in beforeAll.
+   */
   {
     file: "tests/partner-credit-admin-service.test.ts",
-    topology: TOPOLOGY.ACCOUNTING,
-    cluster: "pg17",
-    database: "mintvault_partner_runtime",
-    adminVars: ["PARTNER_ADMIN_DATABASE_URL"],
-    pinAccounting: true,
+    topology: TOPOLOGY.SELF,
     critical: true,
     isolate: true,
   },
   {
     file: "tests/partner-credit-reservation-service.test.ts",
-    topology: TOPOLOGY.ACCOUNTING,
-    cluster: "pg17",
-    database: "mintvault_partner_runtime",
-    adminVars: ["PARTNER_ADMIN_DATABASE_URL"],
-    pinAccounting: true,
+    topology: TOPOLOGY.SELF,
     critical: true,
     isolate: true,
   },
   {
     file: "tests/partner-wallet-service.test.ts",
-    topology: TOPOLOGY.ACCOUNTING,
-    cluster: "pg17",
-    database: "mintvault_partner_runtime",
-    adminVars: ["PARTNER_ADMIN_DATABASE_URL"],
-    pinAccounting: true,
+    topology: TOPOLOGY.SELF,
     critical: true,
     isolate: true,
   },

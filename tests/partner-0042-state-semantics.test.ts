@@ -210,6 +210,43 @@ async function seedReservations(
   return ids;
 }
 
+/**
+ * Attach a completed connector import and a pre-arrival destination.
+ *
+ * WITHOUT THIS the hold assertions in the mixed-state cases are UNFALSIFIABLE. 0042 only creates
+ * holds when `v_destination_count = 1`, so with no partner_connector_imports row the hold branch
+ * is dead code for the whole file and `expect(holds).toBe(0)` is the only possible result for any
+ * implementation, correct or broken. Hoisting the hold INSERT above the mixed-state gate would
+ * have gone undetected.
+ */
+async function mapDestination(f: TenantFixture, submissionId: string, connectorId: string): Promise<number> {
+  const validation = await admin.query<{ id: string }>(
+    `INSERT INTO partner_connector_validation_runs
+       (connector_record_id,validation_attempt,source_submission_version,source_handoff_status,
+        source_fingerprint,source_fingerprint_version,outcome,blocking_error_count,warning_count,completed_at)
+     VALUES ($1,1,1,'pending',$2,1,'valid',0,0,now()) RETURNING id`,
+    [connectorId, "a".repeat(64)]
+  );
+  const destination = await admin.query<{ id: number }>(
+    "INSERT INTO submissions (user_id,tracking_number,status) VALUES ('state-customer',$1,'draft') RETURNING id",
+    [`MV-ST-${++sequence}`]
+  );
+  const handoff = await admin.query<{ id: string }>(
+    "SELECT id FROM partner_submission_handoffs WHERE submission_id=$1",
+    [submissionId]
+  );
+  await admin.query(
+    `INSERT INTO partner_connector_imports
+       (connector_record_id,partner_organisation_id,partner_location_id,partner_submission_id,partner_handoff_id,
+        validation_run_id,source_fingerprint,source_fingerprint_version,mapping_version,import_attempt,
+        state,destination_submission_id,completed_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,1,1,1,'completed',$8,now())`,
+    [connectorId, f.tenantId, f.locationId, submissionId, handoff.rows[0].id, validation.rows[0].id,
+     "a".repeat(64), destination.rows[0].id]
+  );
+  return destination.rows[0].id;
+}
+
 async function makeConnector(f: TenantFixture, submissionId: string, state = "ready_for_import"): Promise<string> {
   const handoff = await admin.query<{ id: string }>(
     `INSERT INTO partner_submission_handoffs (tenant_id,submission_id,status,snapshot)
@@ -409,6 +446,9 @@ describe("0042 credit lifecycle state semantics (real PostgreSQL)", () => {
         const s = await makeSubmission(f, c.statuses.length);
         await seedReservations(f, s, c.statuses);
         const connector = await makeConnector(f, s);
+        // A real destination mapping, so v_destination_count = 1 and the hold branch is LIVE.
+        // Without it the "no hold was written" assertion below cannot fail for any implementation.
+        await mapDestination(f, s, connector);
 
         const eventsBefore = await terminalEventCount(f, s);
         const statusesBefore = await statusesFor(f, s);

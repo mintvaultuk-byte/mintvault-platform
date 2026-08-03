@@ -42,7 +42,10 @@ async function applyAllRealistic(): Promise<void> {
   const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
   await migrator.connect();
   try {
-    await applyMigrations(migrator, listMigrationFiles());
+    // allowDestructive: 0043 must DROP the single-hold-per-destination unique index. The runner
+    // correctly refuses destructive SQL unless the operator opts in; that is safe on this suite's
+    // own disposable database, and still requires owner approval anywhere real.
+    await applyMigrations(migrator, listMigrationFiles(), { allowDestructive: true });
   } finally {
     await migrator.end();
   }
@@ -69,6 +72,27 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
     await admin.query("CREATE TABLE IF NOT EXISTS users (id varchar PRIMARY KEY DEFAULT gen_random_uuid(), email varchar UNIQUE)");
     await admin.query("CREATE TABLE IF NOT EXISTS submissions (id serial PRIMARY KEY, user_id varchar, tracking_number text UNIQUE)");
     await admin.query("CREATE TABLE IF NOT EXISTS submission_items (id serial PRIMARY KEY, submission_id integer NOT NULL)");
+    /**
+     * Later migrations this suite now applies need more MintVault base tables than G5 ever did:
+     * 0018 indexes audit_log, and 0041 attaches credit-hold guard triggers to certificates and
+     * label_prints. Without them the runner aborts in beforeAll with `relation "audit_log" does
+     * not exist` — a FILE-level failure that vitest reports as "10 skipped", which reads exactly
+     * like an ungated suite. The suite only ever passed against a database left populated by an
+     * earlier run.
+     */
+    await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
+      id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL,
+      admin_user text, details jsonb, created_at timestamptz NOT NULL DEFAULT now()
+    )`);
+    await admin.query(
+      "CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, submission_id integer)"
+    );
+    await admin.query(
+      "CREATE TABLE IF NOT EXISTS label_prints (id serial PRIMARY KEY, certificate_id integer)"
+    );
+    for (const t of ["audit_log", "certificates", "label_prints"]) {
+      await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
+    }
     await admin.query("ALTER TABLE users OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
     await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
@@ -97,7 +121,7 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
       const plan = await planMigrations(migrator, listMigrationFiles());
       expect(plan.pending).toHaveLength(0);
       expect(plan.checksumMismatches).toHaveLength(0);
-      const { applied } = await applyMigrations(migrator, listMigrationFiles());
+      const { applied } = await applyMigrations(migrator, listMigrationFiles(), { allowDestructive: true });
       expect(applied).toHaveLength(0);
     } finally {
       await migrator.end();
@@ -216,7 +240,7 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
       expect(j.rows).toHaveLength(0);
       // G4 table survives
       expect((await admin.query("SELECT to_regclass('partner_connector_admin_actions') AS t")).rows[0].t).not.toBeNull();
-      const { applied } = await applyMigrations(migrator, listMigrationFiles());
+      const { applied } = await applyMigrations(migrator, listMigrationFiles(), { allowDestructive: true });
       expect(applied).toContain("0015_partner_management.sql");
     } finally {
       await migrator.end();

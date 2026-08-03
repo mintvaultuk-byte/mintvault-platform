@@ -103,7 +103,7 @@ for (const suite of targets) {
     delete env.PARTNER_DATABASE_URL;
     delete env.PARTNER_CONNECTOR_DATABASE_URL;
   }
-  const reportPath = jsonDir ? join(jsonDir, suite.file.replace(/[\/]/g, "_") + ".json") : null;
+  const reportPath = jsonDir ? join(jsonDir, suite.file.replace(/\//g, "_") + ".json") : null;
   const vitestArgs = ["vitest", "run", suite.file];
   if (reportPath) vitestArgs.push("--reporter=json", "--outputFile", reportPath);
 

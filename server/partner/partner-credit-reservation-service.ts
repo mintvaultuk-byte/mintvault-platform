@@ -762,22 +762,30 @@ async function createDestinationHoldForExpiredReservation(
     );
   }
   const link = rows.rows[0];
+  /**
+   * PER-CARD HOLDS. This check used to be "if ANY unreleased hold exists on this destination and it
+   * is not mine, refuse" — the pre-0043 invariant of one unreleased hold per destination.
+   *
+   * Under the per-card model that is wrong twice over. An N-card submission legitimately has N
+   * unreleased holds on one destination, so expiring card 2 found card 1's hold, saw a different
+   * reservation_id, and threw INTERNAL_ERROR. `expireExpiredReservations` only swallows
+   * RESERVATION_NOT_ACTIVE / IDEMPOTENCY_CONFLICT / WALLET_INACTIVE, so INTERNAL_ERROR propagated
+   * out of the whole sweep — aborting the batch for EVERY tenant, and doing so again on the next
+   * run because the same row is re-selected. That is a permanent global wedge of the expiry job,
+   * and it leaves the submission in the mixed live/settled state that fails closed forever.
+   *
+   * The correct question is only "is this reservation already held?". Holds belonging to OTHER
+   * reservations of the same submission are expected. 0043's uq_..._active_reservation is the
+   * database-level guarantee that one reservation cannot carry two unreleased holds.
+   */
   const existing = await client.query<{ reservation_id: string }>(
     `SELECT reservation_id
        FROM partner_submission_credit_holds
-      WHERE destination_submission_id=$1 AND released_at IS NULL
+      WHERE reservation_id=$1 AND released_at IS NULL
       FOR UPDATE`,
-    [link.destination_submission_id]
+    [reservationId]
   );
-  if ((existing.rowCount ?? 0) > 0) {
-    if (existing.rows[0].reservation_id !== reservationId) {
-      throw new CreditReservationError(
-        "INTERNAL_ERROR",
-        "Expired Partner reservation conflicts with an existing destination hold."
-      );
-    }
-    return;
-  }
+  if ((existing.rowCount ?? 0) > 0) return;
   await client.query(
     `INSERT INTO partner_submission_credit_holds
        (tenant_id, partner_submission_id, destination_submission_id, reservation_id,

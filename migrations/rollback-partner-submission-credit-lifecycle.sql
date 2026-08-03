@@ -20,6 +20,21 @@ BEGIN
      ) THEN
     RAISE EXCEPTION 'cannot roll back 0041 while a later numbered migration is applied';
   END IF;
+  /**
+   * DISABLE FORCE RLS BEFORE READING THE HOLDS TABLE.
+   *
+   * 0043 gives partner_submission_credit_holds ENABLE + FORCE ROW LEVEL SECURITY. FORCE removes
+   * the TABLE OWNER's exemption, and this rollback runs as the owner (on Neon the project owner,
+   * which is not a superuser and not BYPASSRLS) with no app.tenant_id set. The policy therefore
+   * matches nothing and the guard below would see ZERO rows — turning a fail-CLOSED safety
+   * interlock into a fail-OPEN one that happily rolls back 0041 on top of live credit holds.
+   *
+   * The rollback is about to drop this table anyway, so lifting FORCE first is safe and is the
+   * only way to make the guard mean what it says. It is a no-op when 0043 was never applied.
+   */
+  IF to_regclass('public.partner_submission_credit_holds') IS NOT NULL THEN
+    EXECUTE 'ALTER TABLE public.partner_submission_credit_holds NO FORCE ROW LEVEL SECURITY';
+  END IF;
   IF to_regclass('public.partner_submission_credit_holds') IS NOT NULL
      AND EXISTS (SELECT 1 FROM partner_submission_credit_holds WHERE released_at IS NULL) THEN
     RAISE EXCEPTION 'cannot roll back 0041 while active Partner destination credit holds exist';

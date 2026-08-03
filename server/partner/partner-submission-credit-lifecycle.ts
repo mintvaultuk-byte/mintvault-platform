@@ -930,6 +930,32 @@ export async function settlePartnerCreditForDestinationStatus(
     }
 
     await assertPartnerCreditLifecycleReady(client);
+
+    /**
+     * SET THE TENANT CONTEXT BEFORE READING ANY RLS-PROTECTED TABLE ON THIS PATH.
+     *
+     * 0043 gives partner_submission_credit_holds ENABLE + FORCE ROW LEVEL SECURITY with the
+     * standard `tenant_id = partner_current_tenant()` policy, which fails closed to NULL when
+     * app.tenant_id is unset. This transaction previously set it nowhere before the two reads
+     * below, so both depended entirely on the admin pool role holding BYPASSRLS.
+     *
+     * That dependency is not asserted anywhere on this path — `getPartnerAdminCapability()` is
+     * only enforced on the admin/management/connector routes, and this function is reached from an
+     * ordinary MintVault submission status write. If PARTNER_ADMIN_DATABASE_URL ever resolves to a
+     * role without BYPASSRLS (including the documented fallback to MINTVAULT_DATABASE_URL, whose
+     * Neon owner is NOT BYPASSRLS), the consequences are:
+     *
+     *   - hasActiveDestinationCreditHold() returns FALSE for a genuinely held destination, so the
+     *     free-grading gate silently disappears — it fails OPEN, which is the one direction this
+     *     gate must never fail; and
+     *   - findReservationsForPartnerSubmission() cannot see the released hold that authorises a
+     *     recovery replacement, so every recovered multi-card submission becomes unsettleable.
+     *
+     * Setting the context transaction-locally makes both correct irrespective of BYPASSRLS, and
+     * matches what auditAccountingException() and the recovery path already do.
+     */
+    await client.query("SELECT set_config('app.tenant_id', $1, true)", [link.tenant_id]);
+
     if (await hasActiveDestinationCreditHold(client, destinationSubmissionId)) {
       return failClosedAccountingException(destination, status, "destination_credit_hold_active", {
         partner_submission_id: link.partner_submission_id,

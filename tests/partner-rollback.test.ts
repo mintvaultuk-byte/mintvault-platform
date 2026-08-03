@@ -85,7 +85,20 @@ async function applyAllRealistic(): Promise<void> {
     // The owner-approved repair, executed by the migrator itself via its ADMIN option — exactly
     // the self-service path 0042's header prescribes for staging.
     await migrator.query("GRANT partner_credit_lifecycle_definer TO pn_migrator WITH INHERIT TRUE, SET FALSE");
-    await applyMigrations(migrator, all);
+    /**
+     * allowDestructive IS REQUIRED, and that requirement is itself the point.
+     *
+     * 0043 must DROP INDEX uq_partner_submission_credit_holds_active_destination — the per-card
+     * hold model cannot exist while a unique index permits only one unreleased hold per
+     * destination. The migration runner correctly refuses any pending migration containing
+     * destructive SQL unless the operator opts in, so without this flag the suite aborts with
+     * "Destructive SQL detected in pending migration(s): 0043...".
+     *
+     * Opting in is safe HERE because this suite owns a disposable, freshly-created cluster. It is
+     * NOT safe by default anywhere else: applying 0043 to staging or production requires explicit
+     * owner approval and `--allow-destructive`, and that gate must stay in the operator's hands.
+     */
+    await applyMigrations(migrator, all, { allowDestructive: true });
   } finally {
     await migrator.end();
   }

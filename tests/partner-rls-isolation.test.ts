@@ -170,6 +170,9 @@ async function assertRlsHarness(client: Client, table: string, expectTenant: str
   expect(h.bypassrls, `RLS proof role '${h.rolname}' holds BYPASSRLS — every isolation claim would be vacuous`).toBe(
     false
   );
+  // Pin the ACTING role, not merely "some unprivileged role": dropping the SET ROLE would
+  // otherwise leave the proof running as the outer login, which does not exist in production.
+  expect(h.rolname, "isolation claims must be made as partner_runtime").toBe("partner_runtime");
   expect(h.rls_enabled, `${table} must have ROW LEVEL SECURITY enabled`).toBe(true);
   // FORCE matters independently: without it the table OWNER is exempt from its own policies.
   expect(h.forced, `${table} must have FORCE ROW LEVEL SECURITY`).toBe(true);
@@ -193,16 +196,25 @@ async function assertRlsHarness(client: Client, table: string, expectTenant: str
 async function attemptWrite(
   sql: string,
   params: unknown[]
-): Promise<{ refusal: "denied" | "no_rows" | "APPLIED"; rowCount: number }> {
+): Promise<{ refusal: "denied" | "no_rows" | "APPLIED"; rowCount: number; sqlstate: string; message: string }> {
   await runtime.query("SAVEPOINT attempt");
   try {
     const r = await runtime.query(sql, params);
     await runtime.query("RELEASE SAVEPOINT attempt");
-    return { refusal: (r.rowCount ?? 0) === 0 ? "no_rows" : "APPLIED", rowCount: r.rowCount ?? 0 };
-  } catch {
+    return {
+      refusal: (r.rowCount ?? 0) === 0 ? "no_rows" : "APPLIED",
+      rowCount: r.rowCount ?? 0,
+      sqlstate: "",
+      message: "",
+    };
+  } catch (err) {
     await runtime.query("ROLLBACK TO SAVEPOINT attempt");
     await runtime.query("RELEASE SAVEPOINT attempt");
-    return { refusal: "denied", rowCount: 0 };
+    // The SQLSTATE is returned so a test can require the SPECIFIC refusal it claims. A bare
+    // "denied" would also be produced by a typo, an FK violation or a unique collision, which
+    // would leave the test green while proving nothing about isolation.
+    const e = err as { code?: string; message?: string };
+    return { refusal: "denied", rowCount: 0, sqlstate: e.code ?? "", message: e.message ?? "" };
   }
 }
 
@@ -370,15 +382,51 @@ describe("Partner RLS tenant isolation (real PostgreSQL, restricted runtime role
       expect(after.rows[0].reason).not.toBe("hijacked");
     });
 
-    it("an unqualified UPDATE (no WHERE at all) still cannot touch B", async () => {
-      // The strongest form: if RLS is absent this rewrites every tenant's rows.
+    it("an unqualified UPDATE (no WHERE at all) is refused outright", async () => {
+      /**
+       * This previously asserted only that B's row was unchanged AFTER the transaction — which
+       * `asTenant` always rolls back, so the assertion held no matter what the statement did. It
+       * could not fail for any implementation. It now asserts the refusal itself.
+       *
+       * partner_runtime holds SELECT only on this table (0017), so the refusal here is PRIVILEGE
+       * ABSENCE, not RLS. That distinction is the point of asserting the SQLSTATE rather than
+       * calling this an RLS proof: the genuine RLS write proof is the partner_submissions case
+       * below, on a table where the runtime role really does hold DML.
+       */
       await asTenant(A.id, async () => {
-        await attemptWrite("UPDATE partner_credit_reservations SET reason='sweep'", []);
+        const r = await attemptWrite("UPDATE partner_credit_reservations SET reason='sweep'", []);
+        expect(r.refusal).toBe("denied");
+        expect(r.sqlstate).toBe("42501");
+        expect(r.message).toMatch(/permission denied/i);
       });
-      const b = await admin.query<{ reason: string }>("SELECT reason FROM partner_credit_reservations WHERE id=$1", [
-        B.reservationId,
+    });
+
+    it("RLS (not privilege) hides B's submission from an UPDATE the runtime role IS allowed to make", async () => {
+      /**
+       * THE LOAD-BEARING WRITE PROOF. partner_submissions is the one money-path table where
+       * partner_runtime genuinely holds INSERT/UPDATE (0007), so a refusal here can only come from
+       * row-level security. Every other write test in this block is refused by grant absence and
+       * would stay green with RLS switched off entirely.
+       */
+      await asTenant(A.id, async () => {
+        await assertRlsHarness(runtime, "partner_submissions", A.id);
+        const r = await attemptWrite("UPDATE partner_submissions SET status='cancelled' WHERE id=$1", [
+          B.submissionId,
+        ]);
+        // Not "denied": the grant exists. RLS makes the row invisible, so zero rows match.
+        expect(r.refusal).toBe("no_rows");
+        // ...and A can still update its OWN row, proving the grant is real and the test is not
+        // passing merely because the statement is broken.
+        const own = await attemptWrite("UPDATE partner_submissions SET status='cancelled' WHERE id=$1", [
+          A.submissionId,
+        ]);
+        expect(own.refusal).toBe("APPLIED");
+        expect(own.rowCount).toBe(1);
+      });
+      const b = await admin.query<{ status: string }>("SELECT status FROM partner_submissions WHERE id=$1", [
+        B.submissionId,
       ]);
-      expect(b.rows[0].reason).not.toBe("sweep");
+      expect(b.rows[0].status).not.toBe("cancelled");
     });
 
     it("DELETE against B's submission is refused and B survives", async () => {

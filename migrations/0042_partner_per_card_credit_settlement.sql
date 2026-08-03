@@ -22,9 +22,23 @@
 -- first CREATE OR REPLACE.
 -- ==========================================================================
 --
--- ROLLBACK ORDERING: this migration must be rolled back BEFORE 0041. 0041's rollback script
--- refuses to run while any migration numbered > 41 is journalled, which enforces exactly that
--- order. Use rollback-0042-partner-per-card-credit-settlement.sql first.
+-- ============================ PAIRED WITH 0043 ============================
+-- 0042 inserts ONE HOLD PER ACTIVE RESERVATION on a single destination (see the hold block below).
+-- 0041's `uq_partner_submission_credit_holds_active_destination` — UNIQUE (destination_submission_id)
+-- WHERE released_at IS NULL — permits only ONE unreleased hold per destination, so until 0043
+-- re-keys that index the SECOND hold raises unique_violation and the whole connector terminal
+-- transition aborts. The two must be applied together, 0042 then 0043; a staged apply that stops
+-- after 0042 leaves multi-card connector cancellation broken.
+--
+-- This is NOT asserted here, deliberately: 0043 is numbered after 0042, so a precondition
+-- requiring 0043's index would make 0042 unappliable. The numbered runner applies both in one
+-- pass, so the exposed window is a deliberate partial apply only — do not stage 0042 alone.
+-- =========================================================================
+--
+-- ROLLBACK ORDERING: roll back 0043 first, then this migration, then 0041. 0041's rollback script
+-- refuses to run while any migration numbered > 41 is journalled, which enforces that order.
+-- Use rollback-0043-partner-credit-hold-per-card.sql, then
+-- rollback-0042-partner-per-card-credit-settlement.sql.
 --
 -- NON-PARTNER BEHAVIOUR IS UNCHANGED: this migration creates no trigger, drops no trigger, and
 -- touches no grading, certificate or label object. The three hold-guard triggers 0041 installed
