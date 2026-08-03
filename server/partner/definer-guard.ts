@@ -139,8 +139,34 @@ export async function partnerCreditDefinerModelViolations(query: DbQuery): Promi
     if (r.rolreplication) violations.push(`${CREDIT_LIFECYCLE_DEFINER_ROLE} must be NOREPLICATION`);
   }
 
+  /**
+   * Membership policy — deliberately capability-based, NOT row-based.
+   *
+   * WHY (hostile review, 2026-08-03): the previous check flagged ANY row in pg_auth_members.
+   * On managed PostgreSQL (Neon) the provider creates an ADMIN-option-only membership row for
+   * the project owner, granted by `cloud_admin`, which the deployment owner cannot remove.
+   * Migration 0041 explicitly tolerates that row (it asserts only on the 'set'/'usage' forms of
+   * pg_has_role, see 0041 L664-672) — but this guard did not, so the two contradicted each other
+   * and the guard failed closed with HTTP 409 on every credit settlement on a real Neon database.
+   * The test harness never caught it because it applies 0041 as a SUPERUSER, where the row does
+   * not survive. Migration-time and runtime rules are now the same rule.
+   *
+   * What actually matters is whether a role can USE the definer, and which role that is:
+   *  - ADMIN-option-only rows confer no runtime privilege -> tolerated.
+   *  - The database owner may hold SET/INHERIT. It already owns every object and is BYPASSRLS,
+   *    so membership grants it nothing it does not already have, and it is REQUIRED for the
+   *    migration owner to run CREATE OR REPLACE / DROP FUNCTION against definer-owned functions
+   *    (without it, 0041 is neither re-runnable nor rollback-capable) -> tolerated.
+   *  - ANY OTHER role holding SET or INHERIT is a genuine privilege-escalation path, and in
+   *    particular partner_runtime / partner_connector_runtime must never appear here -> violation.
+   */
   const members = await query(
-    `SELECT member.rolname
+    `SELECT member.rolname,
+            membership.admin_option,
+            membership.inherit_option,
+            membership.set_option,
+            (member.oid = (SELECT datdba FROM pg_database WHERE datname = current_database()))
+              AS is_database_owner
        FROM pg_auth_members membership
        JOIN pg_roles role ON role.oid=membership.roleid
        JOIN pg_roles member ON member.oid=membership.member
@@ -148,11 +174,16 @@ export async function partnerCreditDefinerModelViolations(query: DbQuery): Promi
       ORDER BY member.rolname`,
     [CREDIT_LIFECYCLE_DEFINER_ROLE]
   );
-  if (members.rows.length > 0) {
+  const usableBy = members.rows.filter((row) => {
+    const r = row as Record<string, unknown>;
+    // Only SET/INHERIT confer usable privilege; ADMIN alone does not.
+    if (r.inherit_option !== true && r.set_option !== true) return false;
+    return r.is_database_owner !== true;
+  });
+  if (usableBy.length > 0) {
     violations.push(
-      `${CREDIT_LIFECYCLE_DEFINER_ROLE} must have no member roles (found ${members.rows
-        .map((row) => String(row.rolname))
-        .join(", ")})`
+      `${CREDIT_LIFECYCLE_DEFINER_ROLE} must not be usable by any role other than the database owner ` +
+        `(found ${usableBy.map((row) => String((row as Record<string, unknown>).rolname)).join(", ")})`
     );
   }
 
