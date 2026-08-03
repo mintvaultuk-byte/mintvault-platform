@@ -8,6 +8,12 @@
  */
 import type pg from "pg";
 import {
+  isActive,
+  isConsumed,
+  isLive,
+  isReleaseTerminal,
+} from "@shared/partner-credit-reservation-states";
+import {
   assertPartnerAccountingDatabaseTopology,
   withPartnerAccountingAuditTransaction,
   withPartnerAdminTransaction,
@@ -224,8 +230,11 @@ async function findReservationsForPartnerSubmission(
     [tenantId, CREDIT_SOURCE, partnerSubmissionId]
   );
 
-  const live = result.rows.filter((row) => row.status === "active" || row.status === "consumed");
-  const historical = result.rows.filter((row) => row.status === "released" || row.status === "expired");
+  // The partition comes from ONE definition shared with migration 0042 (see
+  // shared/partner-credit-reservation-states.ts) so the SQL and TypeScript views of the lifecycle
+  // cannot drift apart.
+  const live = result.rows.filter((row) => isLive(row.status));
+  const historical = result.rows.filter((row) => isReleaseTerminal(row.status));
 
   // Every live reservation must be for a DISTINCT card reference. Two live rows sharing one
   // reference would mean the per-card unique index was bypassed.
@@ -567,7 +576,7 @@ export async function releasePartnerReservationForPartnerCancellation(
   // Cancellation releases the WHOLE submission or none of it. If any card's credit has already
   // been consumed, the submission is past settlement and cancellation is refused outright — a
   // partial release would leave the partner charged for some cards of a cancelled submission.
-  if (reservations.some((row) => row.status !== "active")) {
+  if (reservations.some((row) => !isActive(row.status))) {
     throw new PartnerSubmissionCreditLifecycleError(
       "This submission credit has already been settled and cannot be released."
     );
@@ -949,7 +958,7 @@ export async function settlePartnerCreditForDestinationStatus(
       });
     }
 
-    const pending = reservations.filter((row) => row.status === "active");
+    const pending = reservations.filter((row) => isActive(row.status));
 
     if (pending.length > 0) {
       /**
@@ -1008,7 +1017,7 @@ export async function settlePartnerCreditForDestinationStatus(
 
     // Replay of an already-settled submission: EVERY card must carry exact consumed evidence.
     // A single card lacking it means the set is not uniformly settled and must not be waved through.
-    const allConsumed = reservations.every((row) => row.status === "consumed");
+    const allConsumed = reservations.every((row) => isConsumed(row.status));
     if (allConsumed) {
       for (const reservation of reservations) {
         if (!(await hasExactConsumedEvidence(client, reservation))) {
@@ -1113,7 +1122,7 @@ export async function recoverPartnerDestinationCreditHold(params: {
       destination.rowCount !== 1 ||
       destination.rows[0].deleted_at != null ||
       releasedReservation.rowCount !== 1 ||
-      !["released", "expired"].includes(releasedReservation.rows[0].status) ||
+      !isReleaseTerminal(releasedReservation.rows[0].status) ||
       releasedReservation.rows[0].location_id !== source.rows[0].location_id
     ) {
       throw new PartnerSubmissionCreditLifecycleError(
@@ -1143,7 +1152,7 @@ export async function recoverPartnerDestinationCreditHold(params: {
         },
       }
     );
-    if (replacement.reservation.status !== "active") {
+    if (!isActive(replacement.reservation.status)) {
       throw new PartnerSubmissionCreditLifecycleError(
         "Authorised recovery did not create an active Partner credit reservation.",
         "credit_settlement_required"

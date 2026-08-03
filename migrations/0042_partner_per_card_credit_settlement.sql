@@ -38,9 +38,15 @@ BEGIN
 
   IF NOT pg_has_role(current_user, 'partner_credit_lifecycle_definer', 'usage')
      AND NOT (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) THEN
+    -- NOTE: plpgsql RAISE supports only `%` as a placeholder — there is no `%I` specifier (that is
+    -- format()). Writing `%I` here consumed the second argument at the `%` and left a literal "I"
+    -- glued to the role name, so the message told the operator to run
+    -- `GRANT ... TO pn_migratorI`, naming a role that does not exist. The remediation instruction
+    -- in a fail-fast assertion has to be copy-pasteable, so the identifier is quoted with
+    -- quote_ident() and interpolated through a single `%`.
     RAISE EXCEPTION
-      '0042 cannot replace functions owned by partner_credit_lifecycle_definer: % lacks INHERIT membership. Execute the owner-approved repair first: GRANT partner_credit_lifecycle_definer TO %I WITH INHERIT TRUE;',
-      current_user, current_user;
+      '0042 cannot replace functions owned by partner_credit_lifecycle_definer: % lacks INHERIT membership. Execute the owner-approved repair first: GRANT partner_credit_lifecycle_definer TO % WITH INHERIT TRUE;',
+      current_user, quote_ident(current_user);
   END IF;
 END$$;
 
@@ -65,8 +71,18 @@ DECLARE
   v_hold record;
   v_reservation record;
   v_anchor_id uuid;
-  v_live_count integer;
+  -- EXPLICIT LIFECYCLE PARTITION. 0017's CHECK constraint allows exactly
+  -- ('active','consumed','released','expired'), so a filter naming all four is the WHOLE domain
+  -- and therefore no filter at all. The three counts below are disjoint and sum to v_total_count,
+  -- which is what makes every mixed-state case decidable instead of silently collapsing into
+  -- "nothing is active, so this must be a replay".
+  --   ACTIVE           = active                     (entitlement still outstanding)
+  --   CONSUMED         = consumed                   (settled BY GRADING — MintVault was paid)
+  --   RELEASE_TERMINAL = released | expired         (settled BY CANCELLATION — credit returned)
   v_active_count integer;
+  v_consumed_count integer;
+  v_terminal_count integer;
+  v_total_count integer;
   v_expected_units integer;
   v_terminal_event_count integer;
   v_terminal_event_type text;
@@ -159,13 +175,16 @@ BEGIN
       AND submission_reference = p_partner_submission_id::text
     FOR UPDATE;
 
-  SELECT count(*)::integer INTO v_live_count
+  SELECT count(*) FILTER (WHERE status = 'active')::integer,
+         count(*) FILTER (WHERE status = 'consumed')::integer,
+         count(*) FILTER (WHERE status IN ('released', 'expired'))::integer,
+         count(*)::integer
+    INTO v_active_count, v_consumed_count, v_terminal_count, v_total_count
     FROM public.partner_credit_reservations
    WHERE tenant_id = p_tenant_id AND source = 'portal'
-     AND submission_reference = p_partner_submission_id::text
-     AND status IN ('active', 'consumed', 'released', 'expired');
+     AND submission_reference = p_partner_submission_id::text;
 
-  IF v_live_count = 0 THEN
+  IF v_total_count = 0 THEN
     -- No entitlement at all. With a destination mapping present that is corrupt; without one
     -- it is an ordinary pre-G6D submission.
     IF v_destination_count = 1 THEN
@@ -176,34 +195,19 @@ BEGIN
     RETURN;
   END IF;
 
-  -- Credits must reconcile to card units exactly. This replaces 0041's `count(*) <> 1` check
-  -- with the per-card equivalent, so a collapsed or over-counted set is still corrupt linkage.
-  SELECT COALESCE(SUM(quantity), 0)::integer INTO v_expected_units
-    FROM public.partner_submission_cards
-   WHERE submission_id = p_partner_submission_id
-     AND tenant_id = p_tenant_id
-     AND removed_at IS NULL;
-
-  IF v_expected_units > 0 AND v_live_count <> v_expected_units THEN
-    RETURN QUERY SELECT 'corrupt_linkage'::text, NULL::uuid;
-    RETURN;
-  END IF;
-
-  -- Every live reservation must belong to this tenant/submission at the same location, and
-  -- card references must be distinct (proving the per-card unique index was not bypassed).
+  -- Every reservation must belong to this tenant/submission at the same location, and card
+  -- references must be distinct (proving the per-card unique index was not bypassed).
   IF EXISTS (
        SELECT 1 FROM public.partner_credit_reservations r
         WHERE r.tenant_id = p_tenant_id AND r.source = 'portal'
           AND r.submission_reference = p_partner_submission_id::text
-          AND r.status IN ('active', 'consumed', 'released', 'expired')
           AND r.location_id IS DISTINCT FROM v_source.location_id
      )
      OR (
        SELECT count(DISTINCT card_reference) FROM public.partner_credit_reservations
         WHERE tenant_id = p_tenant_id AND source = 'portal'
           AND submission_reference = p_partner_submission_id::text
-          AND status IN ('active', 'consumed', 'released', 'expired')
-     ) <> v_live_count THEN
+     ) <> v_total_count THEN
     RETURN QUERY SELECT 'corrupt_linkage'::text, NULL::uuid;
     RETURN;
   END IF;
@@ -212,20 +216,41 @@ BEGIN
     FROM public.partner_credit_reservations
    WHERE tenant_id = p_tenant_id AND source = 'portal'
      AND submission_reference = p_partner_submission_id::text
-     AND status IN ('active', 'consumed', 'released', 'expired')
    ORDER BY created_at ASC, id ASC
    LIMIT 1;
 
-  SELECT count(*)::integer INTO v_active_count
-    FROM public.partner_credit_reservations
-   WHERE tenant_id = p_tenant_id AND source = 'portal'
-     AND submission_reference = p_partner_submission_id::text
-     AND status = 'active';
-
-  -- Mixed active/terminal sets are never an ordinary replay. They indicate a previous partial
-  -- settlement attempt or manual corruption, so refuse before writing any additional events.
-  IF v_active_count > 0 AND v_active_count <> v_live_count THEN
+  /**
+   * MIXED-STATE GATE — evaluated BEFORE anything is written.
+   *
+   * The three lifecycle partitions are mutually exclusive for a healthy submission: a submission is
+   * outstanding, or it was settled by grading, or it was settled by cancellation. Any two of them
+   * present together means a previous settlement ran partially, or the rows were edited by hand.
+   *
+   * This is the case 0042 previously waved through. Because the old `v_live_count` filter spanned
+   * the entire status domain, a {consumed, released} set had v_active_count = 0, fell into the
+   * "fully settled already" branch, found one matching terminal event per reservation — which is
+   * true of both statuses — and returned 'already_settled'. The caller then completed a connector
+   * cancellation for a submission that had ALREADY BEEN GRADED AND CHARGED on some of its cards.
+   */
+  IF (v_active_count > 0 AND v_consumed_count > 0)
+     OR (v_consumed_count > 0 AND v_terminal_count > 0)
+     OR (v_active_count > 0 AND v_terminal_count > 0) THEN
     RETURN QUERY SELECT 'corrupt_linkage'::text, v_anchor_id;
+    RETURN;
+  END IF;
+
+  -- From here the set is UNIFORM: exactly one partition is non-empty.
+
+  -- Credits must reconcile to card units exactly. This replaces 0041's `count(*) <> 1` check with
+  -- the per-card equivalent, so a collapsed or over-counted set is still corrupt linkage.
+  SELECT COALESCE(SUM(quantity), 0)::integer INTO v_expected_units
+    FROM public.partner_submission_cards
+   WHERE submission_id = p_partner_submission_id
+     AND tenant_id = p_tenant_id
+     AND removed_at IS NULL;
+
+  IF v_expected_units > 0 AND v_total_count <> v_expected_units THEN
+    RETURN QUERY SELECT 'corrupt_linkage'::text, NULL::uuid;
     RETURN;
   END IF;
 
@@ -247,13 +272,14 @@ BEGIN
   END IF;
 
   IF v_active_count = 0 THEN
-    -- Fully settled already. Every live reservation must carry exactly one terminal event
-    -- matching its own status, or the set is inconsistent.
+    -- Uniformly settled — either wholly CONSUMED (graded) or wholly RELEASE_TERMINAL (cancelled).
+    -- Both are legitimate replays and both report 'already_settled', which preserves 0041's
+    -- single-reservation behaviour exactly. Every reservation must still carry exactly one terminal
+    -- event matching its own status, or the set is inconsistent.
     FOR v_reservation IN
       SELECT id, status FROM public.partner_credit_reservations
        WHERE tenant_id = p_tenant_id AND source = 'portal'
          AND submission_reference = p_partner_submission_id::text
-         AND status IN ('active', 'consumed', 'released', 'expired')
     LOOP
       SELECT count(*)::integer, min(event_type)
         INTO v_terminal_event_count, v_terminal_event_type
