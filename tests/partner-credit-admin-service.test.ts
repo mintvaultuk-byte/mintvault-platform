@@ -3,8 +3,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
-import { migratorUrlFrom, provisionRealisticRoles } from "./helpers/partner-realistic-db";
+import { listMigrationFiles } from "../scripts/db/migrate";
+import {
+  applyMigrationsRealistic,
+  PARTNER_MIGRATIONS_WITH_G6D,
+  provisionRealisticRoles,
+} from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 
 let cluster: DisposablePostgres17;
@@ -209,18 +213,7 @@ describe("Partner Network G6C Super Admin credit adjustments on PostgreSQL 17.10
     await admin.connect();
     await provisionRealisticRoles(admin);
     await seedMintVaultTables();
-    const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
-    await migrator.connect();
-    try {
-      // Keep the G6B admin-service fixture on its declared schema boundary;
-      // G6D requires the separate owner-operated 0041 deployment path.
-      await applyMigrations(
-        migrator,
-        listMigrationFiles().filter((file) => Number(file.number) < 19)
-      );
-    } finally {
-      await migrator.end();
-    }
+    await applyMigrationsRealistic(admin, cluster.url, PARTNER_MIGRATIONS_WITH_G6D);
     process.env.MINTVAULT_DATABASE_URL = cluster.url;
     delete process.env.PARTNER_ADMIN_DATABASE_URL;
     walletService = await import("../server/partner/partner-wallet-service");

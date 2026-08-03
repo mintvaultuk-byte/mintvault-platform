@@ -3,8 +3,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
-import { migratorUrlFrom, provisionRealisticRoles } from "./helpers/partner-realistic-db";
+import {
+  applyMigrationsRealistic,
+  PARTNER_MIGRATIONS_WITH_G6D,
+  provisionRealisticRoles,
+} from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 
 let cluster: DisposablePostgres17;
@@ -24,7 +27,9 @@ const rollbackSql = readFileSync(join(process.cwd(), "migrations", "rollback-par
 
 async function seedMintVaultTables(): Promise<void> {
   await admin.query("CREATE TABLE users (id varchar primary key default gen_random_uuid(), email varchar unique)");
-  await admin.query("CREATE TABLE submissions (id serial primary key, user_id varchar, tracking_number text unique)");
+  await admin.query(
+    "CREATE TABLE submissions (id serial primary key, user_id varchar, tracking_number text unique, deleted_at timestamptz)"
+  );
   await admin.query("CREATE TABLE submission_items (id serial primary key, submission_id integer not null)");
   // The complete numbered inventory also includes the Correction Mode audit index migration.
   // audit_log is application-owned legacy schema, so provide its required shape in this isolated
@@ -94,17 +99,18 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     await admin.connect();
     await provisionRealisticRoles(admin);
     await seedMintVaultTables();
-    const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
-    await migrator.connect();
-    try {
-      // This is explicit G6B coverage. G6D's privileged lifecycle owner is
-      // intentionally tested in its dedicated owner-operated migration suite.
-      await applyMigrations(
-        migrator,
-        listMigrationFiles().filter((file) => Number(file.number) < 19)
+    await applyMigrationsRealistic(admin, cluster.url, PARTNER_MIGRATIONS_WITH_G6D);
+    await admin.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        filename text PRIMARY KEY,
+        checksum text NOT NULL DEFAULT 'realistic-harness',
+        status text NOT NULL DEFAULT 'applied'
+      )`);
+    for (const name of PARTNER_MIGRATIONS_WITH_G6D) {
+      await admin.query(
+        "INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING",
+        [`${name}.sql`]
       );
-    } finally {
-      await migrator.end();
     }
     const a = await createTenant("G6B Tenant A");
     const b = await createTenant("G6B Tenant B");
