@@ -87,6 +87,21 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT = [
   "0032_partner_final_owner_invariant",
 ] as const;
 
+/**
+ * Partner user management + the final-owner invariant, WITH the credit lifecycle.
+ *
+ * Submit now reserves a grading credit PER CARD (server/partner/submission-service.ts), so any
+ * suite that drives a real submission through submit needs the wallet, ledger and reservation
+ * tables. Listed in NUMERIC order because applyMigrationsRealistic applies the list as given.
+ */
+export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS = [
+  ...PARTNER_MIGRATIONS_WITH_G6B,
+  "0018_correction_audit_index",
+  "0031_partner_user_management",
+  "0032_partner_final_owner_invariant",
+  "0041_partner_submission_credit_lifecycle",
+] as const;
+
 /** 0033 — additive audit-action precision (partner_user_mfa_reset et al). */
 export const PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION = [
   ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
@@ -318,8 +333,71 @@ export async function applyMigrationsRealistic(
     }
     // Model the deployed separation between a schema owner and the migration
     // login only after migrations have created the accounting tables.
+    //
+    // The owner must be able to USE the schema its tables live in. On a managed provider the
+    // schema owner has that implicitly; here `public` is owned by pn_migrator and its ACL lists
+    // every other role in this model (partner_runtime, partner_definer,
+    // partner_connector_runtime, partner_credit_lifecycle_definer) but not this one. Without the
+    // grant the modelled separation is one that cannot exist in production — a table owner with
+    // no access to its own schema — and an INSERT into partner_credit_reservation_events fails
+    // with `permission denied for schema public` even on a superuser connection, which surfaces
+    // as an opaque HTTP 500 from the submit route.
+    await admin.query("GRANT USAGE ON SCHEMA public TO pn_credit_schema_owner");
     for (const table of ["partner_credit_reservations", "partner_credit_reservation_events"]) {
       await admin.query(`ALTER TABLE public.${table} OWNER TO pn_credit_schema_owner`);
     }
   }
+}
+
+/**
+ * Apply EVERY numbered migration in the repository to a disposable database, in the order and
+ * under the role conditions the real runner requires.
+ *
+ * Two things make this more than a one-liner, and both are load-bearing:
+ *
+ *  1. ORDER. 0041 revokes its own SET/INHERIT membership as its final act, so the repair grant
+ *     that 0042 needs must land BETWEEN 0041 and 0042. Granting it up front is silently undone.
+ *  2. allowDestructive. 0043 must DROP the single-hold-per-destination unique index so an N-card
+ *     recovery can exist at all. The runner correctly refuses destructive SQL unless the operator
+ *     opts in. Opting in is safe on a suite's OWN disposable database and still requires owner
+ *     approval anywhere real — this flag changes nothing outside this process.
+ *
+ * Extracted from tests/partner-management-migration.test.ts, which established the pattern. Any
+ * suite that applies listMigrationFiles() in full must use this, or it breaks the moment a
+ * destructive migration lands.
+ */
+export async function applyEveryMigrationRealistic(migrator: pg.Client): Promise<void> {
+  const { applyMigrations, listMigrationFiles } = await import("../../scripts/db/migrate");
+  const all = listMigrationFiles();
+  await applyMigrations(
+    migrator,
+    all.filter((f) => Number(f.number) <= 41),
+    { allowDestructive: true }
+  );
+  await migrator.query("GRANT partner_credit_lifecycle_definer TO pn_migrator WITH INHERIT TRUE, SET FALSE");
+  await applyMigrations(migrator, all, { allowDestructive: true });
+}
+
+/**
+ * Pin the MintVault accounting URL to this suite's OWN disposable database.
+ *
+ * server/partner/db.ts asserts that PARTNER_ADMIN_DATABASE_URL / PARTNER_DATABASE_URL /
+ * PARTNER_CONNECTOR_DATABASE_URL all name the SAME PostgreSQL database as
+ * MINTVAULT_DATABASE_URL, because G6D settles a MintVault submission status and Partner credit
+ * evidence in ONE transaction — a split would make that an unrecoverable distributed commit.
+ * That assertion is correct and must not be relaxed.
+ *
+ * The consequence for tests: a suite that pins its own partner URLs but INHERITS an unrelated
+ * MINTVAULT_DATABASE_URL from the environment trips the assertion. .github/workflows/ci.yml sets
+ * MINTVAULT_DATABASE_URL globally (the PostgreSQL 16 Vault Quest database) for the whole job,
+ * while every partner and connector suite uses its own PostgreSQL 17 database — so the mismatch
+ * appears ONLY under CI's flat run and never when a suite is run on its own. Several connector
+ * services swallow the throw and re-report it as a generic "transient_database_error", which is
+ * why the symptom looked like cross-suite contamination rather than an environment mismatch.
+ *
+ * Call this immediately after pinning the partner URLs. Production topology is the same database,
+ * so this makes the test environment match production rather than diverge from it.
+ */
+export function pinAccountingTopologyTo(url: string): void {
+  process.env.MINTVAULT_DATABASE_URL = url;
 }
