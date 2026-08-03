@@ -159,13 +159,58 @@ export async function assertPartnerCreditLifecycleReady(
   return "ready";
 }
 
-async function findReservationForPartnerSubmission(
+/**
+ * The number of grading credits a Partner submission is expected to hold: one per CARD UNIT,
+ * where a card row of quantity Q counts Q times. This mirrors exactly how
+ * connector-import-service expands rows when pricing (`pricePerCardPence * cardCount`), which is
+ * what makes credits and invoice reconcile.
+ */
+async function expectedCreditUnitsForPartnerSubmission(
+  client: pg.PoolClient,
+  tenantId: string,
+  partnerSubmissionId: string
+): Promise<number> {
+  const result = await client.query<{ units: string | null }>(
+    `SELECT COALESCE(SUM(quantity), 0)::text AS units
+       FROM partner_submission_cards
+      WHERE submission_id=$1 AND tenant_id=$2 AND removed_at IS NULL`,
+    [partnerSubmissionId, tenantId]
+  );
+  const units = Number(result.rows[0]?.units ?? 0);
+  if (!Number.isSafeInteger(units) || units < 0) {
+    throw new PartnerSubmissionCreditLifecycleError(
+      "Partner submission card count could not be resolved.",
+      "reservation_link_inconsistent"
+    );
+  }
+  return units;
+}
+
+/**
+ * Return the AUTHORITATIVE LIVE reservation set for a Partner submission.
+ *
+ * PER-CARD (owner directive, 2026-08-03): credits are one-per-card, so an N-card submission has
+ * N reservations sharing one `submission_reference`. This previously used `LIMIT 3` and threw
+ * whenever more than one row existed, which was correct only while the reserve path collapsed a
+ * whole submission into a single synthetic reservation.
+ *
+ * "Live" means status active|consumed. released|expired rows are immutable history and are
+ * tolerated ONLY in the two shapes that legitimately produce them:
+ *   - a fully cancelled/expired submission (no live rows remain), or
+ *   - an authorised Super Admin recovery, where each historical row is explicitly linked by a
+ *     released hold to a replacement reservation that IS in the live set.
+ * Any other mixture is inconsistent and fails closed.
+ *
+ * Tenant and source are always predicates, so a reservation belonging to another submission or
+ * another tenant can never enter the set.
+ */
+async function findReservationsForPartnerSubmission(
   client: pg.PoolClient,
   tenantId: string,
   partnerSubmissionId: string,
   lock: boolean,
   allowAuthorisedRecovery = false
-): Promise<ReservationRow | null> {
+): Promise<ReservationRow[]> {
   const result = await client.query<ReservationRow>(
     `SELECT id, wallet_id, tenant_id, location_id, card_reference, submission_reference, reserved_credits,
             status, idempotency_key, request_fingerprint, source, reason, actor_type, actor_user_id,
@@ -175,41 +220,54 @@ async function findReservationForPartnerSubmission(
       WHERE tenant_id=$1
         AND source=$2
         AND submission_reference=$3
-      ORDER BY created_at ASC, id ASC
-      LIMIT 3${lock ? " FOR UPDATE" : ""}`,
+      ORDER BY created_at ASC, id ASC${lock ? " FOR UPDATE" : ""}`,
     [tenantId, CREDIT_SOURCE, partnerSubmissionId]
   );
-  if (result.rows.length > 1) {
-    // A recovery necessarily retains the released/expired predecessor for
-    // immutable accounting history. It is the sole narrow exception to the
-    // no-duplicates invariant, and only when the persisted hold explicitly
-    // links that predecessor to this exact replacement reservation.
-    if (allowAuthorisedRecovery && result.rows.length === 2) {
-      const replacement = result.rows.find((row) => row.status === "active" || row.status === "consumed");
-      const predecessor = result.rows.find(
-        (row) => row !== replacement && (row.status === "released" || row.status === "expired")
-      );
-      if (replacement && predecessor) {
-        const authorised = await client.query(
-          `SELECT 1
-             FROM partner_submission_credit_holds
-            WHERE tenant_id=$1
-              AND partner_submission_id=$2
-              AND reservation_id=$3
-              AND recovery_reservation_id=$4
-              AND released_at IS NOT NULL
-            LIMIT 1`,
-          [tenantId, partnerSubmissionId, predecessor.id, replacement.id]
-        );
-        if (authorised.rows.length === 1) return replacement;
-      }
-    }
+
+  const live = result.rows.filter((row) => row.status === "active" || row.status === "consumed");
+  const historical = result.rows.filter((row) => row.status === "released" || row.status === "expired");
+
+  // Every live reservation must be for a DISTINCT card reference. Two live rows sharing one
+  // reference would mean the per-card unique index was bypassed.
+  const references = new Set(live.map((row) => row.card_reference));
+  if (references.size !== live.length) {
     throw new PartnerSubmissionCreditLifecycleError(
-      "Partner submission has more than one authoritative credit reservation and requires reconciliation.",
+      "Partner submission has duplicate live credit reservations for the same card reference.",
       "reservation_link_inconsistent"
     );
   }
-  return result.rows[0] ?? null;
+
+  if (historical.length > 0 && live.length > 0) {
+    if (!allowAuthorisedRecovery) {
+      throw new PartnerSubmissionCreditLifecycleError(
+        "Partner submission mixes live and settled credit reservations and requires reconciliation.",
+        "reservation_link_inconsistent"
+      );
+    }
+    const liveIds = new Set(live.map((row) => row.id));
+    for (const predecessor of historical) {
+      const authorised = await client.query(
+        `SELECT recovery_reservation_id
+           FROM partner_submission_credit_holds
+          WHERE tenant_id=$1
+            AND partner_submission_id=$2
+            AND reservation_id=$3
+            AND recovery_reservation_id IS NOT NULL
+            AND released_at IS NOT NULL
+          LIMIT 1`,
+        [tenantId, partnerSubmissionId, predecessor.id]
+      );
+      const replacementId = authorised.rows[0]?.recovery_reservation_id as string | undefined;
+      if (!replacementId || !liveIds.has(replacementId)) {
+        throw new PartnerSubmissionCreditLifecycleError(
+          "Partner submission has a settled credit reservation with no authorised replacement.",
+          "reservation_link_inconsistent"
+        );
+      }
+    }
+  }
+
+  return live;
 }
 
 /**
@@ -488,13 +546,13 @@ export async function releasePartnerReservationForPartnerCancellation(
   if ((await assertPartnerCreditLifecycleReady(client)) === "legacy_missing_credit_schema") {
     return { released: false, reservationId: null, outcome: "legacy_missing_credit_schema" };
   }
-  const reservation = await findReservationForPartnerSubmission(
+  const reservations = await findReservationsForPartnerSubmission(
     client,
     params.tenantId,
     params.partnerSubmissionId,
     true
   );
-  if (!reservation) {
+  if (reservations.length === 0) {
     if (await hasAuthoritativeMappingForSource(client, params.tenantId, params.partnerSubmissionId)) {
       throw new PartnerSubmissionCreditLifecycleError(
         "Partner destination linkage has no active reservation and requires reconciliation.",
@@ -503,12 +561,19 @@ export async function releasePartnerReservationForPartnerCancellation(
     }
     return { released: false, reservationId: null, outcome: "legacy_no_reservation" };
   }
-  await assertReservationSourceSubmission(client, reservation, params.tenantId, params.partnerSubmissionId);
-  if (reservation.status !== "active") {
+  for (const reservation of reservations) {
+    await assertReservationSourceSubmission(client, reservation, params.tenantId, params.partnerSubmissionId);
+  }
+  // Cancellation releases the WHOLE submission or none of it. If any card's credit has already
+  // been consumed, the submission is past settlement and cancellation is refused outright — a
+  // partial release would leave the partner charged for some cards of a cancelled submission.
+  if (reservations.some((row) => row.status !== "active")) {
     throw new PartnerSubmissionCreditLifecycleError(
       "This submission credit has already been settled and cannot be released."
     );
   }
+  // The first reservation anchors the destination hold; releases below cover every card.
+  const reservation = reservations[0];
 
   const destination = await lockDestinationForPartnerCancellation(client, {
     tenantId: params.tenantId,
@@ -552,14 +617,21 @@ export async function releasePartnerReservationForPartnerCancellation(
     );
   }
 
-  const outcome = await releaseOrExpireActiveReservation(client, reservation, {
-    source: "portal",
-    reason: "Partner cancelled the submission before MintVault received the cards.",
-    actorType: "partner_user",
-    actorUserId: params.actorUserId,
-    actorEmail: params.actorEmail,
-    keySuffix: params.partnerSubmissionId,
-  });
+  // Release EVERY card's credit. All releases share the caller's transaction, so the submission
+  // is either fully released or not released at all. Each release keys its idempotency on the
+  // individual reservation id, so a repeated cancellation is a no-op per card rather than a
+  // duplicate ledger event.
+  let outcome: ConnectorReservationReleaseOutcome = "released";
+  for (const row of reservations) {
+    outcome = await releaseOrExpireActiveReservation(client, row, {
+      source: "portal",
+      reason: "Partner cancelled the submission before MintVault received the cards.",
+      actorType: "partner_user",
+      actorUserId: params.actorUserId,
+      actorEmail: params.actorEmail,
+      keySuffix: params.partnerSubmissionId,
+    });
+  }
   return { released: true, reservationId: reservation.id, outcome };
 }
 
@@ -819,14 +891,20 @@ export async function settlePartnerCreditForDestinationStatus(
       });
     }
 
-    let reservation: ReservationRow | null;
+    let reservations: ReservationRow[];
+    let expectedUnits: number;
     try {
-      reservation = await findReservationForPartnerSubmission(
+      reservations = await findReservationsForPartnerSubmission(
         client,
         link.tenant_id,
         link.partner_submission_id,
         true,
         true
+      );
+      expectedUnits = await expectedCreditUnitsForPartnerSubmission(
+        client,
+        link.tenant_id,
+        link.partner_submission_id
       );
     } catch (error) {
       if (!(error instanceof PartnerSubmissionCreditLifecycleError)) throw error;
@@ -835,74 +913,120 @@ export async function settlePartnerCreditForDestinationStatus(
         tenant_id: link.tenant_id,
       });
     }
-    if (!reservation) {
+    if (reservations.length === 0) {
       return failClosedAccountingException(destination, status, "missing_partner_credit_reservation", {
         partner_submission_id: link.partner_submission_id,
         tenant_id: link.tenant_id,
       });
     }
 
+    /**
+     * RECONCILIATION GATE: credits must equal card units, exactly.
+     *
+     * This is the invariant that makes the per-card model self-policing. If anything upstream
+     * ever collapses N cards into one reservation again (the defect this repair exists to fix),
+     * or reuses a single card reference across cards, settlement refuses rather than silently
+     * grading N cards for fewer credits.
+     */
+    if (reservations.length !== expectedUnits) {
+      return failClosedAccountingException(destination, status, "reservation_count_mismatch", {
+        partner_submission_id: link.partner_submission_id,
+        tenant_id: link.tenant_id,
+        expected_credit_units: expectedUnits,
+        live_reservations: reservations.length,
+      });
+    }
+
     try {
-      await assertReservationSourceSubmission(client, reservation, link.tenant_id, link.partner_submission_id);
+      for (const reservation of reservations) {
+        await assertReservationSourceSubmission(client, reservation, link.tenant_id, link.partner_submission_id);
+      }
     } catch (err) {
       if (!(err instanceof PartnerSubmissionCreditLifecycleError)) throw err;
       return failClosedAccountingException(destination, status, err.code, {
-        reservation_id: reservation.id,
         partner_submission_id: link.partner_submission_id,
         tenant_id: link.tenant_id,
       });
     }
 
-    if (reservation.status === "active") {
+    const pending = reservations.filter((row) => row.status === "active");
+
+    if (pending.length > 0) {
+      /**
+       * ONE savepoint around the WHOLE set, deliberately. Consuming N credits is all-or-nothing:
+       * if card 17 of 20 fails, cards 1-16 must not stay consumed while the destination
+       * transition rolls back, or the partner is charged for a grading that did not complete.
+       * Each consume keys idempotency on its own reservation id, so a retry after a successful
+       * commit is a per-card no-op rather than a double consume.
+       */
       await client.query("SAVEPOINT g6d_credit_consume");
       try {
-        const consumed = await consumeReservedCreditInTransaction(
-          client,
-          { actorUserId: null, actorEmail: typeof extra.creditActorEmail === "string" ? extra.creditActorEmail : null },
-          {
-            tenantId: reservation.tenant_id,
-            reservationId: reservation.id,
-            idempotencyKey: `g6d-consume:${reservation.id}`,
-            source: "system",
-            reason: "MintVault grading completed for Partner submission.",
-            actorType: "admin",
-            externalRef: destination.tracking_number,
-            metadata: {
-              destination_submission_id: destinationSubmissionId,
-              destination_reference: destination.tracking_number,
-              partner_submission_id: reservation.submission_reference,
+        for (const reservation of pending) {
+          const consumed = await consumeReservedCreditInTransaction(
+            client,
+            {
+              actorUserId: null,
+              actorEmail: typeof extra.creditActorEmail === "string" ? extra.creditActorEmail : null,
             },
-          }
-        );
-        if (consumed.reservation.status !== "consumed" || consumed.event?.event_type !== "consumed") {
-          throw new PartnerSubmissionCreditLifecycleError(
-            "Partner credit consumption did not produce exact consumed evidence.",
-            "reservation_link_inconsistent"
+            {
+              tenantId: reservation.tenant_id,
+              reservationId: reservation.id,
+              idempotencyKey: `g6d-consume:${reservation.id}`,
+              source: "system",
+              reason: "MintVault grading completed for Partner submission card.",
+              actorType: "admin",
+              externalRef: destination.tracking_number,
+              metadata: {
+                destination_submission_id: destinationSubmissionId,
+                destination_reference: destination.tracking_number,
+                partner_submission_id: reservation.submission_reference,
+                card_reference: reservation.card_reference,
+              },
+            }
           );
+          if (consumed.reservation.status !== "consumed" || consumed.event?.event_type !== "consumed") {
+            throw new PartnerSubmissionCreditLifecycleError(
+              "Partner credit consumption did not produce exact consumed evidence.",
+              "reservation_link_inconsistent"
+            );
+          }
         }
         await client.query("RELEASE SAVEPOINT g6d_credit_consume");
       } catch (err) {
         await client.query("ROLLBACK TO SAVEPOINT g6d_credit_consume");
         await client.query("RELEASE SAVEPOINT g6d_credit_consume");
         return failClosedAccountingException(destination, status, consumeFailureCode(err), {
-          reservation_id: reservation.id,
           partner_submission_id: link.partner_submission_id,
           tenant_id: link.tenant_id,
+          live_reservations: reservations.length,
+          pending_reservations: pending.length,
           error_class: err instanceof CreditReservationError ? "credit_reservation" : "database_or_invariant",
         });
       }
       return updateDestinationStatus(client, destinationSubmissionId, status, extra);
     }
 
-    if (reservation.status === "consumed" && (await hasExactConsumedEvidence(client, reservation))) {
+    // Replay of an already-settled submission: EVERY card must carry exact consumed evidence.
+    // A single card lacking it means the set is not uniformly settled and must not be waved through.
+    const allConsumed = reservations.every((row) => row.status === "consumed");
+    if (allConsumed) {
+      for (const reservation of reservations) {
+        if (!(await hasExactConsumedEvidence(client, reservation))) {
+          return failClosedAccountingException(destination, status, "reservation_not_consumable", {
+            reservation_id: reservation.id,
+            partner_submission_id: link.partner_submission_id,
+            tenant_id: link.tenant_id,
+            reservation_status: reservation.status,
+          });
+        }
+      }
       return updateDestinationStatus(client, destinationSubmissionId, status, extra);
     }
 
     return failClosedAccountingException(destination, status, "reservation_not_consumable", {
-      reservation_id: reservation.id,
       partner_submission_id: link.partner_submission_id,
       tenant_id: link.tenant_id,
-      reservation_status: reservation.status,
+      live_reservations: reservations.length,
     });
   });
 }

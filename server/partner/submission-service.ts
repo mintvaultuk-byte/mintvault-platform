@@ -660,12 +660,44 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
         throw NOT_DRAFT();
       }
 
-      const cards = await c.query(
-        `SELECT count(*)::int n FROM partner_submission_cards
-          WHERE submission_id=$1 AND tenant_id=$2 AND removed_at IS NULL`,
+      /**
+       * PER-CARD credit accounting (owner directive, 2026-08-03).
+       *
+       * Partner credits are sold and consumed PER CARD: 1 card = 1 grading credit, so a
+       * 20-card submission reserves 20 credits. Previously this path reserved exactly ONE
+       * credit per SUBMISSION using the synthetic reference `partner-submission:{id}`, while
+       * connector-import-service priced the same submission at `pricePerCardPence * cardCount`
+       * — so a partner was invoiced for N cards and debited 1 credit.
+       *
+       * The synthetic per-submission key also silently defeated
+       * `uq_partner_credit_reserve_card_live (tenant_id, card_reference)` (migration 0017),
+       * which exists precisely to be the per-card double-reserve guard. Reserving per card
+       * restores that index to its designed purpose rather than weakening it.
+       *
+       * A card row carries its own `quantity` (>= 1, migration 0007), and connector-import
+       * expands rows by quantity when pricing. Credits must expand identically, so the unit of
+       * account here is (card row, ordinal) — not the card row.
+       */
+      const cards = await c.query<{ id: string; quantity: number }>(
+        `SELECT id, quantity FROM partner_submission_cards
+          WHERE submission_id=$1 AND tenant_id=$2 AND removed_at IS NULL
+          ORDER BY sequence_number, id`,
         [submissionId, principal.tenantId]
       );
-      if (cards.rows[0].n < 1) throw VALIDATION("Add at least one card before submitting.");
+      if (cards.rowCount === 0) throw VALIDATION("Add at least one card before submitting.");
+
+      // Deterministic expansion: same cards -> same units -> same idempotency keys on every
+      // retry, which is what makes a repeated submit a no-op rather than a double reservation.
+      const creditUnits: { cardId: string; ordinal: number }[] = [];
+      for (const card of cards.rows) {
+        const quantity = Number(card.quantity);
+        if (!Number.isSafeInteger(quantity) || quantity < 1) {
+          throw VALIDATION("A card has an invalid quantity and cannot be submitted.");
+        }
+        for (let ordinal = 1; ordinal <= quantity; ordinal += 1) {
+          creditUnits.push({ cardId: String(card.id), ordinal });
+        }
+      }
 
       const full = await c.query(
         `SELECT s.*, (SELECT json_agg(row_to_json(sc)) FROM (
@@ -700,26 +732,43 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
       );
       if (actor.rowCount !== 1 || actor.rows[0].status !== "ACTIVE") throw FORBIDDEN();
 
-      // Reserve exactly one credit before the handoff/status transition becomes visible. This shares
-      // the same database transaction as every acceptance write below, so an insufficient/suspended/
-      // closed wallet rolls back the handoff and leaves the Partner submission in draft.
-      const reservation = await reserveCreditInTransaction(
-        c,
-        { actorUserId: principal.userId, actorEmail: actor.rows[0].email },
-        {
-          tenantId: principal.tenantId,
-          locationId: row.location_id,
-          cardReference: `partner-submission:${submissionId}`,
-          submissionReference: submissionId,
-          expiresAt: new Date(Date.now() + PARTNER_SUBMISSION_CREDIT_TTL_MS),
-          idempotencyKey: `partner-submission-credit:${submissionId}`,
-          source: "portal",
-          reason: "Reserved one grading credit for Partner submission acceptance.",
-          actorType: "partner_user",
-          externalRef: snapshot.public_ref ?? null,
-          metadata: { partner_submission_id: submissionId, partner_public_ref: snapshot.public_ref ?? null },
-        }
-      );
+      // Reserve one credit PER CARD before the handoff/status transition becomes visible. All
+      // reservations share the same database transaction as every acceptance write below, so a
+      // wallet that runs out partway through rolls back the ENTIRE acceptance — there is no
+      // partial reservation state, and the submission stays in draft. That all-or-nothing
+      // behaviour is deliberate: a partially-reserved submission would be handed to MintVault
+      // with fewer credits than cards, which is the defect this change exists to remove.
+      const reservations: Awaited<ReturnType<typeof reserveCreditInTransaction>>[] = [];
+      for (const unit of creditUnits) {
+        reservations.push(
+          await reserveCreditInTransaction(
+            c,
+            { actorUserId: principal.userId, actorEmail: actor.rows[0].email },
+            {
+              tenantId: principal.tenantId,
+              locationId: row.location_id,
+              // Unique per submission card + ordinal, so uq_partner_credit_reserve_card_live
+              // enforces "one live entitlement per card" as designed.
+              cardReference: `partner-submission-card:${unit.cardId}:${unit.ordinal}`,
+              submissionReference: submissionId,
+              expiresAt: new Date(Date.now() + PARTNER_SUBMISSION_CREDIT_TTL_MS),
+              idempotencyKey: `partner-submission-credit:${submissionId}:${unit.cardId}:${unit.ordinal}`,
+              source: "portal",
+              reason: "Reserved one grading credit for a Partner submission card.",
+              actorType: "partner_user",
+              externalRef: snapshot.public_ref ?? null,
+              metadata: {
+                partner_submission_id: submissionId,
+                partner_submission_card_id: unit.cardId,
+                card_ordinal: unit.ordinal,
+                partner_public_ref: snapshot.public_ref ?? null,
+              },
+            }
+          )
+        );
+      }
+      // Retained for the audit/event payload below, which records the acceptance as a whole.
+      const reservation = reservations[0];
 
       // Locking the row (loadSubmissionForUpdate did FOR UPDATE) + the unique index on submission_id
       // in partner_submission_handoffs together make this INSERT impossible to duplicate under
@@ -759,7 +808,13 @@ export async function submitSubmission(principal: PartnerPrincipal, submissionId
         action: "submission.submitted",
         recordType: "partner_submission",
         recordId: submissionId,
-        after: { status: "submitted_to_mintvault" },
+        // Record the credit/card reconciliation on the acceptance itself so an auditor can see
+        // that credits_reserved == card_units without replaying the reservation table.
+        after: {
+          status: "submitted_to_mintvault",
+          card_units: creditUnits.length,
+          credits_reserved: reservations.length,
+        },
         correlationId: reservation.reservation.id,
       });
       return buildDetail(c, principal, submissionId);
