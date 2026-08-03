@@ -971,10 +971,17 @@ function assertInvitationUrlContract(rawUrl: string, token: string): void {
 
     const accepted = await req("POST", ACCEPT, { body: { token: invited.token, password } });
     expect(accepted.status).toBe(200);
-    expect(accepted.body).toEqual({ ok: true });
+    // The accept handler also reports the organisation's status so the Portal can route a user
+    // whose shop is still PENDING (server/partner/public-routes.ts). Pinned against the real row
+    // rather than a literal, and still asserted with toEqual so an unexpected EXTRA key — a
+    // session token, a password hash — fails here exactly as it did before.
+    const orgStatus = (
+      await admin.query<{ status: string }>("SELECT status FROM partner_organisations WHERE id=$1", [TENANT_A])
+    ).rows[0].status;
+    expect(accepted.body).toEqual({ ok: true, organisationStatus: orgStatus });
 
-    // NO SESSION. server/partner/public-routes.ts's accept handler returns `{ok:true}` and never
-    // calls setPartnerCookie — asserted here as behaviour, not assumed.
+    // NO SESSION. server/partner/public-routes.ts's accept handler never calls setPartnerCookie —
+    // asserted here as behaviour, not assumed.
     expect(accepted.setCookie).toBeNull();
     const sessions = await admin.query<{ n: number }>("SELECT count(*)::int n FROM partner_sessions WHERE user_id=$1", [
       invited.userId,

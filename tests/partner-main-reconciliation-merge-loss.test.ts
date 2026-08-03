@@ -26,17 +26,33 @@ const read = (...p: string[]): string => readFileSync(join(process.cwd(), ...p),
  * describe (e.g. "...context"), so a mutant that deleted the real code still matched the prose and
  * survived. Code-level assertions below therefore run against the comment-free source.
  */
-const stripComments = (src: string): string => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+const stripComments = (src: string): string =>
+  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+/**
+ * Line-based comment removal. Safer than the regex above on very large files, where a "/*"
+ * inside a string literal makes the block-comment regex swallow real code — that is exactly what
+ * happened to server/routes.ts and silently emptied the mount assertions.
+ */
+const dropCommentLines = (src: string): string =>
+  src
+    .split("\n")
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join("\n");
 
 const routes = read("server", "partner", "routes.ts");
 const partnerApi = read("client", "src", "lib", "partner-api.ts");
-const securityPage = read("client", "src", "pages", "partner", "security.tsx");
-const serverRoutes = read("server", "routes.ts");
+const securityPageRaw = read("client", "src", "pages", "partner", "security.tsx");
+const securityPage = stripComments(securityPageRaw);
+const serverRoutes = dropCommentLines(read("server", "routes.ts"));
 const ci = read(".github", "workflows", "ci.yml");
-const schemaParity = read("tests", "partner-schema-parity.test.ts");
+const schemaParityRaw = read("tests", "partner-schema-parity.test.ts");
+const schemaParity = stripComments(schemaParityRaw);
 const rlsSuite = read("tests", "partner-rls-isolation.test.ts");
-const submissionWorkflow = read("tests", "partner-submission-workflow.test.ts");
-const creditReservation = read("tests", "partner-credit-reservation-service.test.ts");
+const submissionWorkflowRaw = read("tests", "partner-submission-workflow.test.ts");
+const submissionWorkflow = stripComments(submissionWorkflowRaw);
+const creditReservationRaw = read("tests", "partner-credit-reservation-service.test.ts");
+const creditReservation = stripComments(creditReservationRaw);
 
 /** No resolved file may still carry a conflict marker. */
 describe("no unresolved merge conflict survives in the partner surface", () => {
@@ -44,11 +60,11 @@ describe("no unresolved merge conflict survives in the partner surface", () => {
     const files: Array<[string, string]> = [
       ["server/partner/routes.ts", routes],
       ["client/src/lib/partner-api.ts", partnerApi],
-      ["client/src/pages/partner/security.tsx", securityPage],
-      ["tests/partner-schema-parity.test.ts", schemaParity],
+      ["client/src/pages/partner/security.tsx", securityPageRaw],
+      ["tests/partner-schema-parity.test.ts", schemaParityRaw],
       ["tests/partner-rls-isolation.test.ts", rlsSuite],
-      ["tests/partner-submission-workflow.test.ts", submissionWorkflow],
-      ["tests/partner-credit-reservation-service.test.ts", creditReservation],
+      ["tests/partner-submission-workflow.test.ts", submissionWorkflowRaw],
+      ["tests/partner-credit-reservation-service.test.ts", creditReservationRaw],
     ];
     for (const [name, src] of files) {
       expect(src.length, `${name} read as empty — a vacuous assertion would follow`).toBeGreaterThan(0);
@@ -80,8 +96,20 @@ describe("GET /api/partner/session keeps BOTH sides of the conflict", () => {
     }
   });
 
-  it("orders the MFA fields AFTER the context spread so posture cannot be overridden", () => {
-    expect(session.indexOf("...context")).toBeLessThan(session.indexOf("mfaRequired: status.required"));
+  it("orders ALL four MFA fields AFTER the context spread, in the authenticated payload", () => {
+    const spread = session.indexOf("...context");
+    expect(spread).toBeGreaterThan(-1);
+    // Anchoring every field positionally also prevents them being relocated into the mfa-pending
+    // early return, which would leave the Portal with no posture once MFA is actually complete.
+    const authenticatedPayload = session.slice(spread);
+    for (const f of [
+      "mfaRequired: status.required",
+      "mfaEnrolled: status.enrolled",
+      "mfaEnrolmentRequired: status.enrolmentRequired",
+      "recoveryCodesRemaining: status.recoveryCodesRemaining",
+    ]) {
+      expect(authenticatedPayload, `${f} is not in the authenticated payload after ...context`).toContain(f);
+    }
   });
 
   it("keeps all three routes this branch added, each behind an auth gate", () => {
@@ -98,7 +126,20 @@ describe("GET /api/partner/session keeps BOTH sides of the conflict", () => {
   });
 
   it("keeps origin/main's current-factor requirement on recovery-code regeneration", () => {
-    expect(routes).toContain('r.post("/mfa/recovery-codes/regenerate"');
+    const code = stripComments(routes);
+    expect(code).toContain('r.post("/mfa/recovery-codes/regenerate"');
+    // The control is not the route's existence — it is the current-factor proof passed to
+    // mfaRegenerateRecovery. Deleting that argument silently lets an enrolled user remint their
+    // recovery set with a password alone, so assert the argument and its denial code.
+    const handler = code.slice(code.indexOf('r.post("/mfa/recovery-codes/regenerate"'));
+    // Bound the window to the call itself. A fixed-size slice spills into the NEXT handler once
+    // the argument is deleted, which is precisely how an earlier version of this test let the
+    // mutation survive.
+    const callStart = handler.indexOf("mfaRegenerateRecovery(");
+    const call = handler.slice(callStart, handler.indexOf("\n    );", callStart));
+    expect(call, "the current-factor proof was dropped from mfaRegenerateRecovery").toMatch(/recoveryCode:/);
+    expect(call, "the TOTP half of the current-factor proof was dropped").toMatch(/\bcode:/);
+    expect(handler.slice(0, 2000)).toContain("requires_current_factor");
   });
 });
 
@@ -140,23 +181,49 @@ describe("PartnerSessionInfo keeps BOTH field families", () => {
   });
 
   it("every /api/partner path the client calls is served by a real partner route", () => {
-    const clientPaths = [...partnerApi.matchAll(/"\/api\/partner(\/[^"$`]*)?"/g)]
-      .map((m) => (m[1] ?? "").replace(/\/$/, ""))
-      .filter((p) => p.length > 0);
-    expect(clientPaths.length).toBeGreaterThan(10);
+    // Quoted literals are matched exactly. Template literals are parameterised, so they are
+    // matched on their leading static segment — /sessions/${sessionId}/revoke is one of the three
+    // routes this branch contributed, and an earlier version of this check ignored every
+    // parameterised path entirely.
+    const strip = (p: string) => p.replace(/^\/api\/partner/, "").replace(/\/$/, "");
+    const staticPaths = [
+      ...new Set([...partnerApi.matchAll(/"(\/api\/partner[^"]*)"/g)].map((m) => strip(m[1]))),
+    ].filter((p) => p.length > 0);
+    const templatePrefixes = [
+      ...new Set(
+        [...partnerApi.matchAll(/`(\/api\/partner[^`]*)`/g)]
+          .map((m) => strip(m[1].split("${")[0]))
+          .filter((p) => p.length > 1)
+      ),
+    ];
+    expect(staticPaths.length, "static path extraction found too few paths to be meaningful").toBeGreaterThan(10);
+    expect(
+      templatePrefixes.length,
+      "template path extraction found none — the regex has rotted"
+    ).toBeGreaterThanOrEqual(4);
 
-    const serverSide = routes + read("server", "partner", "public-routes.ts");
-    const submissionRoutes = read("server", "partner", "submission-routes.ts");
-    const customerRoutes = read("server", "partner", "customer-routes.ts");
-    const dashboardRoutes = read("server", "partner", "dashboard-routes.ts");
-    const all = serverSide + submissionRoutes + customerRoutes + dashboardRoutes;
-
+    const all =
+      routes +
+      read("server", "partner", "public-routes.ts") +
+      read("server", "partner", "submission-routes.ts") +
+      read("server", "partner", "customer-routes.ts") +
+      read("server", "partner", "dashboard-routes.ts");
     const registered = new Set(
-      [...all.matchAll(/\br\.(?:get|post|patch|put|delete)\(\s*"([^"]+)"/g)].map((m) => m[1].replace(/\/$/, ""))
+      [...all.matchAll(/\br\.(?:get|post|patch|put|delete)\(\s*"([^"]+)"/g)].map((m) =>
+        m[1].replace(/:[A-Za-z0-9_]+/g, ":param").replace(/\/$/, "")
+      )
     );
+    expect(registered.size, "server route extraction found too few routes to be meaningful").toBeGreaterThan(20);
 
-    const missing = clientPaths.filter((p) => !registered.has(p));
+    const missing = staticPaths.filter((p) => !registered.has(p));
     expect(missing, `client calls partner paths with no server route: ${missing.join(", ")}`).toEqual([]);
+
+    const registeredList = [...registered];
+    const orphanTemplates = templatePrefixes.filter((prefix) => !registeredList.some((r) => r.startsWith(prefix)));
+    expect(
+      orphanTemplates,
+      `client calls parameterised partner paths with no server route: ${orphanTemplates.join(", ")}`
+    ).toEqual([]);
   });
 });
 
@@ -193,7 +260,7 @@ describe("the submission-workflow suite keeps BOTH sides' setup", () => {
   });
 
   it("keeps origin/main's cluster-unique login role and never reintroduces the shared name", () => {
-    expect(submissionWorkflow).toContain("CREATE ROLE partner_app_test_rt");
+    expect(submissionWorkflow).toMatch(/CREATE ROLE partner_app_test_rt\b/);
     // Only SQL role statements matter here; prose may still name the retired role to explain why
     // it was retired. A bare `partner_app_test` in CREATE/DROP/GRANT would reintroduce the
     // cluster-wide collision that origin/main deliberately fixed.
@@ -205,7 +272,9 @@ describe("the submission-workflow suite keeps BOTH sides' setup", () => {
   it("that role name matches PARTNER_RT_RUNTIME in the CI workflow", () => {
     const url = ci.match(/PARTNER_RT_RUNTIME:\s*\S*?:\/\/([^:]+):/);
     expect(url, "PARTNER_RT_RUNTIME is not set in .github/workflows/ci.yml").not.toBeNull();
-    expect(submissionWorkflow).toContain(`CREATE ROLE ${url![1]}`);
+    expect(submissionWorkflow, "the suite's role name drifted from PARTNER_RT_RUNTIME in ci.yml").toMatch(
+      new RegExp(`CREATE ROLE ${url![1]}\\b`)
+    );
   });
 });
 
@@ -263,7 +332,7 @@ describe("the RLS proof keeps BOTH harnesses", () => {
   });
 
   it("does not shadow the global URL constructor, which suite 1 needs", () => {
-    expect(rlsCode).not.toMatch(/^const URL\s*=/m);
+    expect(rlsCode).not.toMatch(/(?:^|[\s;{])(?:const|let|var)\s+URL\s*[:=]/m);
     expect(rlsCode).toContain("new URL(cluster.url)");
   });
 
