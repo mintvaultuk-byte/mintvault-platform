@@ -404,40 +404,73 @@ describe("Per-card credit lifecycle (real PostgreSQL)", () => {
     expect((await reservationsFor(f, draft)).every((r) => r.status === "active")).toBe(true);
   });
 
-  it("C: ATOMICITY — if one card of 20 is not settleable, NONE are consumed", async () => {
+  it("C: ATOMICITY — a write-time failure on card 17 rolls back cards 1-16", async () => {
     const f = await createTenantFixture("atomic");
     await addCredits(f, 40, "pc-atomic");
     const draft = await makeDraft(f, nCards(20, "atom"));
     await submissions.submitSubmission(principalFor(f), draft, "pc-atomic-submit");
     const destinationId = await mapImportedSubmission(f, draft);
-
-    // Take card 17 out of the settleable set through the legitimate service, so the live set no
-    // longer reconciles to the card count. This is the "card 17 fails" shape.
     const rows = await reservationsFor(f, draft);
-    await creditReservations.releaseReservedCredit(adminActor, {
-      tenantId: f.tenantId,
-      reservationId: rows[16].id,
-      idempotencyKey: "pc-atomic-release-17",
-      source: "admin",
-      reason: "simulated card-17 failure",
-      actorType: "admin",
-    });
+    expect(rows).toHaveLength(20);
+
+    /**
+     * The failure must occur INSIDE the consume loop, AFTER earlier cards have written.
+     *
+     * An earlier version of this test released card 17 through the service. That created a
+     * `released` row, which made findReservationsForPartnerSubmission throw at the
+     * live/historical mixing guard BEFORE the count gate and BEFORE the consume loop ever ran —
+     * so it proved a linkage guard, not atomicity, and stayed green with the savepoint deleted.
+     * The tell was that it asserted 19 remaining active reservations rather than 20.
+     *
+     * Instead, pre-write a TERMINAL event for card 17 while leaving its reservation `active`.
+     * The live set is still 20 and reconciles to 20 card units, so every earlier guard passes and
+     * cards 1-16 consume normally. Card 17's own event INSERT then violates
+     * uq_partner_credit_reservation_events_terminal (UNIQUE(reservation_id) WHERE event_type IN
+     * ('consumed','released','expired'), migration 0017) — a genuine write-time constraint
+     * failure mid-loop, which is exactly the condition the savepoint exists to contain.
+     * The pre-written event is 'released' rather than 'consumed' because a consumed event
+     * additionally requires a ledger link (chk_partner_credit_reservation_events_ledger_link);
+     * both are terminal, so either blocks the loop's own event insert identically.
+     */
+    const walletId = (
+      await admin.query<{ id: string }>("SELECT id FROM partner_wallets WHERE tenant_id=$1", [f.tenantId])
+    ).rows[0].id;
+    await admin.query(
+      `INSERT INTO partner_credit_reservation_events
+         (reservation_id, wallet_id, tenant_id, event_type, amount, idempotency_key,
+          request_fingerprint, source, reason, actor_type)
+       VALUES ($1,$2,$3,'released',1,$4,$5,'system','pre-existing terminal event','system')`,
+      [rows[16].id, walletId, f.tenantId, `pre-terminal:${rows[16].id}`, "c".repeat(64)]
+    );
 
     const before = await ledgerTotal(f);
+    const statusBefore = (
+      await admin.query<{ status: string }>("SELECT status FROM submissions WHERE id=$1", [destinationId])
+    ).rows[0].status;
+
     await expect(
       lifecycle.settlePartnerCreditForDestinationStatus(destinationId, "ready_to_return", {})
     ).rejects.toThrow();
 
-    // NOTHING consumed: cards 1-16 must not be left debited.
+    // ALL TWENTY remain unconsumed — cards 1-16 must not survive as consumed.
     const after = await reservationsFor(f, draft);
+    expect(after).toHaveLength(20);
+    expect(after.filter((r) => r.status === "active")).toHaveLength(20);
     expect(after.filter((r) => r.status === "consumed")).toHaveLength(0);
-    expect(after.filter((r) => r.status === "active")).toHaveLength(19);
+
+    // Zero consume ledger rows committed.
     expect(await ledgerTotal(f)).toBe(before);
     const debits = await admin.query<{ n: string }>(
       "SELECT count(*)::text AS n FROM partner_credit_ledger WHERE tenant_id=$1 AND amount < 0",
       [f.tenantId]
     );
     expect(Number(debits.rows[0].n)).toBe(0);
+
+    // The destination status did not advance.
+    const statusAfter = (
+      await admin.query<{ status: string }>("SELECT status FROM submissions WHERE id=$1", [destinationId])
+    ).rows[0].status;
+    expect(statusAfter).toBe(statusBefore);
   });
 
   it("C: a missing reservation fails settlement closed", async () => {
