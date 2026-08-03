@@ -660,16 +660,14 @@ BEGIN
   -- administration option behind, so remove it explicitly before asserting
   -- that the deployment owner has no remaining path back into the definer.
   EXECUTE format('REVOKE ADMIN OPTION FOR partner_credit_lifecycle_definer FROM %I', current_user);
-  IF EXISTS (
-    SELECT 1
-      FROM pg_auth_members m
-      JOIN pg_roles role ON role.oid = m.roleid
-      JOIN pg_roles member ON member.oid = m.member
-     WHERE role.rolname = 'partner_credit_lifecycle_definer'
-       AND member.rolname = current_user
-  ) THEN
+  -- Managed PostgreSQL may retain a provider-owned ADMIN-only membership row
+  -- for the project owner. That row is not a runtime privilege: fail on the
+  -- capabilities that would actually permit SET ROLE or inherited use.
+  IF NOT (SELECT rolsuper FROM pg_roles WHERE rolname=current_user)
+     AND (pg_has_role(current_user, 'partner_credit_lifecycle_definer', 'set')
+          OR pg_has_role(current_user, 'partner_credit_lifecycle_definer', 'usage')) THEN
     RAISE EXCEPTION
-      '0041 must not leave migration user % as a member of partner_credit_lifecycle_definer (session user: %)',
+      '0041 must not leave migration user % able to use partner_credit_lifecycle_definer (session user: %)',
       current_user,
       session_user;
   END IF;

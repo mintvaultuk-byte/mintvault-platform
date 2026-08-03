@@ -52,6 +52,7 @@ describe("G6D migration 0041 upgrade path", () => {
     const migration = readFileSync("migrations/0041_partner_submission_credit_lifecycle.sql", "utf8");
     expect(migration).toContain("WITH SET TRUE");
     expect(migration).toContain("pg_has_role(current_user, 'partner_credit_lifecycle_definer', 'set')");
+    expect(migration).toContain("pg_has_role(current_user, 'partner_credit_lifecycle_definer', 'usage')");
     expect(migration).toContain("REVOKE ADMIN OPTION FOR partner_credit_lifecycle_definer");
   });
 
