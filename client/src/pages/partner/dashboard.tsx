@@ -4,7 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { partnerCredits, partnerDashboard, partnerErrorMessage } from "@/lib/partner-api";
 import { PartnerErrorState, PartnerLoadingState } from "@/components/partner/partner-shell";
-import { ArrowRight, CircleGauge, Clock3, PlusCircle } from "lucide-react";
+import { usePartnerSession } from "@/hooks/use-partner-session";
+import { ArrowRight, PlusCircle } from "lucide-react";
 
 function metric(value: number | null | undefined, empty = "Not available") {
   return value == null ? empty : value.toLocaleString("en-GB");
@@ -23,13 +24,35 @@ function statusLabel(status: string) {
 }
 
 export default function PartnerDashboardPage() {
+  /**
+   * Credit data is an INDEPENDENTLY permission-gated panel, not a page-level dependency.
+   *
+   * WHY (hostile review, 2026-08-03): this page previously merged both queries' errors into one
+   * page-level error and gated ALL content on both succeeding. `partner.credits.view` is not held
+   * by PARTNER_RECEPTION (the primary shop-floor persona), MVGS_ASSESSMENT_TECHNICIAN or
+   * PARTNER_TRAINEE, so for those roles the whole dashboard collapsed to a single red box showing
+   * the raw server string "forbidden" — and the submission counts they ARE entitled to see never
+   * rendered. The shell already gates the Credits & Billing nav item on this same permission.
+   *
+   * The query is therefore not issued at all without the capability (no 403 is provoked, and no
+   * wallet data can reach a client that may not see it), and any credit failure is contained to
+   * the credit panel.
+   */
+  const { hasPermission } = usePartnerSession();
+  const canViewCredits = hasPermission("partner.credits.view");
+
   const submissions = useQuery({
     queryKey: ["/api/partner/dashboard/submissions"],
     queryFn: () => partnerDashboard.summary(),
   });
-  const credits = useQuery({ queryKey: ["/api/partner/credits"], queryFn: () => partnerCredits.view() });
-  const loading = submissions.isLoading || credits.isLoading;
-  const error = submissions.error || credits.error;
+  const credits = useQuery({
+    queryKey: ["/api/partner/credits"],
+    queryFn: () => partnerCredits.view(),
+    enabled: canViewCredits,
+  });
+  // Page-level state tracks ONLY the submission query. Credit state is handled inside its panel.
+  const loading = submissions.isLoading;
+  const error = submissions.error;
 
   return (
     <div className="space-y-8">
@@ -59,17 +82,38 @@ export default function PartnerDashboardPage() {
         />
       )}
 
-      {submissions.data && credits.data && (
+      {submissions.data && (
         <>
           <section aria-labelledby="credit-summary-title" className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <h2 id="credit-summary-title" className="text-base font-semibold">
                 Credit summary
               </h2>
-              <Link href="/partner/billing" className="text-sm text-primary inline-flex items-center gap-1">
-                Credits & Billing <ArrowRight className="h-4 w-4" aria-hidden="true" />
-              </Link>
+              {canViewCredits && (
+                <Link href="/partner/billing" className="text-sm text-primary inline-flex items-center gap-1">
+                  Credits & Billing <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              )}
             </div>
+            {!canViewCredits && (
+              <p className="text-sm text-muted-foreground" data-testid="text-credit-not-authorised">
+                Not authorised — your role does not include access to credit information.
+              </p>
+            )}
+            {canViewCredits && credits.isLoading && (
+              <p className="text-sm text-muted-foreground" data-testid="text-credit-loading">
+                Loading credit summary…
+              </p>
+            )}
+            {canViewCredits && credits.error && (
+              <p className="text-sm text-muted-foreground" role="alert" data-testid="text-credit-error">
+                Credit information is unavailable right now.{" "}
+                <button type="button" className="text-primary underline" onClick={() => void credits.refetch()}>
+                  Try again
+                </button>
+              </p>
+            )}
+            {canViewCredits && credits.data && (
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-3" data-testid="grid-credit-summary">
               {[
                 ["Available", credits.data.summary.availableCredits, "available"],
@@ -99,20 +143,26 @@ export default function PartnerDashboardPage() {
                 </CardContent>
               </Card>
             </div>
+            )}
           </section>
 
           <section aria-labelledby="submission-summary-title" className="space-y-3">
             <h2 id="submission-summary-title" className="text-base font-semibold">
               Submission summary
             </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-3" data-testid="grid-dashboard-cards">
+            {/*
+              Only the three states the schema actually has are rendered. The previous version
+              also advertised Validating / Grading / Awaiting correction / Completed as hardcoded
+              nulls: partner_submissions.status is CHECK-constrained to
+              ('draft','submitted_to_mintvault','cancelled') (migration 0007), so those four tiles
+              could never populate, had no server signal behind them, and had no wiring point to
+              light up later. Advertising four permanently-empty workflow stages to a paying
+              partner reads as "the system is broken", not "not built yet".
+            */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3" data-testid="grid-dashboard-cards">
               {[
                 ["Drafts", submissions.data.draft, "draft"],
                 ["Submitted", submissions.data.submitted_to_mintvault, "submitted"],
-                ["Validating", null, "validating"],
-                ["Grading", null, "grading"],
-                ["Awaiting correction", null, "correction"],
-                ["Completed", null, "completed"],
                 ["Cancelled", submissions.data.cancelled, "cancelled"],
               ].map(([label, value, id]) => (
                 <Card key={String(id)} className="rounded-md" data-testid={`card-dashboard-${id}`}>
@@ -129,38 +179,16 @@ export default function PartnerDashboardPage() {
             </div>
           </section>
 
-          <section aria-labelledby="operations-title" className="space-y-3">
-            <h2 id="operations-title" className="text-base font-semibold">
-              Operations
-            </h2>
-            <div className="grid md:grid-cols-3 gap-3">
-              <Card className="rounded-md">
-                <CardContent className="pt-5 flex gap-3">
-                  <CircleGauge className="h-5 w-5 text-primary" aria-hidden="true" />
-                  <div>
-                    <p className="text-sm font-medium">Cards in progress</p>
-                    <p className="text-sm text-muted-foreground">Not available</p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="rounded-md">
-                <CardContent className="pt-5 flex gap-3">
-                  <Clock3 className="h-5 w-5 text-primary" aria-hidden="true" />
-                  <div>
-                    <p className="text-sm font-medium">Turnaround</p>
-                    <p className="text-sm text-muted-foreground">Not available</p>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card className="rounded-md">
-                <CardContent className="pt-5">
-                  <p className="text-sm font-medium">Quality rating</p>
-                  <p className="text-sm text-muted-foreground">Not available</p>
-                </CardContent>
-              </Card>
-            </div>
-          </section>
+          {/*
+            The "Operations" section (Cards in progress / Turnaround / Quality rating) was removed.
+            All three were client-side literal "Not available" strings with no server field behind
+            them — not even a MetricUnavailable reason code, so unlike the admin surface there was
+            nothing for a future backend to light up. Reinstate them together with the server
+            signal that populates them.
+          */}
 
+          {/* Recent activity is ledger data, so it carries the same permission gate as the panel above. */}
+          {canViewCredits && credits.data && (
           <section aria-labelledby="recent-activity-title" className="space-y-3">
             <h2 id="recent-activity-title" className="text-base font-semibold">
               Recent activity
@@ -184,6 +212,7 @@ export default function PartnerDashboardPage() {
               </div>
             )}
           </section>
+          )}
         </>
       )}
     </div>
