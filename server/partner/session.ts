@@ -12,6 +12,8 @@ import crypto from "node:crypto";
 import { partnerRuntimeQuery, withTenant } from "./db";
 import { getUserPermissions, getUserRoles } from "./permissions";
 import { readEmergencyState, isHardStopped } from "./emergency";
+import { findSoleEligibleLocation } from "./location";
+import { writePartnerAudit } from "./audit";
 
 /** Roles that see the whole organisation rather than only their assigned location(s) (Phase 2). */
 const ORG_WIDE_ROLES = new Set(["PARTNER_OWNER", "PARTNER_MANAGER", "PARTNER_FINANCE_VIEWER"]);
@@ -79,7 +81,7 @@ export async function resolvePartnerSession(token: string): Promise<PartnerPrinc
 
   // tenant-scoped: refresh idle clock, check emergency, resolve permissions
   return withTenant({ tenantId: s.tenant_id, locationId: s.location_id }, async (c) => {
-    const em = await readEmergencyState(c, { tenantId: s.tenant_id, locationId: s.location_id });
+    let em = await readEmergencyState(c, { tenantId: s.tenant_id, locationId: s.location_id });
     if (isHardStopped(em)) return null; // partner/location frozen → no operation, even with a session
     const roles = await getUserRoles(c, s.user_id);
     const orgWide = roles.some((r) => ORG_WIDE_ROLES.has(r));
@@ -92,13 +94,55 @@ export async function resolvePartnerSession(token: string): Promise<PartnerPrinc
       ]);
       if (assigned.rowCount !== 1) return null;
     }
+
+    // Auto-select when the principal is permitted at EXACTLY ONE active location.
+    //
+    // partnerLogin mints every session with location_id NULL, and the portal shell renders no
+    // switcher for a single-location partner — so without this a one-shop partner could never
+    // reach a state where submission creation is possible. Resolved here rather than at login so
+    // that the mfa-pending → mfa-passed transition is covered by the same code path.
+    //
+    // Server-side only: the id is persisted to partner_sessions and re-derived on every request.
+    // Nothing about this trusts the client, and it grants no access the user could not already
+    // have obtained by calling POST /session/location with that same id.
+    let locationId = s.location_id;
+    if (!locationId) {
+      const sole = await findSoleEligibleLocation(c, { tenantId: s.tenant_id, userId: s.user_id, orgWide });
+      if (sole) {
+        // Re-evaluate the emergency state AT that location before binding to it: the tenant-level
+        // read above cannot see a location-scoped freeze, and binding first would hand the session
+        // a location it must not operate at.
+        const scoped = await readEmergencyState(c, { tenantId: s.tenant_id, locationId: sole });
+        if (isHardStopped(scoped)) return null;
+        const upd = await c.query("UPDATE partner_sessions SET location_id=$2 WHERE id=$1 AND revoked_at IS NULL", [
+          s.session_id,
+          sole,
+        ]);
+        // Revoked mid-flight → do not adopt the location and do not claim success.
+        if ((upd.rowCount ?? 0) === 1) {
+          locationId = sole;
+          em = scoped; // view-only / sensitive-frozen flags must reflect the bound location
+          await writePartnerAudit(c, {
+            tenantId: s.tenant_id,
+            locationId: sole,
+            actorUserId: s.user_id,
+            sessionId: s.session_id,
+            action: "partner_location_auto_selected",
+            recordType: "partner_location",
+            recordId: sole,
+            reason: "sole eligible active location",
+          });
+        }
+      }
+    }
+
     await c.query("UPDATE partner_sessions SET last_seen_at=now() WHERE id=$1", [s.session_id]);
     const permissions = await getUserPermissions(c, s.user_id);
     return {
       sessionId: s.session_id,
       tenantId: s.tenant_id,
       userId: s.user_id,
-      locationId: s.location_id,
+      locationId,
       mfaPassed: s.mfa_passed,
       permissions,
       viewOnly: em.viewOnly,

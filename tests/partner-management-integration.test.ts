@@ -16,7 +16,7 @@ import { Client } from "pg";
 import {
   provisionRealisticRoles,
   applyMigrationsRealistic,
-  PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
+  PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN_DB = process.env.PARTNER_MANAGEMENT_RT_ADMIN;
@@ -141,10 +141,24 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     await admin.query(
       "CREATE TABLE IF NOT EXISTS submission_items (id serial PRIMARY KEY, submission_id integer NOT NULL)"
     );
-    await admin.query("ALTER TABLE users OWNER TO pn_migrator");
-    await admin.query("ALTER TABLE submissions OWNER TO pn_migrator");
-    await admin.query("ALTER TABLE submission_items OWNER TO pn_migrator");
-    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT);
+    // 0041 attaches credit-hold guard triggers to certificates and label_prints and writes to
+    // audit_log, so those three must exist before the credit-carrying migration list is applied.
+    await admin.query(
+      "CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text, submission_id integer, secret text)"
+    );
+    await admin.query(
+      "CREATE TABLE IF NOT EXISTS label_prints (id serial PRIMARY KEY, certificate_id integer, created_at timestamptz NOT NULL DEFAULT now())"
+    );
+    await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
+      id serial PRIMARY KEY, entity_type text NOT NULL, entity_id text NOT NULL, action text NOT NULL,
+      admin_user text, details jsonb, created_at timestamptz NOT NULL DEFAULT now())`);
+    for (const t of ["users", "submissions", "submission_items", "certificates", "label_prints", "audit_log"]) {
+      await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
+    }
+    // Includes the wallet/ledger tables (0016/0017). Activating an organisation now provisions
+    // its wallet, so a migration list without partner_wallets makes every activation 500 —
+    // deliberately, since an ACTIVE org with no wallet is the exact defect being fixed.
+    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS);
     const { seedPartnerRbac } = await import("../server/partner/permissions");
     await seedPartnerRbac();
 
@@ -338,7 +352,17 @@ function dbUrlAsRole(raw: string, username: string, password: string): string {
     expect(ok.status).toBe(200);
     const org = await admin.query<{ status: string }>("SELECT status FROM partner_organisations WHERE id=$1", [A]);
     expect(org.rows[0].status).toBe("ACTIVE");
-    // NO side effects: no feature flag rows, no emergency controls created for A
+    // Activation DOES now provision a wallet — the one intended side effect. Zero credits, zero
+    // ledger rows, so it is a true zero balance rather than an asserted one.
+    const w = await admin.query<{ n: number }>(
+      "SELECT count(*)::int n FROM partner_wallets WHERE tenant_id=$1",
+      [A]
+    );
+    expect(w.rows[0].n).toBe(1);
+    expect(
+      (await admin.query("SELECT count(*)::int n FROM partner_credit_ledger WHERE tenant_id=$1", [A])).rows[0].n
+    ).toBe(0);
+    // NO OTHER side effects: no feature flag rows, no emergency controls created for A
     expect(
       (await admin.query("SELECT count(*)::int n FROM partner_feature_flags WHERE tenant_id=$1", [A])).rows[0].n
     ).toBe(0);

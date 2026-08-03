@@ -264,10 +264,23 @@ describe("rejected location switch is handled, not an unhandled crash", () => {
     expect(switcher).toContain('data-testid="text-location-switch-error"');
     expect(switcher).toContain("Couldn't switch to that location. You may not be assigned there.");
   });
-  it("a single-location user sees a plain name, not a confusing one-item dropdown", () => {
+  it("a single-location user sees a plain name ONLY once the session is bound to that location", () => {
     const switcher = SHELL.slice(SHELL.indexOf("function LocationSwitcher"));
     expect(switcher).toContain("locations.length === 1");
     expect(switcher).toContain('data-testid="text-single-location"');
+    // The plain-name branch must ALSO require that the session already holds this location.
+    // Guarding on set size alone was an unrecoverable dead end: the wizard refuses to start
+    // without a location and directs the operator to a switcher that rendered as an inert <span>.
+    expect(switcher).toContain("session?.locationId === locations[0].id");
+  });
+  it("a single-location user with NO location bound still gets an interactive control, not an inert span", () => {
+    const switcher = SHELL.slice(SHELL.indexOf("function LocationSwitcher"));
+    const plainBranch = switcher.indexOf('data-testid="text-single-location"');
+    const selectControl = switcher.indexOf('data-testid="select-location-switcher"');
+    // The real <Select> must sit AFTER the plain-name early return, i.e. it is what an
+    // unbound single-location user falls through to.
+    expect(plainBranch).toBeGreaterThan(-1);
+    expect(selectControl).toBeGreaterThan(plainBranch);
   });
   it("the location switcher is reachable on mobile too, not desktop-only (review finding: it was hidden below sm, but the wizard's own copy tells a locationless user to use it)", () => {
     // Rendered twice: once desktop-only in the header, once inside the mobile menu panel.

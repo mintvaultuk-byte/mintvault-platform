@@ -13,6 +13,7 @@ import { partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import { G5RequestError, canTransitionStatus, isPartnerStatus, type PartnerStatus } from "./partner-management-errors";
 import { hashPassword, MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
+import { ensureWallet } from "./partner-wallet-service";
 import { APP_BASE_URL } from "../app-url";
 import type { PoolClient } from "pg";
 import crypto from "node:crypto";
@@ -590,11 +591,34 @@ export async function changeStatus(
   }
   await loadOrInitProfileVersion(org.id);
   return withAudit(actor, org.id, "status_changed", reason, { from: org.status }, async () => {
+    // An ACTIVE organisation MUST own a wallet: every credit read and the Super Admin
+    // /credits/adjust route resolve the wallet first and fail with WALLET_NOT_FOUND without one,
+    // which blocks funding and therefore blocks submission acceptance entirely. ensureWallet has
+    // existed since G6A but had no caller anywhere in server/, so no org ever got one.
+    //
+    // Deliberately BEFORE the status write, not after. changeStatus runs on the auto-commit admin
+    // pool, so the two writes cannot share a transaction without converting this shipped G5 path to
+    // withPartnerAdminTransaction. Ordering gives the same safety for free by choosing the benign
+    // failure: if provisioning throws, the status write never runs and the org stays as it was
+    // (retry is clean). The reverse order risks the exact state this fixes — ACTIVE with no wallet.
+    // The residue when a LATER step fails is a wallet on a non-activated org: zero credits, zero
+    // ledger rows, invisible to every surface, and reused verbatim if that org activates later.
+    //
+    // Safe to run on every transition into ACTIVE (including SUSPENDED → ACTIVE): ensureWallet is
+    // idempotent via ON CONFLICT (tenant_id) DO NOTHING plus a definitive re-read, and creates NO
+    // ledger row — so a re-activated partner keeps its existing wallet, balance and history.
+    let walletProvisioned = false;
+    if (toStatus === "ACTIVE") {
+      const wallet = await ensureWallet({ actorUserId: actor.actorUserId, actorEmail: actor.actorEmail }, org.id);
+      walletProvisioned = !!wallet;
+    }
+
+
     // Bump the aggregate version under optimistic lock AND set the status in ONE data-modifying-CTE
     // statement, so the two writes are atomic (no "version bumped but status unchanged" window) without
     // a transaction helper. If the version no longer matches, the CTE yields no rows and the org UPDATE
-    // affects 0 rows → VERSION_CONFLICT. Business-label only — no flags, portal, wallet, slots, users,
-    // devices, or sessions are touched.
+    // affects 0 rows → VERSION_CONFLICT. Business-label only — no flags, portal, slots, users,
+    // devices, or sessions are touched. (A wallet IS now provisioned on activation, above.)
     const r = await partnerAdminQuery(
       `WITH bumped AS (
          UPDATE partner_profiles SET version = version + 1, updated_at = now()
@@ -610,7 +634,7 @@ export async function changeStatus(
       result: { status: toStatus as PartnerStatus },
       entityType: "partner",
       entityId: org.id,
-      afterState: { from: org.status, to: toStatus },
+      afterState: { from: org.status, to: toStatus, walletProvisioned },
     };
   });
 }
