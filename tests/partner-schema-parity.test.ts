@@ -123,6 +123,9 @@ describe("partner schema ↔ migration parity", () => {
       // settle a terminal Partner submission; it creates no mutable wallet balance. It lands at
       // 0041 because staging had already applied Project Control reconciliation migration 0040.
       "0041_partner_submission_credit_lifecycle.sql",
+      // Added 2026-08-03: per-card credit settlement. Replaces 0041's single-reservation
+      // connector release function with an N-reservation one. 0041 itself is untouched.
+      "0042_partner_per_card_credit_settlement.sql",
     ]);
   });
 
