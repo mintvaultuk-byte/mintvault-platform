@@ -146,7 +146,17 @@ describe("Partner Portal credit projection on PostgreSQL 17.10", () => {
     expect(result.ledger).toHaveLength(1);
     expect(result.ledger[0]).toMatchObject({ quantity: 10, runningBalance: 10, source: "admin" });
     expect(JSON.stringify(result)).not.toContain("Tenant B private credits");
-    expect(JSON.stringify(result)).not.toContain("99");
+    /**
+     * Tenant B's credit quantity must not leak. This was `expect(JSON.stringify(result))
+     * .not.toContain("99")`, a raw substring scan over the whole payload — which FAILS at random
+     * whenever a generated UUID happens to contain "99" (observed: ...967acc99e984), and would
+     * equally MISS a real leak that rendered the value in another form. A tenant-isolation
+     * assertion must not be a coin flip in either direction, so it now inspects the actual
+     * numeric fields.
+     */
+    expect(result.ledger.map((entry) => entry.quantity)).toEqual([10]);
+    expect(result.summary.availableCredits).toBe(10);
+    expect(result.summary.postedBalance).toBe(10);
   });
 
   it("shows reserve and release without double-reserving or cross-tenant leakage", async () => {

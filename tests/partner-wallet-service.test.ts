@@ -43,11 +43,21 @@ describe("Partner Network G6A wallet service on PostgreSQL 17.10", () => {
     const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
     await migrator.connect();
     try {
-      // G6A wallet coverage intentionally stops before reservation/lifecycle
-      // migrations; G6D has its own owner-operated PostgreSQL suite.
+      /**
+       * RESTORED 2026-08-03 (owner directive). This was narrowed to `<= 16`, which dropped
+       * migration 0017 and with it `trg_partner_credit_ledger_preserve_active_reservations` —
+       * the DATABASE-level negative-balance backstop. The G6A wallet suite was therefore
+       * validating ledger immutability and balance behaviour against a schema materially
+       * different from production, and the mutation "permit negative available balance" could
+       * not go red here.
+       *
+       * The narrowing's own stated rationale was that G6D (0041) needs the separate
+       * owner-operated deployment path — which justifies excluding 0041, not 0017 and 0018.
+       * The boundary is set accordingly.
+       */
       await applyMigrations(
         migrator,
-        listMigrationFiles().filter((file) => Number(file.number) <= 16)
+        listMigrationFiles().filter((file) => Number(file.number) < 19)
       );
     } finally {
       await migrator.end();
