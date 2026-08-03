@@ -31,6 +31,7 @@ import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
   PARTNER_MIGRATIONS_WITH_G4,
+  pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_CONNECTOR_RUNTIME_ADMIN;
@@ -234,6 +235,9 @@ const partnerIntakeSubmissionCount = () =>
 
       // The cross-tenant discovery read + the observability projection run on the privileged pool.
       process.env.PARTNER_ADMIN_DATABASE_URL = ADMIN;
+      // CI pins MINTVAULT_DATABASE_URL globally to a DIFFERENT database; the G6D accounting
+      // topology assertion in server/partner/db.ts then throws. Pin it to this suite's own.
+      pinAccountingTopologyTo(ADMIN);
 
       await seedTenant(A, LA, UA, "rtA");
       await seedTenant(B, LB, UB, "rtB");
@@ -663,12 +667,20 @@ const partnerIntakeSubmissionCount = () =>
       await setGlobalFlag("partner_emergency_stop", false);
       const { closePartnerPools } = await import("../server/partner/db");
       const savedFlagUrl = process.env.PARTNER_DATABASE_URL;
+      // The accounting topology assertion compares every PARTNER_* URL against
+      // MINTVAULT_DATABASE_URL, and returns early when MINTVAULT is unset. This test deliberately
+      // points the flag read at a dead endpoint — a deliberate mismatch — so MINTVAULT must be
+      // UNSET for the window, exactly as it was before this suite pinned it. Otherwise the
+      // assertion throws first and the outage is reported as `admin_capability_unavailable`
+      // instead of the `flag_store_unreachable` this test exists to prove.
+      const savedAccountingUrl = process.env.MINTVAULT_DATABASE_URL;
       const submissionsBefore = await partnerIntakeSubmissionCount();
       await seedPendingHandoff(A, LA, UA, { cardCount: 1 });
 
       // Point the runtime's flag read at a port nothing listens on.
       await closePartnerPools();
       process.env.PARTNER_DATABASE_URL = "postgresql://nobody:nobody@127.0.0.1:1/nope";
+      delete process.env.MINTVAULT_DATABASE_URL;
       try {
         runtime.startConnectorRuntime({ pollIntervalMs: 10, singleCycle: true });
         const deadline = Date.now() + 30_000;
@@ -688,6 +700,8 @@ const partnerIntakeSubmissionCount = () =>
       } finally {
         await closePartnerPools();
         process.env.PARTNER_DATABASE_URL = savedFlagUrl;
+        if (savedAccountingUrl === undefined) delete process.env.MINTVAULT_DATABASE_URL;
+        else process.env.MINTVAULT_DATABASE_URL = savedAccountingUrl;
       }
 
       // Sanity: with the store reachable again the SAME handoff proceeds normally, proving the

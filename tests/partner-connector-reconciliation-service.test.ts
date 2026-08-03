@@ -14,6 +14,7 @@ import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
   PARTNER_MIGRATIONS_WITH_G3F,
+  pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_CONNECTOR_RECON_RT_ADMIN;
@@ -188,6 +189,9 @@ async function seedImportedConnector(): Promise<{
       await admin.query("GRANT partner_runtime TO partner_recon_test_conn");
 
       process.env.PARTNER_CONNECTOR_DATABASE_URL = CONNECTOR_URL;
+      // CI pins MINTVAULT_DATABASE_URL globally to a DIFFERENT database; the G6D accounting
+      // topology assertion in server/partner/db.ts then throws. Pin it to this suite's own.
+      pinAccountingTopologyTo(CONNECTOR_URL);
       const runtimeUrlForFlags = new URL(CONNECTOR_URL!);
       runtimeUrlForFlags.username = "partner_recon_test_conn";
       runtimeUrlForFlags.password = "synthetic";

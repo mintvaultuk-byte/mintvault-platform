@@ -12,6 +12,7 @@ import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
   PARTNER_MIGRATIONS_WITH_G3F,
+  pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_CONNECTOR_SCALE_RT_ADMIN;
@@ -213,6 +214,9 @@ function pct(sorted: number[], p: number): number {
     await admin.query("GRANT partner_runtime TO partner_scale_conn");
 
     process.env.PARTNER_CONNECTOR_DATABASE_URL = CONNECTOR_URL;
+    // CI pins MINTVAULT_DATABASE_URL globally to a DIFFERENT database; the G6D accounting
+    // topology assertion in server/partner/db.ts then throws. Pin it to this suite's own.
+    pinAccountingTopologyTo(CONNECTOR_URL);
     process.env.PARTNER_CONNECTOR_DB_POOL_MAX = "12"; // 10 workers + headroom
     const flagUrl = new URL(CONNECTOR_URL!);
     flagUrl.username = "partner_scale_conn";

@@ -4,6 +4,7 @@ import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
   PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
+  pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_FINAL_OWNER_ADMIN;
@@ -18,6 +19,9 @@ const U2 = "ff00ff00-0032-0000-0000-0000000000a2";
 
   beforeAll(async () => {
     process.env.PARTNER_ADMIN_DATABASE_URL = ADMIN;
+    // CI pins MINTVAULT_DATABASE_URL globally to a DIFFERENT database; the G6D accounting
+    // topology assertion in server/partner/db.ts then throws. Pin it to this suite's own.
+    pinAccountingTopologyTo(ADMIN);
     admin = new Client({ connectionString: ADMIN });
     await admin.connect();
     await admin.query("DROP OWNED BY partner_runtime").catch(() => {});

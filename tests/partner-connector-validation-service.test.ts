@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Client } from "pg";
-import { applyMigrationsRealistic } from "./helpers/partner-realistic-db";
+import { applyMigrationsRealistic, pinAccountingTopologyTo } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_CONNECTOR_VALIDATION_RT_ADMIN;
 const CONNECTOR_URL = process.env.PARTNER_CONNECTOR_VALIDATION_RT_URL;
@@ -147,6 +147,9 @@ async function claimAndStartValidating(
       await admin.query("GRANT partner_runtime TO partner_val_test_conn");
 
       process.env.PARTNER_CONNECTOR_DATABASE_URL = CONNECTOR_URL;
+      // CI pins MINTVAULT_DATABASE_URL globally to a DIFFERENT database; the G6D accounting
+      // topology assertion in server/partner/db.ts then throws. Pin it to this suite's own.
+      pinAccountingTopologyTo(CONNECTOR_URL);
       const runtimeUrlForFlags = new URL(CONNECTOR_URL!);
       runtimeUrlForFlags.username = "partner_val_test_conn";
       runtimeUrlForFlags.password = "synthetic";
