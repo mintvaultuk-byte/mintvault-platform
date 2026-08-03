@@ -39,13 +39,40 @@ let admin: Client;
 
 async function applyAllRealistic(): Promise<void> {
   await provisionRealisticRoles(admin);
+  /**
+   * G6D credit-lifecycle roles. This suite drives the REAL migrate runner over EVERY migration
+   * file, which now includes 0041 and 0042, so it must reproduce the one-time elevated
+   * provisioning applyMigrationsRealistic() performs. The ADMIN-only grant models Neon's
+   * provider-granted membership row; the INHERIT grant below models the owner-approved staging
+   * repair 0042 documents as its prerequisite. SET is never granted.
+   */
+  await admin.query(
+    `DO $$ BEGIN
+       CREATE ROLE partner_credit_lifecycle_definer
+         NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+     EXCEPTION WHEN duplicate_object THEN NULL; END$$;`
+  );
+  await admin.query(
+    `DO $$ BEGIN
+       CREATE ROLE pn_credit_schema_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+     EXCEPTION WHEN duplicate_object THEN NULL; END$$;`
+  );
+  await admin.query("GRANT partner_credit_lifecycle_definer TO pn_migrator WITH ADMIN TRUE, INHERIT FALSE, SET FALSE");
   const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
   await migrator.connect();
   try {
-    // allowDestructive: 0043 must DROP the single-hold-per-destination unique index. The runner
-    // correctly refuses destructive SQL unless the operator opts in; that is safe on this suite's
-    // own disposable database, and still requires owner approval anywhere real.
-    await applyMigrations(migrator, listMigrationFiles(), { allowDestructive: true });
+    /**
+     * ORDER IS LOAD-BEARING. 0041 revokes its own SET/INHERIT membership as its final act, so the
+     * repair grant must land BETWEEN 0041 and 0042 — granting it up front is silently undone.
+     *
+     * allowDestructive: 0043 must DROP the single-hold-per-destination unique index. The runner
+     * correctly refuses destructive SQL unless the operator opts in; that is safe on this suite's
+     * own disposable database, and still requires owner approval anywhere real.
+     */
+    const all = listMigrationFiles();
+    await applyMigrations(migrator, all.filter((f) => Number(f.number) <= 41), { allowDestructive: true });
+    await migrator.query("GRANT partner_credit_lifecycle_definer TO pn_migrator WITH INHERIT TRUE, SET FALSE");
+    await applyMigrations(migrator, all, { allowDestructive: true });
   } finally {
     await migrator.end();
   }
@@ -121,6 +148,7 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
       const plan = await planMigrations(migrator, listMigrationFiles());
       expect(plan.pending).toHaveLength(0);
       expect(plan.checksumMismatches).toHaveLength(0);
+      await migrator.query("GRANT partner_credit_lifecycle_definer TO pn_migrator WITH INHERIT TRUE, SET FALSE").catch(() => {});
       const { applied } = await applyMigrations(migrator, listMigrationFiles(), { allowDestructive: true });
       expect(applied).toHaveLength(0);
     } finally {
@@ -227,21 +255,41 @@ async function asPartner(tenant: string | null, fn: () => Promise<void>): Promis
     ).rejects.toMatchObject({ code: "23505" });
   });
 
-  it("rollback drops exactly the 5 tables + de-journals + reapplies", async () => {
+  /**
+   * The G5 rollback REFUSES once later migrations are applied, and that refusal is the correct
+   * behaviour to pin.
+   *
+   * This test previously asserted the rollback succeeded — valid when 0015 was the newest
+   * migration. The suite now drives the real runner over EVERY migration file, so 0016+ are
+   * journalled and `rollback-partner-management.sql` correctly refuses: dropping the G5 tables
+   * underneath the wallet, reservation and credit-lifecycle migrations that build on them would
+   * corrupt the schema. Asserting the old outcome would mean weakening a guard to satisfy a test.
+   *
+   * The refusal is also SAFE: the script is wrapped in a single transaction, so nothing is
+   * dropped. That is what the survival assertions below prove.
+   */
+  it("the G5 rollback refuses while later migrations are applied, and drops nothing", async () => {
     const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
     await migrator.connect();
     try {
-      await migrator.query(rb("rollback-partner-management.sql"));
-      for (const t of ["partner_profiles", "partner_contacts", "partner_branding", "partner_internal_notes", "partner_management_audit"]) {
+      await expect(migrator.query(rb("rollback-partner-management.sql"))).rejects.toThrow(
+        /refusing G5 rollback: a later migration \(0016\+\) is applied/i
+      );
+      // Every G5 table survives the refused rollback, and the journal row is intact.
+      for (const t of [
+        "partner_profiles",
+        "partner_contacts",
+        "partner_branding",
+        "partner_internal_notes",
+        "partner_management_audit",
+      ]) {
         const e = await admin.query("SELECT to_regclass($1) AS t", [`public.${t}`]);
-        expect(e.rows[0].t).toBeNull();
+        expect(e.rows[0].t, `${t} must survive a refused rollback`).not.toBeNull();
       }
       const j = await admin.query("SELECT 1 FROM schema_migrations WHERE filename='0015_partner_management.sql'");
-      expect(j.rows).toHaveLength(0);
-      // G4 table survives
+      expect(j.rows).toHaveLength(1);
+      // G4 table is untouched either way.
       expect((await admin.query("SELECT to_regclass('partner_connector_admin_actions') AS t")).rows[0].t).not.toBeNull();
-      const { applied } = await applyMigrations(migrator, listMigrationFiles(), { allowDestructive: true });
-      expect(applied).toContain("0015_partner_management.sql");
     } finally {
       await migrator.end();
     }
