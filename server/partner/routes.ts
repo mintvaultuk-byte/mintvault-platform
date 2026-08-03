@@ -53,6 +53,7 @@ import {
   mfaRegenerateRecovery,
   mfaDisable,
   verifyActiveTotpNoReplay,
+  getMfaStatus,
 } from "./mfa-service";
 import {
   getPartnerCreditView,
@@ -150,6 +151,10 @@ export function partnerApiRouter(): Router {
       return;
     }
     setPartnerCookie(res, result.sessionToken!);
+    // RESPONSE SHAPE IS DELIBERATELY UNCHANGED. Whether the outstanding second step is enrolment or
+    // a code challenge is reported by GET /session (`mfaEnrolmentRequired`), which the client calls
+    // immediately after login anyway. Keeping that bit off this response avoids widening the
+    // login contract that tests/partner-login-rate-limit-integration.test.ts asserts exactly.
     res.json({ ok: true, mfaRequired: !!result.mfaPending });
   });
 
@@ -261,13 +266,22 @@ export function partnerApiRouter(): Router {
     }
     // L1: withhold identity + permissions until MFA is complete — a password-only (mfa-pending)
     // session must not disclose the account's full authorization profile.
+    //
+    // P0-E: the ONE extra bit added here is `mfaEnrolmentRequired` — whether the outstanding second
+    // step is enrolment or a code challenge. Without it the Portal cannot route a first owner to the
+    // only step they can complete. It is not an authorization profile, it is reachable only with a
+    // valid session cookie, and the user could infer it anyway by calling /mfa/enrol.
+    const status = await getMfaStatus({ tenantId: req.partner.tenantId, userId: req.partner.userId });
     if (!req.partner.mfaPassed) {
-      res.json({ mfaPassed: false, mfaRequired: true });
+      res.json({ mfaPassed: false, mfaRequired: true, mfaEnrolmentRequired: status.enrolmentRequired });
       return;
     }
     try {
       const context = await getPartnerPortalContext(req.partner);
-      // no secrets — principal and shop-facing identity summary only
+      // no secrets — principal, MFA posture and shop-facing identity summary only.
+      // The four mfa* fields come from origin/main (P0-E) and the ...context spread from this
+      // branch; their key sets are disjoint. The mfa* fields are listed AFTER the spread so a
+      // future portal-context key can never silently override the authoritative MFA posture.
       res.json({
         userId: req.partner.userId,
         tenantId: req.partner.tenantId,
@@ -276,6 +290,10 @@ export function partnerApiRouter(): Router {
         viewOnly: req.partner.viewOnly,
         permissions: [...req.partner.permissions],
         ...context,
+        mfaRequired: status.required,
+        mfaEnrolled: status.enrolled,
+        mfaEnrolmentRequired: status.enrolmentRequired,
+        recoveryCodesRemaining: status.recoveryCodesRemaining,
       });
     } catch {
       res.status(503).json({ error: { code: "portal_context_unavailable", message: "Shop details are unavailable." } });
@@ -485,18 +503,28 @@ export function partnerApiRouter(): Router {
       res.status(401).json({ error: "authentication required" });
       return;
     }
-    const { password } = req.body ?? {};
+    const { password, code, recoveryCode } = req.body ?? {};
     if (typeof password !== "string") {
       res.status(400).json({ error: "elevated verification required" });
       return;
     }
     const out = await mfaEnrolStart(
       { tenantId: req.partner.tenantId, userId: req.partner.userId, sessionMfaPassed: req.partner.mfaPassed },
-      password
+      password,
+      // F3: only consulted when an ACTIVE authenticator already exists (i.e. this is a REPLACEMENT).
+      // First-time enrolment is unaffected and still needs the password alone.
+      {
+        code: typeof code === "string" ? code : undefined,
+        recoveryCode: typeof recoveryCode === "string" ? recoveryCode : undefined,
+      }
     );
     if (!out.ok) {
       const status =
-        out.reason === "encryption_unavailable" ? 503 : out.reason === "requires_current_factor" ? 403 : 401;
+        out.reason === "encryption_unavailable"
+          ? 503
+          : out.reason === "requires_current_factor" || out.reason === "second_factor_required"
+            ? 403
+            : 401;
       res.status(status).json({ error: out.reason });
       return;
     }
@@ -530,17 +558,33 @@ export function partnerApiRouter(): Router {
   });
 
   r.post("/mfa/recovery-codes/regenerate", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {
-    const { password } = req.body ?? {};
+    const { password, code, recoveryCode } = req.body ?? {};
     if (typeof password !== "string") {
       res.status(400).json({ error: "elevated verification required" });
       return;
     }
-    const out = await mfaRegenerateRecovery({ tenantId: req.partner!.tenantId, userId: req.partner!.userId }, password);
+    const out = await mfaRegenerateRecovery(
+      {
+        tenantId: req.partner!.tenantId,
+        userId: req.partner!.userId,
+        sessionMfaPassed: req.partner!.mfaPassed,
+      },
+      password,
+      // C: only consulted when an ACTIVE authenticator already exists. Minting a fresh recovery set
+      // for an enrolled user is a credential-class change and now demands the same current-factor
+      // proof as replacing the authenticator. Bootstrap (no active method) is unaffected.
+      {
+        code: typeof code === "string" ? code : undefined,
+        recoveryCode: typeof recoveryCode === "string" ? recoveryCode : undefined,
+      }
+    );
     if (!out.ok) {
-      res.status(401).json({ error: out.reason });
+      res
+        .status(out.reason === "requires_current_factor" || out.reason === "second_factor_required" ? 403 : 401)
+        .json({ error: out.reason });
       return;
     }
-    res.json({ ok: true, recoveryCodes: out.recoveryCodes });
+    res.json({ ok: true, recoveryCodes: out.recoveryCodes }); // shown once; never logged
   });
 
   r.post("/mfa/disable", requirePartnerAuth, partnerMfaLimiter, async (req, res) => {

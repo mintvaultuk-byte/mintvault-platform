@@ -69,6 +69,12 @@ function classify(reportPath, file, status) {
   else if (status !== 0) verdict = "environment_abort"; // file-level throw (beforeAll, import, gate)
   else if (passed === 0 && skipped > 0) verdict = "skipped";
   else if (passed === 0) verdict = "environment_abort";
+  // ANY skip in a critical suite is a failure, not a pass (hardened 2026-08-03).
+  // Previously `skipped` only mattered when `passed === 0`, so a suite whose env gate hard-skipped
+  // every real test still reported "passed" on the strength of its one out-of-gate CI-wiring guard,
+  // and the printed "skipped=N" was an eyeball check rather than an enforced gate. A partial skip
+  // is exactly how evidence goes missing silently, so it now reddens the run.
+  else if (skipped > 0) verdict = "partially_skipped";
   return { passed, failed, skipped, verdict };
 }
 

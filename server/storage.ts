@@ -19,6 +19,8 @@ import {
   type SubmissionItem,
   type CertificateRecord,
   type InsertCertificate,
+  type CertificateOriginInput,
+  CERTIFICATE_ORIGIN_SNAPSHOT_VERSION,
   type CertificateImage,
   type InsertCertificateImage,
   type CardMaster,
@@ -138,7 +140,17 @@ export interface IStorage {
   updateSubmissionStatus(id: number, status: string, extra?: Record<string, any>): Promise<any | undefined>;
   setEstimatedCompletionDate(id: number): Promise<void>;
 
-  createCertificate(data: InsertCertificate, adminUser?: string): Promise<CertificateRecord>;
+  /**
+   * `origin` is the IMMUTABLE grading-origin snapshot (migration 0035). Omit it — or pass
+   * `{ kind: "HQ" }` — for in-house grading. Partner-originated certificates MUST pass the
+   * partner values captured from the partner context at grading time; they are copied in
+   * verbatim and can never be changed afterwards (DB trigger).
+   */
+  createCertificate(
+    data: InsertCertificate,
+    adminUser?: string,
+    origin?: CertificateOriginInput
+  ): Promise<CertificateRecord>;
   getCertificate(id: number): Promise<CertificateRecord | undefined>;
   getCertificateByCertId(certId: string): Promise<CertificateRecord | undefined>;
   getCertificateByAnyCertId(certIds: string[]): Promise<CertificateRecord | undefined>;
@@ -844,7 +856,79 @@ export class DatabaseStorage implements IStorage {
     `);
   }
 
-  async createCertificate(data: InsertCertificate, adminUser?: string): Promise<CertificateRecord> {
+  /**
+   * Build the persisted origin-snapshot columns from the caller-supplied origin.
+   *
+   * Absent origin => HQ. This is the SAFE default: an unattributed certificate must never
+   * silently acquire partner provenance, and every existing caller (which passes nothing)
+   * keeps recording in-house grading, which is what it actually is.
+   *
+   * The values are copied VERBATIM. This method deliberately performs NO lookup against
+   * partner_organisations / partner_profiles — resolving names here would reintroduce exactly the
+   * mutable-FK behaviour the snapshot exists to prevent, and would make the recorded origin
+   * depend on when the row happened to be read.
+   */
+  private buildOriginSnapshot(origin: CertificateOriginInput | undefined, certId: string) {
+    // Both branches return the SAME key set (HQ nulls every partner field explicitly) so the
+    // insert can never leave a stale partner value behind, and so callers/tests see one shape.
+    if (!origin || origin.kind === "HQ") {
+      return {
+        originType: "HQ" as const,
+        originPartnerId: null,
+        originPartnerPublicRef: null,
+        originPartnerLegalName: null,
+        originPartnerTradingName: null,
+        originLocationId: null,
+        originLocationPublicRef: null,
+        originLocationName: null,
+        originLocationAddress: null,
+        originCapturedAt: new Date(),
+        originSnapshotVersion: CERTIFICATE_ORIGIN_SNAPSHOT_VERSION,
+      };
+    }
+
+    const partnerId = origin.partnerId?.trim();
+    if (!partnerId) {
+      throw new Error(
+        `Refusing to create certificate ${certId}: a PARTNER grading origin was supplied with no partner id.`
+      );
+    }
+
+    // Mirrors CHECK chk_certificates_origin_partner_complete. Failing here rather than at the
+    // constraint gives the caller a message that names the real problem, and guarantees a
+    // partner-originated certificate is always renderable as "Graded by <someone>".
+    const trading = origin.partnerTradingName?.trim() || null;
+    const legal = origin.partnerLegalName?.trim() || null;
+    if (!trading && !legal) {
+      throw new Error(
+        `Refusing to create certificate ${certId}: a PARTNER grading origin must carry a trading name or a legal name — otherwise the certificate could never say who graded the card.`
+      );
+    }
+
+    return {
+      originType: "PARTNER" as const,
+      originPartnerId: partnerId,
+      originPartnerPublicRef: origin.partnerPublicRef?.trim() || null,
+      originPartnerLegalName: legal,
+      originPartnerTradingName: trading,
+      originLocationId: origin.locationId?.trim() || null,
+      originLocationPublicRef: origin.locationPublicRef?.trim() || null,
+      originLocationName: origin.locationName?.trim() || null,
+      originLocationAddress: origin.locationAddress?.trim() || null,
+      originCapturedAt: origin.capturedAt ?? new Date(),
+      originSnapshotVersion: CERTIFICATE_ORIGIN_SNAPSHOT_VERSION,
+    };
+  }
+
+  async createCertificate(
+    data: InsertCertificate,
+    adminUser?: string,
+    origin?: CertificateOriginInput
+  ): Promise<CertificateRecord> {
+    // Validate + materialise the origin BEFORE allocating a certificate number, so a malformed
+    // partner origin cannot burn an MV number on a certificate that will never be inserted.
+    const originSnapshot = this.buildOriginSnapshot(origin, "(unallocated)");
+
     const certId = await this.getNextCertId();
     const hash = crypto
       .createHash("sha256")
@@ -864,6 +948,13 @@ export class DatabaseStorage implements IStorage {
       env,
       dbHost,
       timestamp: new Date().toISOString(),
+      // Provenance is recorded in the audit trail as well as on the row. The row is immutable,
+      // but an independent append-only record of what origin was claimed at allocation time is
+      // what lets a dispute be settled without trusting the row alone.
+      originType: originSnapshot.originType,
+      originPartnerId: originSnapshot.originPartnerId ?? null,
+      originPartnerTradingName: originSnapshot.originPartnerTradingName ?? null,
+      originLocationId: originSnapshot.originLocationId ?? null,
     });
 
     try {
@@ -874,6 +965,9 @@ export class DatabaseStorage implements IStorage {
         refNum = generateReferenceNumber();
       } catch {}
 
+      // Origin is applied AFTER ...data on purpose: the origin columns are omitted from
+      // insertCertificateSchema, so `data` cannot legitimately carry them — and if a caller
+      // ever bypasses that schema, the server-derived snapshot must still win.
       const [cert] = await db
         .insert(certificates)
         .values({
@@ -883,6 +977,7 @@ export class DatabaseStorage implements IStorage {
           ...(refNum ? { referenceNumber: refNum } : {}),
           logbookVersion: 1,
           logbookLastIssuedAt: new Date(),
+          ...originSnapshot,
         } as any)
         .returning();
       return cert;

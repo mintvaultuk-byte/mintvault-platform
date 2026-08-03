@@ -1772,10 +1772,34 @@ export async function acceptPartnerInvitation(token: string, password: string) {
       }
       return { ok: false as const, reason: "invalid" as const };
     }
+    /*
+     * P0-E — MANDATORY SECOND FACTOR FROM THE FIRST SIGN-IN.
+     *
+     * `mfa_required` defaults to false (migrations/0002_partner_auth_support.sql:9) and acceptance
+     * never set it, so a brand-new partner OWNER — the single most privileged principal in a tenant
+     * — received a fully MFA-passed session on their first login and unrestricted access to every
+     * partner API, while both the invitation page and the security page told them two-step was
+     * required. Setting it here is the whole fix: partnerLogin() then mints an mfa-pending session
+     * (mfa_passed=false), and requirePartnerAuth / requirePartnerCapability (server/partner/
+     * session.ts) already refuse every normal partner route without mfa_passed.
+     *
+     * WHY THIS DOES NOT LOCK THE OWNER OUT. The enrolment path is deliberately reachable from an
+     * mfa-pending session: POST /mfa/enrol and POST /mfa/confirm are the only two authenticated
+     * routes that do NOT sit behind requirePartnerAuth (server/partner/routes.ts), and
+     * mfaEnrolStart's F1 guard only blocks REPLACING an existing factor — bootstrap with no active
+     * method stays open. A freshly-accepted user has no method, so they can always enrol. The login
+     * response and GET /session now carry `mfaEnrolmentRequired` so the Portal sends them to
+     * enrolment instead of an impossible code prompt. Proven end to end in
+     * tests/partner-mfa-enrolment-mandatory.test.ts.
+     *
+     * This applies to EVERY invited role, not just owners: `partner_users.mfa_required` is the only
+     * gate the session layer reads, and a weaker rule for staff would be a softer way in to the same
+     * tenant.
+     */
     await client.query(
       `UPDATE partner_users
           SET password_hash=$2, status='ACTIVE', failed_login_count=0, locked_until=NULL,
-              credential_version=credential_version+1, updated_at=now()
+              mfa_required=true, credential_version=credential_version+1, updated_at=now()
         WHERE id=$1 AND tenant_id=$3`,
       [inv.user_id, pwHash, inv.tenant_id]
     );

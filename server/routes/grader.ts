@@ -45,6 +45,8 @@ import {
   stripGraderPii,
   GRADER_AUTO_PUBLISH,
   getOperatorReviewRate,
+  isPartnerOriginatedCert,
+  checkGradePublishGates,
 } from "../grader";
 import { GradeDraftValidationError } from "@shared/grading-draft-validation";
 import { db } from "../db";
@@ -458,7 +460,14 @@ export function registerGraderRoutes(app: Express): void {
           'centering', centering_score, 'corners', corners_score,
           'edges', edges_score, 'surface', surface_score)`;
 
-      if (GRADER_AUTO_PUBLISH) {
+      // P0-C — PARTNER-ORIGIN MANDATORY REVIEW.
+      // A partner-originated card must NEVER reach a publish path without a
+      // human reviewer, so this is resolved BEFORE either auto-publish branch.
+      // FAILS CLOSED: an origin that cannot be determined counts as partner
+      // (see the seam contract on getCertOrigin in server/grader.ts).
+      const partnerOriginated = await isPartnerOriginatedCert(certId);
+
+      if (GRADER_AUTO_PUBLISH && !partnerOriginated) {
         // AUTO-PUBLISH FLIP: publish directly, skip admin review.
         const pub = await db.execute(sql`
           UPDATE certificates SET grade_approved_at = NOW(), grade_approved_by = ${graderEmail}, status = 'active',
@@ -506,17 +515,39 @@ export function registerGraderRoutes(app: Express): void {
       const bucket = (Math.imul(certId, 2654435761) >>> 0) % 100;
 
       // rate 100 → always review; rate 0 → never review; else sample by bucket.
-      const forceReview = gradeMissing || nameMissing;
-      const reviewRequired = forceReview || reviewRate >= 100 || (reviewRate > 0 && bucket < reviewRate);
+      // PARTNER ORIGIN IS A HARD OVERRIDE — it sits with the other forceReview
+      // conditions, ABOVE the sampling expression, so no review_rate (including
+      // 0) can bypass it.
+      const forceReview = gradeMissing || nameMissing || partnerOriginated;
+      const sampledReview = reviewRate >= 100 || (reviewRate > 0 && bucket < reviewRate);
+
+      // P0-C(3) — a grade a HUMAN could not approve must not auto-publish
+      // either. Same two gates approveGraderCert enforces (B3 sub-grade
+      // completeness + printable grade), from the one shared helper. Only
+      // evaluated when this submit would otherwise publish unattended; a
+      // failure routes the card to human review rather than erroring the
+      // grader's submit (the card IS submitted — it just needs a person).
+      const publishGate = forceReview || sampledReview ? null : await checkGradePublishGates(certId);
+      const publishGateBlocked = publishGate !== null && !publishGate.ok;
+      const reviewRequired = forceReview || sampledReview || publishGateBlocked;
 
       if (reviewRequired) {
         await db.execute(sql`UPDATE certificates SET review_required = true, updated_at = NOW() WHERE id = ${certId}`);
+        const forcedReason = partnerOriginated
+          ? "partner_origin"
+          : gradeMissing
+            ? "operator_grade_null"
+            : nameMissing
+              ? "unidentified"
+              : null;
         await storage.writeAuditLog("certificate", String(certId), "grade_submit", graderEmail, {
           review_required: true,
           review_rate: reviewRate,
-          ...(forceReview
-            ? { forced: gradeMissing ? "operator_grade_null" : "unidentified" }
-            : { sampled_bucket: bucket }),
+          ...(forcedReason
+            ? { forced: forcedReason }
+            : publishGateBlocked
+              ? { forced: "publish_gate", publish_gate_code: (publishGate as { code: string }).code }
+              : { sampled_bucket: bucket }),
         });
         return res.json({ ok: true, gradingStatus: "pending_review", reviewRequired: true });
       }

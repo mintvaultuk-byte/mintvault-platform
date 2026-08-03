@@ -80,6 +80,8 @@ export function partnerPublicRouter(): Router {
       return;
     }
     setPartnerCookie(res, result.sessionToken!);
+    // RESPONSE SHAPE IS DELIBERATELY UNCHANGED — identical to the shadowed duplicate in routes.ts.
+    // "enrolment or code challenge?" is answered by GET /session (`mfaEnrolmentRequired`).
     res.json({ ok: true, mfaRequired: !!result.mfaPending });
   });
 

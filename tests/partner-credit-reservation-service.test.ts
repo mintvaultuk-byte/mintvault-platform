@@ -739,6 +739,10 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
       `DELETE FROM schema_migrations
        WHERE CASE WHEN filename ~ '^[0-9]+_' THEN substring(filename FROM '^([0-9]+)_')::integer > 17 ELSE false END`
     );
+    // NOTE (main reconciliation 2026-08-03): origin/main added a per-filename DELETE for
+    // '0035_partner_certificate_origin.sql' here. The numeric predicate above (> 17) already
+    // subsumes it and every future numbered migration, so main's line is intentionally not
+    // re-added — nothing is lost, and the guard cannot silently rot at the next migration.
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );

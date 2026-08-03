@@ -679,6 +679,88 @@ export function consolidatedVariantForLabel(cert: CertificateRecord): string {
   return buildVariantLine(cert) || (cert.rarity ? buildRarityText(cert).toUpperCase() : "");
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GRADING ORIGIN — rendering side of the immutable snapshot (migration 0035).
+//
+// ONE formatter, exported, so every surface that says who graded a card says the
+// same thing. Pure string function: no canvas, no database, no partner lookup.
+//
+// It reads ONLY the snapshot columns on the certificate row. It must never
+// re-resolve the partner through partner_organisations / partner_profiles —
+// that is precisely what would let a later rename, relocation, suspension or
+// revocation rewrite what an already-issued certificate says.
+//
+// ⚠️ NOT PAINTED ON THE PHYSICAL SLAB. The 827×236 label is fully committed:
+// the back carries GRADED UNDER / MVGS / GRADING STANDARD, the rotated
+// MINTVAULT wordmark, the verification URL, the NFC line, the QR and the cert
+// number, with no free zone. Adding an origin line there means moving printed
+// elements, which is a protected geometry change and a separate founder-approved
+// decision. This helper therefore feeds the CERTIFICATE DOCUMENT (and any future
+// digital surface); server/labels.ts owns the formatter but draws nothing new.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** What an in-house-graded certificate is called. */
+export const HQ_ORIGIN_NAME = "MintVault Headquarters";
+
+/**
+ * Used only if a row claims PARTNER origin but carries neither a trading name nor a legal
+ * name — a shape the 0035 CHECK constraint and storage both reject, so it should be
+ * unreachable. Falling back to HQ there would print a FALSE statement (MintVault did not
+ * grade that card), so the fallback is deliberately honest-but-unnamed instead.
+ */
+export const UNNAMED_PARTNER_ORIGIN_NAME = "an Accredited MintVault Partner";
+
+export interface CertificateOriginView {
+  /** True only for a certificate carrying a PARTNER origin snapshot. */
+  isPartner: boolean;
+  /** Name that follows "Graded by". */
+  name: string;
+  /** The full rendered line, e.g. "Graded by MintVault Headquarters". */
+  line: string;
+  /**
+   * Approved intake/grading location snapshot ("<Site name> — <address>"), or null.
+   * Null for HQ and legacy certificates, and for partner certificates recorded without a
+   * location. Never synthesised from the partner's CURRENT address.
+   */
+  location: string | null;
+}
+
+/**
+ * Resolve the grading origin of a certificate for display.
+ *
+ * HQ, and LEGACY (origin_type NULL — the row predates origin capture), both render as
+ * "Graded by MintVault Headquarters". They are the same statement because they describe the
+ * same fact: no partner was involved. The NULL is kept in the database purely so an auditor
+ * can tell a recorded assertion from an absent one.
+ */
+export function certificateOrigin(cert: CertificateRecord): CertificateOriginView {
+  const originType = (cert as unknown as { originType?: string | null }).originType ?? null;
+
+  if (originType !== "PARTNER") {
+    return { isPartner: false, name: HQ_ORIGIN_NAME, line: `Graded by ${HQ_ORIGIN_NAME}`, location: null };
+  }
+
+  const row = cert as unknown as {
+    originPartnerTradingName?: string | null;
+    originPartnerLegalName?: string | null;
+    originLocationName?: string | null;
+    originLocationAddress?: string | null;
+  };
+
+  // Trading name is the customer-facing shop name and wins. Legal name is the fallback because
+  // partner_profiles.trading_name is nullable (0015) and a partner may never have set one.
+  const name =
+    (row.originPartnerTradingName ?? "").trim() ||
+    (row.originPartnerLegalName ?? "").trim() ||
+    UNNAMED_PARTNER_ORIGIN_NAME;
+
+  const siteName = (row.originLocationName ?? "").trim();
+  const siteAddress = (row.originLocationAddress ?? "").trim();
+  const location = [siteName, siteAddress].filter(Boolean).join(" — ") || null;
+
+  return { isPartner: true, name, line: `Graded by ${name}`, location };
+}
+
 // Real-world TCG sets in this recurring "<Era> Black Star Promos" family (e.g.
 // "Sword & Shield Black Star Promos", "XY Black Star Promos") name the whole
 // promo sub-line as part of the set name. Split that trailing qualifier off

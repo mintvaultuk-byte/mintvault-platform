@@ -8,7 +8,7 @@
  * Runs ONLY when PARTNER_RT_ADMIN + PARTNER_RT_RUNTIME are set (superuser + runtime URLs to a
  * DISPOSABLE local Postgres):
  *   PARTNER_RT_ADMIN=postgresql://postgres@127.0.0.1:5544/dispo \
- *   PARTNER_RT_RUNTIME=postgresql://partner_app_test:synthetic@127.0.0.1:5544/dispo \
+ *   PARTNER_RT_RUNTIME=postgresql://partner_app_test_rt:synthetic@127.0.0.1:5544/dispo \
  *   npx vitest run tests/partner-submission-workflow.test.ts
  */
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
@@ -66,12 +66,21 @@ async function seedMintVaultTables(): Promise<void> {
     await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
     await admin.query("CREATE SCHEMA public");
     await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
+    // Union of both sides (main reconciliation 2026-08-03):
+    //  - from this branch: realistic roles + MintVault fixture tables + the G6D migration set.
+    //    `provisionRealisticRoles` must run FIRST because `seedMintVaultTables` reassigns table
+    //    ownership to pn_migrator, and the migration set must be PARTNER_MIGRATIONS_WITH_G6D
+    //    because the wallet seeding below needs 0016/0017/0041 to exist.
+    //  - from origin/main: the CLUSTER-UNIQUE login role `partner_app_test_rt`. Roles are
+    //    cluster-wide, so the shared `partner_app_test` name was the documented cross-suite flake
+    //    class. This name must stay in lockstep with PARTNER_RT_RUNTIME in .github/workflows/ci.yml
+    //    and with the sibling suites that share that variable.
     await provisionRealisticRoles(admin);
     await seedMintVaultTables();
     await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_G6D);
-    await admin.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
-    await admin.query("CREATE ROLE partner_app_test LOGIN PASSWORD 'synthetic'");
-    await admin.query("GRANT partner_runtime TO partner_app_test");
+    await admin.query("DROP ROLE IF EXISTS partner_app_test_rt").catch(() => {});
+    await admin.query("CREATE ROLE partner_app_test_rt LOGIN PASSWORD 'synthetic'");
+    await admin.query("GRANT partner_runtime TO partner_app_test_rt");
     process.env.PARTNER_DATABASE_URL = RUNTIME;
     process.env.PARTNER_ADMIN_DATABASE_URL = ADMIN;
     process.env.PARTNER_MFA_ENC_KEY = "0".repeat(64);
@@ -159,7 +168,7 @@ async function seedMintVaultTables(): Promise<void> {
     if (server) await new Promise<void>((r) => server.close(() => r()));
     const { closePartnerPools } = await import("../server/partner/db");
     await closePartnerPools();
-    await admin?.query("DROP ROLE IF EXISTS partner_app_test").catch(() => {});
+    await admin?.query("DROP ROLE IF EXISTS partner_app_test_rt").catch(() => {});
     await admin?.end().catch(() => {});
   });
 
