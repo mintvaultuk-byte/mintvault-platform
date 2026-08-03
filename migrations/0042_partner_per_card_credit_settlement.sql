@@ -254,21 +254,35 @@ BEGIN
     RETURN;
   END IF;
 
-  -- A released/expired entitlement with a pre-arrival destination leaves that destination
-  -- non-gradable. One hold per destination, anchored to the first reservation.
+  /**
+   * A released/expired entitlement with a pre-arrival destination leaves that destination
+   * non-gradable, so it must be held pending authorised recovery.
+   *
+   * ONE HOLD PER CARD (0043 re-keys the active-hold unique index to
+   * (destination_submission_id, reservation_id) to permit this). Anchoring all N cards to the
+   * first reservation made an N-card recovery unrepresentable: recovery links each hold to its
+   * replacement, and settlement requires EVERY released predecessor to carry such a link, so N-1
+   * of them could never be authorised and the submission could never be graded again.
+   *
+   * The destination GATE is unchanged — every guard asks whether ANY unreleased hold exists for
+   * the destination, which is equally true for one hold or N.
+   */
   IF v_destination_count = 1 AND v_active_count > 0 THEN
-    SELECT h.id, h.reservation_id INTO v_hold
-      FROM public.partner_submission_credit_holds h
-     WHERE h.destination_submission_id = v_destination.destination_submission_id
-       AND h.released_at IS NULL;
-    IF NOT FOUND THEN
-      INSERT INTO public.partner_submission_credit_holds
-        (tenant_id, partner_submission_id, destination_submission_id, reservation_id,
-         connector_record_id, connector_import_id, reason_code)
-      VALUES
-        (p_tenant_id, p_partner_submission_id, v_destination.destination_submission_id, v_anchor_id,
-         p_connector_id, v_destination.connector_import_id, 'connector_terminal_credit_release');
-    END IF;
+    INSERT INTO public.partner_submission_credit_holds
+      (tenant_id, partner_submission_id, destination_submission_id, reservation_id,
+       connector_record_id, connector_import_id, reason_code)
+    SELECT p_tenant_id, p_partner_submission_id, v_destination.destination_submission_id, r.id,
+           p_connector_id, v_destination.connector_import_id, 'connector_terminal_credit_release'
+      FROM public.partner_credit_reservations r
+     WHERE r.tenant_id = p_tenant_id AND r.source = 'portal'
+       AND r.submission_reference = p_partner_submission_id::text
+       AND r.status = 'active'
+       -- Idempotent: a replay must not attempt a second unreleased hold for the same reservation
+       -- (0043's uq_..._active_reservation would reject it outright).
+       AND NOT EXISTS (
+         SELECT 1 FROM public.partner_submission_credit_holds h
+          WHERE h.reservation_id = r.id AND h.released_at IS NULL
+       );
   END IF;
 
   IF v_active_count = 0 THEN

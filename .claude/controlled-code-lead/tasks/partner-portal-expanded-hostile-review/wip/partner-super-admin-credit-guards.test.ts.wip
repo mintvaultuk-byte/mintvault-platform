@@ -1,0 +1,466 @@
+/**
+ * SUPER ADMIN MANUAL CREDIT ADJUSTMENT — guard tests over the REAL HTTP route and a real
+ * PostgreSQL cluster.
+ *
+ * WHY THIS FILE EXISTS: the Codex pass ENABLED manual Super Admin credit adjustment and, in the
+ * same changeset, DELETED the two guard blocks that had prevented it
+ * (tests/partner-dashboard-admin-ui.test.ts: "page is read-only over the credit ledger" and
+ * "does not present a manual credit adjustment control"), replacing them with their inverse. The
+ * owner has since confirmed manual adjustments ARE intended — so the correct response is not to
+ * restore a prohibition, but to restore *protection*: every constraint the feature must honour,
+ * asserted against the real route rather than by grepping the page source for "useMutation".
+ *
+ * Everything here drives POST /api/super-admin/partner-dashboard/partners/:id/credits/adjust
+ * through Express with a real session cookie, against real wallet/ledger/reservation tables.
+ * Nothing is mocked and nothing is asserted by reading source text.
+ */
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Client } from "pg";
+import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
+import { migratorUrlFrom, provisionRealisticRoles } from "./helpers/partner-realistic-db";
+import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
+
+const SUPER_EMAIL = "super@mintvault.test";
+const PLAIN_ADMIN_EMAIL = "plain-admin@mintvault.test";
+
+let cluster: DisposablePostgres17;
+let admin: Client;
+let server: Server | undefined;
+let base: string;
+let superCookie: string;
+let plainCookie: string;
+let wallet: typeof import("../server/partner/partner-wallet-service");
+let creditReservations: typeof import("../server/partner/partner-credit-reservation-service");
+let closePartnerPools: (() => Promise<void>) | undefined;
+let sequence = 0;
+
+const adminActor = { actorUserId: null, actorEmail: SUPER_EMAIL };
+
+async function seedMintVaultTables(): Promise<void> {
+  // requireAdmin loads the admin user through the real storage layer, so this stub must carry the
+  // columns shared/schema.ts declares — a minimal id/email table makes Drizzle throw and every
+  // request 500s before authorisation is even evaluated.
+  await admin.query(`CREATE TABLE users (
+    id varchar primary key default gen_random_uuid(), email varchar unique,
+    first_name varchar, last_name varchar, profile_image_url varchar,
+    role varchar(20) not null default 'customer', deleted_at timestamptz,
+    created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+    password_hash text, display_name text,
+    email_verified boolean not null default false, email_verified_at timestamptz,
+    last_login_at timestamptz, last_login_ip text,
+    failed_login_count integer not null default 0, locked_until timestamptz,
+    last_failed_login_at timestamptz, credential_version integer not null default 1,
+    admin_passphrase_hash text, pin_hash text, pin_set_at timestamptz,
+    pin_failed_count integer not null default 0, pin_locked_until timestamptz
+  )`);
+  await admin.query(`CREATE TABLE submissions (
+    id serial primary key, user_id varchar, status varchar(30) not null default 'draft',
+    tracking_number text not null unique, deleted_at timestamptz
+  )`);
+  await admin.query("CREATE TABLE submission_items (id serial primary key, submission_id integer not null)");
+  await admin.query(`CREATE TABLE audit_log (
+    id serial primary key, entity_type text not null, entity_id text not null, action text not null,
+    admin_user text, details jsonb, created_at timestamptz not null default now()
+  )`);
+  for (const t of ["users", "submissions", "submission_items", "audit_log"]) {
+    await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
+  }
+  // requireAdmin resolves ADMIN_EMAIL and compares credential_version against the session.
+  await admin.query(
+    "INSERT INTO users (email, role, credential_version) VALUES ($1,'admin',1) ON CONFLICT (email) DO NOTHING",
+    [process.env.ADMIN_EMAIL]
+  );
+}
+
+async function makeTenant(label: string): Promise<string> {
+  const id = (
+    await admin.query<{ id: string }>(
+      "INSERT INTO partner_organisations (legal_name,status) VALUES ($1,'ACTIVE') RETURNING id",
+      [`SA ${label} ${++sequence}`]
+    )
+  ).rows[0].id;
+  await admin.query(
+    "INSERT INTO partner_locations (tenant_id,partner_id,name,status) VALUES ($1,$1,$2,'ACTIVE')",
+    [id, `SA ${label} HQ`]
+  );
+  await wallet.ensureWallet(adminActor, id);
+  return id;
+}
+
+async function adjust(cookie: string | null, tenantId: string, body: unknown) {
+  const res = await fetch(`${base}/api/super-admin/partner-dashboard/partners/${tenantId}/credits/adjust`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(cookie ? { cookie } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  let json: unknown = null;
+  try {
+    json = await res.json();
+  } catch {
+    /* non-JSON error bodies are fine; status is what matters */
+  }
+  return { status: res.status, body: json as Record<string, unknown> | null };
+}
+
+async function ledgerRows(tenantId: string) {
+  const r = await admin.query<{
+    amount: string;
+    reason: string;
+    actor_email: string;
+    actor_type: string;
+    idempotency_key: string;
+    tenant_id: string;
+    entry_type: string;
+  }>(
+    `SELECT amount::text, reason, actor_email, actor_type, idempotency_key, tenant_id, entry_type
+       FROM partner_credit_ledger WHERE tenant_id=$1 ORDER BY created_at, id`,
+    [tenantId]
+  );
+  return r.rows;
+}
+
+describe("Super Admin manual credit adjustment — real route, real PostgreSQL", () => {
+  beforeAll(async () => {
+    cluster = await startPostgres17("partner-super-admin-credit-guards");
+    admin = new Client({ connectionString: cluster.url });
+    await admin.connect();
+    process.env.ADMIN_EMAIL = SUPER_EMAIL;
+    await provisionRealisticRoles(admin);
+    await seedMintVaultTables();
+    const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
+    await migrator.connect();
+    try {
+      await applyMigrations(
+        migrator,
+        listMigrationFiles().filter((f) => f.number < 19)
+      );
+    } finally {
+      await migrator.end();
+    }
+
+    process.env.MINTVAULT_DATABASE_URL = cluster.url;
+    delete process.env.PARTNER_ADMIN_DATABASE_URL;
+    delete process.env.PARTNER_DATABASE_URL;
+    process.env.SESSION_SECRET = "synthetic-test-session-secret-not-committed";
+    process.env.SUPER_ADMIN_EMAILS = SUPER_EMAIL;
+    process.env.ADMIN_EMAIL = SUPER_EMAIL;
+
+    wallet = await import("../server/partner/partner-wallet-service");
+    creditReservations = await import("../server/partner/partner-credit-reservation-service");
+    closePartnerPools = (await import("../server/partner/db")).closePartnerPools;
+
+    const express = (await import("express")).default;
+    const session = (await import("express-session")).default;
+    const { registerPartnerDashboardRoutes } = await import("../server/partner/dashboard-routes");
+
+    const app = express();
+    app.set("trust proxy", 1);
+    app.use(express.json());
+    app.use(
+      session({
+        name: "mv.sid",
+        secret: process.env.SESSION_SECRET,
+        resave: false,
+        saveUninitialized: false,
+        cookie: { httpOnly: true, sameSite: "lax" },
+      })
+    );
+    // Stamps the same session shape the real login+PIN flow produces. `email` decides whether the
+    // session is Super Admin, because requireSuperAdmin tests adminEmail against SUPER_ADMIN_EMAILS.
+    app.post("/__test/login", (req, res) => {
+      const s = req.session as unknown as Record<string, unknown>;
+      s.isAdmin = true;
+      s.adminEmail = String(req.query.email);
+      s.authUserId = `user-${String(req.query.email)}`;
+      s.credentialVersion = 1;
+      s.authenticatedAt = Date.now();
+      req.session.save(() => res.json({ ok: true }));
+    });
+    registerPartnerDashboardRoutes(app);
+
+    await new Promise<void>((r) => {
+      server = app.listen(0, () => r());
+    });
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    const su = await fetch(`${base}/__test/login?email=${encodeURIComponent(SUPER_EMAIL)}`, { method: "POST" });
+    superCookie = (su.headers.get("set-cookie") ?? "").split(";")[0];
+    const pa = await fetch(`${base}/__test/login?email=${encodeURIComponent(PLAIN_ADMIN_EMAIL)}`, { method: "POST" });
+    plainCookie = (pa.headers.get("set-cookie") ?? "").split(";")[0];
+    expect(superCookie).toContain("mv.sid");
+    expect(plainCookie).toContain("mv.sid");
+  }, 120_000);
+
+  afterAll(async () => {
+    await new Promise<void>((r) => server?.close(() => r()));
+    await closePartnerPools?.().catch(() => {});
+    await admin?.end().catch(() => {});
+    await cluster?.stop().catch(() => {});
+    delete process.env.SUPER_ADMIN_EMAILS;
+  });
+
+  // 1 --------------------------------------------------------------------------------------
+  it("1: a Super Admin positive adjustment succeeds and appends ONE ledger row", async () => {
+    const tenantId = await makeTenant("positive");
+    const res = await adjust(superCookie, tenantId, {
+      operation: "add",
+      quantity: 7,
+      reason: "goodwill credit",
+      idempotencyKey: "sa-add-1",
+    });
+    expect(res.status).toBe(200);
+    const rows = await ledgerRows(tenantId);
+    expect(rows).toHaveLength(1);
+    expect(Number(rows[0].amount)).toBe(7);
+    expect((await creditReservations.getCreditPosition(tenantId)).availableBalance).toBe(7);
+  });
+
+  // 2 --------------------------------------------------------------------------------------
+  it("2: an ORDINARY admin is refused with 403 and writes nothing", async () => {
+    const tenantId = await makeTenant("plain-admin");
+    const res = await adjust(plainCookie, tenantId, {
+      operation: "add",
+      quantity: 5,
+      reason: "should not happen",
+      idempotencyKey: "sa-plain-1",
+    });
+    expect(res.status).toBe(403);
+    expect(await ledgerRows(tenantId)).toHaveLength(0);
+  });
+
+  // 3 --------------------------------------------------------------------------------------
+  it("3: an unauthenticated caller (e.g. a partner owner) never reaches the route", async () => {
+    const tenantId = await makeTenant("anon");
+    const res = await adjust(null, tenantId, {
+      operation: "add",
+      quantity: 5,
+      reason: "should not happen",
+      idempotencyKey: "sa-anon-1",
+    });
+    expect([401, 403]).toContain(res.status);
+    expect(await ledgerRows(tenantId)).toHaveLength(0);
+  });
+
+  // 4 --------------------------------------------------------------------------------------
+  it.each([[""], ["   "], [undefined]])("4: a missing/blank reason (%p) is refused", async (reason) => {
+    const tenantId = await makeTenant("no-reason");
+    const res = await adjust(superCookie, tenantId, {
+      operation: "add",
+      quantity: 3,
+      ...(reason === undefined ? {} : { reason }),
+      idempotencyKey: `sa-noreason-${String(reason)}`,
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    expect(await ledgerRows(tenantId)).toHaveLength(0);
+  });
+
+  // 5 --------------------------------------------------------------------------------------
+  it("5: a missing idempotency key is refused", async () => {
+    const tenantId = await makeTenant("no-key");
+    const res = await adjust(superCookie, tenantId, {
+      operation: "add",
+      quantity: 3,
+      reason: "no key supplied",
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    expect(await ledgerRows(tenantId)).toHaveLength(0);
+  });
+
+  // 6 --------------------------------------------------------------------------------------
+  it("6: a duplicate idempotency key creates NO duplicate ledger entry", async () => {
+    const tenantId = await makeTenant("dup-key");
+    const body = { operation: "add", quantity: 4, reason: "retry safe", idempotencyKey: "sa-dup-1" };
+    const first = await adjust(superCookie, tenantId, body);
+    const second = await adjust(superCookie, tenantId, body);
+    expect(first.status).toBe(200);
+    expect(second.status).toBeLessThan(500);
+    const rows = await ledgerRows(tenantId);
+    expect(rows).toHaveLength(1);
+    expect(Number(rows[0].amount)).toBe(4);
+    expect((await creditReservations.getCreditPosition(tenantId)).availableBalance).toBe(4);
+  });
+
+  // 7 --------------------------------------------------------------------------------------
+  it("7: a negative adjustment cannot breach RESERVED obligations", async () => {
+    const tenantId = await makeTenant("reserved");
+    await adjust(superCookie, tenantId, {
+      operation: "add",
+      quantity: 5,
+      reason: "seed",
+      idempotencyKey: "sa-res-seed",
+    });
+    // Reserve 4 of the 5 credits, leaving 1 available.
+    for (let i = 1; i <= 4; i += 1) {
+      await creditReservations.reserveCredit(adminActor, {
+        tenantId,
+        cardReference: `sa-res-card-${i}`,
+        submissionReference: "sa-res-sub",
+        expiresAt: new Date(Date.now() + 86_400_000),
+        idempotencyKey: `sa-res-key-${i}`,
+        source: "admin",
+        reason: "hold",
+        actorType: "admin",
+      });
+    }
+    const before = await creditReservations.getCreditPosition(tenantId);
+    expect(before.activeReserved).toBe(4);
+    expect(before.availableBalance).toBe(1);
+
+    // Removing 3 would leave a ledger balance of 2 against 4 active reservations.
+    const res = await adjust(superCookie, tenantId, {
+      operation: "remove",
+      quantity: 3,
+      reason: "over-removal attempt",
+      idempotencyKey: "sa-res-remove",
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    const after = await creditReservations.getCreditPosition(tenantId);
+    expect(after.ledgerBalance).toBe(5);
+    expect(after.activeReserved).toBe(4);
+    expect(after.availableBalance).toBe(1);
+
+    // Removing exactly the available 1 is permitted.
+    const ok = await adjust(superCookie, tenantId, {
+      operation: "remove",
+      quantity: 1,
+      reason: "within available",
+      idempotencyKey: "sa-res-remove-ok",
+    });
+    expect(ok.status).toBe(200);
+    expect((await creditReservations.getCreditPosition(tenantId)).availableBalance).toBe(0);
+  });
+
+  // 8 --------------------------------------------------------------------------------------
+  it("8: actor, tenant, reason and idempotency key all persist on the ledger row", async () => {
+    const tenantId = await makeTenant("attribution");
+    await adjust(superCookie, tenantId, {
+      operation: "add",
+      quantity: 2,
+      reason: "attribution check",
+      idempotencyKey: "sa-attr-1",
+    });
+    const rows = await ledgerRows(tenantId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      reason: "attribution check",
+      actor_email: SUPER_EMAIL,
+      actor_type: "admin",
+      idempotency_key: "sa-attr-1",
+      tenant_id: tenantId,
+    });
+    // The actor must come from the SESSION, never the request body.
+    const forged = await adjust(superCookie, tenantId, {
+      operation: "add",
+      quantity: 1,
+      reason: "forged actor",
+      idempotencyKey: "sa-attr-forged",
+      actorEmail: "attacker@example.test",
+      actorUserId: "00000000-0000-4000-8000-00000000dead",
+    });
+    expect(forged.status).toBe(200);
+    const after = await ledgerRows(tenantId);
+    expect(after.every((r) => r.actor_email === SUPER_EMAIL)).toBe(true);
+    expect(after.some((r) => r.actor_email === "attacker@example.test")).toBe(false);
+  });
+
+  // 9 --------------------------------------------------------------------------------------
+  it("9: a ledger row cannot be UPDATEd or DELETEd, even by the table owner", async () => {
+    const tenantId = await makeTenant("append-only");
+    await adjust(superCookie, tenantId, {
+      operation: "add",
+      quantity: 6,
+      reason: "immutability check",
+      idempotencyKey: "sa-immutable-1",
+    });
+    await expect(
+      admin.query("UPDATE partner_credit_ledger SET amount = 999 WHERE tenant_id=$1", [tenantId])
+    ).rejects.toMatchObject({ code: "23001" });
+    await expect(
+      admin.query("DELETE FROM partner_credit_ledger WHERE tenant_id=$1", [tenantId])
+    ).rejects.toMatchObject({ code: "23001" });
+    await expect(admin.query("TRUNCATE partner_credit_ledger")).rejects.toMatchObject({ code: "23001" });
+    const rows = await ledgerRows(tenantId);
+    expect(Number(rows[0].amount)).toBe(6);
+  });
+
+  // 10 -------------------------------------------------------------------------------------
+  it("10: no wallet balance column exists, so no balance can be directly mutated", async () => {
+    const tenantId = await makeTenant("derived");
+    await adjust(superCookie, tenantId, {
+      operation: "add",
+      quantity: 9,
+      reason: "derived check",
+      idempotencyKey: "sa-derived-1",
+    });
+    const columns = await admin.query<{ column_name: string }>(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_name='partner_wallets' AND column_name ~* 'balance|credits|amount'`
+    );
+    expect(columns.rows).toEqual([]);
+    const position = await creditReservations.getCreditPosition(tenantId);
+    const ledgerSum = (await ledgerRows(tenantId)).reduce((n, r) => n + Number(r.amount), 0);
+    expect(position.ledgerBalance).toBe(ledgerSum);
+    expect(position.ledgerBalance).toBe(9);
+  });
+
+  // 11 -------------------------------------------------------------------------------------
+  it("11: an adjustment is scoped to the tenant in the path and cannot touch another tenant", async () => {
+    const tenantA = await makeTenant("scope-a");
+    const tenantB = await makeTenant("scope-b");
+    await adjust(superCookie, tenantA, {
+      operation: "add",
+      quantity: 8,
+      reason: "tenant A only",
+      idempotencyKey: "sa-scope-a",
+    });
+    expect(await ledgerRows(tenantB)).toHaveLength(0);
+    expect((await creditReservations.getCreditPosition(tenantB)).ledgerBalance).toBe(0);
+
+    // A body-supplied tenantId must not redirect the write away from the path tenant.
+    await adjust(superCookie, tenantA, {
+      operation: "add",
+      quantity: 3,
+      reason: "body tenant override attempt",
+      idempotencyKey: "sa-scope-override",
+      tenantId: tenantB,
+      partnerId: tenantB,
+    });
+    expect(await ledgerRows(tenantB)).toHaveLength(0);
+    expect((await creditReservations.getCreditPosition(tenantA)).ledgerBalance).toBe(11);
+  });
+
+  // 12 -------------------------------------------------------------------------------------
+  it("12: an unknown tenant is refused and creates no wallet or ledger row", async () => {
+    const ghost = "00000000-0000-4000-8000-0000000000ff";
+    const res = await adjust(superCookie, ghost, {
+      operation: "add",
+      quantity: 5,
+      reason: "ghost tenant",
+      idempotencyKey: "sa-ghost-1",
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    const rows = await admin.query("SELECT 1 FROM partner_credit_ledger WHERE tenant_id=$1", [ghost]);
+    expect(rows.rowCount).toBe(0);
+  });
+
+  it("12b: a malformed quantity is refused rather than coerced", async () => {
+    const tenantId = await makeTenant("bad-qty");
+    for (const quantity of [0, -1, 1.5, "5", null]) {
+      const res = await adjust(superCookie, tenantId, {
+        operation: "add",
+        quantity,
+        reason: "malformed quantity",
+        idempotencyKey: `sa-badqty-${String(quantity)}`,
+      });
+      expect(`${String(quantity)}=>${res.status >= 400 && res.status < 500}`).toBe(`${String(quantity)}=>true`);
+    }
+    expect(await ledgerRows(tenantId)).toHaveLength(0);
+  });
+});

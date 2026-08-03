@@ -477,13 +477,32 @@ async function lockDestinationForPartnerCancellation(
   return { ...row, ...locked.rows[0] };
 }
 
-async function createDestinationCreditHold(
+/**
+ * Create ONE HOLD PER RELEASED RESERVATION on the destination.
+ *
+ * PER-CARD (owner directive, 2026-08-03). A hold records "this specific card's credit was released
+ * and owes a replacement", so an N-card cancellation must leave N holds, not one.
+ *
+ * WHY THE SINGLE HOLD WAS A DEFECT, not merely a simplification: recovery links a released hold to
+ * its replacement reservation via `recovery_reservation_id`, and
+ * findReservationsForPartnerSubmission requires EVERY historical reservation to be authorised by
+ * such a link before it will let a submission settle. With one hold covering N released
+ * reservations, only ONE predecessor could ever be authorised; the other N-1 permanently failed
+ * "settled credit reservation with no authorised replacement", so a recovered multi-card
+ * submission could never be graded — it failed closed forever.
+ *
+ * Migration 0043 re-keys the active-hold unique index to (destination_submission_id,
+ * reservation_id) to permit exactly this, and adds a partial unique index on reservation_id so one
+ * reservation can still never carry two unreleased holds. The destination GATE is unchanged: every
+ * guard asks "does ANY unreleased hold exist for this destination?", which is equally true for N.
+ */
+async function createDestinationCreditHolds(
   client: pg.PoolClient,
   destination: { id: number; tracking_number: string },
   params: {
     tenantId: string;
     partnerSubmissionId: string;
-    reservationId: string;
+    reservationIds: string[];
     connectorId?: string | null;
     connectorImportId?: string | null;
     actorUserId?: string | null;
@@ -499,47 +518,56 @@ async function createDestinationCreditHold(
       FOR UPDATE`,
     [destination.id]
   );
-  if (existing.rowCount === 1) {
-    if (existing.rows[0].reservation_id !== params.reservationId) {
+  const held = new Set(existing.rows.map((row) => row.reservation_id));
+
+  // An unreleased hold on this destination for a reservation OUTSIDE this submission's set means
+  // the destination is already blocked by something else and must not be quietly extended.
+  const expected = new Set(params.reservationIds);
+  for (const row of existing.rows) {
+    if (!expected.has(row.reservation_id)) {
       throw new PartnerSubmissionCreditLifecycleError(
         "Partner destination has a conflicting active credit hold and requires reconciliation.",
         "reservation_link_inconsistent"
       );
     }
-    return;
   }
-  await client.query(
-    `INSERT INTO partner_submission_credit_holds
-       (tenant_id, partner_submission_id, destination_submission_id, reservation_id,
-        connector_record_id, connector_import_id, reason_code, blocked_by_user_id, blocked_by_email)
-     VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::uuid,$7,$8::uuid,$9)`,
-    [
-      params.tenantId,
-      params.partnerSubmissionId,
-      destination.id,
-      params.reservationId,
-      params.connectorId ?? null,
-      params.connectorImportId ?? null,
-      params.reasonCode,
-      params.actorUserId ?? null,
-      params.actorEmail ?? null,
-    ]
-  );
-  await auditAccountingException(
-    client,
-    destination,
-    "credit_hold",
-    "destination_credit_hold_created",
-    {
-      tenant_id: params.tenantId,
-      partner_submission_id: params.partnerSubmissionId,
-      reservation_id: params.reservationId,
-      connector_id: params.connectorId ?? null,
-      connector_import_id: params.connectorImportId ?? null,
-      reason_code: params.reasonCode,
-    },
-    "destination_credit_hold"
-  );
+
+  for (const reservationId of params.reservationIds) {
+    if (held.has(reservationId)) continue; // idempotent replay of the same cancellation
+    await client.query(
+      `INSERT INTO partner_submission_credit_holds
+         (tenant_id, partner_submission_id, destination_submission_id, reservation_id,
+          connector_record_id, connector_import_id, reason_code, blocked_by_user_id, blocked_by_email)
+       VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::uuid,$7,$8::uuid,$9)`,
+      [
+        params.tenantId,
+        params.partnerSubmissionId,
+        destination.id,
+        reservationId,
+        params.connectorId ?? null,
+        params.connectorImportId ?? null,
+        params.reasonCode,
+        params.actorUserId ?? null,
+        params.actorEmail ?? null,
+      ]
+    );
+    await auditAccountingException(
+      client,
+      destination,
+      "credit_hold",
+      "destination_credit_hold_created",
+      {
+        tenant_id: params.tenantId,
+        partner_submission_id: params.partnerSubmissionId,
+        reservation_id: reservationId,
+        connector_id: params.connectorId ?? null,
+        connector_import_id: params.connectorImportId ?? null,
+        reason_code: params.reasonCode,
+      },
+      "destination_credit_hold",
+      reservationId
+    );
+  }
 }
 
 /** Releases a reservation from the authenticated Partner cancellation path in the caller's transaction. */
@@ -607,7 +635,7 @@ export async function releasePartnerReservationForPartnerCancellation(
         "A Partner submission cannot be cancelled after MintVault has received the cards."
       );
     }
-    await createDestinationCreditHold(
+    await createDestinationCreditHolds(
       client,
       {
         id: row.destination_submission_id,
@@ -616,7 +644,9 @@ export async function releasePartnerReservationForPartnerCancellation(
       {
         tenantId: params.tenantId,
         partnerSubmissionId: params.partnerSubmissionId,
-        reservationId: reservation.id,
+        // ONE HOLD PER CARD. Anchoring all N cards to reservations[0] is what made an N-card
+        // recovery unrepresentable and therefore permanently unsettleable.
+        reservationIds: reservations.map((row) => row.id),
         connectorId: row.connector_id,
         connectorImportId: row.connector_import_id,
         actorUserId: params.actorUserId,
@@ -691,7 +721,14 @@ async function auditAccountingException(
   status: string,
   code: string,
   details: Record<string, unknown>,
-  eventType: "settlement_exception" | "destination_credit_hold" | "destination_credit_recovery" = "settlement_exception"
+  eventType: "settlement_exception" | "destination_credit_hold" | "destination_credit_recovery" = "settlement_exception",
+  /**
+   * Extra discriminator for the idempotency key. Under the per-card model a single submission
+   * produces N hold and N recovery events, and without this they would all share one key —
+   * `ON CONFLICT (idempotency_key) DO NOTHING` would then silently keep only the FIRST, so the
+   * audit trail would record one event for an N-card action and could never reconcile to N.
+   */
+  keyDiscriminator: string | null = null
 ): Promise<void> {
   const partnerSubmissionId = typeof details.partner_submission_id === "string" ? details.partner_submission_id : null;
   const tenantId = typeof details.tenant_id === "string" ? details.tenant_id : null;
@@ -726,7 +763,8 @@ async function auditAccountingException(
       typeof details.reservation_id === "string" ? details.reservation_id : null,
       eventType,
       code,
-      `g6d-${eventType}:${destination.id}:${status}:${code}:${partnerSubmissionId ?? "none"}`,
+      `g6d-${eventType}:${destination.id}:${status}:${code}:${partnerSubmissionId ?? "none"}` +
+        (keyDiscriminator ? `:${keyDiscriminator}` : ""),
       JSON.stringify({ destination_submission_id: destination.id, requested_status: status, ...details }),
     ]
   );
@@ -1052,8 +1090,17 @@ export async function recoverPartnerDestinationCreditHold(params: {
   actorEmail: string | null;
   idempotencyKey: string;
   reason: string;
-}): Promise<{ destinationSubmissionId: number; reservationId: string; alreadyRecovered: boolean }> {
+}): Promise<{
+  destinationSubmissionId: number;
+  reservationId: string;
+  reservationIds: string[];
+  recoveredCount: number;
+  alreadyRecovered: boolean;
+}> {
   return withPartnerAdminTransaction(async (client) => {
+    // TENANT SCOPE. Every statement below is additionally predicated on tenant_id, and the GUC is
+    // transaction-local, so a cross-tenant submission id simply resolves to no holds and is refused
+    // by the "no hold exists" path rather than recovering another tenant's credit.
     await client.query("SELECT set_config('app.tenant_id', $1, true)", [params.tenantId]);
     if ((await assertPartnerCreditLifecycleReady(client)) === "legacy_missing_credit_schema") {
       throw new PartnerSubmissionCreditLifecycleError(
@@ -1061,36 +1108,78 @@ export async function recoverPartnerDestinationCreditHold(params: {
         "credit_schema_incomplete"
       );
     }
+
+    /**
+     * RECOVER EVERY HELD CARD, NOT THE MOST RECENT ONE.
+     *
+     * This previously took `ORDER BY created_at DESC LIMIT 1` and produced exactly one replacement
+     * reservation. Under the per-card model an N-card cancellation leaves N holds, so that
+     * recovered 1 of N credits: the submission then held 1 live reservation against N card units
+     * and settlement refused forever with `reservation_count_mismatch`, while the other N-1
+     * predecessors were never authorised at all.
+     *
+     * The whole set is locked up front, so a concurrent recovery of the same submission blocks
+     * here rather than interleaving and half-recovering it.
+     */
     const holds = await client.query<DestinationHoldRow>(
       `SELECT id, tenant_id, partner_submission_id, destination_submission_id, reservation_id,
               released_at, recovery_reservation_id, recovery_idempotency_key
          FROM partner_submission_credit_holds
-        WHERE tenant_id=$1 AND partner_submission_id=$2
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1
+        WHERE tenant_id=$1 AND partner_submission_id=$2 AND released_at IS NULL
+        ORDER BY created_at ASC, id ASC
         FOR UPDATE`,
       [params.tenantId, params.partnerSubmissionId]
     );
-    const hold = holds.rows[0];
-    if (!hold) {
-      throw new PartnerSubmissionCreditLifecycleError(
-        "No Partner credit hold exists for this submission.",
-        "reservation_link_inconsistent"
+
+    /** Per-hold idempotency key. The recovery-key unique index is (tenant_id, key), so each hold
+     *  needs its own; deriving it from the caller's key keeps one retry idempotent across all N. */
+    const keyFor = (reservationId: string) => `${params.idempotencyKey}:${reservationId}`;
+
+    if (holds.rows.length === 0) {
+      // Either nothing was ever held, or this is a REPLAY of a completed recovery. A replay is
+      // identified by holds already released under keys derived from this same idempotency key.
+      const replay = await client.query<{
+        destination_submission_id: number;
+        recovery_reservation_id: string | null;
+      }>(
+        `SELECT destination_submission_id, recovery_reservation_id
+           FROM partner_submission_credit_holds
+          WHERE tenant_id=$1 AND partner_submission_id=$2
+            AND recovery_idempotency_key LIKE $3
+          ORDER BY created_at ASC, id ASC`,
+        [params.tenantId, params.partnerSubmissionId, `${params.idempotencyKey}:%`]
       );
-    }
-    if (hold.released_at) {
-      if (hold.recovery_idempotency_key === params.idempotencyKey && hold.recovery_reservation_id) {
+      if (replay.rows.length > 0 && replay.rows.every((r) => r.recovery_reservation_id)) {
+        const ids = replay.rows.map((r) => r.recovery_reservation_id as string);
         return {
-          destinationSubmissionId: hold.destination_submission_id,
-          reservationId: hold.recovery_reservation_id,
+          destinationSubmissionId: replay.rows[0].destination_submission_id,
+          reservationId: ids[0],
+          reservationIds: ids,
+          recoveredCount: ids.length,
           alreadyRecovered: true,
         };
       }
+      const anyHold = await client.query(
+        "SELECT 1 FROM partner_submission_credit_holds WHERE tenant_id=$1 AND partner_submission_id=$2 LIMIT 1",
+        [params.tenantId, params.partnerSubmissionId]
+      );
       throw new PartnerSubmissionCreditLifecycleError(
-        "This Partner destination credit hold has already been recovered.",
+        anyHold.rowCount === 1
+          ? "This Partner destination credit hold has already been recovered."
+          : "No Partner credit hold exists for this submission.",
         "reservation_link_inconsistent"
       );
     }
+
+    // Every hold must name the same destination, or the submission's linkage is corrupt.
+    const destinationIds = new Set(holds.rows.map((h) => h.destination_submission_id));
+    if (destinationIds.size !== 1) {
+      throw new PartnerSubmissionCreditLifecycleError(
+        "Partner credit recovery linkage is inconsistent and requires reconciliation.",
+        "reservation_link_inconsistent"
+      );
+    }
+    const destinationSubmissionId = holds.rows[0].destination_submission_id;
 
     const source = await client.query<{ location_id: string | null }>(
       `SELECT location_id FROM partner_submissions
@@ -1099,90 +1188,144 @@ export async function recoverPartnerDestinationCreditHold(params: {
       [params.partnerSubmissionId, params.tenantId]
     );
     const destination = await client.query<{ id: number; tracking_number: string; deleted_at: string | null }>(
-      `SELECT id, tracking_number, deleted_at FROM submissions
-        WHERE id=$1
-        FOR UPDATE`,
-      [hold.destination_submission_id]
+      "SELECT id, tracking_number, deleted_at FROM submissions WHERE id=$1 FOR UPDATE",
+      [destinationSubmissionId]
     );
-    const releasedReservation = await client.query<{
-      id: string;
-      status: string;
-      location_id: string | null;
-      card_reference: string;
-      external_ref: string | null;
-    }>(
-      `SELECT id, status, location_id, card_reference, external_ref
-         FROM partner_credit_reservations
-        WHERE id=$1 AND tenant_id=$2
-        FOR KEY SHARE`,
-      [hold.reservation_id, params.tenantId]
-    );
-    if (
-      source.rowCount !== 1 ||
-      destination.rowCount !== 1 ||
-      destination.rows[0].deleted_at != null ||
-      releasedReservation.rowCount !== 1 ||
-      !isReleaseTerminal(releasedReservation.rows[0].status) ||
-      releasedReservation.rows[0].location_id !== source.rows[0].location_id
-    ) {
+    if (source.rowCount !== 1 || destination.rowCount !== 1 || destination.rows[0].deleted_at != null) {
       throw new PartnerSubmissionCreditLifecycleError(
         "Partner credit recovery linkage is inconsistent and requires reconciliation.",
         "reservation_link_inconsistent"
       );
     }
 
-    const replacement = await reserveCreditInTransaction(
-      client,
-      { actorUserId: params.actorUserId, actorEmail: params.actorEmail },
-      {
-        tenantId: params.tenantId,
-        locationId: source.rows[0].location_id,
-        cardReference: releasedReservation.rows[0].card_reference,
-        submissionReference: params.partnerSubmissionId,
-        expiresAt: new Date(Date.now() + PARTNER_SUBMISSION_CREDIT_TTL_MS),
-        idempotencyKey: `g6d-recovery:${params.idempotencyKey}`,
-        source: "portal",
-        reason: "Authorised recovery re-reserved Partner grading credit.",
-        actorType: "admin",
-        externalRef: releasedReservation.rows[0].external_ref,
-        metadata: {
-          destination_submission_id: hold.destination_submission_id,
-          prior_reservation_id: hold.reservation_id,
-          recovery_reason: params.reason,
-        },
+    /**
+     * Validate EVERY predecessor before creating ANY replacement. Recovery is all-or-nothing:
+     * validating and replacing card-by-card would leave a partially recovered submission behind
+     * if card 17 of 20 turned out to be inconsistent. Everything below shares the caller's
+     * transaction, so a throw at any point rolls the whole recovery back.
+     */
+    const predecessors: Array<{ holdId: string; id: string; card_reference: string; external_ref: string | null }> = [];
+    for (const hold of holds.rows) {
+      const released = await client.query<{
+        id: string;
+        status: string;
+        location_id: string | null;
+        card_reference: string;
+        external_ref: string | null;
+      }>(
+        `SELECT id, status, location_id, card_reference, external_ref
+           FROM partner_credit_reservations
+          WHERE id=$1 AND tenant_id=$2
+          FOR KEY SHARE`,
+        [hold.reservation_id, params.tenantId]
+      );
+      if (
+        released.rowCount !== 1 ||
+        !isReleaseTerminal(released.rows[0].status) ||
+        released.rows[0].location_id !== source.rows[0].location_id
+      ) {
+        throw new PartnerSubmissionCreditLifecycleError(
+          "Partner credit recovery linkage is inconsistent and requires reconciliation.",
+          "reservation_link_inconsistent"
+        );
       }
-    );
-    if (!isActive(replacement.reservation.status)) {
+      predecessors.push({
+        holdId: hold.id,
+        id: released.rows[0].id,
+        card_reference: released.rows[0].card_reference,
+        external_ref: released.rows[0].external_ref,
+      });
+    }
+
+    // Card references must be distinct across the set, or two cards would collapse onto one
+    // replacement and the recovered submission would silently be short a credit.
+    if (new Set(predecessors.map((p) => p.card_reference)).size !== predecessors.length) {
       throw new PartnerSubmissionCreditLifecycleError(
-        "Authorised recovery did not create an active Partner credit reservation.",
-        "credit_settlement_required"
+        "Partner credit recovery linkage is inconsistent and requires reconciliation.",
+        "reservation_link_inconsistent"
       );
     }
-    await client.query(
-      `UPDATE partner_submission_credit_holds
-          SET released_at=now(), recovered_by_user_id=$2::uuid, recovered_by_email=$3,
-              recovery_reservation_id=$4::uuid, recovery_idempotency_key=$5
-        WHERE id=$1 AND released_at IS NULL`,
-      [hold.id, params.actorUserId, params.actorEmail, replacement.reservation.id, params.idempotencyKey]
-    );
-    await auditAccountingException(
-      client,
-      destination.rows[0],
-      "credit_recovery",
-      "destination_credit_hold_recovered",
-      {
-        tenant_id: params.tenantId,
-        partner_submission_id: params.partnerSubmissionId,
-        reservation_id: replacement.reservation.id,
-        prior_reservation_id: hold.reservation_id,
-        recovery_reason: params.reason,
-      },
-      "destination_credit_recovery"
-    );
+
+    const replacementIds: string[] = [];
+    let allAlreadyApplied = true;
+    for (const predecessor of predecessors) {
+      const replacement = await reserveCreditInTransaction(
+        client,
+        { actorUserId: params.actorUserId, actorEmail: params.actorEmail },
+        {
+          tenantId: params.tenantId,
+          locationId: source.rows[0].location_id,
+          // DETERMINISTIC PER-CARD REFERENCE: the replacement inherits its predecessor's card
+          // reference, so credits stay one-per-card and reconcile against partner_submission_cards.
+          cardReference: predecessor.card_reference,
+          submissionReference: params.partnerSubmissionId,
+          expiresAt: new Date(Date.now() + PARTNER_SUBMISSION_CREDIT_TTL_MS),
+          idempotencyKey: `g6d-recovery:${keyFor(predecessor.id)}`,
+          source: "portal",
+          reason: "Authorised recovery re-reserved Partner grading credit.",
+          actorType: "admin",
+          externalRef: predecessor.external_ref,
+          metadata: {
+            destination_submission_id: destinationSubmissionId,
+            prior_reservation_id: predecessor.id,
+            recovery_reason: params.reason,
+          },
+        }
+      );
+      if (!isActive(replacement.reservation.status)) {
+        throw new PartnerSubmissionCreditLifecycleError(
+          "Authorised recovery did not create an active Partner credit reservation.",
+          "credit_settlement_required"
+        );
+      }
+      if (!replacement.alreadyApplied) allAlreadyApplied = false;
+      replacementIds.push(replacement.reservation.id);
+
+      const updated = await client.query(
+        `UPDATE partner_submission_credit_holds
+            SET released_at=now(), recovered_by_user_id=$2::uuid, recovered_by_email=$3,
+                recovery_reservation_id=$4::uuid, recovery_idempotency_key=$5
+          WHERE id=$1 AND released_at IS NULL`,
+        [
+          predecessor.holdId,
+          params.actorUserId,
+          params.actorEmail,
+          replacement.reservation.id,
+          keyFor(predecessor.id),
+        ]
+      );
+      if (updated.rowCount !== 1) {
+        // Lost a race for this hold despite FOR UPDATE: refuse rather than leave a replacement
+        // reservation with no hold linking it to its predecessor.
+        throw new PartnerSubmissionCreditLifecycleError(
+          "Partner credit recovery linkage is inconsistent and requires reconciliation.",
+          "reservation_link_inconsistent"
+        );
+      }
+
+      await auditAccountingException(
+        client,
+        destination.rows[0],
+        "credit_recovery",
+        "destination_credit_hold_recovered",
+        {
+          tenant_id: params.tenantId,
+          partner_submission_id: params.partnerSubmissionId,
+          reservation_id: replacement.reservation.id,
+          prior_reservation_id: predecessor.id,
+          recovery_reason: params.reason,
+        },
+        "destination_credit_recovery",
+        predecessor.id
+      );
+    }
+
     return {
-      destinationSubmissionId: hold.destination_submission_id,
-      reservationId: replacement.reservation.id,
-      alreadyRecovered: replacement.alreadyApplied,
+      destinationSubmissionId,
+      reservationId: replacementIds[0], // anchor, for callers that report a single id
+      reservationIds: replacementIds,
+      recoveredCount: replacementIds.length,
+      alreadyRecovered: allAlreadyApplied,
     };
   });
 }
