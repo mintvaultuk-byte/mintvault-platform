@@ -1,8 +1,8 @@
--- Rollback for 0027_partner_submission_credit_lifecycle.sql. NOT a numbered migration.
+-- Rollback for 0041_partner_submission_credit_lifecycle.sql. NOT a numbered migration.
 --
 -- Owner-controlled recovery only. Do not use this to repair an edited applied
 -- migration checksum: first obtain owner approval, preserve evidence, execute
--- this rollback, then have the owner reconcile the 0019 journal row before a
+-- this rollback, then have the owner reconcile the 0041 journal row before a
 -- corrected controlled deployment. Never automate journal deletion.
 BEGIN;
 
@@ -16,13 +16,13 @@ BEGIN
          FROM schema_migrations
         WHERE status = 'applied'
           AND filename ~ '^[0-9]+_'
-          AND substring(filename FROM '^([0-9]+)_')::integer > 19
+          AND substring(filename FROM '^([0-9]+)_')::integer > 41
      ) THEN
-    RAISE EXCEPTION 'cannot roll back 0019 while a later numbered migration is applied';
+    RAISE EXCEPTION 'cannot roll back 0041 while a later numbered migration is applied';
   END IF;
   IF to_regclass('public.partner_submission_credit_holds') IS NOT NULL
      AND EXISTS (SELECT 1 FROM partner_submission_credit_holds WHERE released_at IS NULL) THEN
-    RAISE EXCEPTION 'cannot roll back 0019 while active Partner destination credit holds exist';
+    RAISE EXCEPTION 'cannot roll back 0041 while active Partner destination credit holds exist';
   END IF;
 END$$;
 
@@ -109,13 +109,13 @@ BEGIN
   DROP ROLE partner_credit_lifecycle_definer;
 END$$;
 
--- The numbered runner will re-apply 0019 only after the owner-approved
+-- The numbered runner will re-apply 0041 only after the owner-approved
 -- remediation described above. This deletion is intentionally the final
 -- rollback operation, after all privileged objects are gone.
 DO $$
 BEGIN
   IF to_regclass('public.schema_migrations') IS NOT NULL THEN
-    DELETE FROM schema_migrations WHERE filename = '0027_partner_submission_credit_lifecycle.sql';
+    DELETE FROM schema_migrations WHERE filename = '0041_partner_submission_credit_lifecycle.sql';
   END IF;
 END$$;
 

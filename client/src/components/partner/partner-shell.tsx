@@ -24,8 +24,10 @@ import {
   ShieldCheck,
   LogOut,
   PlusCircle,
+  Bell,
 } from "lucide-react";
 import { useState } from "react";
+import "@/styles/partner-portal.css";
 
 interface NavItem {
   href: string;
@@ -40,7 +42,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/partner/submissions", label: "Submissions", icon: FileText, permission: "partner.orders.view" },
   { href: "/partner/users", label: "Users", icon: Users, permission: "partner.users.view" },
   { href: "/partner/locations", label: "Locations", icon: MapPin, permission: "partner.location.view" },
-  { href: "/partner/billing", label: "Billing", icon: CreditCard, permission: "partner.credits.view" },
+  { href: "/partner/billing", label: "Credits & Billing", icon: CreditCard, permission: "partner.credits.view" },
   { href: "/partner/help", label: "Help", icon: HelpCircle },
   { href: "/partner/security", label: "Security & Account", icon: ShieldCheck },
 ];
@@ -63,7 +65,7 @@ export function PartnerShell({ children }: { children: ReactNode }) {
   const visibleItems = NAV_ITEMS.filter((item) => !item.permission || hasPermission(item.permission));
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
+    <div className="partner-portal min-h-screen bg-background text-foreground flex flex-col">
       <a
         href="#partner-main"
         className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:p-3 focus:bg-primary focus:text-primary-foreground"
@@ -71,16 +73,27 @@ export function PartnerShell({ children }: { children: ReactNode }) {
         Skip to main content
       </a>
 
-      <header className="border-b bg-card sticky top-0 z-40">
+      <header className="partner-portal__header border-b bg-card sticky top-0 z-40">
         <div className="flex items-center justify-between px-4 py-3 max-w-7xl mx-auto">
-          <div className="flex items-center gap-4 min-w-0">
-            <span className="font-bold text-lg tracking-tight" data-testid="text-partner-brand">
-              MintVault Partner
-            </span>
+          <div className="flex items-center gap-3 min-w-0">
+            <img className="partner-portal__logo" src="/brand/logo.png" alt="" aria-hidden="true" />
+            <div className="min-w-0 leading-tight">
+              <span className="partner-portal__brand block text-lg" data-testid="text-partner-brand">
+                MintVault Partner
+              </span>
+              <span className="partner-portal__eyebrow block truncate" data-testid="text-partner-shop-header">
+                {session?.tradingName || session?.organisationName || "Partner Portal"}
+              </span>
+            </div>
             {session?.mfaPassed && <LocationSwitcher wrapperClassName="hidden md:flex" />}
           </div>
 
           <div className="hidden md:flex items-center gap-2">
+            {session?.mfaPassed && (
+              <Button variant="ghost" size="icon" aria-label="Notifications: no new alerts" title="No new alerts">
+                <Bell className="h-4 w-4" aria-hidden="true" />
+              </Button>
+            )}
             {session?.mfaPassed && (
               <Link href="/partner/submissions/new">
                 <Button size="sm" data-testid="button-new-submission-header">
@@ -99,7 +112,7 @@ export function PartnerShell({ children }: { children: ReactNode }) {
 
           <button
             type="button"
-            className="md:hidden p-2"
+            className="md:hidden p-3 min-h-11 min-w-11"
             aria-label={mobileOpen ? "Close menu" : "Open menu"}
             aria-expanded={mobileOpen}
             data-testid="button-mobile-menu-toggle"
@@ -114,7 +127,10 @@ export function PartnerShell({ children }: { children: ReactNode }) {
         </div>
 
         {mobileOpen && (
-          <nav aria-label="Partner navigation (mobile)" className="md:hidden border-t bg-card">
+          <nav
+            aria-label="Partner navigation (mobile)"
+            className="partner-portal__mobile-nav md:hidden border-t bg-card"
+          >
             {session?.mfaPassed && (
               <div className="px-3 pt-3">
                 <span className="text-xs font-medium text-muted-foreground" id="mobile-location-label">
@@ -132,7 +148,7 @@ export function PartnerShell({ children }: { children: ReactNode }) {
                     href={item.href}
                     onClick={() => setMobileOpen(false)}
                     data-testid={`link-mobile-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
-                    className="flex items-center gap-3 px-3 py-3 rounded-md hover:bg-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                    className="partner-portal__nav-link flex items-center gap-3 px-3 py-3"
                   >
                     <item.icon className="h-5 w-5" aria-hidden="true" />
                     {item.label}
@@ -159,31 +175,39 @@ export function PartnerShell({ children }: { children: ReactNode }) {
 
       <div className="flex flex-1 max-w-7xl mx-auto w-full">
         {session?.mfaPassed && (
-          <nav aria-label="Partner navigation" className="hidden md:block w-56 shrink-0 border-r p-4">
-            <ul className="space-y-1">
-              {visibleItems.map((item) => {
-                const active = location.startsWith(item.href);
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      data-testid={`link-nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
-                      aria-current={active ? "page" : undefined}
-                      className={`flex items-center gap-3 px-3 py-2 rounded-md text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring ${
-                        active ? "bg-primary/10 text-primary font-medium" : "hover:bg-accent"
-                      }`}
-                    >
-                      <item.icon className="h-4 w-4" aria-hidden="true" />
-                      {item.label}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
+          <nav
+            aria-label="Partner navigation"
+            className="partner-portal__sidebar hidden md:block w-60 shrink-0 border-r"
+          >
+            <div className="partner-portal__identity p-4">
+              <p className="text-sm font-semibold truncate">{session.tradingName || session.organisationName}</p>
+              <p className="text-xs text-muted-foreground truncate">{session.displayName}</p>
+              <p className="text-xs text-primary mt-1">{session.role || "Partner user"}</p>
+            </div>
+            <div className="p-4">
+              <ul className="space-y-1">
+                {visibleItems.map((item) => {
+                  const active = location.startsWith(item.href);
+                  return (
+                    <li key={item.href}>
+                      <Link
+                        href={item.href}
+                        data-testid={`link-nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}
+                        aria-current={active ? "page" : undefined}
+                        className="partner-portal__nav-link flex items-center gap-3 px-3 py-2 text-sm"
+                      >
+                        <item.icon className="h-4 w-4" aria-hidden="true" />
+                        {item.label}
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
           </nav>
         )}
 
-        <main id="partner-main" className="flex-1 p-4 md:p-8 min-w-0">
+        <main id="partner-main" className="partner-portal__main flex-1 p-4 md:p-8 min-w-0">
           {children}
         </main>
       </div>

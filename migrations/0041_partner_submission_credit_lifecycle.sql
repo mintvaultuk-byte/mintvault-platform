@@ -1,8 +1,8 @@
--- 0027_partner_submission_credit_lifecycle.sql
+-- 0041_partner_submission_credit_lifecycle.sql
 -- Partner Network G6D: submission-credit lifecycle integration.
 --
 -- Prerequisites: connector imports plus the complete 0016/0017 accounting
--- model. Deploy 0016, 0017 and 0019 as one controlled set: a partial set is a
+-- model. Deploy 0016, 0017 and 0041 as one controlled set: a partial set is a
 -- hard readiness failure, never a generic grading fallback. The connector
 -- runtime has no direct credit-table capability; it only EXECUTEs the narrow
 -- release function below.
@@ -31,7 +31,7 @@ BEGIN
      OR to_regclass('public.partner_connector_imports') IS NULL
      OR to_regclass('public.partner_submissions') IS NULL
      OR to_regclass('public.submissions') IS NULL THEN
-    RAISE EXCEPTION '0027_partner_submission_credit_lifecycle requires the complete connector-import and 0016/0017 credit migration set';
+    RAISE EXCEPTION '0041_partner_submission_credit_lifecycle requires the complete connector-import and 0016/0017 credit migration set';
   END IF;
 END$$;
 
@@ -49,7 +49,7 @@ BEGIN
         NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
     EXCEPTION WHEN insufficient_privilege THEN
       RAISE EXCEPTION
-        'partner_credit_lifecycle_definer is absent and must be provisioned as NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS before applying 0019';
+        'partner_credit_lifecycle_definer is absent and must be provisioned as NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS before applying 0041';
     END;
   ELSE
     BEGIN
@@ -386,7 +386,7 @@ BEGIN
       EXECUTE format('GRANT partner_credit_lifecycle_definer TO %I', current_user);
     EXCEPTION WHEN insufficient_privilege THEN
       RAISE EXCEPTION
-        '0019 ownership transfer must run as the deployment owner so its temporary partner_credit_lifecycle_definer membership can be revoked atomically';
+        '0041 ownership transfer must run as the deployment owner so its temporary partner_credit_lifecycle_definer membership can be revoked atomically';
     END;
   END IF;
 END$$;
@@ -660,7 +660,7 @@ BEGIN
        AND member.rolname = current_user
   ) THEN
     RAISE EXCEPTION
-      '0019 must not leave migration user % as a member of partner_credit_lifecycle_definer (session user: %)',
+      '0041 must not leave migration user % as a member of partner_credit_lifecycle_definer (session user: %)',
       current_user,
       session_user;
   END IF;

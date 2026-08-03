@@ -54,6 +54,12 @@ import {
   mfaDisable,
   verifyActiveTotpNoReplay,
 } from "./mfa-service";
+import {
+  getPartnerCreditView,
+  getPartnerPortalContext,
+  listOwnPartnerSessions,
+  revokeOwnPartnerSession,
+} from "./portal-view-service";
 
 function sendPartnerTeamError(res: import("express").Response, err: unknown): void {
   const g5 = toG5Error(err);
@@ -248,7 +254,7 @@ export function partnerApiRouter(): Router {
   });
 
   // ---- session ----
-  r.get("/session", (req, res) => {
+  r.get("/session", async (req, res) => {
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
@@ -259,15 +265,55 @@ export function partnerApiRouter(): Router {
       res.json({ mfaPassed: false, mfaRequired: true });
       return;
     }
-    // no secrets — principal summary only
-    res.json({
-      userId: req.partner.userId,
-      tenantId: req.partner.tenantId,
-      locationId: req.partner.locationId,
-      mfaPassed: req.partner.mfaPassed,
-      viewOnly: req.partner.viewOnly,
-      permissions: [...req.partner.permissions],
-    });
+    try {
+      const context = await getPartnerPortalContext(req.partner);
+      // no secrets — principal and shop-facing identity summary only
+      res.json({
+        userId: req.partner.userId,
+        tenantId: req.partner.tenantId,
+        locationId: req.partner.locationId,
+        mfaPassed: req.partner.mfaPassed,
+        viewOnly: req.partner.viewOnly,
+        permissions: [...req.partner.permissions],
+        ...context,
+      });
+    } catch {
+      res.status(503).json({ error: { code: "portal_context_unavailable", message: "Shop details are unavailable." } });
+    }
+  });
+
+  r.get("/credits", requirePartnerCapability("partner.credits.view"), async (req, res) => {
+    try {
+      res.json(await getPartnerCreditView(req.partner!));
+    } catch (err) {
+      console.error("[partner credits] projection failed:", (err as Error).message);
+      res
+        .status(500)
+        .json({ error: { code: "credit_view_unavailable", message: "Credit information is unavailable." } });
+    }
+  });
+
+  r.get("/sessions", requirePartnerAuth, async (req, res) => {
+    try {
+      res.json({ sessions: await listOwnPartnerSessions(req.partner!) });
+    } catch (err) {
+      console.error("[partner sessions] list failed:", (err as Error).message);
+      res.status(500).json({ error: { code: "session_view_unavailable", message: "Sessions are unavailable." } });
+    }
+  });
+
+  r.post("/sessions/:id/revoke", requirePartnerAuth, async (req, res) => {
+    try {
+      const revoked = await revokeOwnPartnerSession(req.partner!, String(req.params.id));
+      if (!revoked) {
+        res.status(404).json({ error: { code: "session_not_found", message: "Session not found." } });
+        return;
+      }
+      res.json({ ok: true, current: String(req.params.id) === req.partner!.sessionId });
+    } catch (err) {
+      console.error("[partner sessions] revoke failed:", (err as Error).message);
+      res.status(500).json({ error: { code: "session_revoke_failed", message: "The session could not be revoked." } });
+    }
   });
 
   // ---- permission-gated foundation reads ----

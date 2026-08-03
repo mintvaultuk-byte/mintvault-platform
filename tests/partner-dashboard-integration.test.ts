@@ -94,6 +94,7 @@ let admin: Client;
 let server: http.Server;
 let base: string;
 let cookie = "";
+let adminUserId = "";
 let closePartnerPools: () => Promise<void>;
 let resetVisibilityCache: () => void;
 
@@ -122,6 +123,22 @@ async function get(path: string): Promise<{ status: number; body: Json; text: st
     /* non-JSON body is itself the assertion material */
   }
   return { status: res.status, body, text };
+}
+
+async function post(path: string, body: unknown): Promise<{ status: number; body: Json; text: string }> {
+  const res = await fetch(`${base}${BASE}${path}`, {
+    method: "POST",
+    headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let responseBody = {} as Json;
+  try {
+    responseBody = JSON.parse(text);
+  } catch {
+    /* non-JSON body is itself the assertion material */
+  }
+  return { status: res.status, body: responseBody, text };
 }
 
 /** Point the dashboard's privileged pool at a different role and force a clean re-probe. */
@@ -179,10 +196,11 @@ async function usePartnerAdminRole(url: string): Promise<void> {
 
     const authMod = await import("../server/auth");
     const ADMIN_EMAIL = authMod.ADMIN_EMAIL;
-    await admin.query(
-      "INSERT INTO users (email, role, credential_version) VALUES ($1,'admin',1) ON CONFLICT (email) DO UPDATE SET role='admin', credential_version=1",
+    const adminUser = await admin.query<{ id: string }>(
+      "INSERT INTO users (email, role, credential_version) VALUES ($1,'admin',1) ON CONFLICT (email) DO UPDATE SET role='admin', credential_version=1 RETURNING id",
       [ADMIN_EMAIL.toLowerCase()]
     );
+    adminUserId = adminUser.rows[0].id;
 
     const dbMod = await import("../server/partner/db");
     closePartnerPools = dbMod.closePartnerPools;
@@ -209,6 +227,7 @@ async function usePartnerAdminRole(url: string): Promise<void> {
       const s = req.session as unknown as Record<string, unknown>;
       s.isAdmin = true;
       s.adminEmail = ADMIN_EMAIL;
+      s.authUserId = adminUserId;
       s.credentialVersion = 1;
       s.authenticatedAt = Date.now();
       req.session.save(() => res.json({ ok: true }));
@@ -350,6 +369,50 @@ async function usePartnerAdminRole(url: string): Promise<void> {
         expect(res.status, `${section} should be 200`).toBe(200);
         expect(res.body).toBeTruthy();
       }
+    });
+
+    it("uses the authenticated Super Admin actor for idempotent append-only credit adjustments", async () => {
+      const add = await post(`/partners/${P_CLEAN}/credits/adjust`, {
+        operation: "add",
+        quantity: 10,
+        reason: "Synthetic route audit proof",
+        idempotencyKey: "dashboard-route-add-10",
+        actorUserId: P_SECURITY,
+      });
+      expect(add.status).toBe(201);
+      expect(add.body.result).toMatchObject({ alreadyApplied: false, entry: { amount: 10 } });
+
+      const replay = await post(`/partners/${P_CLEAN}/credits/adjust`, {
+        operation: "add",
+        quantity: 10,
+        reason: "Synthetic route audit proof",
+        idempotencyKey: "dashboard-route-add-10",
+      });
+      expect(replay.status).toBe(200);
+      expect(replay.body.result).toMatchObject({ alreadyApplied: true, entry: { amount: 10 } });
+
+      const remove = await post(`/partners/${P_CLEAN}/credits/adjust`, {
+        operation: "remove",
+        quantity: 10,
+        reason: "Synthetic route balance restore",
+        idempotencyKey: "dashboard-route-remove-10",
+      });
+      expect(remove.status).toBe(201);
+
+      const ledger = await admin.query(
+        `SELECT amount::int, actor_user_id::text, actor_email, reason
+           FROM partner_credit_ledger
+          WHERE tenant_id=$1 AND idempotency_key=$2`,
+        [P_CLEAN, "dashboard-route-add-10"]
+      );
+      expect(ledger.rows).toEqual([
+        expect.objectContaining({
+          amount: 10,
+          actor_user_id: adminUserId,
+          reason: "Synthetic route audit proof",
+        }),
+      ]);
+      expect(JSON.stringify(ledger.rows)).not.toContain(P_SECURITY);
     });
 
     it("derives the expected risk level for every seeded partner", async () => {
@@ -524,7 +587,7 @@ async function usePartnerAdminRole(url: string): Promise<void> {
         expect(res.body.ledgerBalance).toBe(91);
         expect(res.body.reservedCredits).toBe(1);
         expect(res.body.availableCredits).toBe(90);
-        expect(res.body.manualAdjustmentEnabled).toBe(false);
+        expect(res.body.manualAdjustmentEnabled).toBe(true);
       });
     });
 

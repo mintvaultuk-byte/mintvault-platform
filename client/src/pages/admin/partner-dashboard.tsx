@@ -1,9 +1,9 @@
 /**
  * Super Admin Partner Master Dashboard — /admin/partners/dashboard
  *
- * Cross-tenant control centre for the partner network. READ-ONLY: this page issues no
- * mutations. Wallet balances shown here are derived server-side from the append-only credit
- * ledger and are never computed from component state.
+ * Cross-tenant control centre for the partner network. Wallet balances shown here are derived
+ * server-side from the append-only credit ledger and are never computed from component state.
+ * Its only mutation is the explicit audited credit-adjustment action in the wallet panel.
  *
  * HONESTY RULE: where the platform has no data source (partner quality rating, device
  * registry, scanner telemetry, per-partner certificate counts, credit purchases), the server
@@ -14,9 +14,9 @@
  * Renders <AdminShell> as its outermost element: the repo-wide shell guard parses App.tsx and
  * fails any /admin route whose page is not shell-unified.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "wouter";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AdminShell, Panel, StatCard, Badge, AdminButton, Chip } from "@/components/admin";
 import { apiRequest } from "@/lib/queryClient";
 import type {
@@ -726,6 +726,120 @@ function SectionState({
   return <>{children}</>;
 }
 
+function CreditAdjustmentControl({ partnerId }: { partnerId: string }) {
+  const qc = useQueryClient();
+  const [operation, setOperation] = useState<"add" | "remove">("add");
+  const [quantity, setQuantity] = useState("1");
+  const [reason, setReason] = useState("");
+  const idempotencyKey = useRef(crypto.randomUUID());
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const parsedQuantity = Number(quantity);
+      if (!Number.isSafeInteger(parsedQuantity) || parsedQuantity < 1)
+        throw new Error("Enter a whole credit quantity.");
+      if (!reason.trim()) throw new Error("Enter an adjustment reason.");
+      const response = await apiRequest("POST", `${PARTNER_DASHBOARD_BASE}/partners/${partnerId}/credits/adjust`, {
+        operation,
+        quantity: parsedQuantity,
+        reason: reason.trim(),
+        idempotencyKey: idempotencyKey.current,
+      });
+      return response.json();
+    },
+    onSuccess: async () => {
+      setReason("");
+      idempotencyKey.current = crypto.randomUUID();
+      await qc.invalidateQueries({ queryKey: dashKeys.section(partnerId, "wallet") });
+    },
+  });
+
+  return (
+    <div
+      style={{ border: "1px solid var(--admin-line)", borderRadius: 8, padding: 14, display: "grid", gap: 12 }}
+      data-testid="pd-credit-adjustment"
+    >
+      <div>
+        <strong>Credit adjustment</strong>
+        <div style={{ fontSize: 12, opacity: 0.72 }}>Appends one audited, immutable ledger entry.</div>
+      </div>
+      <div style={{ display: "flex", gap: 6 }} role="group" aria-label="Adjustment type">
+        <AdminButton
+          size="sm"
+          variant={operation === "add" ? "gold" : "ghost"}
+          aria-pressed={operation === "add"}
+          onClick={() => setOperation("add")}
+          data-testid="pd-credit-operation-add"
+        >
+          Add
+        </AdminButton>
+        <AdminButton
+          size="sm"
+          variant={operation === "remove" ? "gold" : "ghost"}
+          aria-pressed={operation === "remove"}
+          onClick={() => setOperation("remove")}
+          data-testid="pd-credit-operation-remove"
+        >
+          Remove
+        </AdminButton>
+      </div>
+      <label style={{ display: "grid", gap: 5, fontSize: 12 }}>
+        Quantity
+        <input
+          type="number"
+          min="1"
+          step="1"
+          value={quantity}
+          onChange={(event) => setQuantity(event.target.value)}
+          style={{
+            maxWidth: 180,
+            border: "1px solid var(--admin-line-hard)",
+            borderRadius: 6,
+            padding: "9px 10px",
+            background: "var(--admin-panel2)",
+          }}
+          data-testid="pd-credit-quantity"
+        />
+      </label>
+      <label style={{ display: "grid", gap: 5, fontSize: 12 }}>
+        Reason
+        <textarea
+          rows={2}
+          maxLength={2000}
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          style={{
+            border: "1px solid var(--admin-line-hard)",
+            borderRadius: 6,
+            padding: "9px 10px",
+            background: "var(--admin-panel2)",
+          }}
+          data-testid="pd-credit-reason"
+        />
+      </label>
+      {mutation.isError && (
+        <div role="alert" style={{ color: "var(--admin-red)", fontSize: 12 }}>
+          {dashboardErrorMessage(mutation.error)}
+        </div>
+      )}
+      {mutation.isSuccess && (
+        <div role="status" style={{ color: "var(--admin-green)", fontSize: 12 }}>
+          Adjustment recorded.
+        </div>
+      )}
+      <div>
+        <AdminButton
+          variant="gold"
+          disabled={mutation.isPending || !reason.trim()}
+          onClick={() => mutation.mutate()}
+          data-testid="pd-credit-submit"
+        >
+          {mutation.isPending ? "Recording…" : operation === "add" ? "Add credits" : "Remove credits"}
+        </AdminButton>
+      </div>
+    </div>
+  );
+}
+
 export function PartnerDrilldown({ partnerId, tab }: { partnerId: string; tab: DrilldownTab }) {
   const overview = useSection<PartnerOverview>(partnerId, "overview", tab === "overview");
   const staff = useSection<{ staff: PartnerStaffRow[] }>(partnerId, "staff", tab === "staff");
@@ -841,6 +955,7 @@ export function PartnerDrilldown({ partnerId, tab }: { partnerId: string; tab: D
             <div style={{ fontSize: 12 }}>
               Credit purchases: <Unavailable metric={wallet.data.purchases} />
             </div>
+            {wallet.data.manualAdjustmentEnabled && <CreditAdjustmentControl partnerId={partnerId} />}
             {wallet.data.recentLedger.length === 0 ? (
               <Empty label="No ledger entries." testId="pd-ledger-empty" />
             ) : (

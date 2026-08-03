@@ -144,7 +144,7 @@ export async function assertPartnerCreditLifecycleReady(
   const row = result.rows[0];
   if (!row?.imports || !row.exceptions || !row.holds || !row.release_function) {
     throw new PartnerSubmissionCreditLifecycleError(
-      "Partner G6D lifecycle schema is incomplete; migrations 0016, 0017 and 0019 must be applied together.",
+      "Partner G6D lifecycle schema is incomplete; migrations 0016, 0017 and 0041 must be applied together.",
       "credit_schema_incomplete"
     );
   }
@@ -626,7 +626,7 @@ async function auditAccountingException(
   );
   if (!evidenceTable.rows[0]?.relation) {
     throw new PartnerSubmissionCreditLifecycleError(
-      "Partner accounting-exception evidence is incomplete and requires migration 0019.",
+      "Partner accounting-exception evidence is incomplete and requires migration 0041.",
       "credit_schema_incomplete"
     );
   }

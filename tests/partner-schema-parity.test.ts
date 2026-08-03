@@ -104,9 +104,6 @@ describe("partner schema ↔ migration parity", () => {
       // rollback is intentionally named rollback-0026-catalogue-abbreviation-
       // unique.sql (non-numbered) so the runner never applies it.
       "0026_catalogue_abbreviation_unique.sql",
-      // G6D grants the trusted connector only the reservation-release privileges needed to
-      // settle a terminal Partner submission; it creates no mutable wallet balance.
-      "0027_partner_submission_credit_lifecycle.sql",
       // Not a partner migration — the Super Admin Project Control dashboard. It creates nine
       // additive pc_* tables and touches nothing that already exists. 0030 is deliberately clear
       // of the contested 0019–0024 band so the runner's duplicate-number hard-reject cannot fire
@@ -122,6 +119,10 @@ describe("partner schema ↔ migration parity", () => {
       // deliberately named rollback-0034-partner-rbac-seed.sql (non-numbered) so the runner never
       // applies it.
       "0034_partner_rbac_seed.sql",
+      // G6D grants the trusted connector only the reservation-release privileges needed to
+      // settle a terminal Partner submission; it creates no mutable wallet balance. It lands at
+      // 0041 because staging had already applied Project Control reconciliation migration 0040.
+      "0041_partner_submission_credit_lifecycle.sql",
     ]);
   });
 

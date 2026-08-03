@@ -289,10 +289,10 @@ describe("G6D Partner submission credit lifecycle on PostgreSQL 17.10", () => {
         files.filter((file) => file.number < 19)
       );
       // PG17 records role-membership grantors. The deployment owner must execute
-      // 0019 so it can revoke the temporary definer membership it grants itself.
+      // 0041 so it can revoke the temporary definer membership it grants itself.
       await applyMigrations(
         admin,
-        files.filter((file) => Number(file.number) === 19)
+        files.filter((file) => file.filename === "0041_partner_submission_credit_lifecycle.sql")
       );
     } finally {
       await migrator.end();

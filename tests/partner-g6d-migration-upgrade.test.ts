@@ -29,7 +29,7 @@ async function seedMintVaultTables(): Promise<void> {
   }
 }
 
-describe("G6D migration 0019 upgrade path", () => {
+describe("G6D migration 0041 upgrade path", () => {
   beforeAll(async () => {
     cluster = await startPostgres17("partner-g6d-migration-upgrade");
     admin = new Client({ connectionString: cluster.url });
@@ -39,7 +39,7 @@ describe("G6D migration 0019 upgrade path", () => {
     await applyMigrationsRealistic(admin, cluster.url, PARTNER_MIGRATIONS_WITH_G6B);
     await applyMigrationsRealistic(admin, cluster.url, [
       "0018_correction_audit_index",
-      "0027_partner_submission_credit_lifecycle",
+      "0041_partner_submission_credit_lifecycle",
     ]);
   });
 
@@ -141,7 +141,7 @@ describe("G6D migration 0019 upgrade path", () => {
     await admin.query(
       "CREATE TABLE schema_migrations (filename text primary key, status text not null, checksum text, completed_at timestamptz)"
     );
-    await admin.query("INSERT INTO schema_migrations (filename,status) VALUES ('0020_later.sql','applied')");
+    await admin.query("INSERT INTO schema_migrations (filename,status) VALUES ('0042_later.sql','applied')");
     const rollback = readFileSync("migrations/rollback-partner-submission-credit-lifecycle.sql", "utf8");
     await expect(admin.query(rollback)).rejects.toThrow("later numbered migration");
     await admin.query("ROLLBACK");

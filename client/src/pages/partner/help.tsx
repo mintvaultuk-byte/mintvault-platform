@@ -23,7 +23,7 @@ const FAQS = [
   },
   {
     q: "I can't find something I need.",
-    a: "Some features are still being built. Contact MintVault directly and we'll help.",
+    a: "Contact MintVault support with your shop name, submission reference and a short description. Never send your password or verification code.",
   },
 ];
 

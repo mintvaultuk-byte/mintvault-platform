@@ -110,7 +110,7 @@ export const PARTNER_MIGRATIONS_WITH_RBAC_SEED = [
 export const PARTNER_MIGRATIONS_WITH_G6D = [
   ...PARTNER_MIGRATIONS_WITH_G6B,
   "0018_correction_audit_index",
-  "0027_partner_submission_credit_lifecycle",
+  "0041_partner_submission_credit_lifecycle",
 ] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
@@ -165,7 +165,7 @@ export async function applyMigrationsRealistic(
   migrations: readonly string[] = PARTNER_MIGRATIONS
 ): Promise<void> {
   await provisionRealisticRoles(admin);
-  if (migrations.includes("0027_partner_submission_credit_lifecycle")) {
+  if (migrations.includes("0041_partner_submission_credit_lifecycle")) {
     // Provision the dedicated G6D definer as an elevated one-time operation,
     // then let the migration login grant and revoke its own temporary
     // membership. The post-migration assertion proves no SET ROLE path remains.
@@ -187,12 +187,18 @@ export async function applyMigrationsRealistic(
   await migrator.connect();
   try {
     for (const name of migrations) {
-      await migrator.query(migrationSql(name));
+      // PostgreSQL 17 records the grantor for role memberships. G6D temporarily grants the
+      // NOLOGIN lifecycle-definer role to the executing deployment owner so it can transfer
+      // function ownership, then revokes that membership in the same migration. The restricted
+      // pn_migrator cannot grant itself a superuser-provisioned BYPASSRLS role, so this one
+      // owner-operated migration must run through the elevated deployment connection.
+      const executor = name === "0041_partner_submission_credit_lifecycle" ? admin : migrator;
+      await executor.query(migrationSql(name));
     }
   } finally {
     await migrator.end();
   }
-  if (migrations.includes("0027_partner_submission_credit_lifecycle")) {
+  if (migrations.includes("0041_partner_submission_credit_lifecycle")) {
     const membership = await admin.query<{ count: string }>(
       `SELECT count(*)::text AS count
          FROM pg_auth_members m
@@ -203,7 +209,7 @@ export async function applyMigrationsRealistic(
       [MIGRATOR_ROLE]
     );
     if (membership.rows[0]?.count !== "0") {
-      throw new Error("0019 left pn_migrator as a member of partner_credit_lifecycle_definer.");
+      throw new Error("0041 left pn_migrator as a member of partner_credit_lifecycle_definer.");
     }
     // Model the deployed separation between a schema owner and the migration
     // login only after migrations have created the accounting tables.
