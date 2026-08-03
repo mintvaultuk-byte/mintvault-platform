@@ -48,6 +48,12 @@ describe("G6D migration 0041 upgrade path", () => {
     await cluster?.stop();
   });
 
+  it("requests explicit PostgreSQL 16+ SET permission for the temporary ownership transfer", () => {
+    const migration = readFileSync("migrations/0041_partner_submission_credit_lifecycle.sql", "utf8");
+    expect(migration).toContain("WITH SET TRUE");
+    expect(migration).toContain("pg_has_role(current_user, 'partner_credit_lifecycle_definer', 'set')");
+  });
+
   it("adds the release function, immutable exception evidence and no direct connector accounting grants", async () => {
     const state = await admin.query<{
       release_function: string | null;

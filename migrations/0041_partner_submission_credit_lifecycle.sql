@@ -381,13 +381,17 @@ GRANT SELECT, INSERT ON partner_submission_credit_holds TO partner_credit_lifecy
 -- definer; migration users retain no SET ROLE path.
 DO $$
 BEGIN
-  IF NOT pg_has_role(current_user, 'partner_credit_lifecycle_definer', 'member') THEN
+  IF NOT pg_has_role(current_user, 'partner_credit_lifecycle_definer', 'set') THEN
     BEGIN
-      EXECUTE format('GRANT partner_credit_lifecycle_definer TO %I', current_user);
+      EXECUTE format('GRANT partner_credit_lifecycle_definer TO %I WITH SET TRUE', current_user);
     EXCEPTION WHEN insufficient_privilege THEN
       RAISE EXCEPTION
         '0041 ownership transfer must run as the deployment owner so its temporary partner_credit_lifecycle_definer membership can be revoked atomically';
     END;
+  END IF;
+  IF NOT pg_has_role(current_user, 'partner_credit_lifecycle_definer', 'set') THEN
+    RAISE EXCEPTION
+      '0041 ownership transfer requires temporary SET ROLE permission for partner_credit_lifecycle_definer';
   END IF;
 END$$;
 GRANT CREATE ON SCHEMA public TO partner_credit_lifecycle_definer;
