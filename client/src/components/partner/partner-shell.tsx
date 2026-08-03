@@ -252,8 +252,17 @@ function LocationSwitcher({ wrapperClassName }: { wrapperClassName: string }) {
 
   if (!locations || locations.length === 0) return null;
 
-  // A single-location user never needs a picker — show the name plainly instead of an empty-feeling dropdown.
-  if (locations.length === 1) {
+  // A single-location user needs no picker ONCE THE SESSION IS ACTUALLY BOUND to that location —
+  // then the name is just status, and a dropdown of one would be noise.
+  //
+  // It is NOT safe to render plain text purely because the set size is 1. When location_id is still
+  // null this branch used to be an unrecoverable dead end: the submission wizard refuses to start
+  // without a location and tells the operator to "use the location switcher at the top of the
+  // page", while this component rendered a non-interactive <span> — a switcher that by construction
+  // could not switch. The server now auto-selects a sole eligible location
+  // (resolvePartnerSession → findSoleEligibleLocation), so this should be transient; falling
+  // through to the real Select keeps a working escape hatch if it is ever not.
+  if (locations.length === 1 && session?.locationId === locations[0].id) {
     return (
       <span className={`${wrapperClassName} text-sm text-muted-foreground`} data-testid="text-single-location">
         {locations[0].name}
