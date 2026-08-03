@@ -163,7 +163,7 @@ BEGIN
     FROM public.partner_credit_reservations
    WHERE tenant_id = p_tenant_id AND source = 'portal'
      AND submission_reference = p_partner_submission_id::text
-     AND status IN ('active', 'consumed');
+     AND status IN ('active', 'consumed', 'released', 'expired');
 
   IF v_live_count = 0 THEN
     -- No entitlement at all. With a destination mapping present that is corrupt; without one
@@ -195,14 +195,14 @@ BEGIN
        SELECT 1 FROM public.partner_credit_reservations r
         WHERE r.tenant_id = p_tenant_id AND r.source = 'portal'
           AND r.submission_reference = p_partner_submission_id::text
-          AND r.status IN ('active', 'consumed')
+          AND r.status IN ('active', 'consumed', 'released', 'expired')
           AND r.location_id IS DISTINCT FROM v_source.location_id
      )
      OR (
        SELECT count(DISTINCT card_reference) FROM public.partner_credit_reservations
         WHERE tenant_id = p_tenant_id AND source = 'portal'
           AND submission_reference = p_partner_submission_id::text
-          AND status IN ('active', 'consumed')
+          AND status IN ('active', 'consumed', 'released', 'expired')
      ) <> v_live_count THEN
     RETURN QUERY SELECT 'corrupt_linkage'::text, NULL::uuid;
     RETURN;
@@ -212,7 +212,7 @@ BEGIN
     FROM public.partner_credit_reservations
    WHERE tenant_id = p_tenant_id AND source = 'portal'
      AND submission_reference = p_partner_submission_id::text
-     AND status IN ('active', 'consumed')
+     AND status IN ('active', 'consumed', 'released', 'expired')
    ORDER BY created_at ASC, id ASC
    LIMIT 1;
 
@@ -221,6 +221,13 @@ BEGIN
    WHERE tenant_id = p_tenant_id AND source = 'portal'
      AND submission_reference = p_partner_submission_id::text
      AND status = 'active';
+
+  -- Mixed active/terminal sets are never an ordinary replay. They indicate a previous partial
+  -- settlement attempt or manual corruption, so refuse before writing any additional events.
+  IF v_active_count > 0 AND v_active_count <> v_live_count THEN
+    RETURN QUERY SELECT 'corrupt_linkage'::text, v_anchor_id;
+    RETURN;
+  END IF;
 
   -- A released/expired entitlement with a pre-arrival destination leaves that destination
   -- non-gradable. One hold per destination, anchored to the first reservation.
@@ -246,7 +253,7 @@ BEGIN
       SELECT id, status FROM public.partner_credit_reservations
        WHERE tenant_id = p_tenant_id AND source = 'portal'
          AND submission_reference = p_partner_submission_id::text
-         AND status IN ('active', 'consumed')
+         AND status IN ('active', 'consumed', 'released', 'expired')
     LOOP
       SELECT count(*)::integer, min(event_type)
         INTO v_terminal_event_count, v_terminal_event_type

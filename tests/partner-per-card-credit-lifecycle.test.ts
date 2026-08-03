@@ -14,9 +14,15 @@
  * The whole file is a mutation target: CARD1-CARD6 and LEDGER1-LEDGER2 must turn it red.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Client } from "pg";
-import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
-import { migratorUrlFrom, provisionRealisticRoles } from "./helpers/partner-realistic-db";
+import {
+  applyMigrationsRealistic,
+  migratorUrlFrom,
+  PARTNER_MIGRATIONS_WITH_PER_CARD,
+  provisionRealisticRoles,
+} from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 
 let cluster: DisposablePostgres17;
@@ -196,6 +202,43 @@ async function mapImportedSubmission(f: TenantFixture, partnerSubmissionId: stri
   return destination.rows[0].id;
 }
 
+async function mapTerminalConnector(f: TenantFixture, partnerSubmissionId: string, state = "ready_for_import"): Promise<string> {
+  const handoff = await admin.query<{ id: string }>(
+    "SELECT id FROM partner_submission_handoffs WHERE submission_id=$1",
+    [partnerSubmissionId]
+  );
+  const connector = await admin.query<{ id: string }>(
+    `INSERT INTO partner_connector_records (tenant_id,partner_submission_id,handoff_id,state,attempt_count)
+     VALUES ($1,$2,$3,$4,1) RETURNING id`,
+    [f.tenantId, partnerSubmissionId, handoff.rows[0].id, state]
+  );
+  return connector.rows[0].id;
+}
+
+async function callConnectorRelease(
+  f: TenantFixture,
+  connectorId: string,
+  partnerSubmissionId: string,
+  tenantOverride = f.tenantId
+) {
+  const runtimeUrl = new URL(cluster.url);
+  runtimeUrl.username = "partner_0042_release_test";
+  runtimeUrl.password = "synthetic";
+  const runtime = new Client({ connectionString: runtimeUrl.toString() });
+  await runtime.connect();
+  try {
+    await runtime.query("SELECT set_config('app.tenant_id', $1, false)", [f.tenantId]);
+    const result = await runtime.query<{ outcome: string; reservation_id: string | null }>(
+      `SELECT outcome, reservation_id
+         FROM partner_connector_release_submission_credit($1::uuid,$2::uuid,$3::uuid,$4::text)`,
+      [connectorId, tenantOverride, partnerSubmissionId, "connector_cancelled"]
+    );
+    return result.rows[0];
+  } finally {
+    await runtime.end();
+  }
+}
+
 describe("Per-card credit lifecycle (real PostgreSQL)", () => {
   beforeAll(async () => {
     cluster = await startPostgres17("partner-per-card-credit-lifecycle");
@@ -203,27 +246,11 @@ describe("Per-card credit lifecycle (real PostgreSQL)", () => {
     await admin.connect();
     await provisionRealisticRoles(admin);
     await seedMintVaultTables();
-    const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
-    await migrator.connect();
-    try {
-      const files = listMigrationFiles();
-      await applyMigrations(
-        migrator,
-        files.filter((f) => f.number < 19)
-      );
-      // 0041 then 0042 as the deployment owner (0042 replaces 0041's single-reservation
-      // connector release function with the N-reservation one).
-      await applyMigrations(
-        admin,
-        files.filter(
-          (f) =>
-            f.filename === "0041_partner_submission_credit_lifecycle.sql" ||
-            f.filename === "0042_partner_per_card_credit_settlement.sql"
-        )
-      );
-    } finally {
-      await migrator.end();
-    }
+    await applyMigrationsRealistic(admin, cluster.url, PARTNER_MIGRATIONS_WITH_PER_CARD);
+    await admin.query(`DO $$ BEGIN
+        CREATE ROLE partner_0042_release_test LOGIN PASSWORD 'synthetic' NOSUPERUSER NOBYPASSRLS;
+      EXCEPTION WHEN duplicate_object THEN NULL; END$$;`);
+    await admin.query("GRANT partner_connector_runtime TO partner_0042_release_test");
     process.env.MINTVAULT_DATABASE_URL = cluster.url;
     delete process.env.PARTNER_ADMIN_DATABASE_URL;
     delete process.env.PARTNER_DATABASE_URL;
@@ -533,6 +560,98 @@ describe("Per-card credit lifecycle (real PostgreSQL)", () => {
     expect(rows.every((r) => r.status === "consumed")).toBe(true);
     expect(rows.filter((r) => r.status === "released")).toHaveLength(0);
   });
+
+  it.each([[2], [20]])("D: direct 0042 SQL release function releases all %i active card reservations", async (cards) => {
+    const f = await createTenantFixture(`sql-release-${cards}`);
+    await addCredits(f, 30, `pc-sql-release-${cards}`);
+    const draft = await makeDraft(f, nCards(cards, `sqlr${cards}`));
+    await submissions.submitSubmission(principalFor(f), draft, `pc-sql-release-submit-${cards}`);
+    const connectorId = await mapTerminalConnector(f, draft);
+
+    const released = await callConnectorRelease(f, connectorId, draft);
+    expect(released.outcome).toBe("released");
+    expect(released.reservation_id).toMatch(/^[0-9a-f-]{36}$/);
+
+    const rows = await reservationsFor(f, draft);
+    expect(rows).toHaveLength(cards);
+    expect(rows.every((r) => r.status === "released")).toBe(true);
+    const events = await admin.query<{ n: string }>(
+      `SELECT count(*)::text AS n
+         FROM partner_credit_reservation_events e
+         JOIN partner_credit_reservations r ON r.id=e.reservation_id
+        WHERE r.tenant_id=$1 AND r.submission_reference=$2 AND e.event_type='released'`,
+      [f.tenantId, draft]
+    );
+    expect(Number(events.rows[0].n)).toBe(cards);
+
+    const replay = await callConnectorRelease(f, connectorId, draft);
+    expect(replay.outcome).toBe("already_settled");
+    expect((await reservationsFor(f, draft)).filter((r) => r.status === "released")).toHaveLength(cards);
+  });
+
+  it("D: direct 0042 SQL release fails closed for a cross-tenant call", async () => {
+    const a = await createTenantFixture("sql-cross-a");
+    const b = await createTenantFixture("sql-cross-b");
+    await addCredits(b, 5, "pc-sql-cross-b");
+    const draftB = await makeDraft(b, nCards(2, "sqlxb"));
+    await submissions.submitSubmission(principalFor(b), draftB, "pc-sql-cross-submit-b");
+    const connectorB = await mapTerminalConnector(b, draftB);
+
+    const forged = await callConnectorRelease(a, connectorB, draftB, b.tenantId);
+    expect(forged).toEqual({ outcome: "corrupt_linkage", reservation_id: null });
+    expect((await reservationsFor(b, draftB)).filter((r) => r.status === "active")).toHaveLength(2);
+  });
+
+  it("D: direct 0042 SQL release fails closed for mixed active and terminal reservation states", async () => {
+    const f = await createTenantFixture("sql-mixed");
+    await addCredits(f, 10, "pc-sql-mixed");
+    const draft = await makeDraft(f, nCards(3, "sqlmix"));
+    await submissions.submitSubmission(principalFor(f), draft, "pc-sql-mixed-submit");
+    const connectorId = await mapTerminalConnector(f, draft);
+    const rows = await reservationsFor(f, draft);
+    await creditReservations.releaseReservedCredit(adminActor, {
+      tenantId: f.tenantId,
+      reservationId: rows[0].id,
+      idempotencyKey: "pc-sql-mixed-one",
+      source: "admin",
+      reason: "mixed-state proof",
+      actorType: "admin",
+    });
+
+    const mixed = await callConnectorRelease(f, connectorId, draft);
+    expect(mixed.outcome).toBe("corrupt_linkage");
+    const after = await reservationsFor(f, draft);
+    expect(after.filter((r) => r.status === "released")).toHaveLength(1);
+    expect(after.filter((r) => r.status === "active")).toHaveLength(2);
+  });
+
+  it("D: rollback restores 0041 single-reservation behaviour, and reapply restores 0042 multi-card release", async () => {
+    const f = await createTenantFixture("rollback-reapply");
+    await addCredits(f, 20, "pc-rollback-reapply");
+    const draft = await makeDraft(f, nCards(2, "rbr"));
+    await submissions.submitSubmission(principalFor(f), draft, "pc-rollback-reapply-submit");
+    const connectorId = await mapTerminalConnector(f, draft);
+
+    const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
+    await migrator.connect();
+    try {
+      await migrator.query(
+        readFileSync(join(process.cwd(), "migrations", "rollback-0042-partner-per-card-credit-settlement.sql"), "utf8")
+      );
+      const single = await callConnectorRelease(f, connectorId, draft);
+      expect(single.outcome).toBe("corrupt_linkage");
+      expect((await reservationsFor(f, draft)).filter((r) => r.status === "active")).toHaveLength(2);
+
+      await migrator.query(
+        readFileSync(join(process.cwd(), "migrations", "0042_partner_per_card_credit_settlement.sql"), "utf8")
+      );
+      const multi = await callConnectorRelease(f, connectorId, draft);
+      expect(multi.outcome).toBe("released");
+      expect((await reservationsFor(f, draft)).filter((r) => r.status === "released")).toHaveLength(2);
+    } finally {
+      await migrator.end();
+    }
+  }, 60_000);
 
   // ---------------------------------------------------------------- E. Isolation
 
