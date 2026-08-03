@@ -21,6 +21,12 @@ import type pg from "pg";
 import { withConnectorTx, connectorQuery } from "./connector-db";
 import { resolveGlobalFlag } from "./flags";
 import { ConnectorError, toConnectorError } from "./connector-errors";
+import {
+  PartnerSubmissionCreditLifecycleError,
+  releasePartnerReservationForConnectorTerminalState,
+  type ConnectorReservationReleaseResult,
+} from "./partner-submission-credit-lifecycle";
+import { recordConnectorCreditLifecycleFailure } from "./connector-credit-lifecycle-audit";
 
 export const CONNECTOR_STATES = [
   "queued",
@@ -468,32 +474,53 @@ export async function transitionConnectorState(params: {
   }
   await assertConnectorActive();
   const { connectorId, expectedVersion, toState, eventType, claimant, tenantId } = params;
-  return guarded(() =>
-    withConnectorTx(async (client) => {
-      const { rows } = await client.query<ConnectorRow>(
-        `SELECT * FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
-        [connectorId]
-      );
-      if (rows.length === 0) throw new ConnectorError("handoff_not_found", "Connector record not found.");
-      const rec = rows[0];
-      if (tenantId && rec.tenant_id !== tenantId) {
-        throw new ConnectorError("unauthorised", "This record does not belong to the specified tenant.");
-      }
-      const fromState = rec.state as ConnectorState;
-      const legalFrom = LEGAL_TRANSITIONS[fromState] ?? [];
-      if (!legalFrom.includes(toState)) {
-        throw new ConnectorError("invalid_state_transition", `Cannot move from ${fromState} to ${toState}.`);
-      }
-      // No "&& claimant" short-circuit here — if the record IS claimed/validating, a caller MUST pass
-      // the matching claimant, not just omit the parameter to skip the check (previously an omitted
-      // claimant silently bypassed ownership verification entirely).
-      if (rec.claimed_by && (fromState === "claimed" || fromState === "validating") && claimant !== rec.claimed_by) {
-        throw new ConnectorError("stale_claim", "Only the current claimant may transition this record.");
-      }
-      const completing = toState === "rejected" || toState === "cancelled";
-      const requeuing = toState === "queued";
-      const upd = await client.query<ConnectorRow>(
-        `UPDATE partner_connector_records
+  let lifecycleTenantId: string | null = null;
+  try {
+    return await guarded(() =>
+      withConnectorTx(async (client) => {
+        const { rows } = await client.query<ConnectorRow>(
+          `SELECT * FROM partner_connector_records WHERE id = $1 FOR UPDATE`,
+          [connectorId]
+        );
+        if (rows.length === 0) throw new ConnectorError("handoff_not_found", "Connector record not found.");
+        const rec = rows[0];
+        if (tenantId && rec.tenant_id !== tenantId) {
+          throw new ConnectorError("unauthorised", "This record does not belong to the specified tenant.");
+        }
+        lifecycleTenantId = rec.tenant_id;
+        const fromState = rec.state as ConnectorState;
+        const legalFrom = LEGAL_TRANSITIONS[fromState] ?? [];
+        if (!legalFrom.includes(toState)) {
+          throw new ConnectorError("invalid_state_transition", `Cannot move from ${fromState} to ${toState}.`);
+        }
+        // No "&& claimant" short-circuit here — if the record IS claimed/validating, a caller MUST pass
+        // the matching claimant, not just omit the parameter to skip the check (previously an omitted
+        // claimant silently bypassed ownership verification entirely).
+        if (rec.claimed_by && (fromState === "claimed" || fromState === "validating") && claimant !== rec.claimed_by) {
+          throw new ConnectorError("stale_claim", "Only the current claimant may transition this record.");
+        }
+        const completing = toState === "rejected" || toState === "cancelled";
+        const requeuing = toState === "queued";
+        let creditSettlement: ConnectorReservationReleaseResult | null = null;
+        if (completing) {
+          try {
+            creditSettlement = await releasePartnerReservationForConnectorTerminalState(
+              client,
+              { id: rec.id, tenantId: rec.tenant_id, partnerSubmissionId: rec.partner_submission_id },
+              toState === "rejected" ? "connector_rejected" : "connector_cancelled"
+            );
+          } catch (err) {
+            if (err instanceof PartnerSubmissionCreditLifecycleError) {
+              throw new ConnectorError(
+                "credit_lifecycle_invariant",
+                "The terminal transition was blocked because its credit linkage requires reconciliation."
+              );
+            }
+            throw err;
+          }
+        }
+        const upd = await client.query<ConnectorRow>(
+          `UPDATE partner_connector_records
           SET state = $1, version = version + 1, updated_at = now(),
               completed_at = CASE WHEN $5::boolean THEN now() ELSE completed_at END,
               claimed_by = CASE WHEN $6::boolean THEN NULL ELSE claimed_by END,
@@ -502,22 +529,54 @@ export async function transitionConnectorState(params: {
               next_retry_at = CASE WHEN $6::boolean THEN NULL ELSE next_retry_at END
         WHERE id = $2 AND version = $3 AND state = $4
         RETURNING *`,
-        [toState, connectorId, expectedVersion, fromState, completing, requeuing]
-      );
-      if (upd.rows.length === 0) throw new ConnectorError("stale_claim", "Record changed since last read.");
-      await writeEvent(
-        client,
-        connectorId,
-        fromState,
-        toState,
-        eventType,
-        upd.rows[0].attempt_count,
-        params.metadata ?? {},
-        claimant ?? null
-      );
-      return mapRow(upd.rows[0]);
-    })
-  );
+          [toState, connectorId, expectedVersion, fromState, completing, requeuing]
+        );
+        if (upd.rows.length === 0) throw new ConnectorError("stale_claim", "Record changed since last read.");
+        await writeEvent(
+          client,
+          connectorId,
+          fromState,
+          toState,
+          eventType,
+          upd.rows[0].attempt_count,
+          {
+            ...(params.metadata ?? {}),
+            ...(creditSettlement
+              ? {
+                  credit_settlement: {
+                    outcome: creditSettlement.outcome,
+                    reservation_id: creditSettlement.reservationId,
+                  },
+                }
+              : {}),
+          },
+          claimant ?? null
+        );
+        return mapRow(upd.rows[0]);
+      })
+    );
+  } catch (err) {
+    if (err instanceof ConnectorError && err.code === "credit_lifecycle_invariant") {
+      try {
+        if (!lifecycleTenantId) throw new Error("connector tenant was not established");
+        await recordConnectorCreditLifecycleFailure({
+          connectorId,
+          tenantId: lifecycleTenantId,
+          expectedVersion,
+          actorId: claimant,
+        });
+      } catch {
+        // The original terminal transition remains blocked. A missing audit record is itself a
+        // transient operational failure, never a reason to continue the cancellation silently.
+        throw new ConnectorError(
+          "transient_database_error",
+          "The terminal transition was blocked and its reconciliation evidence could not be recorded.",
+          true
+        );
+      }
+    }
+    throw err;
+  }
 }
 
 /**

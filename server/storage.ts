@@ -779,6 +779,15 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateSubmissionStatus(id: number, status: string, extra: Record<string, any> = {}): Promise<any | undefined> {
+    // G6D: Partner-linked submissions consume their pre-reserved grading credit exactly when the
+    // established workflow reaches its grading-complete status. The helper performs BOTH the
+    // credit transition and this status update in one transaction; all other submissions continue
+    // through the unchanged storage path below.
+    if (["ready_to_return", "completed"].includes(status.toLowerCase())) {
+      const { settlePartnerCreditForDestinationStatus } = await import("./partner/partner-submission-credit-lifecycle");
+      const settled = await settlePartnerCreditForDestinationStatus(id, status, extra);
+      if (settled) return settled;
+    }
     const setParts: ReturnType<typeof sql>[] = [sql`status = ${status.toLowerCase()}`, sql`updated_at = NOW()`];
 
     if (status.toLowerCase() === "received") {

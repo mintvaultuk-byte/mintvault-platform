@@ -87,6 +87,21 @@ export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT = [
   "0032_partner_final_owner_invariant",
 ] as const;
 
+/**
+ * Partner user management + the final-owner invariant, WITH the credit lifecycle.
+ *
+ * Submit now reserves a grading credit PER CARD (server/partner/submission-service.ts), so any
+ * suite that drives a real submission through submit needs the wallet, ledger and reservation
+ * tables. Listed in NUMERIC order because applyMigrationsRealistic applies the list as given.
+ */
+export const PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS = [
+  ...PARTNER_MIGRATIONS_WITH_G6B,
+  "0018_correction_audit_index",
+  "0031_partner_user_management",
+  "0032_partner_final_owner_invariant",
+  "0041_partner_submission_credit_lifecycle",
+] as const;
+
 /** 0033 — additive audit-action precision (partner_user_mfa_reset et al). */
 export const PARTNER_MIGRATIONS_WITH_AUDIT_PRECISION = [
   ...PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
@@ -106,6 +121,26 @@ export const PARTNER_MIGRATIONS_WITH_RBAC_SEED = [
   "0034_partner_rbac_seed",
 ] as const;
 
+/** G6D — Partner submission credit reservation, consumption and release integration. */
+export const PARTNER_MIGRATIONS_WITH_G6D = [
+  ...PARTNER_MIGRATIONS_WITH_G6B,
+  "0018_correction_audit_index",
+  "0041_partner_submission_credit_lifecycle",
+] as const;
+
+/**
+ * G6D per-card settlement. 0042 replaces 0041's single-reservation connector release function
+ * with an N-reservation one, so any suite exercising multi-card submissions must use this list.
+ * 0042 requires INHERIT membership on the lifecycle definer, which the realistic harness now
+ * provides via the provider-style ADMIN grant (see applyMigrationsRealistic).
+ */
+export const PARTNER_MIGRATIONS_WITH_PER_CARD = [
+  ...PARTNER_MIGRATIONS_WITH_G6D,
+  "0042_partner_per_card_credit_settlement",
+  // 0043 re-keys the active-hold unique index per RESERVATION (so an N-card recovery can exist at
+  // all) and adds the tenant-isolation policy 0041 omitted on partner_submission_credit_holds.
+  "0043_partner_credit_hold_per_card",
+] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
 
@@ -136,6 +171,10 @@ export async function provisionRealisticRoles(admin: pg.Client): Promise<void> {
     await admin.query("ALTER SCHEMA public OWNER TO " + MIGRATOR_ROLE);
     const { rows } = await admin.query<{ db: string }>("SELECT current_database() AS db");
     await admin.query(`GRANT CREATE ON DATABASE "${rows[0].db}" TO ${MIGRATOR_ROLE}`);
+    // On Neon the project owner IS the DATABASE owner (pg_database.datdba), not merely the schema
+    // owner. definer-guard distinguishes the database owner from every other role, so the harness
+    // must reproduce that or it cannot exercise the real policy.
+    await admin.query(`ALTER DATABASE "${rows[0].db}" OWNER TO ${MIGRATOR_ROLE}`);
   } finally {
     await admin.query("SELECT pg_advisory_unlock($1)", [roleProvisionLock]).catch(() => {});
   }
@@ -159,13 +198,218 @@ export async function applyMigrationsRealistic(
   migrations: readonly string[] = PARTNER_MIGRATIONS
 ): Promise<void> {
   await provisionRealisticRoles(admin);
+  if (migrations.includes("0041_partner_submission_credit_lifecycle")) {
+    // Provision the dedicated G6D definer as an elevated one-time operation,
+    // then let the migration login grant and revoke its own temporary
+    // membership. The post-migration assertion proves no SET ROLE path remains.
+    await admin.query(
+      `DO $$ BEGIN
+         CREATE ROLE partner_credit_lifecycle_definer
+           NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
+       EXCEPTION WHEN duplicate_object THEN NULL;
+       END$$;`
+    );
+    await admin.query(
+      `DO $$ BEGIN
+         CREATE ROLE pn_credit_schema_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+       EXCEPTION WHEN duplicate_object THEN NULL;
+       END$$;`
+    );
+    /**
+     * MODEL NEON'S PROVIDER-GRANTED MEMBERSHIP ROW.
+     *
+     * WHY (hostile review, 2026-08-03): this harness previously ran 0041 as the SUPERUSER, which
+     * defeated the entire point of the file — and it hid two production defects:
+     *   1. `definer-guard.ts` rejected the ADMIN-only membership row that survives on Neon,
+     *      so credit settlement returned HTTP 409 on the real database while tests were green.
+     *   2. 0041 was neither re-runnable nor rollback-capable, because the deployment owner ends
+     *      up without INHERIT on the definer and so fails the ownership check.
+     * Neither is reachable as a superuser: a superuser passes every ownership check, and 0041's
+     * own final assertion short-circuits on `rolsuper`.
+     *
+     * On Neon, `cloud_admin` grants the project owner ADMIN OPTION on these roles. Because
+     * PostgreSQL 16+ records the GRANTOR per membership row, 0041's closing
+     * `REVOKE ADMIN OPTION FOR ... FROM current_user` cannot remove a row granted by someone
+     * else — which is exactly why the row survives in production. Granting it here from the
+     * superuser reproduces that grantor asymmetry faithfully: pn_migrator can grant itself SET
+     * (so the ownership transfer works), and its own REVOKE leaves the ADMIN row behind.
+     */
+    // ADMIN only — INHERIT and SET are explicitly FALSE. PostgreSQL 16+ otherwise defaults a role
+    // grant to SET TRUE (and INHERIT from the member's rolinherit), which would NOT be the Neon
+    // shape: there the provider row carries admin_option=true, inherit_option=false,
+    // set_option=false. Getting this wrong makes 0041's own closing assertion fire.
+    await admin.query(
+      `GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH ADMIN TRUE, INHERIT FALSE, SET FALSE`
+    );
+  }
   const migrator = new pg.Client({ connectionString: migratorUrlFrom(adminUrl) });
   await migrator.connect();
   try {
+    /**
+     * EXPLICIT HARNESS GUARD. The whole value of this helper is that migrations run as a
+     * NON-superuser, because a superuser passes every ownership check and short-circuits 0041's
+     * own closing assertion — which is how two production defects shipped green. Reintroducing a
+     * superuser executor must fail loudly HERE rather than silently weakening every downstream
+     * assertion, since several of those assertions cannot themselves detect the difference.
+     */
+    const executorRole = await migrator.query<{ rolname: string; rolsuper: boolean }>(
+      "SELECT current_user AS rolname, (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS rolsuper"
+    );
+    if (executorRole.rows[0]?.rolsuper !== false) {
+      throw new Error(
+        `applyMigrationsRealistic must execute migrations as a NON-superuser; got ` +
+          `'${executorRole.rows[0]?.rolname}' with rolsuper=${executorRole.rows[0]?.rolsuper}. ` +
+          `Running migrations as a superuser invalidates the entire realistic role-model proof.`
+      );
+    }
     for (const name of migrations) {
+      /**
+       * 0042 replaces functions OWNED BY partner_credit_lifecycle_definer, and
+       * `CREATE OR REPLACE FUNCTION` performs an ownership check via the INHERIT form of
+       * pg_has_role. 0041 deliberately revokes its own SET/INHERIT membership at the end, so
+       * after 0041 the migrator holds only the provider-style ADMIN row and CANNOT maintain
+       * those functions. That is precisely the deadlock discovered on staging.
+       *
+       * The fix is the owner-approved role repair, and the migrator can execute it itself
+       * because ADMIN OPTION is exactly the right to grant the role onward. Running the SAME
+       * statement here — no superuser involved — is the proof that the proposed staging repair
+       * is correct, sufficient and self-service. Note INHERIT only: SET is not granted, so
+       * SET ROLE into the definer remains impossible.
+       */
+      if (name === "0042_partner_per_card_credit_settlement") {
+        // SET FALSE is NOT optional. PostgreSQL 16+ defaults a role grant to SET TRUE, so
+        // `WITH INHERIT TRUE` alone would silently also confer SET ROLE into the definer.
+        await migrator.query(
+          `GRANT partner_credit_lifecycle_definer TO ${MIGRATOR_ROLE} WITH INHERIT TRUE, SET FALSE`
+        );
+      }
+      // EVERY migration — including 0041 and 0042 — runs as the NON-SUPERUSER pn_migrator.
+      // There is deliberately no executor swap here any more.
       await migrator.query(migrationSql(name));
     }
   } finally {
     await migrator.end();
   }
+  if (migrations.includes("0041_partner_submission_credit_lifecycle")) {
+    // Assert the POST-MIGRATION shape matches Neon: the ADMIN-option row survives, but the
+    // migrator retains no usable (SET/INHERIT) privilege. Asserting "no rows at all" was the
+    // superuser-only outcome and is what made this check vacuous.
+    const membership = await admin.query<{
+      admin_option: boolean;
+      inherit_option: boolean;
+      set_option: boolean;
+    }>(
+      `SELECT m.admin_option, m.inherit_option, m.set_option
+         FROM pg_auth_members m
+         JOIN pg_roles role ON role.oid=m.roleid
+         JOIN pg_roles member ON member.oid=m.member
+        WHERE role.rolname='partner_credit_lifecycle_definer'
+          AND member.rolname=$1`,
+      [MIGRATOR_ROLE]
+    );
+    if (!membership.rows.some((r) => r.admin_option === true)) {
+      throw new Error(
+        `Expected the provider-style ADMIN membership row for ${MIGRATOR_ROLE} on ` +
+          `partner_credit_lifecycle_definer to survive 0041. The harness no longer reproduces ` +
+          `Neon's grantor asymmetry, so it cannot detect the guard contradiction it exists to catch.`
+      );
+    }
+    // SET ROLE must never become possible — not even after the role repair, which grants INHERIT only.
+    if (membership.rows.some((r) => r.set_option === true)) {
+      throw new Error(
+        "pn_migrator holds SET on partner_credit_lifecycle_definer. SET ROLE into the definer " +
+          "must never be reachable from the migration login."
+      );
+    }
+    // Without the owner-approved repair, 0041 must leave NO usable (INHERIT) membership — that
+    // is the deadlock this harness now reproduces faithfully. When 0042 is in the set the repair
+    // has deliberately been applied, so INHERIT is expected.
+    const repairApplied = migrations.includes("0042_partner_per_card_credit_settlement");
+    if (!repairApplied && membership.rows.some((r) => r.inherit_option === true)) {
+      throw new Error(
+        "0041 left pn_migrator with a USABLE (INHERIT) membership of partner_credit_lifecycle_definer. " +
+          "The migration must revoke runtime capability even though the provider-granted ADMIN row survives."
+      );
+    }
+    // Model the deployed separation between a schema owner and the migration
+    // login only after migrations have created the accounting tables.
+    //
+    // The owner must be able to USE the schema its tables live in. On a managed provider the
+    // schema owner has that implicitly; here `public` is owned by pn_migrator and its ACL lists
+    // every other role in this model (partner_runtime, partner_definer,
+    // partner_connector_runtime, partner_credit_lifecycle_definer) but not this one. Without the
+    // grant the modelled separation is one that cannot exist in production — a table owner with
+    // no access to its own schema — and an INSERT into partner_credit_reservation_events fails
+    // with `permission denied for schema public` even on a superuser connection, which surfaces
+    // as an opaque HTTP 500 from the submit route.
+    await admin.query("GRANT USAGE ON SCHEMA public TO pn_credit_schema_owner");
+    for (const table of ["partner_credit_reservations", "partner_credit_reservation_events"]) {
+      await admin.query(`ALTER TABLE public.${table} OWNER TO pn_credit_schema_owner`);
+    }
+  }
+}
+
+/**
+ * Apply EVERY numbered migration in the repository to a disposable database, in the order and
+ * under the role conditions the real runner requires.
+ *
+ * Two things make this more than a one-liner, and both are load-bearing:
+ *
+ *  1. ORDER. 0041 revokes its own SET/INHERIT membership as its final act, so the repair grant
+ *     that 0042 needs must land BETWEEN 0041 and 0042. Granting it up front is silently undone.
+ *  2. allowDestructive. 0043 must DROP the single-hold-per-destination unique index so an N-card
+ *     recovery can exist at all. The runner correctly refuses destructive SQL unless the operator
+ *     opts in. Opting in is safe on a suite's OWN disposable database and still requires owner
+ *     approval anywhere real — this flag changes nothing outside this process.
+ *
+ * Extracted from tests/partner-management-migration.test.ts, which established the pattern. Any
+ * suite that applies listMigrationFiles() in full must use this, or it breaks the moment a
+ * destructive migration lands.
+ */
+export async function applyEveryMigrationRealistic(migrator: pg.Client): Promise<void> {
+  const { applyMigrations, listMigrationFiles } = await import("../../scripts/db/migrate");
+  const all = listMigrationFiles();
+  await applyMigrations(
+    migrator,
+    all.filter((f) => Number(f.number) <= 41),
+    { allowDestructive: true }
+  );
+  await migrator.query("GRANT partner_credit_lifecycle_definer TO pn_migrator WITH INHERIT TRUE, SET FALSE");
+  try {
+    await applyMigrations(migrator, all, { allowDestructive: true });
+  } finally {
+    // pg_auth_members is a CLUSTER-GLOBAL catalog, not per-database. Every caller of this helper
+    // shares one PostgreSQL 17 server in CI, so an unrevoked INHERIT membership would be visible
+    // to every other suite on that server for the rest of the job — and applyMigrationsRealistic()
+    // asserts exactly this membership is ABSENT when a suite applies 0041 without 0042. 0041's own
+    // closing REVOKE happens to clear it today because pn_migrator is its own grantor, but relying
+    // on that makes the outcome order-dependent. Revoke it explicitly instead.
+    await migrator
+      .query("REVOKE partner_credit_lifecycle_definer FROM pn_migrator")
+      .catch(() => {}); // best-effort: never mask the real failure from applyMigrations
+  }
+}
+
+/**
+ * Pin the MintVault accounting URL to this suite's OWN disposable database.
+ *
+ * server/partner/db.ts asserts that PARTNER_ADMIN_DATABASE_URL / PARTNER_DATABASE_URL /
+ * PARTNER_CONNECTOR_DATABASE_URL all name the SAME PostgreSQL database as
+ * MINTVAULT_DATABASE_URL, because G6D settles a MintVault submission status and Partner credit
+ * evidence in ONE transaction — a split would make that an unrecoverable distributed commit.
+ * That assertion is correct and must not be relaxed.
+ *
+ * The consequence for tests: a suite that pins its own partner URLs but INHERITS an unrelated
+ * MINTVAULT_DATABASE_URL from the environment trips the assertion. .github/workflows/ci.yml sets
+ * MINTVAULT_DATABASE_URL globally (the PostgreSQL 16 Vault Quest database) for the whole job,
+ * while every partner and connector suite uses its own PostgreSQL 17 database — so the mismatch
+ * appears ONLY under CI's flat run and never when a suite is run on its own. Several connector
+ * services swallow the throw and re-report it as a generic "transient_database_error", which is
+ * why the symptom looked like cross-suite contamination rather than an environment mismatch.
+ *
+ * Call this immediately after pinning the partner URLs. Production topology is the same database,
+ * so this makes the test environment match production rather than diverge from it.
+ */
+export function pinAccountingTopologyTo(url: string): void {
+  process.env.MINTVAULT_DATABASE_URL = url;
 }

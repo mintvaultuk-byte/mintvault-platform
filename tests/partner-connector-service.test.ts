@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Client } from "pg";
-import { applyMigrationsRealistic } from "./helpers/partner-realistic-db";
+import { applyMigrationsRealistic, pinAccountingTopologyTo } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_CONNECTOR_RT_ADMIN;
 const CONNECTOR_URL = process.env.PARTNER_CONNECTOR_RT_URL;
@@ -84,6 +84,9 @@ async function seedSubmissionWithHandoff(
     await admin.query("GRANT partner_runtime TO partner_app_test_conn");
 
     process.env.PARTNER_CONNECTOR_DATABASE_URL = CONNECTOR_URL;
+    // CI pins MINTVAULT_DATABASE_URL globally to a DIFFERENT database; the G6D accounting
+    // topology assertion in server/partner/db.ts then throws. Pin it to this suite's own.
+    pinAccountingTopologyTo(CONNECTOR_URL);
     // resolveGlobalFlag() (server/partner/flags.ts) reads via the SEPARATE partner_runtime pool
     // (server/partner/db.ts), not the connector pool — it must be configured too, or every flag
     // check fails closed regardless of the seeded row (which is the correct fail-closed behavior,

@@ -13,7 +13,7 @@
  */
 import { Router, type Express, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
-import { requireAdmin } from "../auth";
+import { requireAdmin, requireSuperAdmin } from "../auth";
 import {
   toG4Error,
   g4StatusFor,
@@ -193,6 +193,20 @@ export function connectorOpsRouter(): Router {
       const actor = actorOf(req);
       const reason = requireReason(req.body?.reason);
       mutationResponse(res, actor.requestId, await svc.opRequestReconciliation(actor, req.params.recordId, reason));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/records/:recordId/recover-credit", requireSuperAdmin, async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.opRecoverSubmissionCredit(actor, String(req.params.recordId), reason)
+      );
     } catch (err) {
       sendError(res, err);
     }

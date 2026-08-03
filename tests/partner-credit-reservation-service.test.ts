@@ -3,8 +3,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
-import { migratorUrlFrom, provisionRealisticRoles } from "./helpers/partner-realistic-db";
+import {
+  applyMigrationsRealistic,
+  PARTNER_MIGRATIONS_WITH_G6D,
+  provisionRealisticRoles,
+} from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 
 let cluster: DisposablePostgres17;
@@ -24,7 +27,9 @@ const rollbackSql = readFileSync(join(process.cwd(), "migrations", "rollback-par
 
 async function seedMintVaultTables(): Promise<void> {
   await admin.query("CREATE TABLE users (id varchar primary key default gen_random_uuid(), email varchar unique)");
-  await admin.query("CREATE TABLE submissions (id serial primary key, user_id varchar, tracking_number text unique)");
+  await admin.query(
+    "CREATE TABLE submissions (id serial primary key, user_id varchar, tracking_number text unique, deleted_at timestamptz)"
+  );
   await admin.query("CREATE TABLE submission_items (id serial primary key, submission_id integer not null)");
   // The complete numbered inventory also includes the Correction Mode audit index migration.
   // audit_log is application-owned legacy schema, so provide its required shape in this isolated
@@ -94,12 +99,18 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
     await admin.connect();
     await provisionRealisticRoles(admin);
     await seedMintVaultTables();
-    const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
-    await migrator.connect();
-    try {
-      await applyMigrations(migrator, listMigrationFiles());
-    } finally {
-      await migrator.end();
+    await applyMigrationsRealistic(admin, cluster.url, PARTNER_MIGRATIONS_WITH_G6D);
+    await admin.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        filename text PRIMARY KEY,
+        checksum text NOT NULL DEFAULT 'realistic-harness',
+        status text NOT NULL DEFAULT 'applied'
+      )`);
+    for (const name of PARTNER_MIGRATIONS_WITH_G6D) {
+      await admin.query(
+        "INSERT INTO schema_migrations (filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING",
+        [`${name}.sql`]
+      );
     }
     const a = await createTenant("G6B Tenant A");
     const b = await createTenant("G6B Tenant B");
@@ -720,43 +731,18 @@ describe("Partner Network G6B credit reservations on PostgreSQL 17.10", () => {
   it("refuses the G6B rollback script when a later migration or reservation evidence exists", async () => {
     await expect(admin.query(rollbackSql)).rejects.toThrow(/later migration \(0018\+\) is applied/);
     await admin.query("ROLLBACK").catch(() => {});
-    // Reach the evidence guard exactly as a correct reverse-order rollback would: 0018 is
-    // no longer journalled, while G6B's immutable lifecycle evidence remains intact.
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0018_correction_audit_index.sql'");
-    // Reverse-order rollback also clears the later print-workflow migration (≥0018),
-    // otherwise its journal row keeps the later-migration guard tripping first.
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0022_print_workflow_lifecycle.sql'");
-    // Likewise the provisional Catalogue Manager migration (also ≥0018). Number is
-    // contested across parallel branches; the coordinated release review finalises it.
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0019_catalogue_manager.sql'");
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0023_set_library_schema.sql'");
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0024_set_library_base_tables.sql'");
-    // And the catalogue persisted-code uniqueness index (also ≥0018) — index-only
-    // and additive, but its journal row still trips the later-migration guard first.
+    // Reach the evidence guard exactly as a correct reverse-order rollback would: every later
+    // numbered migration is no longer journalled, while G6B's immutable lifecycle evidence remains
+    // intact. Keep this numeric rather than naming 0018 so later additive migrations (such as G6D)
+    // do not accidentally mask the guard this regression is meant to exercise.
     await admin.query(
-      "DELETE FROM schema_migrations WHERE filename = '0026_catalogue_abbreviation_unique.sql'"
+      `DELETE FROM schema_migrations
+       WHERE CASE WHEN filename ~ '^[0-9]+_' THEN substring(filename FROM '^([0-9]+)_')::integer > 17 ELSE false END`
     );
-    // And the Project Control dashboard migration (also ≥0018). It creates only pc_* tables and
-    // has no relationship to partner credits — it is cleared purely so the later-migration guard
-    // stops tripping before the evidence guard can be reached.
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0030_project_control.sql'");
-    // Partner User Management is also a later migration in this branch; remove its
-    // journal row to keep this test focused on G6B's immutable evidence guard.
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0031_partner_user_management.sql'");
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0032_partner_final_owner_invariant.sql'");
-    // Audit-action precision (0033) is likewise a later, unrelated additive migration — it only
-    // widens a CHECK constraint on the management ledger and has no bearing on partner credits.
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0033_partner_audit_action_precision.sql'");
-    // The Partner RBAC seed (0034) is also a later migration. It only inserts reference rows into
-    // partner_roles / partner_permissions / partner_role_permissions and has no bearing whatsoever
-    // on partner credits — cleared purely so the later-migration guard stops tripping before the
-    // evidence guard this test is actually about can be reached.
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0034_partner_rbac_seed.sql'");
-    // Immutable Partner certificate origin (0035) is likewise a later, unrelated additive
-    // migration — it adds nullable snapshot columns to `certificates` and has no bearing
-    // whatsoever on partner credits. Cleared for the same reason as the rows above: so the
-    // later-migration guard stops tripping before the evidence guard this test is about.
-    await admin.query("DELETE FROM schema_migrations WHERE filename = '0035_partner_certificate_origin.sql'");
+    // NOTE (main reconciliation 2026-08-03): origin/main added a per-filename DELETE for
+    // '0035_partner_certificate_origin.sql' here. The numeric predicate above (> 17) already
+    // subsumes it and every future numbered migration, so main's line is intentionally not
+    // re-added — nothing is lost, and the guard cannot silently rot at the next migration.
     await expect(admin.query(rollbackSql)).rejects.toThrow(
       /partner_credit_reservation_events contains lifecycle evidence/
     );

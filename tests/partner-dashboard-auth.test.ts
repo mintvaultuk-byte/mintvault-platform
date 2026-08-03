@@ -55,6 +55,14 @@ async function get(path: string, headers: Record<string, string> = {}): Promise<
   return fetch(`${base}${PARTNER_DASHBOARD_BASE}${path}`, { headers });
 }
 
+async function post(path: string, body: unknown, headers: Record<string, string> = {}): Promise<Response> {
+  return fetch(`${base}${PARTNER_DASHBOARD_BASE}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+}
+
 beforeAll(async () => {
   // Imported dynamically so the env placeholder above is set before the module graph loads.
   const mod = await import("../server/partner/dashboard-routes");
@@ -92,6 +100,16 @@ const ENDPOINTS = [
 describe("every dashboard endpoint rejects an unauthenticated caller", () => {
   it.each(ENDPOINTS)("401 for %s with no session", async (path) => {
     const res = await get(path);
+    expect(res.status).toBe(401);
+  });
+
+  it("401s the Super Admin credit adjustment route before parsing a write payload", async () => {
+    const res = await post("/partners/3f2504e0-4f89-11d3-9a0c-0305e82c3301/credits/adjust", {
+      operation: "add",
+      quantity: 1,
+      reason: "must not reach handler",
+      idempotencyKey: "unauthenticated-credit-adjustment",
+    });
     expect(res.status).toBe(401);
   });
 });
@@ -135,6 +153,27 @@ describe("non-admin identities cannot reach the dashboard", () => {
 
   it("cannot be forged with headers claiming admin", async () => {
     const res = await get("/summary", { "x-admin": "true", "x-role": "admin", "x-super-admin": "true" });
+    expect(res.status).toBe(401);
+  });
+
+  it("does not promote forged tenant or Super Admin claims on the credit adjustment route", async () => {
+    const res = await post(
+      "/partners/3f2504e0-4f89-11d3-9a0c-0305e82c3301/credits/adjust",
+      {
+        operation: "add",
+        quantity: 1,
+        reason: "body cannot grant authority",
+        idempotencyKey: "forged-credit-adjustment",
+        tenantId: "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+        isAdmin: true,
+        superAdmin: true,
+      },
+      {
+        "x-admin": "true",
+        "x-role": "super-admin",
+        "x-tenant-id": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+      }
+    );
     expect(res.status).toBe(401);
   });
 

@@ -279,6 +279,13 @@ export function partnerManagementRouter(): Router {
       sendError(res, err);
     }
   });
+  r.get("/partners/:partnerId/onboarding-readiness", async (req, res) => {
+    try {
+      res.json(await svc.getPartnerOnboardingReadiness(req.params.partnerId));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
 
   // ---- MUTATIONS ----
   r.use(g5MutationRateLimit);
@@ -352,6 +359,20 @@ export function partnerManagementRouter(): Router {
         res,
         actor.requestId,
         await svc.resendPartnerInvitation(actor, req.params.partnerId, req.params.userId, reason)
+      );
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  r.post("/partners/:partnerId/users/:userId/copy-invitation-link", async (req, res) => {
+    try {
+      const actor = actorOf(req);
+      const reason = requireReason(req.body?.reason);
+      mutationResponse(
+        res,
+        actor.requestId,
+        await svc.copyPartnerInvitationLink(actor, req.params.partnerId, req.params.userId, reason)
       );
     } catch (err) {
       sendError(res, err);

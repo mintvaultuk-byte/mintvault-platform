@@ -14,7 +14,7 @@
  * (reads project explicit safe columns only). Connector runtime errors are mapped to stable G4 codes
  * via toG4Error and never leak SQL/stack text.
  */
-import { partnerAdminQuery } from "./db";
+import { partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import {
   getConnectorImport,
   getImportAttempts,
@@ -33,6 +33,12 @@ import {
   inspectConnectorConsistency,
 } from "./connector-reconciliation-service";
 import { G4RequestError } from "./connector-admin-errors";
+import {
+  partnerCreditSchemaState,
+  assertPartnerCreditLifecycleReady,
+  PartnerSubmissionCreditLifecycleError,
+  recoverPartnerDestinationCreditHold,
+} from "./partner-submission-credit-lifecycle";
 
 export interface ActorContext {
   actorUserId: string;
@@ -242,6 +248,30 @@ export async function opRequestReconciliation(actor: ActorContext, recordId: str
 }
 
 /**
+ * Controlled G6D recovery: a Super Admin creates a replacement reservation
+ * before the linked MintVault destination hold is lifted. It is intentionally
+ * record-scoped so the tenant/source tuple is server-derived, never supplied by
+ * a browser request.
+ */
+export async function opRecoverSubmissionCredit(actor: ActorContext, recordId: string, reason: string) {
+  if (!actor.idempotencyKey) {
+    throw new G4RequestError("BAD_REQUEST", "idempotencyKey is required for credit recovery.");
+  }
+  const rec = await loadRecord(recordId);
+  const recovered = await recoverPartnerDestinationCreditHold({
+    tenantId: rec.tenant_id,
+    partnerSubmissionId: rec.partner_submission_id,
+    actorUserId: actor.actorUserId,
+    actorEmail: actor.actorEmail,
+    idempotencyKey: actor.idempotencyKey,
+    reason,
+  });
+  // G6D writes immutable recovery evidence itself. Do not overload the older
+  // G4 action-type constraint with a misleading label.
+  return { result: { recovered: true, ...recovered }, alreadyCompleted: recovered.alreadyRecovered };
+}
+
+/**
  * Retry an eligible record: dispatch to the correct recovery service by mapping/record state, and
  * record the audit under the label of the service that actually ran (resume_reserved vs
  * retry_interrupted) so the append-only ledger identifies which recovery path was taken. The branch
@@ -403,12 +433,13 @@ export async function listConnectorRecords(
 
 export async function getRecordDetail(recordId: string) {
   const rec = await loadRecord(recordId);
-  const [validation, mapping, destination, attempts, consistency] = await Promise.all([
+  const [validation, mapping, destination, attempts, consistency, partnerCredit] = await Promise.all([
     getLatestValidationRun(rec.id),
     getConnectorImport(rec.id),
     getImportedDestination(rec.id),
     getImportAttempts(rec.id),
     inspectConnectorConsistency(rec.id).catch(() => null),
+    getPartnerSubmissionCreditProjection(rec.tenant_id, rec.partner_submission_id),
   ]);
   const findings = validation?.findings ?? [];
   const adminActions = await getRecordAuditHistory(recordId, 0, 50);
@@ -420,8 +451,92 @@ export async function getRecordDetail(recordId: string) {
     destination,
     attempts,
     reconciliation: consistency,
+    partnerCredit,
     adminActions: adminActions.rows,
   };
+}
+
+/**
+ * Safe, read-only G6D projection for the existing Super Admin connector detail.
+ * A missing row is intentional for pre-G6D submissions and never changes the
+ * connector lifecycle; it merely lets operators identify the automatic credit
+ * reservation associated with a Partner-created submission.
+ */
+export async function getPartnerSubmissionCreditProjection(tenantId: string, partnerSubmissionId: string) {
+  return withPartnerAdminTransaction(async (client) => {
+    try {
+      if ((await partnerCreditSchemaState(client)) === "legacy_missing_credit_schema") return null;
+      await assertPartnerCreditLifecycleReady(client);
+      await client.query("SELECT set_config('app.tenant_id', $1, true)", [tenantId]);
+    } catch (error) {
+      if (error instanceof PartnerSubmissionCreditLifecycleError && error.code === "credit_schema_incomplete") {
+        return {
+          error: "credit_schema_incomplete",
+          message:
+            "Partner credit accounting schema is incomplete and requires reconciliation before this projection can be read.",
+        };
+      }
+      throw error;
+    }
+    const conflicts = await client.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+         FROM partner_credit_reservations
+        WHERE tenant_id=$1 AND submission_reference=$2 AND source='portal'`,
+      [tenantId, partnerSubmissionId]
+    );
+    if (Number(conflicts.rows[0]?.count ?? "0") > 1) {
+      return {
+        error: "reservation_link_inconsistent",
+        message: "Partner submission has more than one authoritative credit reservation and requires reconciliation.",
+        reservationLinkConflict: true,
+      };
+    }
+    const { rows } = await client.query<{
+      reservation_id: string;
+      reservation_status: string;
+      wallet_status: string | null;
+      partner_id: string;
+      partner_legal_name: string;
+    }>(
+      `SELECT reservation.id AS reservation_id,
+              reservation.status AS reservation_status,
+              wallet.status AS wallet_status,
+              organisation.id AS partner_id,
+              organisation.legal_name AS partner_legal_name
+         FROM partner_credit_reservations reservation
+         JOIN partner_organisations organisation
+           ON organisation.id = reservation.tenant_id
+         LEFT JOIN partner_wallets wallet
+           ON wallet.tenant_id = reservation.tenant_id
+        WHERE reservation.tenant_id = $1
+          AND reservation.submission_reference = $2
+          AND reservation.source = 'portal'
+        ORDER BY reservation.created_at ASC, reservation.id ASC
+        LIMIT 1`,
+      [tenantId, partnerSubmissionId]
+    );
+    const holds = await client.query<{
+      id: string;
+      destination_submission_id: number;
+      reason_code: string;
+      created_at: string;
+      released_at: string | null;
+    }>(
+      `SELECT id, destination_submission_id, reason_code, created_at, released_at
+         FROM partner_submission_credit_holds
+        WHERE tenant_id=$1 AND partner_submission_id=$2
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1`,
+      [tenantId, partnerSubmissionId]
+    );
+    const reservation = rows[0];
+    if (!reservation && holds.rows.length === 0) return null;
+    return {
+      ...(reservation ?? {}),
+      destinationCreditHold: holds.rows[0] ?? null,
+      reservationLinkConflict: false,
+    };
+  });
 }
 
 export async function getAttemptHistory(recordId: string): Promise<ImportAttemptRecord[]> {

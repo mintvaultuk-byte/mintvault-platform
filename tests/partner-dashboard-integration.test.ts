@@ -28,7 +28,7 @@ import {
   provisionRealisticRoles,
   applyMigrationsRealistic,
   migratorUrlFrom,
-  PARTNER_MIGRATIONS_WITH_G6B,
+  PARTNER_MIGRATIONS_WITH_G6D,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN_DB = process.env.PARTNER_MANAGEMENT_RT_ADMIN;
@@ -94,6 +94,7 @@ let admin: Client;
 let server: http.Server;
 let base: string;
 let cookie = "";
+let adminUserId = "";
 let closePartnerPools: () => Promise<void>;
 let resetVisibilityCache: () => void;
 
@@ -122,6 +123,42 @@ async function get(path: string): Promise<{ status: number; body: Json; text: st
     /* non-JSON body is itself the assertion material */
   }
   return { status: res.status, body, text };
+}
+
+async function post(path: string, body: unknown): Promise<{ status: number; body: Json; text: string }> {
+  return postWithCookie(cookie, path, body);
+}
+
+async function postWithCookie(
+  sessionCookie: string,
+  path: string,
+  body: unknown
+): Promise<{ status: number; body: Json; text: string }> {
+  const res = await fetch(`${base}${BASE}${path}`, {
+    method: "POST",
+    headers: { cookie: sessionCookie, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  let responseBody = {} as Json;
+  try {
+    responseBody = JSON.parse(text);
+  } catch {
+    /* non-JSON body is itself the assertion material */
+  }
+  return { status: res.status, body: responseBody, text };
+}
+
+async function testSessionCookie(session: Record<string, unknown>): Promise<string> {
+  const res = await fetch(`${base}/__test/session`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(session),
+  });
+  expect(res.status).toBe(200);
+  const setCookie = (res.headers.get("set-cookie") ?? "").split(";")[0];
+  expect(setCookie).toContain("mv.sid");
+  return setCookie;
 }
 
 /** Point the dashboard's privileged pool at a different role and force a clean re-probe. */
@@ -172,17 +209,29 @@ async function usePartnerAdminRole(url: string): Promise<void> {
     await admin.query(
       "CREATE TABLE IF NOT EXISTS submission_items (id serial PRIMARY KEY, submission_id integer NOT NULL)"
     );
-    for (const t of ["users", "submissions", "submission_items"]) {
+    await admin.query(`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id serial PRIMARY KEY,
+        entity_type text NOT NULL,
+        entity_id text NOT NULL,
+        action text NOT NULL,
+        admin_user text,
+        details jsonb NOT NULL DEFAULT '{}'::jsonb,
+        created_at timestamptz NOT NULL DEFAULT now()
+      )`);
+    await admin.query("CREATE TABLE IF NOT EXISTS certificates (id serial PRIMARY KEY, cert_id text)");
+    for (const t of ["users", "submissions", "submission_items", "audit_log", "certificates"]) {
       await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
     }
-    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_G6B);
+    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_G6D);
 
     const authMod = await import("../server/auth");
     const ADMIN_EMAIL = authMod.ADMIN_EMAIL;
-    await admin.query(
-      "INSERT INTO users (email, role, credential_version) VALUES ($1,'admin',1) ON CONFLICT (email) DO UPDATE SET role='admin', credential_version=1",
+    const adminUser = await admin.query<{ id: string }>(
+      "INSERT INTO users (email, role, credential_version) VALUES ($1,'admin',1) ON CONFLICT (email) DO UPDATE SET role='admin', credential_version=1 RETURNING id",
       [ADMIN_EMAIL.toLowerCase()]
     );
+    adminUserId = adminUser.rows[0].id;
 
     const dbMod = await import("../server/partner/db");
     closePartnerPools = dbMod.closePartnerPools;
@@ -209,8 +258,17 @@ async function usePartnerAdminRole(url: string): Promise<void> {
       const s = req.session as unknown as Record<string, unknown>;
       s.isAdmin = true;
       s.adminEmail = ADMIN_EMAIL;
+      s.authUserId = adminUserId;
       s.credentialVersion = 1;
       s.authenticatedAt = Date.now();
+      req.session.save(() => res.json({ ok: true }));
+    });
+    app.post("/__test/session", (req, res) => {
+      const s = req.session as unknown as Record<string, unknown>;
+      for (const key of Object.keys(s)) {
+        if (key !== "cookie") delete s[key];
+      }
+      Object.assign(s, req.body);
       req.session.save(() => res.json({ ok: true }));
     });
     registerPartnerDashboardRoutes(app);
@@ -350,6 +408,212 @@ async function usePartnerAdminRole(url: string): Promise<void> {
         expect(res.status, `${section} should be 200`).toBe(200);
         expect(res.body).toBeTruthy();
       }
+    });
+
+    it("uses the authenticated Super Admin actor for idempotent append-only credit adjustments", async () => {
+      const add = await post(`/partners/${P_CLEAN}/credits/adjust`, {
+        operation: "add",
+        quantity: 10,
+        reason: "Synthetic route audit proof",
+        idempotencyKey: "dashboard-route-add-10",
+        actorUserId: P_SECURITY,
+      });
+      expect(add.status).toBe(201);
+      expect(add.body.result).toMatchObject({ alreadyApplied: false, entry: { amount: 10 } });
+
+      const replay = await post(`/partners/${P_CLEAN}/credits/adjust`, {
+        operation: "add",
+        quantity: 10,
+        reason: "Synthetic route audit proof",
+        idempotencyKey: "dashboard-route-add-10",
+      });
+      expect(replay.status).toBe(200);
+      expect(replay.body.result).toMatchObject({ alreadyApplied: true, entry: { amount: 10 } });
+
+      const remove = await post(`/partners/${P_CLEAN}/credits/adjust`, {
+        operation: "remove",
+        quantity: 10,
+        reason: "Synthetic route balance restore",
+        idempotencyKey: "dashboard-route-remove-10",
+      });
+      expect(remove.status).toBe(201);
+
+      const ledger = await admin.query(
+        `SELECT amount::int, actor_user_id::text, actor_email, reason
+           FROM partner_credit_ledger
+          WHERE tenant_id=$1 AND idempotency_key=$2`,
+        [P_CLEAN, "dashboard-route-add-10"]
+      );
+      expect(ledger.rows).toEqual([
+        expect.objectContaining({
+          amount: 10,
+          actor_user_id: adminUserId,
+          reason: "Synthetic route audit proof",
+        }),
+      ]);
+      expect(JSON.stringify(ledger.rows)).not.toContain(P_SECURITY);
+
+      const audit = await admin.query(
+        `SELECT action, admin_user, details
+           FROM audit_log
+          WHERE entity_type='partner_credit' AND entity_id=$1
+          ORDER BY id`,
+        [String((add.body.result as { entry: { id: string } }).entry.id)]
+      );
+      expect(audit.rows).toEqual([
+        expect.objectContaining({
+          action: "partner_credit_added",
+          admin_user: expect.stringMatching(/mintvaultuk@gmail.com/i),
+          details: expect.objectContaining({
+            tenantId: P_CLEAN,
+            quantity: 10,
+            reason: "Synthetic route audit proof",
+            alreadyApplied: false,
+          }),
+        }),
+        expect.objectContaining({
+          action: "partner_credit_added",
+          admin_user: expect.stringMatching(/mintvaultuk@gmail.com/i),
+          details: expect.objectContaining({
+            tenantId: P_CLEAN,
+            quantity: 10,
+            reason: "Synthetic route audit proof",
+            alreadyApplied: true,
+          }),
+        }),
+      ]);
+    });
+
+    it("requires Super Admin authority for credit adjustments, not generic admin or partner sessions", async () => {
+      const ordinaryAdminCookie = await testSessionCookie({
+        isAdmin: true,
+        adminEmail: "ordinary-admin@example.invalid",
+        authUserId: adminUserId,
+        credentialVersion: 1,
+        authenticatedAt: Date.now(),
+      });
+      const ordinary = await postWithCookie(ordinaryAdminCookie, `/partners/${P_CLEAN}/credits/adjust`, {
+        operation: "add",
+        quantity: 1,
+        reason: "ordinary admin must not adjust credits",
+        idempotencyKey: "ordinary-admin-credit-adjustment",
+      });
+      expect(ordinary.status).toBe(403);
+
+      const partnerCookie = await testSessionCookie({ partnerUserId: "partner-user", tenantId: P_CLEAN });
+      const partner = await postWithCookie(partnerCookie, `/partners/${P_CLEAN}/credits/adjust`, {
+        operation: "add",
+        quantity: 1,
+        reason: "partner must not adjust credits",
+        idempotencyKey: "partner-credit-adjustment",
+      });
+      expect(partner.status).toBe(401);
+
+      const expiredCookie = await testSessionCookie({
+        isAdmin: true,
+        adminEmail: "mintvaultuk@gmail.com",
+        authUserId: adminUserId,
+        credentialVersion: 1,
+        authenticatedAt: Date.now() - 8 * 24 * 60 * 60 * 1000,
+      });
+      const expired = await postWithCookie(expiredCookie, `/partners/${P_CLEAN}/credits/adjust`, {
+        operation: "add",
+        quantity: 1,
+        reason: "expired session must not adjust credits",
+        idempotencyKey: "expired-super-admin-credit-adjustment",
+      });
+      expect(expired.status).toBe(401);
+
+      const staleCookie = await testSessionCookie({
+        isAdmin: true,
+        adminEmail: "mintvaultuk@gmail.com",
+        authUserId: adminUserId,
+        credentialVersion: 2,
+        authenticatedAt: Date.now(),
+      });
+      const stale = await postWithCookie(staleCookie, `/partners/${P_CLEAN}/credits/adjust`, {
+        operation: "add",
+        quantity: 1,
+        reason: "stale session must not adjust credits",
+        idempotencyKey: "stale-super-admin-credit-adjustment",
+      });
+      expect(stale.status).toBe(401);
+    });
+
+    it("validates credit adjustment reason and idempotency key before writing ledger rows", async () => {
+      const before = await admin.query<{ count: string }>(
+        "SELECT count(*)::bigint AS count FROM partner_credit_ledger WHERE tenant_id=$1",
+        [P_CLEAN]
+      );
+      const missingReason = await post(`/partners/${P_CLEAN}/credits/adjust`, {
+        operation: "add",
+        quantity: 1,
+        idempotencyKey: "dashboard-missing-reason",
+      });
+      expect(missingReason.status).toBe(400);
+      expect(missingReason.body.error).toMatchObject({ code: "INVALID_REASON" });
+
+      const missingKey = await post(`/partners/${P_CLEAN}/credits/adjust`, {
+        operation: "add",
+        quantity: 1,
+        reason: "missing idempotency must fail",
+      });
+      expect(missingKey.status).toBe(400);
+      expect(missingKey.body.error).toMatchObject({ code: "INVALID_IDEMPOTENCY_KEY" });
+
+      const after = await admin.query<{ count: string }>(
+        "SELECT count(*)::bigint AS count FROM partner_credit_ledger WHERE tenant_id=$1",
+        [P_CLEAN]
+      );
+      expect(after.rows[0].count).toBe(before.rows[0].count);
+    });
+
+    it("does not let a forged body tenant override the path tenant", async () => {
+      const res = await post(`/partners/${P_LOWCREDIT}/credits/adjust`, {
+        operation: "add",
+        quantity: 2,
+        reason: "body tenant must be ignored",
+        idempotencyKey: "dashboard-body-tenant-ignored",
+        tenantId: P_CLEAN,
+      });
+      expect(res.status).toBe(201);
+      const rows = await admin.query<{ tenant_id: string; amount: number }>(
+        "SELECT tenant_id::text, amount::int FROM partner_credit_ledger WHERE idempotency_key=$1",
+        ["dashboard-body-tenant-ignored"]
+      );
+      expect(rows.rows).toEqual([{ tenant_id: P_LOWCREDIT, amount: 2 }]);
+    });
+
+    it("refuses negative adjustments that would breach active reserved obligations", async () => {
+      const wallet = await admin.query<{ id: string }>("SELECT id FROM partner_wallets WHERE tenant_id=$1", [
+        P_LOWCREDIT,
+      ]);
+      await admin.query(
+        `INSERT INTO partner_credit_reservations
+           (wallet_id, tenant_id, card_reference, status, idempotency_key, request_fingerprint,
+            source, reason, actor_type, expires_at)
+         VALUES ($1,$2,'LOW-RESERVED-CARD','active','lowcredit-active-reservation',$3,
+                 'portal','active reservation for route refusal proof','partner_user', now() + interval '1 day')`,
+        [wallet.rows[0].id, P_LOWCREDIT, fp("lowcreditreservation")]
+      );
+      const before = await admin.query<{ count: string }>(
+        "SELECT count(*)::bigint AS count FROM partner_credit_ledger WHERE tenant_id=$1",
+        [P_LOWCREDIT]
+      );
+
+      const res = await post(`/partners/${P_LOWCREDIT}/credits/adjust`, {
+        operation: "remove",
+        quantity: 7,
+        reason: "must not breach reserved credit obligations",
+        idempotencyKey: "dashboard-reserved-breach",
+      });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatchObject({ code: "INSUFFICIENT_AVAILABLE_CREDITS" });
+      const after = await admin.query<{ count: string }>(
+        "SELECT count(*)::bigint AS count FROM partner_credit_ledger WHERE tenant_id=$1",
+        [P_LOWCREDIT]
+      );
+      expect(after.rows[0].count).toBe(before.rows[0].count);
     });
 
     it("derives the expected risk level for every seeded partner", async () => {
@@ -524,7 +788,7 @@ async function usePartnerAdminRole(url: string): Promise<void> {
         expect(res.body.ledgerBalance).toBe(91);
         expect(res.body.reservedCredits).toBe(1);
         expect(res.body.availableCredits).toBe(90);
-        expect(res.body.manualAdjustmentEnabled).toBe(false);
+        expect(res.body.manualAdjustmentEnabled).toBe(true);
       });
     });
 
@@ -587,17 +851,21 @@ async function usePartnerAdminRole(url: string): Promise<void> {
         await usePartnerAdminRole(ADMIN_DB!);
       });
 
-      it("proves the role genuinely sees zero rows (the condition being defended against)", async () => {
+      it("proves the role cannot see partner rows as authoritative data", async () => {
         const { Client: PgClient } = await import("pg");
         const c = new PgClient({ connectionString: migratorUrlFrom(ADMIN_DB!) });
         await c.connect();
         try {
           const orgs = await c.query("SELECT count(*)::int AS n FROM partner_organisations");
           expect(orgs.rows[0].n).toBe(0); // ground truth is 6
-          const agg = await c.query(
-            "SELECT COALESCE(SUM(available_balance),0)::int AS n FROM partner_credit_availability"
-          );
-          expect(agg.rows[0].n).toBe(0); // an aggregate ALWAYS returns a row — the trap
+          try {
+            const agg = await c.query(
+              "SELECT COALESCE(SUM(available_balance),0)::int AS n FROM partner_credit_availability"
+            );
+            expect(agg.rows[0].n).toBe(0); // an aggregate ALWAYS returns a row — the trap
+          } catch (err) {
+            expect((err as { code?: string }).code).toBe("42501");
+          }
         } finally {
           await c.end();
         }

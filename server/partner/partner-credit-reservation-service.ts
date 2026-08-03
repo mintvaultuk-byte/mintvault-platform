@@ -266,8 +266,13 @@ async function loadWalletForUpdate(
   tenantId: string,
   operation: WalletOperation
 ): Promise<{ id: string; tenant_id: string; status: string }> {
+  // Only reservation/consumption need the wallet lock: both make an available-balance decision or
+  // write a ledger debit. Release/expiry never touch the wallet or ledger, so they intentionally do
+  // not read it at all (see transitionReservationInTransaction). This lets the connector retain a
+  // strictly column-scoped reservation grant rather than any wallet privilege.
+  const lockClause = operation === "reserve" || operation === "consume" ? "FOR UPDATE" : "";
   const wallet = await client.query<{ id: string; tenant_id: string; status: string }>(
-    "SELECT id, tenant_id, status FROM partner_wallets WHERE tenant_id = $1 FOR UPDATE",
+    `SELECT id, tenant_id, status FROM partner_wallets WHERE tenant_id = $1 ${lockClause}`,
     [tenantId]
   );
   if (wallet.rowCount === 0)
@@ -417,7 +422,18 @@ export async function getCreditPosition(tenantIdRaw: string): Promise<CreditPosi
   };
 }
 
-export async function reserveCredit(actor: ReservationActor, input: ReserveCreditInput): Promise<MutationResult> {
+/**
+ * Reserve within an already-open privileged transaction.
+ *
+ * G6D uses this boundary to make Partner submission acceptance and its credit reservation one
+ * database commit. Callers are responsible for opening a trusted, server-side transaction; this
+ * function never accepts a browser-controlled tenant or actor identity.
+ */
+export async function reserveCreditInTransaction(
+  client: pg.PoolClient,
+  actor: ReservationActor,
+  input: ReserveCreditInput
+): Promise<MutationResult> {
   const now = input.now ?? new Date();
   const common = validateCommon(actor, { ...input, idempotencyKey: input.idempotencyKey });
   const idempotencyKey = common.idempotencyKey ?? requireIdempotencyKey(input.idempotencyKey);
@@ -426,90 +442,86 @@ export async function reserveCredit(actor: ReservationActor, input: ReserveCredi
   const submissionReference = optionalText(input.submissionReference, "submissionReference", 200);
   const expiresAt = requireFutureExpiry(input.expiresAt, now);
 
-  return withPartnerAdminTransaction(async (client) => {
-    const wallet = await loadWalletForUpdate(client, common.tenantId, "reserve");
-    const fingerprint = requestFingerprint({
-      operation: "reserve",
-      wallet_id: wallet.id,
-      tenant_id: wallet.tenant_id,
-      location_id: locationId,
-      card_reference: cardReference,
-      submission_reference: submissionReference,
-      reserved_credits: 1,
-      expires_at: expiresAt.toISOString(),
-      source: common.source,
-      reason: common.reason,
-      actor_type: common.actorType,
-      actor_user_id: common.actorUserId,
-      actor_email: common.actorEmail,
-      external_ref: common.externalRef,
-      metadata: common.metadata,
-    });
+  const wallet = await loadWalletForUpdate(client, common.tenantId, "reserve");
+  const fingerprint = requestFingerprint({
+    operation: "reserve",
+    wallet_id: wallet.id,
+    tenant_id: wallet.tenant_id,
+    location_id: locationId,
+    card_reference: cardReference,
+    submission_reference: submissionReference,
+    reserved_credits: 1,
+    expires_at: expiresAt.toISOString(),
+    source: common.source,
+    reason: common.reason,
+    actor_type: common.actorType,
+    actor_user_id: common.actorUserId,
+    actor_email: common.actorEmail,
+    external_ref: common.externalRef,
+    metadata: common.metadata,
+  });
 
-    const existing = await client.query<Record<string, unknown>>(
-      `SELECT ${RESERVATION_COLS} FROM partner_credit_reservations WHERE tenant_id=$1 AND source=$2 AND idempotency_key=$3`,
-      [wallet.tenant_id, common.source, idempotencyKey]
-    );
-    if (existing.rowCount) {
-      const reservation = normalizeReservation(existing.rows[0]);
-      if (reservation.request_fingerprint !== fingerprint) {
-        throw new CreditReservationError(
-          "IDEMPOTENCY_CONFLICT",
-          "idempotencyKey was already used for a different reservation request."
-        );
-      }
-      const event = await loadEventForReservation(client, wallet.tenant_id, reservation.id, "reserved");
-      return { reservation, event, alreadyApplied: true };
+  const existing = await client.query<Record<string, unknown>>(
+    `SELECT ${RESERVATION_COLS} FROM partner_credit_reservations WHERE tenant_id=$1 AND source=$2 AND idempotency_key=$3`,
+    [wallet.tenant_id, common.source, idempotencyKey]
+  );
+  if (existing.rowCount) {
+    const reservation = normalizeReservation(existing.rows[0]);
+    if (reservation.request_fingerprint !== fingerprint) {
+      throw new CreditReservationError(
+        "IDEMPOTENCY_CONFLICT",
+        "idempotencyKey was already used for a different reservation request."
+      );
     }
+    const event = await loadEventForReservation(client, wallet.tenant_id, reservation.id, "reserved");
+    return { reservation, event, alreadyApplied: true };
+  }
 
-    const position = await loadPositionForWallet(client, wallet.id, wallet.tenant_id);
-    if (position.availableBalance < 1) {
-      throw new CreditReservationError("INSUFFICIENT_CREDITS", "No available grading credit can be reserved.");
-    }
+  const position = await loadPositionForWallet(client, wallet.id, wallet.tenant_id);
+  if (position.availableBalance < 1) {
+    throw new CreditReservationError("INSUFFICIENT_CREDITS", "No available grading credit can be reserved.");
+  }
 
-    try {
-      const inserted = await client.query<Record<string, unknown>>(
-        `INSERT INTO partner_credit_reservations
+  try {
+    const inserted = await client.query<Record<string, unknown>>(
+      `INSERT INTO partner_credit_reservations
            (wallet_id, tenant_id, location_id, card_reference, submission_reference, reserved_credits, status,
             idempotency_key, request_fingerprint, source, reason, actor_type, actor_user_id, actor_email,
             external_ref, metadata, expires_at)
          VALUES ($1,$2,$3,$4,$5,1,'active',$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15)
          RETURNING ${RESERVATION_COLS}`,
-        [
-          wallet.id,
-          wallet.tenant_id,
-          locationId,
-          cardReference,
-          submissionReference,
-          idempotencyKey,
-          fingerprint,
-          common.source,
-          common.reason,
-          common.actorType,
-          common.actorUserId,
-          common.actorEmail,
-          common.externalRef,
-          JSON.stringify(common.metadata),
-          expiresAt,
-        ]
-      );
-      const reservation = normalizeReservation(inserted.rows[0]);
-      const event = await insertEvent(
-        client,
-        reservation,
-        { ...common, idempotencyKey },
-        "reserved",
+      [
+        wallet.id,
+        wallet.tenant_id,
+        locationId,
+        cardReference,
+        submissionReference,
+        idempotencyKey,
         fingerprint,
-        null
-      );
-      return { reservation, event, alreadyApplied: false };
-    } catch (err) {
-      pgConflictToDomain(err);
-    }
-  });
+        common.source,
+        common.reason,
+        common.actorType,
+        common.actorUserId,
+        common.actorEmail,
+        common.externalRef,
+        JSON.stringify(common.metadata),
+        expiresAt,
+      ]
+    );
+    const reservation = normalizeReservation(inserted.rows[0]);
+    const event = await insertEvent(client, reservation, { ...common, idempotencyKey }, "reserved", fingerprint, null);
+    return { reservation, event, alreadyApplied: false };
+  } catch (err) {
+    return pgConflictToDomain(err);
+  }
 }
 
-async function transitionReservation(
+export async function reserveCredit(actor: ReservationActor, input: ReserveCreditInput): Promise<MutationResult> {
+  return withPartnerAdminTransaction((client) => reserveCreditInTransaction(client, actor, input));
+}
+
+async function transitionReservationInTransaction(
+  client: pg.PoolClient,
   actor: ReservationActor,
   input: ReservationTransitionInput,
   eventType: Exclude<ReservationEventType, "reserved">
@@ -524,128 +536,160 @@ async function transitionReservation(
   const reservationId = optionalUuid(input.reservationId, "reservationId");
   if (!reservationId) throw new CreditReservationError("VALIDATION_ERROR", "reservationId is required.");
 
-  return withPartnerAdminTransaction(async (client) => {
-    const fingerprint = requestFingerprint({
-      operation: eventType,
-      tenant_id: common.tenantId,
-      reservation_id: reservationId,
-      source: common.source,
-      reason: common.reason,
-      actor_type: common.actorType,
-      actor_user_id: common.actorUserId,
-      actor_email: common.actorEmail,
-      external_ref: common.externalRef,
-      metadata: common.metadata,
-    });
-    const existingEvent = await findEventByKey(client, common.tenantId, common.source, idempotencyKey);
-    if (existingEvent) {
-      if (existingEvent.request_fingerprint !== fingerprint || existingEvent.event_type !== eventType) {
-        throw new CreditReservationError(
-          "IDEMPOTENCY_CONFLICT",
-          "idempotencyKey was already used for a different reservation transition."
-        );
-      }
-      const reservation = await findReservationById(client, common.tenantId, existingEvent.reservation_id, false);
-      if (!reservation)
-        throw new CreditReservationError("RESERVATION_NOT_FOUND", "Reservation not found for this organisation.");
-      return { reservation, event: existingEvent, alreadyApplied: true };
-    }
-
-    const reservation = await findReservationById(client, common.tenantId, reservationId, true);
-    if (!reservation)
-      throw new CreditReservationError("RESERVATION_NOT_FOUND", "Reservation not found for this organisation.");
-
-    if (reservation.status === eventType) {
-      const event = await loadEventForReservation(client, common.tenantId, reservation.id, eventType);
-      if (event) return { reservation, event, alreadyApplied: true };
-    }
-    if (reservation.status !== "active") {
+  const fingerprint = requestFingerprint({
+    operation: eventType,
+    tenant_id: common.tenantId,
+    reservation_id: reservationId,
+    source: common.source,
+    reason: common.reason,
+    actor_type: common.actorType,
+    actor_user_id: common.actorUserId,
+    actor_email: common.actorEmail,
+    external_ref: common.externalRef,
+    metadata: common.metadata,
+  });
+  const existingEvent = await findEventByKey(client, common.tenantId, common.source, idempotencyKey);
+  if (existingEvent) {
+    if (existingEvent.request_fingerprint !== fingerprint || existingEvent.event_type !== eventType) {
       throw new CreditReservationError(
-        "RESERVATION_NOT_ACTIVE",
-        `Reservation is ${reservation.status}; it cannot be ${eventType}.`
+        "IDEMPOTENCY_CONFLICT",
+        "idempotencyKey was already used for a different reservation transition."
       );
     }
+    const reservation = await findReservationById(client, common.tenantId, existingEvent.reservation_id, false);
+    if (!reservation)
+      throw new CreditReservationError("RESERVATION_NOT_FOUND", "Reservation not found for this organisation.");
+    return { reservation, event: existingEvent, alreadyApplied: true };
+  }
 
-    const wallet = await loadWalletForUpdate(
-      client,
-      common.tenantId,
-      eventType === "consumed" ? "consume" : eventType === "released" ? "release" : "expire"
+  const reservation = await findReservationById(client, common.tenantId, reservationId, true);
+  if (!reservation)
+    throw new CreditReservationError("RESERVATION_NOT_FOUND", "Reservation not found for this organisation.");
+
+  if (reservation.status === eventType) {
+    const event = await loadEventForReservation(client, common.tenantId, reservation.id, eventType);
+    if (event) return { reservation, event, alreadyApplied: true };
+  }
+  if (reservation.status !== "active") {
+    throw new CreditReservationError(
+      "RESERVATION_NOT_ACTIVE",
+      `Reservation is ${reservation.status}; it cannot be ${eventType}.`
     );
+  }
+
+  // A release/expiry only returns an already-held entitlement to availability. It must remain
+  // possible even when the wallet was later suspended or closed, and it does not need any wallet
+  // table access. Consumption is different: it writes the immutable debit and must serialize with
+  // all other balance decisions against an active wallet.
+  if (eventType === "consumed") {
+    const wallet = await loadWalletForUpdate(client, common.tenantId, "consume");
     assertReservationWallet(wallet, reservation);
+  }
 
-    const expiresAtMs = new Date(reservation.expires_at).getTime();
-    if (eventType === "consumed" || eventType === "released") {
-      if (expiresAtMs <= now.getTime()) {
-        throw new CreditReservationError(
-          "RESERVATION_EXPIRED",
-          "Reservation has expired and cannot be consumed or manually released."
-        );
-      }
-    } else if (expiresAtMs > now.getTime()) {
-      throw new CreditReservationError("RESERVATION_NOT_EXPIRED", "Reservation has not expired yet.");
+  const expiresAtMs = new Date(reservation.expires_at).getTime();
+  if (eventType === "consumed" || eventType === "released") {
+    if (expiresAtMs <= now.getTime()) {
+      throw new CreditReservationError(
+        "RESERVATION_EXPIRED",
+        "Reservation has expired and cannot be consumed or manually released."
+      );
     }
+  } else if (expiresAtMs > now.getTime()) {
+    throw new CreditReservationError("RESERVATION_NOT_EXPIRED", "Reservation has not expired yet.");
+  }
 
-    let ledgerEntryId: string | null = null;
-    const timestampColumn =
-      eventType === "consumed" ? "consumed_at" : eventType === "released" ? "released_at" : "expired_at";
-    const updated = await client.query<Record<string, unknown>>(
-      `UPDATE partner_credit_reservations
+  let ledgerEntryId: string | null = null;
+  const timestampColumn =
+    eventType === "consumed" ? "consumed_at" : eventType === "released" ? "released_at" : "expired_at";
+  const updated = await client.query<Record<string, unknown>>(
+    `UPDATE partner_credit_reservations
           SET status=$1, ${timestampColumn}=now(), updated_at=now()
         WHERE tenant_id=$2 AND id=$3 AND status='active'
         RETURNING ${RESERVATION_COLS}`,
-      [eventType === "expired" ? "expired" : eventType, common.tenantId, reservation.id]
-    );
-    if (updated.rowCount === 0) {
-      throw new CreditReservationError("RESERVATION_NOT_ACTIVE", "Reservation was already terminal.");
-    }
-    const transitioned = normalizeReservation(updated.rows[0]);
+    [eventType === "expired" ? "expired" : eventType, common.tenantId, reservation.id]
+  );
+  if (updated.rowCount === 0) {
+    throw new CreditReservationError("RESERVATION_NOT_ACTIVE", "Reservation was already terminal.");
+  }
+  const transitioned = normalizeReservation(updated.rows[0]);
 
-    if (eventType === "consumed") {
-      const ledgerFingerprint = requestFingerprint({
-        operation: "wallet_ledger_consumption",
-        reservation_id: transitioned.id,
-        wallet_id: transitioned.wallet_id,
-        tenant_id: transitioned.tenant_id,
-        amount: -1,
-      });
-      const ledger = await client.query<{ id: string }>(
-        `INSERT INTO partner_credit_ledger
+  if (eventType === "consumed") {
+    const ledgerFingerprint = requestFingerprint({
+      operation: "wallet_ledger_consumption",
+      reservation_id: transitioned.id,
+      wallet_id: transitioned.wallet_id,
+      tenant_id: transitioned.tenant_id,
+      amount: -1,
+    });
+    const ledger = await client.query<{ id: string }>(
+      `INSERT INTO partner_credit_ledger
            (wallet_id, tenant_id, amount, entry_type, idempotency_key, correlation_id, source, reason,
             actor_type, actor_user_id, actor_email, external_ref, metadata, request_fingerprint)
          VALUES ($1,$2,-1,'admin_adjustment',$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
         RETURNING id`,
-        [
-          transitioned.wallet_id,
-          transitioned.tenant_id,
-          `reservation-consume:${transitioned.id}`,
-          transitioned.id,
-          common.source,
-          common.reason,
-          common.actorType,
-          common.actorUserId,
-          common.actorEmail,
-          common.externalRef,
-          JSON.stringify({ ...common.metadata, reservation_event: "consumed" }),
-          ledgerFingerprint,
-        ]
-      );
-      ledgerEntryId = ledger.rows[0].id;
-    }
+      [
+        transitioned.wallet_id,
+        transitioned.tenant_id,
+        `reservation-consume:${transitioned.id}`,
+        transitioned.id,
+        common.source,
+        common.reason,
+        common.actorType,
+        common.actorUserId,
+        common.actorEmail,
+        common.externalRef,
+        JSON.stringify({ ...common.metadata, reservation_event: "consumed" }),
+        ledgerFingerprint,
+      ]
+    );
+    ledgerEntryId = ledger.rows[0].id;
+  }
 
-    try {
-      const event = await insertEvent(
-        client,
-        transitioned,
-        { ...common, idempotencyKey },
-        eventType,
-        fingerprint,
-        ledgerEntryId
-      );
-      return { reservation: transitioned, event, alreadyApplied: false };
-    } catch (err) {
-      pgConflictToDomain(err);
-    }
-  });
+  try {
+    const event = await insertEvent(
+      client,
+      transitioned,
+      { ...common, idempotencyKey },
+      eventType,
+      fingerprint,
+      ledgerEntryId
+    );
+    return { reservation: transitioned, event, alreadyApplied: false };
+  } catch (err) {
+    return pgConflictToDomain(err);
+  }
+}
+
+async function transitionReservation(
+  actor: ReservationActor,
+  input: ReservationTransitionInput,
+  eventType: Exclude<ReservationEventType, "reserved">
+): Promise<MutationResult> {
+  return withPartnerAdminTransaction((client) => transitionReservationInTransaction(client, actor, input, eventType));
+}
+
+export function consumeReservedCreditInTransaction(
+  client: pg.PoolClient,
+  actor: ReservationActor,
+  input: ReservationTransitionInput
+): Promise<MutationResult> {
+  return transitionReservationInTransaction(client, actor, input, "consumed");
+}
+
+export function releaseReservedCreditInTransaction(
+  client: pg.PoolClient,
+  actor: ReservationActor,
+  input: ReservationTransitionInput
+): Promise<MutationResult> {
+  return transitionReservationInTransaction(client, actor, input, "released");
+}
+
+export function expireReservedCreditInTransaction(
+  client: pg.PoolClient,
+  actor: ReservationActor,
+  input: ReservationTransitionInput
+): Promise<MutationResult> {
+  return transitionReservationInTransaction(client, actor, { ...input, source: input.source ?? "system" }, "expired");
 }
 
 export async function consumeReservedCredit(
@@ -669,6 +713,95 @@ export async function expireReservedCredit(
   return transitionReservation(actor, { ...input, source: input.source ?? "system" }, "expired");
 }
 
+async function createDestinationHoldForExpiredReservation(
+  client: pg.PoolClient,
+  tenantId: string,
+  reservationId: string
+): Promise<void> {
+  if (
+    (await client.query("SELECT to_regclass('public.partner_submission_credit_holds')::text AS relation")).rows[0]
+      ?.relation == null
+  ) {
+    return;
+  }
+  const rows = await client.query<{
+    reservation_id: string;
+    partner_submission_id: string;
+    destination_submission_id: number;
+    connector_record_id: string | null;
+    connector_import_id: string | null;
+  }>(
+    `SELECT r.id AS reservation_id,
+            r.submission_reference AS partner_submission_id,
+            i.destination_submission_id,
+            i.connector_record_id,
+            i.id AS connector_import_id
+       FROM partner_credit_reservations r
+       JOIN partner_connector_imports i
+         ON i.partner_organisation_id = r.tenant_id
+        AND i.partner_submission_id::text = r.submission_reference
+        AND i.state = 'completed'
+        AND (to_jsonb(i)->>'deleted_at') IS NULL
+       JOIN submissions s
+         ON s.id = i.destination_submission_id
+        AND s.deleted_at IS NULL
+      WHERE r.id=$1
+        AND r.tenant_id=$2
+        AND r.source='portal'
+        AND r.status='active'
+      ORDER BY i.completed_at DESC NULLS LAST, i.id DESC
+      LIMIT 2
+      FOR UPDATE OF r, i, s`,
+    [reservationId, tenantId]
+  );
+  if (rows.rowCount === 0) return;
+  if (rows.rowCount !== 1) {
+    throw new CreditReservationError(
+      "INTERNAL_ERROR",
+      "Expired Partner reservation has ambiguous destination mapping and requires reconciliation."
+    );
+  }
+  const link = rows.rows[0];
+  /**
+   * PER-CARD HOLDS. This check used to be "if ANY unreleased hold exists on this destination and it
+   * is not mine, refuse" — the pre-0043 invariant of one unreleased hold per destination.
+   *
+   * Under the per-card model that is wrong twice over. An N-card submission legitimately has N
+   * unreleased holds on one destination, so expiring card 2 found card 1's hold, saw a different
+   * reservation_id, and threw INTERNAL_ERROR. `expireExpiredReservations` only swallows
+   * RESERVATION_NOT_ACTIVE / IDEMPOTENCY_CONFLICT / WALLET_INACTIVE, so INTERNAL_ERROR propagated
+   * out of the whole sweep — aborting the batch for EVERY tenant, and doing so again on the next
+   * run because the same row is re-selected. That is a permanent global wedge of the expiry job,
+   * and it leaves the submission in the mixed live/settled state that fails closed forever.
+   *
+   * The correct question is only "is this reservation already held?". Holds belonging to OTHER
+   * reservations of the same submission are expected. 0043's uq_..._active_reservation is the
+   * database-level guarantee that one reservation cannot carry two unreleased holds.
+   */
+  const existing = await client.query<{ reservation_id: string }>(
+    `SELECT reservation_id
+       FROM partner_submission_credit_holds
+      WHERE reservation_id=$1 AND released_at IS NULL
+      FOR UPDATE`,
+    [reservationId]
+  );
+  if ((existing.rowCount ?? 0) > 0) return;
+  await client.query(
+    `INSERT INTO partner_submission_credit_holds
+       (tenant_id, partner_submission_id, destination_submission_id, reservation_id,
+        connector_record_id, connector_import_id, reason_code)
+     VALUES ($1::uuid,$2::uuid,$3,$4::uuid,$5::uuid,$6::uuid,'partner_reservation_expired')`,
+    [
+      tenantId,
+      link.partner_submission_id,
+      link.destination_submission_id,
+      reservationId,
+      link.connector_record_id,
+      link.connector_import_id,
+    ]
+  );
+}
+
 export async function expireExpiredReservations(
   input: {
     now?: Date;
@@ -680,6 +813,25 @@ export async function expireExpiredReservations(
   const now = input.now ?? new Date();
   const limit = Math.max(1, Math.min(500, Math.floor(Number(input.limit ?? 100))));
   const tenantId = input.tenantId ? requireTenantId(input.tenantId) : null;
+  // The scheduler can arrive before G6D on an upgraded database. Only a wholly absent accounting
+  // schema is a legacy no-op; any mixture of wallet/ledger/reservation/event tables is unsafe.
+  const schema = await partnerAdminQuery<{
+    wallets: string | null;
+    ledger: string | null;
+    reservations: string | null;
+    events: string | null;
+  }>(
+    `SELECT to_regclass('public.partner_wallets')::text AS wallets,
+            to_regclass('public.partner_credit_ledger')::text AS ledger,
+            to_regclass('public.partner_credit_reservations')::text AS reservations,
+            to_regclass('public.partner_credit_reservation_events')::text AS events`
+  );
+  const tables = schema.rows[0];
+  const objects = [tables?.wallets, tables?.ledger, tables?.reservations, tables?.events];
+  if (objects.every((value) => !value)) return { processed: 0, expired: [] };
+  if (objects.some((value) => !value)) {
+    throw new Error("Partner credit accounting schema is incomplete; expiry cannot run safely.");
+  }
   const rows = await partnerAdminQuery<{ id: string; tenant_id: string }>(
     `SELECT id, tenant_id
        FROM partner_credit_reservations
@@ -692,13 +844,18 @@ export async function expireExpiredReservations(
   const expired: string[] = [];
   for (const row of rows.rows) {
     try {
-      const result = await expireReservedCredit(actor, {
-        tenantId: row.tenant_id,
-        reservationId: row.id,
-        source: "system",
-        reason: "reservation expired",
-        actorType: "system",
-        now,
+      const result = await withPartnerAdminTransaction(async (client) => {
+        await client.query("SELECT set_config('app.tenant_id', $1, true)", [row.tenant_id]);
+        await createDestinationHoldForExpiredReservation(client, row.tenant_id, row.id);
+        return expireReservedCreditInTransaction(client, actor, {
+          tenantId: row.tenant_id,
+          reservationId: row.id,
+          idempotencyKey: `reservation-expiry:${row.id}`,
+          source: "system",
+          reason: "reservation expired",
+          actorType: "system",
+          now,
+        });
       });
       expired.push(result.reservation.id);
     } catch (err) {

@@ -3,8 +3,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "pg";
-import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
-import { migratorUrlFrom, provisionRealisticRoles } from "./helpers/partner-realistic-db";
+import {
+  applyMigrationsRealistic,
+  PARTNER_MIGRATIONS_WITH_G6D,
+  provisionRealisticRoles,
+} from "./helpers/partner-realistic-db";
 import { startPostgres17, type DisposablePostgres17 } from "./helpers/postgres17-cluster";
 
 let cluster: DisposablePostgres17;
@@ -40,13 +43,7 @@ describe("Partner Network G6A wallet service on PostgreSQL 17.10", () => {
     for (const table of ["users", "submissions", "submission_items", "audit_log", "certificates"]) {
       await admin.query(`ALTER TABLE ${table} OWNER TO pn_migrator`);
     }
-    const migrator = new Client({ connectionString: migratorUrlFrom(cluster.url) });
-    await migrator.connect();
-    try {
-      await applyMigrations(migrator, listMigrationFiles());
-    } finally {
-      await migrator.end();
-    }
+    await applyMigrationsRealistic(admin, cluster.url, PARTNER_MIGRATIONS_WITH_G6D);
     tenantA = (
       await admin.query<{ id: string }>(
         "INSERT INTO partner_organisations (legal_name,status) VALUES ('Service A','ACTIVE') RETURNING id"

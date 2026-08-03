@@ -20,7 +20,12 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { Client } from "pg";
 import bcrypt from "bcryptjs";
-import { applyMigrationsRealistic } from "./helpers/partner-realistic-db";
+import {
+  applyMigrationsRealistic,
+  pinAccountingTopologyTo,
+  PARTNER_MIGRATIONS_WITH_G6D,
+  provisionRealisticRoles,
+} from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_RT_ADMIN;
 const RUNTIME = process.env.PARTNER_RT_RUNTIME;
@@ -57,12 +62,36 @@ let admin: Client;
       await admin.query("DROP SCHEMA IF EXISTS public CASCADE");
       await admin.query("CREATE SCHEMA public");
       await admin.query("DROP OWNED BY partner_runtime").catch(() => {});
-      await applyMigrationsRealistic(admin, ADMIN!);
+      // The G6D lineage includes the connector migrations (0010-0014), which GRANT on the
+      // MintVault-side users/submissions/submission_items tables. Nothing in the partner set
+      // creates them, so stub them first — same pattern as tests/partner-submission-workflow.
+      // provisionRealisticRoles must run first because these are reassigned to pn_migrator.
+      await provisionRealisticRoles(admin);
+      await admin.query(
+        "CREATE TABLE IF NOT EXISTS users (id varchar primary key default gen_random_uuid(), email varchar unique)"
+      );
+      await admin.query(
+        "CREATE TABLE IF NOT EXISTS submissions (id serial primary key, user_id varchar, tracking_number text unique)"
+      );
+      await admin.query(
+        "CREATE TABLE IF NOT EXISTS submission_items (id serial primary key, submission_id integer not null)"
+      );
+      await admin.query(`CREATE TABLE IF NOT EXISTS audit_log (
+        id serial primary key, entity_type text not null, entity_id text not null, action text not null,
+        admin_user text, details jsonb, created_at timestamptz not null default now()
+      )`);
+      for (const t of ["users", "submissions", "submission_items", "audit_log"]) {
+        await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
+      }
+      await applyMigrationsRealistic(admin, ADMIN!, PARTNER_MIGRATIONS_WITH_G6D);
       await admin.query("DROP ROLE IF EXISTS partner_app_test_rt").catch(() => {});
       await admin.query("CREATE ROLE partner_app_test_rt LOGIN PASSWORD 'synthetic'");
       await admin.query("GRANT partner_runtime TO partner_app_test_rt");
       process.env.PARTNER_DATABASE_URL = RUNTIME;
       process.env.PARTNER_ADMIN_DATABASE_URL = ADMIN;
+      // CI pins MINTVAULT_DATABASE_URL globally to a DIFFERENT database; the G6D accounting
+      // topology assertion in server/partner/db.ts then throws. Pin it to this suite's own.
+      pinAccountingTopologyTo(ADMIN);
       process.env.PARTNER_MFA_ENC_KEY = "0".repeat(64);
 
       const { seedPartnerRbac } = await import("../server/partner/permissions");
@@ -72,6 +101,30 @@ let admin: Client;
         "INSERT INTO partner_organisations (id, public_ref, legal_name, status) VALUES ($1,'apiA','API A Ltd','ACTIVE'),($2,'apiB','API B Ltd','ACTIVE')",
         [A, B]
       );
+
+      // Submit reserves a grading credit PER CARD, so any suite that drives a real submission needs
+      // a funded wallet. Seeded AFTER the organisation rows exist — ensureWallet resolves the org
+      // first and fails with ORG_NOT_FOUND otherwise.
+      {
+        const wallet = await import("../server/partner/partner-wallet-service");
+        const actor = { actorUserId: null, actorEmail: "workflow-apis@example.test" };
+        for (const [tenantId, key] of [
+          [A, "workflow-apis-wallet-a"],
+          [B, "workflow-apis-wallet-b"],
+        ] as const) {
+          await wallet.ensureWallet(actor, tenantId);
+          await wallet.appendFoundationCredit(actor, {
+            tenantId,
+            amount: 100,
+            entryType: "purchase",
+            source: "admin",
+            reason: "Workflow API regression credits",
+            idempotencyKey: key,
+            actorType: "admin",
+          });
+        }
+      }
+
       const pw = await bcrypt.hash("correct-horse-battery", 12);
       await admin.query(
         `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status, mfa_required) VALUES

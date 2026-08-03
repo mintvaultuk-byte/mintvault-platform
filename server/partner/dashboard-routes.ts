@@ -2,8 +2,8 @@
  * Super Admin Partner Master Dashboard — HTTP surface.
  *
  * Thin router. Authenticate, validate, delegate to dashboard-service, return the standard
- * envelope. No business logic here, and NO mutations anywhere in this file — the dashboard is
- * an observation surface only.
+ * envelope. The one mutation is an explicit Super Admin credit adjustment delegated to the
+ * append-only wallet service; every other dashboard endpoint remains an observation surface.
  *
  * SECURITY POSTURE (deliberately stricter than the three older partner routers):
  *
@@ -37,6 +37,8 @@ import * as svc from "./dashboard-service";
 import { DashboardError } from "./dashboard-service";
 import { getPartnerReadVisibility, type PartnerReadVisibility } from "./dashboard-visibility";
 import { isDashboardPartnerStatus, isPartnerSortKey, isRiskLevel, isSortDirection } from "@shared/partner-dashboard";
+import { addCredits, removeCredits } from "./partner-credit-admin-service";
+import { WalletRequestError } from "./partner-wallet-errors";
 
 export const PARTNER_DASHBOARD_BASE = "/api/super-admin/partner-dashboard";
 
@@ -75,6 +77,18 @@ function statusFor(code: string): number {
 }
 
 function sendError(res: Response, err: unknown): void {
+  if (err instanceof WalletRequestError) {
+    const status =
+      err.code === "WALLET_NOT_FOUND"
+        ? 404
+        : err.code === "IDEMPOTENCY_CONFLICT" || err.code === "INSUFFICIENT_AVAILABLE_CREDITS"
+          ? 409
+          : err.code === "INTERNAL_ERROR"
+            ? 500
+            : 400;
+    res.status(status).json({ error: { code: err.code, message: err.message } });
+    return;
+  }
   if (err instanceof DashboardError) {
     res.status(statusFor(err.code)).json({ error: { code: err.code, message: err.message } });
     return;
@@ -278,6 +292,53 @@ export function partnerDashboardRouter(): Router {
     (id) => svc.getPartnerOverview(id),
     () => 1
   );
+
+  r.post("/partners/:partnerId/credits/adjust", async (req: Request, res: Response) => {
+    try {
+      const tenantId = paramId(req.params.partnerId);
+      const operation = req.body?.operation;
+      if (operation !== "add" && operation !== "remove") {
+        throw new WalletRequestError("VALIDATION_ERROR", "operation must be add or remove.");
+      }
+      const actorEmail = req.session.adminEmail;
+      const actorUserId = req.session.authUserId;
+      if (!actorEmail || !actorUserId) {
+        throw new WalletRequestError("ACTOR_REQUIRED", "A verified Super Admin actor is required.");
+      }
+      const input = {
+        tenantId,
+        quantity: req.body?.quantity,
+        reason: req.body?.reason,
+        idempotencyKey: req.body?.idempotencyKey,
+      };
+      const result = await (operation === "add"
+        ? addCredits({ actorUserId, actorEmail }, input)
+        : removeCredits({ actorUserId, actorEmail }, input));
+      // The immutable credit-ledger row is the authoritative financial audit evidence and already
+      // contains actor, operation, quantity and reason. Mirror it into the general operator audit
+      // log when available, but never turn a committed adjustment into a misleading 500 response.
+      try {
+        await storage.writeAuditLog(
+          "partner_credit",
+          result.entry.id,
+          operation === "add" ? "partner_credit_added" : "partner_credit_removed",
+          actorEmail,
+          {
+            tenantId,
+            quantity: req.body.quantity,
+            reason: req.body.reason,
+            alreadyApplied: result.alreadyApplied,
+            requestId: String(req.headers["x-request-id"] ?? ""),
+          }
+        );
+      } catch (auditError) {
+        console.error("[partner-credit] secondary audit mirror failed:", (auditError as Error).message);
+      }
+      res.status(result.alreadyApplied ? 200 : 201).json({ result });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
   section(
     "/partners/:partnerId/staff",
     "dashboard_partner_staff_viewed",

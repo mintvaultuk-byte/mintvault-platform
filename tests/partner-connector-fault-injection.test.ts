@@ -13,6 +13,7 @@ import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
   PARTNER_MIGRATIONS_WITH_G3F,
+  pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_CONNECTOR_FAULT_RT_ADMIN;
@@ -181,6 +182,9 @@ const ROLLBACK_POINTS = [
     await admin.query("CREATE ROLE partner_fault_conn LOGIN PASSWORD 'synthetic'");
     await admin.query("GRANT partner_runtime TO partner_fault_conn");
     process.env.PARTNER_CONNECTOR_DATABASE_URL = CONNECTOR_URL;
+    // CI pins MINTVAULT_DATABASE_URL globally to a DIFFERENT database; the G6D accounting
+    // topology assertion in server/partner/db.ts then throws. Pin it to this suite's own.
+    pinAccountingTopologyTo(CONNECTOR_URL);
     const flagUrl = new URL(CONNECTOR_URL!);
     flagUrl.username = "partner_fault_conn";
     flagUrl.password = "synthetic";

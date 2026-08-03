@@ -104,10 +104,6 @@ describe("partner schema ↔ migration parity", () => {
       // rollback is intentionally named rollback-0026-catalogue-abbreviation-
       // unique.sql (non-numbered) so the runner never applies it.
       "0026_catalogue_abbreviation_unique.sql",
-      // 0027 is likewise claimed but unmerged: the g6d submission-credit lifecycle was
-      // renumbered off the contested 0019 onto 0027 on 2026-07-29
-      // (codex/partner-g6d-submission-credit-integration @ 70dbc79c). Absent here until it lands.
-      //
       // Not a partner migration — the Super Admin Project Control dashboard. It creates nine
       // additive pc_* tables and touches nothing that already exists. 0030 is deliberately clear
       // of the contested 0019–0024 band so the runner's duplicate-number hard-reject cannot fire
@@ -123,7 +119,23 @@ describe("partner schema ↔ migration parity", () => {
       // deliberately named rollback-0034-partner-rbac-seed.sql (non-numbered) so the runner never
       // applies it.
       "0034_partner_rbac_seed.sql",
+      // 0035 records an immutable ORIGIN SNAPSHOT on certificates (origin_* columns, CHECK
+      // constraints, an ENABLE ALWAYS immutability trigger and a partial index). It is additive and
+      // touches ONLY `certificates` — no overlap with the partner credit surface below. It is
+      // numbered BELOW staging's applied watermark (0041), so on staging it is journalled after a
+      // higher-numbered migration; that is safe here precisely because the surfaces are disjoint.
       "0035_partner_certificate_origin.sql",
+      // G6D grants the trusted connector only the reservation-release privileges needed to
+      // settle a terminal Partner submission; it creates no mutable wallet balance. It lands at
+      // 0041 because staging had already applied Project Control reconciliation migration 0040.
+      "0041_partner_submission_credit_lifecycle.sql",
+      // Added 2026-08-03: per-card credit settlement. Replaces 0041's single-reservation
+      // connector release function with an N-reservation one. 0041 itself is untouched.
+      "0042_partner_per_card_credit_settlement.sql",
+      // 0043 re-keys the active-hold unique index per RESERVATION and adds the tenant-isolation
+      // policy 0041 omitted on partner_submission_credit_holds. It contains an INTENTIONAL
+      // DROP INDEX, so the runner requires --allow-destructive for it.
+      "0043_partner_credit_hold_per_card.sql",
     ]);
   });
 

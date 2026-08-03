@@ -22,6 +22,7 @@ import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
   PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
+  pinAccountingTopologyTo,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN = process.env.PARTNER_RT_ADMIN;
@@ -79,6 +80,9 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     // env for the runtime BEFORE importing app modules (pools are lazy)
     process.env.PARTNER_DATABASE_URL = RUNTIME;
     process.env.PARTNER_ADMIN_DATABASE_URL = ADMIN;
+    // CI pins MINTVAULT_DATABASE_URL globally to a DIFFERENT database; the G6D accounting
+    // topology assertion in server/partner/db.ts then throws. Pin it to this suite's own.
+    pinAccountingTopologyTo(ADMIN);
     process.env.PARTNER_MFA_ENC_KEY = "0".repeat(64); // synthetic, never committed as real
 
     // seed RBAC + two partners

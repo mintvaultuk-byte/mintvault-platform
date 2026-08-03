@@ -227,20 +227,21 @@ describe("draft save-status and stale-conflict wording is plain English, not tec
   });
 });
 
-describe("deferred Users/Locations/Billing pages clearly state they are unavailable, never fabricate data", () => {
+describe("Locations and Billing use their real partner APIs", () => {
   it("shared coming-soon component says 'Not available yet' with no data-driven content", () => {
     expect(COMING_SOON).toContain("Not available yet.");
     expect(COMING_SOON).not.toMatch(/useQuery|fetch\(|apiRequest/);
   });
-  it("Locations placeholder page renders the honest coming-soon component, not a fabricated location list", () => {
-    expect(LOCATIONS_PAGE).toContain("PartnerComingSoon");
-    expect(LOCATIONS_PAGE).not.toMatch(/useQuery|partnerLocations\.list/);
+  it("Locations lists only the server-scoped partner locations", () => {
+    expect(LOCATIONS_PAGE).not.toContain("PartnerComingSoon");
+    expect(LOCATIONS_PAGE).toMatch(/useQuery|partnerLocations\.list/);
+    expect(LOCATIONS_PAGE).toContain("Active grading location");
   });
-  it("Billing placeholder page renders the honest coming-soon component, not fabricated invoice/balance data", () => {
-    expect(BILLING_PAGE).toContain("PartnerComingSoon");
-    // "invoices" legitimately appears in the honest deferred-copy description — what must NEVER
-    // appear is a data fetch or a rendered monetary amount (which would imply real billing data).
-    expect(BILLING_PAGE).not.toMatch(/useQuery|apiRequest|fetch\(|£\d/);
+  it("Billing renders real wallet and ledger values without fabricating missing data", () => {
+    expect(BILLING_PAGE).not.toContain("PartnerComingSoon");
+    expect(BILLING_PAGE).toContain("partnerCredits.view()");
+    expect(BILLING_PAGE).toContain("Not available");
+    expect(BILLING_PAGE).toContain("runningBalance");
   });
 });
 

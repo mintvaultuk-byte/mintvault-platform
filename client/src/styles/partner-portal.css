@@ -1,0 +1,124 @@
+.partner-portal {
+  --background: 40 13% 5%;
+  --foreground: 42 27% 93%;
+  --border: 43 31% 18%;
+  --card: 42 15% 8%;
+  --card-foreground: 42 27% 93%;
+  --card-border: 43 31% 18%;
+  --popover: 42 15% 8%;
+  --popover-foreground: 42 27% 93%;
+  --popover-border: 43 31% 18%;
+  --primary: 46 65% 52%;
+  --primary-foreground: 42 30% 7%;
+  --secondary: 42 12% 13%;
+  --secondary-foreground: 42 27% 93%;
+  --muted: 42 10% 13%;
+  --muted-foreground: 42 13% 66%;
+  --accent: 43 25% 15%;
+  --accent-foreground: 45 68% 70%;
+  --input: 43 25% 22%;
+  --ring: 46 65% 52%;
+  min-height: 100vh;
+  background: #0e0d0b;
+  color: #f4efe4;
+  font-family: var(--font-sans);
+  letter-spacing: 0;
+}
+
+.partner-portal * {
+  letter-spacing: 0;
+}
+
+.partner-portal__header {
+  background: #11100d;
+  border-color: rgba(212, 175, 55, 0.18);
+}
+
+.partner-portal__logo {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+.partner-portal__brand {
+  color: #f4efe4;
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 650;
+}
+
+.partner-portal__eyebrow {
+  color: #d4af37;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.partner-portal__sidebar {
+  background: #11100d;
+  border-color: rgba(212, 175, 55, 0.14);
+}
+
+.partner-portal__identity {
+  border-bottom: 1px solid rgba(212, 175, 55, 0.12);
+}
+
+.partner-portal__nav-link {
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.partner-portal__nav-link:hover {
+  border-color: rgba(212, 175, 55, 0.14);
+  background: #1a1812;
+}
+
+.partner-portal__nav-link[aria-current="page"] {
+  border-color: rgba(212, 175, 55, 0.28);
+  background: #211d13;
+  color: #ecd585;
+}
+
+.partner-portal__main {
+  background: #0e0d0b;
+}
+
+.partner-portal [data-radix-popper-content-wrapper] {
+  color: #f4efe4;
+}
+
+.partner-portal table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.partner-portal th,
+.partner-portal td {
+  padding: 11px 12px;
+  border-bottom: 1px solid rgba(212, 175, 55, 0.11);
+  text-align: left;
+  vertical-align: top;
+}
+
+.partner-portal th {
+  color: #b9b2a1;
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.partner-portal :focus-visible {
+  outline: 2px solid #d4af37;
+  outline-offset: 3px;
+}
+
+@media (max-width: 767px) {
+  .partner-portal__main {
+    padding: 18px 14px 28px;
+  }
+
+  .partner-portal__mobile-nav {
+    max-height: calc(100vh - 60px);
+    overflow-y: auto;
+  }
+}

@@ -298,16 +298,20 @@ describe("page must not fabricate metrics", () => {
   });
 });
 
-describe("page is read-only over the credit ledger", () => {
-  it("issues no mutations at all", () => {
-    expect(PAGE).not.toContain("useMutation");
-    for (const verb of ['"POST"', '"PUT"', '"PATCH"', '"DELETE"']) {
-      expect(PAGE).not.toContain(verb);
-    }
+describe("audited credit adjustment control", () => {
+  it("posts only to the dedicated Super Admin adjustment endpoint", () => {
+    expect(PAGE).toContain("useMutation");
+    expect(PAGE).toContain("/credits/adjust`");
+    expect(PAGE).toContain('"POST"');
+    for (const verb of ['"PUT"', '"PATCH"', '"DELETE"']) expect(PAGE).not.toContain(verb);
   });
 
-  it("does not present a manual credit adjustment control in this version", () => {
-    expect(PAGE).not.toMatch(/addCredits|removeCredits|adjustCredits/);
+  it("requires a quantity, reason and explicit adjustment command", () => {
+    expect(PAGE).toContain("pd-credit-adjustment");
+    expect(PAGE).toContain("pd-credit-quantity");
+    expect(PAGE).toContain("pd-credit-reason");
+    expect(PAGE).toContain("pd-credit-submit");
+    expect(PAGE).toContain("idempotencyKey.current");
   });
 });
 

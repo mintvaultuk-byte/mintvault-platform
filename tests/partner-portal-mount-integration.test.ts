@@ -37,7 +37,7 @@ import bcrypt from "bcryptjs";
 import {
   applyMigrationsRealistic,
   provisionRealisticRoles,
-  PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT,
+  PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS,
 } from "./helpers/partner-realistic-db";
 
 const ADMIN_DB = process.env.PARTNER_MOUNT_RT_ADMIN;
@@ -221,7 +221,7 @@ async function login(
       await admin.query(`ALTER TABLE ${t} OWNER TO pn_migrator`);
     }
 
-    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_INVARIANT);
+    await applyMigrationsRealistic(admin, ADMIN_DB!, PARTNER_MIGRATIONS_WITH_USER_MANAGEMENT_CREDITS);
 
     // Synthetic LOGIN role inheriting the restricted partner_runtime role — the runtime must never
     // be a superuser, which the first test below proves rather than assumes.
@@ -244,6 +244,27 @@ async function login(
       "INSERT INTO partner_organisations (id, public_ref, legal_name, status) VALUES ($1,'mountA','Mount A Ltd','ACTIVE')",
       [TENANT]
     );
+
+    // Submit reserves a grading credit PER CARD, so any suite that drives a real submission needs
+    // a funded wallet. Seeded AFTER the organisation rows exist — ensureWallet resolves the org
+    // first and fails with ORG_NOT_FOUND otherwise.
+    {
+      const wallet = await import("../server/partner/partner-wallet-service");
+      const actor = { actorUserId: null, actorEmail: "mount@example.test" };
+      for (const [tenantId, key] of [[TENANT, "mount-integration-wallet"]] as const) {
+        await wallet.ensureWallet(actor, tenantId);
+        await wallet.appendFoundationCredit(actor, {
+          tenantId,
+          amount: 100,
+          entryType: "purchase",
+          source: "admin",
+          reason: "Portal mount integration regression credits",
+          idempotencyKey: key,
+          actorType: "admin",
+        });
+      }
+    }
+
     const pw = await bcrypt.hash(OWNER_PASSWORD, 12);
     await admin.query(
       `INSERT INTO partner_users (id, public_ref, tenant_id, partner_id, email, password_hash, status, mfa_required)

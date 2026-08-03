@@ -10,7 +10,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Client } from "pg";
-import { provisionRealisticRoles, migratorUrlFrom } from "./helpers/partner-realistic-db";
+import { provisionRealisticRoles, migratorUrlFrom, applyEveryMigrationRealistic } from "./helpers/partner-realistic-db";
 import { applyMigrations, planMigrations, listMigrationFiles } from "../scripts/db/migrate";
 import { runPreflight } from "../scripts/db/preflight-schema";
 
@@ -95,7 +95,7 @@ async function applyAllRealistic(): Promise<void> {
   const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
   await migrator.connect();
   try {
-    await applyMigrations(migrator, listMigrationFiles());
+    await applyEveryMigrationRealistic(migrator);
   } finally {
     await migrator.end();
   }

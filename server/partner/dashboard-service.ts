@@ -757,10 +757,8 @@ export async function getPartnerWallet(partnerIdRaw: unknown, walletSchema = tru
     consumedReservations: num(w.consumed_reservations),
     recentLedger,
     purchases: PURCHASES_UNAVAILABLE,
-    // Read-only by design. Enabling this needs a reviewed HTTP write path over the
-    // append-only ledger — deliberately out of scope for this first version.
-    manualAdjustmentEnabled: false,
-    note: "Balances are derived from the append-only ledger. This view is read-only.",
+    manualAdjustmentEnabled: true,
+    note: "Balances are ledger-derived. Super Admin adjustments append immutable entries.",
   };
 }
 

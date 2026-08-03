@@ -16,6 +16,7 @@ export const CONNECTOR_ERROR_CODES = [
   "validation_pending",
   "transient_database_error",
   "permanent_processing_error",
+  "credit_lifecycle_invariant",
   "cancelled",
   // G3 — exactly-once import.
   "import_not_ready",
@@ -71,6 +72,7 @@ const RETRYABLE_BY_CODE: Record<ConnectorErrorCode, boolean> = {
   validation_pending: true,
   transient_database_error: true,
   permanent_processing_error: false,
+  credit_lifecycle_invariant: false,
   cancelled: false,
   // G3 — exactly-once import. Non-retryable = the caller must act (revalidate, re-authenticate,
   // escalate) before trying again; retryable = a bare retry may succeed with no other change.

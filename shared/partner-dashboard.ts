@@ -297,7 +297,7 @@ export interface PartnerWalletView {
   consumedReservations: number | null;
   recentLedger: LedgerEntryView[];
   purchases: MetricUnavailable;
-  /** True once a safe, reviewed HTTP write path exists. Currently always false. */
+  /** True when the audited Super Admin adjustment workflow is available. */
   manualAdjustmentEnabled: boolean;
   note: string;
 }

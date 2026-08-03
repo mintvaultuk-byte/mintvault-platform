@@ -295,6 +295,11 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
 
   // ---- 12-15: the read-only validator ----------------------------------------------------
   it("12-13. validator reports 503-worthy state BEFORE the migration and ready AFTER", async () => {
+    // The partner runtime asserts that PARTNER_* and MINTVAULT_DATABASE_URL name the SAME database
+    // (server/partner/db.ts, G6D credit settlement is one transaction). Pin both, or a
+    // globally-inherited MINTVAULT pin — as .github/workflows/ci.yml sets — makes the topology
+    // assertion throw and validatePartnerRbac() reports 'unavailable' instead of the real state.
+    process.env.MINTVAULT_DATABASE_URL = ADMIN_DB;
     process.env.PARTNER_ADMIN_DATABASE_URL = ADMIN_DB;
     const perms = await import("../server/partner/permissions");
     const { closePartnerPools } = await import("../server/partner/db");
@@ -318,6 +323,11 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
 
   it("14. validator detects ONE deliberately removed mapping", async () => {
     await runRealRunnerFor0034();
+    // The partner runtime asserts that PARTNER_* and MINTVAULT_DATABASE_URL name the SAME database
+    // (server/partner/db.ts, G6D credit settlement is one transaction). Pin both, or a
+    // globally-inherited MINTVAULT pin — as .github/workflows/ci.yml sets — makes the topology
+    // assertion throw and validatePartnerRbac() reports 'unavailable' instead of the real state.
+    process.env.MINTVAULT_DATABASE_URL = ADMIN_DB;
     process.env.PARTNER_ADMIN_DATABASE_URL = ADMIN_DB;
     const perms = await import("../server/partner/permissions");
     const { closePartnerPools } = await import("../server/partner/db");
@@ -359,6 +369,11 @@ describe.skipIf(!isLocal)("migration 0034 — Partner RBAC seed (real runner, Po
     readerUrl.username = "mv_rbac_reader";
     readerUrl.password = "reader-pw";
 
+    // The partner runtime asserts that PARTNER_* and MINTVAULT_DATABASE_URL name the SAME database
+    // (server/partner/db.ts, G6D credit settlement is one transaction). Pin both, or a
+    // globally-inherited MINTVAULT pin — as .github/workflows/ci.yml sets — makes the topology
+    // assertion throw and validatePartnerRbac() reports 'unavailable' instead of the real state.
+    process.env.MINTVAULT_DATABASE_URL = readerUrl.toString();
     process.env.PARTNER_ADMIN_DATABASE_URL = readerUrl.toString();
     const perms = await import("../server/partner/permissions");
     const { closePartnerPools } = await import("../server/partner/db");

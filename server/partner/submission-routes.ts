@@ -33,7 +33,9 @@ function sendError(res: import("express").Response, err: unknown): void {
           ? 403
           : err.code === "stale_version" ||
               err.code === "idempotency_conflict" ||
-              err.code === "service_tier_unavailable"
+              err.code === "service_tier_unavailable" ||
+              err.code === "credit_unavailable" ||
+              err.code === "credit_settlement_required"
             ? 409
             : 400;
     res.status(status).json({ error: { code: err.code, message: err.message } });

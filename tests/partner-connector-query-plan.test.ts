@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { Client } from "pg";
-import { provisionRealisticRoles, migratorUrlFrom } from "./helpers/partner-realistic-db";
+import { provisionRealisticRoles, migratorUrlFrom, applyEveryMigrationRealistic } from "./helpers/partner-realistic-db";
 import { applyMigrations, listMigrationFiles } from "../scripts/db/migrate";
 
 const ADMIN = process.env.PARTNER_CONNECTOR_PLAN_ADMIN;
@@ -53,7 +53,7 @@ async function explain(sql: string, params: unknown[] = []): Promise<string> {
     const migrator = new Client({ connectionString: migratorUrlFrom(ADMIN!) });
     await migrator.connect();
     try {
-      await applyMigrations(migrator, listMigrationFiles());
+      await applyEveryMigrationRealistic(migrator);
     } finally {
       await migrator.end();
     }

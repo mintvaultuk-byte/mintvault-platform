@@ -48,7 +48,7 @@ interface ActionSpec {
   key: string;
   label: string;
   path: (id: string) => string;
-  body: (reason: string, version: number) => Record<string, unknown>;
+  body: (reason: string, version: number, recordId: string) => Record<string, unknown>;
   available: (rec: RecordRow, mappingState?: string | null) => boolean;
 }
 
@@ -115,6 +115,19 @@ const ACTIONS: ActionSpec[] = [
   },
 ];
 
+const RECOVER_CREDIT_HOLD_ACTION: ActionSpec = {
+  key: "recover-credit-hold",
+  label: "Recover credit hold",
+  path: (id) => `${BASE}/records/${id}/recover-credit`,
+  body: (reason, version, recordId) => ({
+    reason,
+    // Retain this key for a retry of the same record/version, including a
+    // browser retry after the initial response was lost.
+    idempotencyKey: `g6d-recovery:${recordId}:${version}`,
+  }),
+  available: () => true,
+};
+
 export default function PartnerNetworkOpsPage() {
   const [, navigate] = useLocation();
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -173,7 +186,7 @@ export default function PartnerNetworkOpsPage() {
 
   const mutation = useMutation({
     mutationFn: async ({ action, rec, reason }: { action: ActionSpec; rec: RecordRow; reason: string }) => {
-      const res = await apiRequest("POST", action.path(rec.id), action.body(reason, rec.version));
+      const res = await apiRequest("POST", action.path(rec.id), action.body(reason, rec.version, rec.id));
       return res.json();
     },
     onSuccess: (data) => {
@@ -355,6 +368,44 @@ export default function PartnerNetworkOpsPage() {
               <div data-testid="pn-audit" style={{ fontSize: 12, opacity: 0.8 }}>
                 {(detail.data?.adminActions ?? []).length} admin action(s) on record.
               </div>
+              {detail.data?.partnerCredit && (
+                <div data-testid="pn-credit-detail" style={{ fontSize: 12, marginTop: 8, opacity: 0.85 }}>
+                  {detail.data.partnerCredit.error ? (
+                    <div role="alert">{detail.data.partnerCredit.message}</div>
+                  ) : (
+                    <>
+                      <div>
+                        Partner: {detail.data.partnerCredit.partner_legal_name} ({detail.data.partnerCredit.partner_id})
+                      </div>
+                      <div>
+                        Credit reservation: {detail.data.partnerCredit.reservation_id} (
+                        {detail.data.partnerCredit.reservation_status})
+                      </div>
+                      <div>Wallet: {detail.data.partnerCredit.wallet_status ?? "unavailable"}</div>
+                      {detail.data.partnerCredit.reservationLinkConflict && (
+                        <div role="alert">Credit reservation linkage requires reconciliation.</div>
+                      )}
+                      {detail.data.partnerCredit.destinationCreditHold?.released_at == null && (
+                        <>
+                          <div role="alert">
+                            Destination grading is blocked pending a replacement credit reservation.
+                          </div>
+                          <AdminButton
+                            size="sm"
+                            variant="gold"
+                            onClick={() =>
+                              selectedRec && setModal({ action: RECOVER_CREDIT_HOLD_ACTION, rec: selectedRec })
+                            }
+                            data-testid="pn-recover-credit-hold"
+                          >
+                            Recover credit hold
+                          </AdminButton>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           </Panel>
         )}
@@ -391,7 +442,9 @@ export default function PartnerNetworkOpsPage() {
                     {modal.action.label}
                   </h3>
                   <p style={{ fontSize: 13, opacity: 0.8, marginBottom: 8 }}>
-                    A reason is required and recorded in the append-only admin audit.
+                    {modal.action.key === "recover-credit-hold"
+                      ? "A replacement reservation is created before the destination can resume grading; immutable recovery evidence is recorded."
+                      : "A reason is required and recorded in the append-only admin audit."}
                   </p>
                   <label
                     htmlFor="pn-reason-input"

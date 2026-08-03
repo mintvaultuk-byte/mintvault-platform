@@ -48,6 +48,14 @@ export interface PartnerSessionInfo {
   locationId?: string | null;
   viewOnly?: boolean;
   permissions?: string[];
+  // Shop-facing identity summary (this branch) — spread from getPartnerPortalContext.
+  organisationName?: string;
+  tradingName?: string | null;
+  displayName?: string;
+  role?: string;
+  locationName?: string | null;
+  // MFA posture (origin/main, P0-E). Disjoint from the identity fields above; GET /session
+  // returns both, and dropping either half silently breaks a shipped Portal surface.
   /** An ACTIVE authenticator is registered on this account. */
   mfaEnrolled?: boolean;
   /** Two-step is required but no authenticator exists yet — enrolment is the only way forward. */
@@ -207,6 +215,58 @@ export interface DashboardCounts {
 }
 export const partnerDashboard = {
   summary: () => req<DashboardCounts>("GET", "/api/partner/dashboard/submissions"),
+};
+
+// ---- credits and billing ----
+export interface PartnerCreditSummary {
+  configured: boolean;
+  walletStatus: string | null;
+  availableCredits: number | null;
+  reservedCredits: number | null;
+  consumedThisMonth: number | null;
+  consumedLifetime: number | null;
+  postedBalance: number | null;
+  balanceStatus: "healthy" | "low" | "empty" | "inactive" | "unknown";
+}
+
+export interface PartnerCreditLedgerEntry {
+  id: string;
+  date: string;
+  type: string;
+  quantity: number;
+  submissionReference: string | null;
+  cardReference: string | null;
+  actor: string;
+  source: string;
+  runningBalance: number;
+  reason: string;
+}
+
+export interface PartnerCreditView {
+  summary: PartnerCreditSummary;
+  ledger: PartnerCreditLedgerEntry[];
+  purchaseHistory: PartnerCreditLedgerEntry[];
+}
+
+export const partnerCredits = {
+  view: () => req<PartnerCreditView>("GET", "/api/partner/credits"),
+};
+
+// ---- own sessions ----
+export interface PartnerSessionView {
+  id: string;
+  current: boolean;
+  createdAt: string;
+  lastSeenAt: string | null;
+  expiresAt: string;
+  ip: string | null;
+  revokedAt: string | null;
+}
+
+export const partnerSessions = {
+  list: () => req<{ sessions: PartnerSessionView[] }>("GET", "/api/partner/sessions"),
+  revoke: (sessionId: string) =>
+    req<{ ok: boolean; current: boolean }>("POST", `/api/partner/sessions/${sessionId}/revoke`),
 };
 
 // ---- submissions ----
