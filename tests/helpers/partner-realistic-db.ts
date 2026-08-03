@@ -122,6 +122,9 @@ export const PARTNER_MIGRATIONS_WITH_G6D = [
 export const PARTNER_MIGRATIONS_WITH_PER_CARD = [
   ...PARTNER_MIGRATIONS_WITH_G6D,
   "0042_partner_per_card_credit_settlement",
+  // 0043 re-keys the active-hold unique index per RESERVATION (so an N-card recovery can exist at
+  // all) and adds the tenant-isolation policy 0041 omitted on partner_submission_credit_holds.
+  "0043_partner_credit_hold_per_card",
 ] as const;
 export const MIGRATOR_ROLE = "pn_migrator";
 export const MIGRATOR_PASSWORD = "realistic-migrator-pw"; // synthetic, disposable-DB only
