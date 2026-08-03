@@ -35,6 +35,13 @@ const EXPECTED = [
   // Partner Admin BYPASSRLS capability gate, which fails every Super Admin route closed. Its
   // PostgreSQL-17 half is gated on PARTNER_CAPABILITY_RT_ADMIN and can vanish the same way.
   { file: "tests/partner-admin-capability.test.ts", min: 5 },
+  // Wired into CI on 2026-08-03. All three shipped with a self-gate that CI never satisfied, so
+  // they reported `describe.skip` and 37 tests never ran while the build stayed green. Floors are
+  // set at the counts observed once their databases existed, minus nothing — these suites are
+  // stable, and a floor below the real count is how coverage silently drains away.
+  { file: "tests/partner-definer-ownership.test.ts", min: 15 },
+  { file: "tests/partner-management-migration.test.ts", min: 10 },
+  { file: "tests/super-admin-correction-mode-behaviour.test.ts", min: 12 },
 ];
 
 const reportPath = process.argv[2];

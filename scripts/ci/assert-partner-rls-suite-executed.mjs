@@ -34,9 +34,10 @@ const EXPECTED = [
   // missing / empty / malformed context, no leak through the reporting views, no self-topup of the
   // credit ledger, and the RLS+FORCE+policy coverage sweep that catches a new tenant table added
   // without protection.
-  // Currently 42 executed / 0 skipped; floor set just below so adding tests never breaks the
+  // Currently 69 executed / 0 skipped (the merge split this file into TWO suites on separate
+  // databases); floor set just below so adding tests never breaks the
   // build while deleting or gating-out a block does.
-  { file: "tests/partner-rls-isolation.test.ts", min: 38 },
+  { file: "tests/partner-rls-isolation.test.ts", min: 68 },
 ];
 
 const reportPath = process.argv[2];

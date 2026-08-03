@@ -375,7 +375,19 @@ export async function applyEveryMigrationRealistic(migrator: pg.Client): Promise
     { allowDestructive: true }
   );
   await migrator.query("GRANT partner_credit_lifecycle_definer TO pn_migrator WITH INHERIT TRUE, SET FALSE");
-  await applyMigrations(migrator, all, { allowDestructive: true });
+  try {
+    await applyMigrations(migrator, all, { allowDestructive: true });
+  } finally {
+    // pg_auth_members is a CLUSTER-GLOBAL catalog, not per-database. Every caller of this helper
+    // shares one PostgreSQL 17 server in CI, so an unrevoked INHERIT membership would be visible
+    // to every other suite on that server for the rest of the job — and applyMigrationsRealistic()
+    // asserts exactly this membership is ABSENT when a suite applies 0041 without 0042. 0041's own
+    // closing REVOKE happens to clear it today because pn_migrator is its own grantor, but relying
+    // on that makes the outcome order-dependent. Revoke it explicitly instead.
+    await migrator
+      .query("REVOKE partner_credit_lifecycle_definer FROM pn_migrator")
+      .catch(() => {}); // best-effort: never mask the real failure from applyMigrations
+  }
 }
 
 /**
