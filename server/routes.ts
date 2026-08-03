@@ -109,6 +109,7 @@ import {
   serviceTierToPricingTier,
   auditLog,
   certificates,
+  CERTIFICATE_ORIGIN_SNAPSHOT_VERSION,
 } from "@shared/schema";
 import { mvgsTierName } from "@shared/mvgs-scoring";
 import type { PublicCertificate, ServiceTierRecord, CertificateRecord } from "@shared/schema";
@@ -5240,9 +5241,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { generateReferenceNumber } = await import("./reference-number");
       const certNumber = await storage.getNextCertId();
       const refNum = generateReferenceNumber();
+      // Stamp the grading origin as HQ explicitly — see the same rationale in
+      // scan-ingest-service.ts. This path also bypasses storage.createCertificate, so it left the
+      // origin_* columns NULL, which the reader treats as LEGACY rather than as a recorded fact.
+      // Partner provenance is never inferred here.
       const result = await db.execute(sql`
-        INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number)
-        VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin', NOW(), NOW(), ${refNum})
+        INSERT INTO certificates (certificate_number, status, label_type, grade_type, language, card_name, created_by, issued_at, updated_at, reference_number, origin_type, origin_captured_at, origin_snapshot_version)
+        VALUES (${certNumber}, 'active', 'Standard', 'numeric', 'English', NULL, 'admin', NOW(), NOW(), ${refNum}, 'HQ', NOW(), ${CERTIFICATE_ORIGIN_SNAPSHOT_VERSION})
         RETURNING *
       `);
       const row = result.rows[0] as any;
