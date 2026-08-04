@@ -2,8 +2,8 @@
  * G5 Partner-management admin UI — unit + source-assertion coverage (the repo has no DOM/RTL harness).
  * Page logic lives in exported pure helpers (unit-tested here); the page components are verified by
  * source assertion: required data-testids present, mutations reason/version/typed-confirm gated,
- * accessible modals, unavailable metrics labeled, and NO future-phase (wallet/credits/slots/billing/
- * devices/pricing/marketplace/portal) controls present.
+ * accessible modals, unavailable metrics labeled, and the single WALLET-BACKFILL1 staging control is
+ * wired through the authenticated Super Admin API client.
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -68,6 +68,7 @@ describe("G5 UI pure helpers", () => {
   it("pmKeys build literal API paths for prefix-invalidation", () => {
     expect(pmKeys.partner("abc")[0]).toBe("/api/super-admin/partner-management/partners/abc");
     expect(pmKeys.notes("abc")[0]).toBe("/api/super-admin/partner-management/partners/abc/notes");
+    expect(pmKeys.walletBackfill()[0]).toBe("/api/super-admin/partner-management/wallet-backfills/WALLET-BACKFILL1");
   });
 
   it("pilot flag helpers expose only onboarding/login as mutable and portal as read-only", () => {
@@ -100,9 +101,28 @@ describe("G5 list page source assertions", () => {
       "pm-pilot-flags",
       "pm-pilot-flag-toggle-",
       "pm-pilot-portal-readonly",
+      "pm-wallet-backfill",
+      "pm-wallet-backfill-scope",
+      "pm-wallet-backfill-targets",
+      "pm-wallet-backfill-confirm",
+      "pm-wallet-backfill-submit",
+      "pm-wallet-backfill-result",
     ]) {
       expect(src).toContain(id);
     }
+  });
+  it("wires WALLET-BACKFILL1 through the same-origin admin API client with explicit targets and audit result", () => {
+    expect(src).toContain("Provision Missing Partner Wallets");
+    expect(src).toContain("All ACTIVE partner organisations missing wallets");
+    expect(src).toContain("/wallet-backfills/WALLET-BACKFILL1");
+    expect(src).toContain('apiRequest("POST"');
+    expect(src).toContain('confirm: "WALLET-BACKFILL1"');
+    expect(src).toContain("targetTenantIds: walletTargets.map");
+    expect(src).toContain('idempotencyKey: "WALLET-BACKFILL1-ui"');
+    expect(src).toContain("ledgerEntriesCreated");
+    expect(src).not.toContain("document.cookie");
+    expect(src).not.toContain("localStorage");
+    expect(src).not.toContain("/api/partner/");
   });
   it("hardcodes the pilot controls to the canonical flag API and no connector/grading/payment flags", () => {
     expect(src).toContain("PARTNER_PILOT_FLAG_BASE");
@@ -111,6 +131,14 @@ describe("G5 list page source assertions", () => {
     expect(src).not.toContain("partner_connector_enabled");
     expect(src).not.toContain("partner_grading_enabled");
     expect(src).not.toContain("partner_payments_enabled");
+  });
+});
+
+describe("shared admin API client source assertions", () => {
+  const queryClientSrc = readFileSync(join(process.cwd(), "client/src/lib/queryClient.ts"), "utf8");
+  it("sends admin mutations as same-origin credentialed JSON requests", () => {
+    expect(queryClientSrc).toContain('credentials: "include"');
+    expect(queryClientSrc).toContain('"Content-Type": "application/json"');
   });
 });
 

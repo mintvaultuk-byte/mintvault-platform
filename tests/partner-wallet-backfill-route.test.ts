@@ -21,9 +21,12 @@ let admin: Client;
 let server: http.Server;
 let base: string;
 let adminEmail: string;
+const ordinaryAdminEmail = "ordinary-wallet-admin@example.test";
 
 const ACTIVE = "11111111-4242-4444-9444-111111111111";
 const PENDING = "22222222-4242-4444-9444-222222222222";
+const FAIL_FIRST = "33333333-4242-4444-9444-333333333333";
+const FAIL_SECOND = "44444444-4242-4444-9444-444444444444";
 const PM = "/api/super-admin/partner-management";
 
 function dbUrlAsRole(raw: string, username: string, password: string): string {
@@ -105,6 +108,10 @@ describe("WALLET-BACKFILL1 route (PostgreSQL 17)", () => {
       [adminEmail.toLowerCase()]
     );
     await admin.query(
+      "INSERT INTO users (email, role, credential_version) VALUES ($1,'admin',1) ON CONFLICT (email) DO UPDATE SET role='admin', credential_version=1",
+      [ordinaryAdminEmail]
+    );
+    await admin.query(
       `INSERT INTO partner_organisations (id, public_ref, legal_name, status)
        VALUES ($1,'wbfA','Backfill Active Route Ltd','ACTIVE'),($2,'wbfP','Backfill Pending Route Ltd','PENDING')`,
       [ACTIVE, PENDING]
@@ -132,6 +139,14 @@ describe("WALLET-BACKFILL1 route (PostgreSQL 17)", () => {
       req.session.authenticatedAt = Date.now();
       req.session.save(() => res.json({ ok: true }));
     });
+    app.post("/__test/ordinary-admin-login", (req, res) => {
+      req.session.isAdmin = true;
+      req.session.adminEmail = ordinaryAdminEmail;
+      req.session.authUserId = "00000000-0000-0000-0000-000000004243";
+      req.session.credentialVersion = 1;
+      req.session.authenticatedAt = Date.now();
+      req.session.save(() => res.json({ ok: true }));
+    });
     registerPartnerManagementRoutes(app);
     server = http.createServer(app);
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -148,6 +163,11 @@ describe("WALLET-BACKFILL1 route (PostgreSQL 17)", () => {
 
   async function cookie(): Promise<string> {
     const response = await fetch(`${base}/__test/admin-login`, { method: "POST" });
+    return response.headers.get("set-cookie")!.split(";")[0];
+  }
+
+  async function ordinaryAdminCookie(): Promise<string> {
+    const response = await fetch(`${base}/__test/ordinary-admin-login`, { method: "POST" });
     return response.headers.get("set-cookie")!.split(";")[0];
   }
 
@@ -174,6 +194,27 @@ describe("WALLET-BACKFILL1 route (PostgreSQL 17)", () => {
     expect((await missingConfirm.json()).error.code).toBe("VALIDATION_ERROR");
   });
 
+  it("refuses an authenticated ordinary admin before wallet or audit writes", async () => {
+    const c = await ordinaryAdminCookie();
+    const before = await admin.query<{ wallets: number; audit: number }>(
+      `SELECT
+        (SELECT count(*)::int FROM partner_wallets) AS wallets,
+        (SELECT count(*)::int FROM partner_management_audit WHERE action_type='partner_wallet_backfilled') AS audit`
+    );
+    const response = await post(
+      `${PM}/wallet-backfills/WALLET-BACKFILL1`,
+      { confirm: "WALLET-BACKFILL1", reason: "ordinary admin must not run", targetTenantIds: [ACTIVE] },
+      c
+    );
+    expect(response.status).toBe(403);
+    const after = await admin.query<{ wallets: number; audit: number }>(
+      `SELECT
+        (SELECT count(*)::int FROM partner_wallets) AS wallets,
+        (SELECT count(*)::int FROM partner_management_audit WHERE action_type='partner_wallet_backfilled') AS audit`
+    );
+    expect(after.rows[0]).toEqual(before.rows[0]);
+  });
+
   it("refuses production even when the feature flag is enabled", async () => {
     const c = await cookie();
     try {
@@ -191,6 +232,90 @@ describe("WALLET-BACKFILL1 route (PostgreSQL 17)", () => {
       process.env.NODE_ENV = "test";
       process.env.APP_URL = "http://127.0.0.1";
       delete process.env.FLY_APP_NAME;
+    }
+  });
+
+  it("refuses a staging app whose configured database identity is not the expected staging identity", async () => {
+    const c = await cookie();
+    try {
+      process.env.NODE_ENV = "production";
+      process.env.APP_URL = "https://mintvault-v2.fly.dev";
+      process.env.FLY_APP_NAME = "mintvault-v2";
+      process.env.PARTNER_WALLET_BACKFILL1_EXPECTED_DATABASE_IDENTITY =
+        "postgresql://different-staging-db.local:5432/different";
+      const before = await admin.query<{ wallets: number; audit: number }>(
+        `SELECT
+          (SELECT count(*)::int FROM partner_wallets) AS wallets,
+          (SELECT count(*)::int FROM partner_management_audit WHERE action_type='partner_wallet_backfilled') AS audit`
+      );
+      const response = await post(
+        `${PM}/wallet-backfills/WALLET-BACKFILL1`,
+        { confirm: "WALLET-BACKFILL1", reason: "wrong db identity", targetTenantIds: [ACTIVE] },
+        c
+      );
+      expect(response.status).toBe(403);
+      expect((await response.json()).error.code).toBe("WALLET_BACKFILL_DISABLED");
+      const after = await admin.query<{ wallets: number; audit: number }>(
+        `SELECT
+          (SELECT count(*)::int FROM partner_wallets) AS wallets,
+          (SELECT count(*)::int FROM partner_management_audit WHERE action_type='partner_wallet_backfilled') AS audit`
+      );
+      expect(after.rows[0]).toEqual(before.rows[0]);
+    } finally {
+      process.env.NODE_ENV = "test";
+      process.env.APP_URL = "http://127.0.0.1";
+      delete process.env.FLY_APP_NAME;
+      delete process.env.PARTNER_WALLET_BACKFILL1_EXPECTED_DATABASE_IDENTITY;
+    }
+  });
+
+  it("rolls back the whole batch if a later wallet insert fails", async () => {
+    await admin.query(
+      `INSERT INTO partner_organisations (id, public_ref, legal_name, status)
+       VALUES ($1,'wbfF1','Backfill Failure First Ltd','ACTIVE'),($2,'wbfF2','Backfill Failure Second Ltd','ACTIVE')
+       ON CONFLICT (id) DO UPDATE SET status='ACTIVE'`,
+      [FAIL_FIRST, FAIL_SECOND]
+    );
+    await admin.query(
+      `CREATE OR REPLACE FUNCTION test_wallet_backfill_fail_second()
+       RETURNS trigger LANGUAGE plpgsql AS $$
+       BEGIN
+         IF NEW.tenant_id = '${FAIL_SECOND}'::uuid THEN
+           RAISE EXCEPTION 'synthetic wallet backfill failure';
+         END IF;
+         RETURN NEW;
+       END $$`
+    );
+    await admin.query(
+      `CREATE TRIGGER test_wallet_backfill_fail_second
+       BEFORE INSERT ON partner_wallets
+       FOR EACH ROW EXECUTE FUNCTION test_wallet_backfill_fail_second()`
+    );
+    try {
+      const c = await cookie();
+      const response = await post(
+        `${PM}/wallet-backfills/WALLET-BACKFILL1`,
+        {
+          confirm: "WALLET-BACKFILL1",
+          reason: "synthetic partial failure proof",
+          idempotencyKey: "route-wallet-backfill-failure-proof",
+          targetTenantIds: [FAIL_FIRST, FAIL_SECOND],
+        },
+        c
+      );
+      expect(response.status).toBe(500);
+      expect((await response.json()).error.code).toBe("INTERNAL_ERROR");
+      const counts = await admin.query<{ wallets: number; audit: number; ledger: number }>(
+        `SELECT
+          (SELECT count(*)::int FROM partner_wallets WHERE tenant_id = ANY($1::uuid[])) AS wallets,
+          (SELECT count(*)::int FROM partner_management_audit WHERE tenant_id = ANY($1::uuid[]) AND action_type='partner_wallet_backfilled') AS audit,
+          (SELECT count(*)::int FROM partner_credit_ledger WHERE tenant_id = ANY($1::uuid[])) AS ledger`,
+        [[FAIL_FIRST, FAIL_SECOND]]
+      );
+      expect(counts.rows[0]).toEqual({ wallets: 0, audit: 0, ledger: 0 });
+    } finally {
+      await admin.query("DROP TRIGGER IF EXISTS test_wallet_backfill_fail_second ON partner_wallets");
+      await admin.query("DROP FUNCTION IF EXISTS test_wallet_backfill_fail_second()");
     }
   });
 

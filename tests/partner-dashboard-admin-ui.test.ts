@@ -310,8 +310,9 @@ describe("audited credit adjustment control", () => {
     expect(PAGE).toContain("pd-credit-adjustment");
     expect(PAGE).toContain("pd-credit-quantity");
     expect(PAGE).toContain("pd-credit-reason");
+    expect(PAGE).toContain("pd-credit-idempotency-key");
     expect(PAGE).toContain("pd-credit-submit");
-    expect(PAGE).toContain("idempotencyKey.current");
+    expect(PAGE).toContain("idempotencyKey.trim()");
   });
 });
 

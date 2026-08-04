@@ -9,7 +9,7 @@
  * locking (WHERE version = $expected). No connector/wallet/slot/billing/grading logic here; no secret
  * is ever read or written; the actor is always server-derived.
  */
-import { partnerAdminQuery, withPartnerAdminTransaction } from "./db";
+import { databaseIdentity, partnerAdminQuery, withPartnerAdminTransaction } from "./db";
 import { G5RequestError, canTransitionStatus, isPartnerStatus, type PartnerStatus } from "./partner-management-errors";
 import { hashPassword, MIN_PASSWORD_LEN, MAX_PASSWORD_LEN } from "./auth";
 import { deliverInvitationToken, invitationDeliveryConfigured } from "./delivery";
@@ -200,7 +200,17 @@ function walletBackfillAllowed(): boolean {
   const local =
     process.env.NODE_ENV !== "production" &&
     (process.env.VITEST === "true" || appUrl.includes("localhost") || appUrl.includes("127.0.0.1"));
-  return staging || local;
+  if (local) return true;
+  if (!staging) return false;
+
+  const expectedIdentity = process.env.PARTNER_WALLET_BACKFILL1_EXPECTED_DATABASE_IDENTITY?.trim();
+  const actualUrl = process.env.PARTNER_ADMIN_DATABASE_URL || process.env.MINTVAULT_DATABASE_URL;
+  if (!expectedIdentity || !actualUrl) return false;
+  try {
+    return databaseIdentity(actualUrl, "PARTNER_ADMIN_DATABASE_URL") === expectedIdentity;
+  } catch {
+    return false;
+  }
 }
 
 function walletBackfillIdempotencyKey(actor: ActorContext, tenantId: string): string {

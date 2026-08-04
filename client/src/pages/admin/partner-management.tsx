@@ -4,9 +4,8 @@
  * Internal (requireAdmin) admin page inside the existing admin app (AdminShell + admin primitives).
  * Self-auth-gates via /api/admin/session, lists partner organisations with search + status/kind filters
  * + pagination, and opens a partner's detail page. A "Create partner" action opens a reason-modal.
- * No wallet/credits/slots/billing/devices/pricing/marketplace/portal controls appear here (future
- * phases); the repo has no DOM harness, so logic lives in ./partner-management-helpers (unit-tested)
- * and this component is a thin renderer carrying data-testids.
+ * The only wallet control here is the one-off audited WALLET-BACKFILL1 button for staging wallet
+ * provisioning. Credit adjustments remain in the Partner Master Dashboard wallet tab.
  */
 import { useEffect, useState } from "react";
 import { useLocation, Link } from "wouter";
@@ -32,6 +31,7 @@ import {
   submitAllowed,
   submitLabel,
   serverErrorMessage,
+  reasonValid,
   type PartnerPilotDisplayFlag,
   type PartnerPilotMutableFlag,
   type DuplicateMatch,
@@ -68,6 +68,31 @@ interface PartnerPilotFlagState {
   flags: PartnerPilotFlagRow[];
 }
 
+interface PartnerListResponse {
+  partners: PartnerRow[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+interface WalletBackfillTenantResult {
+  tenantId: string;
+  legalName: string;
+  walletId?: string;
+  status?: string;
+  reason?: string;
+}
+
+interface WalletBackfillResult {
+  backfillId: "WALLET-BACKFILL1";
+  considered: number;
+  provisioned: WalletBackfillTenantResult[];
+  alreadyPresent: WalletBackfillTenantResult[];
+  skipped: WalletBackfillTenantResult[];
+  ledgerEntriesCreated: 0;
+}
+
 function flagState(data: PartnerPilotFlagState | undefined, flag: PartnerPilotDisplayFlag): PartnerPilotFlagRow | null {
   return data?.flags.find((row) => row.flag === flag) ?? null;
 }
@@ -91,6 +116,9 @@ export default function PartnerManagementPage() {
   // blip render a positive all-clear over a check that never ran.
   const [dupCheckFailed, setDupCheckFailed] = useState(false);
   const [dupAcknowledged, setDupAcknowledged] = useState(false);
+  const [walletReason, setWalletReason] = useState("Owner-approved staging wallet provisioning");
+  const [walletConfirm, setWalletConfirm] = useState("");
+  const [walletBackfillResult, setWalletBackfillResult] = useState<WalletBackfillResult | null>(null);
 
   const legalNameErr = validateLegalName(legalName);
   const dupDecision = canCreateDespiteDuplicates(duplicates, dupAcknowledged);
@@ -151,9 +179,18 @@ export default function PartnerManagementPage() {
     if (authed === false) navigate("/admin/login?next=/admin/partner-network/partners", { replace: true });
   }, [authed, navigate]);
 
-  const partners = useQuery({
+  const partners = useQuery<PartnerListResponse>({
     queryKey: pmKeys.partners(filter as Record<string, unknown>),
     queryFn: () => apiRequest("GET", `${BASE}/partners${partnersQueryString(filter)}`).then((r) => r.json()),
+    enabled: authed === true,
+  });
+
+  const activePartnersForWallets = useQuery<PartnerListResponse>({
+    queryKey: pmKeys.partners({ status: "ACTIVE", pageSize: 100, walletBackfillPreview: true }),
+    queryFn: () =>
+      apiRequest("GET", `${BASE}/partners${partnersQueryString({ status: "ACTIVE", pageSize: 100 })}`).then((r) =>
+        r.json()
+      ),
     enabled: authed === true,
   });
 
@@ -215,6 +252,40 @@ export default function PartnerManagementPage() {
     if (!window.confirm(`${enabled ? "Enable" : "Disable"} ${label}?`)) return;
     flagMutation.mutate({ flag, enabled });
   };
+
+  const walletTargets = activePartnersForWallets.data?.partners ?? [];
+  const walletBackfillCanSubmit =
+    walletConfirm.trim() === "WALLET-BACKFILL1" &&
+    walletTargets.length > 0 &&
+    activePartnersForWallets.data?.totalPages === 1 &&
+    !activePartnersForWallets.isLoading &&
+    reasonValid(walletReason);
+
+  const walletBackfillMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", `${BASE}/wallet-backfills/WALLET-BACKFILL1`, {
+        confirm: "WALLET-BACKFILL1",
+        reason: walletReason.trim(),
+        idempotencyKey: "WALLET-BACKFILL1-ui",
+        targetTenantIds: walletTargets.map((row) => row.id),
+      });
+      return response.json() as Promise<{ result: WalletBackfillResult }>;
+    },
+    onSuccess: async (data) => {
+      const result = data.result;
+      setWalletBackfillResult(result);
+      setBanner(
+        `Wallet backfill complete: ${result.provisioned.length} created, ${result.alreadyPresent.length} already existed, ${result.skipped.length} skipped, 0 failed, ${result.ledgerEntriesCreated} ledger entries.`
+      );
+      await queryClient.invalidateQueries({ queryKey: pmKeys.partners({}) });
+      await queryClient.invalidateQueries({ queryKey: pmKeys.walletBackfill() });
+      activePartnersForWallets.refetch();
+    },
+    onError: (err: unknown) => {
+      const msg = serverErrorMessage((err as { body?: unknown })?.body, "Wallet backfill failed. No result was recorded.");
+      setBanner(msg);
+    },
+  });
 
   if (authed === null) {
     return (
@@ -322,6 +393,120 @@ export default function PartnerManagementPage() {
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+        </Panel>
+
+        <Panel title="Wallets / Credits" sub="Owner-approved staging controls" className="mb-4">
+          <div data-testid="pm-wallet-backfill" style={{ display: "grid", gap: 12 }}>
+            <div>
+              <strong>Provision Missing Partner Wallets</strong>
+              <div style={{ fontSize: 12, opacity: 0.72 }} data-testid="pm-wallet-backfill-scope">
+                All ACTIVE partner organisations missing wallets
+              </div>
+            </div>
+
+            {activePartnersForWallets.isLoading ? (
+              <div data-testid="pm-wallet-backfill-loading">Loading active partner organisations…</div>
+            ) : activePartnersForWallets.isError ? (
+              <div role="alert" data-testid="pm-wallet-backfill-error" style={{ color: "var(--admin-red)" }}>
+                Active partner organisations are unavailable. Wallet provisioning is disabled.
+              </div>
+            ) : walletTargets.length === 0 ? (
+              <div data-testid="pm-wallet-backfill-empty">No ACTIVE partner organisations are available.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {activePartnersForWallets.data?.totalPages && activePartnersForWallets.data.totalPages > 1 ? (
+                  <div role="alert" data-testid="pm-wallet-backfill-page-limit" style={{ color: "var(--admin-red)" }}>
+                    Too many ACTIVE organisations to preview in one guarded action. Wallet provisioning is disabled.
+                  </div>
+                ) : null}
+                <div style={{ display: "grid", gap: 6 }} data-testid="pm-wallet-backfill-targets">
+                  {walletTargets.map((row) => (
+                    <div
+                      key={row.id}
+                      data-testid={`pm-wallet-backfill-target-${row.id}`}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 10,
+                        padding: "8px 10px",
+                        border: "1px solid rgba(255,255,255,.12)",
+                        borderRadius: 8,
+                      }}
+                    >
+                      <span>{row.legal_name}</span>
+                      <code style={{ fontSize: 11, opacity: 0.75 }}>{row.id}</code>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <label style={{ display: "grid", gap: 5, fontSize: 12 }}>
+              Reason
+              <textarea
+                rows={2}
+                maxLength={2000}
+                value={walletReason}
+                onChange={(event) => setWalletReason(event.target.value)}
+                style={{
+                  border: "1px solid var(--admin-line-hard)",
+                  borderRadius: 6,
+                  padding: "9px 10px",
+                  background: "var(--admin-panel2)",
+                }}
+                data-testid="pm-wallet-backfill-reason"
+              />
+            </label>
+            <label style={{ display: "grid", gap: 5, fontSize: 12 }}>
+              Type WALLET-BACKFILL1
+              <input
+                value={walletConfirm}
+                onChange={(event) => setWalletConfirm(event.target.value)}
+                autoComplete="off"
+                style={{
+                  border: "1px solid var(--admin-line-hard)",
+                  borderRadius: 6,
+                  padding: "9px 10px",
+                  background: "var(--admin-panel2)",
+                }}
+                data-testid="pm-wallet-backfill-confirm"
+              />
+            </label>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <AdminButton
+                variant="gold"
+                disabled={!walletBackfillCanSubmit || walletBackfillMutation.isPending}
+                onClick={() => walletBackfillMutation.mutate()}
+                data-testid="pm-wallet-backfill-submit"
+              >
+                {walletBackfillMutation.isPending ? "Provisioning…" : "Provision Missing Partner Wallets"}
+              </AdminButton>
+              <Link
+                href="/admin/partners/dashboard"
+                className={adminButtonClass({ variant: "ghost", size: "sm" })}
+                data-testid="pm-wallet-dashboard-link"
+              >
+                Open Wallet & Ledger
+              </Link>
+            </div>
+            {walletBackfillMutation.isError && (
+              <div role="alert" data-testid="pm-wallet-backfill-mutation-error" style={{ color: "var(--admin-red)" }}>
+                {serverErrorMessage(
+                  (walletBackfillMutation.error as { body?: unknown })?.body,
+                  "Wallet backfill failed. No result was recorded."
+                )}
+              </div>
+            )}
+            {walletBackfillResult && (
+              <div data-testid="pm-wallet-backfill-result" style={{ fontSize: 12, display: "grid", gap: 4 }}>
+                <div>Created: {walletBackfillResult.provisioned.length}</div>
+                <div>Already existed: {walletBackfillResult.alreadyPresent.length}</div>
+                <div>Skipped: {walletBackfillResult.skipped.length}</div>
+                <div>Failed: 0</div>
+                <div>Ledger entries created: {walletBackfillResult.ledgerEntriesCreated}</div>
               </div>
             )}
           </div>
