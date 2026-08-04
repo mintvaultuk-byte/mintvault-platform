@@ -24,6 +24,12 @@ async function flagEnabled(flag: string): Promise<boolean> {
   return resolveGlobalFlag(flag);
 }
 
+function noStore(res: import("express").Response): void {
+  res.setHeader("Cache-Control", "private, no-store");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+}
+
 export function partnerPublicRouter(): Router {
   const r = Router();
 
@@ -65,6 +71,7 @@ export function partnerPublicRouter(): Router {
   // spraying; the per-account bucket stays as additional defence in depth. Same shape as the
   // password-reset REQUEST pair below (partnerResetRequestLimiter then ...AccountLimiter).
   r.post("/auth/login", partnerLoginIpLimiter, partnerLoginLimiter, async (req, res) => {
+    noStore(res);
     if (!(await flagEnabled("partner_login_enabled"))) {
       res.status(503).json({ error: "partner login unavailable" });
       return;

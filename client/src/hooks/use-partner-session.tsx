@@ -75,6 +75,7 @@ export function PartnerSessionProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(async () => {
     await qc.invalidateQueries({ queryKey: ["/api/partner/session"] });
+    await qc.refetchQueries({ queryKey: ["/api/partner/session"], type: "active" });
   }, [qc]);
 
   const hasPermission = useCallback((perm: string) => !!session?.permissions?.includes(perm), [session]);

@@ -70,6 +70,13 @@ function sendPartnerTeamError(res: import("express").Response, err: unknown): vo
 
 function noStore(res: import("express").Response): void {
   res.setHeader("Cache-Control", "private, no-store");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+}
+
+function ignoreConditionalRequest(req: import("express").Request): void {
+  delete req.headers["if-none-match"];
+  delete req.headers["if-modified-since"];
 }
 
 class StaleMfaSessionError extends Error {}
@@ -146,6 +153,7 @@ export function partnerApiRouter(): Router {
   // both apply here too. The ONE gate this handler lacks is the per-route partner_login_enabled
   // check that public-routes.ts performs before authenticating.
   r.post("/auth/login", partnerLoginIpLimiter, partnerLoginLimiter, async (req, res) => {
+    noStore(res);
     const { email, password } = req.body ?? {};
     if (typeof email !== "string" || typeof password !== "string") {
       res.status(400).json({ error: "invalid request" });
@@ -166,6 +174,7 @@ export function partnerApiRouter(): Router {
   });
 
   r.post("/auth/mfa", partnerMfaLimiter, async (req, res) => {
+    noStore(res);
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;
@@ -235,6 +244,7 @@ export function partnerApiRouter(): Router {
   });
 
   r.post("/auth/logout", async (req, res) => {
+    noStore(res);
     if (req.partner) await partnerLogout(req.partner.tenantId, req.partner.sessionId);
     clearPartnerCookie(res);
     res.json({ ok: true });
@@ -301,6 +311,8 @@ export function partnerApiRouter(): Router {
 
   // ---- session ----
   r.get("/session", async (req, res) => {
+    ignoreConditionalRequest(req);
+    noStore(res);
     if (!req.partner) {
       res.status(401).json({ error: "authentication required" });
       return;

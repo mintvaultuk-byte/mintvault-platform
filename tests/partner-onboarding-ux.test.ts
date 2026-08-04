@@ -687,6 +687,13 @@ describe("WP-2 route registration and dead-code removal", () => {
     expect(resetBlock).not.toContain("PartnerRouteGuard");
   });
 
+  it("partner session refresh waits for a real refetch before post-MFA navigation can rely on it", async () => {
+    const { readFileSync } = await import("node:fs");
+    const hook = readFileSync("client/src/hooks/use-partner-session.tsx", "utf8");
+    expect(hook).toContain('invalidateQueries({ queryKey: ["/api/partner/session"] })');
+    expect(hook).toContain('refetchQueries({ queryKey: ["/api/partner/session"], type: "active" })');
+  });
+
   it("coming-soon.tsx no longer exports a dead default page that shadows the real Users page", async () => {
     const mod = await import("../client/src/pages/partner/coming-soon");
     expect(mod.PartnerComingSoon, "the shared placeholder is still exported").toBeTruthy();

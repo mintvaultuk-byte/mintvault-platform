@@ -207,6 +207,7 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
   it("valid login sets the mv.partner.sid cookie; invalid + unknown are generic 401", async () => {
     const okLogin = await login("owner@a.com");
     expect(okLogin.res.status).toBe(200);
+    expect(okLogin.res.headers.get("cache-control")).toContain("no-store");
     expect(okLogin.cookie).toMatch(/^mv\.partner\.sid=/);
     const bad = await login("owner@a.com", "wrong");
     expect(bad.res.status).toBe(401);
@@ -847,6 +848,16 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     expect(pending.rows[0].n).toBe(0);
     const session = await (await get("/api/partner/session", cookie)).json();
     expect(session.mfaPassed).toBe(true);
+    const sessionAfterConfirm = await get("/api/partner/session", cookie);
+    expect(sessionAfterConfirm.status).toBe(200);
+    expect(sessionAfterConfirm.headers.get("cache-control")).toContain("no-store");
+    const etag = sessionAfterConfirm.headers.get("etag") ?? "*";
+    const revalidatedSession = await fetch(`${base}/api/partner/session`, {
+      headers: { cookie, "if-none-match": etag },
+    });
+    expect(revalidatedSession.status).toBe(200);
+    expect(revalidatedSession.headers.get("cache-control")).toContain("no-store");
+    expect((await revalidatedSession.json()).mfaPassed).toBe(true);
     expect((await post("/api/partner/mfa/restart", {}, cookie)).status).toBe(403);
     const replaySession = await login("enrol@a.com");
     expect(
@@ -975,7 +986,9 @@ const LB = "20000000-0000-0000-0000-0000000000d1";
     const { currentTotp, decryptSecret } = await import("../server/partner/mfa");
     const code = currentTotp(decryptSecret(m.rows[0].secret_ref), Date.now());
     const s1 = await login("enrol@a.com");
-    expect((await post("/api/partner/auth/mfa", { code }, s1.cookie)).status).toBe(200); // first use ok
+    const firstUse = await post("/api/partner/auth/mfa", { code }, s1.cookie);
+    expect(firstUse.status).toBe(200); // first use ok
+    expect(firstUse.headers.get("cache-control")).toContain("no-store");
     const s2 = await login("enrol@a.com");
     expect((await post("/api/partner/auth/mfa", { code }, s2.cookie)).status).toBe(401); // replay rejected
     await admin.query("UPDATE partner_users SET mfa_required=false WHERE email='enrol@a.com'");
