@@ -121,8 +121,12 @@ describe("MFA current-factor hardening coverage is wired up", () => {
   async function enrolFresh(): Promise<{ secret: string; codes: string[] }> {
     const enrol = await call("POST", "/api/partner/mfa/enrol", { password: PASSWORD });
     expect(enrol.status, `enrol failed: ${enrol.text}`).toBe(200);
+    const enrolmentId = enrol.json.enrolmentId as string;
     const secret = enrol.json.secret as string;
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: currentTotp(secret, Date.now()) });
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId,
+      code: currentTotp(secret, Date.now()),
+    });
     expect(confirm.status, `confirm failed: ${confirm.text}`).toBe(200);
     return { secret, codes: confirm.json.recoveryCodes as string[] };
   }
@@ -252,10 +256,14 @@ describe("MFA current-factor hardening coverage is wired up", () => {
     // The password ALONE is accepted — there is no factor this user could present.
     const enrol = await call("POST", "/api/partner/mfa/enrol", { password: PASSWORD });
     expect(enrol.status, "first enrolment must not require a factor that does not yet exist").toBe(200);
+    const enrolmentId = enrol.json.enrolmentId as string;
     secretA = enrol.json.secret as string;
     expect(secretA).toBeTruthy();
 
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: currentTotp(secretA, Date.now()) });
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId,
+      code: currentTotp(secretA, Date.now()),
+    });
     expect(confirm.status).toBe(200);
     codesA = confirm.json.recoveryCodes as string[];
     expect(codesA).toHaveLength(10);
@@ -527,10 +535,14 @@ describe("MFA current-factor hardening coverage is wired up", () => {
       code: await totpFor(USER_A, oldSecret),
     });
     expect(enrol.status, enrol.text).toBe(200);
+    const enrolmentId = enrol.json.enrolmentId as string;
     const newSecret = enrol.json.secret as string;
     expect(newSecret).not.toBe(oldSecret);
 
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: currentTotp(newSecret, Date.now()) });
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId,
+      code: currentTotp(newSecret, Date.now()),
+    });
     expect(confirm.status, confirm.text).toBe(200);
     expect(confirm.json.recoveryCodes as string[]).toHaveLength(10);
     codesA = confirm.json.recoveryCodes as string[];
@@ -585,8 +597,12 @@ describe("MFA current-factor hardening coverage is wired up", () => {
     const usedFactor = codesA[2];
     const enrol = await call("POST", "/api/partner/mfa/enrol", { password: PASSWORD, recoveryCode: usedFactor });
     expect(enrol.status, enrol.text).toBe(200);
+    const enrolmentId = enrol.json.enrolmentId as string;
     const newSecret = enrol.json.secret as string;
-    const confirm = await call("POST", "/api/partner/mfa/confirm", { code: currentTotp(newSecret, Date.now()) });
+    const confirm = await call("POST", "/api/partner/mfa/confirm", {
+      enrolmentId,
+      code: currentTotp(newSecret, Date.now()),
+    });
     expect(confirm.status).toBe(200);
     secretA = newSecret;
     codesA = confirm.json.recoveryCodes as string[];

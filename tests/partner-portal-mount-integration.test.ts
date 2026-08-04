@@ -573,6 +573,7 @@ async function login(
         cookie: owner.cookie,
       });
       expect(enrol.status).toBe(200);
+      const enrolmentId = enrol.body.enrolmentId as string;
       const secret = enrol.body.secret as string;
       expect(secret).toBeTruthy();
       const storedSecret = await admin.query<{ secret_ref: string; status: string }>(
@@ -583,7 +584,7 @@ async function login(
       expect(storedSecret.rows[0].status).toBe("PENDING"); // an unconfirmed factor does not satisfy MFA
       const { currentTotp } = await import("../server/partner/mfa");
       const confirmed = await req("POST", "/api/partner/mfa/confirm", {
-        body: { code: currentTotp(secret, Date.now()) },
+        body: { enrolmentId, code: currentTotp(secret, Date.now()) },
         cookie: owner.cookie,
       });
       expect(confirmed.status).toBe(200);

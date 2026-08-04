@@ -134,10 +134,11 @@ describe("G5 list page source assertions", () => {
   });
 });
 
-describe("shared admin API client source assertions", () => {
+describe("shared API client source assertions", () => {
   const queryClientSrc = readFileSync(join(process.cwd(), "client/src/lib/queryClient.ts"), "utf8");
-  it("sends admin mutations as same-origin credentialed JSON requests", () => {
+  it("sends same-origin credentialed no-store JSON requests", () => {
     expect(queryClientSrc).toContain('credentials: "include"');
+    expect(queryClientSrc).toContain('cache: "no-store"');
     expect(queryClientSrc).toContain('"Content-Type": "application/json"');
   });
 });
